@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const reviewedAdvisories = new Map([
+  // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
   [1121797, 'linkify-it'],
+  [1124012, 'linkify-it'],
 ]);
 
 const loadReport = () => {
