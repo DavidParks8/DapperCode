@@ -28,6 +28,11 @@
     "yaml": "^2.9.0",
     "zod-to-json-schema": "^3.25.1"
   },
+  "overrides": {
+    "@expo/metro-config": {
+      "postcss": "8.5.23"
+    }
+  },
   "workspaces": [
     "apps/mobile"
   ],

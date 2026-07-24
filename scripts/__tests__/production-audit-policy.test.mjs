@@ -22,7 +22,10 @@ function runChecker(vulnerabilities) {
 
 const reviewed = {
   'linkify-it': {
-    via: [{ source: 1121797, name: 'linkify-it', severity: 'high' }],
+    via: [
+      { source: 1121797, name: 'linkify-it', severity: 'high' },
+      { source: 1124012, name: 'linkify-it', severity: 'high' },
+    ],
     fixAvailable: false,
   },
 };
@@ -30,7 +33,7 @@ const reviewed = {
 test('production audit accepts only the reviewed high-severity advisories', () => {
   const result = runChecker(reviewed);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /1 reviewed high-severity advisories/);
+  assert.match(result.stdout, /2 reviewed high-severity advisories/);
 });
 
 test('production audit rejects new, stale, or newly fixable advisories', () => {
@@ -46,7 +49,7 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(stale.stderr, /stale exceptions: linkify-it#1121797/);
+  assert.match(stale.stderr, /stale exceptions: linkify-it#1121797, linkify-it#1124012/);
 
   const fixable = runChecker({
     ...reviewed,
@@ -66,5 +69,8 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
     },
   });
   assert.notEqual(escalated.status, 0);
-  assert.match(escalated.stderr, /critical: linkify-it#1121797/);
+  assert.match(
+    escalated.stderr,
+    /critical: linkify-it#1121797, linkify-it#1124012/
+  );
 });
