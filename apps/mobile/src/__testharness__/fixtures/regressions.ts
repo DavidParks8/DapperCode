@@ -412,3 +412,53 @@ export function turnsWithSubAgentInTheMiddle(parentThreadId = 'parent'): {
 
   return { turnOne: turn(1, 'child-1'), turnTwo: turn(2, 'child-2') };
 }
+
+/**
+ * A sub-agent whose card arrives only after the tool already opened — what the
+ * bridge produces when a task tool's title is the prompt rather than "Task", so
+ * it cannot be classified until its first task header lands.
+ */
+export function lateClassifiedSubAgent(
+  parentThreadId = 'parent',
+  childThreadId = 'child',
+): { toolOnly: EventSequenceEntry[]; classified: EventSequenceEntry[] } {
+  const runId = `${parentThreadId}::run-1`;
+  const toolCallId = `${parentThreadId}::task-1`;
+  return {
+    toolOnly: sequence(parentThreadId, runId)
+      .runStarted()
+      .toolCall('Research dependency options', '{}', { toolCallId })
+      .build(),
+    classified: [
+      subAgentCard(parentThreadId, runId, {
+        toolCallId,
+        childThreadId,
+        status: 'running',
+        heading: '\u2022 Sub-agent working',
+        latest: 'Reading package.json',
+      }),
+    ],
+  };
+}
+
+/** A sub-agent card that also carries tool text and a tool result for the same call. */
+export function subAgentWithToolPayloads(
+  parentThreadId = 'parent',
+  childThreadId = 'child',
+): EventSequenceEntry[] {
+  const runId = `${parentThreadId}::run-1`;
+  const toolCallId = `${parentThreadId}::task-1`;
+  return [
+    ...sequence(parentThreadId, runId).runStarted().build(),
+    subAgentCard(parentThreadId, runId, {
+      toolCallId,
+      childThreadId,
+      status: 'running',
+      heading: '\u2022 Sub-agent working',
+      latest: 'Auditing',
+    }),
+    ...sequence(parentThreadId, runId)
+      .toolResult(toolCallId, '<task id="child" state="running">raw payload</task>')
+      .build(),
+  ];
+}

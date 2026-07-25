@@ -3,11 +3,13 @@ import { registerTestHarnessMatchers } from '../AssertionHelpers';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
 import {
+  lateClassifiedSubAgent,
   nestedSubAgent,
   parallelSubAgentsInOneTurn,
   parentOnlySubAgent,
   spawnToolThenSubAgentCard,
   subAgentStatusOnlyUpdate,
+  subAgentWithToolPayloads,
   subAgentTerminalThenIdleThread,
   promptAfterSnapshot,
   streamThenAuthoritativeSnapshot,
@@ -164,6 +166,54 @@ describe('Streaming and snapshot sequencing', () => {
 });
 
 describe('Sub-agent card lifecycle', () => {
+  it('removes a tool card that only later turns out to be a sub-agent', () => {
+    // A task tool whose title is the prompt cannot be classified until its first
+    // task header arrives, so the bridge opens an ordinary tool card first. Once
+    // the sub-agent card lands that tool card must go, not sit beside it.
+    const state = new TestableThreadState();
+    const { toolOnly, classified } = lateClassifiedSubAgent('parent', 'child');
+
+    state.applySequence(toolOnly);
+    expect(state).toHaveMessageCount('parent', 1);
+
+    state.applySequence(classified);
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'running' });
+    const { messages } = state.projectTranscript('parent');
+    expect(
+      messages.some(
+        (message) => message.role === 'assistant' && Boolean(message.toolCalls?.length),
+      ),
+    ).toBe(false);
+  });
+
+  it('never leaves a phantom tool card beside a sub-agent card', () => {
+    // The card already renders the task payload. Tool text or a tool result for the
+    // same call would render it a second time as an empty tool card.
+    const state = new TestableThreadState();
+    state.applySequence(subAgentWithToolPayloads('parent', 'child'));
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child');
+    const { messages } = state.projectTranscript('parent');
+    expect(messages.every((message) => message.role === 'activity')).toBe(true);
+    expect(JSON.stringify(messages)).not.toContain('raw payload');
+  });
+
+  it('never shows a sub-agent as starting, and shows it as openable', () => {
+    // A card reading "starting" cannot be opened and looks stuck. The child thread
+    // arrives with the task header, so the first card is already navigable.
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+
+    const [card] = state.getSubAgentActivities('parent');
+    expect(card).toBeTruthy();
+    const text = String((card.content as { text?: string }).text).toLowerCase();
+    expect(text).not.toContain('starting');
+    expect(state.getSubAgentThreadIds('parent')).toContain('child');
+  });
+
   it('replaces the spawn tool card with the sub-agent card', () => {
     // The task tool that launches a sub-agent must not leave a dead "spawnAgent"
     // tool card sitting above the card that reports the same work.

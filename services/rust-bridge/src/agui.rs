@@ -374,46 +374,14 @@ impl AgUiProjector {
                     agent_client_protocol::schema::v1::ToolCallStatus::Completed
                         | agent_client_protocol::schema::v1::ToolCallStatus::Failed
                 );
-                let was_started = state.started;
                 if !state.started {
                     state.started = true;
                     if state.subagent_activity {
-                        if !update_has_task {
-                            let status = if terminal {
-                                if matches!(
-                                    status,
-                                    agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                                ) {
-                                    "failed"
-                                } else {
-                                    "completed"
-                                }
-                            } else {
-                                "running"
-                            };
-                            let latest = task_result_preview(&state.result_content)
-                                .or_else(|| task_progress_preview(&state.result_content));
-                            state.subagent_revision = Some(format!(
-                                "unlinked\0{status}\0{}",
-                                latest.as_deref().unwrap_or("")
-                            ));
-                            projection.events.push(subagent_activity_envelope(
-                                SubagentActivityContext {
-                                    parent_thread_id: thread_id,
-                                    parent_run_id: &run.run_id,
-                                    parent_source_turn_id: run.source_turn_id.clone(),
-                                    tool_call_id,
-                                    child_thread_id: None,
-                                },
-                                status,
-                                latest.as_deref().or(Some(if terminal {
-                                    "Task finished"
-                                } else {
-                                    "Starting sub-agent"
-                                })),
-                                timestamp,
-                            ));
-                        }
+                        // Nothing is announced here: this update's content has not been
+                        // applied yet, so the only card we could emit is a placeholder
+                        // reading "starting" that carries no child thread and cannot be
+                        // opened. The branches below report the sub-agent once its
+                        // content has landed, which is also when its child link exists.
                     } else {
                         projection.events.push(envelope(
                             thread_id,
@@ -568,13 +536,18 @@ impl AgUiProjector {
                         );
                     }
                 }
-                if state.subagent_activity && !terminal && subagent.is_none() && was_started {
-                    // Agents that never stream a child session only report progress
-                    // through this tool, so mirror its latest output onto the card
-                    // instead of leaving it on "Starting sub-agent" until it ends.
-                    let latest = subagent_preview.clone();
-                    let revision =
-                        format!("unlinked\0running\0{}", latest.as_deref().unwrap_or(""));
+                // Read after the linked branch above, which can classify this tool as a
+                // sub-agent from accumulated content when the update itself carried none.
+                let is_subagent_tool = state.subagent_activity;
+                // Agents that never stream a child session only report progress through
+                // this tool, so mirror its latest output onto the card. Without real
+                // output there is nothing to say: an empty card reports "starting" and
+                // cannot be opened, so stay silent until the sub-agent reports or ends.
+                if let Some(latest) = subagent_preview
+                    .clone()
+                    .filter(|_| is_subagent_tool && !terminal && subagent.is_none())
+                {
+                    let revision = format!("unlinked\0running\0{latest}");
                     if state.subagent_revision.as_deref() != Some(&revision) {
                         state.subagent_revision = Some(revision);
                         projection.events.push(subagent_activity_envelope(
@@ -586,7 +559,7 @@ impl AgUiProjector {
                                 child_thread_id: None,
                             },
                             "running",
-                            latest.as_deref().or(Some("Working")),
+                            Some(latest.as_str()),
                             timestamp,
                         ));
                     }
@@ -621,8 +594,10 @@ impl AgUiProjector {
                 }
                 if let Some(previous_content) = previous_content {
                     let content = content.clone().unwrap_or_default();
-                    if subagent.is_some() {
-                        // The typed subagent event replaces accumulated task XML/tool payloads.
+                    if is_subagent_tool {
+                        // A sub-agent's task payload is already rendered by its card.
+                        // Echoing it as tool text or a tool result leaves a phantom
+                        // tool card next to the card that says the same thing.
                     } else if terminal
                         && content.starts_with(&previous_content)
                         && !content.is_empty()
@@ -664,7 +639,7 @@ impl AgUiProjector {
                         );
                     }
                 }
-                if changed_structured && subagent.is_none() {
+                if changed_structured && !is_subagent_tool {
                     push_structured_chunks(
                         &mut projection.events,
                         thread_id,
@@ -1056,10 +1031,11 @@ pub(super) fn messages_snapshot_envelope(
                     } else {
                         "• Sub-agent working".to_string()
                     }];
-                    lines.push(format!("  Status: {status}"));
+                    lines.push(format!("  Status: {}", display_subagent_status(status)));
                     if let Some(result) = task_result_preview(&tool.content) {
                         lines.push(format!("  Latest: {result}"));
                     }
+                    let navigable = child_thread_id.is_some();
                     let content = json!({
                         "text": lines.join("\n"),
                         "subAgent": {
@@ -1068,7 +1044,7 @@ pub(super) fn messages_snapshot_envelope(
                             "senderThreadId": snapshot.thread_id,
                             "receiverThreadIds": child_thread_id.into_iter().collect::<Vec<_>>(),
                             "agentStatus": status,
-                            "navigable": true,
+                            "navigable": navigable,
                         }
                     });
                     messages.push(activity_message(
@@ -1450,6 +1426,19 @@ fn is_subagent_task_tool(kind: agent_client_protocol::schema::v1::ToolKind, titl
             && normalized.contains("agent")
 }
 
+/// How a sub-agent's own state should be reported on its card.
+///
+/// Agents announce a task as `starting` (or `pending`/`queued`) before the child
+/// session does anything. Surfacing that verbatim gives a card that reads
+/// "starting" and looks stuck, so pre-run states are reported as running -- the
+/// card heading already distinguishes working from completed.
+fn display_subagent_status(status: &str) -> &str {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "starting" | "start" | "pending" | "queued" | "created" | "initializing" => "running",
+        _ => status,
+    }
+}
+
 fn is_terminal_subagent_status(status: &str) -> bool {
     matches!(
         status.trim().to_ascii_lowercase().as_str(),
@@ -1484,7 +1473,7 @@ fn subagent_activity_envelope(
         "• Sub-agent working"
     };
     let mut lines = vec![heading.to_string()];
-    lines.push(format!("  Status: {status}"));
+    lines.push(format!("  Status: {}", display_subagent_status(status)));
     if let Some(latest) = latest.map(str::trim).filter(|value| !value.is_empty()) {
         lines.push(format!("  Latest: {}", bounded(latest, 512)));
     }
@@ -2458,6 +2447,174 @@ mod tests {
         assert_eq!(card_ids.len(), 2, "each turn needs its own sub-agent card");
     }
 
+    /// Every event a projection emits, as `(type, messageId)`.
+    fn typed_ids(projection: &CanonicalProjection) -> Vec<(String, String)> {
+        projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .map(|value| {
+                let kind = value["event"]["type"]
+                    .as_str()
+                    .or_else(|| value["event"]["name"].as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let id = value["event"]["messageId"]
+                    .as_str()
+                    .unwrap_or("-")
+                    .to_string();
+                (kind, id)
+            })
+            .collect()
+    }
+
+    fn subagent_task_tool(
+        tool_call_id: &str,
+        title: &str,
+        status: ToolCallStatus,
+        content: FieldUpdate<String>,
+    ) -> CanonicalEvent {
+        CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: tool_call_id.to_string(),
+            kind: ToolKind::Other,
+            status,
+            title: title.to_string(),
+            content,
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn a_sub_agent_never_reports_a_starting_state() {
+        // A card that reads "starting" cannot be opened and looks stuck. Nothing is
+        // announced until there is a child thread to open or real progress to show.
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+
+        let opened = projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Unchanged,
+        ));
+        assert!(
+            typed_ids(&opened).is_empty(),
+            "a task tool with nothing to report must stay silent, got {:?}",
+            typed_ids(&opened)
+        );
+
+        // The agent's own `starting` state is reported as running, never verbatim.
+        let announced = subagent_cards(&projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("<task id=\"child-1\" state=\"starting\">\n</task>".to_string()),
+        )));
+        assert_eq!(announced.len(), 1, "expected one card, got {announced:?}");
+        let text = announced[0].1.to_ascii_lowercase();
+        assert!(
+            !text.contains("starting"),
+            "card must not report a starting state: {text}"
+        );
+        assert!(
+            text.contains("status: running"),
+            "a pre-run state is reported as running: {text}"
+        );
+    }
+
+    #[test]
+    fn the_first_sub_agent_card_can_be_opened() {
+        // The child thread id arrives with the task header, so the first card the
+        // user ever sees must already carry it and be navigable.
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Unchanged,
+        ));
+
+        let projection = projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("<task id=\"child-1\" state=\"starting\">\n</task>".to_string()),
+        ));
+        let card = projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| {
+                value["event"]["messageId"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("subagent:"))
+            })
+            .expect("a sub-agent card");
+
+        let meta = &card["event"]["content"]["subAgent"];
+        assert_eq!(
+            meta["navigable"].as_bool(),
+            Some(true),
+            "the first card must be openable: {card}"
+        );
+        assert_eq!(
+            meta["receiverThreadIds"].as_array().map(Vec::len),
+            Some(1),
+            "the first card must carry its child thread: {card}"
+        );
+    }
+
+    #[test]
+    fn a_sub_agent_tool_never_leaves_a_phantom_tool_card() {
+        // The card already renders the task payload. Echoing it as tool text or a
+        // tool result leaves a second, empty tool card beside it.
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+
+        let mut emitted: Vec<(String, String)> = Vec::new();
+        emitted.extend(typed_ids(&projector.project_canonical(
+            &subagent_task_tool(
+                "task-1",
+                "Task",
+                ToolCallStatus::InProgress,
+                FieldUpdate::Set("Auditing\n".to_string()),
+            ),
+        )));
+        emitted.extend(typed_ids(&projector.project_canonical(
+            &subagent_task_tool(
+                "task-1",
+                "Task",
+                ToolCallStatus::Completed,
+                FieldUpdate::Set("Auditing\nAll clear\n".to_string()),
+            ),
+        )));
+
+        for (kind, id) in &emitted {
+            assert!(
+                !matches!(
+                    kind.as_str(),
+                    "TOOL_CALL_START" | "TOOL_CALL_ARGS" | "TOOL_CALL_RESULT" | "TOOL_CALL_END"
+                ),
+                "sub-agent tool leaked {kind} ({id}); all of {emitted:?}"
+            );
+            assert!(
+                !kind.contains("tool-text") && !kind.contains("tool-content"),
+                "sub-agent tool leaked {kind} ({id}); all of {emitted:?}"
+            );
+        }
+        assert!(
+            emitted.iter().any(|(_, id)| id.starts_with("subagent:")),
+            "expected a sub-agent card in {emitted:?}"
+        );
+    }
+
     #[test]
     fn parallel_task_tools_keep_one_card_each() {
         // Two sub-agents running at once in a single turn must not share a card or a
@@ -2812,11 +2969,12 @@ mod tests {
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
         });
-        assert_eq!(event_types(&starting.events), ["ACTIVITY_SNAPSHOT"]);
-        let starting_value = serde_json::to_value(&starting.events[0]).unwrap();
-        assert_eq!(
-            starting_value["event"]["content"]["subAgent"]["agentStatus"],
-            "running"
+        // A task tool with nothing to report announces nothing: a placeholder card
+        // would read "starting" and could not be opened.
+        assert!(
+            event_types(&starting.events).is_empty(),
+            "unexpected {:?}",
+            event_types(&starting.events)
         );
         let failed_unlinked = projector.project_canonical(&CanonicalEvent::Tool {
             agent_id: "alpha-agent".to_string(),
