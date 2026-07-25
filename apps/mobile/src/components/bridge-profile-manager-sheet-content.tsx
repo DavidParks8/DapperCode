@@ -337,7 +337,7 @@ export function BridgeProfileManagerSheet({
                             <Text style={styles.deleteConfirmTitle}>Delete this profile?</Text>
                             <Text style={styles.deleteConfirmBody}>
                               This removes the saved connection from the device. If it is active,
-                              TetherCode will switch to another saved connection or return to
+                              DapperCode will switch to another saved connection or return to
                               onboarding.
                             </Text>
                             <View style={styles.inlineActions}>

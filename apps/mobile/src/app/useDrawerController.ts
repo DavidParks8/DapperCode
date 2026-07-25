@@ -125,6 +125,7 @@ export function useDrawerController({
     drawerCapturesTouchesRef,
     setDrawerVisible,
     setDrawerCapturesTouches,
+    onDrawerSettled: handleDrawerSettled,
     onToggleTabletSidebar: () => setTabletSidebarVisible((visible) => !visible),
     onChatGitBack,
   });

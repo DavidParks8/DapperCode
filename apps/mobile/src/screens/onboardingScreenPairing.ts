@@ -47,7 +47,7 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
 
   try {
     const parsed = new URL(raw);
-    if (parsed.protocol !== 'tethercode:') {
+    if (parsed.protocol !== 'dappercode:') {
       return null;
     }
     const bridgeUrl =

@@ -39,7 +39,7 @@ interface LoadingShellProps {
 export function LoadingShell({ theme, styles }: LoadingShellProps) {
   return (
     <AppShellFrame theme={theme} styles={styles}>
-      <View style={styles.loadingRoot} accessibilityRole="progressbar" accessibilityLabel="Loading TetherCode">
+      <View style={styles.loadingRoot} accessibilityRole="progressbar" accessibilityLabel="Loading DapperCode">
         <ActivityIndicator size="large" color={theme.colors.textMuted} />
       </View>
     </AppShellFrame>

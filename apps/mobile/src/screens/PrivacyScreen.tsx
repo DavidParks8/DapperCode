@@ -8,7 +8,7 @@ interface PrivacyScreenProps {
 const privacySections: readonly LegalSection[] = [
   {
     title: 'What This App Does',
-    body: 'TetherCode connects to your own host bridge service and lets you view chats, run approved commands, and perform Git operations on your machine.',
+    body: 'DapperCode connects to your own host bridge service and lets you view chats, run approved commands, and perform Git operations on your machine.',
   },
   {
     title: 'Data Processed',

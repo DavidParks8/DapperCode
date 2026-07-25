@@ -314,7 +314,7 @@ export function OnboardingConnectSection({
           <View style={styles.primaryButtonContent}>
             <View style={styles.primaryButtonCopy}>
               <Text style={styles.primaryButtonText}>{continueLabel}</Text>
-              <Text style={styles.primaryButtonSubtext}>Start using TetherCode</Text>
+              <Text style={styles.primaryButtonSubtext}>Start using DapperCode</Text>
             </View>
             <Ionicons
               {...decorativeAccessibilityProps}

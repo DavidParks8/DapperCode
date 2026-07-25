@@ -33,5 +33,12 @@
         "EXPO_PUBLIC_TERMS_OF_SERVICE_URL": "https://github.com/DavidParks8/TetherCode/blob/main/docs/terms-of-service.md"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6794534397"
+      }
+    }
   }
 }

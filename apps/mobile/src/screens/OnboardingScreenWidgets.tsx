@@ -76,7 +76,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
   }, [command]);
 
   const handleShareGuide = useCallback(() => {
-    const title = 'TetherCode bridge setup';
+    const title = 'DapperCode bridge setup';
     void Share.share(
       Platform.OS === 'ios'
         ? { title, url: BRIDGE_SETUP_URL }

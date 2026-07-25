@@ -68,18 +68,7 @@
     "jest": "^29.7.0",
     "jest-expo": "~55.0.20",
     "resolve-from": "5.0.0",
-    "typescript": "7.0.2",
-    "typescript-expo-compat": "npm:typescript@5.9.3"
-  },
-  "optionalDependencies": {
-    "@typescript/typescript-linux-x64": "7.0.2"
-  },
-  "expo": {
-    "install": {
-      "exclude": [
-        "typescript"
-      ]
-    }
+    "typescript": "^5.9.3"
   },
   "jest": {
     "preset": "jest-expo",

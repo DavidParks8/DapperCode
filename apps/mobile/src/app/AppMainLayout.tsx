@@ -270,6 +270,15 @@ export function AppMainLayout(props: AppMainLayoutProps) {
                 </GestureDetector>
               </View>
             ) : null}
+
+            {currentScreen === 'ChatGit' && !usesTabletLayout ? (
+              <GestureDetector gesture={drawer.chatGitBackGesture as never}>
+                <View
+                  pointerEvents={drawer.drawerVisible && drawer.drawerCapturesTouches ? 'none' : 'auto'}
+                  style={styles.edgeSwipeZone}
+                />
+              </GestureDetector>
+            ) : null}
           </View>
         </SafeAreaProvider>
       </GestureHandlerRootView>

@@ -1,5 +1,5 @@
 export const BRIDGE_SETUP_INSTRUCTION =
-  'Open TetherCode.app on your Mac to set up and start the bundled bridge.';
+  'Open the desktop companion on your Mac to set up and start the bundled bridge.';
 export const BRIDGE_SETUP_URL =
   'https://github.com/DavidParks8/TetherCode/blob/main/docs/setup-and-operations.md';
 

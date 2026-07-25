@@ -33,6 +33,7 @@ interface UseDrawerGesturesArgs {
   drawerCapturesTouchesRef: React.MutableRefObject<boolean>;
   setDrawerVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setDrawerCapturesTouches: React.Dispatch<React.SetStateAction<boolean>>;
+  onDrawerSettled: (isOpen: boolean) => void;
   onToggleTabletSidebar: () => void;
   onChatGitBack: () => void;
 }
@@ -50,6 +51,7 @@ export function useDrawerGestures({
   drawerCapturesTouchesRef,
   setDrawerVisible,
   setDrawerCapturesTouches,
+  onDrawerSettled,
   onToggleTabletSidebar,
   onChatGitBack,
 }: UseDrawerGesturesArgs) {
@@ -80,15 +82,7 @@ export function useDrawerGestures({
     ensureDrawerCapturesTouches();
   }, [ensureDrawerCapturesTouches, ensureDrawerVisible]);
 
-  const handleDrawerSettled = useCallback(
-    (isOpen: boolean) => {
-      drawerVisibleRef.current = isOpen;
-      drawerCapturesTouchesRef.current = isOpen;
-      setDrawerVisible(isOpen);
-      setDrawerCapturesTouches(isOpen);
-    },
-    [drawerCapturesTouchesRef, drawerVisibleRef, setDrawerCapturesTouches, setDrawerVisible]
-  );
+  const handleDrawerSettled = onDrawerSettled;
 
   const animateDrawerTo = useCallback(
     (shouldOpen: boolean, velocityX = 0) => {
@@ -168,6 +162,7 @@ export function useDrawerGestures({
 
   const settleDrawerFromGesture = useCallback(
     (translationX: number, velocityX: number) => {
+      'worklet';
       const nextOffset = clampDrawerOffset(
         drawerDragStartOffset.value + translationX,
         drawerWidth

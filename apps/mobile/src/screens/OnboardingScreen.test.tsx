@@ -137,7 +137,7 @@ describe('OnboardingScreen behavior', () => {
   it('moves between initial intro and connection setup', async () => {
     const { tree } = await renderOnboarding();
     const root = tree.root as Queryable;
-    expect(hasText(root, 'TetherCode')).toBe(true);
+    expect(hasText(root, 'DapperCode')).toBe(true);
     expect(hasText(root, 'Pair your phone with your own machine.')).toBe(true);
     await press(findPressableByText(root, 'Private connection'));
     expect(findByLabel(root, 'Bridge URL')).toBeTruthy();
@@ -266,7 +266,7 @@ describe('OnboardingScreen behavior', () => {
     await act(async () => {
       readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data: 'not-a-pairing-code' });
     });
-    expect(hasText(root, 'QR code is not a valid TetherCode bridge pairing code.')).toBe(true);
+    expect(hasText(root, 'QR code is not a valid DapperCode bridge pairing code.')).toBe(true);
     act(() => jest.advanceTimersByTime(1200));
     await press(findByLabel(root, 'Cancel QR scan'));
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
@@ -292,9 +292,9 @@ describe('OnboardingScreen behavior', () => {
   });
 
   it.each([
-    ['tethercode://pair?bridgeUrl=http%3A%2F%2F127.0.0.1%3A3001&bridgeToken=uri-token', 'http://127.0.0.1:3001', 'uri-token'],
-    ['tethercode://pair?url=ws%3A%2F%2F127.0.0.1%3A4001&token=alias-uri', 'http://127.0.0.1:4001', 'alias-uri'],
-    ['tethercode://pair?token=token-only', '', 'token-only'],
+    ['dappercode://pair?bridgeUrl=http%3A%2F%2F127.0.0.1%3A3001&bridgeToken=uri-token', 'http://127.0.0.1:3001', 'uri-token'],
+    ['dappercode://pair?url=ws%3A%2F%2F127.0.0.1%3A4001&token=alias-uri', 'http://127.0.0.1:4001', 'alias-uri'],
+    ['dappercode://pair?token=token-only', '', 'token-only'],
   ])('accepts pairing URI %s', async (data, expectedUrl, expectedToken) => {
     mockCameraGranted = true;
     const result = await renderOnboarding({ mode: 'add' });
@@ -313,7 +313,7 @@ describe('OnboardingScreen behavior', () => {
     JSON.stringify({ type: 'other', bridgeToken: 'token' }),
     JSON.stringify({ type: 'tethercode-bridge-pair', bridgeToken: '   ' }),
     'https://example.com/?token=nope',
-    'tethercode://pair',
+    'dappercode://pair',
   ])('rejects invalid QR form %p', async (data) => {
     mockCameraGranted = true;
     const result = await renderOnboarding({ mode: 'add' });
@@ -321,7 +321,7 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
     await act(async () => readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }));
-    expect(hasText(root, 'QR code is not a valid TetherCode bridge pairing code.')).toBe(true);
+    expect(hasText(root, 'QR code is not a valid DapperCode bridge pairing code.')).toBe(true);
     act(() => result.tree.unmount());
   });
 
@@ -335,7 +335,7 @@ describe('OnboardingScreen behavior', () => {
     expect(camera.props.onBarcodeScanned).toBeUndefined();
     act(() => jest.advanceTimersByTime(1200));
     const unlockedCamera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(unlockedCamera, 'onBarcodeScanned')({ data: 'tethercode://pair?token=unlocked' }));
+    await act(async () => readHandler<(event: { data: string }) => void>(unlockedCamera, 'onBarcodeScanned')({ data: 'dappercode://pair?token=unlocked' }));
     expect(findByLabel(root, 'Bridge token').props.value).toBe('unlocked');
     act(() => result.tree.unmount());
   });
@@ -396,7 +396,7 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Copy'));
-    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('Open TetherCode.app on your Mac to set up and start the bundled bridge.');
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('Open the desktop companion on your Mac to set up and start the bundled bridge.');
     expect(hasText(root, 'Copied')).toBe(true);
     act(() => jest.advanceTimersByTime(1400));
     expect(hasText(root, 'Copy')).toBe(true);

@@ -34,7 +34,7 @@ export function OnboardingIntroSection({
       <View style={styles.introHeader}>
         <View style={styles.introBrandRow}>
           <BrandMark size={24} />
-          <Text style={styles.introBrandName}>TetherCode</Text>
+          <Text style={styles.introBrandName}>DapperCode</Text>
         </View>
       </View>
 

@@ -282,7 +282,7 @@ export function useOnboardingScreenController(
       setScannerLocked(true);
       const pairing = parsePairingPayload(data);
       if (!pairing) {
-        setScannerError('QR code is not a valid TetherCode bridge pairing code.');
+        setScannerError('QR code is not a valid DapperCode bridge pairing code.');
         setTimeout(() => {
           setScannerLocked(false);
         }, 1200);
