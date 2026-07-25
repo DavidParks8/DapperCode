@@ -56,6 +56,18 @@ export function reduceStructuredMessageContent(
   return upsertMessage(current, base, envelope.runId, envelope.event.timestamp);
 }
 
+/**
+ * A tool's plain text and its structured rendering usually describe the same
+ * payload, so only append the structured lines the plain text does not cover.
+ */
+function joinToolText(text: string, structured: string): string {
+  const extras = structured
+    .split("\n")
+    .filter((line) => line.trim() && !text.includes(line.trim()))
+    .join("\n");
+  return [text, extras].filter(Boolean).join("\n");
+}
+
 export function reduceToolText(
   current: AgUiThreadMessageState,
   envelope: AgUiEventEnvelope,
@@ -76,7 +88,7 @@ export function reduceToolText(
     envelope.runId,
     messageId,
     toolCallId,
-    [content, structured].filter(Boolean).join("\n"),
+    joinToolText(content, structured),
     envelope.event.timestamp,
   );
   return {
@@ -120,7 +132,7 @@ export function reduceToolContent(
     envelope.runId,
     messageId,
     toolCallId,
-    [base, structured].filter(Boolean).join("\n"),
+    joinToolText(base, structured),
     envelope.event.timestamp,
   );
   return {

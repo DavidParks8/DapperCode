@@ -39,6 +39,53 @@ function createEnvelope(
 }
 
 describe('agUiStructuredAndTerminalReducers', () => {
+  it('does not repeat tool text that the structured rendering already covers', () => {
+    let state = createState();
+    state = reduceToolText(
+      state,
+      createEnvelope(),
+      { toolCallId: 'tool-1', revision: 'r1', content: 'file 3 body\n' }
+    );
+    state = reduceToolContent(
+      state,
+      createEnvelope(),
+      {
+        toolCallId: 'tool-1',
+        revision: 'r2',
+        content: [{ type: 'content', content: { type: 'text', text: 'file 3 body\n' } }],
+        locations: [],
+      }
+    );
+
+    const message = findMessage(state, 'tool-result:tool-1');
+    const text = message?.role === 'tool' ? message.content : '';
+    expect(text.match(/file 3 body/g)).toHaveLength(1);
+  });
+
+  it('still appends structured lines the plain text does not cover', () => {
+    let state = createState();
+    state = reduceToolText(
+      state,
+      createEnvelope(),
+      { toolCallId: 'tool-2', revision: 'r1', content: 'plain output' }
+    );
+    state = reduceToolContent(
+      state,
+      createEnvelope(),
+      {
+        toolCallId: 'tool-2',
+        revision: 'r2',
+        content: [],
+        locations: [{ path: 'src/math.ts' }],
+      }
+    );
+
+    const message = findMessage(state, 'tool-result:tool-2');
+    const text = message?.role === 'tool' ? message.content : '';
+    expect(text).toContain('plain output');
+    expect(text).toContain('[location: src/math.ts]');
+  });
+
   describe('reduceStructuredMessageContent', () => {
     it('uses fallback id and assistant role when messageId and role are missing', () => {
       const next = reduceStructuredMessageContent(

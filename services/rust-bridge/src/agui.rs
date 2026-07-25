@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 pub(super) const AG_UI_EVENT_METHOD: &str = "bridge/agui.event";
 const CLOSED_THREAD_CAPACITY: usize = 2048;
+const OBSERVED_RUN_CAPACITY: usize = 256;
 const MESSAGE_CHUNK_BYTES: usize = 32 * 1024;
 const TOOL_RESULT_CHUNK_BYTES: usize = 16 * 1024;
 const STRUCTURED_CHUNK_BYTES: usize = 16 * 1024;
@@ -77,6 +78,7 @@ pub(super) struct AgUiProjector {
     runs: HashMap<String, AgUiRunState>,
     closed_threads: HashSet<String>,
     subagent_links: HashMap<String, SubagentActivityLink>,
+    observed_runs: VecDeque<String>,
 }
 
 #[derive(Debug, Default)]
@@ -136,6 +138,13 @@ impl AgUiProjector {
                 content_block,
                 ..
             } if !content.is_empty() || content_block.is_some() => {
+                self.ensure_observed_run(
+                    thread_id,
+                    run_id.as_deref(),
+                    source_turn_id.as_deref(),
+                    timestamp,
+                    &mut projection.events,
+                );
                 let Some(run) = canonical_run_mut(
                     &mut self.runs,
                     thread_id,
@@ -338,6 +347,13 @@ impl AgUiProjector {
                     }
                     FieldUpdate::Clear | FieldUpdate::Unchanged => false,
                 };
+                self.ensure_observed_run(
+                    thread_id,
+                    run_id.as_deref(),
+                    source_turn_id.as_deref(),
+                    timestamp,
+                    &mut projection.events,
+                );
                 let (runs, subagent_links) = (&mut self.runs, &mut self.subagent_links);
                 let Some(run) = canonical_run_mut(
                     runs,
@@ -785,6 +801,64 @@ impl AgUiProjector {
             CanonicalEvent::Ignored { .. } | CanonicalEvent::MessageChunk { .. } => {}
         }
         projection
+    }
+
+    /// Sub-agent threads are driven by the agent itself, so no client prompt ever
+    /// opens a run for them and every live event they produce would be dropped.
+    /// Open an implicit run the first time such a thread emits output so its
+    /// transcript streams like any other thread.
+    fn ensure_observed_run(
+        &mut self,
+        thread_id: &str,
+        run_id: Option<&str>,
+        source_turn_id: Option<&str>,
+        timestamp: i64,
+        events: &mut Vec<AgUiEventEnvelope>,
+    ) {
+        if run_id.is_some()
+            || source_turn_id.is_some()
+            || self.runs.contains_key(thread_id)
+            || self.closed_threads.contains(thread_id)
+        {
+            return;
+        }
+        let observed_run_id = format!("{thread_id}::observed");
+        self.runs.insert(
+            thread_id.to_string(),
+            AgUiRunState {
+                run_id: observed_run_id.clone(),
+                source_turn_id: None,
+                open_user_id: None,
+                open_message_id: None,
+                open_reasoning_id: None,
+                message_bytes: HashMap::new(),
+                truncated_messages: HashSet::new(),
+                tools: HashMap::new(),
+            },
+        );
+        self.observed_runs.push_back(thread_id.to_string());
+        while self.observed_runs.len() > OBSERVED_RUN_CAPACITY {
+            if let Some(oldest) = self.observed_runs.pop_front() {
+                if self
+                    .runs
+                    .get(&oldest)
+                    .is_some_and(|run| run.source_turn_id.is_none())
+                {
+                    self.runs.remove(&oldest);
+                }
+            }
+        }
+        events.push(envelope(
+            thread_id,
+            &observed_run_id.clone(),
+            None,
+            run_event(
+                AgUiEventType::RunStarted,
+                thread_id.to_string(),
+                observed_run_id,
+                timestamp,
+            ),
+        ));
     }
 
     fn mark_thread_closed(&mut self, thread_id: &str) {
@@ -2007,6 +2081,36 @@ mod tests {
             content: content.to_string(),
             content_block: None,
         }
+    }
+
+    #[test]
+    fn agent_driven_threads_stream_without_a_client_started_run() {
+        let mut projector = AgUiProjector::default();
+        let mut chunk = canonical_message(MessageRole::Agent, "child-message", "scanning");
+        if let CanonicalEvent::MessageChunk {
+            thread_id,
+            run_id,
+            source_turn_id,
+            generation,
+            ..
+        } = &mut chunk
+        {
+            "v1.YWxwaGEtYWdlbnQ.Y2hpbGQ".clone_into(thread_id);
+            *run_id = None;
+            *source_turn_id = None;
+            *generation = None;
+        }
+
+        let events = projector.project_canonical(&chunk).events;
+
+        assert_eq!(
+            event_types(&events),
+            vec!["RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"],
+            "sub-agent threads must open an implicit run so their output streams"
+        );
+        // A second chunk reuses the same implicit run instead of restarting it.
+        let more = projector.project_canonical(&chunk).events;
+        assert_eq!(event_types(&more), vec!["TEXT_MESSAGE_CONTENT"]);
     }
 
     #[test]
