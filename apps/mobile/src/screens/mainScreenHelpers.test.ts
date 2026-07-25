@@ -1007,6 +1007,38 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.extractExternalStatusHint({ thread: { lifecycle: { status: 'Failed' } } })).toBe('failed');
   });
 
+  it('treats a parent as working whenever any sub-agent beneath it is working', () => {
+    // The parent's own run can settle to complete while a sub-agent it spawned is
+    // still streaming. Reporting Ready then contradicts the spinning sub-agent card.
+    const parent = chat({ id: 'root', status: 'complete' });
+    const idleChild = summary({ id: 'child', status: 'idle', parentThreadId: 'root' });
+    const busyChild = summary({ id: 'child', status: 'running', parentThreadId: 'root' });
+
+    expect(helpers.isThreadOrSubAgentRunning(parent, [])).toBe(false);
+    expect(helpers.isThreadOrSubAgentRunning(parent, [idleChild])).toBe(false);
+    expect(helpers.isThreadOrSubAgentRunning(parent, [busyChild])).toBe(true);
+
+    // Any depth counts: relatedAgentThreads holds every descendant of the root.
+    const busyGrandChild = summary({
+      id: 'grandchild',
+      status: 'running',
+      parentThreadId: 'child',
+    });
+    expect(helpers.isThreadOrSubAgentRunning(parent, [idleChild, busyGrandChild])).toBe(true);
+
+    // A running root-level thread is not a sub-agent and must not count.
+    const busySibling = summary({ id: 'other-root', status: 'running' });
+    expect(helpers.isThreadOrSubAgentRunning(parent, [busySibling])).toBe(false);
+
+    // The parent's own entry in the list must not be double-counted as a child.
+    const parentEntry = summary({ id: 'root', status: 'running', parentThreadId: 'root' });
+    expect(helpers.isThreadOrSubAgentRunning(parent, [parentEntry])).toBe(false);
+
+    // A running parent is working regardless of its sub-agents.
+    expect(helpers.isThreadOrSubAgentRunning(chat({ status: 'running' }), [])).toBe(true);
+    expect(helpers.isThreadOrSubAgentRunning(null, [busyChild])).toBe(true);
+  });
+
   it('evaluates running and unanswered chat heuristics', () => {
     const now = Date.now();
     jest.spyOn(Date, 'now').mockReturnValue(now);

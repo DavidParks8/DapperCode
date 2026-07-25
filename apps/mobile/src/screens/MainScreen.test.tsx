@@ -1564,6 +1564,28 @@ describe('MainScreen controls and modals', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps the parent reported as working while a sub-agent is still working', async () => {
+    // If any sub-agent is working the parent is working. The parent's own run can
+    // settle to complete first, and "Turn completed" then contradicts the sub-agent
+    // card spinning in the same transcript.
+    const busyChild: Chat = { ...subAgentChat, status: 'running' };
+    const chats: ChatSummary[] = [{ ...rootChat, status: 'complete' }, busyChild];
+    const api = createApi({ chats });
+    const { tree } = await renderMain({
+      api,
+      selectedChat: { ...rootChat, status: 'complete' },
+    });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    expect(hasText(root, 'Working')).toBe(true);
+    expect(hasText(root, 'Turn completed')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('does not pin an agents panel above the transcript while sub-agents are in use', async () => {
     // Regression: a live agents panel took a third of the screen to repeat what the
     // inline sub-agent card already says. The header chip remains the way in.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
-import { ACTIVITY_DETAIL_HOLD_MS, isChatLikelyRunning, removeBridgeUiSurfaceFromList, resolveHeldActivity } from './mainScreenHelpers';
+import { ACTIVITY_DETAIL_HOLD_MS, isThreadOrSubAgentRunning, removeBridgeUiSurfaceFromList, resolveHeldActivity } from './mainScreenHelpers';
 import type { MainScreenApprovalAndUserInputResolutionContext, MainScreenApprovalAndUserInputResolutionResult } from './mainScreenApprovalAndUserInputResolution';
 
 
@@ -32,6 +32,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     runWatchdogNow,
     runWatchdogUntilRef,
     scrollToBottomReliable,
+    relatedAgentThreads,
     selectedChat,
     sendMessage,
     sending,
@@ -127,7 +128,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
   const isOpeningChat = Boolean(openingChatId);
   const shouldShowComposer = !isOpeningChat;
   const isTurnLikelyRunning =
-    Boolean(activeTurnId) || (selectedChat ? isChatLikelyRunning(selectedChat) : false);
+    Boolean(activeTurnId) || isThreadOrSubAgentRunning(selectedChat, relatedAgentThreads);
   const hasRunWatchdog = runWatchdogUntilRef.current > runWatchdogNow;
 
   useEffect(() => {
