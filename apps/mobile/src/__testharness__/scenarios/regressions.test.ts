@@ -3,7 +3,9 @@ import { registerTestHarnessMatchers } from '../AssertionHelpers';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
 import {
+  nestedSubAgent,
   parentOnlySubAgent,
+  spawnToolThenSubAgentCard,
   subAgentStatusOnlyUpdate,
   subAgentTerminalThenIdleThread,
   promptAfterSnapshot,
@@ -142,6 +144,52 @@ describe('Streaming and snapshot sequencing', () => {
 });
 
 describe('Sub-agent card lifecycle', () => {
+  it('replaces the spawn tool card with the sub-agent card', () => {
+    // The task tool that launches a sub-agent must not leave a dead "spawnAgent"
+    // tool card sitting above the card that reports the same work.
+    const state = new TestableThreadState();
+    state.applySequence(spawnToolThenSubAgentCard('parent', 'child'));
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'running' });
+    const { messages } = state.projectTranscript('parent');
+    expect(
+      messages.some(
+        (message) => message.role === 'assistant' && Boolean(message.toolCalls?.length),
+      ),
+    ).toBe(false);
+    expect(messages.some((message) => message.id.startsWith('tool-call:'))).toBe(false);
+  });
+
+  it('shows only the latest step on the parent card, not an accumulating list', () => {
+    // The parent transcript stays scannable: one rolling line. The full history
+    // belongs in the sub-agent detail view.
+    const state = new TestableThreadState();
+    const steps = parentOnlySubAgent('parent', ['Reading src/math.ts', 'Running npm test']);
+
+    state.applySequence(steps.start);
+    steps.progress.forEach((step) => {
+      state.applySequence([step]);
+    });
+
+    expect(state).toHaveSubAgentCount('parent', 1);
+    expect(state).toHaveSubAgentPreview('parent', 'Running npm test');
+    const [card] = state.getSubAgentActivities('parent');
+    expect(String((card.content as { text?: string }).text)).not.toContain('Reading src/math.ts');
+  });
+
+  it('keeps a nested sub-agent card on its own thread and out of the parent', () => {
+    // A sub-agent that spawns its own sub-agent reports that on the child thread.
+    // Surfacing it on the parent would make one card look like two sub-agents.
+    const state = new TestableThreadState();
+    state.applySequence(nestedSubAgent('parent', 'child', 'grandchild'));
+
+    expect(state).toHaveSubAgentCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child');
+    expect(state).toHaveSubAgentCount('child', 1);
+    expect(state).toHaveSubAgentCard('child', 'grandchild', { preview: 'Running npm test' });
+  });
+
   it('reports progress while the sub-agent works instead of a static start label', () => {
     // Regression: the card sat on "Starting sub-agent" for the whole run and then
     // jumped to done, because it only refreshed when the task state changed.

@@ -264,3 +264,49 @@ export function subAgentTerminalThenIdleThread(
 ): EventSequenceEntry[] {
   return linkedSubAgentSequence(parentThreadId, childThreadId, [WORKING_CARD, COMPLETED_CARD]);
 }
+
+/**
+ * A task tool that starts as an ordinary tool call and is only recognised as a
+ * sub-agent afterwards — the ordering a bridge produces when the first ACP update
+ * carries no task payload.
+ */
+export function spawnToolThenSubAgentCard(
+  parentThreadId = 'parent',
+  childThreadId = 'child',
+): EventSequenceEntry[] {
+  const runId = `${parentThreadId}::run-1`;
+  const toolCallId = `${parentThreadId}::task-1`;
+  return [
+    ...sequence(parentThreadId, runId)
+      .runStarted()
+      .toolCall('spawnAgent', '{"prompt":"audit the repo"}', { toolCallId })
+      .build(),
+    subAgentCard(parentThreadId, runId, {
+      toolCallId,
+      childThreadId,
+      status: 'running',
+      heading: '\u2022 Sub-agent working',
+      latest: 'Reading src/math.ts',
+    }),
+  ];
+}
+
+/** A sub-agent that itself spawns a sub-agent, so the child thread has its own card. */
+export function nestedSubAgent(
+  parentThreadId = 'parent',
+  childThreadId = 'child',
+  grandChildThreadId = 'grandchild',
+): EventSequenceEntry[] {
+  const childRunId = `${childThreadId}::run-1`;
+  return [
+    ...linkedSubAgentSequence(parentThreadId, childThreadId, [WORKING_CARD]),
+    ...sequence(childThreadId, childRunId).runStarted().build(),
+    subAgentCard(childThreadId, childRunId, {
+      toolCallId: `${childThreadId}::task-1`,
+      childThreadId: grandChildThreadId,
+      status: 'running',
+      heading: '\u2022 Sub-agent working',
+      latest: 'Running npm test',
+    }),
+  ];
+}

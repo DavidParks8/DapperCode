@@ -169,6 +169,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [agentRuntimeRevision, setAgentRuntimeRevision] = useState(0);
   const [loadingAgentThreads, setLoadingAgentThreads] = useState(false);
   const [agentDetailThreadId, setAgentDetailThreadId] = useState<string | null>(null);
+  const [agentDetailStack, setAgentDetailStack] = useState<string[]>([]);
   const [agentDetailChat, setAgentDetailChat] = useState<Chat | null>(null);
   const [agentDetailParentChat, setAgentDetailParentChat] = useState<Chat | null>(null);
   const [agentDetailLoading, setAgentDetailLoading] = useState(false);
@@ -352,6 +353,8 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setLoadingAgentThreads,
     agentDetailThreadId,
     setAgentDetailThreadId,
+    agentDetailStack,
+    setAgentDetailStack,
     agentDetailChat,
     setAgentDetailChat,
     agentDetailParentChat,
