@@ -1,3 +1,4 @@
+import { isTerminalSubAgentStatus } from '../components/chatMessageTimelineHelpers';
 import type { ChatMessage, ChatStatus } from '../api/types';
 import {
   COMPACTION_ACTIVITY_TYPE,
@@ -174,6 +175,12 @@ function syncSubAgentMessageStatus(
 ): ChatMessage {
   const subAgentMeta = getSubAgentMeta(message);
   if (!subAgentMeta) {
+    return message;
+  }
+
+  // The child thread goes back to `idle` once its task ends, so never overwrite a
+  // terminal task status with the thread's lifecycle status.
+  if (isTerminalSubAgentStatus(subAgentMeta.agentStatus)) {
     return message;
   }
 

@@ -186,6 +186,20 @@ describe('getVisibleTranscriptMessages', () => {
     expect(syncedMessage.content.subAgent?.agentStatus).toBe('complete');
   });
 
+  it('keeps a terminal sub-agent status when its thread goes back to idle', () => {
+    const messages = [
+      message('s1', 'system', '• Sub-agent completed\n  Status: completed', {
+        systemKind: 'subAgent',
+        subAgentMeta: {
+          receiverThreadIds: ['child'],
+          agentStatus: 'completed',
+        },
+      }),
+    ];
+
+    expect(syncVisibleSubAgentStatuses(messages, new Map([['child', 'idle']]))).toBe(messages);
+  });
+
   it('hides internal protocol content and blank assistant messages', () => {
     const messages = [
       message('result', 'assistant', 'FINAL_TASK_RESULT_JSON {}'),
