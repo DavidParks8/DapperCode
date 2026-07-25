@@ -197,7 +197,11 @@ export function addNotificationResponseListener(
 }
 
 export async function getInitialNotificationResponse(): Promise<PushResponseEvent | null> {
-  const response = await Notifications.getLastNotificationResponseAsync();
+  // Platforms without a notifications module (or with permissions denied) reject
+  // here; a missing cold-start notification must never break app startup.
+  const response = await Notifications.getLastNotificationResponseAsync().catch(
+    () => null
+  );
   if (!response) {
     return null;
   }

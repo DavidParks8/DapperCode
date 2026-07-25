@@ -76,9 +76,6 @@ export function mapMessages(
                 : state === "failed"
                   ? "• Sub-agent failed"
                   : "• Sub-agent working",
-              taskSubagent?.threadId
-                ? `  Thread: ${taskSubagent.threadId}`
-                : null,
               `  Status: ${state}`,
               taskSubagent?.result ? `  Latest: ${taskSubagent.result}` : null,
             ]
@@ -109,7 +106,13 @@ export function mapMessages(
             content: tool.structuredContent,
             locations: tool.locations,
           });
-          const details = [tool.title || tool.kind, tool.content, structured]
+          // `tool.content` is the plain-text rendering of the same payload, so drop
+          // structured lines it already covers instead of printing them twice.
+          const structuredExtras = structured
+            .split("\n")
+            .filter((line) => line.trim() && !tool.content.includes(line.trim()))
+            .join("\n");
+          const details = [tool.title || tool.kind, tool.content, structuredExtras]
             .filter(Boolean)
             .join("\n");
           return [

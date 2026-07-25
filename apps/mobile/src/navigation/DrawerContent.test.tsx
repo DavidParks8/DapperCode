@@ -718,6 +718,19 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree.unmount());
   });
 
+  it('shows primed sessions instead of a loading placeholder while hidden', async () => {
+    const harness = createHarness();
+    const tree = await renderDrawer(harness, { active: false });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hasText(tree.root as Queryable, 'Loading sessions')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('primes while inactive and ignores late capability and stream callbacks after unmount', async () => {
     let resolveCapabilities: ((value: { agents: AgentDescriptor[]; supportsByAgent: Record<string, unknown> }) => void) | undefined;
     let streamBatch: ((batch: { streamId: string; limit: number; done: boolean; chats: ChatSummary[] }) => void) | undefined;

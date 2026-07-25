@@ -213,7 +213,9 @@ export function DrawerChatList() {
                   </Text>
                 </View>
                 <View style={styles.chatItemMeta}>
-                  <Text style={styles.chatAge}>{relativeTime(item.chat.updatedAt)}</Text>
+                  {item.chat.timestampsSynthesized ? null : (
+                    <Text style={styles.chatAge}>{relativeTime(item.chat.updatedAt)}</Text>
+                  )}
                   <View style={styles.chatState}>
                     <View
                       {...decorativeAccessibilityProps}

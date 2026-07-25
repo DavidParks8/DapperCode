@@ -11,6 +11,22 @@ export function renderAgUiCustomContent(value: unknown): string {
   }
 }
 
+/**
+ * Ordered parts win over `content` when a message is rendered, so they must only
+ * be carried across a snapshot when they still describe the authoritative text.
+ * Non-text parts (images, resources) are always kept because a plain string
+ * cannot represent them.
+ */
+export function partsMatchMessageContent(
+  parts: readonly unknown[] | undefined,
+  content: unknown
+): boolean {
+  if (!parts || parts.length === 0) return false;
+  if (typeof content !== 'string') return true;
+  if (parts.some((part) => record(part)?.type !== 'text')) return true;
+  return parts.map(renderAgUiCustomContent).filter(Boolean).join('\n') === content;
+}
+
 function renderStructuredContent(value: unknown, depth: number): string[] {
   if (depth > 4 || value == null) return [];
   if (Array.isArray(value)) return value.flatMap((entry) => renderStructuredContent(entry, depth + 1));

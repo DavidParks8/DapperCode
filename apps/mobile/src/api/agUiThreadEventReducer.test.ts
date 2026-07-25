@@ -200,6 +200,56 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
     expect(unchanged).toBe(state);
   });
 
+  it('drops streamed parts that no longer match an authoritative snapshot', () => {
+    let state = createAgUiThreadMessageState();
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TEXT_MESSAGE_START, messageId: 'a1', role: 'assistant' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'a1', delta: 'This needs a' }),
+    );
+    expect(state.messages[0]?.parts).toEqual([{ type: 'text', text: 'This needs a' }]);
+
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: 'a1', role: 'assistant', content: 'This needs a wider search.' }],
+      }),
+    );
+
+    const snapshotted = state.messages.find((entry) => entry.id === 'a1');
+    expect(snapshotted?.parts).toBeUndefined();
+    expect(snapshotted?.role === 'assistant' ? snapshotted.content : null).toBe(
+      'This needs a wider search.',
+    );
+  });
+
+  it('keeps streamed parts that still describe the snapshot text', () => {
+    let state = createAgUiThreadMessageState();
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TEXT_MESSAGE_START, messageId: 'a2', role: 'assistant' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'a2', delta: 'Same text' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: 'a2', role: 'assistant', content: 'Same text' }],
+      }),
+    );
+
+    expect(state.messages.find((entry) => entry.id === 'a2')?.parts).toEqual([
+      { type: 'text', text: 'Same text' },
+    ]);
+  });
+
   it('applies message snapshots and activity snapshot/delta updates', () => {
     let state = createAgUiThreadMessageState();
     state = reduceThreadState(

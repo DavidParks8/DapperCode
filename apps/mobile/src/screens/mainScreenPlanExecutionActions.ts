@@ -28,11 +28,18 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     setPlanPanelCollapsedByThread,
     setSelectedCollaborationMode,
     showActivity,
+    supportsPlanMode,
   } = context;
 
 
   useEffect(() => {
-    if (!selectedChat || isOpeningChat || !shouldAutoEnablePlanModeFromChat(selectedChat)) {
+    // Agents that cannot run a plan turn still publish plan/to-do updates, so
+    // never flip the composer into plan mode on their behalf.
+    if (
+      !selectedChat ||
+      isOpeningChat ||
+      !shouldAutoEnablePlanModeFromChat(selectedChat, supportsPlanMode)
+    ) {
       return;
     }
 
@@ -59,6 +66,7 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     selectedChat?.id,
     selectedChat?.latestTurnPlan?.turnId,
     selectedChat?.latestTurnStatus,
+    supportsPlanMode,
   ]);
 
   useEffect(() => {

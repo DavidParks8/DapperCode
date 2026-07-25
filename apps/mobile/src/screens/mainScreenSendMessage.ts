@@ -73,6 +73,7 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     setResolvingUserInput,
     mergeChatWithPendingOptimisticMessages,
     setSelectedCollaborationMode,
+    supportsPlanMode,
     setShowDelayedGenericRunningActivity,
     handleTurnFailure,
   } = context;
@@ -321,7 +322,7 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
         const resolvedUpdated = mergeChatWithPendingOptimisticMessages(result.chat);
         const autoEnabledPlan =
           !options?.suppressPlanModeAutoEnable &&
-          shouldAutoEnablePlanModeFromChat(resolvedUpdated);
+          shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
         if (autoEnabledPlan && isStillSelected) {
           setSelectedCollaborationMode('plan');
         }

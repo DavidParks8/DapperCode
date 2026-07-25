@@ -65,13 +65,17 @@ export function getInitialVisibleMessageStartIndex(totalMessageCount: number): n
 }
 
 export function resolveSnapshotCollaborationMode(
-  snapshot: ThreadRuntimeSnapshot | null | undefined
+  snapshot: ThreadRuntimeSnapshot | null | undefined,
+  supportsPlanMode = true
 ): CollaborationMode {
   if (!snapshot) {
     return 'default';
   }
 
+  // A published plan is just a to-do list for most agents, so it must not imply
+  // plan mode unless the agent actually has one.
   const hasActivePlanSnapshot =
+    supportsPlanMode &&
     Boolean(snapshot.plan) &&
     (Boolean(snapshot.activeTurnId) || snapshot.activity?.title === 'Planning');
   return snapshot.pendingUserInputRequest || hasActivePlanSnapshot ? 'plan' : 'default';
@@ -195,7 +199,16 @@ export function formatReasoningEffort(effort: ReasoningEffort): string {
   return effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
-export function shouldAutoEnablePlanModeFromChat(chat: Chat): boolean {
+export function shouldAutoEnablePlanModeFromChat(
+  chat: Chat,
+  supportsPlanMode = true
+): boolean {
+  // Agents without a plan mode still publish plan/to-do updates, so the composer
+  // must never switch itself into a mode they cannot run.
+  if (!supportsPlanMode) {
+    return false;
+  }
+
   if (chat.latestTurnPlan) {
     return true;
   }

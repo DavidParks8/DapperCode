@@ -39,9 +39,13 @@ export function useModalAccessibilityFocus(visible: boolean, delayMs = 350) {
       if (typeof findNodeHandle !== 'function') {
         return;
       }
-      const handle = findNodeHandle(focusRef.current);
-      if (typeof handle === 'number') {
-        AccessibilityInfo.setAccessibilityFocus(handle);
+      try {
+        const handle = findNodeHandle(focusRef.current);
+        if (typeof handle === 'number') {
+          AccessibilityInfo.setAccessibilityFocus(handle);
+        }
+      } catch {
+        // Some platforms (web) throw instead of returning null; focus is best effort.
       }
     }, delayMs);
 

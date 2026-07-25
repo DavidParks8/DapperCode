@@ -213,6 +213,7 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
     return null;
   }
   const fallbackTimestampSeconds = stableThreadTimestampSeconds(raw.id);
+  const hasBridgeTimestamps = raw.createdAt != null || raw.updatedAt != null;
   const createdAtSeconds =
     raw.createdAt ?? raw.updatedAt ?? fallbackTimestampSeconds;
   const updatedAtSeconds = raw.updatedAt ?? raw.createdAt ?? createdAtSeconds;
@@ -222,7 +223,8 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
   const sourceMetadata = readThreadSourceMetadata(raw.source);
   const lastError = extractLastError(turns);
   const previewTitle = toPreview(raw.preview || "");
-  const firstUserTitle = firstUserMessagePreview(turns);
+  const firstUserTitle =
+    firstUserMessagePreview(turns) ?? firstSnapshotUserMessagePreview(raw);
   const rawTitle = raw.name?.trim() || null;
   const displayTitle = rawTitle || previewTitle || firstUserTitle;
   const fallbackTitle = raw.acpSnapshot?.session.threadId
@@ -235,6 +237,7 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
     createdAt,
     updatedAt,
     statusUpdatedAt: updatedAt,
+    timestampsSynthesized: !hasBridgeTimestamps,
     lastMessagePreview: toPreview(raw.preview || ""),
     cwd: readString(raw.cwd) ?? undefined,
     agentId: readAgentId(raw.agentId),
@@ -246,6 +249,27 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
     subAgentDepth: sourceMetadata.subAgentDepth,
     lastError: lastError ?? undefined,
   };
+}
+
+export function firstSnapshotUserMessagePreview(raw: RawThread): string | null {
+  for (const message of raw.acpSnapshot?.messages ?? []) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const text = message.parts
+      .map((part) =>
+        typeof (part as { text?: unknown }).text === "string"
+          ? (part as { text: string }).text
+          : "",
+      )
+      .join("")
+      .trim();
+    const preview = toPreview(text);
+    if (preview) {
+      return preview;
+    }
+  }
+  return null;
 }
 
 export function shortSessionId(value: string): string {

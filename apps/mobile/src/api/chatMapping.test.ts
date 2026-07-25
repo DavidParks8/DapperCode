@@ -196,6 +196,83 @@ describe('chatMapping', () => {
     });
   });
 
+  it('titles untitled sessions from the first snapshot user message and hides synthesized ages', () => {
+    const summary = mapChatSummary(toRawThread({
+      id: 'v1.YWdlbnQ.c2Vzc2lvbg', status: { type: 'idle' }, turns: [],
+      acpSnapshot: {
+        version: 2,
+        timeline: [{ sequence: 0, kind: 'message', canonicalId: 'user-1' }],
+        messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'add a multiply helper' }], truncated: false }],
+        tools: [], plan: [], usage: {}, config: [], commands: [],
+        session: { agentId: 'agent', threadId: 'session', historyReconstruction: false },
+        active: { toolIds: [] },
+      },
+    }));
+
+    expect(summary?.title).toBe('add a multiply helper');
+    expect(summary?.timestampsSynthesized).toBe(true);
+  });
+
+  it('keeps bridge timestamps unsynthesized when the bridge reports them', () => {
+    const summary = mapChatSummary(toRawThread({
+      id: 'v1.YWdlbnQ.dGltZWQ', status: { type: 'idle' }, turns: [], updatedAt: 1_768_000_000,
+    }));
+
+    expect(summary?.timestampsSynthesized).toBe(false);
+  });
+
+  it('does not repeat tool text that structured content already covers', () => {
+    const mapped = mapChat(toRawThread({
+      id: 'tool-dedupe',
+      acpSnapshot: {
+        version: 2,
+        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-read' }],
+        messages: [],
+        tools: [{
+          id: 'call-read', kind: 'read', status: 'completed', title: 'Read src/math.ts',
+          content: 'export function add() {}',
+          structuredContent: [{ type: 'content', content: { type: 'text', text: 'export function add() {}' } }],
+          locations: [{ path: 'src/math.ts' }],
+        }],
+        plan: [], usage: {}, config: [], commands: [],
+        session: { agentId: 'agent', threadId: 'tool-dedupe', historyReconstruction: false },
+        active: { toolIds: [] },
+      },
+    }));
+
+    const content = mapped.messages[0].content as string;
+    expect(content.match(/export function add\(\) \{\}/g)).toHaveLength(1);
+    expect(content).toContain('[location: src/math.ts]');
+    expect(content).not.toContain('{"content"');
+  });
+
+  it('uses the newest appended task header and never shows raw child thread ids', () => {
+    const mapped = mapChat(toRawThread({
+      id: 'parent-appended',
+      acpSnapshot: {
+        version: 2,
+        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-appended' }],
+        messages: [],
+        tools: [{
+          id: 'task-appended', kind: 'think', status: 'completed', title: 'Task',
+          content:
+            '<task id="child-session" state="running">\nAudit\n</task><task id="child-session" state="completed">\nAudit\n</task>\n<task_result>All clear</task_result>',
+          structuredContent: [], locations: [],
+        }],
+        plan: [], usage: {}, config: [], commands: [],
+        session: { agentId: 'opencode', threadId: 'parent-appended', historyReconstruction: false },
+        active: { toolIds: [] },
+      },
+    }));
+
+    const message = mapped.messages[0];
+    if (message.role !== 'activity') throw new Error('expected activity message');
+    expect(message.content.text).toContain('Sub-agent completed');
+    expect(message.content.text).toContain('Status: completed');
+    expect(message.content.text).not.toContain('Thread: ');
+    expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed' });
+  });
+
   it('maps an in-progress task snapshot to a running subagent card before child XML', () => {
     const mapped = mapChat(toRawThread({
       id: 'parent-running-task',

@@ -52,6 +52,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     setSelectedChat,
     setSelectedChatId,
     setSelectedCollaborationMode,
+    supportsPlanMode,
     setStoppingTurn,
     setUserInputDrafts,
     setUserInputError,
@@ -208,7 +209,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       const resolvedUpdated =
         mergeChatWithPendingOptimisticMessages(updated);
       const autoEnabledPlan =
-        shouldAutoEnablePlanModeFromChat(resolvedUpdated);
+        shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
       const isStillVisible = isCreatedChatVisible();
       if (autoEnabledPlan && isStillVisible) {
         setSelectedCollaborationMode('plan');

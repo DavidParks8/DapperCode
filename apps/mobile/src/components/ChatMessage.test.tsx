@@ -197,6 +197,45 @@ describe('ChatMessage markdown formatting', () => {
     expect(headingStyle.fontSize).toBeLessThanOrEqual(18);
   });
 
+  it('repaints when only the ordered parts change', () => {
+    const base: ApiChatMessage = {
+      id: 'msg_parts',
+      role: 'assistant',
+      content: 'This needs a wider search.',
+      parts: [{ type: 'text', text: 'This needs a' }],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ChatMessage message={base} />
+        </AppThemeProvider>
+      );
+    });
+    const tree = expectValue(rendered);
+    const readText = () =>
+      (tree.root as QueryableTestInstance)
+        .findAll((node) => node.type === Text)
+        .map((node) => flattenRenderedText(node.props.children))
+        .join(' ');
+
+    expect(readText()).toContain('This needs a');
+
+    act(() => {
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <ChatMessage
+            message={{ ...base, parts: [{ type: 'text', text: 'This needs a wider search.' }] }}
+          />
+        </AppThemeProvider>
+      );
+    });
+
+    expect(readText()).toContain('This needs a wider search.');
+  });
+
   it('renders markdown tables in a horizontal scroll area', () => {
     const message: ApiChatMessage = {
       id: 'msg_table',

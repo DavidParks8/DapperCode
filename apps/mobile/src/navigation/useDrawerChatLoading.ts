@@ -44,6 +44,7 @@ export function useDrawerChatLoading(
   const chatListStreamRef = useRef<{ cancel: () => void } | null>(null);
   const deepLoadInFlightRef = useRef<Promise<void> | null>(null);
   const hasLoadedDeepChatListRef = useRef(false);
+  const hasLoadedWhileActiveRef = useRef(false);
   const activeRef = useRef(active);
   const hydrateLoadedChats = useDrawerLoadedChatHydration({
     activeRef,
@@ -157,17 +158,23 @@ export function useDrawerChatLoading(
       let streamFinished = false;
       if (!activeRef.current) {
         try {
-          await api.listChats({
+          const primedChats = await api.listChats({
             includeSubAgents: true,
             limit: DRAWER_FAST_CHAT_LIST_LIMIT,
             cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
             forceRefresh,
           });
+          // Apply while hidden too, otherwise the drawer keeps showing its
+          // loading placeholder the first time it is opened.
+          applyChats(primedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
         } catch {
           // Hidden drawer priming is best effort.
+        } finally {
+          setLoading(false);
         }
         return;
       }
+      hasLoadedWhileActiveRef.current = true;
 
       try {
         const hasCachedDeepChats = applyCachedDeepChats();
@@ -374,8 +381,12 @@ export function useDrawerChatLoading(
   useEffect(() => {
     setWsConnected(ws.isConnected);
     const shouldPrimeHiddenDrawer = !hasHydratedOnceRef.current;
+    // Priming while hidden only fetches the short list, so the first time the
+    // drawer actually opens it still needs the full load.
     const shouldRefreshVisibleDrawer =
-      active && Date.now() - lastLoadedAtRef.current > DRAWER_OPEN_STALE_REFRESH_MS;
+      active &&
+      (!hasLoadedWhileActiveRef.current ||
+        Date.now() - lastLoadedAtRef.current > DRAWER_OPEN_STALE_REFRESH_MS);
     if (!shouldPrimeHiddenDrawer && !shouldRefreshVisibleDrawer) {
       return;
     }

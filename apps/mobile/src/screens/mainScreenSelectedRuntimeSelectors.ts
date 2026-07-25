@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { buildUserInputDrafts, resolveSnapshotCollaborationMode, appendRunEventHistory, upsertBridgeUiSurfaceList } from './mainScreenHelpers';
 import type { MainScreenThreadRuntimeMutationsContext, MainScreenThreadRuntimeMutationsResult } from './mainScreenThreadRuntimeMutations';
 
@@ -13,6 +13,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   const {
     api,
     approvalController,
+    bridgeCapabilities,
     bridgeUiSurfaceSnapshotsRef,
     cacheThreadPendingApproval,
     chatIdRef,
@@ -44,6 +45,12 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   } = context;
 
 
+  // Read through a ref so the snapshot applier keeps a stable identity.
+  const planModeSupportedRef = useRef(false);
+  planModeSupportedRef.current = selectedChat?.agentId
+    ? bridgeCapabilities?.supportsByAgent[selectedChat.agentId]?.planMode === true
+    : false;
+
   const applyThreadRuntimeSnapshot = useCallback(
     (threadId: string) => {
       if (!threadId) {
@@ -61,7 +68,9 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         return;
       }
 
-      setSelectedCollaborationMode(resolveSnapshotCollaborationMode(snapshot));
+      setSelectedCollaborationMode(
+        resolveSnapshotCollaborationMode(snapshot, planModeSupportedRef.current)
+      );
       if (snapshot.activeCommands !== undefined) {
         setActiveCommands(snapshot.activeCommands);
       }

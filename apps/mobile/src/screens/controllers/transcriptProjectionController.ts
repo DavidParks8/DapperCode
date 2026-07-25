@@ -1,6 +1,7 @@
 import type { Chat, ChatMessage } from '../../api/types';
 import type { AgUiThreadMessageState } from '../../api/agUiMessages';
 import { getMessageText } from '../../api/messages';
+import { partsMatchMessageContent } from '../../api/agUiContent';
 import {
   filterReasoningMessages,
   normalizeChatMessageMatchContent,
@@ -62,10 +63,13 @@ export function projectTranscript({
       .filter((message) => !replacedMessageIds.has(message.id) && getMessageText(message).trim())
       .map((message) => {
         const persisted = persistedById.get(message.id);
+        const parts = persisted?.parts ?? message.parts;
         return {
           ...message,
           createdAt: persisted?.createdAt || message.createdAt || now(),
-          parts: persisted?.parts ?? message.parts,
+          // Ordered parts win over `content` when rendering, so drop them when
+          // they no longer describe the authoritative snapshot text.
+          parts: partsMatchMessageContent(parts, message.content) ? parts : undefined,
         } as ChatMessage;
       });
   }

@@ -176,6 +176,9 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     Boolean(selectedChat) && !isOpeningChat && Boolean(oldestQueuedMessage);
   const showPlanImplementationPrompt =
     Boolean(selectedPlanImplementationPrompt) &&
+    // The prompt offers to switch out of plan mode, so it is meaningless for agents
+    // that have no plan mode and only publish plan/to-do updates.
+    activeAgentSupports?.planMode === true &&
     !isOpeningChat &&
     !sending &&
     !creating &&

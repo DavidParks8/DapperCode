@@ -61,6 +61,8 @@ export interface ChatSummary {
   createdAt: string;
   updatedAt: string;
   statusUpdatedAt: string;
+  /** True when the bridge reported no timestamps and they were derived locally. */
+  timestampsSynthesized?: boolean;
   lastMessagePreview: string;
   cwd?: string;
   agentId?: AgentId | null;

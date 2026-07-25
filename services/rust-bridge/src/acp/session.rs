@@ -48,6 +48,8 @@ struct SessionState {
     next_generation: u64,
     generation_state: GenerationState,
     message_ids: HashMap<(Option<u64>, MessageRole), String>,
+    history_role: Option<MessageRole>,
+    history_serial: u64,
     notification_receipts: VecDeque<RoutedSessionNotification>,
     notification_draining: bool,
 }
@@ -87,6 +89,8 @@ impl AcpSession {
                 next_generation: 0,
                 generation_state: GenerationState::Terminal,
                 message_ids: HashMap::new(),
+                history_role: None,
+                history_serial: 0,
                 notification_receipts: VecDeque::new(),
                 notification_draining: false,
             })),
@@ -119,6 +123,8 @@ impl AcpSession {
         fresh.history_reconstruction = true;
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
         state.message_ids.clear();
+        state.history_role = None;
+        state.history_serial = 0;
         Ok(ReconstructionTransaction {
             session: self.clone(),
             _guard: guard,
@@ -144,11 +150,19 @@ impl AcpSession {
         let Some(previous) = state.reconstruction_backup.take() else {
             return;
         };
-        if commit {
-            state.snapshot.history_reconstruction = false;
-        } else {
+        if !commit {
             state.snapshot = previous;
+            return;
         }
+        // Agents are expected to replay the conversation while `session/load` is in
+        // flight. When nothing was replayed, keep the history we already had instead
+        // of committing an empty snapshot and wiping the transcript.
+        if state.snapshot.timeline.is_empty() && !previous.timeline.is_empty() {
+            state.snapshot = previous;
+            state.snapshot.history_reconstruction = false;
+            return;
+        }
+        state.snapshot.history_reconstruction = false;
     }
     pub async fn admit_prompt(
         &self,
@@ -212,6 +226,17 @@ impl AcpSession {
         let key = (generation, role);
         if let Some(id) = state.message_ids.get(&key) {
             return id.clone();
+        }
+        if generation.is_none() {
+            // Replayed history has no run generations, so start a new message every
+            // time the speaker changes. Otherwise every past turn would collapse into
+            // a single user message and a single agent message.
+            if state.history_role != Some(role) {
+                state.history_role = Some(role);
+                state.history_serial = state.history_serial.saturating_add(1);
+            }
+            let serial = state.history_serial;
+            return format!("{}:history-{serial}:{role:?}", state.snapshot.thread_id);
         }
         let generation =
             generation.map_or_else(|| "history".to_string(), |value| value.to_string());
@@ -1032,7 +1057,7 @@ mod tests {
         assert!(events.try_recv().is_err());
         assert_eq!(
             session.message_id(MessageRole::Agent, None).await,
-            "thread:history:Agent"
+            "thread:history-1:Agent"
         );
         reconstruction.finish(true).await;
 
@@ -1904,6 +1929,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_reconstruction_keeps_the_previous_history() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        session
+            .emit(CanonicalEvent::MessageChunk {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: MessageRole::Agent,
+                message_id: "kept".into(),
+                content: "kept".into(),
+                content_block: None,
+            })
+            .await;
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "kept");
+        assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn replayed_history_starts_a_new_message_when_the_speaker_changes() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let mut ids = Vec::new();
+        for role in [
+            MessageRole::User,
+            MessageRole::Agent,
+            MessageRole::Agent,
+            MessageRole::User,
+            MessageRole::Agent,
+        ] {
+            ids.push(session.message_id_for_generation(role, None, None).await);
+        }
+
+        assert_eq!(ids[1], ids[2], "consecutive agent chunks share a message");
+        assert_ne!(
+            ids[0], ids[3],
+            "each replayed user turn gets its own message"
+        );
+        assert_ne!(
+            ids[1], ids[4],
+            "each replayed agent turn gets its own message"
+        );
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            4
+        );
+    }
+
+    #[tokio::test]
     async fn prompt_waits_for_reconstruction_commit_or_rollback() {
         for commit in [true, false] {
             let session = AcpSession::new("agent".into(), "thread".into());
@@ -2051,7 +2131,7 @@ mod tests {
             "supplied::agent"
         );
         let generated = session.message_id(MessageRole::Agent, None).await;
-        assert_eq!(generated, "thread:history:Agent");
+        assert_eq!(generated, "thread:history-1:Agent");
         assert_eq!(
             session.message_id(MessageRole::Agent, None).await,
             generated

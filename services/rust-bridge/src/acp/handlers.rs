@@ -143,8 +143,10 @@ pub async fn handle_session_notification(
                 .into_iter()
                 .map(|entry| PlanEntry {
                     content: entry.content,
-                    priority: format!("{:?}", entry.priority),
-                    status: format!("{:?}", entry.status),
+                    // Use the ACP wire values (`high`, `in_progress`, …) rather than
+                    // Rust's Debug spelling, which mobile cannot match.
+                    priority: serde_wire_value(&entry.priority),
+                    status: serde_wire_value(&entry.status),
                 })
                 .collect(),
         },
@@ -386,9 +388,53 @@ fn field_update(value: MaybeUndefined<String>) -> FieldUpdate {
     }
 }
 
+/// Renders a serde enum with its wire spelling, falling back to Debug formatting
+/// for anything that does not serialize to a bare JSON string.
+fn serde_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{value:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn plan_entries_use_acp_wire_values_not_debug_formatting() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {"content": "Read", "priority": "high", "status": "completed"},
+                {"content": "Edit", "priority": "medium", "status": "in_progress"},
+                {"content": "Test", "priority": "low", "status": "pending"}
+            ]
+        }))
+        .expect("plan update");
+
+        handle_session_notification(
+            "agent",
+            &session,
+            SessionNotification::new("session", update).into(),
+        )
+        .await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(
+            snapshot
+                .plan
+                .iter()
+                .map(|entry| (entry.priority.as_str(), entry.status.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("high", "completed"),
+                ("medium", "in_progress"),
+                ("low", "pending"),
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn typed_tool_update_preserves_all_structured_variants_and_excludes_raw_fields() {

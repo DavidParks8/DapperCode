@@ -161,6 +161,9 @@ function areChatMessagePropsEqual(previousProps: ChatMessageProps, nextProps: Ch
   if (previous === next) return true;
   return previous.id === next.id && previous.role === next.role &&
     JSON.stringify(previous.content) === JSON.stringify(next.content) && previous.createdAt === next.createdAt &&
+    // Ordered parts take priority over `content` when rendering, so a parts-only
+    // change still has to repaint the bubble.
+    JSON.stringify(previous.parts) === JSON.stringify(next.parts) &&
     (previous.role !== 'activity' || next.role !== 'activity' || previous.activityType === next.activityType) &&
     previousProps.bridgeUrl === nextProps.bridgeUrl && previousProps.bridgeToken === nextProps.bridgeToken &&
     previousProps.onOpenLocalPreview === nextProps.onOpenLocalPreview && previousProps.onOpenSubAgentThread === nextProps.onOpenSubAgentThread;

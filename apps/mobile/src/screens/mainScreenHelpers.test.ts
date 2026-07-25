@@ -802,6 +802,15 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activeTurnId: 'turn' })).toBe('plan');
     expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activity: { tone: 'running', title: 'Planning' } })).toBe('plan');
     expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan })).toBe('default');
+    expect(
+      helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activeTurnId: 'turn' }, false)
+    ).toBe('default');
+    expect(
+      helpers.resolveSnapshotCollaborationMode(
+        { updatedAtMs: 1, pendingUserInputRequest: {} as PendingUserInputRequest },
+        false
+      )
+    ).toBe('plan');
   });
 
   it('selects and merges displayed plans', () => {
@@ -847,6 +856,7 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'request_user_input is unavailable in default mode')] }))).toBe(true);
     expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'request_user_input cannot run in default mode; switch to plan mode because it is unavailable')] }))).toBe(true);
     expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'normal')] }))).toBe(false);
+    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ latestTurnPlan: plan }), false)).toBe(false);
   });
 
   it('parses, filters, deduplicates, and checks slash commands', () => {

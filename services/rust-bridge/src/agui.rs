@@ -891,9 +891,6 @@ pub(super) fn messages_snapshot_envelope(
                     } else {
                         "• Sub-agent working".to_string()
                     }];
-                    if let Some(thread_id) = &child_thread_id {
-                        lines.push(format!("  Thread: {thread_id}"));
-                    }
                     lines.push(format!("  Status: {status}"));
                     if let Some(result) = task_result_preview(&tool.content) {
                         lines.push(format!("  Latest: {result}"));
@@ -1065,6 +1062,49 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
                 }
                 return lines;
             }
+            match object.get("type").and_then(Value::as_str) {
+                Some("diff") => {
+                    let path = object
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("file");
+                    return vec![format!("[diff: {path}]")];
+                }
+                Some("terminal") => {
+                    let terminal_id = object
+                        .get("terminalId")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty());
+                    return vec![terminal_id.map_or_else(
+                        || "[terminal]".to_string(),
+                        |id| format!("[terminal: {id}]"),
+                    )];
+                }
+                Some("resource_link") | Some("resourceLink") => {
+                    return object
+                        .get("uri")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .map(|uri| format!("[file: {uri}]"))
+                        .into_iter()
+                        .collect();
+                }
+                Some("image") => return vec!["[image]".to_string()],
+                Some("audio") => return vec!["[audio]".to_string()],
+                _ => {}
+            }
+            if let Some(path) = object
+                .get("path")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+            {
+                let line = object.get("line").and_then(Value::as_u64);
+                return vec![line.map_or_else(
+                    || format!("[location: {path}]"),
+                    |line| format!("[location: {path}:{line}]"),
+                )];
+            }
             serde_json::to_string(value).ok().into_iter().collect()
         }
         Value::Null => Vec::new(),
@@ -1073,13 +1113,22 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
 }
 
 fn tool_snapshot_text(tool: &SnapshotTool) -> String {
-    let structured = json!({
-        "content": tool.structured_content,
-        "locations": tool.locations,
-    });
-    let mut parts = vec![tool.content.clone()];
-    if !tool.structured_content.is_empty() || !tool.locations.is_empty() {
-        parts.push(structured.to_string());
+    let mut parts = Vec::new();
+    if !tool.content.is_empty() {
+        parts.push(tool.content.clone());
+    }
+    // Render structured content as readable lines rather than embedding raw JSON,
+    // and skip anything the plain-text `content` already covers.
+    for line in tool
+        .structured_content
+        .iter()
+        .chain(tool.locations.iter())
+        .flat_map(snapshot_content_lines)
+    {
+        if line.trim().is_empty() || tool.content.contains(line.trim()) {
+            continue;
+        }
+        parts.push(line);
     }
     if tool.truncated {
         parts.push("[tool content truncated]".to_string());
@@ -1123,7 +1172,10 @@ struct TaskSubagent<'a> {
 }
 
 fn parse_task_subagent(content: &str) -> Option<TaskSubagent<'_>> {
-    let header = content.trim_start().strip_prefix("<task ")?;
+    // Tool content is appended across updates, so the newest `<task …>` header wins.
+    let header = content
+        .rfind("<task ")
+        .map(|index| &content[index + "<task ".len()..])?;
     let header = header.split_once('>')?.0;
     let session_id = xml_attribute(header, "id")?.trim();
     let state = xml_attribute(header, "state")?.trim();
@@ -1221,9 +1273,6 @@ fn subagent_activity_envelope(
         "• Sub-agent working"
     };
     let mut lines = vec![heading.to_string()];
-    if let Some(child_thread_id) = context.child_thread_id {
-        lines.push(format!("  Thread: {child_thread_id}"));
-    }
     lines.push(format!("  Status: {status}"));
     if let Some(latest) = latest.map(str::trim).filter(|value| !value.is_empty()) {
         lines.push(format!("  Latest: {}", bounded(latest, 512)));
@@ -1759,6 +1808,77 @@ mod tests {
     use super::*;
     use crate::acp::snapshot::SessionSnapshot;
     use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
+
+    #[test]
+    fn tool_snapshot_text_renders_structured_content_without_raw_json() {
+        let tool = SnapshotTool {
+            id: "call-read-1".to_string(),
+            generation: Some(1),
+            kind: ToolKind::Read,
+            status: ToolCallStatus::Completed,
+            title: "Read src/math.ts".to_string(),
+            content: "export function add() {}\n".to_string(),
+            structured_content: vec![
+                json!({"type": "content", "content": {"type": "text", "text": "export function add() {}\n"}}),
+                json!({"type": "diff", "path": "src/math.ts"}),
+            ],
+            locations: vec![json!({"path": "src/math.ts", "line": 7})],
+            truncated: false,
+        };
+
+        let text = tool_snapshot_text(&tool);
+
+        assert!(!text.contains("{\""), "unexpected raw JSON in {text}");
+        assert!(
+            text.contains("[diff: src/math.ts]"),
+            "missing diff marker in {text}"
+        );
+        assert!(
+            text.contains("[location: src/math.ts:7]"),
+            "missing location marker in {text}"
+        );
+        assert_eq!(
+            text.matches("export function add() {}").count(),
+            1,
+            "duplicated plain content in {text}"
+        );
+    }
+
+    #[test]
+    fn parse_task_subagent_reads_the_newest_appended_header() {
+        let content = concat!(
+            "<task id=\"child-1\" state=\"running\">\nAudit\n</task>",
+            "<task id=\"child-1\" state=\"completed\">\nAudit\n</task>"
+        );
+
+        let task = parse_task_subagent(content).expect("task header");
+
+        assert_eq!(task.session_id, "child-1");
+        assert_eq!(task.state, "completed");
+    }
+
+    #[test]
+    fn subagent_activity_text_never_leaks_the_child_thread_id() {
+        let envelope = subagent_activity_envelope(
+            SubagentActivityContext {
+                parent_thread_id: "parent",
+                parent_run_id: "run",
+                parent_source_turn_id: Some("turn".to_string()),
+                tool_call_id: "call-task-1",
+                child_thread_id: Some("v1.YWdlbnQ.Y2hpbGQ"),
+            },
+            "completed",
+            Some("All clear"),
+            0,
+        );
+
+        let text = serde_json::to_string(&envelope).expect("serializes");
+        assert!(
+            text.contains("Sub-agent completed"),
+            "unexpected text in {text}"
+        );
+        assert!(!text.contains("Thread: "), "leaked thread id in {text}");
+    }
 
     fn event_types(events: &[AgUiEventEnvelope]) -> Vec<&'static str> {
         events

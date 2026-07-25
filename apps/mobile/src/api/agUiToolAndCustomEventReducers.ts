@@ -1,4 +1,5 @@
 import { SUBAGENT_ACTIVITY_TYPE } from "./messages";
+import { partsMatchMessageContent } from "./agUiContent";
 import {
   applyJsonPatch,
   nonEmptyString,
@@ -112,15 +113,16 @@ export function applyMessagesSnapshot(
     .filter(
       (message) => !messageUsesSuppressedTool(message, snapshotSubagentIds),
     )
-    .map(
-      (message) =>
-        ({
-          ...message,
-          createdAt:
-            previous.get(message.id)?.createdAt ?? timestampIso(timestamp),
-          parts: previous.get(message.id)?.parts,
-        }) as ChatMessage,
-    );
+    .map((message) => {
+      const existing = previous.get(message.id);
+      return {
+        ...message,
+        createdAt: existing?.createdAt ?? timestampIso(timestamp),
+        parts: partsMatchMessageContent(existing?.parts, message.content)
+          ? existing?.parts
+          : undefined,
+      } as ChatMessage;
+    });
   return {
     ...current,
     messages: nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
