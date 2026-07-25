@@ -354,6 +354,9 @@ impl AgUiProjector {
                     timestamp,
                     &mut projection.events,
                 );
+                // Closing the child's implicit run needs `&mut self`, so defer it
+                // until the split borrow below ends.
+                let mut finished_child_thread_id: Option<String> = None;
                 let (runs, subagent_links) = (&mut self.runs, &mut self.subagent_links);
                 let Some(run) = canonical_run_mut(
                     runs,
@@ -535,6 +538,7 @@ impl AgUiProjector {
                     }
                     if is_terminal_subagent_status(task.state) {
                         subagent_links.remove(child_thread_id);
+                        finished_child_thread_id = Some(child_thread_id.clone());
                     } else {
                         subagent_links.insert(
                             child_thread_id.clone(),
@@ -637,6 +641,9 @@ impl AgUiProjector {
                         }),
                         timestamp,
                     );
+                }
+                if let Some(child_thread_id) = finished_child_thread_id {
+                    self.close_observed_run(&child_thread_id, timestamp, &mut projection.events);
                 }
             }
             CanonicalEvent::RunFinished {
@@ -861,6 +868,42 @@ impl AgUiProjector {
         ));
     }
 
+    /// Closes an implicit run once the sub-agent that owns it reaches a terminal
+    /// state, so clients stop showing the thread as working and the projector
+    /// stops retaining its buffers.
+    fn close_observed_run(
+        &mut self,
+        thread_id: &str,
+        timestamp: i64,
+        events: &mut Vec<AgUiEventEnvelope>,
+    ) {
+        let observed_run_id = format!("{thread_id}::observed");
+        if self
+            .runs
+            .get(thread_id)
+            .is_none_or(|run| run.run_id != observed_run_id)
+        {
+            return;
+        }
+        let Some(run) = self.runs.remove(thread_id) else {
+            return;
+        };
+        self.observed_runs.retain(|entry| entry != thread_id);
+        close_run(thread_id, run, timestamp, events, false);
+        events.push(envelope(
+            thread_id,
+            &observed_run_id.clone(),
+            None,
+            run_event(
+                AgUiEventType::RunFinished,
+                thread_id.to_string(),
+                observed_run_id,
+                timestamp,
+            ),
+        ));
+        self.mark_thread_closed(thread_id);
+    }
+
     fn mark_thread_closed(&mut self, thread_id: &str) {
         if !self.closed_threads.contains(thread_id)
             && self.closed_threads.len() >= CLOSED_THREAD_CAPACITY
@@ -901,6 +944,7 @@ impl AgUiProjector {
         ));
         if is_terminal_subagent_status(status) {
             self.subagent_links.remove(thread_id);
+            self.close_observed_run(thread_id, timestamp, events);
         }
     }
 }
@@ -2111,6 +2155,48 @@ mod tests {
         // A second chunk reuses the same implicit run instead of restarting it.
         let more = projector.project_canonical(&chunk).events;
         assert_eq!(event_types(&more), vec!["TEXT_MESSAGE_CONTENT"]);
+    }
+
+    #[test]
+    fn observed_runs_close_when_the_sub_agent_reaches_a_terminal_state() {
+        let mut projector = AgUiProjector::default();
+        let child_thread_id = "v1.YWxwaGEtYWdlbnQ.Y2hpbGQ";
+        let mut chunk = canonical_message(MessageRole::Agent, "child-message", "scanning");
+        if let CanonicalEvent::MessageChunk {
+            thread_id,
+            run_id,
+            source_turn_id,
+            generation,
+            ..
+        } = &mut chunk
+        {
+            child_thread_id.clone_into(thread_id);
+            *run_id = None;
+            *source_turn_id = None;
+            *generation = None;
+        }
+        assert!(event_types(&projector.project_canonical(&chunk).events).contains(&"RUN_STARTED"));
+
+        let mut finished = canonical_message(MessageRole::Agent, "ignored", "ignored");
+        if let CanonicalEvent::MessageChunk { .. } = &finished {
+            finished = CanonicalEvent::RunFinished {
+                agent_id: "alpha-agent".to_string(),
+                thread_id: child_thread_id.to_string(),
+                run_id: format!("{child_thread_id}::observed"),
+                source_turn_id: String::new(),
+                generation: 0,
+                stop_reason: StopReason::EndTurn,
+            };
+        }
+        let closed = projector.project_canonical(&finished).events;
+        assert!(
+            event_types(&closed).contains(&"RUN_FINISHED"),
+            "a terminal run must close the implicit run"
+        );
+        assert!(
+            !projector.runs.contains_key(child_thread_id),
+            "implicit run state must be released"
+        );
     }
 
     #[test]

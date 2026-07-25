@@ -52,7 +52,10 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   bridgeCapabilitiesRef.current = bridgeCapabilities;
   const supportsPlanModeForThread = useCallback(
     (threadId: string) => {
-      const agentId = api.peekChat(threadId)?.agentId;
+      // `peekChatSummary` also resolves threads the drawer has listed but the
+      // user has never opened, and avoids cloning a whole transcript to read one
+      // field.
+      const agentId = api.peekChatSummary(threadId)?.agentId;
       return agentId
         ? bridgeCapabilitiesRef.current?.supportsByAgent[agentId]?.planMode === true
         : false;

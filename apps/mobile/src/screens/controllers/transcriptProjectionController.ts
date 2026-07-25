@@ -59,7 +59,8 @@ export function projectTranscript({
   );
   if (liveMessageState?.authoritativeSnapshot) {
     const persistedById = new Map(messages.map((message) => [message.id, message]));
-    messages = liveMessages
+    const liveIds = new Set(liveMessages.map((message) => message.id));
+    const projected = liveMessages
       .filter((message) => !replacedMessageIds.has(message.id) && getMessageText(message).trim())
       .map((message) => {
         const persisted = persistedById.get(message.id);
@@ -72,6 +73,18 @@ export function projectTranscript({
           parts: partsMatchMessageContent(parts, message.content) ? parts : undefined,
         } as ChatMessage;
       });
+    // The snapshot is only authoritative for the runs it was built from. A prompt
+    // sent after it is already persisted but not in the snapshot yet, so keep the
+    // trailing persisted messages instead of dropping them until the next one.
+    const lastCoveredIndex = messages.reduce(
+      (last, message, index) => (liveIds.has(message.id) ? index : last),
+      -1
+    );
+    const trailing =
+      lastCoveredIndex >= 0
+        ? messages.slice(lastCoveredIndex + 1).filter((message) => !liveIds.has(message.id))
+        : [];
+    messages = [...projected, ...trailing];
   }
   for (const liveAssistantMessage of liveMessages) {
     const liveText = getMessageText(liveAssistantMessage).trim();

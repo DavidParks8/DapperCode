@@ -58,14 +58,18 @@ export function reduceStructuredMessageContent(
 
 /**
  * A tool's plain text and its structured rendering usually describe the same
- * payload, so only append the structured lines the plain text does not cover.
+ * payload, so skip the structured block when the plain text already covers it.
+ * The block is kept whole: deduplicating line by line would delete interior
+ * lines of a diff or terminal payload that happen to appear in the plain text.
+ * Returns what was appended so callers can strip it again on the next revision.
  */
-function joinToolText(text: string, structured: string): string {
-  const extras = structured
-    .split("\n")
-    .filter((line) => line.trim() && !text.includes(line.trim()))
-    .join("\n");
-  return [text, extras].filter(Boolean).join("\n");
+function appendToolText(
+  text: string,
+  structured: string,
+): { text: string; appended: string } {
+  const trimmed = structured.trim();
+  const appended = !trimmed || text.includes(trimmed) ? "" : structured;
+  return { text: [text, appended].filter(Boolean).join("\n"), appended };
 }
 
 export function reduceToolText(
@@ -83,12 +87,13 @@ export function reduceToolText(
     current.toolResultMessageIdByCallId[toolCallId] ??
     `tool-result:${toolCallId}`;
   const structured = current.structuredTextByCallId[toolCallId] ?? "";
+  const joined = appendToolText(content, structured);
   const next = upsertToolResult(
     current,
     envelope.runId,
     messageId,
     toolCallId,
-    joinToolText(content, structured),
+    joined.text,
     envelope.event.timestamp,
   );
   return {
@@ -96,6 +101,10 @@ export function reduceToolText(
     toolTextRevisionByCallId: {
       ...next.toolTextRevisionByCallId,
       [toolCallId]: revision,
+    },
+    structuredTextByCallId: {
+      ...next.structuredTextByCallId,
+      [toolCallId]: joined.appended,
     },
   };
 }
@@ -127,12 +136,13 @@ export function reduceToolContent(
     previousStructured && existingText.endsWith(previousStructured)
       ? existingText.slice(0, -previousStructured.length).trimEnd()
       : existingText;
+  const joined = appendToolText(base, structured);
   const next = upsertToolResult(
     current,
     envelope.runId,
     messageId,
     toolCallId,
-    joinToolText(base, structured),
+    joined.text,
     envelope.event.timestamp,
   );
   return {
@@ -143,7 +153,7 @@ export function reduceToolContent(
     },
     structuredTextByCallId: {
       ...next.structuredTextByCallId,
-      [toolCallId]: structured,
+      [toolCallId]: joined.appended,
     },
   };
 }
