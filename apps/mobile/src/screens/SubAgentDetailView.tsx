@@ -17,6 +17,7 @@ import type { Chat, RunEvent } from '../api/types';
 import type { AutoScrollState, ThreadRuntimeSnapshot } from './mainScreenHelpers';
 import type { AgentThreadDisplayState } from './agentThreadDisplay';
 import type { AgUiThreadMessageState } from '../api/agUiMessages';
+import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { ChatTranscriptView } from './ChatTranscriptView';
 import { useAppTheme, type AppTheme } from '../theme';
@@ -98,6 +99,29 @@ export function SubAgentDetailView({
           customMetadata: {}, customMetadataOrder: [],
         }
       : null);
+
+  // A sub-agent that has just been spawned has no transcript yet. Rendering an
+  // empty scroll view makes a live agent look dead, so it gets an explicit
+  // starting state until its first message arrives.
+  const hasStarted = useMemo(() => {
+    if (!chat) return false;
+    return (
+      projectTranscript({
+        chat,
+        parentChat,
+        showToolCalls,
+        threadStatuses: agentThreadStatusById,
+        liveMessageState: resolvedLiveMessageState,
+      }).messages.length > 0
+    );
+  }, [
+    agentThreadStatusById,
+    chat,
+    parentChat,
+    resolvedLiveMessageState,
+    showToolCalls,
+  ]);
+
   const activityDetail = display?.detail ?? latestCommand?.detail ?? role?.trim() ?? null;
   const modalFocusRef = useModalAccessibilityFocus(visible);
   useAccessibilityAnnouncement(visible ? error ?? (loading ? 'Loading agent transcript' : null) : null);
@@ -200,7 +224,19 @@ export function SubAgentDetailView({
         {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.transcript}>
-          {chat ? (
+          {chat && !hasStarted ? (
+            <View
+              style={styles.loadingShell}
+              accessibilityRole="progressbar"
+              accessibilityLabel="Sub-agent starting"
+            >
+              <ActivityIndicator color={theme.colors.warning} />
+              <Text style={styles.loadingText}>Starting…</Text>
+              <Text style={styles.startingHint}>
+                This agent has not reported anything yet. Its work will stream in here.
+              </Text>
+            </View>
+          ) : chat ? (
             <ChatTranscriptView
               chat={chat}
               parentChat={parentChat}
@@ -328,5 +364,12 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
   loadingText: {
     ...theme.typography.caption,
     color: theme.colors.textMuted,
+  },
+  startingHint: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    textAlign: 'center',
+    maxWidth: 260,
+    paddingHorizontal: theme.spacing.lg,
   },
 });

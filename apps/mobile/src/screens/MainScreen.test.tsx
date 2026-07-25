@@ -1478,6 +1478,51 @@ describe('MainScreen controls and modals', () => {
     act(() => tree.unmount());
   });
 
+  it('shows a starting state for a sub-agent that has not reported yet', async () => {
+    // A just-spawned sub-agent has no transcript. Rendering an empty scroll view
+    // makes a live agent look dead, so the page says it is starting until its
+    // first message streams in.
+    const emptyChild: Chat = { ...subAgentChat, messages: [] };
+    const chats: ChatSummary[] = [rootChat, emptyChild];
+    const api = createApi({ chats });
+    (api.getChat as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve(id === emptyChild.id ? emptyChild : rootChat)
+    );
+    const { tree } = await renderMain({ api, selectedChat: rootChat });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    await press(byLabel(root, '1 agent'));
+    await press(byLabel(root, 'Sub-agent 1'));
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Sub-agent starting').length
+    ).toBeGreaterThan(0);
+    expect(hasText(root, 'Starting…')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('drops the starting state as soon as the sub-agent reports', async () => {
+    const chats: ChatSummary[] = [rootChat, subAgentChat];
+    const api = createApi({ chats });
+    const { tree } = await renderMain({ api, selectedChat: rootChat });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    await press(byLabel(root, '1 agent'));
+    await press(byLabel(root, 'Sub-agent 1'));
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Sub-agent starting')).toHaveLength(0);
+    expect(
+      root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-sub')
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it('drills into a sub-agent of a sub-agent and walks back one level at a time', async () => {
     // A sub-agent can spawn its own sub-agent. Its card has to be openable from the
     // detail view, and Back has to return to the sub-agent that spawned it rather
