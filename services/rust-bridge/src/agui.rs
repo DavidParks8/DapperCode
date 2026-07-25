@@ -354,9 +354,10 @@ impl AgUiProjector {
                     timestamp,
                     &mut projection.events,
                 );
-                // Closing the child's implicit run needs `&mut self`, so defer it
-                // until the split borrow below ends.
+                // Closing or re-opening the child's implicit run needs `&mut self`,
+                // so defer both until the split borrow below ends.
                 let mut finished_child_thread_id: Option<String> = None;
+                let mut relinked_child_thread_id: Option<String> = None;
                 let (runs, subagent_links) = (&mut self.runs, &mut self.subagent_links);
                 let Some(run) = canonical_run_mut(
                     runs,
@@ -540,6 +541,7 @@ impl AgUiProjector {
                         subagent_links.remove(child_thread_id);
                         finished_child_thread_id = Some(child_thread_id.clone());
                     } else {
+                        relinked_child_thread_id = Some(child_thread_id.clone());
                         subagent_links.insert(
                             child_thread_id.clone(),
                             SubagentActivityLink {
@@ -644,6 +646,12 @@ impl AgUiProjector {
                 }
                 if let Some(child_thread_id) = finished_child_thread_id {
                     self.close_observed_run(&child_thread_id, timestamp, &mut projection.events);
+                }
+                if let Some(child_thread_id) = relinked_child_thread_id {
+                    // A parent can re-task the same child session. Closing its implicit
+                    // run marked the thread closed, so clear that or the child would
+                    // never stream again.
+                    self.closed_threads.remove(&child_thread_id);
                 }
             }
             CanonicalEvent::RunFinished {
@@ -2226,6 +2234,11 @@ mod tests {
         assert!(!projector.runs.contains_key(&child_thread));
         assert!(!projector.observed_runs.contains(&child_thread));
 
+        assert!(
+            event_types(&closing).contains(&"TEXT_MESSAGE_END"),
+            "closing the implicit run must end the child's open message"
+        );
+
         // A repeated terminal update must not close it twice.
         let repeated = projector.project_canonical(&task_tool("completed"));
         assert!(
@@ -2234,6 +2247,20 @@ mod tests {
                 .iter()
                 .any(|event| event.thread_id == child_thread),
             "closing an already-closed implicit run must be a no-op"
+        );
+
+        // Re-tasking the same child session must let it stream again.
+        projector.project_canonical(&task_tool("running"));
+        let restreamed = projector.project_canonical(&chunk);
+        let restreamed_child = restreamed
+            .events
+            .into_iter()
+            .filter(|event| event.thread_id == child_thread)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            event_types(&restreamed_child),
+            ["RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"],
+            "a re-tasked sub-agent must open a fresh implicit run"
         );
     }
 
