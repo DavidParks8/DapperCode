@@ -391,7 +391,12 @@ impl AgUiProjector {
                             } else {
                                 "running"
                             };
-                            state.subagent_revision = Some(format!("unlinked\0{status}"));
+                            let latest = task_result_preview(&state.result_content)
+                                .or_else(|| task_progress_preview(&state.result_content));
+                            state.subagent_revision = Some(format!(
+                                "unlinked\0{status}\0{}",
+                                latest.as_deref().unwrap_or("")
+                            ));
                             projection.events.push(subagent_activity_envelope(
                                 SubagentActivityContext {
                                     parent_thread_id: thread_id,
@@ -401,11 +406,11 @@ impl AgUiProjector {
                                     child_thread_id: None,
                                 },
                                 status,
-                                Some(if terminal {
+                                latest.as_deref().or(Some(if terminal {
                                     "Task finished"
                                 } else {
                                     "Starting sub-agent"
-                                }),
+                                })),
                                 timestamp,
                             ));
                         }
@@ -511,20 +516,20 @@ impl AgUiProjector {
                 let structured_content = state.structured_content.clone();
                 let structured_locations = state.locations.clone();
                 let structured_available = !state.structured_truncated;
-                let subagent = content
-                    .as_deref()
-                    .and_then(parse_task_subagent)
-                    .and_then(|task| {
-                        AgentSessionId::new(agent_id, &task.session_id)
-                            .ok()
-                            .map(|identity| (task, identity.encode()))
-                    });
+                // Status-only updates carry no content, so read the accumulated text.
+                // Using the per-update value would blank the sub-agent card and drop
+                // its child-thread link.
+                let accumulated_content = state.result_content.clone();
+                let subagent_preview = task_result_preview(&accumulated_content)
+                    .or_else(|| task_progress_preview(&accumulated_content));
+                let subagent = parse_task_subagent(&accumulated_content).and_then(|task| {
+                    AgentSessionId::new(agent_id, &task.session_id)
+                        .ok()
+                        .map(|identity| (task, identity.encode()))
+                });
                 if let Some((task, child_thread_id)) = subagent.as_ref() {
                     state.subagent_activity = true;
-                    let result = content
-                        .as_deref()
-                        .and_then(task_result_preview)
-                        .or_else(|| content.as_deref().and_then(task_progress_preview));
+                    let result = subagent_preview.clone();
                     let revision = format!(
                         "{}\0{}\0{}",
                         child_thread_id,
@@ -567,7 +572,7 @@ impl AgUiProjector {
                     // Agents that never stream a child session only report progress
                     // through this tool, so mirror its latest output onto the card
                     // instead of leaving it on "Starting sub-agent" until it ends.
-                    let latest = content.as_deref().and_then(task_progress_preview);
+                    let latest = subagent_preview.clone();
                     let revision =
                         format!("unlinked\0running\0{}", latest.as_deref().unwrap_or(""));
                     if state.subagent_revision.as_deref() != Some(&revision) {
@@ -595,7 +600,9 @@ impl AgUiProjector {
                     } else {
                         "completed"
                     };
-                    let revision = format!("unlinked\0{status}");
+                    let latest = subagent_preview.clone();
+                    let revision =
+                        format!("unlinked\0{status}\0{}", latest.as_deref().unwrap_or(""));
                     if state.subagent_revision.as_deref() != Some(&revision) {
                         state.subagent_revision = Some(revision);
                         projection.events.push(subagent_activity_envelope(
@@ -607,12 +614,7 @@ impl AgUiProjector {
                                 child_thread_id: None,
                             },
                             status,
-                            content
-                                .as_deref()
-                                .and_then(task_result_preview)
-                                .or_else(|| content.as_deref().and_then(task_progress_preview))
-                                .as_deref()
-                                .or(Some("Task finished")),
+                            latest.as_deref().or(Some("Task finished")),
                             timestamp,
                         ));
                     }
@@ -2290,6 +2292,52 @@ mod tests {
             text.contains("All clear"),
             "terminal result missing from {text}"
         );
+    }
+
+    #[test]
+    fn status_only_updates_keep_the_sub_agent_card_and_its_child_link() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+        let child_thread = AgentSessionId::new("alpha-agent", "child-session")
+            .unwrap()
+            .encode();
+
+        let tool = |status: ToolCallStatus, content: FieldUpdate| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: parent_thread.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-status".to_string(),
+            kind: ToolKind::Other,
+            status,
+            title: "task".to_string(),
+            content,
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+
+        projector.project_canonical(&tool(
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("<task id=\"child-session\" state=\"running\"></task>".to_string()),
+        ));
+
+        // A status-only update carries no content at all.
+        let status_only =
+            projector.project_canonical(&tool(ToolCallStatus::InProgress, FieldUpdate::Unchanged));
+        for event in &status_only.events {
+            let value = serde_json::to_value(event).unwrap();
+            let Some(sub_agent) = value["event"]["content"]["subAgent"].as_object() else {
+                continue;
+            };
+            assert_eq!(
+                sub_agent["receiverThreadIds"][0].as_str(),
+                Some(child_thread.as_str()),
+                "a status-only update must not drop the child thread link"
+            );
+            assert_eq!(sub_agent["navigable"].as_bool(), Some(true));
+        }
     }
 
     #[test]

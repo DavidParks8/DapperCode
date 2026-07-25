@@ -148,9 +148,9 @@ export function buildDrawerAttentionModel({
           : chat.status === 'error'
             ? 'attention'
             : 'recent';
-    // Sub-agents belong to their parent session. They only earn a row of their own
-    // while they need the user or have failed, never in the plain recent list.
-    if (lane === 'recent' && isSubAgentSource(chat.sourceKind)) {
+    // Sub-agents belong to their parent session and are reported inside its
+    // transcript, so they only earn a row of their own when they need the user.
+    if (lane !== 'attention' && isSubAgentSource(chat.sourceKind)) {
       continue;
     }
     rowsByLane[lane].push({
@@ -265,18 +265,26 @@ function buildVisibleChatIdSet(
     if (selectedFolderKey && section.key !== selectedFolderKey) {
       continue;
     }
+    // Sub-agents without a pending interaction are never rendered, so they must
+    // not consume the per-workspace budget and push real sessions out of view.
+    const listable = section.data.filter(
+      (row) =>
+        !isSubAgentSource(row.chat.sourceKind) || pendingByThread.has(row.chat.id)
+    );
     const rows =
       selectedFolderKey || workspaceChatLimit === null
-        ? section.data
-        : section.data.slice(0, workspaceChatLimit);
+        ? listable
+        : listable.slice(0, workspaceChatLimit);
     for (const row of rows) {
       visible.add(row.chat.id);
     }
     for (const row of section.data) {
+      const needsUser =
+        pendingByThread.has(row.chat.id) || row.chat.status === 'error';
       if (
-        pendingByThread.has(row.chat.id) ||
-        row.chat.status === 'error' ||
-        isDrawerChatRunning(row.chat, runIndicatorsByThread)
+        needsUser ||
+        (!isSubAgentSource(row.chat.sourceKind) &&
+          isDrawerChatRunning(row.chat, runIndicatorsByThread))
       ) {
         visible.add(row.chat.id);
       }

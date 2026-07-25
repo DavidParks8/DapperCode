@@ -79,6 +79,33 @@ function userInput(
 }
 
 describe('buildDrawerAttentionModel', () => {
+  it('does not let hidden sub-agents consume the per-workspace session budget', () => {
+    const model = buildDrawerAttentionModel({
+      chats: [
+        chat('root-1'),
+        chat('sub-a', { sourceKind: 'subAgent', parentThreadId: 'root-1' }),
+        chat('sub-b', { sourceKind: 'subAgent', parentThreadId: 'root-1' }),
+        chat('sub-c', { sourceKind: 'subAgent', parentThreadId: 'root-1' }),
+        chat('sub-d', { sourceKind: 'subAgent', parentThreadId: 'root-1' }),
+        chat('root-2'),
+        chat('root-3'),
+      ],
+      agents,
+      runIndicatorsByThread: {},
+      pendingApprovals: [],
+      pendingUserInputs: [],
+      selectedFolderKey: null,
+      workspaceChatLimit: 5,
+    });
+
+    const recent = model.sections.find((section) => section.key === 'recent');
+    expect(recent?.data.map((row) => row.chat.id).sort()).toEqual([
+      'root-1',
+      'root-2',
+      'root-3',
+    ]);
+  });
+
   it('keeps idle sub-agents out of the recent list but surfaces ones that need you', () => {
     const model = buildDrawerAttentionModel({
       chats: [
