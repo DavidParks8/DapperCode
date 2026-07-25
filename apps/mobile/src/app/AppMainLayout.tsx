@@ -168,75 +168,79 @@ export function AppMainLayout(props: AppMainLayoutProps) {
                   usesTabletLayout ? null : { width: screenWidth },
                 ]}
               >
-                <AppScreenRenderer
-                  currentScreen={currentScreen}
-                  activeApi={api}
-                  activeWs={ws}
-                  appStateStore={appStateStore}
-                  appStateSnapshot={appStateSnapshot}
-                  pushSettings={pushSettings}
-                  bridgeProfiles={bridgeProfiles}
-                  activeBridgeProfile={activeBridgeProfile}
-                  bridgeUrl={activeBridgeProfile?.bridgeUrl ?? ''}
-                  bridgeToken={activeBridgeProfile?.bridgeToken ?? null}
-                  browserRef={browserRef}
-                  mainRef={mainRef}
-                  gitChat={gitChat}
-                  selectedChatId={selectedChatId}
-                  pendingMainChatId={pendingMainChatId}
-                  pendingMainChatSnapshot={pendingMainChatSnapshot}
-                  pendingBrowserTargetUrl={pendingBrowserTargetUrl}
-                  browserReturnScreen={browserReturnScreen}
-                  approvalMode={approvalMode}
-                  showToolCalls={showToolCalls}
-                  workspaceChatLimit={workspaceChatLimit}
-                  defaultStartCwd={defaultStartCwd}
-                  preferredAgentId={preferredAgentId}
-                  agentSettings={agentSettings}
-                  appearancePreference={appearancePreference}
-                  darkUiPalette={darkUiPalette}
-                  fontPreference={fontPreference}
-                  recentBrowserTargetUrls={recentBrowserTargetUrls}
-                  onOpenDrawer={drawer.handleNavigationToggle}
-                  onOpenGit={navActions.handleOpenChatGit}
-                  onOpenLocalPreview={navActions.openBrowser}
-                  onOpenBridgeRecoveryGuide={profileActions.handleOpenBridgeRecoveryGuide}
-                  onLastUsedThreadSettingsChange={navActions.handleLastUsedThreadSettingsChange}
-                  onChatContextChange={navActions.handleChatContextChange}
-                  onChatOpeningStateChange={setMainOpeningChatId}
-                  onPendingOpenChatHandled={() => {
-                    setPendingMainChatId(null);
-                    setPendingMainChatSnapshot(null);
-                  }}
-                  onApprovalModeChange={(value) => navActions.updateSettings({ approvalMode: value })}
-                  onShowToolCallsChange={(value) => navActions.updateSettings({ showToolCalls: value })}
-                  onWorkspaceChatLimitChange={(value) => navActions.updateSettings({ workspaceChatLimit: value })}
-                  onAppearancePreferenceChange={(value) => navActions.updateSettings({ appearancePreference: value })}
-                  onDarkUiPaletteChange={(value) => navActions.updateSettings({ darkUiPalette: value })}
-                  onFontPreferenceChange={(value) => navActions.updateSettings({ fontPreference: value })}
-                  onRetryPersistence={() => appStateStore.retryPersistence()}
-                  onEditBridgeProfile={profileActions.handleEditBridgeProfile}
-                  onAddBridgeProfile={profileActions.handleAddBridgeProfile}
-                  onSwitchBridgeProfile={profileActions.handleSwitchBridgeProfile}
-                  onRenameBridgeProfile={profileActions.handleRenameBridgeProfile}
-                  onDeleteBridgeProfile={profileActions.handleDeleteBridgeProfile}
-                  onClearSavedBridges={profileActions.handleClearSavedBridges}
-                  onDrawerGestureEnabledChange={setSettingsAllowsDrawerGesture}
-                  onOpenPrivacy={navActions.openPrivacy}
-                  onOpenTerms={navActions.openTerms}
-                  onRecentTargetUrlsChange={(value) => navActions.updateSettings({ recentBrowserTargetUrls: value })}
-                  onPendingTargetHandled={() => setPendingBrowserTargetUrl(null)}
-                  onCloseGit={navActions.handleCloseGit}
-                  onGitChatUpdated={navActions.handleGitChatUpdated}
-                />
-                {chatTransitionChatId || (currentScreen === 'Main' && mainOpeningChatId) ? (
-                  <View style={styles.chatTransitionOverlay}>
-                    <View style={styles.chatTransitionCard} accessibilityRole="progressbar" accessibilityLabel="Opening chat" accessibilityLiveRegion="polite">
-                      <ActivityIndicator size="small" color={theme.colors.textPrimary} />
-                      <Text style={styles.chatTransitionTitle}>Opening chat...</Text>
-                    </View>
+                <GestureDetector gesture={drawer.backSwipeGesture as never}>
+                  <View style={styles.screen}>
+                    <AppScreenRenderer
+                      currentScreen={currentScreen}
+                      activeApi={api}
+                      activeWs={ws}
+                      appStateStore={appStateStore}
+                      appStateSnapshot={appStateSnapshot}
+                      pushSettings={pushSettings}
+                      bridgeProfiles={bridgeProfiles}
+                      activeBridgeProfile={activeBridgeProfile}
+                      bridgeUrl={activeBridgeProfile?.bridgeUrl ?? ''}
+                      bridgeToken={activeBridgeProfile?.bridgeToken ?? null}
+                      browserRef={browserRef}
+                      mainRef={mainRef}
+                      gitChat={gitChat}
+                      selectedChatId={selectedChatId}
+                      pendingMainChatId={pendingMainChatId}
+                      pendingMainChatSnapshot={pendingMainChatSnapshot}
+                      pendingBrowserTargetUrl={pendingBrowserTargetUrl}
+                      browserReturnScreen={browserReturnScreen}
+                      approvalMode={approvalMode}
+                      showToolCalls={showToolCalls}
+                      workspaceChatLimit={workspaceChatLimit}
+                      defaultStartCwd={defaultStartCwd}
+                      preferredAgentId={preferredAgentId}
+                      agentSettings={agentSettings}
+                      appearancePreference={appearancePreference}
+                      darkUiPalette={darkUiPalette}
+                      fontPreference={fontPreference}
+                      recentBrowserTargetUrls={recentBrowserTargetUrls}
+                      onOpenDrawer={drawer.handleNavigationToggle}
+                      onOpenGit={navActions.handleOpenChatGit}
+                      onOpenLocalPreview={navActions.openBrowser}
+                      onOpenBridgeRecoveryGuide={profileActions.handleOpenBridgeRecoveryGuide}
+                      onLastUsedThreadSettingsChange={navActions.handleLastUsedThreadSettingsChange}
+                      onChatContextChange={navActions.handleChatContextChange}
+                      onChatOpeningStateChange={setMainOpeningChatId}
+                      onPendingOpenChatHandled={() => {
+                        setPendingMainChatId(null);
+                        setPendingMainChatSnapshot(null);
+                      }}
+                      onApprovalModeChange={(value) => navActions.updateSettings({ approvalMode: value })}
+                      onShowToolCallsChange={(value) => navActions.updateSettings({ showToolCalls: value })}
+                      onWorkspaceChatLimitChange={(value) => navActions.updateSettings({ workspaceChatLimit: value })}
+                      onAppearancePreferenceChange={(value) => navActions.updateSettings({ appearancePreference: value })}
+                      onDarkUiPaletteChange={(value) => navActions.updateSettings({ darkUiPalette: value })}
+                      onFontPreferenceChange={(value) => navActions.updateSettings({ fontPreference: value })}
+                      onRetryPersistence={() => appStateStore.retryPersistence()}
+                      onEditBridgeProfile={profileActions.handleEditBridgeProfile}
+                      onAddBridgeProfile={profileActions.handleAddBridgeProfile}
+                      onSwitchBridgeProfile={profileActions.handleSwitchBridgeProfile}
+                      onRenameBridgeProfile={profileActions.handleRenameBridgeProfile}
+                      onDeleteBridgeProfile={profileActions.handleDeleteBridgeProfile}
+                      onClearSavedBridges={profileActions.handleClearSavedBridges}
+                      onDrawerGestureEnabledChange={setSettingsAllowsDrawerGesture}
+                      onOpenPrivacy={navActions.openPrivacy}
+                      onOpenTerms={navActions.openTerms}
+                      onRecentTargetUrlsChange={(value) => navActions.updateSettings({ recentBrowserTargetUrls: value })}
+                      onPendingTargetHandled={() => setPendingBrowserTargetUrl(null)}
+                      onCloseGit={navActions.handleCloseGit}
+                      onGitChatUpdated={navActions.handleGitChatUpdated}
+                    />
+                    {chatTransitionChatId || (currentScreen === 'Main' && mainOpeningChatId) ? (
+                      <View style={styles.chatTransitionOverlay}>
+                        <View style={styles.chatTransitionCard} accessibilityRole="progressbar" accessibilityLabel="Opening chat" accessibilityLiveRegion="polite">
+                          <ActivityIndicator size="small" color={theme.colors.textPrimary} />
+                          <Text style={styles.chatTransitionTitle}>Opening chat...</Text>
+                        </View>
+                      </View>
+                    ) : null}
                   </View>
-                ) : null}
+                </GestureDetector>
               </Animated.View>
             </GestureDetector>
 
@@ -263,21 +267,13 @@ export function AppMainLayout(props: AppMainLayoutProps) {
                           onSelectChat={navActions.handleSelectChat}
                           onNewChat={navActions.handleNewChat}
                           onNavigate={navActions.navigate}
+                          onClose={drawer.closeDrawer}
                         />
                       </Animated.View>
                     </Animated.View>
                   </View>
                 </GestureDetector>
               </View>
-            ) : null}
-
-            {currentScreen === 'ChatGit' && !usesTabletLayout ? (
-              <GestureDetector gesture={drawer.chatGitBackGesture as never}>
-                <View
-                  pointerEvents={drawer.drawerVisible && drawer.drawerCapturesTouches ? 'none' : 'auto'}
-                  style={styles.edgeSwipeZone}
-                />
-              </GestureDetector>
             ) : null}
           </View>
         </SafeAreaProvider>

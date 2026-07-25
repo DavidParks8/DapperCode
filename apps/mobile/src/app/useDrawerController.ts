@@ -5,10 +5,7 @@ import {
 } from 'react-native-reanimated';
 
 import {
-  DRAWER_CONTENT_PARALLAX,
-  DRAWER_CONTENT_SCALE,
   DRAWER_MAX_ELEVATION,
-  DRAWER_MAX_RADIUS,
   DRAWER_MAX_SHADOW_OPACITY,
   DRAWER_MAX_SHADOW_RADIUS,
   type Screen,
@@ -22,18 +19,16 @@ interface UseDrawerControllerArgs {
   currentScreen: Screen;
   usesTabletLayout: boolean;
   drawerWidth: number;
-  screenWidth: number;
   settingsAllowsDrawerGesture: boolean;
-  onChatGitBack: () => void;
+  onBackSwipe: () => void;
 }
 
 export function useDrawerController({
   currentScreen,
   usesTabletLayout,
   drawerWidth,
-  screenWidth,
   settingsAllowsDrawerGesture,
-  onChatGitBack,
+  onBackSwipe,
 }: UseDrawerControllerArgs) {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [drawerCapturesTouches, setDrawerCapturesTouches] = useState(false);
@@ -43,7 +38,7 @@ export function useDrawerController({
   const drawerVisibleRef = useRef(false);
   const drawerCapturesTouchesRef = useRef(false);
 
-  const contentShiftOpen = Math.min(drawerWidth - 12, screenWidth * 0.74);
+  const contentShiftOpen = drawerWidth;
   const drawerOffset = useSharedValue(-drawerWidth);
   const drawerDragStartOffset = useSharedValue(-drawerWidth);
   const drawerGestureDidSettle = useSharedValue(true);
@@ -51,8 +46,7 @@ export function useDrawerController({
   const screenFrameAnimatedStyle = useAnimatedStyle(() => {
     if (usesTabletLayout) {
       return {
-        transform: [{ translateX: 0 }, { scale: 1 }],
-        borderRadius: 0,
+        transform: [{ translateX: 0 }],
         shadowOpacity: 0,
         shadowRadius: 0,
         elevation: 0,
@@ -61,11 +55,7 @@ export function useDrawerController({
 
     const progress = getDrawerOpenProgress(drawerOffset.value, drawerWidth);
     return {
-      transform: [
-        { translateX: progress * contentShiftOpen },
-        { scale: 1 - (1 - DRAWER_CONTENT_SCALE) * progress },
-      ],
-      borderRadius: DRAWER_MAX_RADIUS * progress,
+      transform: [{ translateX: progress * contentShiftOpen }],
       shadowOpacity: DRAWER_MAX_SHADOW_OPACITY * progress,
       shadowRadius: DRAWER_MAX_SHADOW_RADIUS * progress,
       elevation: DRAWER_MAX_ELEVATION * progress,
@@ -80,16 +70,9 @@ export function useDrawerController({
     transform: [{ translateX: drawerOffset.value }],
   }));
 
-  const drawerContentAnimatedStyle = useAnimatedStyle(() => {
-    const progress = getDrawerOpenProgress(drawerOffset.value, drawerWidth);
-    return {
-      opacity: 0.88 + progress * 0.12,
-      transform: [
-        { translateX: (1 - progress) * -DRAWER_CONTENT_PARALLAX },
-        { scale: 0.985 + progress * 0.015 },
-      ],
-    };
-  });
+  const drawerContentAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: 0.88 + getDrawerOpenProgress(drawerOffset.value, drawerWidth) * 0.12,
+  }));
 
   useEffect(() => {
     const nextOffset = drawerOpenRef.current ? 0 : -drawerWidth;
@@ -111,7 +94,7 @@ export function useDrawerController({
     openDrawerGesture,
     visibleDrawerGesture,
     visibleDrawerTapGesture,
-    chatGitBackGesture,
+    backSwipeGesture,
   } = useDrawerGestures({
     currentScreen,
     usesTabletLayout,
@@ -127,7 +110,7 @@ export function useDrawerController({
     setDrawerCapturesTouches,
     onDrawerSettled: handleDrawerSettled,
     onToggleTabletSidebar: () => setTabletSidebarVisible((visible) => !visible),
-    onChatGitBack,
+    onBackSwipe,
   });
 
   useEffect(() => {
@@ -157,7 +140,7 @@ export function useDrawerController({
     openDrawerGesture,
     visibleDrawerGesture,
     visibleDrawerTapGesture,
-    chatGitBackGesture,
+    backSwipeGesture,
     screenFrameAnimatedStyle,
     overlayAnimatedStyle,
     drawerAnimatedStyle,

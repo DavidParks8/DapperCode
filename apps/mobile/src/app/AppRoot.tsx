@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 
 import { useFonts } from 'expo-font';
-import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useColorScheme, useWindowDimensions } from 'react-native';
 import { Easing, LinearTransition } from 'react-native-reanimated';
 
@@ -18,7 +18,7 @@ import { type BrowserScreenHandle } from '../screens/BrowserScreen';
 import { type MainScreenHandle } from '../screens/MainScreen';
 import { type OnboardingMode } from '../screens/OnboardingScreen';
 import { createAppTheme, resolveThemeMode } from '../theme';
-import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_ANIMATION_MS, type AppScreen, type Screen } from './appConstants';
+import { CHAT_TRANSITION_MIN_MS, TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_ANIMATION_MS, type AppScreen, type Screen } from './appConstants';
 import { getDrawerWidth } from './appDrawerUtils';
 import { createStyles } from './appStyles';
 import { LoadingShell, OnboardingShell, PersistenceRecoveryShell } from './AppShells';
@@ -81,6 +81,7 @@ export function AppRoot() {
   const pushResponseControllerRef = useRef<PushResponseController | null>(null);
   const chatTransitionRequestIdRef = useRef(0);
   const chatSnapshotPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backSwipeHandlerRef = useRef<() => void>(() => undefined);
 
   const activeBridgeProfile = useMemo(
     () => getActiveBridgeProfile({ activeProfileId: activeBridgeProfileId, profiles: bridgeProfiles }),
@@ -127,18 +128,18 @@ export function AppRoot() {
   );
 
   const openChatWithTransition = useMemo(
-    () => async (id: string, snapshot?: Chat | null) => {
+    () => async (id: string, snapshot?: Chat | null, options?: { immediate?: boolean }) => {
       const requestId = chatTransitionRequestIdRef.current + 1;
       chatTransitionRequestIdRef.current = requestId;
       const startedAt = Date.now();
       const nextSnapshot = snapshot && snapshot.id === id ? snapshot : api?.peekChatShell(id) ?? null;
       const hasHydratedSnapshot = Boolean(nextSnapshot && nextSnapshot.messages.length > 0);
-      const shouldShowTransition = !hasHydratedSnapshot;
+      const shouldShowTransition = !hasHydratedSnapshot && !options?.immediate;
 
       setChatTransitionChatId(shouldShowTransition ? id : null);
-      setMainOpeningChatId(shouldShowTransition ? id : null);
+      setMainOpeningChatId(hasHydratedSnapshot ? null : id);
 
-      const remainingMs = shouldShowTransition ? Math.max(0, 220 - (Date.now() - startedAt)) : 0;
+      const remainingMs = shouldShowTransition ? Math.max(0, CHAT_TRANSITION_MIN_MS - (Date.now() - startedAt)) : 0;
       if (remainingMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, remainingMs));
       }
@@ -160,23 +161,16 @@ export function AppRoot() {
     [api]
   );
 
+  const handleBackSwipe = useCallback(() => {
+    backSwipeHandlerRef.current();
+  }, []);
+
   const drawer = useDrawerController({
     currentScreen,
     usesTabletLayout,
     drawerWidth,
-    screenWidth,
     settingsAllowsDrawerGesture,
-    onChatGitBack: () => {
-      const chatId = gitChat?.id ?? activeChat?.id ?? selectedChatId;
-      const resumeChat =
-        gitChat && gitChat.id === chatId ? gitChat : activeChat && activeChat.id === chatId ? activeChat : null;
-      if (chatId) {
-        void openChatWithTransition(chatId, resumeChat);
-        return;
-      }
-      setCurrentScreen('Main');
-      setGitChat(null);
-    },
+    onBackSwipe: handleBackSwipe,
   });
 
   const profileActions = useAppProfileActions({
@@ -233,6 +227,11 @@ export function AppRoot() {
     openChatWithTransition,
     handleCancelOnboarding: profileActions.handleCancelOnboarding,
   });
+
+  const { handleHardwareBackPress } = navActions;
+  useEffect(() => {
+    backSwipeHandlerRef.current = handleHardwareBackPress;
+  }, [handleHardwareBackPress]);
 
   usePushNotificationsLifecycle({
     activeBridgeProfileId,

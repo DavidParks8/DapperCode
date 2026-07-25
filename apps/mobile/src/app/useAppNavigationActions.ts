@@ -35,7 +35,7 @@ interface UseAppNavigationActionsArgs {
   setGitChat: Dispatch<SetStateAction<Chat | null>>;
   setSettingsAllowsDrawerGesture: Dispatch<SetStateAction<boolean>>;
   closeDrawer: () => void;
-  openChatWithTransition: (id: string, snapshot?: Chat | null) => Promise<void>;
+  openChatWithTransition: (id: string, snapshot?: Chat | null, options?: { immediate?: boolean }) => Promise<void>;
   handleCancelOnboarding: () => void;
 }
 
@@ -99,12 +99,12 @@ export function useAppNavigationActions({
   const handleSelectChat = useCallback(
     (id: string) => {
       const currentChatId = activeChat?.id ?? selectedChatId;
+      closeDrawer();
       if (currentScreen === 'Main' && currentChatId === id) {
-        closeDrawer();
         return;
       }
 
-      void openChatWithTransition(id, null);
+      void openChatWithTransition(id, null, { immediate: true });
     },
     [activeChat?.id, closeDrawer, currentScreen, openChatWithTransition, selectedChatId]
   );
@@ -295,5 +295,6 @@ export function useAppNavigationActions({
     handleCloseGit,
     openPrivacy,
     openTerms,
+    handleHardwareBackPress,
   };
 }

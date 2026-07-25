@@ -34,6 +34,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   onSelectChat,
   onNewChat,
   onNavigate,
+  onClose,
 }: DrawerContentProps) {
   const theme = useAppTheme();
   const {
@@ -263,6 +264,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
     collapsedLaneKeys,
     folderOptions: attentionModel.folderOptions,
     folderPickerVisible,
+    handleClose: onClose,
     handleDismissFolderPicker: () => setFolderPickerVisible(false),
     handleNavigate,
     handleNewChat,

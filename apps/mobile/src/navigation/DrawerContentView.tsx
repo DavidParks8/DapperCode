@@ -18,6 +18,7 @@ export function DrawerContentView() {
     attentionCount,
     folderOptions,
     folderPickerVisible,
+    handleClose,
     handleDismissFolderPicker,
     handleNavigate,
     handleNewChat,
@@ -67,6 +68,25 @@ export function DrawerContentView() {
                   color={theme.colors.accent}
                 />
               </Pressable>
+              {handleClose ? (
+                <Pressable
+                  accessibilityLabel="Close session list"
+                  accessibilityRole="button"
+                  hitSlop={4}
+                  onPress={handleClose}
+                  style={({ pressed }) => [
+                    styles.headerIconButton,
+                    pressed && styles.headerIconButtonPressed,
+                  ]}
+                >
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="chevron-forward"
+                    size={22}
+                    color={theme.colors.accent}
+                  />
+                </Pressable>
+              ) : null}
             </View>
 
             <View style={styles.statusSummary} accessibilityLiveRegion="polite">

@@ -13,4 +13,5 @@ export interface DrawerContentProps {
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
   onNavigate: (screen: DrawerScreen) => void;
+  onClose?: () => void;
 }

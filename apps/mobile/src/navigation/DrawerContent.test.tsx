@@ -373,6 +373,23 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree.unmount());
   });
 
+  it('renders the close control only when the drawer can be dismissed', async () => {
+    const onClose = jest.fn();
+    const harness = createHarness({ chats: [createChat({ id: 'root' })] });
+    const withoutClose = await renderDrawer(harness);
+    expect(
+      (withoutClose.root as Queryable).findAll(
+        (candidate) => candidate.props.accessibilityLabel === 'Close session list'
+      )
+    ).toHaveLength(0);
+    act(() => withoutClose.unmount());
+
+    const tree = await renderDrawer(harness, { onClose });
+    await press(findByLabel(tree.root as Queryable, 'Close session list'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
   it('renders attention lanes, explicit agents, selection, and primary actions', async () => {
     const onSelectChat = jest.fn();
     const onNewChat = jest.fn();

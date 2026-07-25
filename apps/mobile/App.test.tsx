@@ -724,6 +724,34 @@ describe('App orchestration', () => {
     act(() => initial.unmount());
   });
 
+  it('navigates back in the stack when swiping from the left screen edge', async () => {
+    const tree = await renderApp();
+    const backSwipeGesture = mockGestures[0];
+
+    await callProp('DrawerContent', 'onNavigate', 'Settings');
+    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
+    await act(async () => {
+      backSwipeGesture.onEnd?.({ translationX: 10, velocityX: 0 });
+      await Promise.resolve();
+    });
+    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
+    await act(async () => {
+      backSwipeGesture.onEnd?.({ translationX: 120, velocityX: 0 });
+      await Promise.resolve();
+    });
+    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    act(() => tree.unmount());
+  });
+
+  it('closes the full-page drawer from its close control', async () => {
+    const tree = await renderApp();
+    await callProp('MainScreen', 'onOpenDrawer');
+    expect(mockScreenProps.DrawerContent.active).toBe(true);
+    await callProp('DrawerContent', 'onClose');
+    expect(mockScreenProps.DrawerContent.active).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('routes push responses, profile registration, websocket status, and app lifecycle', async () => {
     mockSnapshot = snapshot({
       registrations: [{ profileId: profile.id, registrationId: 'registration-1', token: null }],

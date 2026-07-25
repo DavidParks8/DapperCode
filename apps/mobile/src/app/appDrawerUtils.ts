@@ -1,8 +1,6 @@
 import {
-  DRAWER_MAX_WIDTH,
   DRAWER_MIN_WIDTH,
   DRAWER_RUBBER_BAND_STRENGTH,
-  DRAWER_SCREEN_RATIO,
   DRAWER_SNAP_OPEN_PROGRESS,
   DRAWER_SNAP_VELOCITY,
   DRAWER_VELOCITY_PROJECTION,
@@ -18,8 +16,7 @@ export function normalizeBridgeToken(value: unknown): string | null {
 }
 
 export function getDrawerWidth(screenWidth: number): number {
-  const targetWidth = screenWidth * DRAWER_SCREEN_RATIO;
-  return Math.min(DRAWER_MAX_WIDTH, Math.max(DRAWER_MIN_WIDTH, targetWidth));
+  return Math.max(DRAWER_MIN_WIDTH, screenWidth);
 }
 
 export function clampDrawerOffset(value: number, drawerWidth: number): number {

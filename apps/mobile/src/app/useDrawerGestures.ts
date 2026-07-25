@@ -9,8 +9,9 @@ import {
 } from 'react-native-reanimated';
 
 import {
-  CHAT_GIT_BACK_DISTANCE,
-  CHAT_GIT_BACK_VELOCITY,
+  BACK_SWIPE_DISTANCE,
+  BACK_SWIPE_VELOCITY,
+  EDGE_SWIPE_WIDTH,
   type Screen,
 } from './appConstants';
 import {
@@ -35,7 +36,7 @@ interface UseDrawerGesturesArgs {
   setDrawerCapturesTouches: React.Dispatch<React.SetStateAction<boolean>>;
   onDrawerSettled: (isOpen: boolean) => void;
   onToggleTabletSidebar: () => void;
-  onChatGitBack: () => void;
+  onBackSwipe: () => void;
 }
 
 export function useDrawerGestures({
@@ -53,7 +54,7 @@ export function useDrawerGestures({
   setDrawerCapturesTouches,
   onDrawerSettled,
   onToggleTabletSidebar,
-  onChatGitBack,
+  onBackSwipe,
 }: UseDrawerGesturesArgs) {
   const dismissKeyboard = useCallback(() => {
     Keyboard.dismiss();
@@ -143,21 +144,25 @@ export function useDrawerGestures({
     openDrawer();
   }, [onToggleTabletSidebar, openDrawer, usesTabletLayout]);
 
-  const chatGitBackGesture = useMemo(
+  const backSwipeGesture = useMemo(
     () =>
       Gesture.Pan()
-        .hitSlop({ right: 12 })
+        .enabled(
+          currentScreen !== 'Main' &&
+            (currentScreen !== 'Settings' || settingsAllowsDrawerGesture)
+        )
+        .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
         .activeOffsetX(12)
         .failOffsetY([-18, 18])
         .onEnd((event) => {
           if (
-            event.translationX > CHAT_GIT_BACK_DISTANCE ||
-            event.velocityX > CHAT_GIT_BACK_VELOCITY
+            event.translationX > BACK_SWIPE_DISTANCE ||
+            event.velocityX > BACK_SWIPE_VELOCITY
           ) {
-            runOnJS(onChatGitBack)();
+            runOnJS(onBackSwipe)();
           }
         }),
-    [onChatGitBack]
+    [currentScreen, onBackSwipe, settingsAllowsDrawerGesture]
   );
 
   const settleDrawerFromGesture = useCallback(
@@ -189,12 +194,7 @@ export function useDrawerGestures({
   const openDrawerGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(
-          !usesTabletLayout &&
-            currentScreen !== 'ChatGit' &&
-            currentScreen !== 'Browser' &&
-            (currentScreen !== 'Settings' || settingsAllowsDrawerGesture)
-        )
+        .enabled(!usesTabletLayout && currentScreen === 'Main')
         .activeOffsetX(12)
         .failOffsetY([-18, 18])
         .onStart(() => {
@@ -229,7 +229,6 @@ export function useDrawerGestures({
       drawerGestureDidSettle,
       drawerOffset,
       drawerWidth,
-      settingsAllowsDrawerGesture,
       settleDrawerFromGesture,
       usesTabletLayout,
     ]
@@ -294,6 +293,6 @@ export function useDrawerGestures({
     openDrawerGesture,
     visibleDrawerGesture,
     visibleDrawerTapGesture,
-    chatGitBackGesture,
+    backSwipeGesture,
   };
 }

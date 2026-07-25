@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native';
 
-import { EDGE_SWIPE_WIDTH, TABLET_SIDEBAR_WIDTH } from './appConstants';
+import { TABLET_SIDEBAR_WIDTH } from './appConstants';
 import { type AppTheme } from '../theme';
 
 export function createStyles(theme: AppTheme): ReturnType<typeof StyleSheet.create> {
@@ -131,14 +131,6 @@ export function createStyles(theme: AppTheme): ReturnType<typeof StyleSheet.crea
     },
     drawerContentShell: {
       flex: 1,
-    },
-    edgeSwipeZone: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      bottom: 0,
-      width: EDGE_SWIPE_WIDTH,
-      zIndex: 30,
     },
   });
 }

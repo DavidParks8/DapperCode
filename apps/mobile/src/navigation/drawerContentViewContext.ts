@@ -14,6 +14,7 @@ export interface DrawerContentViewModel {
   folderOptions: DrawerFolderOption[];
   folderPickerVisible: boolean;
   handleDismissFolderPicker: () => void;
+  handleClose?: () => void;
   handleNavigate: (screen: DrawerScreen) => void;
   handleNewChat: () => void;
   handleOpenFolderPicker: () => void;
