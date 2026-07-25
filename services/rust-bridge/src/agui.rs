@@ -2160,7 +2160,32 @@ mod tests {
     #[test]
     fn observed_runs_close_when_the_sub_agent_reaches_a_terminal_state() {
         let mut projector = AgUiProjector::default();
-        let child_thread_id = "v1.YWxwaGEtYWdlbnQ.Y2hpbGQ";
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+        let child_thread = AgentSessionId::new("alpha-agent", "child-session")
+            .unwrap()
+            .encode();
+
+        let task_tool = |state: &str| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: parent_thread.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-live".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "task".to_string(),
+            content: FieldUpdate::Set(format!(
+                "<task id=\"child-session\" state=\"{state}\"></task>"
+            )),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+
+        projector.project_canonical(&task_tool("running"));
+
+        // The child streams without any client-admitted run of its own.
         let mut chunk = canonical_message(MessageRole::Agent, "child-message", "scanning");
         if let CanonicalEvent::MessageChunk {
             thread_id,
@@ -2170,32 +2195,45 @@ mod tests {
             ..
         } = &mut chunk
         {
-            child_thread_id.clone_into(thread_id);
+            child_thread.clone_into(thread_id);
             *run_id = None;
             *source_turn_id = None;
             *generation = None;
         }
-        assert!(event_types(&projector.project_canonical(&chunk).events).contains(&"RUN_STARTED"));
-
-        let mut finished = canonical_message(MessageRole::Agent, "ignored", "ignored");
-        if let CanonicalEvent::MessageChunk { .. } = &finished {
-            finished = CanonicalEvent::RunFinished {
-                agent_id: "alpha-agent".to_string(),
-                thread_id: child_thread_id.to_string(),
-                run_id: format!("{child_thread_id}::observed"),
-                source_turn_id: String::new(),
-                generation: 0,
-                stop_reason: StopReason::EndTurn,
-            };
-        }
-        let closed = projector.project_canonical(&finished).events;
-        assert!(
-            event_types(&closed).contains(&"RUN_FINISHED"),
-            "a terminal run must close the implicit run"
+        let streamed = projector.project_canonical(&chunk);
+        let streamed_child = streamed
+            .events
+            .into_iter()
+            .filter(|event| event.thread_id == child_thread)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            event_types(&streamed_child),
+            ["RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"],
+            "an agent-driven thread must open an implicit run so its output streams"
         );
+        assert!(projector.runs.contains_key(&child_thread));
+
+        let finished = projector.project_canonical(&task_tool("completed"));
+        let closing = finished
+            .events
+            .into_iter()
+            .filter(|event| event.thread_id == child_thread)
+            .collect::<Vec<_>>();
         assert!(
-            !projector.runs.contains_key(child_thread_id),
-            "implicit run state must be released"
+            event_types(&closing).contains(&"RUN_FINISHED"),
+            "the implicit run must be closed when the sub-agent finishes"
+        );
+        assert!(!projector.runs.contains_key(&child_thread));
+        assert!(!projector.observed_runs.contains(&child_thread));
+
+        // A repeated terminal update must not close it twice.
+        let repeated = projector.project_canonical(&task_tool("completed"));
+        assert!(
+            !repeated
+                .events
+                .iter()
+                .any(|event| event.thread_id == child_thread),
+            "closing an already-closed implicit run must be a no-op"
         );
     }
 
