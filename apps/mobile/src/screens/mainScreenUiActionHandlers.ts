@@ -132,6 +132,9 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
 
   useEffect(() => {
     if (activity.tone !== 'running') {
+      // A terminal or idle status supersedes whatever was being held, otherwise the
+      // stale running title reappears once the turn stops running.
+      clearHeldActivity();
       return;
     }
 
