@@ -3,61 +3,7 @@ import { StyleSheet } from 'react-native';
 import type { AppTheme } from '../theme';
 
 export const createMainScreenAgentStyles = (theme: AppTheme) => {
-  const agentPanelShadow = theme.isDark
-    ? '0 12px 30px rgba(0, 0, 0, 0.22)'
-    : '0 12px 24px rgba(15, 23, 42, 0.12)';
-
   return {
-    agentPanelWrap: { backgroundColor: theme.colors.bgMain, paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.sm },
-    agentPanelCard: {
-      borderRadius: 18,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderLight,
-      backgroundColor: theme.colors.bgElevated,
-      paddingHorizontal: theme.spacing.md,
-      paddingVertical: theme.spacing.md,
-      gap: theme.spacing.sm,
-      boxShadow: agentPanelShadow,
-    },
-    agentPanelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing.sm },
-    agentPanelHeaderPressable: { borderRadius: theme.radius.md },
-    agentPanelHeaderPressed: { opacity: 0.84 },
-    agentPanelHeaderCopy: { flex: 1, gap: 2 },
-    agentPanelEyebrow: { ...theme.typography.caption, color: theme.colors.textMuted, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0 },
-    agentPanelSummary: { ...theme.typography.caption, color: theme.colors.textMuted },
-    agentPanelList: { gap: theme.spacing.sm },
-    agentPanelScroll: { flexGrow: 0 },
-    agentPanelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.sm,
-      borderRadius: theme.radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderLight,
-      backgroundColor: theme.colors.bgItem,
-      paddingHorizontal: theme.spacing.sm + 2,
-      paddingVertical: theme.spacing.sm + 2,
-    },
-    agentPanelRowSelected: { borderColor: theme.colors.borderHighlight, backgroundColor: theme.colors.bgInput },
-    agentPanelRowPressed: { opacity: 0.84 },
-    agentPanelAccent: { width: 4, alignSelf: 'stretch', borderRadius: 999, flexShrink: 0 },
-    agentPanelCopy: { flex: 1, gap: 2, minWidth: 0 },
-    agentPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs },
-    agentPanelTitle: { ...theme.typography.body, fontSize: 13, lineHeight: 18, fontWeight: '700', flex: 1 },
-    agentPanelSelectedLabel: { ...theme.typography.caption, color: theme.colors.textMuted, fontWeight: '600' },
-    agentPanelDescription: { ...theme.typography.caption, color: theme.colors.textMuted, fontSize: 11, lineHeight: 15 },
-    agentPanelStatusBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.xs,
-      borderRadius: 999,
-      borderWidth: StyleSheet.hairlineWidth,
-      paddingHorizontal: theme.spacing.sm,
-      paddingVertical: 5,
-      maxWidth: '42%',
-      flexShrink: 0,
-    },
-    agentPanelStatusText: { ...theme.typography.caption, fontSize: 11, lineHeight: 14, fontWeight: '700' },
     modelChip: {
       flexDirection: 'row',
       alignItems: 'center',

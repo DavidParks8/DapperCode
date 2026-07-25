@@ -1,6 +1,5 @@
 import type { ChatSummary } from '../api/types';
 import {
-  collectLiveAgentPanelThreadIds,
   collectRelatedAgentThreads,
   describeAgentThreadSource,
   findMatchingAgentThread,
@@ -166,27 +165,6 @@ describe('agentThreads', () => {
 
     expect(describeAgentThreadSource(root, 'thr_root')).toBe('Main thread');
     expect(describeAgentThreadSource(review, 'thr_root')).toBe('Review agent');
-  });
-
-  it('includes the main thread in the live agent panel when sub-agents are active', () => {
-    expect(
-      collectLiveAgentPanelThreadIds([
-        { id: 'thr_root', isRootThread: true, isActive: false },
-        { id: 'thr_child_1', isRootThread: false, isActive: true },
-        { id: 'thr_child_2', isRootThread: false, isActive: true },
-        { id: 'thr_child_3', isRootThread: false, isActive: false },
-      ])
-    ).toEqual(['thr_root', 'thr_child_1', 'thr_child_2']);
-  });
-
-  it('keeps the live agent panel hidden when no sub-agent is active', () => {
-    expect(
-      collectLiveAgentPanelThreadIds([
-        { id: 'thr_root', isRootThread: true, isActive: true },
-        { id: 'thr_child_1', isRootThread: false, isActive: false },
-        { id: 'thr_child_2', isRootThread: false, isActive: false },
-      ])
-    ).toEqual([]);
   });
 
   it('returns no related threads without a focused chat and includes an omitted focus chat', () => {

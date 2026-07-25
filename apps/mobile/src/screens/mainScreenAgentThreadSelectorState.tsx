@@ -117,14 +117,6 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     agentDetailThreadId,
   ]);
 
-  const liveAgentRows = useMemo(
-    () => agentThreadRows.filter((row) => !row.isRootThread),
-    [agentThreadRows]
-  );
-  const liveRunningAgentCount = useMemo(
-    () => agentThreadRows.filter((row) => !row.isRootThread && row.runtime.isActive).length,
-    [agentThreadRows]
-  );
   const selectorAgentCount = useMemo(
     () => agentThreadRows.filter((row) => !row.isRootThread).length,
     [agentThreadRows]
@@ -199,8 +191,6 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
   return {
     openAgentThreadSelector,
     agentThreadRows,
-    liveAgentRows,
-    liveRunningAgentCount,
     selectorAgentCount,
     agentThreadMenuOptions,
   };
