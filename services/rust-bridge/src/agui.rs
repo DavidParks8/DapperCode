@@ -1069,17 +1069,21 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
                         .and_then(Value::as_str)
                         .filter(|value| !value.is_empty())
                         .unwrap_or("file");
-                    return vec![format!("[diff: {path}]")];
+                    let mut lines = vec![format!("[diff: {path}]")];
+                    lines.extend(nested_content_lines(object, &["oldText", "newText"]));
+                    return lines;
                 }
                 Some("terminal") => {
                     let terminal_id = object
                         .get("terminalId")
                         .and_then(Value::as_str)
                         .filter(|value| !value.is_empty());
-                    return vec![terminal_id.map_or_else(
+                    let mut lines = vec![terminal_id.map_or_else(
                         || "[terminal]".to_string(),
                         |id| format!("[terminal: {id}]"),
                     )];
+                    lines.extend(nested_content_lines(object, &["output", "content"]));
+                    return lines;
                 }
                 Some("resource_link") | Some("resourceLink") => {
                     return object
@@ -1110,6 +1114,13 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
         Value::Null => Vec::new(),
         _ => vec![value.to_string()],
     }
+}
+
+fn nested_content_lines(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| object.get(*key))
+        .flat_map(snapshot_content_lines)
+        .collect()
 }
 
 fn tool_snapshot_text(tool: &SnapshotTool) -> String {
@@ -1173,10 +1184,20 @@ struct TaskSubagent<'a> {
 
 fn parse_task_subagent(content: &str) -> Option<TaskSubagent<'_>> {
     // Tool content is appended across updates, so the newest `<task …>` header wins.
-    let header = content
-        .rfind("<task ")
-        .map(|index| &content[index + "<task ".len()..])?;
-    let header = header.split_once('>')?.0;
+    // Later occurrences can also be incidental (quoted markup in tool output), so
+    // fall back to earlier candidates instead of giving up on the first bad match.
+    let mut candidates = content
+        .match_indices("<task ")
+        .map(|(index, marker)| index + marker.len())
+        .collect::<Vec<_>>();
+    candidates.reverse();
+    candidates
+        .into_iter()
+        .find_map(|start| parse_task_header(&content[start..]))
+}
+
+fn parse_task_header(rest: &str) -> Option<TaskSubagent<'_>> {
+    let header = rest.split_once('>')?.0;
     let session_id = xml_attribute(header, "id")?.trim();
     let state = xml_attribute(header, "state")?.trim();
     if session_id.is_empty() || session_id.len() > 1_024 || state.is_empty() || state.len() > 64 {
@@ -1841,6 +1862,53 @@ mod tests {
             text.matches("export function add() {}").count(),
             1,
             "duplicated plain content in {text}"
+        );
+    }
+
+    #[test]
+    fn parse_task_subagent_falls_back_past_incidental_markup() {
+        let content = concat!(
+            "<task id=\"child-1\" state=\"completed\">\nAudit\n</task>\n",
+            "src/readme.md:1:<task something-else>"
+        );
+
+        let task = parse_task_subagent(content).expect("task header");
+
+        assert_eq!(task.session_id, "child-1");
+        assert_eq!(task.state, "completed");
+    }
+
+    #[test]
+    fn tool_snapshot_text_keeps_diff_and_terminal_payloads() {
+        let tool = SnapshotTool {
+            id: "call-edit-1".to_string(),
+            generation: Some(1),
+            kind: ToolKind::Edit,
+            status: ToolCallStatus::Completed,
+            title: "Edit src/math.ts".to_string(),
+            content: String::new(),
+            structured_content: vec![
+                json!({"type": "diff", "path": "src/math.ts", "oldText": "old body", "newText": "new body"}),
+                json!({"type": "terminal", "terminalId": "term-1", "output": "npm test output"}),
+            ],
+            locations: vec![],
+            truncated: false,
+        };
+
+        let text = tool_snapshot_text(&tool);
+
+        assert!(
+            text.contains("[diff: src/math.ts]"),
+            "missing diff marker in {text}"
+        );
+        assert!(text.contains("new body"), "diff body dropped in {text}");
+        assert!(
+            text.contains("[terminal: term-1]"),
+            "missing terminal marker in {text}"
+        );
+        assert!(
+            text.contains("npm test output"),
+            "terminal output dropped in {text}"
         );
     }
 

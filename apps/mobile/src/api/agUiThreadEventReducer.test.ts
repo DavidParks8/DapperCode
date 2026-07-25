@@ -3,6 +3,7 @@ import { EventType, type AGUIEvent } from '@ag-ui/core';
 import type { AgUiEventEnvelope } from './agUi';
 import { reduceThreadState } from './agUiThreadEventReducer';
 import {
+  MAX_MESSAGES_PER_THREAD,
   MAX_RAW_EVENTS_PER_THREAD,
   createAgUiThreadMessageState,
 } from './agUiMessagesState';
@@ -198,6 +199,33 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
       envelope({ type: EventType.TOOL_CALL_END, toolCallId: 'unknown-tool' }),
     );
     expect(unchanged).toBe(state);
+  });
+
+  it('forgets bookkeeping for messages trimmed out of a long thread', () => {
+    let state = createAgUiThreadMessageState();
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TOOL_CALL_START, toolCallId: 'tc-old', toolCallName: 'read' }),
+    );
+    expect(state.toolCallMessageIdByCallId['tc-old']).toBe('tool-call:tc-old');
+
+    for (let index = 0; index < MAX_MESSAGES_PER_THREAD + 4; index += 1) {
+      state = reduceThreadState(
+        state,
+        envelope({
+          type: EventType.TEXT_MESSAGE_CHUNK,
+          messageId: `filler-${String(index)}`,
+          role: 'assistant',
+          delta: 'x',
+        }),
+      );
+    }
+
+    expect(state.messages).toHaveLength(MAX_MESSAGES_PER_THREAD);
+    expect(state.messages.some((entry) => entry.id === 'tool-call:tc-old')).toBe(false);
+    expect(state.toolCallMessageIdByCallId['tc-old']).toBeUndefined();
+    expect(state.runByMessageId['tool-call:tc-old']).toBeUndefined();
+    expect(Object.keys(state.runByMessageId)).toHaveLength(MAX_MESSAGES_PER_THREAD);
   });
 
   it('drops streamed parts that no longer match an authoritative snapshot', () => {

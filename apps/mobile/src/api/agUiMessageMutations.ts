@@ -77,11 +77,55 @@ export function upsertMessage(
           entryIndex === index ? nextMessage : entry,
         )
       : [...current.messages, nextMessage];
+  const kept = messages.slice(-MAX_MESSAGES_PER_THREAD);
+  const runByMessageId = { ...current.runByMessageId, [message.id]: runId };
+  if (kept.length === messages.length) {
+    return { ...current, messages: kept, runByMessageId };
+  }
+  // Trimming the head must also forget the bookkeeping for the dropped
+  // messages, otherwise later events resurrect them at the end of the
+  // transcript or attach tool results to messages that no longer exist.
+  const dropped = new Set(
+    messages.slice(0, messages.length - kept.length).map((entry) => entry.id),
+  );
   return {
     ...current,
-    messages: messages.slice(-MAX_MESSAGES_PER_THREAD),
-    runByMessageId: { ...current.runByMessageId, [message.id]: runId },
+    messages: kept,
+    runByMessageId: withoutMessageIds(runByMessageId, dropped),
+    replacesMessageIdByMessageId: withoutMessageIds(
+      current.replacesMessageIdByMessageId,
+      dropped,
+    ),
+    toolCallMessageIdByCallId: withoutMessageValues(
+      current.toolCallMessageIdByCallId,
+      dropped,
+    ),
+    toolResultMessageIdByCallId: withoutMessageValues(
+      current.toolResultMessageIdByCallId,
+      dropped,
+    ),
+    terminalMessageIds: current.terminalMessageIds.filter(
+      (id) => !dropped.has(id),
+    ),
   };
+}
+
+function withoutMessageIds(
+  entries: Record<string, string>,
+  dropped: ReadonlySet<string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(entries).filter(([id]) => !dropped.has(id)),
+  );
+}
+
+function withoutMessageValues(
+  entries: Record<string, string>,
+  dropped: ReadonlySet<string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(entries).filter(([, messageId]) => !dropped.has(messageId)),
+  );
 }
 
 export function appendText(

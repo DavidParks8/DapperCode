@@ -51,7 +51,9 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
       return {
         tone: 'idle',
         title: 'Waiting for approval',
-        detail: pendingApproval.command ?? pendingApproval.kind,
+        detail:
+          pendingApproval.command ??
+          (pendingApproval.kind === 'commandExecution' ? 'Run command' : 'File change'),
       } satisfies ActivityState;
     }
 

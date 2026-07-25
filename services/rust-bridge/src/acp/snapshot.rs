@@ -254,6 +254,22 @@ struct ToolProjection<'a> {
 }
 
 impl SessionSnapshot {
+    /// Restores the transcript recorded before a reload while keeping the session
+    /// metadata (mode, commands, config, plan, usage, title) that the agent just
+    /// reported. Used when a reload replays no history at all.
+    pub fn restore_transcript_from(&mut self, previous: SessionSnapshot) {
+        self.messages = previous.messages;
+        self.tools = previous.tools;
+        self.timeline = previous.timeline;
+        self.next_sequence = previous.next_sequence;
+        self.total_messages = previous.total_messages;
+        self.total_reasoning = previous.total_reasoning;
+        self.total_tools = previous.total_tools;
+        self.history = previous.history;
+        self.history_bytes = previous.history_bytes;
+        self.unavailable_count = previous.unavailable_count;
+    }
+
     pub fn new(agent_id: String, thread_id: String) -> Self {
         Self {
             agent_id,

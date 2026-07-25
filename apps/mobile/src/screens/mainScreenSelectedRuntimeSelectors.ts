@@ -45,11 +45,20 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   } = context;
 
 
-  // Read through a ref so the snapshot applier keeps a stable identity.
-  const planModeSupportedRef = useRef(false);
-  planModeSupportedRef.current = selectedChat?.agentId
-    ? bridgeCapabilities?.supportsByAgent[selectedChat.agentId]?.planMode === true
-    : false;
+  // Held in a ref so the snapshot applier keeps a stable identity. The capability
+  // is resolved for the thread being applied rather than the last rendered chat,
+  // because callers apply a snapshot in the same tick they select the chat.
+  const bridgeCapabilitiesRef = useRef(bridgeCapabilities);
+  bridgeCapabilitiesRef.current = bridgeCapabilities;
+  const supportsPlanModeForThread = useCallback(
+    (threadId: string) => {
+      const agentId = api.peekChat(threadId)?.agentId;
+      return agentId
+        ? bridgeCapabilitiesRef.current?.supportsByAgent[agentId]?.planMode === true
+        : false;
+    },
+    [api]
+  );
 
   const applyThreadRuntimeSnapshot = useCallback(
     (threadId: string) => {
@@ -69,7 +78,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
       }
 
       setSelectedCollaborationMode(
-        resolveSnapshotCollaborationMode(snapshot, planModeSupportedRef.current)
+        resolveSnapshotCollaborationMode(snapshot, supportsPlanModeForThread(threadId))
       );
       if (snapshot.activeCommands !== undefined) {
         setActiveCommands(snapshot.activeCommands);
@@ -107,7 +116,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         scheduleRunWatchdogExpiry(snapshot.runWatchdogUntil);
       }
     },
-    [scheduleRunWatchdogExpiry]
+    [scheduleRunWatchdogExpiry, supportsPlanModeForThread]
   );
 
   useEffect(() => {

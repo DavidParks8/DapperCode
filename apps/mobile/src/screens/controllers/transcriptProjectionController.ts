@@ -97,11 +97,16 @@ export function projectTranscript({
     );
     if (persistedLiveMessage) {
       const persistedText = getMessageText(persistedLiveMessage).trim();
+      // While a message is still streaming the live copy is the fresher one,
+      // unless the persisted copy is strictly ahead of it (a snapshot that
+      // already contains text the live stream has not caught up with yet).
+      const liveExtendsPersisted = liveText.startsWith(persistedText);
+      const persistedExtendsLive = persistedText.startsWith(liveText);
       if (
         !liveMessageState?.terminalMessageIds.includes(liveAssistantMessage.id) &&
         liveAssistantMessage.role !== 'user' &&
         liveText !== persistedText &&
-        liveText.startsWith(persistedText)
+        (liveExtendsPersisted || !persistedExtendsLive)
       ) {
         messages = messages.map((message) =>
           message === persistedLiveMessage

@@ -102,10 +102,14 @@ export function mapMessages(
               ),
             ];
           }
-          const structured = renderAgUiCustomContent({
-            content: tool.structuredContent,
-            locations: tool.locations,
-          });
+          const hasStructured =
+            tool.structuredContent.length > 0 || tool.locations.length > 0;
+          const structured = hasStructured
+            ? renderAgUiCustomContent({
+                content: tool.structuredContent,
+                locations: tool.locations,
+              })
+            : "";
           // `tool.content` is the plain-text rendering of the same payload, so drop
           // structured lines it already covers instead of printing them twice.
           const structuredExtras = structured

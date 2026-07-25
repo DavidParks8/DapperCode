@@ -11,8 +11,14 @@ export function parseSnapshotTaskSubagent(
   agentId: string | undefined,
 ): { threadId: string; state: string; result: string | null } | null {
   // Tool content is appended across updates, so the newest `<task …>` header wins.
-  const headers = [...content.matchAll(/<task\s+([^>]+)>/g)];
-  const header = headers.at(-1);
+  // Later matches can be incidental (quoted markup in tool output), so fall back to
+  // earlier candidates instead of giving up on the first unparsable one.
+  const headers = [...content.matchAll(/<task\s+([^>]+)>/g)].reverse();
+  const header = headers.find(
+    (candidate) =>
+      /\bid="([^"]{1,1024})"/.test(candidate[1] ?? "") &&
+      /\bstate="([^"]{1,64})"/.test(candidate[1] ?? ""),
+  );
   const sessionId = header?.[1]?.match(/\bid="([^"]{1,1024})"/)?.[1]?.trim();
   const state = header?.[1]?.match(/\bstate="([^"]{1,64})"/)?.[1]?.trim();
   const normalizedAgentId = agentId?.trim();

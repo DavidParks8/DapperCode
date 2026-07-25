@@ -246,6 +246,50 @@ describe('chatMapping', () => {
     expect(content).not.toContain('{"content"');
   });
 
+  it('falls back past incidental task markup in tool output', () => {
+    const mapped = mapChat(toRawThread({
+      id: 'parent-noise',
+      acpSnapshot: {
+        version: 2,
+        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-noise' }],
+        messages: [],
+        tools: [{
+          id: 'task-noise', kind: 'think', status: 'completed', title: 'Task',
+          content:
+            '<task id="child-session" state="completed">\nAudit\n</task>\nsrc/readme.md:1:<task something-else>',
+          structuredContent: [], locations: [],
+        }],
+        plan: [], usage: {}, config: [], commands: [],
+        session: { agentId: 'opencode', threadId: 'parent-noise', historyReconstruction: false },
+        active: { toolIds: [] },
+      },
+    }));
+
+    const message = mapped.messages[0];
+    if (message.role !== 'activity') throw new Error('expected activity message');
+    expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed', navigable: true });
+  });
+
+  it('renders pending tools without an empty structured-content placeholder', () => {
+    const mapped = mapChat(toRawThread({
+      id: 'tool-pending',
+      acpSnapshot: {
+        version: 2,
+        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-danger' }],
+        messages: [],
+        tools: [{
+          id: 'call-danger', kind: 'execute', status: 'pending', title: 'rm -rf build',
+          content: '', structuredContent: [], locations: [],
+        }],
+        plan: [], usage: {}, config: [], commands: [],
+        session: { agentId: 'agent', threadId: 'tool-pending', historyReconstruction: false },
+        active: { toolIds: ['call-danger'] },
+      },
+    }));
+
+    expect(mapped.messages[0].content).toBe('rm -rf build');
+  });
+
   it('uses the newest appended task header and never shows raw child thread ids', () => {
     const mapped = mapChat(toRawThread({
       id: 'parent-appended',

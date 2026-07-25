@@ -45,6 +45,7 @@ pub struct AcpSession {
 struct SessionState {
     snapshot: SessionSnapshot,
     reconstruction_backup: Option<SessionSnapshot>,
+    reconstruction_history_cursor: Option<(Option<MessageRole>, u64)>,
     next_generation: u64,
     generation_state: GenerationState,
     message_ids: HashMap<(Option<u64>, MessageRole), String>,
@@ -86,6 +87,7 @@ impl AcpSession {
             inner: Arc::new(Mutex::new(SessionState {
                 snapshot: SessionSnapshot::new(agent_id, thread_id),
                 reconstruction_backup: None,
+                reconstruction_history_cursor: None,
                 next_generation: 0,
                 generation_state: GenerationState::Terminal,
                 message_ids: HashMap::new(),
@@ -123,6 +125,7 @@ impl AcpSession {
         fresh.history_reconstruction = true;
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
         state.message_ids.clear();
+        state.reconstruction_history_cursor = Some((state.history_role, state.history_serial));
         state.history_role = None;
         state.history_serial = 0;
         Ok(ReconstructionTransaction {
@@ -147,22 +150,35 @@ impl AcpSession {
     }
     async fn finish_reconstruction(&self, commit: bool) {
         let mut state = self.inner.lock().await;
+        let restored_cursor = state.reconstruction_history_cursor.take();
         let Some(previous) = state.reconstruction_backup.take() else {
             return;
         };
-        if !commit {
+        let restored = if !commit {
             state.snapshot = previous;
-            return;
+            true
+        } else if state.snapshot.timeline.is_empty() && !previous.timeline.is_empty() {
+            // Agents are expected to replay the conversation while `session/load` is
+            // in flight. When nothing was replayed, keep the transcript we already had
+            // while retaining the metadata (mode, commands, config, plan) the reload
+            // reported.
+            state.snapshot.restore_transcript_from(previous);
+            true
+        } else {
+            false
+        };
+        // Restoring a transcript also has to restore the history id cursor, otherwise
+        // the next replayed chunk reuses `history-1` and is appended to the oldest
+        // message instead of starting a new one.
+        if restored {
+            if let Some((role, serial)) = restored_cursor {
+                state.history_role = role;
+                state.history_serial = serial;
+            }
         }
-        // Agents are expected to replay the conversation while `session/load` is in
-        // flight. When nothing was replayed, keep the history we already had instead
-        // of committing an empty snapshot and wiping the transcript.
-        if state.snapshot.timeline.is_empty() && !previous.timeline.is_empty() {
-            state.snapshot = previous;
+        if commit {
             state.snapshot.history_reconstruction = false;
-            return;
         }
-        state.snapshot.history_reconstruction = false;
     }
     pub async fn admit_prompt(
         &self,
@@ -1929,7 +1945,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_reconstruction_keeps_the_previous_history() {
+    async fn empty_reconstruction_keeps_history_but_adopts_reloaded_metadata() {
         let session = AcpSession::new("agent".into(), "thread".into());
         session
             .emit(CanonicalEvent::MessageChunk {
@@ -1946,12 +1962,49 @@ mod tests {
             .await;
 
         let reconstruction = session.begin_reconstruction().await.unwrap();
+        session
+            .emit(CanonicalEvent::Mode {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                id: "plan".into(),
+            })
+            .await;
         reconstruction.finish(true).await;
 
         let snapshot = session.snapshot().await;
         assert_eq!(snapshot.messages.len(), 1);
         assert_eq!(snapshot.messages[0].id, "kept");
+        assert_eq!(snapshot.mode_id.as_deref(), Some("plan"));
         assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn restoring_history_also_restores_the_replay_id_cursor() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let first = session
+            .message_id_for_generation(MessageRole::Agent, None, None)
+            .await;
+        session
+            .emit(CanonicalEvent::MessageChunk {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: MessageRole::Agent,
+                message_id: first.clone(),
+                content: "first".into(),
+                content_block: None,
+            })
+            .await;
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        reconstruction.finish(true).await;
+
+        let next = session
+            .message_id_for_generation(MessageRole::User, None, None)
+            .await;
+        assert_ne!(next, first, "replay ids must not collide after a restore");
     }
 
     #[tokio::test]
