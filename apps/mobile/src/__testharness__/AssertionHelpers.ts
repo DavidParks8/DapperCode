@@ -1,192 +1,253 @@
-import type { TestableThreadState } from './TestableThreadState';
+import { TestableThreadState } from './TestableThreadState';
+import { getSubAgentMeta } from '../api/messages';
+
+interface MatcherResult {
+  pass: boolean;
+  message: () => string;
+}
+
+interface SubAgentExpectation {
+  status?: string;
+  preview?: string | RegExp;
+}
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace jest {
     interface Matchers<R> {
-      /** Assert the projected transcript has exactly N messages. */
-      toHaveMessageCount(expected: number): R;
-      /** Assert a message at the given index has matching id/role/content. */
+      /** Assert the projected transcript for a thread has exactly N messages. */
+      toHaveMessageCount(threadId: string, expected: number): R;
+      /** Assert the message at an index matches the given id/role/content. */
       toHaveMessageAt(
+        threadId: string,
         index: number,
         expected: { id?: string; role?: string; content?: string | RegExp },
       ): R;
-      /** Assert no duplicate message IDs exist in the transcript. */
-      toHaveNoDuplicateIds(): R;
-      /** Assert no duplicate message content exists in the transcript. */
-      toHaveNoDuplicateContent(): R;
-      /** Assert message IDs appear in the given order. */
-      toHaveMessagesInOrder(...ids: string[]): R;
-      /** Assert a sub-agent activity card exists for the given child thread. */
+      /** Assert no message id is rendered twice. */
+      toHaveNoDuplicateIds(threadId: string): R;
+      /** Assert no message body is rendered twice. */
+      toHaveNoDuplicateContent(threadId: string): R;
+      /** Assert message ids appear in the given relative order. */
+      toHaveMessagesInOrder(threadId: string, ...ids: string[]): R;
+      /** Assert a sub-agent card exists for a child thread, optionally matching status/preview. */
       toHaveSubAgentCard(
+        threadId: string,
         childThreadId: string,
-        expected?: { status?: string; preview?: string | RegExp },
+        expected?: SubAgentExpectation,
       ): R;
-      /** Assert the number of sub-agent activities. */
-      toHaveSubAgentCount(expected: number): R;
-      /** Assert the number of running sub-agents. */
-      toHaveRunningSubAgents(expected: number): R;
+      /** Assert some sub-agent card's text matches the given preview. */
+      toHaveSubAgentPreview(threadId: string, preview: string | RegExp): R;
+      /** Assert how many sub-agent cards a thread renders. */
+      toHaveSubAgentCount(threadId: string, expected: number): R;
+      /** Assert how many sub-agents are reported as running. */
+      toHaveRunningSubAgents(threadId: string, expected: number): R;
     }
   }
 }
 
-function getMessages(state: TestableThreadState, threadId: string) {
-  return state.projectTranscript(threadId);
+function requireState(received: unknown): TestableThreadState {
+  if (!(received instanceof TestableThreadState)) {
+    throw new TypeError(
+      'test harness matchers expect a TestableThreadState, e.g. expect(state).toHaveMessageCount(threadId, 2)',
+    );
+  }
+  return received;
 }
 
-export function createMatchers(state: TestableThreadState) {
-  return {
-    toHaveMessageCount(threadId: string, expected: number) {
-      const { messages } = getMessages(state, threadId);
-      const pass = messages.length === expected;
+function cardText(message: { content?: unknown }): string {
+  const content = message.content as { text?: unknown } | undefined;
+  return typeof content?.text === 'string' ? content.text : '';
+}
+
+function matchesText(actual: string, expected: string | RegExp): boolean {
+  return expected instanceof RegExp ? expected.test(actual) : actual.includes(expected);
+}
+
+export const testHarnessMatchers = {
+  toHaveMessageCount(received: unknown, threadId: string, expected: number): MatcherResult {
+    const { messages } = requireState(received).projectTranscript(threadId);
+    const pass = messages.length === expected;
+    return {
+      pass,
+      message: () =>
+        pass
+          ? `expected "${threadId}" not to render ${String(expected)} messages`
+          : `expected "${threadId}" to render ${String(expected)} messages but got ${String(messages.length)}:\n${messages
+              .map((message) => `  - ${message.id} (${message.role})`)
+              .join('\n')}`,
+    };
+  },
+
+  toHaveMessageAt(
+    received: unknown,
+    threadId: string,
+    index: number,
+    expected: { id?: string; role?: string; content?: string | RegExp },
+  ): MatcherResult {
+    const state = requireState(received);
+    const { messages } = state.projectTranscript(threadId);
+    if (index >= messages.length) {
       return {
-        pass,
+        pass: false,
         message: () =>
-          pass
-            ? `expected transcript NOT to have ${expected} messages`
-            : `expected ${expected} messages but got ${messages.length}`,
+          `expected a message at index ${String(index)} but "${threadId}" renders ${String(messages.length)}`,
       };
-    },
+    }
+    const message = messages[index];
+    const failures: string[] = [];
+    if (expected.id !== undefined && message.id !== expected.id) {
+      failures.push(`id: expected "${expected.id}" but got "${message.id}"`);
+    }
+    if (expected.role !== undefined && message.role !== expected.role) {
+      failures.push(`role: expected "${expected.role}" but got "${message.role}"`);
+    }
+    if (expected.content !== undefined) {
+      const text = state.getMessageContents(threadId)[index]?.content ?? '';
+      if (!matchesText(text, expected.content)) {
+        failures.push(`content: expected ${String(expected.content)} but got "${text}"`);
+      }
+    }
+    return {
+      pass: failures.length === 0,
+      message: () =>
+        failures.length === 0
+          ? `expected message at index ${String(index)} not to match`
+          : `message at index ${String(index)}: ${failures.join('; ')}`,
+    };
+  },
 
-    toHaveMessageAt(
-      threadId: string,
-      index: number,
-      expected: { id?: string; role?: string; content?: string | RegExp },
-    ) {
-      const { messages } = getMessages(state, threadId);
-      if (index >= messages.length) {
-        return {
-          pass: false,
-          message: () => `index ${index} is out of range (have ${messages.length} messages)`,
-        };
+  toHaveNoDuplicateIds(received: unknown, threadId: string): MatcherResult {
+    const duplicates = requireState(received).findDuplicateIds(threadId);
+    return {
+      pass: duplicates.length === 0,
+      message: () =>
+        duplicates.length === 0
+          ? `expected "${threadId}" to render duplicate ids`
+          : `"${threadId}" rendered duplicate message ids: ${duplicates.join(', ')}`,
+    };
+  },
+
+  toHaveNoDuplicateContent(received: unknown, threadId: string): MatcherResult {
+    const duplicates = requireState(received).findDuplicateContent(threadId);
+    return {
+      pass: duplicates.length === 0,
+      message: () =>
+        duplicates.length === 0
+          ? `expected "${threadId}" to render duplicate content`
+          : `"${threadId}" rendered duplicate content: ${duplicates
+              .map((entry) => `"${entry.content}" (x${String(entry.count)})`)
+              .join(', ')}`,
+    };
+  },
+
+  toHaveMessagesInOrder(received: unknown, threadId: string, ...ids: string[]): MatcherResult {
+    const actualIds = requireState(received).getMessageIds(threadId);
+    const positionById = new Map(actualIds.map((id, index) => [id, index] as const));
+    const failures: string[] = [];
+    for (let index = 1; index < ids.length; index += 1) {
+      const previous = positionById.get(ids[index - 1]);
+      const current = positionById.get(ids[index]);
+      if (previous === undefined) {
+        failures.push(`"${ids[index - 1]}" is not rendered`);
+      } else if (current === undefined) {
+        failures.push(`"${ids[index]}" is not rendered`);
+      } else if (current <= previous) {
+        failures.push(`"${ids[index]}" should come after "${ids[index - 1]}"`);
       }
-      const msg = messages[index];
-      const failures: string[] = [];
-      if (expected.id !== undefined && msg.id !== expected.id) {
-        failures.push(`id: expected "${expected.id}" but got "${msg.id}"`);
-      }
-      if (expected.role !== undefined && msg.role !== expected.role) {
-        failures.push(`role: expected "${expected.role}" but got "${msg.role}"`);
-      }
-      if (expected.content !== undefined) {
-        const text = msg.role === 'activity'
-          ? (msg.content as { text?: string })?.text ?? ''
-          : (typeof msg.content === 'string' ? msg.content : '');
-        if (expected.content instanceof RegExp) {
-          if (!expected.content.test(text)) {
-            failures.push(`content: expected to match ${expected.content} but got "${text}"`);
-          }
-        } else if (text !== expected.content) {
-          failures.push(`content: expected "${expected.content}" but got "${text}"`);
-        }
-      }
+    }
+    return {
+      pass: failures.length === 0,
+      message: () =>
+        failures.length === 0
+          ? `expected "${threadId}" not to render those ids in order`
+          : `"${threadId}" message order: ${failures.join('; ')}`,
+    };
+  },
+
+  toHaveSubAgentCard(
+    received: unknown,
+    threadId: string,
+    childThreadId: string,
+    expected?: SubAgentExpectation,
+  ): MatcherResult {
+    const activities = requireState(received).getSubAgentActivities(threadId);
+    const card = activities.find((message) =>
+      getSubAgentMeta(message)?.receiverThreadIds?.includes(childThreadId),
+    );
+    if (!card) {
       return {
-        pass: failures.length === 0,
+        pass: false,
         message: () =>
-          `message at index ${index}: ${failures.join('; ')}`,
+          `no sub-agent card links "${childThreadId}"; "${threadId}" renders ${String(activities.length)} card(s)`,
       };
-    },
-
-    toHaveNoDuplicateIds(threadId: string) {
-      const dupes = state.findDuplicateIds(threadId);
-      return {
-        pass: dupes.length === 0,
-        message: () =>
-          `found duplicate message IDs: ${dupes.join(', ')}`,
-      };
-    },
-
-    toHaveNoDuplicateContent(threadId: string) {
-      const dupes = state.findDuplicateContent(threadId);
-      return {
-        pass: dupes.length === 0,
-        message: () =>
-          `found duplicate content: ${dupes.map((d) => `"${d.content}" (x${d.count})`).join(', ')}`,
-      };
-    },
-
-    toHaveMessagesInOrder(threadId: string, ...ids: string[]) {
-      const actualIds = state.getMessageIds(threadId);
-      const actualIndex = new Map(actualIds.map((id, i) => [id, i]));
-      const failures: string[] = [];
-      for (let i = 1; i < ids.length; i++) {
-        const prev = actualIndex.get(ids[i - 1]);
-        const curr = actualIndex.get(ids[i]);
-        if (prev === undefined) {
-          failures.push(`"${ids[i - 1]}" not found in transcript`);
-        } else if (curr === undefined) {
-          failures.push(`"${ids[i]}" not found in transcript`);
-        } else if (curr <= prev) {
-          failures.push(`"${ids[i]}" (index ${curr}) should come after "${ids[i - 1]}" (index ${prev})`);
-        }
+    }
+    const failures: string[] = [];
+    if (expected?.status !== undefined) {
+      const status = getSubAgentMeta(card)?.agentStatus;
+      if (status !== expected.status) {
+        failures.push(`status: expected "${expected.status}" but got "${String(status)}"`);
       }
-      return {
-        pass: failures.length === 0,
-        message: () => `message order: ${failures.join('; ')}`,
-      };
-    },
-
-    toHaveSubAgentCard(
-      threadId: string,
-      childThreadId: string,
-      expected?: { status?: string; preview?: string | RegExp },
-    ) {
-      const activities = state.getSubAgentActivities(threadId);
-      const card = activities.find((m) => {
-        const meta = (m.content as { subAgent?: { receiverThreadIds?: string[] } })?.subAgent;
-        return meta?.receiverThreadIds?.includes(childThreadId);
-      });
-      if (!card) {
-        return {
-          pass: false,
-          message: () => `no sub-agent card found for child "${childThreadId}"`,
-        };
+    }
+    if (expected?.preview !== undefined) {
+      const text = cardText(card);
+      if (!matchesText(text, expected.preview)) {
+        failures.push(`preview: expected ${String(expected.preview)} but got "${text}"`);
       }
-      const failures: string[] = [];
-      if (expected?.status !== undefined) {
-        const meta = (card.content as { subAgent?: { agentStatus?: string } })?.subAgent;
-        if (meta?.agentStatus !== expected.status) {
-          failures.push(`status: expected "${expected.status}" but got "${meta?.agentStatus}"`);
-        }
-      }
-      if (expected?.preview !== undefined) {
-        const text = (card.content as { text?: string })?.text ?? '';
-        if (expected.preview instanceof RegExp) {
-          if (!expected.preview.test(text)) {
-            failures.push(`preview: expected to match ${expected.preview} but got "${text}"`);
-          }
-        } else if (!text.includes(expected.preview)) {
-          failures.push(`preview: expected to contain "${expected.preview}" but got "${text}"`);
-        }
-      }
-      return {
-        pass: failures.length === 0,
-        message: () => `sub-agent card for "${childThreadId}": ${failures.join('; ')}`,
-      };
-    },
+    }
+    return {
+      pass: failures.length === 0,
+      message: () =>
+        failures.length === 0
+          ? `expected no sub-agent card for "${childThreadId}"`
+          : `sub-agent card for "${childThreadId}": ${failures.join('; ')}`,
+    };
+  },
 
-    toHaveSubAgentCount(threadId: string, expected: number) {
-      const activities = state.getSubAgentActivities(threadId);
-      const pass = activities.length === expected;
-      return {
-        pass,
-        message: () =>
-          pass
-            ? `expected NOT ${expected} sub-agents`
-            : `expected ${expected} sub-agents but got ${activities.length}`,
-      };
-    },
+  toHaveSubAgentPreview(
+    received: unknown,
+    threadId: string,
+    preview: string | RegExp,
+  ): MatcherResult {
+    const activities = requireState(received).getSubAgentActivities(threadId);
+    const texts = activities.map(cardText);
+    const pass = texts.some((text) => matchesText(text, preview));
+    return {
+      pass,
+      message: () =>
+        pass
+          ? `expected no sub-agent card matching ${String(preview)}`
+          : `no sub-agent card matched ${String(preview)}; rendered:\n${texts
+              .map((text) => `  - ${text.replace(/\n/g, ' / ')}`)
+              .join('\n')}`,
+    };
+  },
 
-    toHaveRunningSubAgents(threadId: string, expected: number) {
-      const count = state.getRunningSubAgentCount(threadId);
-      const pass = count === expected;
-      return {
-        pass,
-        message: () =>
-          pass
-            ? `expected NOT ${expected} running sub-agents`
-            : `expected ${expected} running sub-agents but got ${count}`,
-      };
-    },
-  };
+  toHaveSubAgentCount(received: unknown, threadId: string, expected: number): MatcherResult {
+    const activities = requireState(received).getSubAgentActivities(threadId);
+    const pass = activities.length === expected;
+    return {
+      pass,
+      message: () =>
+        pass
+          ? `expected "${threadId}" not to render ${String(expected)} sub-agent card(s)`
+          : `expected ${String(expected)} sub-agent card(s) but got ${String(activities.length)}`,
+    };
+  },
+
+  toHaveRunningSubAgents(received: unknown, threadId: string, expected: number): MatcherResult {
+    const count = requireState(received).getRunningSubAgentCount(threadId);
+    const pass = count === expected;
+    return {
+      pass,
+      message: () =>
+        pass
+          ? `expected "${threadId}" not to report ${String(expected)} running sub-agent(s)`
+          : `expected ${String(expected)} running sub-agent(s) but got ${String(count)}`,
+    };
+  },
+};
+
+/** Registers the harness matchers with Jest. Imported by harness scenario tests. */
+export function registerTestHarnessMatchers(): void {
+  expect.extend(testHarnessMatchers);
 }

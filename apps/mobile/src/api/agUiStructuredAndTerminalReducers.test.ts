@@ -13,6 +13,7 @@ import {
   updateEncryptedValue,
 } from './agUiStructuredAndTerminalReducers';
 import type { AgUiThreadMessageState } from './agUiMessagesState';
+import { structuredTextRemainder } from './agUiContent';
 import type { ChatMessage } from './types';
 
 function createState(overrides: Partial<AgUiThreadMessageState> = {}): AgUiThreadMessageState {
@@ -474,5 +475,41 @@ describe('agUiStructuredAndTerminalReducers', () => {
         function: { name: 'search', arguments: '{"q":"term"}' },
       });
     });
+  });
+});
+
+describe('structuredTextRemainder', () => {
+  // A tool card must never print the same body twice, and must never lose the
+  // extra detail (locations, diff headers) that only the structured rendering has.
+  it('drops the plain text and keeps only what the structured rendering adds', () => {
+    expect(
+      structuredTextRemainder(
+        'export function add() {}\n',
+        'export function add() {}\n\n[location: src/math.ts]',
+      ),
+    ).toBe('[location: src/math.ts]');
+  });
+
+  it('returns nothing when the structured rendering adds nothing', () => {
+    expect(structuredTextRemainder('same body', 'same body')).toBe('');
+  });
+
+  it('keeps interior lines that repeat a line of the plain text', () => {
+    const structured = '--- a/x\n+++ b/x\n-const a = 1;\n+const a = 2;\n-const a = 1;';
+    expect(structuredTextRemainder('const a = 1;', structured)).toBe(structured);
+  });
+
+  it('returns nothing when the structured rendering is empty or blank', () => {
+    expect(structuredTextRemainder('body', '')).toBe('');
+    expect(structuredTextRemainder('body', '   \n ')).toBe('');
+  });
+
+  it('returns the whole structured rendering when there is no plain text yet', () => {
+    expect(structuredTextRemainder('', 'structured only')).toBe('structured only');
+    expect(structuredTextRemainder('  \n', 'structured only')).toBe('structured only');
+  });
+
+  it('returns nothing when the plain text already contains the structured rendering', () => {
+    expect(structuredTextRemainder('a full body with extra trailing notes', 'full body')).toBe('');
   });
 });

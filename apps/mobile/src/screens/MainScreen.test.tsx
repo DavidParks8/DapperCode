@@ -745,6 +745,19 @@ describe('MainScreen shell behavior', () => {
     act(() => tree.unmount());
   });
 
+  it('labels a pending approval by what it does, not by its protocol kind', async () => {
+    // Regression: the activity strip showed the raw "commandExecution" kind.
+    const api = createApi();
+    const { tree } = await renderMain({ api, pendingOpenChatId: chat.id, pendingOpenChatSnapshot: chat });
+    const root = tree.root as Queryable;
+
+    await emitWs(approvalRequested());
+
+    expect(hasText(root, 'Waiting for approval')).toBe(true);
+    expect(hasText(root, 'commandExecution')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('reuses the approval resolution id when a failed decision is retried', async () => {
     const api = createApi();
     (api.resolveApproval as jest.Mock)
@@ -1454,6 +1467,27 @@ describe('MainScreen controls and modals', () => {
     await press(byLabel(root, 'retry · broken.txt, remove attachment'));
     expect(root.findAll((node) => node.props.accessibilityLabel === 'retry · broken.txt, remove attachment')).toHaveLength(0);
 
+    act(() => tree.unmount());
+  });
+
+  it('does not pin an agents panel above the transcript while sub-agents are in use', async () => {
+    // Regression: a live agents panel took a third of the screen to repeat what the
+    // inline sub-agent card already says. The header chip remains the way in.
+    const chats: ChatSummary[] = [rootChat, subAgentChat];
+    const api = createApi({ chats });
+    const { tree } = await renderMain({ api, selectedChat: rootChat });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    expect(
+      root.findAll((node) => String(node.props.accessibilityLabel).startsWith('Agents, '))
+    ).toHaveLength(0);
+    expect(hasText(root, 'running now')).toBe(false);
+    // The agent thread picker is still reachable from the header.
+    expect(root.findAll((node) => node.props.accessibilityLabel === '1 agent').length).toBeGreaterThan(0);
     act(() => tree.unmount());
   });
 

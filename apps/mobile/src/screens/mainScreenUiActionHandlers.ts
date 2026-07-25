@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
-import { type ActivityState, ACTIVITY_DETAIL_HOLD_MS, GENERIC_RUNNING_ACTIVITY_TITLES, isChatLikelyRunning, removeBridgeUiSurfaceFromList } from './mainScreenHelpers';
+import { ACTIVITY_DETAIL_HOLD_MS, isChatLikelyRunning, removeBridgeUiSurfaceFromList, resolveHeldActivity } from './mainScreenHelpers';
 import type { MainScreenApprovalAndUserInputResolutionContext, MainScreenApprovalAndUserInputResolutionResult } from './mainScreenApprovalAndUserInputResolution';
 
 
@@ -131,25 +131,16 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
   const hasRunWatchdog = runWatchdogUntilRef.current > runWatchdogNow;
 
   useEffect(() => {
-    if (activity.tone !== 'running') {
+    const nextHeldActivity = resolveHeldActivity(activity);
+    if (!nextHeldActivity) {
       // A terminal or idle status supersedes whatever was being held, otherwise the
       // stale running title reappears once the turn stops running.
-      clearHeldActivity();
+      if (activity.tone !== 'running') {
+        clearHeldActivity();
+      }
       return;
     }
 
-    const title = activity.title.trim() || 'Working';
-    const detail = activity.detail?.trim() ?? '';
-    const shouldHold = Boolean(detail) || !GENERIC_RUNNING_ACTIVITY_TITLES.has(title.toLowerCase());
-    if (!shouldHold) {
-      return;
-    }
-
-    const nextHeldActivity: ActivityState = {
-      tone: 'running',
-      title,
-      detail: detail || undefined,
-    };
     setHeldActivity(nextHeldActivity);
     if (heldActivityTimeoutRef.current) {
       clearTimeout(heldActivityTimeoutRef.current);

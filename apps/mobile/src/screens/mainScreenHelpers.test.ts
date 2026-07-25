@@ -859,6 +859,26 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ latestTurnPlan: plan }), false)).toBe(false);
   });
 
+  it('holds a specific running status and drops it once the turn is terminal', () => {
+    // Regression: the held status was only cleared on a timeout, so it reappeared
+    // after the turn had already finished.
+    expect(
+      helpers.resolveHeldActivity({ tone: 'running', title: 'Reading src/math.ts' })
+    ).toEqual({ tone: 'running', title: 'Reading src/math.ts', detail: undefined });
+    expect(
+      helpers.resolveHeldActivity({ tone: 'running', title: 'Working', detail: 'npm test' })
+    ).toEqual({ tone: 'running', title: 'Working', detail: 'npm test' });
+
+    // Generic running titles are not worth holding.
+    expect(helpers.resolveHeldActivity({ tone: 'running', title: 'Working' })).toBeNull();
+    expect(helpers.resolveHeldActivity({ tone: 'running', title: 'Thinking' })).toBeNull();
+
+    // Any non-running status supersedes the held one.
+    expect(helpers.resolveHeldActivity({ tone: 'complete', title: 'Turn completed' })).toBeNull();
+    expect(helpers.resolveHeldActivity({ tone: 'error', title: 'Turn failed' })).toBeNull();
+    expect(helpers.resolveHeldActivity({ tone: 'idle', title: 'Ready' })).toBeNull();
+  });
+
   it('parses, filters, deduplicates, and checks slash commands', () => {
     expect(helpers.parseSlashCommand('hello')).toBeNull();
     expect(helpers.parseSlashCommand('/')).toEqual({ name: 'help', args: '' });

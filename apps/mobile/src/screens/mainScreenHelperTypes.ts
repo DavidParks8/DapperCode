@@ -157,6 +157,27 @@ export const APP_FOCUS_DISCONNECT_GRACE_MS = 5_000;
 export const ACTIVITY_DETAIL_HOLD_MS = 2_500;
 export const GENERIC_RUNNING_ACTIVITY_DELAY_MS = 1_200;
 export const GENERIC_RUNNING_ACTIVITY_TITLES = new Set(['working', 'thinking']);
+
+/**
+ * The activity strip briefly holds a specific running status so it stays readable
+ * even when a later generic "Working" would otherwise overwrite it. Returns the
+ * status to hold, or `null` when nothing should be held.
+ *
+ * A non-running status returns `null`: a terminal or idle status supersedes the
+ * held one, otherwise the stale running title reappears once the turn stops.
+ */
+export function resolveHeldActivity(activity: ActivityState): ActivityState | null {
+  if (activity.tone !== 'running') {
+    return null;
+  }
+  const title = activity.title.trim() || 'Working';
+  const detail = activity.detail?.trim() ?? '';
+  const shouldHold = Boolean(detail) || !GENERIC_RUNNING_ACTIVITY_TITLES.has(title.toLowerCase());
+  if (!shouldHold) {
+    return null;
+  }
+  return { tone: 'running', title, detail: detail || undefined };
+}
 export const CHAT_DRAFTS_FILE = 'chat-drafts.json';
 export const CHAT_DRAFTS_VERSION = 2;
 export const CHAT_MODEL_PREFERENCES_FILE = 'chat-model-preferences.json';
