@@ -166,7 +166,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [queueActionKind, setQueueActionKind] = useState<'steer' | 'cancel' | null>(null);
   const [relatedAgentThreads, setRelatedAgentThreads] = useState<ChatSummary[]>([]);
   const [agentRootThreadId, setAgentRootThreadId] = useState<string | null>(null);
-  const [agentPanelCollapsed, setAgentPanelCollapsed] = useState(false);
   const [agentRuntimeRevision, setAgentRuntimeRevision] = useState(0);
   const [loadingAgentThreads, setLoadingAgentThreads] = useState(false);
   const [agentDetailThreadId, setAgentDetailThreadId] = useState<string | null>(null);
@@ -347,8 +346,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setRelatedAgentThreads,
     agentRootThreadId,
     setAgentRootThreadId,
-    agentPanelCollapsed,
-    setAgentPanelCollapsed,
     agentRuntimeRevision,
     setAgentRuntimeRevision,
     loadingAgentThreads,

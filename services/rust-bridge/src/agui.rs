@@ -374,6 +374,7 @@ impl AgUiProjector {
                     agent_client_protocol::schema::v1::ToolCallStatus::Completed
                         | agent_client_protocol::schema::v1::ToolCallStatus::Failed
                 );
+                let was_started = state.started;
                 if !state.started {
                     state.started = true;
                     if state.subagent_activity {
@@ -520,10 +521,18 @@ impl AgUiProjector {
                     });
                 if let Some((task, child_thread_id)) = subagent.as_ref() {
                     state.subagent_activity = true;
-                    let revision = format!("{}\0{}", child_thread_id, task.state);
+                    let result = content
+                        .as_deref()
+                        .and_then(task_result_preview)
+                        .or_else(|| content.as_deref().and_then(task_progress_preview));
+                    let revision = format!(
+                        "{}\0{}\0{}",
+                        child_thread_id,
+                        task.state,
+                        result.as_deref().unwrap_or("")
+                    );
                     if state.subagent_revision.as_deref() != Some(&revision) {
                         state.subagent_revision = Some(revision);
-                        let result = content.as_deref().and_then(task_result_preview);
                         projection.events.push(subagent_activity_envelope(
                             SubagentActivityContext {
                                 parent_thread_id: thread_id,
@@ -554,6 +563,29 @@ impl AgUiProjector {
                         );
                     }
                 }
+                if state.subagent_activity && !terminal && subagent.is_none() && was_started {
+                    // Agents that never stream a child session only report progress
+                    // through this tool, so mirror its latest output onto the card
+                    // instead of leaving it on "Starting sub-agent" until it ends.
+                    let latest = content.as_deref().and_then(task_progress_preview);
+                    let revision =
+                        format!("unlinked\0running\0{}", latest.as_deref().unwrap_or(""));
+                    if state.subagent_revision.as_deref() != Some(&revision) {
+                        state.subagent_revision = Some(revision);
+                        projection.events.push(subagent_activity_envelope(
+                            SubagentActivityContext {
+                                parent_thread_id: thread_id,
+                                parent_run_id: &run.run_id,
+                                parent_source_turn_id: run.source_turn_id.clone(),
+                                tool_call_id,
+                                child_thread_id: None,
+                            },
+                            "running",
+                            latest.as_deref().or(Some("Working")),
+                            timestamp,
+                        ));
+                    }
+                }
                 if state.subagent_activity && terminal && subagent.is_none() {
                     let status = if matches!(
                         status,
@@ -575,7 +607,12 @@ impl AgUiProjector {
                                 child_thread_id: None,
                             },
                             status,
-                            Some("Task finished"),
+                            content
+                                .as_deref()
+                                .and_then(task_result_preview)
+                                .or_else(|| content.as_deref().and_then(task_progress_preview))
+                                .as_deref()
+                                .or(Some("Task finished")),
                             timestamp,
                         ));
                     }
@@ -1364,6 +1401,31 @@ fn xml_attribute<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     let marker = format!(r#"{name}=""#);
     let value = header.split_once(&marker)?.1;
     value.split_once('"').map(|(value, _)| value)
+}
+
+/// Latest human-readable line of a sub-agent task tool's output, ignoring the
+/// `<task …>` bookkeeping. Agents that never stream a child session report their
+/// progress here, so this is the only live signal the parent card has.
+fn task_progress_preview(content: &str) -> Option<String> {
+    let without_result = match (
+        content.find("<task_result>"),
+        content.rfind("</task_result>"),
+    ) {
+        (Some(start), Some(end)) if end >= start => {
+            let mut trimmed = content[..start].to_string();
+            trimmed.push_str(&content[end + "</task_result>".len()..]);
+            trimmed
+        }
+        _ => content.to_string(),
+    };
+    let lines = without_result
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty() && !line.starts_with("<task") && !line.starts_with("</task")
+        })
+        .collect::<Vec<_>>();
+    lines.last().map(|line| bounded(line, 512))
 }
 
 fn task_result_preview(content: &str) -> Option<String> {
@@ -2163,6 +2225,71 @@ mod tests {
         // A second chunk reuses the same implicit run instead of restarting it.
         let more = projector.project_canonical(&chunk).events;
         assert_eq!(event_types(&more), vec!["TEXT_MESSAGE_CONTENT"]);
+    }
+
+    #[test]
+    fn sub_agent_tools_report_progress_without_a_linked_child_session() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+
+        let task_tool = |status: ToolCallStatus, content: &str| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: parent_thread.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-plain".to_string(),
+            kind: ToolKind::Other,
+            status,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(content.to_string()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+
+        let latest_of = |projection: &CanonicalProjection| -> Option<String> {
+            projection
+                .events
+                .iter()
+                .filter_map(|event| serde_json::to_value(event).ok())
+                .filter_map(|value| {
+                    value["event"]["content"]["text"]
+                        .as_str()
+                        .map(str::to_string)
+                })
+                .next_back()
+        };
+
+        projector.project_canonical(&task_tool(ToolCallStatus::InProgress, "Auditing\n"));
+
+        let progress = projector.project_canonical(&task_tool(
+            ToolCallStatus::InProgress,
+            "Searching package 3 of 20\n",
+        ));
+        let text = latest_of(&progress).expect("a progress envelope");
+        assert!(
+            text.contains("Searching package 3 of 20"),
+            "sub-agent progress must reach the parent card, got {text}"
+        );
+        assert!(
+            text.contains("Status: running"),
+            "unexpected status in {text}"
+        );
+
+        let done = projector.project_canonical(&task_tool(
+            ToolCallStatus::Completed,
+            "<task_result>All clear</task_result>",
+        ));
+        let text = latest_of(&done).expect("a terminal envelope");
+        assert!(
+            text.contains("Sub-agent completed"),
+            "unexpected text {text}"
+        );
+        assert!(
+            text.contains("All clear"),
+            "terminal result missing from {text}"
+        );
     }
 
     #[test]

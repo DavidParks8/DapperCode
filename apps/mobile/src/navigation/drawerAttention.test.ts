@@ -79,6 +79,33 @@ function userInput(
 }
 
 describe('buildDrawerAttentionModel', () => {
+  it('keeps idle sub-agents out of the recent list but surfaces ones that need you', () => {
+    const model = buildDrawerAttentionModel({
+      chats: [
+        chat('root'),
+        chat('idle-sub', { sourceKind: 'subAgentThreadSpawn', parentThreadId: 'root' }),
+        chat('asking-sub', { sourceKind: 'subAgent', parentThreadId: 'root' }),
+        chat('failed-sub', { sourceKind: 'subAgent', parentThreadId: 'root', status: 'error' }),
+      ],
+      agents,
+      runIndicatorsByThread: {},
+      pendingApprovals: [],
+      pendingUserInputs: [userInput('asking-sub')],
+      selectedFolderKey: null,
+      workspaceChatLimit: null,
+    });
+
+    const recent = model.sections.find((section) => section.key === 'recent');
+    expect(recent?.data.map((row) => row.chat.id)).toEqual(['root']);
+    expect(model.recentCount).toBe(1);
+
+    const attention = model.sections.find((section) => section.key === 'attention');
+    expect(attention?.data.map((row) => row.chat.id).sort()).toEqual([
+      'asking-sub',
+      'failed-sub',
+    ]);
+  });
+
   it('groups authoritative requests, failures, running sessions, and recent work', () => {
     const model = buildDrawerAttentionModel({
       chats: [

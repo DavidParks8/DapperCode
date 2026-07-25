@@ -4,7 +4,6 @@ import { BridgeUiWorkflowCard } from '../components/BridgeUiSurface';
 import { ChatHeader } from '../components/ChatHeader';
 import { InlineOptionsGroup } from './MainScreenInlineOptions';
 import { decorativeAccessibilityProps } from '../accessibility';
-import { AgentThreadsPanel } from './MainScreenPresentation';
 import { WorkflowCard } from './MainScreenWorkflow';
 import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
 
@@ -60,12 +59,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     toggleSelectedPlanPanel,
     implementPlan,
     stayInPlanMode,
-    showLiveAgentPanel,
-    liveAgentRows,
-    liveRunningAgentCount,
-    agentPanelCollapsed,
-    setAgentPanelCollapsed,
-    openAgentDetail,
   } = context;
 
   return (
@@ -234,21 +227,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
                       onStayInPlanMode={stayInPlanMode}
                     />
                   ) : null}
-                </View>
-              ) : null}
-      {showLiveAgentPanel ? (
-                <View style={styles.agentPanelWrap}>
-                  <AgentThreadsPanel
-                    rows={liveAgentRows}
-                    runningCount={liveRunningAgentCount}
-                    collapsed={agentPanelCollapsed}
-                    onToggleCollapse={() => {
-                      setAgentPanelCollapsed((previous) => !previous);
-                    }}
-                    onSelectThread={(threadId) => {
-                      openAgentDetail(threadId);
-                    }}
-                  />
                 </View>
               ) : null}
     </>

@@ -24,7 +24,6 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     isOpeningChat,
     isTurnLikelyRunning,
     isTurnLoading,
-    liveAgentRows,
     pendingApproval,
     pendingUserInputRequest,
     preferredStartCwd,
@@ -200,8 +199,6 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     : spawnedAgentCount === 1
       ? '1 agent'
       : `${String(spawnedAgentCount)} agents`;
-  const showLiveAgentPanel =
-    !isOpeningChat && Boolean(selectedChat) && liveAgentRows.length > 0;
   const agentThreadStatusByIdRef = useRef<ReadonlyMap<string, Chat['status']>>(new Map());
   const agentThreadStatusById = useMemo(() => {
     const nextMap = new Map(relatedAgentThreads.map((chat) => [chat.id, chat.status] as const));
@@ -228,7 +225,6 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     selectedChatIsSubAgent,
     showAgentThreadChip,
     agentThreadChipLabel,
-    showLiveAgentPanel,
     agentThreadStatusByIdRef,
     agentThreadStatusById,
   };

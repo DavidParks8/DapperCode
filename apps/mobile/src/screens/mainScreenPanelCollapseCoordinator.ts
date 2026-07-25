@@ -14,9 +14,7 @@ export function useMainScreenPanelCollapseCoordinator(context: MainScreenPanelCo
     keyboardVisible,
     planPanelCollapsed,
     selectedChat,
-    setAgentPanelCollapsed,
     setPlanPanelCollapsedByThread,
-    showLiveAgentPanel,
     workflowCardMode,
   } = context;
 
@@ -45,16 +43,6 @@ export function useMainScreenPanelCollapseCoordinator(context: MainScreenPanelCo
       };
     });
   }, [keyboardVisible, planPanelCollapsed, selectedChat?.id, workflowCardMode]);
-
-  useEffect(() => {
-    if (!showLiveAgentPanel) {
-      setAgentPanelCollapsed(false);
-    }
-  }, [showLiveAgentPanel]);
-
-  useEffect(() => {
-    setAgentPanelCollapsed(false);
-  }, [selectedChat?.id]);
 
   const toggleSelectedPlanPanel = useCallback(() => {
     if (!selectedChat?.id || workflowCardMode === null) {

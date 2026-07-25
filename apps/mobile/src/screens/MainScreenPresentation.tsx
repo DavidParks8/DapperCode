@@ -1,21 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { BrandMark } from '../components/BrandMark';
-import type { ChatSummary, RunEvent } from '../api/types';
-import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
-import type { AgentThreadDisplayState } from './agentThreadDisplay';
+import { decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
 
-interface AgentThreadPanelRow {
-  chat: ChatSummary;
-  title: string;
-  description: string;
-  runtime: AgentThreadDisplayState;
-  selected: boolean;
-  latestCommand?: RunEvent | null;
-}
 
 
 
@@ -223,145 +213,6 @@ export function ComposeView({
 }
 
 
-
-export function AgentThreadsPanel({
-  rows,
-  runningCount,
-  collapsed,
-  onToggleCollapse,
-  onSelectThread,
-}: {
-  rows: AgentThreadPanelRow[];
-  runningCount: number;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-  onSelectThread: (threadId: string) => void;
-}) {
-  const theme = useAppTheme();
-  const { height: windowHeight } = useWindowDimensions();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  return (
-    <View style={styles.agentPanelCard}>
-      <Pressable
-        onPress={onToggleCollapse}
-        style={({ pressed }) => [
-          styles.agentPanelHeader,
-          styles.agentPanelHeaderPressable,
-          pressed && styles.agentPanelHeaderPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`Agents, ${String(runningCount)} running`}
-        accessibilityState={controlAccessibilityState({ expanded: !collapsed })}
-      >
-        <View style={styles.agentPanelHeaderCopy}>
-          <Text style={styles.agentPanelEyebrow}>Agents</Text>
-          <Text style={styles.agentPanelSummary}>
-            {runningCount === 1
-              ? '1 running now'
-              : `${String(runningCount)} running now`}
-          </Text>
-        </View>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name={collapsed ? 'chevron-down' : 'chevron-up'}
-          size={16}
-          color={theme.colors.textMuted}
-        />
-      </Pressable>
-
-      {!collapsed ? (
-        <ScrollView
-          style={[
-            styles.agentPanelScroll,
-            { maxHeight: Math.max(180, Math.floor(windowHeight * 0.5)) },
-          ]}
-          contentContainerStyle={styles.agentPanelList}
-          showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-        >
-          {rows.map((row) => (
-            <Pressable
-              key={row.chat.id}
-              onPress={() => onSelectThread(row.chat.id)}
-              style={({ pressed }) => [
-                styles.agentPanelRow,
-                { borderColor: row.runtime.statusBorderColor },
-                row.selected && styles.agentPanelRowSelected,
-                pressed && styles.agentPanelRowPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={`${row.title}, ${row.runtime.label}. ${row.description}`}
-              accessibilityState={controlAccessibilityState({ selected: row.selected, busy: row.runtime.isActive })}
-            >
-              <View
-                style={[
-                  styles.agentPanelAccent,
-                  { backgroundColor: row.runtime.accentColor },
-                ]}
-              />
-              <View style={styles.agentPanelCopy}>
-                <View style={styles.agentPanelTitleRow}>
-                  <Text
-                    style={[
-                      styles.agentPanelTitle,
-                      { color: row.runtime.accentColor },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {row.title}
-                  </Text>
-                  {row.selected ? (
-                    <Text style={styles.agentPanelSelectedLabel}>Current</Text>
-                  ) : null}
-                </View>
-                <Text style={styles.agentPanelDescription} numberOfLines={1}>
-                  {row.description}
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.agentPanelStatusBadge,
-                  {
-                    backgroundColor: row.runtime.statusSurfaceColor,
-                    borderColor: row.runtime.statusBorderColor,
-                  },
-                ]}
-              >
-                {row.runtime.isActive ? (
-                  <ActivityIndicator size="small" color={row.runtime.statusColor} />
-                ) : (
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name={row.runtime.icon}
-                    size={12}
-                    color={row.runtime.statusColor}
-                  />
-                )}
-                <Text
-                  style={[
-                    styles.agentPanelStatusText,
-                    { color: row.runtime.statusColor },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {row.runtime.label}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : null}
-    </View>
-  );
-}
-
-
-// ── Chat View ──────────────────────────────────────────────────────
 
 export function ChatOpeningView() {
   const theme = useAppTheme();

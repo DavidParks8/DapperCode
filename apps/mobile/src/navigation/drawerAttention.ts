@@ -6,6 +6,7 @@ import type {
 } from '../api/types';
 import type { WorkspaceChatLimit } from '../appSettings';
 import { getAgentLabel } from '../agents';
+import { isSubAgentSource } from '../api/clientChatListInternals';
 import { buildChatWorkspaceSections } from './chatThreadTree';
 import {
   isDrawerChatRunning,
@@ -147,6 +148,11 @@ export function buildDrawerAttentionModel({
           : chat.status === 'error'
             ? 'attention'
             : 'recent';
+    // Sub-agents belong to their parent session. They only earn a row of their own
+    // while they need the user or have failed, never in the plain recent list.
+    if (lane === 'recent' && isSubAgentSource(chat.sourceKind)) {
+      continue;
+    }
     rowsByLane[lane].push({
       chat,
       lane,
