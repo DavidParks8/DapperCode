@@ -13,6 +13,7 @@ export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPi
 export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenChatNavigationAndAgentDetailContext) {
   const {
     agentDetailRequestRef,
+    agentDetailStack,
     agentRootThreadId,
     agentThreadsController,
     api,
@@ -33,6 +34,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     setAgentDetailError,
     setAgentDetailLoading,
     setAgentDetailParentChat,
+    setAgentDetailStack,
     setAgentDetailThreadId,
     setAgentThreadMenuVisible,
     setCreating,
@@ -146,6 +148,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
 
   const closeAgentDetail = useCallback(() => {
     agentDetailRequestRef.current += 1;
+    setAgentDetailStack([]);
     setAgentDetailThreadId(null);
     setAgentDetailChat(null);
     setAgentDetailParentChat(null);
@@ -184,12 +187,8 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     [agentThreadsController]
   );
 
-  const openAgentDetail = useCallback(
+  const showAgentDetail = useCallback(
     (threadId: string) => {
-      if (!threadId || threadId === agentRootThreadId) {
-        closeAgentDetail();
-        return;
-      }
       setAgentThreadMenuVisible(false);
       setAgentDetailThreadId(threadId);
       setAgentDetailChat(api.peekChat(threadId) ?? api.peekChatShell(threadId));
@@ -197,13 +196,42 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       setAgentDetailError(null);
       void loadAgentDetail(threadId, true);
     },
-    [agentRootThreadId, api, closeAgentDetail, loadAgentDetail]
+    [api, loadAgentDetail, setAgentDetailChat, setAgentDetailError, setAgentDetailParentChat, setAgentDetailThreadId, setAgentThreadMenuVisible]
   );
+
+  const openAgentDetail = useCallback(
+    (threadId: string) => {
+      if (!threadId || threadId === agentRootThreadId) {
+        closeAgentDetail();
+        return;
+      }
+      // A sub-agent can itself spawn sub-agents, so drilling in has to stack:
+      // Back walks one level up rather than dumping you to the main thread.
+      setAgentDetailStack((previous) =>
+        previous[previous.length - 1] === threadId
+          ? previous
+          : [...previous.filter((id) => id !== threadId), threadId]
+      );
+      showAgentDetail(threadId);
+    },
+    [agentRootThreadId, closeAgentDetail, setAgentDetailStack, showAgentDetail]
+  );
+
+  const popAgentDetail = useCallback(() => {
+    const parent = agentDetailStack[agentDetailStack.length - 2];
+    if (!parent) {
+      closeAgentDetail();
+      return;
+    }
+    setAgentDetailStack((previous) => previous.slice(0, -1));
+    showAgentDetail(parent);
+  }, [agentDetailStack, closeAgentDetail, setAgentDetailStack, showAgentDetail]);
 
   return {
     handleLoadEarlier,
     openChatThread,
     closeAgentDetail,
+    popAgentDetail,
     loadAgentDetail,
     openAgentDetail,
   };

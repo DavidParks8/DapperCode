@@ -165,6 +165,31 @@ export function isChatSummaryLikelyRunning(chat: ChatSummary): boolean {
   return chat.status === 'running';
 }
 
+/**
+ * A thread is working whenever it, or any sub-agent beneath it, is working.
+ *
+ * A parent's own run can settle to `complete` while a sub-agent it spawned is still
+ * streaming. Reporting "Ready" then contradicts the sub-agent card spinning in the
+ * same transcript, and makes the composer look safe to use when it is not.
+ * `relatedAgentThreads` holds every descendant of the root, so this covers
+ * sub-agents of sub-agents at any depth.
+ */
+export function isThreadOrSubAgentRunning(
+  chat: Chat | null,
+  relatedAgentThreads: readonly ChatSummary[]
+): boolean {
+  if (chat && isChatLikelyRunning(chat)) {
+    return true;
+  }
+
+  return relatedAgentThreads.some(
+    (thread) =>
+      thread.id !== chat?.id &&
+      Boolean(thread.parentThreadId) &&
+      isChatSummaryLikelyRunning(thread)
+  );
+}
+
 export function isChatLikelyRunning(chat: Chat): boolean {
   if (chat.status === 'running') {
     return true;

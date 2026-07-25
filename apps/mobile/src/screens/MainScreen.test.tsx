@@ -745,6 +745,19 @@ describe('MainScreen shell behavior', () => {
     act(() => tree.unmount());
   });
 
+  it('labels a pending approval by what it does, not by its protocol kind', async () => {
+    // Regression: the activity strip showed the raw "commandExecution" kind.
+    const api = createApi();
+    const { tree } = await renderMain({ api, pendingOpenChatId: chat.id, pendingOpenChatSnapshot: chat });
+    const root = tree.root as Queryable;
+
+    await emitWs(approvalRequested());
+
+    expect(hasText(root, 'Waiting for approval')).toBe(true);
+    expect(hasText(root, 'commandExecution')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('reuses the approval resolution id when a failed decision is retried', async () => {
     const api = createApi();
     (api.resolveApproval as jest.Mock)
@@ -867,6 +880,14 @@ const rootChat: Chat = {
     },
   ],
 };
+function nestedNoop(): Chat['messages'][number] {
+  return {
+    id: 'message-sub',
+    role: 'assistant',
+    content: 'Delegating the test run',
+    createdAt: '2026-07-20T00:00:01.000Z',
+  };
+}
 const subAgentChat: Chat = {
   ...rootChat,
   id: 'thread-sub',
@@ -1454,6 +1475,135 @@ describe('MainScreen controls and modals', () => {
     await press(byLabel(root, 'retry · broken.txt, remove attachment'));
     expect(root.findAll((node) => node.props.accessibilityLabel === 'retry · broken.txt, remove attachment')).toHaveLength(0);
 
+    act(() => tree.unmount());
+  });
+
+  it('drills into a sub-agent of a sub-agent and walks back one level at a time', async () => {
+    // A sub-agent can spawn its own sub-agent. Its card has to be openable from the
+    // detail view, and Back has to return to the sub-agent that spawned it rather
+    // than dumping the user all the way out to the main thread.
+    const nestedCard = createActivityMessage(
+      'message-sub-nested',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '\u2022 Sub-agent working\n  Status: running\n  Latest: Running npm test',
+        subAgent: {
+          tool: 'spawn_agent',
+          prompt: 'Run the tests',
+          senderThreadId: 'thread-sub',
+          receiverThreadIds: ['thread-subsub'],
+          agentStatus: 'running' as const,
+        },
+      },
+      '2026-07-20T00:00:02.000Z'
+    );
+    const nestedParent: Chat = { ...subAgentChat, messages: [nestedNoop(), nestedCard] };
+    const grandChild: Chat = {
+      ...subAgentChat,
+      id: 'thread-subsub',
+      title: 'Run the tests',
+      parentThreadId: 'thread-sub',
+      subAgentDepth: 2,
+      messages: [
+        {
+          id: 'message-subsub',
+          role: 'assistant',
+          content: 'All 12 tests passed',
+          createdAt: '2026-07-20T00:00:03.000Z',
+        },
+      ],
+    };
+    const chats: ChatSummary[] = [rootChat, nestedParent, grandChild];
+    const api = createApi({ chats });
+    (api.getChat as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve(
+        id === grandChild.id ? grandChild : id === nestedParent.id ? nestedParent : rootChat
+      )
+    );
+    const { tree } = await renderMain({ api, selectedChat: rootChat });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    const agentChip = root.findAll((node) =>
+      /^\d+ agents?$/.test(String(node.props.accessibilityLabel))
+    )[0];
+    expect(agentChip).toBeTruthy();
+    await press(agentChip);
+    await press(byLabel(root, 'Sub-agent 1'));
+    expect(
+      root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-sub-nested')
+    ).toBe(true);
+
+    // Depth 2: the nested card is openable from inside the detail view.
+    const nestedNode = root
+      .findAllByType(ChatMessage)
+      .find((node) => node.props.message.id === 'message-sub-nested');
+    const openNested = nestedNode?.props.onOpenSubAgentThread as
+      | ((threadId: string) => void)
+      | undefined;
+    expect(typeof openNested).toBe('function');
+    await act(async () => {
+      openNested?.('thread-subsub');
+      await flush();
+    });
+    await advance();
+    expect(api.getChat).toHaveBeenCalledWith(grandChild.id, { forceRefresh: true });
+    expect(
+      root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-subsub')
+    ).toBe(true);
+
+    // Back returns to the sub-agent that spawned it, not to the main thread.
+    await press(byLabel(root, 'Back from sub-agent transcript'));
+    await advance(250);
+    expect(
+      root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-sub-nested')
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the parent reported as working while a sub-agent is still working', async () => {
+    // If any sub-agent is working the parent is working. The parent's own run can
+    // settle to complete first, and "Turn completed" then contradicts the sub-agent
+    // card spinning in the same transcript.
+    const busyChild: Chat = { ...subAgentChat, status: 'running' };
+    const chats: ChatSummary[] = [{ ...rootChat, status: 'complete' }, busyChild];
+    const api = createApi({ chats });
+    const { tree } = await renderMain({
+      api,
+      selectedChat: { ...rootChat, status: 'complete' },
+    });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    expect(hasText(root, 'Working')).toBe(true);
+    expect(hasText(root, 'Turn completed')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('does not pin an agents panel above the transcript while sub-agents are in use', async () => {
+    // Regression: a live agents panel took a third of the screen to repeat what the
+    // inline sub-agent card already says. The header chip remains the way in.
+    const chats: ChatSummary[] = [rootChat, subAgentChat];
+    const api = createApi({ chats });
+    const { tree } = await renderMain({ api, selectedChat: rootChat });
+    const root = rootOf(tree);
+    await advance();
+    await act(async () => {
+      await flush();
+    });
+
+    expect(
+      root.findAll((node) => String(node.props.accessibilityLabel).startsWith('Agents, '))
+    ).toHaveLength(0);
+    expect(hasText(root, 'running now')).toBe(false);
+    // The agent thread picker is still reachable from the header.
+    expect(root.findAll((node) => node.props.accessibilityLabel === '1 agent').length).toBeGreaterThan(0);
     act(() => tree.unmount());
   });
 

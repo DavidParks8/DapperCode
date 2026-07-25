@@ -5,7 +5,10 @@ import {
   timestampIso,
 } from "./agUiReducerUtilities";
 import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from "./messages";
-import { renderAgUiCustomContent } from "./agUiContent";
+import {
+  renderAgUiCustomContent,
+  structuredTextRemainder,
+} from "./agUiContent";
 import { type AgUiEventEnvelope } from "./agUi";
 import { type AgUiThreadMessageState } from "./agUiMessagesState";
 import { type ChatMessage, type ChatMessageSubAgentMeta } from "./types";
@@ -57,18 +60,15 @@ export function reduceStructuredMessageContent(
 }
 
 /**
- * A tool's plain text and its structured rendering usually describe the same
- * payload, so skip the structured block when the plain text already covers it.
- * The block is kept whole: deduplicating line by line would delete interior
- * lines of a diff or terminal payload that happen to appear in the plain text.
- * Returns what was appended so callers can strip it again on the next revision.
+ * Appends only the part of a tool's structured rendering that its plain text does
+ * not already cover. Returns what was appended so the next revision can strip it
+ * again.
  */
 function appendToolText(
   text: string,
   structured: string,
 ): { text: string; appended: string } {
-  const trimmed = structured.trim();
-  const appended = !trimmed || text.includes(trimmed) ? "" : structured;
+  const appended = structuredTextRemainder(text, structured);
   return { text: [text, appended].filter(Boolean).join("\n"), appended };
 }
 

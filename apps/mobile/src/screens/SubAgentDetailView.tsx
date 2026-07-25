@@ -40,6 +40,7 @@ interface SubAgentDetailViewProps {
   bridgeUrl: string;
   bridgeToken: string | null;
   showToolCalls: boolean;
+  onOpenSubAgentThread?: (threadId: string) => void;
   agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
   onOpenLocalPreview?: (targetUrl: string) => void;
   onClose: () => void;
@@ -59,6 +60,7 @@ export function SubAgentDetailView({
   bridgeUrl,
   bridgeToken,
   showToolCalls,
+  onOpenSubAgentThread,
   agentThreadStatusById,
   onOpenLocalPreview,
   onClose,
@@ -206,6 +208,7 @@ export function SubAgentDetailView({
               bridgeToken={bridgeToken}
               onOpenLocalPreview={onOpenLocalPreview}
               showToolCalls={showToolCalls}
+              onOpenSubAgentThread={onOpenSubAgentThread}
               agentThreadStatusById={agentThreadStatusById}
               scrollRef={scrollRef}
               inlineChoicesEnabled={false}

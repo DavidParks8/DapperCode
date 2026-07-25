@@ -2294,6 +2294,258 @@ mod tests {
         );
     }
 
+    const TEST_THREAD: &str = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+
+    fn turn_run_started(turn: u64) -> CanonicalEvent {
+        CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: format!("run-{turn}"),
+            source_turn_id: format!("turn-{turn}"),
+            generation: turn,
+        }
+    }
+
+    fn turn_run_finished(turn: u64) -> CanonicalEvent {
+        CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: format!("run-{turn}"),
+            source_turn_id: format!("turn-{turn}"),
+            generation: turn,
+            stop_reason: StopReason::EndTurn,
+        }
+    }
+
+    fn turn_message(turn: u64, message_id: &str, content: &str) -> CanonicalEvent {
+        CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: Some(format!("run-{turn}")),
+            source_turn_id: Some(format!("turn-{turn}")),
+            generation: Some(turn),
+            role: MessageRole::Agent,
+            message_id: message_id.to_string(),
+            content: content.to_string(),
+            content_block: None,
+        }
+    }
+
+    fn turn_task_tool(
+        turn: u64,
+        tool_call_id: &str,
+        status: ToolCallStatus,
+        content: &str,
+    ) -> CanonicalEvent {
+        CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: Some(format!("run-{turn}")),
+            source_turn_id: Some(format!("turn-{turn}")),
+            generation: Some(turn),
+            tool_call_id: tool_call_id.to_string(),
+            kind: ToolKind::Other,
+            status,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(content.to_string()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        }
+    }
+
+    /// Every `(messageId, text)` pair a projection emits for sub-agent cards.
+    fn subagent_cards(projection: &CanonicalProjection) -> Vec<(String, String)> {
+        projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .filter_map(|value| {
+                let id = value["event"]["messageId"].as_str()?.to_string();
+                let text = value["event"]["content"]["text"].as_str()?.to_string();
+                id.starts_with("subagent:").then_some((id, text))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_turn_keeps_its_own_run_and_message_ids() {
+        // Follow-up messages in one session must stay separate turns: a new run has
+        // to open its own run and must not reopen or reuse the previous one.
+        let mut projector = AgUiProjector::default();
+        let mut run_ids: Vec<String> = Vec::new();
+
+        for turn in 1..=3u64 {
+            let started = projector.project_canonical(&turn_run_started(turn));
+            assert_eq!(
+                event_types(&started.events),
+                vec!["RUN_STARTED"],
+                "turn {turn} must open exactly one run"
+            );
+            run_ids.push(started.events[0].run_id.clone());
+
+            let answered =
+                projector.project_canonical(&turn_message(turn, &format!("msg-{turn}"), "answer"));
+            assert_eq!(
+                event_types(&answered.events),
+                vec!["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"],
+                "turn {turn} must stream its own message"
+            );
+
+            let finished = projector.project_canonical(&turn_run_finished(turn));
+            assert_eq!(
+                event_types(&finished.events),
+                vec!["TEXT_MESSAGE_END", "RUN_FINISHED"],
+                "turn {turn} must close cleanly"
+            );
+        }
+
+        run_ids.sort();
+        run_ids.dedup();
+        assert_eq!(run_ids.len(), 3, "each turn needs a distinct run id");
+    }
+
+    #[test]
+    fn a_sub_agent_in_the_middle_of_each_turn_gets_its_own_card() {
+        // Two turns, each spawning a sub-agent between two assistant messages. The
+        // cards are keyed by tool call, so turn two must not reuse turn one's card
+        // or resurrect it as running.
+        let mut projector = AgUiProjector::default();
+        let mut card_ids: Vec<String> = Vec::new();
+
+        for turn in 1..=2u64 {
+            projector.project_canonical(&turn_run_started(turn));
+            projector.project_canonical(&turn_message(turn, &format!("before-{turn}"), "before"));
+
+            let tool_call_id = format!("turn-{turn}-task");
+            let running = subagent_cards(&projector.project_canonical(&turn_task_tool(
+                turn,
+                &tool_call_id,
+                ToolCallStatus::InProgress,
+                "Working\n",
+            )));
+            assert_eq!(running.len(), 1, "expected one card, got {running:?}");
+            assert_eq!(running[0].0, format!("subagent:{tool_call_id}"));
+            assert!(
+                running[0].1.contains("Status: running"),
+                "turn {turn} card must report running, got {running:?}"
+            );
+            card_ids.push(running[0].0.clone());
+
+            let done = subagent_cards(&projector.project_canonical(&turn_task_tool(
+                turn,
+                &tool_call_id,
+                ToolCallStatus::Completed,
+                &format!("<task_result>Finished turn {turn}</task_result>"),
+            )));
+            assert_eq!(done.len(), 1, "expected one card, got {done:?}");
+            assert!(
+                done[0].1.contains(&format!("Finished turn {turn}")),
+                "turn {turn} result missing from {done:?}"
+            );
+
+            // The rest of the turn still streams after the sub-agent finishes.
+            let after =
+                projector.project_canonical(&turn_message(turn, &format!("after-{turn}"), "after"));
+            assert!(
+                event_types(&after.events).contains(&"TEXT_MESSAGE_CONTENT"),
+                "turn {turn} must keep streaming after its sub-agent"
+            );
+            projector.project_canonical(&turn_run_finished(turn));
+        }
+
+        card_ids.sort();
+        card_ids.dedup();
+        assert_eq!(card_ids.len(), 2, "each turn needs its own sub-agent card");
+    }
+
+    #[test]
+    fn parallel_task_tools_keep_one_card_each() {
+        // Two sub-agents running at once in a single turn must not share a card or a
+        // revision slot: interleaved updates have to land on their own tool call.
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+
+        let task_tool =
+            |tool_call_id: &str, status: ToolCallStatus, content: &str| CanonicalEvent::Tool {
+                agent_id: "alpha-agent".to_string(),
+                thread_id: parent_thread.to_string(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                tool_call_id: tool_call_id.to_string(),
+                kind: ToolKind::Other,
+                status,
+                title: "Task".to_string(),
+                content: FieldUpdate::Set(content.to_string()),
+                structured_content: FieldUpdate::Set(Vec::new()),
+                locations: FieldUpdate::Set(Vec::new()),
+            };
+
+        let cards_of = subagent_cards;
+
+        projector.project_canonical(&task_tool(
+            "task-a",
+            ToolCallStatus::InProgress,
+            "Auditing\n",
+        ));
+        projector.project_canonical(&task_tool(
+            "task-b",
+            ToolCallStatus::InProgress,
+            "Reading\n",
+        ));
+
+        // Interleaved progress: each update must address its own card.
+        let b_progress = cards_of(&projector.project_canonical(&task_tool(
+            "task-b",
+            ToolCallStatus::InProgress,
+            "Running npm test\n",
+        )));
+        assert_eq!(b_progress.len(), 1, "expected one card, got {b_progress:?}");
+        assert_eq!(b_progress[0].0, "subagent:task-b");
+        assert!(
+            b_progress[0].1.contains("Running npm test"),
+            "progress landed on the wrong card: {b_progress:?}"
+        );
+
+        let a_progress = cards_of(&projector.project_canonical(&task_tool(
+            "task-a",
+            ToolCallStatus::InProgress,
+            "Checking lockfile\n",
+        )));
+        assert_eq!(a_progress.len(), 1, "expected one card, got {a_progress:?}");
+        assert_eq!(a_progress[0].0, "subagent:task-a");
+        assert!(
+            a_progress[0].1.contains("Checking lockfile"),
+            "progress landed on the wrong card: {a_progress:?}"
+        );
+
+        // One finishing must leave the other running.
+        let b_done = cards_of(&projector.project_canonical(&task_tool(
+            "task-b",
+            ToolCallStatus::Completed,
+            "<task_result>12 tests passed</task_result>",
+        )));
+        assert_eq!(b_done.len(), 1, "expected one card, got {b_done:?}");
+        assert_eq!(b_done[0].0, "subagent:task-b");
+        assert!(
+            b_done[0].1.contains("Sub-agent completed"),
+            "unexpected text {b_done:?}"
+        );
+
+        let a_done = cards_of(&projector.project_canonical(&task_tool(
+            "task-a",
+            ToolCallStatus::Completed,
+            "<task_result>No drift found</task_result>",
+        )));
+        assert_eq!(a_done.len(), 1, "expected one card, got {a_done:?}");
+        assert_eq!(a_done[0].0, "subagent:task-a");
+        assert!(
+            a_done[0].1.contains("No drift found"),
+            "terminal result missing from {a_done:?}"
+        );
+    }
+
     #[test]
     fn status_only_updates_keep_the_sub_agent_card_and_its_child_link() {
         let mut projector = AgUiProjector::default();

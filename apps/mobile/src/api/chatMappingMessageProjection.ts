@@ -14,6 +14,7 @@ import {
   toSubAgentMeta,
 } from "./chatMappingToolArgumentParsers";
 import { renderAgUiCustomContent } from "./agUi";
+import { structuredTextRemainder } from "./agUiContent";
 import { toToolLikeMessage } from "./chatMappingToolMessageProjection";
 import { type ChatMessage } from "./types";
 import {
@@ -110,12 +111,9 @@ export function mapMessages(
                 locations: tool.locations,
               })
             : "";
-          // `tool.content` is the plain-text rendering of the same payload, so drop
-          // structured lines it already covers instead of printing them twice.
-          const structuredExtras = structured
-            .split("\n")
-            .filter((line) => line.trim() && !tool.content.includes(line.trim()))
-            .join("\n");
+          // `tool.content` is the plain-text rendering of the same payload, so keep
+          // only what it does not already cover instead of printing it twice.
+          const structuredExtras = structuredTextRemainder(tool.content, structured);
           const details = [tool.title || tool.kind, tool.content, structuredExtras]
             .filter(Boolean)
             .join("\n");

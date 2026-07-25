@@ -71,7 +71,7 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     agentDetailSummary,
     agentDetailLoading,
     agentDetailError,
-    closeAgentDetail,
+    popAgentDetail,
     attachmentMenuVisible,
     attachmentMenuOptions,
     attachmentController,
@@ -240,7 +240,8 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
                 showToolCalls={showToolCalls ?? true}
                 agentThreadStatusById={agentThreadStatusById}
                 onOpenLocalPreview={onOpenLocalPreview}
-                onClose={closeAgentDetail}
+                onOpenSubAgentThread={openAgentDetail}
+                onClose={popAgentDetail}
               />
       <SelectionSheet
                 visible={attachmentMenuVisible}

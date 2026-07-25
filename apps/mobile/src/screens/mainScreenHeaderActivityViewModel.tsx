@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Chat } from '../api/types';
-import { type ActivityState, GENERIC_RUNNING_ACTIVITY_DELAY_MS, GENERIC_RUNNING_ACTIVITY_TITLES, normalizeCloneDirectoryName, joinWorkspacePath, isBridgeRecoveryActivity } from './mainScreenHelpers';
+import { GENERIC_RUNNING_ACTIVITY_DELAY_MS, GENERIC_RUNNING_ACTIVITY_TITLES, normalizeCloneDirectoryName, joinWorkspacePath } from './mainScreenHelpers';
 import { areChatStatusMapsEquivalent } from './mainScreenChatState';
+import { resolveDisplayedActivity, resolveVisibleActivity } from './mainScreenActivityIndicator';
 import type { MainScreenUiActionHandlersContext, MainScreenUiActionHandlersResult } from './mainScreenUiActionHandlers';
 
 
@@ -38,87 +39,21 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     ws,
   } = context;
 
-  const visibleActivity = (() => {
-    if (isOpeningChat) {
-      return {
-        tone: 'running',
-        title: 'Opening chat',
-      } satisfies ActivityState;
-    }
-
-    if (pendingApproval) {
-      return {
-        tone: 'idle',
-        title: 'Waiting for approval',
-        detail:
-          pendingApproval.command ??
-          (pendingApproval.kind === 'commandExecution' ? 'Run command' : 'File change'),
-      } satisfies ActivityState;
-    }
-
-    if (pendingUserInputRequest) {
-      return {
-        tone: 'idle',
-        title: 'Waiting for input',
-      } satisfies ActivityState;
-    }
-
-    if (activity.tone === 'error' && activity.title !== 'Turn failed') {
-      return activity;
-    }
-
-    if (heldActivity && !isLoading && !isTurnLikelyRunning) {
-      return heldActivity;
-    }
-
-    if (
-      isLoading ||
-      isTurnLikelyRunning ||
-      (activity.tone === 'running' && selectedChat?.status !== 'complete')
-    ) {
-      const runningTitle = activity.title.trim() || 'Working';
-      return {
-        tone: 'running',
-        title: runningTitle,
-        detail: activity.detail,
-      } satisfies ActivityState;
-    }
-
-    if (!isLoading && !isTurnLikelyRunning && selectedChat?.status === 'complete') {
-      return {
-        tone: 'complete',
-        title: 'Turn completed',
-      } satisfies ActivityState;
-    }
-
-    if (activity.tone === 'error' && activity.title === 'Turn failed') {
-      return {
-        tone: 'error',
-        title: 'Turn failed',
-        detail: turnFailureDetail ?? undefined,
-      } satisfies ActivityState;
-    }
-
-    return activity;
-  })();
-  const displayedActivity = (() => {
-    if (!ws.isConnected && isBridgeRecoveryActivity(visibleActivity)) {
-      if (!showBridgeRecoveryBanner) {
-        return {
-          tone: 'idle',
-          title: 'Ready',
-        } satisfies ActivityState;
-      }
-
-      return {
-        tone: 'error',
-        title: 'Bridge disconnected',
-        detail: 'Start the bridge on your computer to continue.',
-      } satisfies ActivityState;
-    }
-
-    return visibleActivity;
-  })();
+  const indicatorInputs = {
+    activity,
+    heldActivity,
+    isConnected: ws.isConnected,
+    isLoading,
+    isOpeningChat,
+    isTurnLikelyRunning,
+    pendingApproval,
+    pendingUserInputRequest,
+    selectedChatStatus: selectedChat?.status ?? null,
+    showBridgeRecoveryBanner,
+    turnFailureDetail,
+  };
+  const visibleActivity = resolveVisibleActivity(indicatorInputs);
+  const displayedActivity = resolveDisplayedActivity(indicatorInputs);
   const isGenericRunningActivity =
     displayedActivity.tone === 'running' &&
     !displayedActivity.detail &&
