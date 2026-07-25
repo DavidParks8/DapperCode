@@ -310,3 +310,105 @@ export function nestedSubAgent(
     }),
   ];
 }
+
+/** One card update for a sub-agent identified by its slot in the turn. */
+interface SubAgentStep {
+  slot: number;
+  childThreadId?: string;
+  status: 'running' | 'completed';
+  latest: string;
+}
+
+function turnCards(
+  parentThreadId: string,
+  runId: string,
+  turnIndex: number,
+  steps: SubAgentStep[],
+): EventSequenceEntry[] {
+  return steps.map((step) =>
+    subAgentCard(parentThreadId, runId, {
+      toolCallId: `${parentThreadId}::turn-${String(turnIndex)}-task-${String(step.slot)}`,
+      childThreadId: step.childThreadId,
+      status: step.status,
+      heading: step.status === 'completed' ? '\u2022 Sub-agent completed' : '\u2022 Sub-agent working',
+      latest: step.latest,
+    }),
+  );
+}
+
+/**
+ * One turn that runs two sub-agents at the same time, interleaving their updates
+ * the way two concurrent task tools actually report.
+ */
+export function parallelSubAgentsInOneTurn(parentThreadId = 'parent'): {
+  start: EventSequenceEntry[];
+  interleaved: EventSequenceEntry[];
+  finish: EventSequenceEntry[];
+} {
+  const runId = `${parentThreadId}::run-1`;
+  const cards = (steps: SubAgentStep[]) => turnCards(parentThreadId, runId, 1, steps);
+
+  return {
+    start: [
+      ...sequence(parentThreadId, runId)
+        .runStarted()
+        .textMessage('Splitting this in two.', { messageId: `${parentThreadId}::msg-1` })
+        .build(),
+      ...cards([
+        { slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Auditing deps' },
+        { slot: 2, childThreadId: 'child-b', status: 'running', latest: 'Reading tests' },
+      ]),
+    ],
+    // Both report progress out of order, and one finishes while the other works.
+    interleaved: [
+      ...cards([{ slot: 2, childThreadId: 'child-b', status: 'running', latest: 'Running npm test' }]),
+      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Checking lockfile' }]),
+      ...cards([{ slot: 2, childThreadId: 'child-b', status: 'completed', latest: '12 tests passed' }]),
+      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Diffing versions' }]),
+    ],
+    finish: [
+      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'completed', latest: 'No drift found' }]),
+      ...sequence(parentThreadId, runId)
+        .textMessage('Both finished.', { messageId: `${parentThreadId}::msg-2` })
+        .runFinished()
+        .build(),
+    ],
+  };
+}
+
+/**
+ * Two turns in one session, each spawning a sub-agent *between* two assistant
+ * messages, so the card has to hold its place in the middle of the turn.
+ */
+export function turnsWithSubAgentInTheMiddle(parentThreadId = 'parent'): {
+  turnOne: EventSequenceEntry[];
+  turnTwo: EventSequenceEntry[];
+} {
+  const turn = (index: number, childThreadId: string): EventSequenceEntry[] => {
+    const runId = `${parentThreadId}::run-${String(index)}`;
+    const prefix = `${parentThreadId}::t${String(index)}`;
+    return [
+      ...sequence(parentThreadId, runId)
+        .runStarted()
+        .textMessage(`Prompt ${String(index)}`, { messageId: `${prefix}-user`, role: 'user' })
+        .textMessage(`Before the sub-agent, turn ${String(index)}.`, {
+          messageId: `${prefix}-before`,
+        })
+        .build(),
+      ...turnCards(parentThreadId, runId, index, [
+        { slot: 1, childThreadId, status: 'running', latest: `Working on turn ${String(index)}` },
+      ]),
+      ...turnCards(parentThreadId, runId, index, [
+        { slot: 1, childThreadId, status: 'completed', latest: `Finished turn ${String(index)}` },
+      ]),
+      ...sequence(parentThreadId, runId)
+        .textMessage(`After the sub-agent, turn ${String(index)}.`, {
+          messageId: `${prefix}-after`,
+        })
+        .runFinished()
+        .build(),
+    ];
+  };
+
+  return { turnOne: turn(1, 'child-1'), turnTwo: turn(2, 'child-2') };
+}

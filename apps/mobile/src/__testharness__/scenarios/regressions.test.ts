@@ -4,6 +4,7 @@ import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
 import {
   nestedSubAgent,
+  parallelSubAgentsInOneTurn,
   parentOnlySubAgent,
   spawnToolThenSubAgentCard,
   subAgentStatusOnlyUpdate,
@@ -11,6 +12,7 @@ import {
   promptAfterSnapshot,
   streamThenAuthoritativeSnapshot,
   multiTurnReplayedHistory,
+  turnsWithSubAgentInTheMiddle,
 } from '../fixtures/regressions';
 
 registerTestHarnessMatchers();
@@ -20,6 +22,14 @@ registerTestHarnessMatchers();
  * against the sequence of events the bridge actually emits, so a regression fails
  * here rather than on a device.
  */
+
+/** Persist what is currently rendered, the way the bridge stores a finished turn. */
+function persistProjection(state: TestableThreadState, threadId: string): void {
+  state.setPersistedChat({
+    ...state.buildSyntheticChat(threadId),
+    messages: state.projectTranscript(threadId).messages,
+  });
+}
 
 describe('Streaming and snapshot sequencing', () => {
   it('keeps the full assistant text when a snapshot lands mid-stream', () => {
@@ -122,24 +132,34 @@ describe('Streaming and snapshot sequencing', () => {
   });
 
   it('never renders the same message twice across a multi-turn session', () => {
+    // Follow-up messages in one session must not make earlier ones pop in and out:
+    // after every turn the whole history is still there, in order, exactly once.
     const state = new TestableThreadState();
+    const expectedIds: string[] = [];
+
     for (let turn = 1; turn <= 4; turn += 1) {
-      const runId = `run-${String(turn)}`;
       state.applySequence(
-        sequence('t1', runId)
+        sequence('t1', `run-${String(turn)}`)
           .runStarted()
+          .textMessage(`prompt ${String(turn)}`, {
+            messageId: `t1::user-${String(turn)}`,
+            role: 'user',
+          })
           .textMessage(`answer ${String(turn)}`, { messageId: `t1::msg-${String(turn)}` })
           .runFinished()
           .build(),
       );
-      state.setPersistedChat({
-        ...state.buildSyntheticChat('t1'),
-        messages: state.projectTranscript('t1').messages,
-      });
+      expectedIds.push(`t1::user-${String(turn)}`, `t1::msg-${String(turn)}`);
+
+      expect(state).toHaveMessageCount('t1', expectedIds.length);
+      expect(state).toHaveMessagesInOrder('t1', ...expectedIds);
+      expect(state).toHaveNoDuplicateIds('t1');
+      expect(state).toHaveNoDuplicateContent('t1');
+      persistProjection(state, 't1');
     }
 
-    expect(state.findDuplicateIds('t1')).toEqual([]);
-    expect(state.findDuplicateContent('t1')).toEqual([]);
+    // The first turn survives all three follow-ups verbatim.
+    expect(state).toHaveMessageAt('t1', 0, { id: 't1::user-1', content: 'prompt 1' });
   });
 });
 
@@ -425,5 +445,101 @@ describe('Long-session bookkeeping', () => {
       threadState?.messages.length,
     );
     expect(state.findDuplicateIds('t1')).toEqual([]);
+  });
+});
+
+describe('Sub-agents across turns', () => {
+  it('tracks two sub-agents running in parallel in a single turn', () => {
+    // Two concurrent task tools report out of order. Each needs its own card, and
+    // one finishing must not disturb the other's state.
+    const state = new TestableThreadState();
+    const turn = parallelSubAgentsInOneTurn('parent');
+
+    state.applySequence(turn.start);
+    expect(state).toHaveSubAgentCount('parent', 2);
+    expect(state).toHaveRunningSubAgents('parent', 2);
+    expect(state).toHaveSubAgentCard('parent', 'child-a', { preview: 'Auditing deps' });
+    expect(state).toHaveSubAgentCard('parent', 'child-b', { preview: 'Reading tests' });
+
+    // Interleaved updates: each card tracks its own sub-agent, not the last one seen.
+    turn.interleaved.forEach((event) => {
+      state.applySequence([event]);
+    });
+    expect(state).toHaveSubAgentCount('parent', 2);
+    expect(state).toHaveRunningSubAgents('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child-a', {
+      status: 'running',
+      preview: 'Diffing versions',
+    });
+    expect(state).toHaveSubAgentCard('parent', 'child-b', {
+      status: 'completed',
+      preview: '12 tests passed',
+    });
+
+    state.applySequence(turn.finish);
+    expect(state).toHaveSubAgentCount('parent', 2);
+    expect(state).toHaveRunningSubAgents('parent', 0);
+    expect(state).toHaveNoDuplicateIds('parent');
+    expect(state).toHaveNoDuplicateContent('parent');
+  });
+
+  it('keeps each turn\'s sub-agent card in the middle of its own turn', () => {
+    // Two turns, each spawning a sub-agent between two assistant messages. Turn one
+    // is persisted before turn two starts, the way the bridge stores a finished
+    // turn, so this exercises the persisted+live merge with cards in the middle.
+    const state = new TestableThreadState();
+    const { turnOne, turnTwo } = turnsWithSubAgentInTheMiddle('parent');
+
+    state.applySequence(turnOne);
+    expect(state).toHaveSubAgentCount('parent', 1);
+    expect(state).toHaveMessagesInOrder(
+      'parent',
+      'parent::t1-before',
+      'subagent:parent::turn-1-task-1',
+      'parent::t1-after',
+    );
+
+    persistProjection(state, 'parent');
+    state.applySequence(turnTwo);
+
+    expect(state).toHaveSubAgentCount('parent', 2);
+    expect(state).toHaveSubAgentCard('parent', 'child-1', { status: 'completed' });
+    expect(state).toHaveSubAgentCard('parent', 'child-2', { status: 'completed' });
+    // Turn one's messages keep their place; nothing pops to the end.
+    expect(state).toHaveMessagesInOrder(
+      'parent',
+      'parent::t1-before',
+      'subagent:parent::turn-1-task-1',
+      'parent::t1-after',
+      'parent::t2-before',
+      'subagent:parent::turn-2-task-1',
+      'parent::t2-after',
+    );
+    expect(state).toHaveNoDuplicateIds('parent');
+    expect(state).toHaveNoDuplicateContent('parent');
+  });
+
+  it('does not resurrect an earlier turn\'s sub-agent as running', () => {
+    // A completed card from turn one must stay completed once turn two starts,
+    // otherwise the parent reports work that already finished -- and with the
+    // parent following its sub-agents, that would spin the header indefinitely.
+    const state = new TestableThreadState();
+    const { turnOne, turnTwo } = turnsWithSubAgentInTheMiddle('parent');
+
+    state.applySequence(turnOne);
+    expect(state).toHaveRunningSubAgents('parent', 0);
+    persistProjection(state, 'parent');
+
+    // Mid-turn-two the only running sub-agent is turn two's.
+    const finishIndex = turnTwo.findIndex((entry) => {
+      const content = (entry.event as { content?: { text?: string } }).content;
+      return content?.text?.includes('Finished turn 2') ?? false;
+    });
+    expect(finishIndex).toBeGreaterThan(0);
+    state.applySequence(turnTwo.slice(0, finishIndex));
+
+    expect(state).toHaveRunningSubAgents('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child-1', { status: 'completed' });
+    expect(state).toHaveSubAgentCard('parent', 'child-2', { status: 'running' });
   });
 });
