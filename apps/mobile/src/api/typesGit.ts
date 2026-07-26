@@ -16,12 +16,6 @@ export interface TerminalExecResponse {
   durationMs: number;
 }
 
-export interface GitHubAuthInstallRequest {
-  accessToken?: string;
-  repositories?: string[];
-  grants?: GitHubAuthGrantInput[];
-}
-
 export interface GitHubAuthGrantInput {
   accessToken: string;
   repositories?: string[];
@@ -202,11 +196,6 @@ export interface PendingApproval {
   grantRoot?: string;
   proposedExecpolicyAmendment?: string[];
   options: Array<{ id: string; label: string; kind?: string }>;
-}
-
-export interface ResolveApprovalRequest {
-  decision: string;
-  resolutionId: string;
 }
 
 export interface ResolveApprovalResponse {

@@ -5,11 +5,6 @@ import type {
 } from './api/types';
 import { dedupeRecentPreviewTargets, normalizePreviewTargetInput } from './browserPreview';
 import { normalizeBridgeUrlInput } from './bridgeUrl';
-import {
-  DEFAULT_FONT_PREFERENCE,
-  normalizeFontPreference,
-  type FontPreference,
-} from './fonts';
 import type { AppearancePreference, DarkUiPalette } from './theme';
 
 export const APP_SETTINGS_VERSION = 13;
@@ -27,7 +22,6 @@ export function parseAppSettings(raw: string): {
   showToolCalls: boolean;
   appearancePreference: AppearancePreference;
   darkUiPalette: DarkUiPalette;
-  fontPreference: FontPreference;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
 } {
@@ -42,7 +36,6 @@ export function parseAppSettings(raw: string): {
       showToolCalls: true,
       appearancePreference: 'system',
       darkUiPalette: 'classic',
-      fontPreference: DEFAULT_FONT_PREFERENCE,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
@@ -66,8 +59,7 @@ export function parseAppSettings(raw: string): {
         showToolCalls: true,
         appearancePreference: 'system',
         darkUiPalette: 'classic',
-        fontPreference: DEFAULT_FONT_PREFERENCE,
-        workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
+          workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
       };
     }
@@ -98,9 +90,6 @@ export function parseAppSettings(raw: string): {
       darkUiPalette: normalizeStoredDarkUiPalette(
         (parsed as { darkUiPalette?: unknown }).darkUiPalette
       ),
-      fontPreference: normalizeFontPreference(
-        (parsed as { fontPreference?: unknown }).fontPreference
-      ),
       workspaceChatLimit: normalizeWorkspaceChatLimit(
         (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit
       ),
@@ -119,15 +108,10 @@ export function parseAppSettings(raw: string): {
       showToolCalls: true,
       appearancePreference: 'system',
       darkUiPalette: 'classic',
-      fontPreference: DEFAULT_FONT_PREFERENCE,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
   }
-}
-
-export function formatWorkspaceChatLimit(value: WorkspaceChatLimit): string {
-  return value === null ? 'All chats' : `${value} chats`;
 }
 
 function normalizeBridgeUrl(value: unknown): string | null {

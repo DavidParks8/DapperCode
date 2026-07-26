@@ -37,8 +37,6 @@ export const bridgeProfileStoreAtom = atom((get) => get(appStateDataAtom).bridge
 
 export const bridgeProfilesAtom = atom((get) => get(bridgeProfileStoreAtom).profiles);
 
-export const activeBridgeProfileIdAtom = atom((get) => get(bridgeProfileStoreAtom).activeProfileId);
-
 export const pushSettingsAtom = atom((get) => get(appStateDataAtom).push);
 
 export function requireAppStore(store: AppStore | null): AppStore {

@@ -1,4 +1,4 @@
-import { DEFAULT_FONT_PREFERENCE } from './fonts';
+import { SYSTEM_FONT_FAMILIES } from './fonts';
 import { Platform } from 'react-native';
 import { AppThemeProvider, colors, createAppTheme, resolveThemeMode, typography } from './theme';
 
@@ -38,26 +38,29 @@ describe('theme', () => {
   });
 
   it('uses grey charcoal tokens when dark grey palette is selected', () => {
-    const theme = createAppTheme('dark', DEFAULT_FONT_PREFERENCE, 'grey');
+    const theme = createAppTheme('dark', 'grey');
 
     expect(theme.colors.bgMain).toBe('#1e1e1e');
     expect(theme.colors.accentText).toBe('#1e1e1e');
   });
 
-  it('switches typography families for a custom font preset', () => {
-    const theme = createAppTheme('dark', 'ibmPlex');
+  it('uses the platform font with numeric weights for all text styles', () => {
+    const theme = createAppTheme('dark');
 
-    expect(theme.fontPreference).toBe('ibmPlex');
-    expect(theme.typography.body.fontFamily).toBe('IBMPlexSans_400Regular');
-    expect(theme.typography.headline.fontFamily).toBe('IBMPlexSans_600SemiBold');
-    expect(theme.typography.mono.fontFamily).toBe('IBMPlexMono_400Regular');
-  });
-
-  it('uses platform system weights for the system font preset', () => {
-    const theme = createAppTheme('dark', 'system');
+    expect(theme.fonts).toBe(SYSTEM_FONT_FAMILIES);
     expect(theme.typography.largeTitle).toMatchObject({ fontWeight: '700' });
     expect(theme.typography.headline).toMatchObject({ fontWeight: '600' });
     expect(theme.typography.body).toMatchObject({ fontWeight: '400' });
+    expect(theme.typography.caption).toMatchObject({ fontWeight: '400' });
+    expect(theme.typography.largeTitle.fontFamily).toBeUndefined();
+    expect(theme.typography.body.fontFamily).toBeUndefined();
+  });
+
+  it('keeps a platform monospace family for code-style text', () => {
+    const theme = createAppTheme('dark');
+
+    expect(theme.typography.mono.fontFamily).toBe(SYSTEM_FONT_FAMILIES.monoRegular);
+    expect(SYSTEM_FONT_FAMILIES.monoRegular).toBe('Menlo');
   });
 
   it('updates compatibility color and typography exports in the provider', () => {

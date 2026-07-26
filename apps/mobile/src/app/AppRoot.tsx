@@ -1,16 +1,14 @@
 import 'react-native-gesture-handler';
 
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useFonts } from 'expo-font';
 import { useEffect, useMemo } from 'react';
 import { useColorScheme, useWindowDimensions } from 'react-native';
 import { Easing, LinearTransition } from 'react-native-reanimated';
 
-import { APP_FONT_ASSETS } from '../fonts';
 import { appStateLoadedAtom, appStatePersistenceErrorAtom } from '../state/appState/atoms';
 import { bridgeUrlAtom } from '../state/bridge/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
-import { fontsLoadedAtom, systemColorSchemeAtom, themeAtom } from '../state/theme';
+import { systemColorSchemeAtom, themeAtom } from '../state/theme';
 import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_ANIMATION_MS } from './appConstants';
 import { getDrawerWidth } from './appDrawerUtils';
 import { createStyles } from './appStyles';
@@ -25,16 +23,10 @@ import { usePushNotificationsLifecycle } from './usePushNotificationsLifecycle';
 export function AppRoot() {
   const systemColorScheme = useColorScheme();
   const setSystemColorScheme = useSetAtom(systemColorSchemeAtom);
-  const setFontsLoaded = useSetAtom(fontsLoadedAtom);
-  const [fontsLoaded, fontsError] = useFonts(APP_FONT_ASSETS);
 
   useEffect(() => {
     setSystemColorScheme(systemColorScheme);
   }, [setSystemColorScheme, systemColorScheme]);
-
-  useEffect(() => {
-    setFontsLoaded(fontsLoaded);
-  }, [fontsLoaded, setFontsLoaded]);
 
   const settingsLoaded = useAtomValue(appStateLoadedAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
@@ -62,7 +54,7 @@ export function AppRoot() {
   useAppBridgeLifecycle();
   useAppStoreReview();
 
-  if (!settingsLoaded || (!fontsLoaded && !fontsError)) {
+  if (!settingsLoaded) {
     return <LoadingShell theme={theme} styles={styles} />;
   }
 

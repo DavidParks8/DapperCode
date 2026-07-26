@@ -17,13 +17,6 @@
   },
   "dependencies": {
     "@ag-ui/core": "0.0.57",
-    "@expo-google-fonts/fira-code": "^0.4.1",
-    "@expo-google-fonts/ibm-plex-mono": "^0.4.1",
-    "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
-    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
-    "@expo-google-fonts/source-code-pro": "^0.4.1",
-    "@expo-google-fonts/space-grotesk": "^0.4.1",
-    "@expo-google-fonts/space-mono": "^0.4.2",
     "@expo/metro-runtime": "~55.0.12",
     "@expo/vector-icons": "15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
@@ -90,7 +83,7 @@
       }
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
     ]
   }
 }
