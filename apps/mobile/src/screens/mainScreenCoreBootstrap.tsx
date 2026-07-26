@@ -1,9 +1,19 @@
-import { useAtomValue } from 'jotai';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useCallback, useMemo, useRef } from 'react';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../state/mainScreen/turn';
+import {
+  activeCommandsAtom,
+  loadingWorkspaceRootsAtom,
+  openingChatIdAtom,
+  pendingAgentIdAtom,
+  selectedChatAtom,
+  selectedChatIdAtom,
+  selectedParentChatAtom,
+  transcriptContinuationStateAtom,
+} from '../state/mainScreen/session';
 import { type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AgentId, RunEvent, Chat, FileSystemListResponse } from '../api/types';
+import type { FileSystemListResponse } from '../api/types';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
@@ -15,7 +25,7 @@ import { useDraftController } from './controllers/draftController';
 import { SubmissionController } from './controllers/submissionController';
 import { TurnExecutionController } from './controllers/turnExecutionController';
 import { MainScreenPersistenceController } from './controllers/mainScreenPersistenceController';
-import { TranscriptContinuationController, getTranscriptContinuationState, type TranscriptContinuationState } from './controllers/transcriptContinuationController';
+import { TranscriptContinuationController, getTranscriptContinuationState } from './controllers/transcriptContinuationController';
 import type { MainScreenBaseContext } from './useMainScreenBaseContext';
 
 
@@ -35,6 +45,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     preferredAgentId,
   } = context;
 
+  const store = useStore();
   const theme = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -54,28 +65,35 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     pendingOpenChatSnapshot.messages.length > 0
       ? pendingOpenChatSnapshot
       : null;
-  const [selectedChat, setSelectedChat] = useState<Chat | null>(
-    initialPendingSnapshot
-  );
-  const [transcriptContinuationState, setTranscriptContinuationState] =
-    useState<TranscriptContinuationState>(() =>
-      initialPendingSnapshot
-        ? getTranscriptContinuationState(initialPendingSnapshot)
-        : { loading: false, error: null, exhausted: true, unavailableCount: 0 }
-    );
-  const [selectedParentChat, setSelectedParentChat] = useState<Chat | null>(null);
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(
-    initialPendingSnapshot?.id ?? pendingOpenChatId ?? null
-  );
-  const [openingChatId, setOpeningChatId] = useState<string | null>(
-    initialPendingSnapshot ? null : pendingOpenChatId ?? null
-  );
+  // Seeds the freshly reset screen atoms with the snapshot this mount was opened with.
+  useMemo(() => {
+    if (initialPendingSnapshot) {
+      store.set(selectedChatAtom, initialPendingSnapshot);
+      store.set(
+        transcriptContinuationStateAtom,
+        getTranscriptContinuationState(initialPendingSnapshot)
+      );
+    }
+    store.set(selectedChatIdAtom, initialPendingSnapshot?.id ?? pendingOpenChatId ?? null);
+    store.set(openingChatIdAtom, initialPendingSnapshot ? null : pendingOpenChatId ?? null);
+    store.set(pendingAgentIdAtom, preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null);
+  }, [store]);
+  const selectedChat = useAtomValue(selectedChatAtom);
+  const setSelectedChat = useSetAtom(selectedChatAtom);
+  const transcriptContinuationState = useAtomValue(transcriptContinuationStateAtom);
+  const setTranscriptContinuationState = useSetAtom(transcriptContinuationStateAtom);
+  const selectedParentChat = useAtomValue(selectedParentChatAtom);
+  const setSelectedParentChat = useSetAtom(selectedParentChatAtom);
+  const selectedChatId = useAtomValue(selectedChatIdAtom);
+  const setSelectedChatId = useSetAtom(selectedChatIdAtom);
+  const openingChatId = useAtomValue(openingChatIdAtom);
+  const setOpeningChatId = useSetAtom(openingChatIdAtom);
   const openingChatStartedAtRef = useRef<number>(
     initialPendingSnapshot || !pendingOpenChatId ? 0 : Date.now()
   );
   const draftController = useDraftController(bridgeProfileId, selectedChatId);
   const { draft, setDraft } = draftController;
-  const [, setActiveCommands] = useState<RunEvent[]>([]);
+  const setActiveCommands = useSetAtom(activeCommandsAtom);
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(
     (
@@ -94,12 +112,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     },
     []
   );
-  const [, setLoadingWorkspaceRoots] = useState(false);
+  const setLoadingWorkspaceRoots = useSetAtom(loadingWorkspaceRootsAtom);
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
-  const [pendingAgentId, setPendingAgentId] = useState<AgentId | null>(
-    () => preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null
-  );
+  const pendingAgentId = useAtomValue(pendingAgentIdAtom);
+  const setPendingAgentId = useSetAtom(pendingAgentIdAtom);
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
