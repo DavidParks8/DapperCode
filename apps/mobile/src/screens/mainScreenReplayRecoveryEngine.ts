@@ -1,8 +1,11 @@
 import {
+  bridgeCapabilitiesAtom
+} from '../state/mainScreen/models';
+import {
   agentDetailThreadIdAtom,
   relatedAgentThreadsAtom
 } from '../state/mainScreen/workspace';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { RUN_WATCHDOG_MS, toPersistedActivePlanState, isChatLikelyRunning } from './mainScreenHelpers';
 import { fetchReplayRecoverySnapshot, ReplayRecoveryProtocolError, type ReplayRecoverySnapshot } from './controllers/replayRecoveryController';
@@ -38,7 +41,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     setActiveCommands,
     setActivePlan,
     setActiveTurnId,
-    setBridgeCapabilities,
     setError,
     setLiveAssistantByThread,
     setPendingApproval,
@@ -51,6 +53,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     threadRuntimeSnapshotsRef,
     ws,
   } = context;
+  const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
 

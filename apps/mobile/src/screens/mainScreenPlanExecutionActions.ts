@@ -1,4 +1,7 @@
 import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import {
   pendingPlanImplementationPromptsAtom,
   planPanelCollapsedByThreadAtom
 } from '../state/mainScreen/composer';
@@ -24,14 +27,14 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     scrollToBottomIfPinned,
     selectedChat,
     selectedChatId,
-    selectedCollaborationMode,
     selectedPlanImplementationPrompt,
     selectedThreadPlan,
     sendMessageContent,
-    setSelectedCollaborationMode,
     showActivity,
     supportsPlanMode,
   } = context;
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const pendingPlanImplementationPrompts = useAtomValue(pendingPlanImplementationPromptsAtom);
   const setPlanPanelCollapsedByThread = useSetAtom(planPanelCollapsedByThreadAtom);
   const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);

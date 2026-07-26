@@ -1,3 +1,8 @@
+import {
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import type { MainScreenPickerOptionBuildersContext, MainScreenPickerOptionBuildersResult } from './mainScreenPickerOptionBuilders';
@@ -19,15 +24,15 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
     api,
     preferredStartCwd,
     scrollToBottomIfPinned,
-    selectedAcpModeId,
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    selectedCollaborationMode,
     setError,
     setSelectedChat,
     setSelectedChatId,
   } = context;
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
 
 
   const appendLocalAssistantMessage = useCallback(

@@ -1,7 +1,11 @@
 import {
+  bridgeCapabilitiesAtom,
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { buildUserInputDrafts, resolveSnapshotCollaborationMode, appendRunEventHistory, upsertBridgeUiSurfaceList } from './mainScreenHelpers';
 import type { MainScreenThreadRuntimeMutationsContext, MainScreenThreadRuntimeMutationsResult } from './mainScreenThreadRuntimeMutations';
@@ -17,7 +21,6 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   const {
     api,
     approvalController,
-    bridgeCapabilities,
     bridgeUiSurfaceSnapshotsRef,
     cacheThreadPendingApproval,
     chatIdRef,
@@ -33,19 +36,20 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
     setActiveCommands,
     setActivePlan,
     setActiveTurnId,
-    setBridgeCapabilities,
     setChatPlanSnapshotsLoaded,
     setPendingApproval,
     setPendingUserInputRequest,
     setResolvingUserInput,
     setRunWatchdogNow,
-    setSelectedCollaborationMode,
     setStreamingText,
     setUserInputDrafts,
     setUserInputError,
     threadRuntimeSnapshotsRef,
     upsertThreadRuntimeSnapshot,
   } = context;
+  const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
+  const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
 
 

@@ -1,4 +1,7 @@
 import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import {
   agentDetailChatAtom,
   agentDetailThreadIdAtom
 } from '../state/mainScreen/workspace';
@@ -42,10 +45,10 @@ export function processThreadStateEvents(
     cacheThreadActivity,
     bumpRunWatchdog,
     pushActiveCommand,
-    setSelectedCollaborationMode,
     upsertLiveReasoningMessage,
     store,
   } = context;
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const agentDetailThreadId = store.get(agentDetailThreadIdAtom);
   const agentDetailChat = store.get(agentDetailChatAtom);
   const setActivity = screenSetter(store, activityAtom);

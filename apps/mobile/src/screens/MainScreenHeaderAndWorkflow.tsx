@@ -1,3 +1,6 @@
+import {
+  loadingModelsAtom
+} from '../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, Text, View } from 'react-native';
@@ -44,7 +47,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     fastModeControlDisabled,
     toggleFastMode,
     modelPickerOptions,
-    loadingModels,
     closeModelModal,
     effortPickerSheetOptions,
     closeEffortModal,
@@ -63,6 +65,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     implementPlan,
     stayInPlanMode,
   } = context;
+  const loadingModels = useAtomValue(loadingModelsAtom);
   const modelModalVisible = useAtomValue(modelModalVisibleAtom);
   const effortModalVisible = useAtomValue(effortModalVisibleAtom);
 

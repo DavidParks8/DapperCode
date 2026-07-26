@@ -1,3 +1,7 @@
+import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
 import type { MainScreenChatCreationFlowContext, MainScreenChatCreationFlowResult } from './mainScreenChatCreationFlow';
 import { executeSendMessage, type SendMessageOptions } from './mainScreenSendMessage';
@@ -39,9 +43,9 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
     scrollToBottomReliable,
     selectedChat,
     selectedChatId,
-    selectedCollaborationMode,
     submissionController,
   } = context;
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
 
 
   const sendMessageContent = useCallback(

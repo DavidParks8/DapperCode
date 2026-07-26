@@ -1,4 +1,11 @@
-import { useSetAtom } from 'jotai';
+import {
+  loadingModelsAtom,
+  modelOptionsByAgentAtom,
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom
+} from '../state/mainScreen/models';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useRef } from 'react';
 import type { AcpConfigOption, Chat, ReasoningEffort } from '../api/types';
 import { normalizeModelId } from './mainScreenHelpers';
@@ -29,24 +36,24 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
     api,
     chatModelPreferencesRef,
     effortConfig,
-    loadingModels,
     modelOptionsRequestRef,
     preferredStartCwd,
     rememberChatModelPreference,
     saveChatModelPreferences,
-    selectedAcpModeId,
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    selectedCollaborationMode,
-    selectedEffort,
     setError,
-    setLoadingModels,
-    setModelOptionsByAgent,
     setSelectedChat,
     setSelectedChatId,
-    setSelectedEffort,
   } = context;
+  const loadingModels = useAtomValue(loadingModelsAtom);
+  const selectedEffort = useAtomValue(selectedEffortAtom);
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
+  const setModelOptionsByAgent = useSetAtom(modelOptionsByAgentAtom);
+  const setLoadingModels = useSetAtom(loadingModelsAtom);
+  const setSelectedEffort = useSetAtom(selectedEffortAtom);
   const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
   const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);

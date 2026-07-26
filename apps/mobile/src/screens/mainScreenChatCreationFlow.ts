@@ -1,7 +1,12 @@
 import {
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom
+} from '../state/mainScreen/models';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Chat, ChatMessage as ChatTranscriptMessage } from '../api/types';
 import { toMentionInput, toOptimisticUserContent, countUserMessages, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
@@ -40,11 +45,8 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     rememberChatModelPreference,
     scrollToBottomReliable,
     selectedChatId,
-    selectedAcpModeId,
     selectedChatIdRef,
     selectedChatRef,
-    selectedCollaborationMode,
-    selectedEffort,
     setActivePlan,
     setActiveTurnId,
     setCreating,
@@ -54,7 +56,6 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     setResolvingUserInput,
     setSelectedChat,
     setSelectedChatId,
-    setSelectedCollaborationMode,
     supportsPlanMode,
     setStoppingTurn,
     setUserInputDrafts,
@@ -63,6 +64,10 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     submissionController,
     turnExecutionController,
   } = context;
+  const selectedEffort = useAtomValue(selectedEffortAtom);
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
   const pendingRestoredDraftRef = useRef<string | null>(null);
 

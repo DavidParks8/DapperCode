@@ -1,4 +1,8 @@
 import {
+  bridgeCapabilitiesAtom,
+  modelOptionsByAgentAtom
+} from '../state/mainScreen/models';
+import {
   agentRootThreadIdAtom
 } from '../state/mainScreen/workspace';
 import {
@@ -30,10 +34,8 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     agentSettings,
     api,
     approvalMode,
-    bridgeCapabilities,
     defaultStartCwd,
     draft,
-    modelOptionsByAgent,
     pendingAgentId,
     preferredAgentId,
     replayRecoveryAbortControllerRef,
@@ -44,6 +46,8 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     setDraft,
     setError,
   } = context;
+  const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
+  const modelOptionsByAgent = useAtomValue(modelOptionsByAgentAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
   const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);

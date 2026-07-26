@@ -1,4 +1,7 @@
 import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   relatedAgentThreadsAtom,
@@ -56,7 +59,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     safeAreaInsets,
     selectedChat,
     selectedChatId,
-    selectedCollaborationMode,
     sending,
     shouldShowComposer,
     showBridgeRecoveryBanner,
@@ -67,6 +69,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     userInputError,
     ws,
   } = context;
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);

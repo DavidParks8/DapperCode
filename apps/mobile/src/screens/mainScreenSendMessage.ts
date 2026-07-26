@@ -1,3 +1,7 @@
+import {
+  selectedCollaborationModeAtom,
+  selectedEffortAtom
+} from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom,
@@ -31,7 +35,6 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     selectedChatId,
     handleSlashCommand,
     setDraft,
-    selectedCollaborationMode,
     pendingMentionPaths,
     selectedChat,
     pendingLocalImagePaths,
@@ -63,7 +66,6 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     discardOptimisticQueuedMessage,
     cacheThreadQueueState,
     rememberChatModelPreference,
-    selectedEffort,
     setError,
     clearRunWatchdog,
     registerTurnStarted,
@@ -76,11 +78,13 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     setUserInputError,
     setResolvingUserInput,
     mergeChatWithPendingOptimisticMessages,
-    setSelectedCollaborationMode,
     supportsPlanMode,
     handleTurnFailure,
     store,
   } = context;
+  const selectedEffort = store.get(selectedEffortAtom);
+  const selectedCollaborationMode = store.get(selectedCollaborationModeAtom);
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
   const setShowDelayedGenericRunningActivity = screenSetter(store, showDelayedGenericRunningActivityAtom);
 

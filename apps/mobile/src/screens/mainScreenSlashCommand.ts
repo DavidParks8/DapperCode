@@ -1,3 +1,6 @@
+import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom
@@ -24,12 +27,12 @@ export async function executeSlashCommand(context: MainScreenSlashCommandHandler
     selectedChat,
     activeModelLabel,
     activeEffortLabel,
-    selectedCollaborationMode,
     supportsFastMode,
     fastModeEnabled,
     onOpenGit,
     store,
   } = context;
+  const selectedCollaborationMode = store.get(selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 
       const parsed = parseSlashCommand(input);

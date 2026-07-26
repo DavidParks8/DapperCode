@@ -1,4 +1,10 @@
-import { useSetAtom } from 'jotai';
+import {
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom,
+  selectedModelIdAtom
+} from '../state/mainScreen/models';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import type { CollaborationMode } from '../api/types';
 import { type SelectionSheetOption } from '../components/SelectionSheet';
@@ -30,15 +36,15 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     selectModel,
     selectPendingAgent,
     selectedChatId,
-    selectedCollaborationMode,
-    selectedEffort,
     selectedModel,
-    selectedModelId,
     serverDefaultModel,
     setError,
-    setSelectedAcpModeId,
-    setSelectedCollaborationMode,
   } = context;
+  const selectedModelId = useAtomValue(selectedModelIdAtom);
+  const selectedEffort = useAtomValue(selectedEffortAtom);
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
+  const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
 
 

@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AgentId, BridgeCapabilities, BridgeUiSurface, CollaborationMode, PendingApproval, PendingUserInputRequest, RunEvent, Chat, ModelOption, ReasoningEffort, ServiceTier, FileSystemListResponse } from '../api/types';
+import type { AgentId, BridgeUiSurface, PendingApproval, PendingUserInputRequest, RunEvent, Chat, FileSystemListResponse } from '../api/types';
 import { type AgUiLiveAssistantMessages } from '../api/agUi';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
-import { type ActivePlanState, type IdleTaskHandle, type SelectedServiceTier } from './mainScreenHelpers';
+import { type ActivePlanState, type IdleTaskHandle } from './mainScreenHelpers';
 import { ApprovalController } from './controllers/approvalController';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
@@ -111,23 +111,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [, setLoadingWorkspaceRoots] = useState(false);
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
-  const [bridgeCapabilities, setBridgeCapabilities] = useState<BridgeCapabilities | null>(
-    null
-  );
-  const [modelOptionsByAgent, setModelOptionsByAgent] = useState<
-    Record<AgentId, ModelOption[]>
-  >({});
-  const [loadingModels, setLoadingModels] = useState(false);
   const [pendingAgentId, setPendingAgentId] = useState<AgentId | null>(
     () => preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null
   );
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-  const [selectedEffort, setSelectedEffort] = useState<ReasoningEffort | null>(null);
-  const [selectedServiceTier, setSelectedServiceTier] = useState<SelectedServiceTier>();
-  const [defaultServiceTier, setDefaultServiceTier] = useState<ServiceTier | null>(null);
-  const [selectedCollaborationMode, setSelectedCollaborationMode] =
-    useState<CollaborationMode>('default');
-  const [selectedAcpModeId, setSelectedAcpModeId] = useState<string | null>(null);
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
   const creatingRef = useRef(creating);
@@ -201,26 +187,8 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setLoadingWorkspaceRoots,
     workspaceBrowseCacheRef,
     workspaceBrowseRequestRef,
-    bridgeCapabilities,
-    setBridgeCapabilities,
-    modelOptionsByAgent,
-    setModelOptionsByAgent,
-    loadingModels,
-    setLoadingModels,
     pendingAgentId,
     setPendingAgentId,
-    selectedModelId,
-    setSelectedModelId,
-    selectedEffort,
-    setSelectedEffort,
-    selectedServiceTier,
-    setSelectedServiceTier,
-    defaultServiceTier,
-    setDefaultServiceTier,
-    selectedCollaborationMode,
-    setSelectedCollaborationMode,
-    selectedAcpModeId,
-    setSelectedAcpModeId,
     sendingRef,
     creatingRef,
     stoppingTurnRef,

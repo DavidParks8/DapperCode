@@ -1,4 +1,10 @@
 import {
+  defaultServiceTierAtom,
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedServiceTierAtom
+} from '../state/mainScreen/models';
+import {
   workspaceBridgeRootAtom,
   workspaceBrowseErrorAtom,
   workspaceModalVisibleAtom,
@@ -38,7 +44,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     attachmentController,
     clearExternalStatusFullSync,
     clearRunWatchdog,
-    defaultServiceTier,
     hadCommandRef,
     loadChatRequestRef,
     openingChatStartedAtRef,
@@ -56,11 +61,8 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setPendingApproval,
     setPendingUserInputRequest,
     setResolvingUserInput,
-    setSelectedAcpModeId,
     setSelectedChat,
     setSelectedChatId,
-    setSelectedCollaborationMode,
-    setSelectedServiceTier,
     setStoppingTurn,
     setStreamingText,
     setUserInputDrafts,
@@ -68,6 +70,10 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     stopRequestedRef,
     stopSystemMessageLoggedRef,
   } = context;
+  const defaultServiceTier = useAtomValue(defaultServiceTierAtom);
+  const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
+  const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
   const setWorkspaceRoots = useSetAtom(workspaceRootsAtom);
   const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);

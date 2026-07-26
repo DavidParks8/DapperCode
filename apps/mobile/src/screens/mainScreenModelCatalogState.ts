@@ -1,4 +1,13 @@
 import {
+  bridgeCapabilitiesAtom,
+  defaultServiceTierAtom,
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom,
+  selectedModelIdAtom,
+  selectedServiceTierAtom
+} from '../state/mainScreen/models';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -21,10 +30,8 @@ export type MainScreenModelCatalogStateContext = MainScreenSelectedRuntimeSelect
 
 export function useMainScreenModelCatalogState(context: MainScreenModelCatalogStateContext) {
   const {
-    bridgeCapabilities,
     chatModelPreferencesLoaded,
     chatModelPreferencesRef,
-    defaultServiceTier,
     modeConfig,
     modelOptions,
     pendingAgentId,
@@ -33,19 +40,21 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     preferredDefaultEffort,
     preferredDefaultModelId,
     preferredServiceTier,
-    selectedAcpModeId,
     selectedChatId,
-    selectedCollaborationMode,
-    selectedEffort,
-    selectedModelId,
-    selectedServiceTier,
     setPendingAgentId,
-    setSelectedCollaborationMode,
-    setSelectedEffort,
-    setSelectedModelId,
-    setSelectedServiceTier,
     supportsFastMode,
   } = context;
+  const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
+  const selectedModelId = useAtomValue(selectedModelIdAtom);
+  const selectedEffort = useAtomValue(selectedEffortAtom);
+  const selectedServiceTier = useAtomValue(selectedServiceTierAtom);
+  const defaultServiceTier = useAtomValue(defaultServiceTierAtom);
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
+  const setSelectedModelId = useSetAtom(selectedModelIdAtom);
+  const setSelectedEffort = useSetAtom(selectedEffortAtom);
+  const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const activity = useAtomValue(activityAtom);
   const setActivity = useSetAtom(activityAtom);
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);

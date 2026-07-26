@@ -1,3 +1,6 @@
+import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom
@@ -30,7 +33,6 @@ export function processTurnLifecycleEvents(
     cacheThreadTurnState,
     cacheThreadActivity,
     cacheThreadPlan,
-    setSelectedCollaborationMode,
     bumpRunWatchdog,
     setActivePlan,
     reasoningSummaryRef,
@@ -51,6 +53,7 @@ export function processTurnLifecycleEvents(
     refreshPendingApprovalsForThread,
     store,
   } = context;
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'item/commandExecution/outputDelta') {

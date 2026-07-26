@@ -1,3 +1,6 @@
+import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom
@@ -15,7 +18,6 @@ export function processBridgeInteractionEvents(context: MainScreenWsEventRouterC
     clearRunWatchdog,
     setPendingApproval,
     cacheThreadPendingUserInputRequest,
-    setSelectedCollaborationMode,
     setPendingUserInputRequest,
     setUserInputDrafts,
     setUserInputError,
@@ -27,6 +29,7 @@ export function processBridgeInteractionEvents(context: MainScreenWsEventRouterC
     removeThreadBridgeUiSurface,
     store,
   } = context;
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'bridge/thread/queue/updated') {

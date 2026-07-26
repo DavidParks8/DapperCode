@@ -1,4 +1,6 @@
 import type { RpcNotification } from '../api/types';
+import { screenSetter } from '../state/mainScreen/registry';
+import { selectedCollaborationModeAtom } from '../state/mainScreen/models';
 import { RUN_WATCHDOG_MS, toRecord, readString, readNumber, buildNextPlanStateFromDelta, extractFirstBoldSnippet, toReasoningActivityDetail } from './mainScreenHelpers';
 import type { ActivityState } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
@@ -13,7 +15,8 @@ export function processPlanAndReasoningEvents(
   currentId: string | null,
   setActivity: SetActivity
 ): void {
-  const { planItemTurnIdByThreadRef, cacheThreadTurnState, cacheThreadActivity, cacheThreadPlan, setSelectedCollaborationMode, bumpRunWatchdog, setActivePlan, reasoningSummaryRef, threadReasoningBuffersRef, upsertLiveReasoningMessage } = context;
+  const { store, planItemTurnIdByThreadRef, cacheThreadTurnState, cacheThreadActivity, cacheThreadPlan, bumpRunWatchdog, setActivePlan, reasoningSummaryRef, threadReasoningBuffersRef, upsertLiveReasoningMessage } = context;
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
 
       if (event.method === 'item/plan/delta') {
         const params = toRecord(event.params);

@@ -1,3 +1,7 @@
+import {
+  selectedCollaborationModeAtom
+} from '../state/mainScreen/models';
+import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
 import type { MainScreenTurnStopControlContext, MainScreenTurnStopControlResult } from './mainScreenTurnStopControl';
 import { executeSlashCommand } from './mainScreenSlashCommand';
@@ -38,13 +42,13 @@ export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommand
     scrollToBottomReliable,
     selectedChat,
     selectedChatId,
-    selectedCollaborationMode,
     startNewChat,
     supportsFastMode,
     supportsGoal,
     supportsPlanMode,
     supportsReview,
   } = context;
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
 
 
   const handleSlashCommand = useCallback(

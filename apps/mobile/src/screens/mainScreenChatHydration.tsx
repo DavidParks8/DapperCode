@@ -1,4 +1,10 @@
 import {
+  defaultServiceTierAtom,
+  selectedEffortAtom,
+  selectedModelIdAtom,
+  selectedServiceTierAtom
+} from '../state/mainScreen/models';
+import {
   favoriteWorkspacePathsAtom
 } from '../state/mainScreen/workspace';
 import { useSetAtom } from 'jotai';
@@ -30,11 +36,11 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
     saveWorkspaceFavorites,
     scheduleBridgeUiSurfaceSnapshotsPersist,
     setChatModelPreferencesLoaded,
-    setDefaultServiceTier,
-    setSelectedEffort,
-    setSelectedModelId,
-    setSelectedServiceTier,
   } = context;
+  const setSelectedModelId = useSetAtom(selectedModelIdAtom);
+  const setSelectedEffort = useSetAtom(selectedEffortAtom);
+  const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
+  const setDefaultServiceTier = useSetAtom(defaultServiceTierAtom);
   const setFavoriteWorkspacePaths = useSetAtom(favoriteWorkspacePathsAtom);
 
 

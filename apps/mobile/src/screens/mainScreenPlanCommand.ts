@@ -1,3 +1,8 @@
+import {
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom
+} from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom
@@ -9,7 +14,6 @@ import type { MainScreenSlashCommandHandlerContext } from './mainScreenSlashComm
 
 export async function executePlanCommand(context: MainScreenSlashCommandHandlerContext, argText: string): Promise<boolean> {
   const {
-    setSelectedCollaborationMode,
     setError,
     selectedChatId,
     submissionController,
@@ -32,7 +36,6 @@ export async function executePlanCommand(context: MainScreenSlashCommandHandlerC
     activeEffort,
     activeServiceTier,
     activeApprovalPolicy,
-    selectedAcpModeId,
     onLastUsedThreadSettingsChange,
     queueOptimisticUserMessage,
     setSelectedChatId,
@@ -41,7 +44,6 @@ export async function executePlanCommand(context: MainScreenSlashCommandHandlerC
     registerTurnStarted,
     mergeChatWithPendingOptimisticMessages,
     rememberChatModelPreference,
-    selectedEffort,
     clearRunWatchdog,
     discardOptimisticUserMessage,
     handleTurnFailure,
@@ -51,6 +53,9 @@ export async function executePlanCommand(context: MainScreenSlashCommandHandlerC
     scrollToBottomReliable,
     store,
   } = context;
+  const selectedEffort = store.get(selectedEffortAtom);
+  const selectedAcpModeId = store.get(selectedAcpModeIdAtom);
+  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
         const lowered = argText.toLowerCase();
         if (!argText || lowered === 'on' || lowered === 'enable' || lowered === 'enabled') {

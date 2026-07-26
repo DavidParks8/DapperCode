@@ -1,4 +1,11 @@
 import {
+  selectedAcpModeIdAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom,
+  selectedModelIdAtom,
+  selectedServiceTierAtom
+} from '../state/mainScreen/models';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
@@ -44,15 +51,15 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     selectedChatId,
     setError,
     setPendingAgentId,
-    setSelectedAcpModeId,
-    setSelectedCollaborationMode,
-    setSelectedEffort,
-    setSelectedModelId,
-    setSelectedServiceTier,
     supportsFastMode,
     uploadingAttachment,
     ws,
   } = context;
+  const setSelectedModelId = useSetAtom(selectedModelIdAtom);
+  const setSelectedEffort = useSetAtom(selectedEffortAtom);
+  const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
+  const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
+  const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setActivity = useSetAtom(activityAtom);
   const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
   const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
