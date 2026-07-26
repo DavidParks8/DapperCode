@@ -76,21 +76,42 @@ Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState
 `mainScreen*` modules. Atoms are grouped by domain (`session`, `turn`, `models`, `workspace`,
 `composer`, `modals`, `gitCheckout`).
 
-- **Always create them with `screenAtom`,** not `atom`. `screenAtom` registers the atom's initial
-  value with `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive
-  the component, so an atom created with plain `atom()` would silently leak state across bridge
-  profiles. `registry.test.ts` guards the registry.
+- **Always create them with `screenAtom`,** never `atom`. `screenAtom` registers the atom with
+  `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive the
+  component, so a bare `atom()` would leak state into the next bridge profile. `registry.test.ts`
+  scans these files and fails on any bare `atom(`.
+- **Object and array atoms take a factory,** e.g. `screenAtom((): string[] => [])`. The type
+  signature enforces it. Reset assigns whatever the factory returns, so a shared literal would let
+  one in-place mutation poison the baseline for every later reset, in every store.
 - **Non-React helpers use the store, not hooks.** The WS event processors (`processAgUiRunEvents`,
   `processTurnLifecycleEvents`, …) and the command executors (`executeSendMessage`,
-  `executeSlashCommand`, …) are plain functions. They take the jotai store from
-  `context.store` and use `store.get(atom)` / `screenSetter(store, atom)`.
-- `MainScreen` is still keyed by bridge profile id. The key is what clears the ~40 `useRef` caches in
-  the hook chain (thread runtime snapshots, reasoning buffers, model preferences); the atom reset
-  covers the state. Dropping the key requires converting those refs too.
+  `executeSlashCommand`, …) are plain functions. They take the jotai store from `context.store` and
+  use `store.get(atom)` / `screenSetter(store, atom)`.
+- **Prefer `screenRefView` over mirroring state into a ref.** Jotai reads are already live, so
+  `screenRefView(store, someAtom)` gives a read-only `{ current }` view with no duplicated state.
 
-## Known follow-up
+### Why `MainScreen` is still keyed by bridge profile
 
-The 35-hook chain in `MainScreen.tsx` still threads an accumulated `context` object, and the
-`MainScreen*.tsx` views still take it as a prop. It now carries derived values, actions and refs
-rather than raw state, so the remaining work is mechanical: turn the derived values into derived
-atoms and let the views subscribe directly.
+`AppScreenRenderer` renders `<MainScreen key={activeBridgeProfileId} />`. That remount is what clears
+the component-local state the atoms deliberately do not cover:
+
+- ~38 `useRef` caches in the hook chain (thread runtime snapshots, reasoning buffers, model
+  preferences, parent-chat cache) and their pending timers.
+- The feature controllers under `screens/controllers/` (`useDraftController`,
+  `useAttachmentController`), which own their own `useState` and persistence and are tested
+  standalone.
+
+Remounting is the cheapest correct way to reset that state, and it is the mechanism those pieces were
+already designed around. Atoms needed an explicit registry precisely *because* they cannot be cleared
+by remounting. Both mechanisms are in place, and both are covered by tests.
+
+## What is intentionally not in atoms
+
+- **Feature controllers** (`screens/controllers/*`). They are cohesive, separately tested units that
+  own their state and persistence. Moving them into atoms would relocate complexity, not remove it.
+- **The accumulated `context` in the MainScreen hook chain.** It no longer carries raw state; what
+  remains is effects, action callbacks, controllers and ref caches. Several modules named like
+  selectors (`mainScreenSelectedRuntimeSelectors`) are actually effects that write atoms from ref
+  caches, so they cannot become derived atoms. Converting the chain further would be churn rather
+  than simplification.
+- **Animation values and gesture objects**, which must stay component-local.

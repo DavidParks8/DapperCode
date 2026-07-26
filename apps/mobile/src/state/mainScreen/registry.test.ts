@@ -6,6 +6,9 @@ import { listScreenAtomEntries, resetMainScreenStateAtom } from './registry';
 import { selectedChatIdAtom } from './session';
 import { sendingAtom } from './turn';
 import { workspaceBrowsePathAtom } from './workspace';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
+
 import { createTestStore } from '../testing';
 
 // Importing every screen atom module above is what populates the registry.
@@ -46,6 +49,25 @@ describe('MainScreen atom registry', () => {
       expect(entry.createInitialValue()).not.toBe(first);
       expect(entry.createInitialValue()).toEqual(first);
     }
+  });
+
+  it('declares every screen atom through screenAtom', () => {
+    // A bare atom() here would never be reset, so its value would leak into the next bridge
+    // profile. Scanning the sources is what stops the registry from silently drifting.
+    const directory = __dirname;
+    const offenders: string[] = [];
+    for (const file of readdirSync(directory)) {
+      if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file === 'registry.ts') {
+        continue;
+      }
+      const source = readFileSync(join(directory, file), 'utf8');
+      for (const line of source.split('\n')) {
+        if (/(?<!screen)\batom[(<]/.test(line) && !line.trim().startsWith('*')) {
+          offenders.push(`${file}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('isolates screen state between stores', () => {
