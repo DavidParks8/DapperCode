@@ -8,7 +8,21 @@ const reviewedAdvisories = new Map([
   // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
   [1121797, 'linkify-it'],
   [1124012, 'linkify-it'],
+  // Reached only through minimatch@3 inside the Expo/React Native build toolchain, never with
+  // remote input. The sole patched release (5.0.8) is CommonJS-incompatible with minimatch@3.
+  [1124334, 'brace-expansion'],
 ]);
+
+// npm reports `fixAvailable` as `true` when a compatible release exists, or as the package a
+// breaking upgrade would land on. A breaking upgrade of an unrelated framework dependency is not
+// an actionable fix for a reviewed advisory, so only compatible fixes fail the gate.
+const hasCompatibleFix = (fixAvailable) => {
+  if (fixAvailable === false) return false;
+  if (typeof fixAvailable === 'object' && fixAvailable !== null) {
+    return fixAvailable.isSemVerMajor !== true;
+  }
+  return true;
+};
 
 const loadReport = () => {
   if (process.argv[2]) {
@@ -48,8 +62,8 @@ const unexpected = [...found].filter(
 const stale = [...reviewedAdvisories].filter(
   ([id, name]) => found.get(id) !== name
 );
-const fixable = [...new Set(found.values())].filter(
-  (name) => vulnerabilities[name]?.fixAvailable !== false
+const fixable = [...new Set(found.values())].filter((name) =>
+  hasCompatibleFix(vulnerabilities[name]?.fixAvailable)
 );
 
 if (critical.length > 0 || unexpected.length > 0 || stale.length > 0 || fixable.length > 0) {

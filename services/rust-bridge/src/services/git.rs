@@ -19,12 +19,15 @@ use crate::{
 
 use super::TerminalService;
 
+type EnvironmentProbe = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 #[derive(Clone)]
 pub(crate) struct GitService {
     terminal: Arc<TerminalService>,
     path_policy: Arc<PathPolicy>,
     global_config_paths: Arc<Vec<PathBuf>>,
     inspect_standard_config: bool,
+    environment_probe: EnvironmentProbe,
 }
 
 impl GitService {
@@ -34,6 +37,7 @@ impl GitService {
             path_policy,
             global_config_paths: Arc::new(global_git_config_paths()),
             inspect_standard_config: true,
+            environment_probe: Arc::new(|name| std::env::var_os(name).is_some()),
         }
     }
 
@@ -41,6 +45,12 @@ impl GitService {
     fn with_global_config_paths(mut self, paths: Vec<PathBuf>) -> Self {
         self.global_config_paths = Arc::new(paths);
         self.inspect_standard_config = false;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_environment_probe(mut self, probe: EnvironmentProbe) -> Self {
+        self.environment_probe = probe;
         self
     }
 
@@ -787,7 +797,7 @@ impl GitService {
     }
 
     async fn validate_credentialed_transport(&self, repo_path: &Path) -> Result<(), BridgeError> {
-        validate_credential_environment()?;
+        validate_credential_environment_with(|name| (self.environment_probe)(name))?;
         for global_config in self.global_config_paths.iter() {
             if global_config.is_file() {
                 let source_args = vec![
@@ -884,10 +894,6 @@ const UNSAFE_GIT_ENVIRONMENT: &[&str] = &[
     "http_proxy",
     "no_proxy",
 ];
-
-fn validate_credential_environment() -> Result<(), BridgeError> {
-    validate_credential_environment_with(|name| std::env::var_os(name).is_some())
-}
 
 fn validate_credential_environment_with(is_set: impl Fn(&str) -> bool) -> Result<(), BridgeError> {
     if UNSAFE_GIT_ENVIRONMENT.iter().any(|name| is_set(name)) {
@@ -1391,12 +1397,15 @@ mod tests {
         }
 
         fn git(&self, args: &[&str]) -> String {
-            let output = Command::new("git")
-                .arg("-C")
-                .arg(&self.0)
-                .args(args)
-                .output()
-                .expect("run git");
+            let mut command = Command::new("git");
+            command.arg("-C").arg(&self.0).args(args);
+            for name in super::UNSAFE_GIT_ENVIRONMENT
+                .iter()
+                .chain(["GIT_CONFIG_PARAMETERS"].iter())
+            {
+                command.env_remove(name);
+            }
+            let output = command.output().expect("run git");
             assert!(
                 output.status.success(),
                 "git {args:?} failed: {}",
@@ -1415,7 +1424,9 @@ mod tests {
         fn service(&self) -> super::GitService {
             let policy = Arc::new(PathPolicy::new(self.0.clone(), false).expect("create policy"));
             let terminal = Arc::new(super::TerminalService::new(policy.clone(), HashSet::new()));
-            super::GitService::new(terminal, policy).with_global_config_paths(Vec::new())
+            super::GitService::new(terminal, policy)
+                .with_global_config_paths(Vec::new())
+                .with_environment_probe(Arc::new(|_| false))
         }
     }
 
@@ -2113,6 +2124,25 @@ mod tests {
             .await
             .expect_err("reject helper config");
         assert_eq!(unsafe_config.code, -32003);
+    }
+
+    #[tokio::test]
+    async fn rejects_credentialed_operations_when_the_bridge_environment_is_unsafe() {
+        let repo = TestDir::new("unsafe-env");
+        repo.init();
+        fs::write(repo.0.join("file.txt"), "content\n").expect("write file");
+        repo.git(&["add", "file.txt"]);
+        repo.git(&["commit", "-m", "initial"]);
+        let service = repo
+            .service()
+            .with_environment_probe(Arc::new(|name| name == "HTTPS_PROXY"));
+
+        let error = service
+            .push(None)
+            .await
+            .expect_err("reject proxied bridge environment");
+        assert_eq!(error.code, -32003);
+        assert_eq!(error.data.unwrap()["error"], "unsafe_git_environment");
     }
 
     #[tokio::test]
