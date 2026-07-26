@@ -1,4 +1,6 @@
 import { useAtomValue } from 'jotai';
+import type { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { env } from '../config';
 import { BrowserScreen } from '../screens/BrowserScreen';
@@ -13,6 +15,29 @@ import { activeBridgeProfileAtom } from '../state/bridge/atoms';
 import { gitChatAtom } from '../state/chat/atoms';
 import { drawerCommandsAtom } from '../state/drawer/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
+
+/**
+ * Stacks a screen over the chat, the way a native stack keeps the previous screen mounted.
+ *
+ * The workspace picker and git checkout are pushed from the chat and hand control straight back
+ * to it, so unmounting the chat underneath would remount it — and MainScreen resets its screen
+ * atoms on mount.
+ */
+function ScreenStack({ under, children }: { under: ReactNode; children: ReactNode }) {
+  return (
+    <View style={styles.stack}>
+      <View
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        {under}
+      </View>
+      {children}
+    </View>
+  );
+}
 
 function useOpenDrawer(): () => void {
   const drawerCommands = useAtomValue(drawerCommandsAtom);
@@ -35,9 +60,17 @@ export function AppScreenRenderer() {
     case 'Browser':
       return <BrowserScreen />;
     case 'WorkspacePicker':
-      return <WorkspacePickerScreen />;
+      return (
+        <ScreenStack under={mainScreen}>
+          <WorkspacePickerScreen />
+        </ScreenStack>
+      );
     case 'GitCheckout':
-      return <GitCheckoutScreen />;
+      return (
+        <ScreenStack under={mainScreen}>
+          <GitCheckoutScreen />
+        </ScreenStack>
+      );
     case 'Privacy':
       return <PrivacyScreen policyUrl={env.privacyPolicyUrl} onOpenDrawer={onOpenDrawer} />;
     case 'Terms':
@@ -46,3 +79,7 @@ export function AppScreenRenderer() {
       return mainScreen;
   }
 }
+
+const styles = StyleSheet.create({
+  stack: { flex: 1 },
+});

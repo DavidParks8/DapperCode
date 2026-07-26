@@ -2976,3 +2976,78 @@ describe('HostBridgeApiClient', () => {
     });
   });
 });
+
+describe('HostBridgeApiClient model options', () => {
+  const catalogResponse = {
+    data: [
+      {
+        id: 'gpt-5',
+        displayName: 'GPT-5',
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        contextWindow: 200000,
+        reasoningEffort: ['high'],
+      },
+      { id: '   ' },
+    ],
+  };
+
+  it('caches the catalog per agent and hands out copies', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValue(catalogResponse);
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+
+    expect(client.peekModelOptions('codex')).toBeNull();
+    const first = await client.listModelOptions('codex');
+    expect(first).toEqual([
+      {
+        id: 'gpt-5',
+        displayName: 'GPT-5',
+        providerId: 'openai',
+        providerName: 'OpenAI',
+        contextWindow: 200000,
+        reasoningEffort: [{ effort: 'high' }],
+      },
+    ]);
+
+    const second = await client.listModelOptions('codex');
+    expect(ws.request).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+
+    // Mutating a returned option must not corrupt the cache.
+    second[0].displayName = 'mutated';
+    expect(client.peekModelOptions('codex')?.[0]?.displayName).toBe('GPT-5');
+
+    await client.listModelOptions('claude');
+    expect(ws.request).toHaveBeenCalledTimes(2);
+    expect(ws.request).toHaveBeenLastCalledWith('model/list', { agentId: 'claude' });
+  });
+
+  it('shares one request between concurrent callers and refetches after the ttl', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValue(catalogResponse);
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+
+    const [a, b] = await Promise.all([client.listModelOptions(), client.listModelOptions()]);
+    expect(ws.request).toHaveBeenCalledTimes(1);
+    expect(ws.request).toHaveBeenLastCalledWith('model/list', { agentId: null });
+    expect(a).toEqual(b);
+
+    now.mockReturnValue(1_000 + 5 * 60 * 1000);
+    await client.listModelOptions();
+    expect(ws.request).toHaveBeenCalledTimes(2);
+    now.mockRestore();
+  });
+
+  it('does not cache a failed catalog request', async () => {
+    const ws = createWsMock();
+    ws.request.mockRejectedValueOnce(new Error('agent unavailable')).mockResolvedValue(catalogResponse);
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+
+    await expect(client.listModelOptions('codex')).rejects.toThrow('agent unavailable');
+    expect(client.peekModelOptions('codex')).toBeNull();
+    expect(await client.listModelOptions('codex')).toHaveLength(1);
+  });
+});

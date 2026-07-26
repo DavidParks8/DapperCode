@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { AppState, FlatList, Pressable, TextInput } from 'react-native';
+import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import type { HostBridgeApiClient } from '../api/client';
@@ -1092,12 +1092,26 @@ async function renderMain(options: {
   return { tree, api, store };
 }
 
-/** The subset of the app's screen switch these flows navigate between. */
+/**
+ * The subset of the app's screen switch these flows navigate between, stacked the same way
+ * `AppScreenRenderer` stacks them so the chat stays mounted underneath.
+ */
 function WorkspaceFlowShell() {
   const screen = useAtomValue(currentScreenAtom);
-  if (screen === 'WorkspacePicker') return <WorkspacePickerScreen />;
-  if (screen === 'GitCheckout') return <GitCheckoutScreen />;
-  return <MainScreen />;
+  const pushed =
+    screen === 'WorkspacePicker' ? (
+      <WorkspacePickerScreen />
+    ) : screen === 'GitCheckout' ? (
+      <GitCheckoutScreen />
+    ) : null;
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={StyleSheet.absoluteFill} pointerEvents={pushed ? 'none' : 'auto'}>
+        <MainScreen />
+      </View>
+      {pushed}
+    </View>
+  );
 }
 
 /**

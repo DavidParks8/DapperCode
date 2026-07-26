@@ -1,6 +1,6 @@
 import { isRpcRequestError, type RpcRequestError } from "./ws";
 import { readString, toRecord } from "./chatMapping";
-import { type Chat, type ChatSummary } from "./types";
+import { type Chat, type ChatSummary, type ModelOption } from "./types";
 import {
   type TurnInputLocalImage,
   type TurnInputMention,
@@ -59,6 +59,13 @@ export function cloneChatSummary(chat: ChatSummary): ChatSummary {
 
 export function cloneChatSummaries(chats: ChatSummary[]): ChatSummary[] {
   return chats.map(cloneChatSummary);
+}
+
+export function cloneModelOptions(options: ModelOption[]): ModelOption[] {
+  return options.map((option) => ({
+    ...option,
+    reasoningEffort: option.reasoningEffort?.map((entry) => ({ ...entry })),
+  }));
 }
 
 export function cloneChat(chat: Chat): Chat {

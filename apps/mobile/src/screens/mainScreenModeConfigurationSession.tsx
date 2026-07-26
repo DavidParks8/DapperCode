@@ -63,10 +63,12 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
 
-  const refreshModelOptions = useCallback(async () => {
+  const refreshModelOptions = useCallback(async (options?: { silent?: boolean }) => {
     const requestId = modelOptionsRequestRef.current + 1;
     modelOptionsRequestRef.current = requestId;
-    setLoadingModels(true);
+    if (!options?.silent) {
+      setLoadingModels(true);
+    }
     try {
       const catalogModels = await api.listModelOptions(activeAgentId);
       if (modelOptionsRequestRef.current !== requestId) {
@@ -83,7 +85,7 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
         setError((err as Error).message);
       }
     } finally {
-      if (modelOptionsRequestRef.current === requestId) {
+      if (!options?.silent && modelOptionsRequestRef.current === requestId) {
         setLoadingModels(false);
       }
     }
@@ -140,9 +142,15 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
   ]);
 
   const openModelModal = useCallback(() => {
+    // Serve whatever the client already has so the picker opens populated, then revalidate.
+    const cachedModels = api.peekModelOptions(activeAgentId);
+    const hasCachedModels = Boolean(activeAgentId && cachedModels && cachedModels.length > 0);
+    if (activeAgentId && cachedModels && hasCachedModels) {
+      setModelOptionsByAgent((previous) => ({ ...previous, [activeAgentId]: cachedModels }));
+    }
     setModelModalVisible(true);
-    void refreshModelOptions();
-  }, [refreshModelOptions]);
+    void refreshModelOptions({ silent: hasCachedModels });
+  }, [activeAgentId, api, refreshModelOptions]);
 
   const closeModelModal = useCallback(() => {
     if (loadingModels) {
