@@ -493,6 +493,128 @@ fn validate_no_auth_listener(host: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Scratch directory that cleans itself up, mirroring the helper the attachment tests use so
+    /// the bridge keeps its dependency-free test setup.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!(
+                "dappercode-config-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock")
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path).expect("create test directory");
+            Self(path)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Serializes the process-wide environment mutations these tests need.
+    struct DirEnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl DirEnvGuard {
+        fn set(name: &'static str, value: &std::path::Path) -> Self {
+            let previous = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, previous }
+        }
+
+        fn set_raw(name: &'static str, value: &str) -> Self {
+            let previous = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for DirEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => env::set_var(self.name, value),
+                None => env::remove_var(self.name),
+            }
+        }
+    }
+
+    #[test]
+    fn state_and_attachment_directories_default_beside_the_workspace() {
+        let temp = TestDir::new();
+        let workdir = temp.path().canonicalize().expect("canonical workdir");
+
+        let state = parse_absolute_dir_env(
+            "BRIDGE_STATE_DIR_UNSET_FOR_TEST",
+            workdir.join(".dappercode"),
+        )
+        .expect("default state dir");
+        assert_eq!(state, workdir.join(".dappercode"));
+        assert!(state.is_dir(), "the default state directory is created");
+    }
+
+    #[test]
+    fn an_explicit_state_directory_overrides_the_default() {
+        let temp = TestDir::new();
+        let configured = temp.path().join("central/state");
+        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", &configured);
+
+        let resolved = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().join("ignored"))
+            .expect("explicit state dir");
+        assert_eq!(resolved, configured.canonicalize().expect("canonical"));
+        assert!(!temp.path().join("ignored").exists());
+    }
+
+    #[test]
+    fn a_blank_directory_variable_falls_back_to_the_default() {
+        let temp = TestDir::new();
+        let _guard = DirEnvGuard::set_raw("BRIDGE_STATE_DIR", "   ");
+
+        let resolved = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().join("fallback"))
+            .expect("fallback state dir");
+        assert_eq!(
+            resolved,
+            temp.path()
+                .join("fallback")
+                .canonicalize()
+                .expect("canonical")
+        );
+    }
+
+    #[test]
+    fn a_relative_directory_variable_is_rejected() {
+        let temp = TestDir::new();
+        let _guard = DirEnvGuard::set_raw("BRIDGE_STATE_DIR", "relative/state");
+
+        let error = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().to_path_buf())
+            .expect_err("relative paths must be rejected");
+        assert!(error.contains("must be an absolute path"), "{error}");
+    }
+
+    #[test]
+    fn a_directory_variable_that_cannot_be_created_is_reported() {
+        let temp = TestDir::new();
+        let blocking_file = temp.path().join("blocked");
+        std::fs::write(&blocking_file, b"file").expect("write blocking file");
+        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", &blocking_file.join("child"));
+
+        let error = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().to_path_buf())
+            .expect_err("a file cannot host a directory");
+        assert!(error.contains("could not be created"), "{error}");
+    }
+
     fn no_auth_config(host: &str) -> BridgeConfig {
         BridgeConfig {
             host: host.to_string(),

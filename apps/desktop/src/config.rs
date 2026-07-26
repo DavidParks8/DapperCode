@@ -540,12 +540,15 @@ mod tests {
 
         let mut zero_port = base.clone();
         zero_port.bridge_port = 0;
-        assert!(
-            BridgeRuntimeConfig::from_profile(&zero_port, "secret", SecretBackend::File, &paths)
-                .unwrap_err()
-                .to_string()
-                .contains("invalid bridge port")
-        );
+        assert!(BridgeRuntimeConfig::from_profile(
+            &zero_port,
+            "secret",
+            SecretBackend::File,
+            &paths
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("invalid bridge port"));
 
         let mut zero_preview = base.clone();
         zero_preview.preview_port = 0;
@@ -556,21 +559,27 @@ mod tests {
 
         let mut missing_workspace = base.clone();
         missing_workspace.workspace = workspace.path().join("gone");
-        assert!(
-            BridgeRuntimeConfig::from_profile(&missing_workspace, "s", SecretBackend::File, &paths)
-                .unwrap_err()
-                .to_string()
-                .contains("no longer exists")
-        );
+        assert!(BridgeRuntimeConfig::from_profile(
+            &missing_workspace,
+            "s",
+            SecretBackend::File,
+            &paths
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("no longer exists"));
 
         let mut missing_agent = base;
         missing_agent.agent.executable = workspace.path().join("gone").join("agent");
-        assert!(
-            BridgeRuntimeConfig::from_profile(&missing_agent, "s", SecretBackend::File, &paths)
-                .unwrap_err()
-                .to_string()
-                .contains("no longer installed")
-        );
+        assert!(BridgeRuntimeConfig::from_profile(
+            &missing_agent,
+            "s",
+            SecretBackend::File,
+            &paths
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("no longer installed"));
     }
 
     #[test]
@@ -663,9 +672,14 @@ mod tests {
             profiles: Vec::new(),
         };
 
-        let error =
-            allocate_port_pair(&config, "alpha-000000000001", "127.0.0.1", Some(taken), true)
-                .unwrap_err();
+        let error = allocate_port_pair(
+            &config,
+            "alpha-000000000001",
+            "127.0.0.1",
+            Some(taken),
+            true,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("already in use"));
     }
 
@@ -753,9 +767,14 @@ mod tests {
         config.upsert(profile("beta-000000000002", workspace.path(), 18861));
 
         // 18860 is free, but its preview slot 18861 belongs to the other workspace.
-        let error =
-            allocate_port_pair(&config, "alpha-000000000001", "127.0.0.1", Some(18860), true)
-                .unwrap_err();
+        let error = allocate_port_pair(
+            &config,
+            "alpha-000000000001",
+            "127.0.0.1",
+            Some(18860),
+            true,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("18861"));
     }
 
@@ -799,9 +818,14 @@ mod tests {
             version: 1,
             profiles: Vec::new(),
         };
-        let (bridge, _) =
-            allocate_port_pair(&config, "alpha-000000000001", "127.0.0.1", Some(taken), false)
-                .unwrap();
+        let (bridge, _) = allocate_port_pair(
+            &config,
+            "alpha-000000000001",
+            "127.0.0.1",
+            Some(taken),
+            false,
+        )
+        .unwrap();
         assert_ne!(bridge, taken);
     }
 }

@@ -1050,7 +1050,8 @@ mod tests {
         assert!(!supervisor.owns_running_process());
         assert_eq!(supervisor.snapshot().state, BridgeState::Stopped);
         assert_eq!(supervisor.stop().unwrap().state, BridgeState::Stopped);
-        assert_eq!(supervisor.restart().unwrap_err().to_string().is_empty(), false);
+        // Restarting an idle profile still fails, because no bridge binary is installed here.
+        assert!(supervisor.restart().is_err());
     }
 
     #[test]
@@ -1092,9 +1093,7 @@ mod tests {
 
         for mutate in [
             |record: &mut ProcessOwnershipRecord| record.pid = 0,
-            |record: &mut ProcessOwnershipRecord| {
-                record.config_sha256 = "sha256:short".to_string()
-            },
+            |record: &mut ProcessOwnershipRecord| record.config_sha256 = "sha256:short".to_string(),
         ] {
             let path = temp.path().join("record.json");
             let mut record = record(temp.path());
@@ -1384,7 +1383,9 @@ mod tests {
         assert!(snapshot.detail.contains("authenticated status failed"));
 
         let error = supervisor.start().unwrap_err();
-        assert!(error.to_string().contains("authenticated status is unavailable"));
+        assert!(error
+            .to_string()
+            .contains("authenticated status is unavailable"));
     }
 
     #[test]
@@ -1479,7 +1480,12 @@ mod tests {
         write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
 
         // Losing the manifest breaks configuration while the owned process is still alive.
-        fs::remove_file(supervisor.paths.manifest_path(&supervisor.profile.profile_id)).unwrap();
+        fs::remove_file(
+            supervisor
+                .paths
+                .manifest_path(&supervisor.profile.profile_id),
+        )
+        .unwrap();
         let snapshot = supervisor.snapshot();
 
         assert_eq!(snapshot.state, BridgeState::Inaccessible);
@@ -1499,7 +1505,12 @@ mod tests {
         let mut dead = record(&workspace.path().canonicalize().unwrap());
         dead.pid = u32::MAX - 1;
         write_ownership_record(&supervisor.ownership_path(), &dead).unwrap();
-        fs::remove_file(supervisor.paths.manifest_path(&supervisor.profile.profile_id)).unwrap();
+        fs::remove_file(
+            supervisor
+                .paths
+                .manifest_path(&supervisor.profile.profile_id),
+        )
+        .unwrap();
 
         let snapshot = supervisor.stop().unwrap();
         assert_eq!(snapshot.state, BridgeState::Error);

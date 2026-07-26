@@ -590,7 +590,10 @@ mod tests {
         assert_eq!(home_dir().unwrap(), PathBuf::from("/tmp/dappercode-home"));
 
         std::env::set_var("HOME", "");
-        assert!(home_dir().unwrap_err().to_string().contains("HOME is not set"));
+        assert!(home_dir()
+            .unwrap_err()
+            .to_string()
+            .contains("HOME is not set"));
 
         std::env::remove_var("HOME");
         assert!(home_dir().is_err());
@@ -631,9 +634,10 @@ mod tests {
             .to_string()
             .contains("must be an absolute path"));
 
+        // An empty override falls through to the platform default. That default is only inspected,
+        // never created, so the test does not touch the real user data directory.
         std::env::set_var("DAPPERCODE_DATA_DIR", "");
-        // An empty override falls through to the platform default, which must be absolute.
-        assert!(AppPaths::discover().map(|paths| paths.config_path()).is_ok());
+        assert!(platform_data_dir().unwrap().is_absolute());
     }
 
     #[test]
@@ -654,7 +658,11 @@ mod tests {
             .update_config(|config| Ok(config.remove("alpha-000000000001")))
             .unwrap());
         assert!(paths.load_config().unwrap().profiles.is_empty());
-        assert!(paths.load_config().unwrap().find("alpha-000000000001").is_none());
+        assert!(paths
+            .load_config()
+            .unwrap()
+            .find("alpha-000000000001")
+            .is_none());
     }
 
     #[test]
@@ -726,5 +734,4 @@ mod tests {
         #[cfg(not(unix))]
         create_private_dir(&path).unwrap();
     }
-
 }

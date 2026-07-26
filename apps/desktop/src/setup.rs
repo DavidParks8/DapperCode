@@ -446,7 +446,8 @@ mod tests {
         let paths = AppPaths::for_tests(data.path().to_path_buf());
         let secrets = store();
 
-        let cases: [(Box<dyn Fn(&mut SetupRequest)>, &str); 7] = [
+        type Mutation = Box<dyn Fn(&mut SetupRequest)>;
+        let cases: [(Mutation, &str); 7] = [
             (
                 Box::new(|request| request.agent_id = "bad id".to_string()),
                 "agent ID",
@@ -545,7 +546,9 @@ mod tests {
         setup_profile(request(alpha.path(), Some(18847)), &paths, &secrets).unwrap();
         let error = setup_profile(request(beta.path(), Some(18847)), &paths, &secrets).unwrap_err();
 
-        assert!(error.to_string().contains("already assigned to the workspace"));
+        assert!(error
+            .to_string()
+            .contains("already assigned to the workspace"));
         assert_eq!(paths.load_config().unwrap().profiles.len(), 1);
     }
 
@@ -557,7 +560,8 @@ mod tests {
 
         // `/bin/echo --version` prints its argument rather than failing, so this exercises the
         // successful version-probe path.
-        let result = setup_profile(request(workspace.path(), Some(18849)), &paths, &store()).unwrap();
+        let result =
+            setup_profile(request(workspace.path(), Some(18849)), &paths, &store()).unwrap();
         assert_eq!(result.agent_version, "--version");
         assert_eq!(result.secret_backend, "file");
         assert_eq!(result.config_path, paths.config_path());
@@ -609,5 +613,4 @@ mod tests {
         assert!(!valid_agent_id("has/slash"));
         assert!(!valid_agent_id(&"a".repeat(129)));
     }
-
 }

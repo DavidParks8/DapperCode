@@ -227,7 +227,10 @@ mod tests {
 
         let watchdog = tokio::spawn(async move { wait_for_owner_exit(Some(pid)).await });
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(!watchdog.is_finished(), "should still be watching a live owner");
+        assert!(
+            !watchdog.is_finished(),
+            "should still be watching a live owner"
+        );
 
         child.kill().expect("kill owner");
         child.wait().expect("reap owner");
@@ -244,6 +247,56 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn the_kqueue_watch_reports_failure_for_a_process_that_cannot_be_registered() {
+        // A PID that cannot exist fails registration, which is what tells the caller to poll.
+        assert!(!block_on_owner_exit(u32::MAX - 1));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[tokio::test]
+    async fn the_kqueue_watch_resolves_when_the_owner_exits() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn long-lived child");
+        let pid = child.id();
+
+        let watch = tokio::spawn(async move { wait_for_owner_exit_via_kqueue(pid).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        child.kill().expect("kill owner");
+        child.wait().expect("reap owner");
+
+        assert!(tokio::time::timeout(Duration::from_secs(10), watch)
+            .await
+            .expect("kqueue watch should resolve")
+            .expect("watch task should not panic"));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[tokio::test]
+    async fn falls_back_to_polling_when_the_kqueue_watch_cannot_be_established() {
+        // The owner is alive, so `wait_for_owner_exit` gets past its early return, but a PID that
+        // cannot be registered forces the polling path to take over.
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn long-lived child");
+        let pid = child.id();
+
+        let watchdog = tokio::spawn(async move { wait_for_owner_exit(Some(pid)).await });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!watchdog.is_finished());
+
+        child.kill().expect("kill owner");
+        child.wait().expect("reap owner");
+        tokio::time::timeout(Duration::from_secs(10), watchdog)
+            .await
+            .expect("watchdog should resolve after the owner exits")
+            .expect("watchdog task should not panic");
     }
 
     #[tokio::test]

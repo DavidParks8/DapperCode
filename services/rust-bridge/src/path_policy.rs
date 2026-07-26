@@ -311,7 +311,7 @@ impl PathPolicy {
     ) -> Result<(std::fs::File, PathBuf), BridgeError> {
         let (base_root, base_fd, relative) = self.secure_relative_path(raw)?;
         let mut components = relative.components().peekable();
-        let mut directory = rustix::io::dup(&*base_fd).map_err(|error| {
+        let mut directory = rustix::io::dup(base_fd).map_err(|error| {
             BridgeError::server(&format!("failed to duplicate root descriptor: {error}"))
         })?;
         let mut final_name = None;
@@ -559,9 +559,8 @@ fn create_private_directory(path: &Path) -> Result<(), String> {
             .permissions();
         if permissions.mode() & 0o077 != 0 {
             permissions.set_mode(0o700);
-            std::fs::set_permissions(path, permissions).map_err(|error| {
-                format!("BRIDGE_ATTACHMENTS_DIR could not be secured: {error}")
-            })?;
+            std::fs::set_permissions(path, permissions)
+                .map_err(|error| format!("BRIDGE_ATTACHMENTS_DIR could not be secured: {error}"))?;
         }
     }
     Ok(())
@@ -771,6 +770,94 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_central_attachments_root_is_readable_but_only_that_directory() {
+        use std::io::Write;
+
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        let central = temp.0.join("central/attachments");
+        let outside = temp.0.join("outside");
+        fs::create_dir_all(&root).expect("create root");
+        fs::create_dir_all(&outside).expect("create outside");
+        fs::write(outside.join("secret.txt"), b"secret").expect("write outside file");
+
+        let policy = PathPolicy::with_attachments_root(root.clone(), false, Some(central.clone()))
+            .expect("create policy with a central attachments root");
+        let central = central.canonicalize().expect("canonical attachments root");
+        assert_eq!(policy.attachments_root(), central);
+        assert!(!central.starts_with(policy.root()));
+
+        // An upload lands in the central root and stays readable by absolute path.
+        let staging = policy
+            .secure_attachments_directory(&PathBuf::from(".tmp"))
+            .expect("open staging");
+        staging
+            .create_file("upload.tmp")
+            .expect("create staged file")
+            .write_all(b"payload")
+            .expect("write staged file");
+        let saved = policy
+            .rename_attachment_file(
+                &staging,
+                "upload.tmp",
+                &PathBuf::from("threads"),
+                "saved.txt",
+            )
+            .expect("finalize upload");
+        assert!(saved.starts_with(&central));
+
+        let (mut file, resolved) = policy
+            .open_regular_file_beneath(saved.to_str().expect("utf-8 path"))
+            .expect("read the attachment back");
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut file, &mut contents).expect("read attachment");
+        assert_eq!(contents, "payload");
+        assert_eq!(resolved, saved);
+
+        // Widening access to the attachments root must not widen it to anything else.
+        let escape = outside.join("secret.txt");
+        assert!(policy
+            .open_regular_file_beneath(escape.to_str().expect("utf-8 path"))
+            .is_err());
+        assert!(policy
+            .resolve_existing(escape.to_str().expect("utf-8 path"), PathKind::File)
+            .is_err());
+        assert!(policy.resolve_existing("", PathKind::Any).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_attachments_root_is_rejected() {
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        fs::create_dir_all(&root).expect("create root");
+
+        let error =
+            PathPolicy::with_attachments_root(root, false, Some(PathBuf::from("relative/uploads")))
+                .expect_err("relative attachments roots must be rejected");
+        assert!(error.contains("must be an absolute path"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_regular_or_hardlinked_attachment_is_refused() {
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        fs::create_dir_all(root.join("images")).expect("create image directory");
+        fs::write(root.join("images/image.png"), b"image").expect("write image");
+        let policy = PathPolicy::new(root.clone(), false).expect("create policy");
+
+        // A directory is not a regular file.
+        assert!(policy.open_regular_file_beneath("images").is_err());
+        // Traversal cannot be laundered through an absolute workspace path.
+        let traversal = root.join("images/../../escape");
+        assert!(policy
+            .open_regular_file_beneath(traversal.to_str().expect("utf-8 path"))
+            .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn descriptor_api_covers_valid_invalid_and_cleanup_paths() {
         use std::io::{Read, Write};
 
@@ -816,8 +903,7 @@ mod tests {
         for invalid in [PathBuf::new(), PathBuf::from("../bad"), root.clone()] {
             assert!(policy.secure_attachments_directory(&invalid).is_err());
         }
-        fs::write(policy.attachments_root().join("blocked"), b"file")
-            .expect("write blocking file");
+        fs::write(policy.attachments_root().join("blocked"), b"file").expect("write blocking file");
         assert!(policy
             .secure_attachments_directory(PathBuf::from("blocked/child").as_path())
             .is_err());
