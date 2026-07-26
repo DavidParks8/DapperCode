@@ -33,12 +33,10 @@ const mockStore = {
 };
 
 let mockSnapshot: AppStateSnapshot;
-let mockFonts: [boolean, Error | null] = [true, null];
 let mockBackHandler: (() => boolean | null | undefined) | null = null;
 let previousAppState: typeof AppState.currentState;
 let mockSpringFinished = true;
 
-jest.mock('expo-font', () => ({ useFonts: () => mockFonts }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('react-native-safe-area-context', () => {
   const actual = jest.requireActual('react-native-safe-area-context');
@@ -236,7 +234,6 @@ import {
   appearancePreferenceAtom,
   darkUiPaletteAtom,
   defaultStartCwdAtom,
-  fontPreferenceAtom,
   recentBrowserTargetUrlsAtom,
   rememberThreadSettingsAtom,
   showToolCallsAtom,
@@ -318,7 +315,6 @@ function snapshot(options: {
         workspaceChatLimit: 5,
         appearancePreference: 'system',
         darkUiPalette: 'classic',
-        fontPreference: 'system',
         recentBrowserTargetUrls: [],
         ...options.settings,
       },
@@ -385,7 +381,6 @@ describe('App orchestration', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     mockSnapshot = snapshot();
-    mockFonts = [true, null];
     mockSpringFinished = true;
     mockBackHandler = null;
     mockScreenProps.MainScreen = {};
@@ -423,7 +418,7 @@ describe('App orchestration', () => {
     jest.useRealTimers();
   });
 
-  it('renders font/state loading and persistence recovery branches', async () => {
+  it('renders state loading and persistence recovery branches', async () => {
     mockSnapshot = snapshot({ loaded: false });
     const loading = await renderApp();
     expect((loading.root as Queryable).findAll((node) => node.props.accessibilityLabel === 'Loading DapperCode').length).toBeGreaterThan(0);
@@ -440,18 +435,6 @@ describe('App orchestration', () => {
     await act(async () => (retry?.props.onPress as () => Promise<void>)());
     expect(mockStore.retryPersistence).toHaveBeenCalled();
     act(() => recovery.unmount());
-  });
-
-  it('waits for fonts but proceeds with fallback fonts after a font error', async () => {
-    mockFonts = [false, null];
-    const waiting = await renderApp();
-    expect((waiting.root as Queryable).findAll((node) => node.props.accessibilityLabel === 'Loading DapperCode').length).toBeGreaterThan(0);
-    act(() => waiting.unmount());
-
-    mockFonts = [false, new Error('font download failed')];
-    const fallback = await renderApp();
-    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
-    act(() => fallback.unmount());
   });
 
   it('restores the selected cached chat and persists subsequent context', async () => {
@@ -500,7 +483,6 @@ describe('App orchestration', () => {
       () => store.set(workspaceChatLimitAtom, 25),
       () => store.set(appearancePreferenceAtom, 'dark'),
       () => store.set(darkUiPaletteAtom, 'grey'),
-      () => store.set(fontPreferenceAtom, 'jetbrainsMono'),
     ];
     for (const update of updates) await dispatch(update);
     await dispatch((s) => s.set(retryPersistenceAtom));

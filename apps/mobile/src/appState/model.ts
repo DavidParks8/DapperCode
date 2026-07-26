@@ -20,11 +20,6 @@ import {
   dedupeRecentPreviewTargets,
   normalizePreviewTargetInput,
 } from '../browserPreview';
-import {
-  DEFAULT_FONT_PREFERENCE,
-  normalizeFontPreference,
-  type FontPreference,
-} from '../fonts';
 import type { AppearancePreference, DarkUiPalette } from '../theme';
 
 const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
@@ -60,7 +55,6 @@ export interface AppSettingsState {
   workspaceChatLimit: WorkspaceChatLimit;
   appearancePreference: AppearancePreference;
   darkUiPalette: DarkUiPalette;
-  fontPreference: FontPreference;
   recentBrowserTargetUrls: string[];
 }
 
@@ -141,7 +135,6 @@ export function createDefaultAppSettings(): AppSettingsState {
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
     appearancePreference: 'system',
     darkUiPalette: 'classic',
-    fontPreference: DEFAULT_FONT_PREFERENCE,
     recentBrowserTargetUrls: [],
   };
 }
@@ -273,7 +266,6 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       workspaceChatLimit: record.workspaceChatLimit,
       appearancePreference: record.appearancePreference,
       darkUiPalette: record.darkUiPalette,
-      fontPreference: record.fontPreference,
       recentBrowserTargetUrls: record.recentBrowserTargetUrls,
     })
   );
@@ -286,7 +278,6 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     workspaceChatLimit: parsed.workspaceChatLimit,
     appearancePreference: parsed.appearancePreference,
     darkUiPalette: parsed.darkUiPalette,
-    fontPreference: normalizeFontPreference(parsed.fontPreference),
     recentBrowserTargetUrls: dedupeRecentPreviewTargets(
       parsed.recentBrowserTargetUrls
         .map(normalizePreviewTargetInput)

@@ -36,5 +36,4 @@ export const showToolCallsAtom = settingAtom('showToolCalls');
 export const workspaceChatLimitAtom = settingAtom('workspaceChatLimit');
 export const appearancePreferenceAtom = settingAtom('appearancePreference');
 export const darkUiPaletteAtom = settingAtom('darkUiPalette');
-export const fontPreferenceAtom = settingAtom('fontPreference');
 export const recentBrowserTargetUrlsAtom = settingAtom('recentBrowserTargetUrls');

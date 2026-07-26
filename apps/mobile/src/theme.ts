@@ -11,12 +11,7 @@ import {
   type TextStyle,
 } from 'react-native';
 
-import {
-  getFontFamilies,
-  type AppFontFamilies,
-  type FontPreference,
-  DEFAULT_FONT_PREFERENCE,
-} from './fonts';
+import { SYSTEM_FONT_FAMILIES, type AppFontFamilies } from './fonts';
 
 export type AppearancePreference = 'system' | 'light' | 'dark';
 export type ThemeMode = 'light' | 'dark';
@@ -79,7 +74,6 @@ export type AppTypography = {
 export interface AppTheme {
   mode: ThemeMode;
   isDark: boolean;
-  fontPreference: FontPreference;
   fonts: AppFontFamilies;
   colors: AppColors;
   spacing: typeof spacing;
@@ -251,36 +245,29 @@ export const shadow = {
   },
 } as const;
 
-function withWeightedFamily(
-  family: string | undefined,
-  fallbackWeight: NonNullable<TextStyle['fontWeight']>
-): Pick<TextStyle, 'fontFamily' | 'fontWeight'> {
-  return family ? { fontFamily: family } : { fontWeight: fallbackWeight };
-}
-
 function createTypography(colors: AppColors, fonts: AppFontFamilies): AppTypography {
   return {
     largeTitle: {
       fontSize: 24,
       color: colors.textPrimary,
       letterSpacing: 0,
-      ...withWeightedFamily(fonts.bold, '700'),
+      fontWeight: '700',
     },
     headline: {
       fontSize: 15,
       color: colors.textPrimary,
-      ...withWeightedFamily(fonts.semibold ?? fonts.medium, '600'),
+      fontWeight: '600',
     },
     body: {
       fontSize: 14,
       color: colors.textPrimary,
       lineHeight: 20,
-      ...withWeightedFamily(fonts.regular, '400'),
+      fontWeight: '400',
     },
     caption: {
       fontSize: 12,
       color: colors.textMuted,
-      ...withWeightedFamily(fonts.regular, '400'),
+      fontWeight: '400',
     },
     mono: {
       fontSize: 12,
@@ -304,7 +291,6 @@ export function resolveThemeMode(
 
 export function createAppTheme(
   mode: ThemeMode,
-  fontPreference: FontPreference = DEFAULT_FONT_PREFERENCE,
   darkUiPalette: DarkUiPalette = 'classic'
 ): AppTheme {
   const colors =
@@ -314,11 +300,10 @@ export function createAppTheme(
         ? darkGreyColors
         : darkClassicColors;
   const isDark = mode === 'dark';
-  const fonts = getFontFamilies(fontPreference);
+  const fonts = SYSTEM_FONT_FAMILIES;
   return {
     mode,
     isDark,
-    fontPreference,
     fonts,
     colors,
     spacing,
@@ -338,7 +323,7 @@ export function createAppTheme(
   };
 }
 
-const fallbackTheme = createAppTheme('dark', DEFAULT_FONT_PREFERENCE, 'classic');
+const fallbackTheme = createAppTheme('dark', 'classic');
 export const colors: AppColors = { ...fallbackTheme.colors };
 export const typography: AppTypography = { ...fallbackTheme.typography };
 
