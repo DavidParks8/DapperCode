@@ -218,6 +218,7 @@ export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
                   : [],
                 locations: Array.isArray(tool.locations) ? tool.locations : [],
                 truncated: tool.truncated === true,
+                subagent: tool.subagent === true,
               }
             : undefined,
         },

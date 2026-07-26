@@ -328,6 +328,7 @@ describe('HostBridgeApiClient', () => {
             structuredContent: [],
             locations: [],
             truncated: false,
+            subagent: false,
           },
         ],
         messageCollection: {
@@ -2745,6 +2746,7 @@ describe('HostBridgeApiClient', () => {
               structuredContent: [],
               locations: [],
               truncated: false,
+              subagent: false,
             },
           },
         ],

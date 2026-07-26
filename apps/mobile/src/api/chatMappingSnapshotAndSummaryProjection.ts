@@ -1,4 +1,8 @@
-import { extractLastError, mapRawStatus } from './chatMappingStatusAndErrorProjection';
+import {
+  extractLastError,
+  hasActiveAcpRun,
+  mapRawStatus,
+} from './chatMappingStatusAndErrorProjection';
 import {
   readAgentId,
   readThreadItemText,
@@ -50,6 +54,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       structuredContent: Array.isArray(entry.structuredContent) ? entry.structuredContent : [],
       locations: Array.isArray(entry.locations) ? entry.locations : [],
       truncated: entry.truncated === true,
+      subagent: entry.subagent === true,
     }))
     .filter((entry) => entry.id);
   const timeline = (Array.isArray(snapshot.timeline) ? snapshot.timeline : [])
@@ -213,7 +218,7 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
   return {
     id: raw.id,
     title: toPreview(displayTitle || fallbackTitle),
-    status: mapRawStatus(raw.status, turns),
+    status: hasActiveAcpRun(raw.acpSnapshot) ? 'running' : mapRawStatus(raw.status, turns),
     createdAt,
     updatedAt,
     statusUpdatedAt: updatedAt,

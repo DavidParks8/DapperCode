@@ -240,6 +240,12 @@ export function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMess
 }
 
 export function isSnapshotSubagentTool(tool: RawAcpSnapshot['tools'][number]): boolean {
+  if (tool.subagent) {
+    // The bridge classifies a task tool from the first update that names it and remembers the
+    // verdict. Agents rename the tool once it reports a description, so the live title alone
+    // cannot be trusted while the sub-agent is still working.
+    return true;
+  }
   const title = tool.title.trim().toLowerCase().replace(/[-_ ]/g, '');
   return title === 'task' || title === 'spawnagent' || title === 'subagent';
 }

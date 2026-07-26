@@ -1,6 +1,8 @@
 use crate::acp::events::{CanonicalEvent, FieldUpdate, MessageRole};
 use crate::acp::identity::AgentSessionId;
-use crate::acp::snapshot::{SessionSnapshot, SnapshotMessage, SnapshotTimelineKind, SnapshotTool};
+use crate::acp::snapshot::{
+    is_subagent_task_tool, SessionSnapshot, SnapshotMessage, SnapshotTimelineKind, SnapshotTool,
+};
 use crate::agui_generated::{
     AgUiEvent, AgUiEventContent, AgUiEventRole, AgUiEventType, Delta, Function, Message,
     MessageContent, MessageRole as AgUiMessageRole, ToolCall, ToolCallType,
@@ -1259,7 +1261,8 @@ pub(super) fn messages_snapshot_envelope(
                 } else {
                     current_task.or(preserved_task)
                 };
-                if task.is_some() || is_subagent_task_tool(tool.kind, &tool.title) {
+                if task.is_some() || tool.subagent || is_subagent_task_tool(tool.kind, &tool.title)
+                {
                     let child_thread_id = task.as_ref().and_then(|task| {
                         AgentSessionId::new(&snapshot.agent_id, &task.session_id)
                             .ok()
@@ -1719,16 +1722,6 @@ fn summarize_task_result(result: &str) -> String {
 }
 
 const TASK_RESULT_SUMMARY_BYTES: usize = 140;
-
-fn is_subagent_task_tool(kind: agent_client_protocol::schema::v1::ToolKind, title: &str) -> bool {
-    let normalized = title
-        .trim()
-        .to_ascii_lowercase()
-        .replace(['-', '_', ' '], "");
-    matches!(normalized.as_str(), "task" | "spawnagent" | "subagent")
-        || kind == agent_client_protocol::schema::v1::ToolKind::Think
-            && normalized.contains("agent")
-}
 
 /// How a sub-agent's own state should be reported on its card.
 ///
@@ -2354,6 +2347,7 @@ mod tests {
             ],
             locations: vec![json!({"path": "src/math.ts", "line": 7})],
             truncated: false,
+            subagent: false,
         };
 
         let text = tool_snapshot_text(&tool);
@@ -2402,6 +2396,7 @@ mod tests {
             ],
             locations: vec![],
             truncated: false,
+            subagent: false,
         };
 
         let text = tool_snapshot_text(&tool);

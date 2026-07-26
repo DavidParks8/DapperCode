@@ -1,5 +1,6 @@
 import {
   normalizeLifecycleStatus,
+  type RawAcpSnapshot,
   type RawThread,
   type RawThreadStatus,
   type RawTurn,
@@ -40,6 +41,24 @@ export function readErrorMessage(value: unknown, depth = 0): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Whether the thread has a prompt in flight right now.
+ *
+ * The ACP bridge reports no thread lifecycle status at all — its `thread/read` payload carries
+ * only the snapshot — so `mapRawStatus` would settle every thread, running or not, on `idle`.
+ * `acpSnapshot.active` is the authoritative live signal: the bridge sets it on `RunStarted` and
+ * clears it on `RunFinished`/`RunFailed`. Without it a turn that goes quiet — which is exactly
+ * what a parent thread does for the whole of a sub-agent run — looks finished, the run watchdog
+ * expires, and the composer settles on "Ready" while the agent is still working.
+ */
+export function hasActiveAcpRun(acpSnapshot: RawAcpSnapshot | undefined): boolean {
+  const active = acpSnapshot?.active;
+  if (!active) {
+    return false;
+  }
+  return Boolean(active.runId ?? active.sourceTurnId) || active.generation != null;
 }
 
 export function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus {
