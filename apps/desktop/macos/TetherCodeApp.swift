@@ -79,6 +79,87 @@ private enum OperatorError: LocalizedError {
     }
 }
 
+private final class OperatorProcessRegistry: @unchecked Sendable {
+    static let shared = OperatorProcessRegistry()
+
+    private let lock = NSLock()
+    private var processes: [ObjectIdentifier: Process] = [:]
+    private var isTerminating = false
+
+    func run(_ process: Process) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isTerminating else {
+            throw OperatorError.failed("TetherCode is quitting.")
+        }
+        try process.run()
+        processes[ObjectIdentifier(process)] = process
+    }
+
+    func unregister(_ process: Process) {
+        lock.lock()
+        processes.removeValue(forKey: ObjectIdentifier(process))
+        lock.unlock()
+    }
+
+    func settleBeforeTermination() {
+        lock.lock()
+        isTerminating = true
+        lock.unlock()
+
+        let graceDeadline = Date().addingTimeInterval(2)
+        while Date() < graceDeadline {
+            let running = snapshot().filter(\.isRunning)
+            if running.isEmpty { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        let running = snapshot().filter(\.isRunning)
+        running.forEach { $0.terminate() }
+        let terminationDeadline = Date().addingTimeInterval(1)
+        while Date() < terminationDeadline && running.contains(where: \.isRunning) {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+
+    private func snapshot() -> [Process] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(processes.values)
+    }
+}
+
+private final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        OperatorProcessRegistry.shared.settleBeforeTermination()
+        guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/tethercode"),
+              FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
+            return
+        }
+
+        let workspace = UserDefaults.standard.string(forKey: "workspace")
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let process = Process()
+        process.executableURL = operatorURL
+        process.arguments = ["stop", "--workspace", workspace]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            let deadline = Date().addingTimeInterval(18)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                process.terminate()
+            }
+        } catch {
+            // Termination cannot present recovery UI; the ownership guard in the
+            // operator still prevents this fallback from stopping another process.
+        }
+    }
+}
+
 @MainActor
 private final class BridgeModel: ObservableObject {
     @Published var snapshot = BridgeSnapshot.loading
@@ -294,7 +375,8 @@ private final class BridgeModel: ObservableObject {
             let stderr = Pipe()
             process.standardOutput = stdout
             process.standardError = stderr
-            try process.run()
+            try OperatorProcessRegistry.shared.run(process)
+            defer { OperatorProcessRegistry.shared.unregister(process) }
             process.waitUntilExit()
 
             let output = stdout.fileHandleForReading.readDataToEndOfFile()
@@ -518,6 +600,7 @@ private enum QRCode {
 
 @main
 private struct TetherCodeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = BridgeModel()
 
     var body: some Scene {

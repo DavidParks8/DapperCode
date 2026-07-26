@@ -13,7 +13,7 @@ use agent_client_protocol::schema::v1::{
 use futures_util::future::BoxFuture;
 
 use crate::acp::interactions::ElicitationFieldKind;
-use crate::acp::manager::{AgentLifecycle, AgentManager, LocalAgentManifestSet};
+use crate::acp::manager::{AgentLifecycle, AgentManager, LocalAgentManifestSet, ManagedSession};
 use crate::acp::runtime::RequestCancellation;
 use crate::*;
 
@@ -25,6 +25,16 @@ pub(super) struct RuntimeBackend {
 }
 
 const MAX_TRACKED_CLIENT_REQUESTS: usize = 4096;
+
+fn parent_subagent_snapshot_envelope(parent: &ManagedSession) -> crate::agui::AgUiEventEnvelope {
+    let run_id = parent
+        .snapshot
+        .active_run_id
+        .clone()
+        .unwrap_or_else(|| format!("{}::history", parent.thread_id));
+    let source_turn_id = parent.snapshot.active_source_turn_id.clone();
+    crate::agui::messages_snapshot_envelope(&parent.snapshot, run_id, source_turn_id)
+}
 
 struct ClientRequestOwner {
     client_id: u64,
@@ -230,14 +240,119 @@ impl RuntimeBackend {
         let snapshot_manager = manager.clone();
         let event_pump = tokio::spawn(async move {
             while let Some(event) = events.recv().await {
-                if let Some((parent_thread_id, child_session_id, child_title)) =
-                    crate::agui::discovered_subagent_session(&event)
+                if let crate::acp::events::CanonicalEvent::RunStarted {
+                    thread_id,
+                    generation,
+                    ..
+                } = &event
                 {
+                    snapshot_manager
+                        .note_subagent_started(thread_id, *generation)
+                        .await;
+                }
+                let related_terminal = match &event {
+                    crate::acp::events::CanonicalEvent::RunFinished {
+                        thread_id,
+                        stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                        generation,
+                        ..
+                    } => Some((thread_id.as_str(), *generation, "cancelled")),
+                    crate::acp::events::CanonicalEvent::RunFinished {
+                        thread_id,
+                        generation,
+                        ..
+                    } => Some((thread_id.as_str(), *generation, "completed")),
+                    crate::acp::events::CanonicalEvent::RunFailed {
+                        thread_id,
+                        generation,
+                        ..
+                    } => Some((thread_id.as_str(), *generation, "failed")),
+                    _ => None,
+                };
+                if let Some((child_thread_id, generation, status)) = related_terminal {
+                    let accepted = snapshot_manager
+                        .accepted_subagent_terminal(child_thread_id, generation)
+                        .await;
+                    let correlation_target = accepted.clone();
+                    let correction = if let Some(target) = accepted {
+                        snapshot_manager
+                            .mark_parent_subagent_tool_terminal(
+                                &target.parent_thread_id,
+                                &target.tool_call_id,
+                                status,
+                            )
+                            .await
+                    } else if !snapshot_manager
+                        .tracks_subagent_generation(child_thread_id)
+                        .await
+                    {
+                        snapshot_manager
+                            .mark_parent_subagent_terminal(child_thread_id, status)
+                            .await
+                    } else {
+                        Ok(None)
+                    };
+                    match correction {
+                        Ok(Some(parent)) => {
+                            if let Some(target) = correlation_target {
+                                snapshot_manager
+                                    .retire_subagent_link(child_thread_id, &target.tool_call_id)
+                                    .await;
+                            }
+                            event_hub
+                                .broadcast_ag_ui_envelope(parent_subagent_snapshot_envelope(
+                                    &parent,
+                                ))
+                                .await;
+                        }
+                        Ok(None) => {
+                            if let Some(target) = correlation_target {
+                                snapshot_manager
+                                    .retire_subagent_link(child_thread_id, &target.tool_call_id)
+                                    .await;
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("failed to persist parent sub-agent status: {error}");
+                        }
+                    }
+                }
+                if let Some((
+                    parent_thread_id,
+                    child_session_id,
+                    child_title,
+                    tool_call_id,
+                    terminal,
+                )) = crate::agui::discovered_subagent_session(&event)
+                {
+                    let discovered_thread_id =
+                        crate::acp::identity::AgentSessionId::decode(parent_thread_id)
+                            .ok()
+                            .and_then(|parent| {
+                                crate::acp::identity::AgentSessionId::new(
+                                    parent.agent_id,
+                                    child_session_id.clone(),
+                                )
+                                .ok()
+                            })
+                            .map(|identity| identity.encode());
+                    if terminal {
+                        if let Some(thread_id) = discovered_thread_id.as_deref() {
+                            snapshot_manager
+                                .retire_subagent_link(thread_id, tool_call_id)
+                                .await;
+                        }
+                    }
                     match snapshot_manager
                         .adopt_related_session(parent_thread_id, &child_session_id, child_title)
                         .await
                     {
                         Ok(thread_id) => {
+                            if !terminal {
+                                snapshot_manager
+                                    .note_subagent_link(parent_thread_id, &thread_id, tool_call_id)
+                                    .await;
+                            }
                             if let Ok(session) = snapshot_manager.read_session(&thread_id).await {
                                 event_hub
                                     .broadcast_ag_ui_envelope(
@@ -994,10 +1109,75 @@ pub(super) async fn wait_for_shutdown_signal() -> &'static str {
 #[cfg(test)]
 mod client_request_tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
+    use std::path::PathBuf;
     use tokio::{
         sync::{oneshot, Semaphore},
         time::{timeout, Duration},
     };
+
+    #[test]
+    fn late_child_terminal_after_projector_state_loss_broadcasts_the_updated_parent_snapshot() {
+        let mut snapshot = crate::acp::snapshot::SessionSnapshot::new(
+            "alpha-agent".to_string(),
+            "parent-thread".to_string(),
+        );
+        snapshot.apply(&crate::acp::events::CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "parent-thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: crate::acp::events::FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: crate::acp::events::FieldUpdate::Set(Vec::new()),
+            locations: crate::acp::events::FieldUpdate::Set(Vec::new()),
+        });
+        assert!(snapshot.mark_subagent_terminal("child-1", "failed"));
+        snapshot.apply(&crate::acp::events::CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "parent-thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: crate::acp::events::FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWrapper completed\n</task>".to_string(),
+            ),
+            structured_content: crate::acp::events::FieldUpdate::Unchanged,
+            locations: crate::acp::events::FieldUpdate::Unchanged,
+        });
+        let parent = ManagedSession {
+            thread_id: "parent-thread".to_string(),
+            agent_id: "alpha-agent".to_string(),
+            cwd: PathBuf::from("/tmp"),
+            parent_thread_id: None,
+            snapshot,
+        };
+
+        let envelope = parent_subagent_snapshot_envelope(&parent);
+        assert_eq!(envelope.thread_id, "parent-thread");
+        let card = envelope
+            .event
+            .messages
+            .expect("parent snapshot messages")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-1")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("corrected parent card");
+        assert_eq!(card["content"]["subAgent"]["agentStatus"], "failed");
+        assert!(card["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Sub-agent failed")));
+    }
 
     #[tokio::test]
     async fn disconnect_cancels_blocked_permit_and_acp_futures_and_cleans_map() {

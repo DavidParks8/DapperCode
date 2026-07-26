@@ -91,6 +91,18 @@ export function applyMessagesSnapshot(
   messages: Message[],
   timestamp?: number,
 ): AgUiThreadMessageState {
+  const currentSubagents = new Map<string, ChatMessage>();
+  for (const message of current.messages) {
+    if (
+      message.role !== "activity" ||
+      message.activityType !== SUBAGENT_ACTIVITY_TYPE
+    ) {
+      continue;
+    }
+    const toolCallId = nonEmptyString(record(message.content.subAgent)?.toolCallId);
+    if (toolCallId) currentSubagents.set(toolCallId, message);
+  }
+  const snapshotActivityIds = new Set<string>();
   const snapshotSubagentIds = messages.reduce<Record<string, true>>(
     (ids, message) => {
       if (
@@ -100,7 +112,10 @@ export function applyMessagesSnapshot(
         const content = record(message.content);
         const subAgent = record(content?.subAgent);
         const toolCallId = nonEmptyString(subAgent?.toolCallId);
-        if (toolCallId) ids[toolCallId] = true;
+        if (toolCallId) {
+          ids[toolCallId] = true;
+          snapshotActivityIds.add(toolCallId);
+        }
       }
       return ids;
     },
@@ -109,20 +124,43 @@ export function applyMessagesSnapshot(
   const previous = new Map(
     current.messages.map((message) => [message.id, message]),
   );
-  const nextMessages = messages
-    .filter(
-      (message) => !messageUsesSuppressedTool(message, snapshotSubagentIds),
-    )
-    .map((message) => {
-      const existing = previous.get(message.id);
-      return {
-        ...message,
-        createdAt: existing?.createdAt ?? timestampIso(timestamp),
-        parts: partsMatchMessageContent(existing?.parts, message.content)
-          ? existing?.parts
-          : undefined,
-      } as ChatMessage;
-    });
+  const restoredSubagents = new Set<string>();
+  const nextMessages: ChatMessage[] = [];
+  for (const message of messages) {
+    const suppressedIds = suppressedToolCallIds(message, snapshotSubagentIds);
+    if (suppressedIds.length > 0) {
+      // A malformed bridge snapshot can forget that a live task tool was already
+      // classified as a sub-agent. Keep the known card at the tool's timeline
+      // position instead of letting the snapshot replace it with a generic tool.
+      for (const toolCallId of suppressedIds) {
+        const currentSubagent = currentSubagents.get(toolCallId);
+        if (
+          currentSubagent &&
+          !snapshotActivityIds.has(toolCallId) &&
+          !restoredSubagents.has(toolCallId)
+        ) {
+          nextMessages.push(
+            current.terminalMessageIds.includes(currentSubagent.id)
+              ? terminalizeSubagentCard(
+                  currentSubagent,
+                  snapshotToolFailed(messages, toolCallId) ? "failed" : "completed",
+                )
+              : currentSubagent,
+          );
+          restoredSubagents.add(toolCallId);
+        }
+      }
+      continue;
+    }
+    const existing = previous.get(message.id);
+    nextMessages.push({
+      ...message,
+      createdAt: existing?.createdAt ?? timestampIso(timestamp),
+      parts: partsMatchMessageContent(existing?.parts, message.content)
+        ? existing?.parts
+        : undefined,
+    } as ChatMessage);
+  }
   return {
     ...current,
     messages: nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
@@ -135,17 +173,87 @@ export function applyMessagesSnapshot(
   };
 }
 
+function snapshotToolFailed(messages: Message[], toolCallId: string): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "tool" &&
+      message.toolCallId === toolCallId &&
+      Boolean(message.error),
+  );
+}
+
+function terminalizeSubagentCard(
+  message: ChatMessage,
+  status: "completed" | "failed",
+): ChatMessage {
+  if (
+    message.role !== "activity" ||
+    message.activityType !== SUBAGENT_ACTIVITY_TYPE
+  ) {
+    return message;
+  }
+  const meta = record(message.content.subAgent);
+  const existingStatus = nonEmptyString(meta?.agentStatus);
+  const effectiveStatus =
+    existingStatus && isFailedSubagentStatus(existingStatus)
+      ? existingStatus
+      : status;
+  const text =
+    typeof message.content.text === "string" ? message.content.text : "";
+  const latest = text
+    .split("\n")
+    .find((line) => line.trimStart().startsWith("Latest:"));
+  return {
+    ...message,
+    content: {
+      ...message.content,
+      text: [
+        isFailedSubagentStatus(effectiveStatus)
+          ? "• Sub-agent failed"
+          : "• Sub-agent completed",
+        `  Status: ${effectiveStatus}`,
+        latest,
+      ]
+        .filter((line): line is string => Boolean(line))
+        .join("\n"),
+      subAgent: {
+        ...meta,
+        agentStatus: effectiveStatus,
+      },
+    },
+  };
+}
+
+function isFailedSubagentStatus(status: string): boolean {
+  return [
+    "failed",
+    "error",
+    "aborted",
+    "cancelled",
+    "canceled",
+  ].includes(status.trim().toLowerCase());
+}
+
+function suppressedToolCallIds(
+  message: Message,
+  suppressed: Record<string, true>,
+): string[] {
+  if (message.role === "tool") {
+    return suppressed[message.toolCallId] ? [message.toolCallId] : [];
+  }
+  if (message.role === "assistant") {
+    return (message.toolCalls ?? [])
+      .map((call) => call.id)
+      .filter((toolCallId) => suppressed[toolCallId]);
+  }
+  return [];
+}
+
 export function messageUsesSuppressedTool(
   message: Message,
   suppressed: Record<string, true>,
 ): boolean {
-  if (message.role === "tool") {
-    return Boolean(suppressed[message.toolCallId]);
-  }
-  if (message.role === "assistant") {
-    return (message.toolCalls ?? []).some((call) => suppressed[call.id]);
-  }
-  return false;
+  return suppressedToolCallIds(message, suppressed).length > 0;
 }
 
 export function applyActivityDelta(

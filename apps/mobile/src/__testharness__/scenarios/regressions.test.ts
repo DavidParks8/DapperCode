@@ -262,6 +262,333 @@ describe('Sub-agent card lifecycle', () => {
     expect(JSON.stringify(messages)).not.toContain('raw payload');
   });
 
+  it.each([
+    { error: undefined, expectedStatus: 'completed' },
+    { error: 'Tool failed', expectedStatus: 'failed' },
+  ] as const)(
+    'does not let a malformed terminal snapshot replace a live sub-agent card ($expectedStatus)',
+    ({ error, expectedStatus }) => {
+    // Regression: the bridge classified the task live, then its terminal snapshot
+    // saw only the tool's newest plain-text update and rendered it as a generic
+    // tool. The mobile projection keeps the already-known card as a final defense.
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence(sequence('parent', 'parent::run-1').runFinished().build());
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'tool-call:parent::task-1',
+              role: 'assistant',
+              content: '',
+              toolCalls: [
+                {
+                  id: 'parent::task-1',
+                  type: 'function',
+                  function: { name: 'Research dependency options', arguments: '{}' },
+                },
+              ],
+            },
+            {
+              id: 'tool-result:parent::task-1',
+              role: 'tool',
+              toolCallId: 'parent::task-1',
+              content: 'raw task result',
+              error,
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: expectedStatus });
+    expect(JSON.stringify(state.projectTranscript('parent').messages)).not.toContain(
+      'Research dependency options',
+    );
+    },
+  );
+
+  it('does not let a successful wrapper snapshot overwrite a known child failure', () => {
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'subagent:parent::task-1',
+          activityType: 'tethercode.subagent',
+          content: {
+            text: '• Sub-agent failed\n  Status: error\n  Latest: Child failed',
+            subAgent: {
+              toolCallId: 'parent::task-1',
+              tool: 'spawnAgent',
+              senderThreadId: 'parent',
+              receiverThreadIds: ['child'],
+              agentStatus: 'error',
+              navigable: true,
+            },
+          },
+        } as unknown as AGUIEvent,
+      },
+    ]);
+    state.applySequence(sequence('parent', 'parent::run-1').runFinished().build());
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'tool-call:parent::task-1',
+              role: 'assistant',
+              content: '',
+              toolCalls: [
+                {
+                  id: 'parent::task-1',
+                  type: 'function',
+                  function: { name: 'Research dependency options', arguments: '{}' },
+                },
+              ],
+            },
+            {
+              id: 'tool-result:parent::task-1',
+              role: 'tool',
+              toolCallId: 'parent::task-1',
+              content: 'wrapper completed',
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'error' });
+    expect(state).toHaveSubAgentPreview('parent', 'Child failed');
+  });
+
+  it('classified authoritative snapshot replaces transient local status', () => {
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'subagent:parent::task-1',
+          activityType: 'tethercode.subagent',
+          content: {
+            text: '• Sub-agent failed\n  Status: failed\n  Latest: Child failed late',
+            subAgent: {
+              toolCallId: 'parent::task-1',
+              tool: 'spawnAgent',
+              senderThreadId: 'parent',
+              receiverThreadIds: ['child'],
+              agentStatus: 'failed',
+              navigable: true,
+            },
+          },
+        } as unknown as AGUIEvent,
+      },
+    ]);
+    state.applySequence(sequence('parent', 'parent::run-1').runFinished().build());
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'subagent:parent::task-1',
+              role: 'activity',
+              activityType: 'tethercode.subagent',
+              content: {
+                text: '• Sub-agent completed\n  Status: completed\n  Latest: Wrapper completed',
+                subAgent: {
+                  toolCallId: 'parent::task-1',
+                  tool: 'spawnAgent',
+                  senderThreadId: 'parent',
+                  receiverThreadIds: ['child'],
+                  agentStatus: 'completed',
+                  navigable: true,
+                },
+              },
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'completed' });
+    expect(state).toHaveSubAgentPreview('parent', 'Wrapper completed');
+  });
+
+  it('retasked sub-agent snapshot clears a previous failure', () => {
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'subagent:parent::task-1',
+          activityType: 'tethercode.subagent',
+          content: {
+            text: '• Sub-agent failed\n  Status: failed\n  Latest: First attempt failed',
+            subAgent: {
+              toolCallId: 'parent::task-1',
+              tool: 'spawnAgent',
+              senderThreadId: 'parent',
+              receiverThreadIds: ['child'],
+              agentStatus: 'failed',
+              navigable: true,
+            },
+          },
+        } as unknown as AGUIEvent,
+      },
+    ]);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'subagent:parent::task-1',
+              role: 'activity',
+              activityType: 'tethercode.subagent',
+              content: {
+                text: '• Sub-agent working\n  Status: running\n  Latest: Trying again',
+                subAgent: {
+                  toolCallId: 'parent::task-1',
+                  tool: 'spawnAgent',
+                  senderThreadId: 'parent',
+                  receiverThreadIds: ['child'],
+                  agentStatus: 'running',
+                  navigable: true,
+                },
+              },
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'running' });
+    expect(state).toHaveSubAgentPreview('parent', 'Trying again');
+  });
+
+  it('final retask snapshot converges without an intermediate running update', () => {
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'subagent:parent::task-1',
+          activityType: 'tethercode.subagent',
+          content: {
+            text: '• Sub-agent failed\n  Status: failed\n  Latest: First attempt failed',
+            subAgent: {
+              toolCallId: 'parent::task-1',
+              tool: 'spawnAgent',
+              senderThreadId: 'parent',
+              receiverThreadIds: ['child'],
+              agentStatus: 'failed',
+              navigable: true,
+            },
+          },
+        } as unknown as AGUIEvent,
+      },
+    ]);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'subagent:parent::task-1',
+              role: 'activity',
+              activityType: 'tethercode.subagent',
+              content: {
+                text: '• Sub-agent completed\n  Status: completed\n  Latest: Retry passed',
+                subAgent: {
+                  toolCallId: 'parent::task-1',
+                  tool: 'spawnAgent',
+                  senderThreadId: 'parent',
+                  receiverThreadIds: ['child'],
+                  agentStatus: 'completed',
+                  navigable: true,
+                },
+              },
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'completed' });
+    expect(state).toHaveSubAgentPreview('parent', 'Retry passed');
+  });
+
+  it('keeps the card when the terminal snapshot updates it to done', () => {
+    const state = new TestableThreadState();
+    const { classified } = lateClassifiedSubAgent('parent', 'child');
+    state.applySequence(classified);
+    state.applySequence([
+      {
+        threadId: 'parent',
+        runId: 'parent::run-1',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: 'subagent:parent::task-1',
+              role: 'activity',
+              activityType: 'tethercode.subagent',
+              content: {
+                text: '• Sub-agent completed\n  Status: completed\n  Latest: Done',
+                subAgent: {
+                  toolCallId: 'parent::task-1',
+                  tool: 'spawnAgent',
+                  senderThreadId: 'parent',
+                  receiverThreadIds: ['child'],
+                  agentStatus: 'completed',
+                  navigable: true,
+                },
+              },
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessageCount('parent', 1);
+    expect(state).toHaveSubAgentCard('parent', 'child', { status: 'completed' });
+    expect(state).toHaveNoDuplicateIds('parent');
+  });
+
   it('never shows a sub-agent as starting, and shows it as openable', () => {
     // A card reading "starting" cannot be opened and looks stuck. The child thread
     // arrives with the task header, so the first card is already navigable.

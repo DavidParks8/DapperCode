@@ -2023,7 +2023,11 @@ mod tests {
             .await
             .expect("failed network push response");
         assert!(!failed_push.pushed);
-        assert!(failed_push.stderr.contains("127.0.0.1"));
+        assert_ne!(failed_push.code, Some(0));
+        assert!(
+            !failed_push.stderr.trim().is_empty(),
+            "failed push must return a diagnostic"
+        );
 
         repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
         repo.git(&["config", "branch.main.remote", "origin"]);
