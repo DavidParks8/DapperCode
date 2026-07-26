@@ -14,7 +14,12 @@ import {
   keyboardVisibleAtom
 } from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import {
+  chatModelPreferencesLoadedAtom,
+  chatPlanSnapshotsLoadedAtom,
+  runWatchdogNowAtom,
+} from '../state/mainScreen/session';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../agents';
 import type { BridgeUiSurface, Chat } from '../api/types';
@@ -134,7 +139,8 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const liveReasoningMessageIdsRef = useRef<Record<string, string>>({});
   const runWatchdogUntilRef = useRef(0);
   const runWatchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [runWatchdogNow, setRunWatchdogNow] = useState(() => Date.now());
+  const runWatchdogNow = useAtomValue(runWatchdogNowAtom);
+  const setRunWatchdogNow = useSetAtom(runWatchdogNowAtom);
   const externalStatusFullSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -150,10 +156,11 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     Record<string, PendingOptimisticQueuedMessage[]>
   >({});
   const chatModelPreferencesRef = useRef<Record<string, ChatModelPreference>>({});
-  const [chatModelPreferencesLoaded, setChatModelPreferencesLoaded] = useState(false);
+  const chatModelPreferencesLoaded = useAtomValue(chatModelPreferencesLoadedAtom);
+  const setChatModelPreferencesLoaded = useSetAtom(chatModelPreferencesLoadedAtom);
   const chatPlanSnapshotsRef = useRef<Record<string, ActivePlanState>>({});
   const bridgeUiSurfaceSnapshotsRef = useRef<Record<string, BridgeUiSurface[]>>({});
-  const [, setChatPlanSnapshotsLoaded] = useState(false);
+  const setChatPlanSnapshotsLoaded = useSetAtom(chatPlanSnapshotsLoadedAtom);
   const bridgeUiSurfacePersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );

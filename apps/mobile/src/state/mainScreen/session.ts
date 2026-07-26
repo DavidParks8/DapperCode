@@ -22,3 +22,9 @@ export const activeCommandsAtom = screenAtom<RunEvent[]>([]);
 export const loadingWorkspaceRootsAtom = screenAtom(false);
 
 export const pendingAgentIdAtom = screenAtom<string | null>(null);
+
+export const runWatchdogNowAtom = screenAtom(0);
+
+export const chatModelPreferencesLoadedAtom = screenAtom(false);
+
+export const chatPlanSnapshotsLoadedAtom = screenAtom(false);
