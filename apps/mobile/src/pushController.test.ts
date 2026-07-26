@@ -9,6 +9,7 @@ import {
   updatePushEvents,
 } from './pushController';
 import { requestPushRegistration } from './pushNotifications';
+import { pushSettingsAtom } from './state/appState/atoms';
 
 jest.mock('./pushNotifications', () => ({
   requestPushRegistration: jest.fn(),
@@ -54,9 +55,19 @@ function createStore(initial: Partial<AppStateData['push']> = {}) {
   });
   return {
     data,
-    store: { getSnapshot: () => ({ data }), dispatchDurable } as never,
+    store: createStoreFacade(() => data.push, dispatchDurable),
     dispatchDurable,
   };
+}
+
+function createStoreFacade(
+  readPush: () => AppStateData['push'],
+  dispatchDurable: (action: AppStateAction) => Promise<AppStateData>
+) {
+  return {
+    get: (atom: unknown) => (atom === pushSettingsAtom ? readPush() : undefined),
+    set: (atom: unknown, action: AppStateAction) => dispatchDurable(action),
+  } as never;
 }
 
 describe('pushController', () => {
@@ -119,11 +130,11 @@ describe('pushController', () => {
       status: 'unavailable',
     });
 
-    const brokenStore = {
-      getSnapshot: () => ({ data: createDefaultAppStateData() }),
-      dispatchDurable: jest.fn(async () => createDefaultAppStateData()),
-    };
-    await expect(syncPushRegistration({} as never, brokenStore as never, 'profile-1')).rejects.toThrow(
+    const brokenStore = createStoreFacade(
+      () => createDefaultAppStateData().push,
+      jest.fn(async () => createDefaultAppStateData())
+    );
+    await expect(syncPushRegistration({} as never, brokenStore, 'profile-1')).rejects.toThrow(
       'Could not create a push registration identity.'
     );
   });

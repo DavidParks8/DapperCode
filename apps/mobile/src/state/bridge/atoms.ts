@@ -14,29 +14,54 @@ export const bridgeUrlAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeU
 
 export const bridgeTokenAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeToken ?? null);
 
-export const wsClientAtom = atom((get) => {
-  const bridgeUrl = get(bridgeUrlAtom);
-  if (!bridgeUrl) {
-    return null;
-  }
-  return new HostBridgeWsClient(bridgeUrl, {
-    authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
-    allowQueryTokenAuth: env.allowWsQueryTokenAuth,
-  });
-});
+const wsClientOverrideAtom = atom<HostBridgeWsClient | null>(null);
+const apiClientOverrideAtom = atom<HostBridgeApiClient | null>(null);
 
-export const apiClientAtom = atom((get) => {
-  const ws = get(wsClientAtom);
-  const bridgeUrl = get(bridgeUrlAtom);
-  if (!ws) {
-    return null;
+/**
+ * The clients are derived from the active bridge profile. Writing to these atoms installs an
+ * override, which is the injection seam used by tests.
+ */
+export const wsClientAtom = atom(
+  (get) => {
+    const override = get(wsClientOverrideAtom);
+    if (override) {
+      return override;
+    }
+    const bridgeUrl = get(bridgeUrlAtom);
+    if (!bridgeUrl) {
+      return null;
+    }
+    return new HostBridgeWsClient(bridgeUrl, {
+      authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+      allowQueryTokenAuth: env.allowWsQueryTokenAuth,
+    });
+  },
+  (get, set, client: HostBridgeWsClient | null) => {
+    set(wsClientOverrideAtom, client);
   }
-  return new HostBridgeApiClient({
-    ws,
-    bridgeUrl: bridgeUrl ?? undefined,
-    authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
-  });
-});
+);
+
+export const apiClientAtom = atom(
+  (get) => {
+    const override = get(apiClientOverrideAtom);
+    if (override) {
+      return override;
+    }
+    const ws = get(wsClientAtom);
+    const bridgeUrl = get(bridgeUrlAtom);
+    if (!ws) {
+      return null;
+    }
+    return new HostBridgeApiClient({
+      ws,
+      bridgeUrl: bridgeUrl ?? undefined,
+      authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+    });
+  },
+  (get, set, client: HostBridgeApiClient | null) => {
+    set(apiClientOverrideAtom, client);
+  }
+);
 
 /** Connection status published by the active WebSocket client. */
 export const bridgeConnectedAtom = atom(false);

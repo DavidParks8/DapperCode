@@ -6,6 +6,10 @@ import type { HostBridgeApiClient } from '../api/client';
 import type { Chat, GitStatusResponse } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { GitScreen } from './GitScreen';
+import { apiClientAtom } from '../state/bridge/atoms';
+import { chatTransitionChatIdAtom } from '../state/chat/atoms';
+import { currentScreenAtom } from '../state/navigation/atoms';
+import { createTestStore, withAppStore } from '../state/testing';
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => name,
@@ -155,15 +159,25 @@ async function press(root: Queryable, text: string): Promise<void> {
   });
 }
 
+function createGitStore(api: HostBridgeApiClient) {
+  const store = createTestStore();
+  store.set(apiClientAtom, api);
+  store.set(currentScreenAtom, 'ChatGit');
+  return store;
+}
+
 async function renderGit(api: HostBridgeApiClient, activeChat: Chat = chat): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
-        <AppThemeProvider theme={theme}>
-          <GitScreen api={api} chat={activeChat} onBack={jest.fn()} />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        createGitStore(api),
+        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+          <AppThemeProvider theme={theme}>
+            <GitScreen chat={activeChat} />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -236,13 +250,16 @@ describe('GitScreen behavior', () => {
 
   it('adds, edits, deletes, and submits inline review comments', async () => {
     const api = createApi();
-    const onBack = jest.fn();
+    const store = createGitStore(api);
     let tree: ReactTestRenderer | undefined;
     await act(async () => {
       tree = renderer.create(
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
-          <AppThemeProvider theme={theme}><GitScreen api={api} chat={chat} onBack={onBack} /></AppThemeProvider>
-        </SafeAreaProvider>
+        withAppStore(
+          store,
+          <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+            <AppThemeProvider theme={theme}><GitScreen chat={chat} /></AppThemeProvider>
+          </SafeAreaProvider>
+        )
       );
       await Promise.resolve();
       await Promise.resolve();
@@ -263,7 +280,7 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'Inline review')).toBe(true);
     await press(root, 'Send review to agent');
     expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(chat.id, expect.objectContaining({ content: expect.stringContaining('Please preserve this behavior.') }));
-    expect(onBack).toHaveBeenCalled();
+    expect(store.get(chatTransitionChatIdAtom)).toBe(chat.id);
     act(() => tree?.unmount());
   });
 

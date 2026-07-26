@@ -1,3 +1,6 @@
+import { Provider } from 'jotai';
+import { createElement, type ReactElement, type ReactNode } from 'react';
+
 import {
   createDefaultAppStateData,
   type AppStateAction,
@@ -83,4 +86,9 @@ export function createAppStateHarness(persistence: AppStatePersistenceAdapter): 
     getSnapshot: () => store.get(appStateSnapshotAtom),
     subscribe: (listener) => store.sub(appStateSnapshotAtom, listener),
   };
+}
+
+/** Wraps a tree so it resolves atoms from the supplied store. */
+export function withAppStore(store: AppStore, children: ReactNode): ReactElement {
+  return createElement(Provider, { store }, children);
 }

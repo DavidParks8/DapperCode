@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { ActionSheetIOS, AppState, Platform, RefreshControl } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -11,8 +12,57 @@ import type {
   RpcNotification,
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
+import { workspaceChatLimitAtom } from '../state/appState/settings';
+import { apiClientAtom, wsClientAtom } from '../state/bridge/atoms';
+import { selectedChatIdAtom } from '../state/chat/atoms';
+import { browserReturnScreenAtom, currentScreenAtom } from '../state/navigation/atoms';
+import { createTestStore, withAppStore } from '../state/testing';
+import type { AppStore } from '../state/types';
+import type { WorkspaceChatLimit } from '../appSettings';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+
+interface DrawerProbeProps {
+  api: HostBridgeApiClient;
+  ws: HostBridgeWsClient;
+  active?: boolean;
+  selectedChatId?: string | null;
+  workspaceChatLimit?: WorkspaceChatLimit;
+  onClose?: () => void;
+  store?: AppStore;
+}
+
+export function createDrawerStore(
+  api: HostBridgeApiClient,
+  ws: HostBridgeWsClient,
+  options: { selectedChatId?: string | null; workspaceChatLimit?: WorkspaceChatLimit } = {}
+): AppStore {
+  const store = createTestStore();
+  store.set(apiClientAtom, api);
+  store.set(wsClientAtom, ws);
+  store.set(selectedChatIdAtom, options.selectedChatId ?? null);
+  if (options.workspaceChatLimit !== undefined) {
+    store.set(workspaceChatLimitAtom, options.workspaceChatLimit);
+  }
+  return store;
+}
+
+/** Renders DrawerContent against a hydrated jotai store using the legacy prop shape. */
+function DrawerContentProbe({
+  api,
+  ws,
+  active = true,
+  selectedChatId = null,
+  workspaceChatLimit,
+  onClose,
+  store,
+}: DrawerProbeProps) {
+  const fallbackStore = useMemo(
+    () => createDrawerStore(api, ws, { selectedChatId, workspaceChatLimit }),
+    [api, selectedChatId, workspaceChatLimit, ws]
+  );
+  return withAppStore(store ?? fallbackStore, <DrawerContent active={active} onClose={onClose} />);
+}
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
@@ -188,21 +238,18 @@ function createHarness({
 
 async function renderDrawer(
   harness: DrawerHarness,
-  props: Partial<React.ComponentProps<typeof DrawerContent>> = {}
+  props: Partial<DrawerProbeProps> = {}
 ): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
         <AppThemeProvider theme={theme}>
-          <DrawerContent
+          <DrawerContentProbe
             api={harness.api}
             ws={harness.ws}
             active
             selectedChatId={null}
-            onSelectChat={jest.fn()}
-            onNewChat={jest.fn()}
-            onNavigate={jest.fn()}
             {...props}
           />
         </AppThemeProvider>
@@ -287,7 +334,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree = renderer.create(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -391,9 +438,6 @@ describe('DrawerContent render behavior matrix', () => {
   });
 
   it('renders attention lanes, explicit agents, selection, and primary actions', async () => {
-    const onSelectChat = jest.fn();
-    const onNewChat = jest.fn();
-    const onNavigate = jest.fn();
     const chats = [
       createChat({ id: 'root', title: 'Running root', status: 'running', cwd: '/repo/alpha', agentId: 'copilot', updatedAt: '2026-07-20T00:29:00.000Z' }),
       createChat({ id: 'approval', title: 'Approval chat', cwd: '/repo/beta', agentId: 'codex', updatedAt: '2026-07-20T00:28:00.000Z' }),
@@ -406,7 +450,8 @@ describe('DrawerContent render behavior matrix', () => {
       approvals: [createApproval('approval')],
       userInputs: [createUserInput('input')],
     });
-    const tree = await renderDrawer(harness, { selectedChatId: 'root', onSelectChat, onNewChat, onNavigate });
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'root' });
+    const tree = await renderDrawer(harness, { selectedChatId: 'root', store });
     const root = tree.root as Queryable;
 
     expect(findByLabel(root, 'Needs your attention, 3 sessions').props.accessibilityState).toEqual(expect.objectContaining({ expanded: true }));
@@ -423,10 +468,9 @@ describe('DrawerContent render behavior matrix', () => {
     await press(findByLabel(root, 'Open settings'));
     await press(findByLabel(root, 'Needs your attention, 3 sessions'));
 
-    expect(onSelectChat).toHaveBeenCalledWith('root');
-    expect(onNewChat).toHaveBeenCalledTimes(1);
-    expect(onNavigate).toHaveBeenNthCalledWith(1, 'Browser');
-    expect(onNavigate).toHaveBeenNthCalledWith(2, 'Settings');
+    expect(store.get(currentScreenAtom)).toBe('Settings');
+    expect(store.get(browserReturnScreenAtom)).toBe('Main');
+    expect(store.get(selectedChatIdAtom)).toBeNull();
     expect(hasText(root, 'Approval chat')).toBe(false);
     act(() => tree.unmount());
   });
@@ -642,7 +686,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active={false} selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -766,7 +810,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -802,7 +846,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active={false} selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -816,7 +860,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -874,7 +918,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree = renderer.create(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={createAppTheme('light')}>
-            <DrawerContent api={harness.api} ws={harness.ws} active workspaceChatLimit={null} selectedChatId="sub-error" onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active workspaceChatLimit={null} selectedChatId="sub-error" />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -1051,7 +1095,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active={false} selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -1106,7 +1150,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active={false} selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -1136,7 +1180,7 @@ describe('DrawerContent render behavior matrix', () => {
       tree.update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent api={harness.api} ws={harness.ws} active={false} selectedChatId={null} onSelectChat={jest.fn()} onNewChat={jest.fn()} onNavigate={jest.fn()} />
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} selectedChatId={null} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -1190,14 +1234,11 @@ describe('DrawerContent partial history diagnostics', () => {
       tree = renderer.create(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
           <AppThemeProvider theme={theme}>
-            <DrawerContent
+            <DrawerContentProbe
               api={api}
               ws={ws}
               active
               selectedChatId={null}
-              onSelectChat={jest.fn()}
-              onNewChat={jest.fn()}
-              onNavigate={jest.fn()}
             />
           </AppThemeProvider>
         </SafeAreaProvider>

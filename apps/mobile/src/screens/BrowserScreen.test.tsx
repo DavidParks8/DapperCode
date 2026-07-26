@@ -5,8 +5,16 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import type { HostBridgeApiClient } from '../api/client';
 import type { BridgeCapabilities, BrowserPreviewSession } from '../api/types';
+import { createDefaultAppStateData } from '../appState';
+import { recentBrowserTargetUrlsAtom } from '../state/appState/settings';
+import { apiClientAtom } from '../state/bridge/atoms';
+import { browserScreenCommandsAtom, type BrowserScreenCommands } from '../state/commands';
+import { drawerCommandsAtom } from '../state/drawer/atoms';
+import { pendingBrowserTargetUrlAtom } from '../state/navigation/atoms';
+import { createTestStore, withAppStore } from '../state/testing';
+import type { AppStore } from '../state/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
-import { BrowserScreen, type BrowserScreenHandle } from './BrowserScreen';
+import { BrowserScreen } from './BrowserScreen';
 
 const mockWebViewMethods = {
   reload: jest.fn(),
@@ -144,37 +152,51 @@ async function renderBrowser(options: {
 } = {}): Promise<{
   tree: ReactTestRenderer;
   api: HostBridgeApiClient;
-  ref: { current: BrowserScreenHandle | null };
-  onRecentTargetUrlsChange: jest.Mock;
-  onPendingTargetHandled: jest.Mock;
+  store: AppStore;
+  ref: { current: BrowserScreenCommands | null };
 }> {
   const api = options.api ?? createApi();
-  const ref = { current: null as BrowserScreenHandle | null };
-  const onRecentTargetUrlsChange = jest.fn();
-  const onPendingTargetHandled = jest.fn();
+  const data = createDefaultAppStateData();
+  data.settings = { ...data.settings, recentBrowserTargetUrls: options.recentTargetUrls ?? [] };
+  data.bridgeProfiles = {
+    activeProfileId: 'profile-1',
+    profiles: [
+      {
+        id: 'profile-1',
+        name: 'Bridge',
+        bridgeUrl: 'http://bridge:3001',
+        bridgeToken: 'token',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  };
+  const store = createTestStore({ data });
+  store.set(apiClientAtom, api);
+  store.set(drawerCommandsAtom, { closeDrawer: jest.fn(), toggleNavigation: jest.fn() });
+  store.set(pendingBrowserTargetUrlAtom, options.pendingTargetUrl ?? null);
+  const ref = {
+    get current(): BrowserScreenCommands | null {
+      return store.get(browserScreenCommandsAtom);
+    },
+  };
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 } }}>
-        <AppThemeProvider theme={theme}>
-          <BrowserScreen
-            ref={ref}
-            api={api}
-            bridgeUrl="http://bridge:3001"
-            onOpenDrawer={jest.fn()}
-            recentTargetUrls={options.recentTargetUrls ?? []}
-            onRecentTargetUrlsChange={onRecentTargetUrlsChange}
-            pendingTargetUrl={options.pendingTargetUrl}
-            onPendingTargetHandled={options.handlePendingTarget === false ? undefined : onPendingTargetHandled}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        store,
+        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 } }}>
+          <AppThemeProvider theme={theme}>
+            <BrowserScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await Promise.resolve();
     await Promise.resolve();
   });
   if (!tree) throw new Error('Expected BrowserScreen tree');
-  return { tree, api, ref, onRecentTargetUrlsChange, onPendingTargetHandled };
+  return { tree, api, store, ref };
 }
 
 describe('BrowserScreen behavior', () => {
@@ -220,7 +242,7 @@ describe('BrowserScreen behavior', () => {
     exercisePressableStyles(root);
 
     expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:3000/');
-    expect(result.onRecentTargetUrlsChange).toHaveBeenCalledWith(['http://127.0.0.1:3000/']);
+    expect(result.store.get(recentBrowserTargetUrlsAtom)).toEqual(['http://127.0.0.1:3000/']);
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing WebView');
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
@@ -270,7 +292,7 @@ describe('BrowserScreen behavior', () => {
     act(() => failed.tree.unmount());
 
     const pending = await renderBrowser({ pendingTargetUrl: '5173' });
-    expect(pending.onPendingTargetHandled).toHaveBeenCalledTimes(1);
+    expect(pending.store.get(pendingBrowserTargetUrlAtom)).toBeNull();
     expect(pending.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:5173/');
     act(() => pending.tree.unmount());
   });
@@ -308,7 +330,7 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, '127.0.0.1:5173, Vite'));
     expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:5173/');
     await invoke(findByLabel(root, 'Show preview start page'));
-    await invoke(findByLabel(root, '127.0.0.1:8080, http://127.0.0.1:8080'));
+    await invoke(findByLabel(root, '127.0.0.1:8080, http://127.0.0.1:8080/'));
     expect(result.api.createBrowserPreviewSession).toHaveBeenLastCalledWith('http://127.0.0.1:8080/');
     await invoke(findByLabel(root, 'Show preview start page'));
     const input = findByLabel(root, 'Preview address');

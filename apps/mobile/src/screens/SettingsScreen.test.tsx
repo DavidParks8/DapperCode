@@ -4,15 +4,38 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import type { HostBridgeApiClient } from '../api/client';
 import type { BridgeCapabilities } from '../api/types';
-import type { AppStateAction, AppStateSnapshot, AppStateStore, PushSettingsState } from '../appState';
+import type { AppStateData, PushSettingsState } from '../appState';
 import { AppStatePersistenceError, createDefaultAppStateData } from '../appState';
+import type { WorkspaceChatLimit } from '../appSettings';
 import type { BridgeProfile } from '../bridgeProfiles';
 import { requestPushRegistration } from '../pushNotifications';
+import { appStateSnapshotAtom, pushSettingsAtom } from '../state/appState/atoms';
+import {
+  approvalModeAtom,
+  showToolCallsAtom,
+  workspaceChatLimitAtom,
+} from '../state/appState/settings';
+import { apiClientAtom, bridgeConnectedAtom } from '../state/bridge/atoms';
+import { drawerCommandsAtom } from '../state/drawer/atoms';
+import {
+  currentScreenAtom,
+  onboardingModeAtom,
+  settingsAllowsDrawerGestureAtom,
+} from '../state/navigation/atoms';
+import { createMemoryPersistence, createTestStore, withAppStore } from '../state/testing';
+import type { AppStore } from '../state/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { SettingsScreen } from './SettingsScreen';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('../pushNotifications', () => ({ requestPushRegistration: jest.fn() }));
+jest.mock('../chatSnapshotCache', () => ({
+  loadChatSnapshotCache: jest.fn().mockResolvedValue({ profileId: 'profile-2', selectedChatId: null, entries: [] }),
+  deleteChatSnapshotCache: jest.fn().mockResolvedValue(undefined),
+  saveChatSnapshotCache: jest.fn().mockResolvedValue(undefined),
+  createEmptyChatSnapshotCache: (profileId: string) => ({ profileId, selectedChatId: null, entries: [] }),
+  updateChatSnapshotCache: (cache: unknown) => cache,
+}));
 
 type Queryable = Omit<ReactTestInstance, 'children' | 'findAll' | 'parent' | 'props'> & {
   children: unknown[];
@@ -54,34 +77,40 @@ const capabilities: BridgeCapabilities = {
   },
 };
 
-function createStore(initial: Partial<PushSettingsState> = {}) {
+interface SettingsStoreOptions {
+  push?: Partial<PushSettingsState>;
+  activeProfileId?: string | null;
+  workspaceChatLimit?: WorkspaceChatLimit;
+  persistenceError?: AppStatePersistenceError | null;
+  writeCurrent?: jest.Mock;
+}
+
+function createSettingsData(options: SettingsStoreOptions): AppStateData {
   const data = createDefaultAppStateData();
-  data.push = { ...data.push, ...initial };
-  const dispatchDurable = jest.fn(async (action: AppStateAction) => {
-    if (action.type === 'push/update') data.push = { ...data.push, ...action.patch };
-    if (action.type === 'push/ensure-registration') {
-      data.push.registrations.push({ profileId: action.profileId, registrationId: action.registrationId, token: null });
-    }
-    if (action.type === 'push/registered') {
-      const registration = data.push.registrations.find((entry) => entry.profileId === action.profileId);
-      if (registration) registration.token = action.token;
-    }
-    if (action.type === 'push/unregistered') {
-      const registration = data.push.registrations.find((entry) => entry.profileId === action.profileId);
-      if (registration) registration.token = null;
-    }
-    return data;
-  });
-  const snapshot: AppStateSnapshot = { loaded: true, data, persistenceError: null };
-  const store = {
-    getSnapshot: () => snapshot,
-    dispatchDurable,
-  } satisfies Pick<AppStateStore, 'dispatchDurable' | 'getSnapshot'>;
-  return {
-    data,
-    dispatchDurable,
-    store: store as unknown as AppStateStore,
+  data.push = { ...data.push, ...options.push };
+  data.bridgeProfiles = {
+    activeProfileId: options.activeProfileId === undefined ? 'profile-1' : options.activeProfileId,
+    profiles,
   };
+  if (options.workspaceChatLimit !== undefined) {
+    data.settings = { ...data.settings, workspaceChatLimit: options.workspaceChatLimit };
+  }
+  return data;
+}
+
+function createSettingsStore(options: SettingsStoreOptions = {}): AppStore {
+  const persistence = createMemoryPersistence();
+  if (options.writeCurrent) {
+    persistence.writeCurrent = options.writeCurrent as unknown as typeof persistence.writeCurrent;
+  }
+  const store = createTestStore({ data: createSettingsData(options), persistence });
+  if (options.persistenceError) {
+    store.set(appStateSnapshotAtom, {
+      ...store.get(appStateSnapshotAtom),
+      persistenceError: options.persistenceError,
+    });
+  }
+  return store;
 }
 
 function hasText(root: Queryable, text: string): boolean {
@@ -137,59 +166,46 @@ async function changeToggle(node: Queryable, value: boolean): Promise<void> {
 
 async function renderSettings(options: {
   api?: Record<string, jest.Mock>;
-  activeBridgeProfileId?: string | null;
-  pushSettings?: PushSettingsState;
-  store?: ReturnType<typeof createStore>;
-  workspaceChatLimit?: 5 | 10 | 25 | null;
-  persistenceError?: AppStatePersistenceError | null;
+  store?: AppStore;
   connected?: boolean;
-  callbacks?: Record<string, jest.Mock>;
-} = {}): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: ReturnType<typeof createStore>; callbacks: Record<string, jest.Mock> }> {
+  drawerToggle?: jest.Mock;
+} = {}): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: AppStore }> {
   const api = options.api ?? {
     readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
     registerPushDevice: jest.fn().mockResolvedValue(undefined),
     unregisterPushDevice: jest.fn().mockResolvedValue(undefined),
   };
-  const store = options.store ?? createStore({
-    optedOut: false,
-    registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+  const store =
+    options.store ??
+    createSettingsStore({
+      push: {
+        optedOut: false,
+        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+      },
+    });
+  store.set(apiClientAtom, api as unknown as HostBridgeApiClient);
+  store.set(bridgeConnectedAtom, options.connected ?? true);
+  store.set(drawerCommandsAtom, {
+    closeDrawer: jest.fn(),
+    toggleNavigation: options.drawerToggle ?? jest.fn(),
   });
-  const callbacks = options.callbacks ?? {};
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
-        <AppThemeProvider theme={theme}>
-          <SettingsScreen
-            api={api as unknown as HostBridgeApiClient}
-            ws={{ isConnected: options.connected ?? true } as never}
-            activeBridgeProfileId={options.activeBridgeProfileId === undefined ? 'profile-1' : options.activeBridgeProfileId}
-            appStateStore={store.store}
-            pushSettings={options.pushSettings ?? store.data.push}
-            bridgeProfileName="Primary bridge"
-            bridgeProfiles={profiles}
-            workspaceChatLimit={options.workspaceChatLimit}
-            persistenceError={options.persistenceError}
-            onApprovalModeChange={callbacks.onApprovalModeChange}
-            onShowToolCallsChange={callbacks.onShowToolCallsChange}
-            onWorkspaceChatLimitChange={callbacks.onWorkspaceChatLimitChange}
-            onEditBridgeProfile={callbacks.onEditBridgeProfile}
-            onAddBridgeProfile={callbacks.onAddBridgeProfile}
-            onSwitchBridgeProfile={callbacks.onSwitchBridgeProfile}
-            onRetryPersistence={callbacks.onRetryPersistence}
-            onOpenDrawer={callbacks.onOpenDrawer ?? jest.fn()}
-            onDrawerGestureEnabledChange={callbacks.onDrawerGestureEnabledChange}
-            onOpenPrivacy={callbacks.onOpenPrivacy ?? jest.fn()}
-            onOpenTerms={callbacks.onOpenTerms ?? jest.fn()}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        store,
+        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+          <AppThemeProvider theme={theme}>
+            <SettingsScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await Promise.resolve();
     await Promise.resolve();
   });
   if (!tree) throw new Error('Expected SettingsScreen tree');
-  return { tree, api, store, callbacks };
+  return { tree, api, store };
 }
 
 describe('SettingsScreen behavior', () => {
@@ -199,44 +215,52 @@ describe('SettingsScreen behavior', () => {
   });
 
   it('renders capabilities and drives settings, profile, legal, retry, and drawer actions', async () => {
-    const callbacks = {
-      onApprovalModeChange: jest.fn(), onShowToolCallsChange: jest.fn(),
-      onWorkspaceChatLimitChange: jest.fn(), onEditBridgeProfile: jest.fn(),
-      onAddBridgeProfile: jest.fn(), onSwitchBridgeProfile: jest.fn(),
-      onRetryPersistence: jest.fn(), onOpenDrawer: jest.fn(),
-      onOpenPrivacy: jest.fn(), onOpenTerms: jest.fn(),
-      onDrawerGestureEnabledChange: jest.fn(),
-    };
+    const drawerToggle = jest.fn();
     const persistenceError = new AppStatePersistenceError('write_failed', 'write', 'save failed');
-    const { tree } = await renderSettings({ callbacks, workspaceChatLimit: 5, persistenceError });
+    const store = createSettingsStore({ workspaceChatLimit: 5, persistenceError });
+    store.set(settingsAllowsDrawerGestureAtom, false);
+    const { tree } = await renderSettings({ store, drawerToggle });
     const root = tree.root as Queryable;
     expect(hasText(root, 'Codex')).toBe(true);
     expect(hasText(root, 'Preferred · Active · ready · 1.2.3 · managed')).toBe(true);
     expect(hasText(root, 'Agent unavailable (details redacted)')).toBe(true);
-    expect(callbacks.onDrawerGestureEnabledChange).toHaveBeenCalledWith(true);
+    expect(store.get(settingsAllowsDrawerGestureAtom)).toBe(true);
 
     await changeToggle(findToggle(root, 'Require approvals'), false);
     await changeToggle(findToggle(root, 'Show tool calls'), false);
     await press(findPressableByText(root, 'Chats per workspace'));
-    await press(findPressableByText(root, 'Primary bridge'));
+    expect(store.get(approvalModeAtom)).toBe('yolo');
+    expect(store.get(showToolCallsAtom)).toBe(false);
+    expect(store.get(workspaceChatLimitAtom)).toBe(10);
+
+    await press(findPressableByText(root, 'Primary'));
+    expect(store.get(currentScreenAtom)).toBe('Onboarding');
+    expect(store.get(onboardingModeAtom)).toBe('edit');
     await press(findPressableByText(root, 'Add bridge'));
+    expect(store.get(onboardingModeAtom)).toBe('add');
     await press(findPressableByText(root, 'Secondary'));
-    await press(findPressableByText(root, 'Retry'));
+    expect(store.get(appStateSnapshotAtom).data.bridgeProfiles.activeProfileId).toBe('profile-2');
+
     await press(findPressableByText(root, 'Privacy policy'));
+    expect(store.get(currentScreenAtom)).toBe('Privacy');
     await press(findPressableByText(root, 'Terms of service'));
+    expect(store.get(currentScreenAtom)).toBe('Terms');
+
     const drawer = root.findAll((node) => node.props.accessibilityLabel === 'Open navigation drawer')[0];
     await press(drawer);
+    expect(drawerToggle).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
 
-    expect(callbacks.onApprovalModeChange).toHaveBeenCalledWith('yolo');
-    expect(callbacks.onShowToolCallsChange).toHaveBeenCalledWith(false);
-    expect(callbacks.onWorkspaceChatLimitChange).toHaveBeenCalledWith(10);
-    expect(callbacks.onEditBridgeProfile).toHaveBeenCalled();
-    expect(callbacks.onAddBridgeProfile).toHaveBeenCalled();
-    expect(callbacks.onSwitchBridgeProfile).toHaveBeenCalledWith('profile-2');
-    expect(callbacks.onRetryPersistence).toHaveBeenCalled();
-    expect(callbacks.onOpenPrivacy).toHaveBeenCalled();
-    expect(callbacks.onOpenTerms).toHaveBeenCalled();
-    expect(callbacks.onOpenDrawer).toHaveBeenCalled();
+  it('surfaces a persistence failure and clears it after a retry', async () => {
+    const store = createSettingsStore({
+      persistenceError: new AppStatePersistenceError('write_failed', 'write', 'save failed'),
+    });
+    const { tree } = await renderSettings({ store });
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'save failed')).toBe(true);
+    await press(findPressableByText(root, 'Retry'));
+    expect(store.get(appStateSnapshotAtom).persistenceError).toBeNull();
     act(() => tree.unmount());
   });
 
@@ -245,37 +269,42 @@ describe('SettingsScreen behavior', () => {
     { current: 25 as const, next: null },
     { current: null, next: 5 },
   ])('cycles workspace limit $current to $next', async ({ current, next }) => {
-    const callbacks = { onWorkspaceChatLimitChange: jest.fn() };
-    const { tree } = await renderSettings({ callbacks, workspaceChatLimit: current });
+    const store = createSettingsStore({ workspaceChatLimit: current });
+    const { tree } = await renderSettings({ store });
     await press(findPressableByText(tree.root as Queryable, 'Chats per workspace'));
-    expect(callbacks.onWorkspaceChatLimitChange).toHaveBeenCalledWith(next);
+    expect(store.get(workspaceChatLimitAtom)).toBe(next);
     act(() => tree.unmount());
   });
 
   it('persists push enable, disable, and event changes through the real controller', async () => {
-    const disabledStore = createStore({
-      optedOut: true,
-      registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+    const disabledStore = createSettingsStore({
+      push: {
+        optedOut: true,
+        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+      },
     });
-    const enabled = await renderSettings({ store: disabledStore, pushSettings: disabledStore.data.push });
+    const enabled = await renderSettings({ store: disabledStore });
     await changeToggle(findToggle(enabled.tree.root as Queryable, 'Push notifications'), true);
     expect(enabled.api.registerPushDevice).toHaveBeenCalledWith(expect.objectContaining({ token: 'new-token' }));
-    expect(disabledStore.dispatchDurable).toHaveBeenCalledWith({ type: 'push/update', patch: { optedOut: false } });
+    expect(disabledStore.get(pushSettingsAtom).optedOut).toBe(false);
     act(() => enabled.tree.unmount());
 
-    const activeStore = createStore({
-      optedOut: false,
-      registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+    const activeStore = createSettingsStore({
+      push: {
+        optedOut: false,
+        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+      },
     });
-    const active = await renderSettings({ store: activeStore, pushSettings: activeStore.data.push });
+    const active = await renderSettings({ store: activeStore });
     const root = active.tree.root as Queryable;
     await changeToggle(findToggle(root, 'Push notifications'), false);
     expect(active.api.unregisterPushDevice).toHaveBeenCalled();
-    await changeToggle(findToggle(root, 'Turn completed'), false);
+    expect(activeStore.get(pushSettingsAtom).optedOut).toBe(true);
     await changeToggle(findToggle(root, 'Approval requested'), false);
-    expect(activeStore.dispatchDurable).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'push/update', patch: { events: { turnCompleted: true, approvalRequested: false } },
-    }));
+    expect(activeStore.get(pushSettingsAtom).events).toEqual({
+      turnCompleted: true,
+      approvalRequested: false,
+    });
     act(() => active.tree.unmount());
   });
 
@@ -302,18 +331,21 @@ describe('SettingsScreen behavior', () => {
     expect(hasText(unknownFailure.tree.root as Queryable, 'Could not read bridge capabilities.')).toBe(true);
     act(() => unknownFailure.tree.unmount());
 
-    const errorStore = createStore({ optedOut: true });
-    errorStore.dispatchDurable.mockRejectedValueOnce('persist failed');
-    const pushError = await renderSettings({ store: errorStore, pushSettings: errorStore.data.push });
+    const errorStore = createSettingsStore({
+      push: { optedOut: true },
+      writeCurrent: jest.fn().mockRejectedValue(new Error('persist failed')),
+    });
+    const pushError = await renderSettings({ store: errorStore });
     await changeToggle(findToggle(pushError.tree.root as Queryable, 'Push notifications'), true);
-    expect(hasText(pushError.tree.root as Queryable, 'Could not update notifications.')).toBe(true);
+    expect(hasText(pushError.tree.root as Queryable, 'The app-state change was not saved. Please retry.')).toBe(true);
     act(() => pushError.tree.unmount());
 
-    const noProfileStore = createStore();
-    const noProfile = await renderSettings({ activeBridgeProfileId: null, store: noProfileStore });
+    const noProfileStore = createSettingsStore({ activeProfileId: null });
+    const noProfile = await renderSettings({ store: noProfileStore });
     await changeToggle(findToggle(noProfile.tree.root as Queryable, 'Push notifications'), true);
     await changeToggle(findToggle(noProfile.tree.root as Queryable, 'Turn completed'), false);
-    expect(noProfileStore.dispatchDurable).not.toHaveBeenCalled();
+    expect(noProfileStore.get(pushSettingsAtom).optedOut).toBe(false);
+    expect(noProfileStore.get(pushSettingsAtom).events.turnCompleted).toBe(true);
     act(() => noProfile.tree.unmount());
   });
 });
