@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 
 import type { AppScreen, Screen } from '../../app/appConstants';
-import type { OnboardingMode } from '../../screens/OnboardingScreen';
+import type { OnboardingMode } from '../../screens/onboarding/OnboardingScreen';
 
 export const currentScreenAtom = atom<Screen>('Main');
 

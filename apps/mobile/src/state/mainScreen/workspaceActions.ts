@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 
 import type { FileSystemListResponse } from '../../api/types';
-import { MainScreenPersistenceController } from '../../screens/controllers/mainScreenPersistenceController';
+import { MainScreenPersistenceController } from '../../screens/main/controllers/mainScreenPersistenceController';
 import {
   deriveCloneDirectoryName,
   formatGitCloneFailureMessage,
@@ -12,7 +12,7 @@ import {
   scheduleIdleTask,
   WORKSPACE_FAVORITES_LIMIT,
   type WorkspacePickerPurpose,
-} from '../../screens/mainScreenHelpers';
+} from '../../screens/main/mainScreenHelpers';
 import { defaultStartCwdAtom } from '../appState/settings';
 import { apiClientAtom } from '../bridge/atoms';
 import { currentScreenAtom, toAppScreen } from '../navigation/atoms';

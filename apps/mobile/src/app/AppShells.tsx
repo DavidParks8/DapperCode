@@ -9,7 +9,7 @@ import { appStatePersistenceErrorAtom } from '../state/appState/atoms';
 import { cancelOnboardingAtom, saveBridgeProfileAtom } from '../state/bridge/actions';
 import { activeBridgeProfileAtom, bridgeUrlAtom } from '../state/bridge/atoms';
 import { onboardingModeAtom } from '../state/navigation/atoms';
-import { OnboardingScreen, type OnboardingMode } from '../screens/OnboardingScreen';
+import { OnboardingScreen, type OnboardingMode } from '../screens/onboarding/OnboardingScreen';
 import { AppThemeProvider, type AppTheme } from '../theme';
 import type { AppStyles } from './appStyles';
 

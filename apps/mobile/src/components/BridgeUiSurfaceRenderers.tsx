@@ -18,7 +18,7 @@ import {
 import { AppSheet } from './AppSheet';
 import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 import { useAppTheme } from '../theme';
-import { createWorkflowMarkdownStyles } from '../screens/mainScreenStyles';
+import { createWorkflowMarkdownStyles } from '../screens/main/mainScreenStyles';
 import {
   controlAccessibilityState,
   decorativeAccessibilityProps,

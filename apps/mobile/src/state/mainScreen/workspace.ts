@@ -6,7 +6,7 @@ import type {
   WorkspaceSummary,
 } from '../../api/types';
 import type { AppScreen } from '../../app/appConstants';
-import type { WorkspacePickerPurpose } from '../../screens/mainScreenHelpers';
+import type { WorkspacePickerPurpose } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
 

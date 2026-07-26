@@ -3,38 +3,39 @@ import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { env } from '../config';
-import { BrowserScreen } from '../screens/BrowserScreen';
-import { GitCheckoutScreen } from '../screens/GitCheckoutScreen';
-import { GitScreen } from '../screens/GitScreen';
-import { MainScreen } from '../screens/MainScreen';
-import { PrivacyScreen } from '../screens/PrivacyScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
-import { TermsScreen } from '../screens/TermsScreen';
-import { WorkspacePickerScreen } from '../screens/WorkspacePickerScreen';
+import { BrowserScreen } from '../screens/browser/BrowserScreen';
+import { GitCheckoutScreen } from '../screens/gitCheckout/GitCheckoutScreen';
+import { GitScreen } from '../screens/git/GitScreen';
+import { MainScreen } from '../screens/main/MainScreen';
+import { PrivacyScreen } from '../screens/legal/PrivacyScreen';
+import { SettingsScreen } from '../screens/settings/SettingsScreen';
+import { TermsScreen } from '../screens/legal/TermsScreen';
+import { WorkspacePickerScreen } from '../screens/workspacePicker/WorkspacePickerScreen';
 import { activeBridgeProfileAtom } from '../state/bridge/atoms';
 import { gitChatAtom } from '../state/chat/atoms';
 import { drawerCommandsAtom } from '../state/drawer/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
 
 /**
- * Stacks a screen over the chat, the way a native stack keeps the previous screen mounted.
+ * Keeps the chat mounted underneath a pushed screen, the way a native stack does.
  *
- * The workspace picker and git checkout are pushed from the chat and hand control straight back
- * to it, so unmounting the chat underneath would remount it — and MainScreen resets its screen
- * atoms on mount.
+ * The chat must stay in the same tree position whether or not a screen is pushed. If the root
+ * element type changes between renders React remounts the chat, and MainScreen resets every screen
+ * atom on mount, which would wipe the composer draft and any in-flight chat creation.
  */
-function ScreenStack({ under, children }: { under: ReactNode; children: ReactNode }) {
+function ScreenStack({ children, pushed }: { children: ReactNode; pushed: ReactNode }) {
+  const covered = pushed !== null;
   return (
     <View style={styles.stack}>
       <View
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
+        style={styles.stack}
+        pointerEvents={covered ? 'none' : 'auto'}
+        accessibilityElementsHidden={covered}
+        importantForAccessibility={covered ? 'no-hide-descendants' : 'auto'}
       >
-        {under}
+        {children}
       </View>
-      {children}
+      {covered ? <View style={StyleSheet.absoluteFill}>{pushed}</View> : null}
     </View>
   );
 }
@@ -52,6 +53,13 @@ export function AppScreenRenderer() {
   // MainScreen still owns per-profile session state, so it is remounted per bridge profile.
   const mainScreen = <MainScreen key={activeBridgeProfileId} />;
 
+  const pushedScreen =
+    currentScreen === 'WorkspacePicker' ? (
+      <WorkspacePickerScreen />
+    ) : currentScreen === 'GitCheckout' ? (
+      <GitCheckoutScreen />
+    ) : null;
+
   switch (currentScreen) {
     case 'ChatGit':
       return gitChat ? <GitScreen chat={gitChat} /> : mainScreen;
@@ -59,22 +67,13 @@ export function AppScreenRenderer() {
       return <SettingsScreen />;
     case 'Browser':
       return <BrowserScreen />;
-    case 'WorkspacePicker':
-      return (
-        <ScreenStack under={mainScreen}>
-          <WorkspacePickerScreen />
-        </ScreenStack>
-      );
-    case 'GitCheckout':
-      return (
-        <ScreenStack under={mainScreen}>
-          <GitCheckoutScreen />
-        </ScreenStack>
-      );
     case 'Privacy':
       return <PrivacyScreen policyUrl={env.privacyPolicyUrl} onOpenDrawer={onOpenDrawer} />;
     case 'Terms':
       return <TermsScreen termsUrl={env.termsOfServiceUrl} onOpenDrawer={onOpenDrawer} />;
+    case 'WorkspacePicker':
+    case 'GitCheckout':
+      return <ScreenStack pushed={pushedScreen}>{mainScreen}</ScreenStack>;
     default:
       return mainScreen;
   }

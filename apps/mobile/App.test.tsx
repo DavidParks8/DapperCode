@@ -185,7 +185,7 @@ function mockScreen(name: string, refMethods?: Record<string, jest.Mock>) {
 
 const mockStartNewChat = jest.fn();
 const mockBrowserBack = jest.fn().mockReturnValue(false);
-jest.mock('./src/screens/MainScreen', () => {
+jest.mock('./src/screens/main/MainScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
   const jotai = require('jotai') as typeof import('jotai');
@@ -202,7 +202,7 @@ jest.mock('./src/screens/MainScreen', () => {
     },
   };
 });
-jest.mock('./src/screens/BrowserScreen', () => {
+jest.mock('./src/screens/browser/BrowserScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
   const jotai = require('jotai') as typeof import('jotai');
@@ -219,11 +219,11 @@ jest.mock('./src/screens/BrowserScreen', () => {
     },
   };
 });
-jest.mock('./src/screens/GitScreen', () => mockScreen('GitScreen'));
-jest.mock('./src/screens/OnboardingScreen', () => mockScreen('OnboardingScreen'));
-jest.mock('./src/screens/PrivacyScreen', () => mockScreen('PrivacyScreen'));
-jest.mock('./src/screens/SettingsScreen', () => mockScreen('SettingsScreen'));
-jest.mock('./src/screens/TermsScreen', () => mockScreen('TermsScreen'));
+jest.mock('./src/screens/git/GitScreen', () => mockScreen('GitScreen'));
+jest.mock('./src/screens/onboarding/OnboardingScreen', () => mockScreen('OnboardingScreen'));
+jest.mock('./src/screens/legal/PrivacyScreen', () => mockScreen('PrivacyScreen'));
+jest.mock('./src/screens/settings/SettingsScreen', () => mockScreen('SettingsScreen'));
+jest.mock('./src/screens/legal/TermsScreen', () => mockScreen('TermsScreen'));
 jest.mock('./src/navigation/DrawerContent', () => mockScreen('DrawerContent'));
 
 import { AppRoot } from './src/app/AppRoot';

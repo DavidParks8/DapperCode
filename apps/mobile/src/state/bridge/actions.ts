@@ -8,7 +8,7 @@ import {
   loadChatSnapshotCache,
   type ChatSnapshotCache,
 } from '../../chatSnapshotCache';
-import type { OnboardingBridgeProfileDraft } from '../../screens/OnboardingScreen';
+import type { OnboardingBridgeProfileDraft } from '../../screens/onboarding/OnboardingScreen';
 import { bridgeProfilesAtom, bridgeProfileStoreAtom } from '../appState/atoms';
 import { dispatchDurableAppStateAtom } from '../appState/actions';
 import { applyRestoredChatSnapshotAtom, resetChatSessionStateAtom } from '../chat/actions';
