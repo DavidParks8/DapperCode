@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 pub(super) const AG_UI_EVENT_METHOD: &str = "bridge/agui.event";
 const CLOSED_THREAD_CAPACITY: usize = 2048;
 const OBSERVED_RUN_CAPACITY: usize = 256;
+const SUBAGENT_LINK_CAPACITY: usize = 2048;
 const MESSAGE_CHUNK_BYTES: usize = 32 * 1024;
 const TOOL_RESULT_CHUNK_BYTES: usize = 16 * 1024;
 const STRUCTURED_CHUNK_BYTES: usize = 16 * 1024;
@@ -47,6 +48,8 @@ struct AgUiToolState {
     started: bool,
     ended: bool,
     subagent_activity: bool,
+    subagent_child_thread_id: Option<String>,
+    subagent_terminal_status: Option<String>,
     result_content: String,
     result_revision: Option<String>,
     structured_revision: Option<String>,
@@ -63,6 +66,9 @@ struct SubagentActivityLink {
     parent_source_turn_id: Option<String>,
     tool_call_id: String,
     child_thread_id: String,
+    child_run_id: Option<String>,
+    child_generation: Option<u64>,
+    minimum_child_generation: Option<u64>,
 }
 
 struct SubagentActivityContext<'a> {
@@ -100,7 +106,18 @@ impl AgUiProjector {
                 ..
             } => {
                 self.closed_threads.remove(thread_id);
-                if let Some(previous) = self.runs.remove(thread_id) {
+                if let Some(mut previous) = self.runs.remove(thread_id) {
+                    let previous_run_id = previous.run_id.clone();
+                    self.terminalize_run_subagents(
+                        thread_id,
+                        &mut previous,
+                        "failed",
+                        timestamp,
+                        &mut projection.events,
+                    );
+                    self.subagent_links.retain(|_, link| {
+                        link.parent_thread_id != *thread_id || link.parent_run_id != previous_run_id
+                    });
                     close_run(thread_id, previous, timestamp, &mut projection.events, true);
                 }
                 self.runs.insert(
@@ -497,11 +514,30 @@ impl AgUiProjector {
                 });
                 if let Some((task, child_thread_id)) = subagent.as_ref() {
                     state.subagent_activity = true;
+                    state.subagent_child_thread_id = Some(child_thread_id.clone());
                     let result = subagent_preview.clone();
+                    let remembered_failure = state
+                        .subagent_terminal_status
+                        .as_deref()
+                        .filter(|status| is_failed_subagent_status(status))
+                        .map(str::to_string);
+                    let stale_terminal_header = terminal
+                        && !is_terminal_subagent_status(task.state)
+                        && remembered_failure.is_some();
+                    let subagent_status = remembered_failure
+                        .as_deref()
+                        .filter(|_| stale_terminal_header)
+                        .unwrap_or_else(|| snapshot_subagent_status(*status, Some(task.state)));
+                    if is_terminal_subagent_status(task.state) {
+                        state.subagent_terminal_status = Some(task.state.to_string());
+                    } else if !stale_terminal_header {
+                        state.subagent_terminal_status = None;
+                        state.ended = false;
+                    }
                     let revision = format!(
                         "{}\0{}\0{}",
                         child_thread_id,
-                        task.state,
+                        subagent_status,
                         result.as_deref().unwrap_or("")
                     );
                     if state.subagent_revision.as_deref() != Some(&revision) {
@@ -514,16 +550,50 @@ impl AgUiProjector {
                                 tool_call_id,
                                 child_thread_id: Some(child_thread_id),
                             },
-                            task.state,
+                            subagent_status,
                             result.as_deref(),
                             timestamp,
                         ));
                     }
-                    if is_terminal_subagent_status(task.state) {
+                    if is_terminal_subagent_status(task.state) || stale_terminal_header {
                         subagent_links.remove(child_thread_id);
                         finished_child_thread_id = Some(child_thread_id.clone());
                     } else {
                         relinked_child_thread_id = Some(child_thread_id.clone());
+                        if !subagent_links.contains_key(child_thread_id)
+                            && subagent_links.len() >= SUBAGENT_LINK_CAPACITY
+                        {
+                            if let Some(expired) = subagent_links.keys().next().cloned() {
+                                subagent_links.remove(&expired);
+                            }
+                        }
+                        let previous_link = subagent_links.get(child_thread_id);
+                        let same_invocation = previous_link.is_some_and(|link| {
+                            link.parent_run_id == run.run_id && link.tool_call_id == *tool_call_id
+                        });
+                        let child_run_id = same_invocation
+                            .then(|| previous_link.and_then(|link| link.child_run_id.clone()))
+                            .flatten();
+                        let child_generation = same_invocation
+                            .then(|| previous_link.and_then(|link| link.child_generation))
+                            .flatten();
+                        let minimum_child_generation = if same_invocation {
+                            previous_link.and_then(|link| link.minimum_child_generation)
+                        } else {
+                            previous_link.and_then(|link| {
+                                let observed_floor = link
+                                    .child_generation
+                                    .map(|generation| generation.saturating_add(1));
+                                match (link.minimum_child_generation, observed_floor) {
+                                    (Some(existing), Some(observed)) => {
+                                        Some(existing.max(observed))
+                                    }
+                                    (Some(existing), None) => Some(existing),
+                                    (None, Some(observed)) => Some(observed),
+                                    (None, None) => None,
+                                }
+                            })
+                        };
                         subagent_links.insert(
                             child_thread_id.clone(),
                             SubagentActivityLink {
@@ -532,6 +602,9 @@ impl AgUiProjector {
                                 parent_source_turn_id: run.source_turn_id.clone(),
                                 tool_call_id: tool_call_id.clone(),
                                 child_thread_id: child_thread_id.clone(),
+                                child_run_id,
+                                child_generation,
+                                minimum_child_generation,
                             },
                         );
                     }
@@ -543,11 +616,15 @@ impl AgUiProjector {
                 // this tool, so mirror its latest output onto the card. Without real
                 // output there is nothing to say: an empty card reports "starting" and
                 // cannot be opened, so stay silent until the sub-agent reports or ends.
+                let known_child_thread_id = state.subagent_child_thread_id.clone();
                 if let Some(latest) = subagent_preview
                     .clone()
                     .filter(|_| is_subagent_tool && !terminal && subagent.is_none())
                 {
-                    let revision = format!("unlinked\0running\0{latest}");
+                    let revision = format!(
+                        "{}\0running\0{latest}",
+                        known_child_thread_id.as_deref().unwrap_or("unlinked")
+                    );
                     if state.subagent_revision.as_deref() != Some(&revision) {
                         state.subagent_revision = Some(revision);
                         projection.events.push(subagent_activity_envelope(
@@ -556,7 +633,7 @@ impl AgUiProjector {
                                 parent_run_id: &run.run_id,
                                 parent_source_turn_id: run.source_turn_id.clone(),
                                 tool_call_id,
-                                child_thread_id: None,
+                                child_thread_id: known_child_thread_id.as_deref(),
                             },
                             "running",
                             Some(latest.as_str()),
@@ -565,17 +642,27 @@ impl AgUiProjector {
                     }
                 }
                 if state.subagent_activity && terminal && subagent.is_none() {
-                    let status = if matches!(
+                    let wrapper_failed = matches!(
                         status,
                         agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                    ) {
-                        "failed"
-                    } else {
-                        "completed"
-                    };
+                    );
+                    let status = state
+                        .subagent_terminal_status
+                        .as_deref()
+                        .filter(|status| is_failed_subagent_status(status))
+                        .unwrap_or({
+                            if wrapper_failed {
+                                "failed"
+                            } else {
+                                "completed"
+                            }
+                        });
                     let latest = subagent_preview.clone();
-                    let revision =
-                        format!("unlinked\0{status}\0{}", latest.as_deref().unwrap_or(""));
+                    let revision = format!(
+                        "{}\0{status}\0{}",
+                        known_child_thread_id.as_deref().unwrap_or("unlinked"),
+                        latest.as_deref().unwrap_or("")
+                    );
                     if state.subagent_revision.as_deref() != Some(&revision) {
                         state.subagent_revision = Some(revision);
                         projection.events.push(subagent_activity_envelope(
@@ -584,12 +671,22 @@ impl AgUiProjector {
                                 parent_run_id: &run.run_id,
                                 parent_source_turn_id: run.source_turn_id.clone(),
                                 tool_call_id,
-                                child_thread_id: None,
+                                child_thread_id: known_child_thread_id.as_deref(),
                             },
                             status,
                             latest.as_deref().or(Some("Task finished")),
                             timestamp,
                         ));
+                    }
+                    let terminal_child_known = state
+                        .subagent_terminal_status
+                        .as_deref()
+                        .is_some_and(is_terminal_subagent_status);
+                    if terminal_child_known || wrapper_failed {
+                        if let Some(child_thread_id) = known_child_thread_id {
+                            subagent_links.remove(&child_thread_id);
+                            finished_child_thread_id = Some(child_thread_id);
+                        }
                     }
                 }
                 if let Some(previous_content) = previous_content {
@@ -682,7 +779,29 @@ impl AgUiProjector {
                 if entry.get().run_id != *run_id {
                     return projection;
                 }
-                let run = entry.remove();
+                let mut run = entry.remove();
+                let run_cancelled = matches!(
+                    canonical,
+                    CanonicalEvent::RunFinished {
+                        stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                        ..
+                    }
+                );
+                let run_failed =
+                    run_cancelled || matches!(canonical, CanonicalEvent::RunFailed { .. });
+                self.terminalize_run_subagents(
+                    thread_id,
+                    &mut run,
+                    if run_cancelled {
+                        "cancelled"
+                    } else if run_failed {
+                        "failed"
+                    } else {
+                        "completed"
+                    },
+                    timestamp,
+                    &mut projection.events,
+                );
                 close_run(thread_id, run, timestamp, &mut projection.events, false);
                 let source_turn_id = canonical_source_turn_id(canonical).map(str::to_string);
                 projection.events.push(envelope(
@@ -705,9 +824,11 @@ impl AgUiProjector {
                     },
                 ));
                 self.mark_thread_closed(thread_id);
-                self.subagent_links.retain(|_, link| {
-                    link.parent_thread_id != *thread_id || link.parent_run_id != *run_id
-                });
+                if run_failed {
+                    self.subagent_links.retain(|_, link| {
+                        link.parent_thread_id != *thread_id || link.parent_run_id != *run_id
+                    });
+                }
             }
             CanonicalEvent::PermissionRequested { approval } => {
                 projection.controls.push((
@@ -873,7 +994,7 @@ impl AgUiProjector {
                     .get(&oldest)
                     .is_some_and(|run| run.source_turn_id.is_none())
                 {
-                    self.runs.remove(&oldest);
+                    self.close_observed_run(&oldest, timestamp, events);
                 }
             }
         }
@@ -937,6 +1058,60 @@ impl AgUiProjector {
         self.closed_threads.insert(thread_id.to_string());
     }
 
+    fn terminalize_run_subagents(
+        &mut self,
+        parent_thread_id: &str,
+        run: &mut AgUiRunState,
+        fallback_status: &str,
+        timestamp: i64,
+        events: &mut Vec<AgUiEventEnvelope>,
+    ) {
+        let mut child_threads_to_close = Vec::new();
+        for (tool_call_id, tool) in &mut run.tools {
+            if !tool.subagent_activity || tool.ended {
+                continue;
+            }
+            let remembered_terminal = tool
+                .subagent_terminal_status
+                .as_deref()
+                .filter(|status| is_terminal_subagent_status(status))
+                .map(str::to_string);
+            let parsed_terminal = parse_task_subagent(&tool.result_content)
+                .map(|task| task.state)
+                .filter(|status| is_terminal_subagent_status(status))
+                .map(str::to_string);
+            let known_terminal = remembered_terminal.or(parsed_terminal);
+            let status = known_terminal.as_deref().unwrap_or(fallback_status);
+            let latest = task_result_preview(&tool.result_content)
+                .or_else(|| task_progress_preview(&tool.result_content));
+            events.push(subagent_activity_envelope(
+                SubagentActivityContext {
+                    parent_thread_id,
+                    parent_run_id: &run.run_id,
+                    parent_source_turn_id: run.source_turn_id.clone(),
+                    tool_call_id,
+                    child_thread_id: tool.subagent_child_thread_id.as_deref(),
+                },
+                status,
+                latest.as_deref(),
+                timestamp,
+            ));
+            tool.subagent_terminal_status = Some(status.to_string());
+            tool.ended = true;
+            let should_close_child =
+                known_terminal.is_some() || is_failed_subagent_status(fallback_status);
+            if should_close_child {
+                let Some(child_thread_id) = &tool.subagent_child_thread_id else {
+                    continue;
+                };
+                child_threads_to_close.push(child_thread_id.clone());
+            }
+        }
+        for child_thread_id in child_threads_to_close {
+            self.close_observed_run(&child_thread_id, timestamp, events);
+        }
+    }
+
     fn project_subagent_progress(
         &mut self,
         canonical: &CanonicalEvent,
@@ -949,6 +1124,36 @@ impl AgUiProjector {
         let Some(link) = self.subagent_links.get(thread_id).cloned() else {
             return;
         };
+        let (event_run_id, event_generation, run_started) =
+            canonical_child_run_correlation(canonical);
+        if link
+            .minimum_child_generation
+            .zip(event_generation)
+            .is_some_and(|(minimum, generation)| generation < minimum)
+        {
+            return;
+        }
+        if link
+            .child_generation
+            .zip(event_generation)
+            .is_some_and(|(expected, generation)| generation != expected)
+        {
+            return;
+        }
+        if link
+            .child_run_id
+            .as_deref()
+            .zip(event_run_id)
+            .is_some_and(|(expected, actual)| expected != actual)
+        {
+            return;
+        }
+        if run_started {
+            if let Some(current) = self.subagent_links.get_mut(thread_id) {
+                current.child_run_id = event_run_id.map(str::to_string);
+                current.child_generation = event_generation;
+            }
+        }
         let Some((status, latest)) = subagent_progress(canonical) else {
             return;
         };
@@ -965,9 +1170,39 @@ impl AgUiProjector {
             timestamp,
         ));
         if is_terminal_subagent_status(status) {
+            if let Some(run) = self.runs.get_mut(&link.parent_thread_id) {
+                if run.run_id == link.parent_run_id {
+                    if let Some(tool) = run.tools.get_mut(&link.tool_call_id) {
+                        tool.subagent_terminal_status = Some(status.to_string());
+                    }
+                }
+            }
             self.subagent_links.remove(thread_id);
             self.close_observed_run(thread_id, timestamp, events);
         }
+    }
+}
+
+fn canonical_child_run_correlation(
+    canonical: &CanonicalEvent,
+) -> (Option<&str>, Option<u64>, bool) {
+    match canonical {
+        CanonicalEvent::RunStarted {
+            run_id, generation, ..
+        } => (Some(run_id), Some(*generation), true),
+        CanonicalEvent::RunFinished {
+            run_id, generation, ..
+        }
+        | CanonicalEvent::RunFailed {
+            run_id, generation, ..
+        } => (Some(run_id), Some(*generation), false),
+        CanonicalEvent::MessageChunk {
+            run_id, generation, ..
+        }
+        | CanonicalEvent::Tool {
+            run_id, generation, ..
+        } => (run_id.as_deref(), *generation, false),
+        _ => (None, None, false),
     }
 }
 
@@ -1009,24 +1244,32 @@ pub(super) fn messages_snapshot_envelope(
                 let Some(tool) = snapshot.tools.get(&entry.canonical_id) else {
                     continue;
                 };
-                let task = parse_task_subagent(&tool.content);
+                let current_task = parse_task_subagent(&tool.content);
+                let preserved_task = snapshot
+                    .subagent_header(&tool.id)
+                    .and_then(parse_task_subagent);
+                let prefer_preserved_terminal = preserved_task
+                    .as_ref()
+                    .is_some_and(|task| is_terminal_subagent_status(task.state))
+                    && current_task
+                        .as_ref()
+                        .is_some_and(|task| !is_terminal_subagent_status(task.state));
+                let task = if prefer_preserved_terminal {
+                    preserved_task
+                } else {
+                    current_task.or(preserved_task)
+                };
                 if task.is_some() || is_subagent_task_tool(tool.kind, &tool.title) {
                     let child_thread_id = task.as_ref().and_then(|task| {
                         AgentSessionId::new(&snapshot.agent_id, &task.session_id)
                             .ok()
                             .map(|identity| identity.encode())
                     });
-                    let status = task.as_ref().map_or_else(
-                        || match tool.status {
-                            agent_client_protocol::schema::v1::ToolCallStatus::Completed => {
-                                "completed"
-                            }
-                            agent_client_protocol::schema::v1::ToolCallStatus::Failed => "failed",
-                            _ => "running",
-                        },
-                        |task| task.state,
-                    );
-                    let mut lines = vec![if is_terminal_subagent_status(status) {
+                    let status =
+                        snapshot_subagent_status(tool.status, task.as_ref().map(|task| task.state));
+                    let mut lines = vec![if is_failed_subagent_status(status) {
+                        "• Sub-agent failed".to_string()
+                    } else if is_terminal_subagent_status(status) {
                         "• Sub-agent completed".to_string()
                     } else {
                         "• Sub-agent working".to_string()
@@ -1352,9 +1595,10 @@ fn parse_task_header(rest: &str) -> Option<TaskSubagent<'_>> {
 
 pub(super) fn discovered_subagent_session(
     canonical: &CanonicalEvent,
-) -> Option<(&str, String, Option<&str>)> {
+) -> Option<(&str, String, Option<&str>, &str, bool)> {
     let CanonicalEvent::Tool {
         thread_id,
+        tool_call_id,
         title,
         content,
         ..
@@ -1371,6 +1615,8 @@ pub(super) fn discovered_subagent_session(
             thread_id.as_str(),
             task.session_id,
             (!title.trim().is_empty()).then_some(title.as_str()),
+            tool_call_id.as_str(),
+            is_terminal_subagent_status(task.state),
         )
     })
 }
@@ -1403,7 +1649,27 @@ fn task_progress_preview(content: &str) -> Option<String> {
             !line.is_empty() && !line.starts_with("<task") && !line.starts_with("</task")
         })
         .collect::<Vec<_>>();
-    lines.last().map(|line| bounded(line, 512))
+    lines
+        .last()
+        .filter(|line| !is_placeholder_subagent_progress(line))
+        .map(|line| bounded(line, 512))
+}
+
+fn is_placeholder_subagent_progress(line: &str) -> bool {
+    let normalized = line
+        .trim()
+        .trim_end_matches(['.', '…'])
+        .to_ascii_lowercase()
+        .replace(['-', '_'], " ");
+    matches!(
+        normalized.split_whitespace().collect::<Vec<_>>().as_slice(),
+        ["starting", "agent"]
+            | ["starting", "subagent"]
+            | ["starting", "sub", "agent"]
+            | ["agent", "starting"]
+            | ["subagent", "starting"]
+            | ["sub", "agent", "starting"]
+    )
 }
 
 fn task_result_preview(content: &str) -> Option<String> {
@@ -1492,6 +1758,28 @@ fn is_terminal_subagent_status(status: &str) -> bool {
     )
 }
 
+fn is_failed_subagent_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "failed" | "error" | "aborted" | "cancelled" | "canceled"
+    )
+}
+
+fn snapshot_subagent_status(
+    tool_status: agent_client_protocol::schema::v1::ToolCallStatus,
+    child_status: Option<&str>,
+) -> &str {
+    match tool_status {
+        agent_client_protocol::schema::v1::ToolCallStatus::Completed => child_status
+            .filter(|status| is_failed_subagent_status(status))
+            .unwrap_or("completed"),
+        agent_client_protocol::schema::v1::ToolCallStatus::Failed => child_status
+            .filter(|status| is_failed_subagent_status(status))
+            .unwrap_or("failed"),
+        _ => child_status.unwrap_or("running"),
+    }
+}
+
 fn subagent_activity_envelope(
     context: SubagentActivityContext<'_>,
     status: &str,
@@ -1499,10 +1787,7 @@ fn subagent_activity_envelope(
     timestamp: i64,
 ) -> AgUiEventEnvelope {
     let terminal = is_terminal_subagent_status(status);
-    let failed = matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "failed" | "error" | "aborted" | "cancelled" | "canceled"
-    );
+    let failed = is_failed_subagent_status(status);
     let heading = if failed {
         "• Sub-agent failed"
     } else if terminal {
@@ -1540,7 +1825,10 @@ fn subagent_activity_envelope(
 
 fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String)> {
     match canonical {
-        CanonicalEvent::RunStarted { .. } => Some(("running", "Starting".to_string())),
+        // The task header already created a navigable working card. RunStarted is
+        // useful for correlation only; rendering it regresses the preview to a
+        // meaningless "Starting" state until the child produces real work.
+        CanonicalEvent::RunStarted { .. } => None,
         CanonicalEvent::MessageChunk { role, content, .. } if !content.trim().is_empty() => {
             let action = match role {
                 MessageRole::Thought => "Thinking",
@@ -1571,6 +1859,10 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String
         CanonicalEvent::ElicitationRequested { .. } => {
             Some(("running", "Waiting for input".to_string()))
         }
+        CanonicalEvent::RunFinished {
+            stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            ..
+        } => Some(("cancelled", "Cancelled".to_string())),
         CanonicalEvent::RunFinished { .. } => Some(("completed", "Returned result".to_string())),
         CanonicalEvent::RunFailed { message, .. } => Some(("failed", bounded(message, 512))),
         _ => None,
@@ -2604,6 +2896,18 @@ mod tests {
             typed_ids(&opened)
         );
 
+        let placeholder = projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("Starting sub-agent".to_string()),
+        ));
+        assert!(
+            typed_ids(&placeholder).is_empty(),
+            "agent-authored placeholder text must stay silent, got {:?}",
+            typed_ids(&placeholder)
+        );
+
         // The agent's own `starting` state is reported as running, never verbatim.
         let announced = subagent_cards(&projector.project_canonical(&subagent_task_tool(
             "task-1",
@@ -2707,6 +3011,668 @@ mod tests {
         assert!(
             emitted.iter().any(|(_, id)| id.starts_with("subagent:")),
             "expected a sub-agent card in {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_snapshot_keeps_a_live_sub_agent_card_classified() {
+        // Some agents title the task tool with the prompt rather than "Task". The
+        // first update carries the task header, but a later `Set` replaces it with
+        // plain result text. The terminal snapshot must remember that this tool is
+        // a sub-agent instead of replacing its live card with a generic tool card.
+        let mut projector = AgUiProjector::default();
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        let started = canonical_run_started();
+        projector.project_canonical(&started);
+        snapshot.apply(&started);
+
+        let linked = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading package.json\n</task>"
+                    .to_string(),
+            ),
+        );
+        snapshot.apply(&linked);
+        let live = projector.project_canonical(&linked);
+        assert_eq!(
+            subagent_cards(&live),
+            vec![(
+                "subagent:task-1".to_string(),
+                "• Sub-agent working\n  Status: running\n  Latest: Reading package.json"
+                    .to_string(),
+            )]
+        );
+
+        let completed = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set(
+                "<task_result>Found three compatible options.</task_result>".to_string(),
+            ),
+        );
+        snapshot.apply(&completed);
+        let terminal_live = projector.project_canonical(&completed);
+        let terminal_live_value = terminal_live
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("terminal live card");
+        assert_eq!(
+            terminal_live_value["event"]["content"]["subAgent"]["receiverThreadIds"]
+                .as_array()
+                .map(Vec::len),
+            Some(1),
+            "terminal live update lost its child link: {terminal_live_value}"
+        );
+        assert_eq!(
+            terminal_live_value["event"]["content"]["subAgent"]["agentStatus"],
+            "completed"
+        );
+
+        let envelope =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let messages = envelope.event.messages.expect("snapshot messages");
+        assert_eq!(messages.len(), 1, "unexpected snapshot: {messages:?}");
+        let value = serde_json::to_value(&messages[0]).expect("serializable message");
+        assert_eq!(value["id"], "subagent:task-1");
+        assert_eq!(value["role"], "activity");
+        assert_eq!(value["activityType"], "tethercode.subagent");
+        assert_eq!(
+            value["content"]["subAgent"]["receiverThreadIds"]
+                .as_array()
+                .map(Vec::len),
+            Some(1),
+            "snapshot lost its child link: {value}"
+        );
+        assert_eq!(
+            value["content"]["subAgent"]["agentStatus"], "completed",
+            "terminal tool status must win over the preserved running header"
+        );
+        assert!(
+            value["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Sub-agent completed")),
+            "snapshot replaced the card with a tool: {value}"
+        );
+
+        let failed = subagent_task_tool(
+            "task-2",
+            "Audit dependency risks",
+            ToolCallStatus::Failed,
+            FieldUpdate::Set(
+                "<task id=\"child-2\" state=\"failed\">\n<task_result>Audit failed</task_result>\n</task>"
+                    .to_string(),
+            ),
+        );
+        snapshot.apply(&failed);
+        let failed_snapshot =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let failed_value = failed_snapshot
+            .event
+            .messages
+            .expect("failed snapshot messages")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-2")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("failed sub-agent card");
+        assert!(
+            failed_value["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Sub-agent failed")),
+            "failed snapshot used the completed heading: {failed_value}"
+        );
+
+        let child_failed = subagent_task_tool(
+            "task-3",
+            "Audit transitive risks",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set(
+                "<task id=\"child-3\" state=\"error\">\n<task_result>Child failed</task_result>\n</task>"
+                    .to_string(),
+            ),
+        );
+        snapshot.apply(&child_failed);
+        let child_failed_snapshot =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let child_failed_value = child_failed_snapshot
+            .event
+            .messages
+            .expect("child-failed snapshot messages")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-3")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("child-failed sub-agent card");
+        assert_eq!(
+            child_failed_value["content"]["subAgent"]["agentStatus"], "error",
+            "successful wrapper overwrote the child's failure: {child_failed_value}"
+        );
+        assert!(
+            child_failed_value["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Sub-agent failed")),
+            "child failure used the completed heading: {child_failed_value}"
+        );
+    }
+
+    #[test]
+    fn run_failure_terminalizes_an_active_sub_agent() {
+        let mut projector = AgUiProjector::default();
+        let started = canonical_run_started();
+        projector.project_canonical(&started);
+        let linked = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading package.json\n</task>"
+                    .to_string(),
+            ),
+        );
+        projector.project_canonical(&linked);
+
+        let failed = CanonicalEvent::RunFailed {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "parent failed".to_string(),
+        };
+        let projection = projector.project_canonical(&failed);
+        let card = projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("failed active sub-agent card");
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["agentStatus"],
+            "failed"
+        );
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["receiverThreadIds"]
+                .as_array()
+                .map(Vec::len),
+            Some(1),
+            "run failure lost the child link: {card}"
+        );
+        assert!(
+            card["event"]["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Sub-agent failed")),
+            "run failure left the card running: {card}"
+        );
+
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        snapshot.apply(&started);
+        snapshot.apply(&linked);
+        snapshot.apply(&failed);
+        assert_eq!(snapshot.tools["task-1"].status, ToolCallStatus::Failed);
+        let terminal =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let terminal_card = terminal
+            .event
+            .messages
+            .expect("failed terminal snapshot")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-1")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("failed snapshot card");
+        assert_eq!(
+            terminal_card["content"]["subAgent"]["agentStatus"], "failed",
+            "terminal snapshot resurrected the active card: {terminal_card}"
+        );
+    }
+
+    #[test]
+    fn terminal_tool_update_overrides_stale_running_header_without_losing_child_failure() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading files\n</task>".to_string(),
+            ),
+        ));
+        let completed = projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::Completed,
+            FieldUpdate::Unchanged,
+        ));
+        let completed_card = completed
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("status-only completed card");
+        assert_eq!(
+            completed_card["event"]["content"]["subAgent"]["agentStatus"], "completed",
+            "stale running header beat terminal wrapper status: {completed_card}"
+        );
+        assert_eq!(
+            completed_card["event"]["content"]["subAgent"]["receiverThreadIds"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        let late_child_failure = projector.project_canonical(&CanonicalEvent::RunFailed {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: "child-run".to_string(),
+            source_turn_id: "child-turn".to_string(),
+            generation: 1,
+            message: "child failed after wrapper completion".to_string(),
+        });
+        let corrected_card = late_child_failure
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("late child failure card");
+        assert_eq!(
+            corrected_card["event"]["content"]["subAgent"]["agentStatus"], "failed",
+            "late child failure could not correct wrapper completion: {corrected_card}"
+        );
+
+        let mut failed_projector = AgUiProjector::default();
+        failed_projector.project_canonical(&canonical_run_started());
+        failed_projector.project_canonical(&subagent_task_tool(
+            "task-2",
+            "Audit dependency risks",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-2\" state=\"error\">\nChild failed\n</task>".to_string(),
+            ),
+        ));
+        let wrapper_completed = failed_projector.project_canonical(&subagent_task_tool(
+            "task-2",
+            "Audit dependency risks",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set("<task_result>Wrapper completed</task_result>".to_string()),
+        ));
+        let failed_card = wrapper_completed
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-2")
+            .expect("remembered child failure card");
+        assert_eq!(
+            failed_card["event"]["content"]["subAgent"]["agentStatus"], "error",
+            "wrapper completion downgraded the child failure: {failed_card}"
+        );
+        assert!(failed_card["event"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Sub-agent failed")));
+    }
+
+    #[test]
+    fn parent_failure_after_wrapper_completion_fails_the_unresolved_child() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let linked = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+        );
+        projector.project_canonical(&linked);
+        let wrapper_completed = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::Completed,
+            FieldUpdate::Unchanged,
+        );
+        projector.project_canonical(&wrapper_completed);
+
+        let parent_failed = CanonicalEvent::RunFailed {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "parent failed".to_string(),
+        };
+        let failed = projector.project_canonical(&parent_failed);
+        let card = failed
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("unresolved child failure card");
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["agentStatus"],
+            "failed"
+        );
+        assert!(
+            projector
+                .subagent_links
+                .values()
+                .all(|link| link.parent_run_id != "run-1"),
+            "parent failure kept the unresolved link"
+        );
+
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        snapshot.apply(&canonical_run_started());
+        snapshot.apply(&linked);
+        snapshot.apply(&wrapper_completed);
+        snapshot.apply(&parent_failed);
+        let terminal =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let terminal_card = terminal
+            .event
+            .messages
+            .expect("terminal snapshot")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-1")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("terminal sub-agent card");
+        assert_eq!(
+            terminal_card["content"]["subAgent"]["agentStatus"], "failed",
+            "parent failure left the completed wrapper state: {terminal_card}"
+        );
+    }
+
+    #[test]
+    fn cancelled_parent_run_fails_and_unlinks_unresolved_subagents() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let linked = subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+        );
+        projector.project_canonical(&linked);
+        let cancelled = CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::Cancelled,
+        };
+        let projection = projector.project_canonical(&cancelled);
+        let card = projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("cancelled parent card");
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["agentStatus"],
+            "cancelled"
+        );
+        assert!(projector
+            .subagent_links
+            .values()
+            .all(|link| link.parent_run_id != "run-1"));
+
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        snapshot.apply(&canonical_run_started());
+        snapshot.apply(&linked);
+        snapshot.apply(&cancelled);
+        assert_eq!(snapshot.tools["task-1"].status, ToolCallStatus::Failed);
+        let terminal =
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()));
+        let terminal_card = terminal
+            .event
+            .messages
+            .expect("cancelled snapshot")
+            .into_iter()
+            .find(|message| message.id == "subagent:task-1")
+            .and_then(|message| serde_json::to_value(message).ok())
+            .expect("cancelled snapshot card");
+        assert_eq!(
+            terminal_card["content"]["subAgent"]["agentStatus"], "cancelled",
+            "authoritative snapshot lost cancellation cause: {terminal_card}"
+        );
+    }
+
+    #[test]
+    fn cancelled_child_run_does_not_complete_the_parent_subagent_card() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+        ));
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        let cancelled = projector.project_canonical(&CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: "child-run".to_string(),
+            source_turn_id: "child-turn".to_string(),
+            generation: 1,
+            stop_reason: StopReason::Cancelled,
+        });
+        let card = cancelled
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("cancelled child card");
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["agentStatus"],
+            "cancelled"
+        );
+        assert!(card["event"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Sub-agent failed")));
+    }
+
+    #[test]
+    fn retasking_a_child_clears_its_previous_terminal_status() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Audit dependency risks",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"error\">\nFirst attempt failed\n</task>".to_string(),
+            ),
+        ));
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Audit dependency risks",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nTrying again\n</task>".to_string(),
+            ),
+        ));
+        let completed = projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Audit dependency risks",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set("<task_result>Second attempt passed</task_result>".to_string()),
+        ));
+        let card = completed
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("re-tasked child card");
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["agentStatus"], "completed",
+            "re-task inherited the previous failure: {card}"
+        );
+    }
+
+    #[test]
+    fn stale_child_terminal_does_not_update_a_newer_retask_card() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "First attempt",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nFirst attempt\n</task>".to_string(),
+            ),
+        ));
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        projector.project_canonical(&CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: "child-run-1".to_string(),
+            source_turn_id: "child-turn-1".to_string(),
+            generation: 1,
+        });
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "First attempt",
+            ToolCallStatus::Completed,
+            FieldUpdate::Unchanged,
+        ));
+        projector.project_canonical(&subagent_task_tool(
+            "task-2",
+            "Second attempt",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nSecond attempt\n</task>".to_string(),
+            ),
+        ));
+        projector.project_canonical(&subagent_task_tool(
+            "task-3",
+            "Third attempt before the child restarts",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nThird attempt\n</task>".to_string(),
+            ),
+        ));
+
+        let stale = projector.project_canonical(&CanonicalEvent::RunFailed {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: "child-run-1".to_string(),
+            source_turn_id: "child-turn-1".to_string(),
+            generation: 1,
+            message: "old attempt failed late".to_string(),
+        });
+        assert!(
+            stale
+                .events
+                .iter()
+                .filter_map(|event| serde_json::to_value(event).ok())
+                .all(|value| value["event"]["messageId"] != "subagent:task-3"),
+            "repeated retask dropped its generation floor"
+        );
+
+        projector.project_canonical(&CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: "child-run-2".to_string(),
+            source_turn_id: "child-turn-2".to_string(),
+            generation: 2,
+        });
+        let current = projector.project_canonical(&CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: "child-run-2".to_string(),
+            source_turn_id: "child-turn-2".to_string(),
+            generation: 2,
+            stop_reason: StopReason::EndTurn,
+        });
+        let current_card = current
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-3")
+            .expect("new child terminal card");
+        assert_eq!(
+            current_card["event"]["content"]["subAgent"]["agentStatus"],
+            "completed"
+        );
+    }
+
+    #[test]
+    fn projector_retask_generation_floor_is_monotonic() {
+        stale_child_terminal_does_not_update_a_newer_retask_card();
+    }
+
+    #[test]
+    fn superseding_a_run_terminalizes_and_unlinks_its_sub_agents() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading files\n</task>".to_string(),
+            ),
+        ));
+
+        let superseding = CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-2".to_string(),
+            source_turn_id: "turn-2".to_string(),
+            generation: 2,
+        };
+        let superseded = projector.project_canonical(&superseding);
+        let old_card = superseded
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("superseded sub-agent card");
+        assert_eq!(
+            old_card["event"]["content"]["subAgent"]["agentStatus"], "failed",
+            "superseded sub-agent stayed active: {old_card}"
+        );
+        assert!(
+            projector
+                .subagent_links
+                .values()
+                .all(|link| link.parent_run_id != "run-1"),
+            "superseded run kept a child link"
+        );
+
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        let child_after_supersession = CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "late-child-message".to_string(),
+            content: "late output".to_string(),
+            content_block: None,
+        };
+        let late = projector.project_canonical(&child_after_supersession);
+        assert!(
+            late.events
+                .iter()
+                .filter_map(|event| serde_json::to_value(event).ok())
+                .all(|value| value["event"]["messageId"] != "subagent:task-1"),
+            "late child output updated the superseded parent"
         );
     }
 
@@ -2944,6 +3910,50 @@ mod tests {
     }
 
     #[test]
+    fn observed_run_eviction_emits_a_balanced_terminal_event() {
+        let mut projector = AgUiProjector::default();
+        let mut overflow = CanonicalProjection::default();
+        for index in 0..=OBSERVED_RUN_CAPACITY {
+            overflow = projector.project_canonical(&CanonicalEvent::MessageChunk {
+                agent_id: "alpha-agent".to_string(),
+                thread_id: format!("observed-child-{index:03}"),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: MessageRole::Agent,
+                message_id: format!("message-{index:03}"),
+                content: "working".to_string(),
+                content_block: None,
+            });
+        }
+
+        let types = event_types(&overflow.events);
+        assert!(
+            types.contains(&"RUN_FINISHED"),
+            "eviction dropped an open run without a terminal event: {types:?}"
+        );
+        assert!(types.contains(&"RUN_STARTED"));
+        assert!(!projector.runs.contains_key("observed-child-000"));
+        assert!(projector.closed_threads.contains("observed-child-000"));
+
+        let late = projector.project_canonical(&CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "observed-child-000".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "late".to_string(),
+            content: "late".to_string(),
+            content_block: None,
+        });
+        assert!(
+            !event_types(&late.events).contains(&"RUN_STARTED"),
+            "evicted observed thread opened a second run"
+        );
+    }
+
+    #[test]
     fn canonical_projection_orders_multiple_text_and_reasoning_messages() {
         let mut projector = AgUiProjector::default();
         assert_eq!(
@@ -3135,8 +4145,9 @@ mod tests {
         let repeated = projector.project_canonical(&task("completed"));
         assert!(repeated.events.is_empty());
 
+        // A stale child header cannot regress a terminal wrapper back to running.
         let changed = projector.project_canonical(&task("running"));
-        assert_eq!(event_types(&changed.events), ["ACTIVITY_SNAPSHOT"]);
+        assert!(changed.events.is_empty());
     }
 
     #[test]
@@ -3172,11 +4183,8 @@ mod tests {
             source_turn_id: "child-turn".to_string(),
             generation: 1,
         });
-        assert_eq!(
-            event_types(&child_started.events),
-            ["ACTIVITY_SNAPSHOT", "RUN_STARTED"]
-        );
-        assert_eq!(child_started.events[0].thread_id, parent_thread);
+        assert_eq!(event_types(&child_started.events), ["RUN_STARTED"]);
+        assert_eq!(child_started.events[0].thread_id, child_thread);
 
         let child_tool = projector.project_canonical(&CanonicalEvent::Tool {
             agent_id: "alpha-agent".to_string(),
@@ -3209,6 +4217,38 @@ mod tests {
         assert_eq!(
             terminal_activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
+        );
+    }
+
+    #[test]
+    fn child_run_started_does_not_replace_card_with_starting_preview() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Research dependency options",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nQueued work\n</task>".to_string(),
+            ),
+        ));
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        let started = projector.project_canonical(&CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: "child-run".to_string(),
+            source_turn_id: "child-turn".to_string(),
+            generation: 1,
+        });
+        assert!(
+            started
+                .events
+                .iter()
+                .filter_map(|event| serde_json::to_value(event).ok())
+                .all(|value| value["event"]["messageId"] != "subagent:task-1"),
+            "child start regressed the parent card to a starting preview"
         );
     }
 

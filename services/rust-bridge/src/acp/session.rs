@@ -319,6 +319,30 @@ impl AcpSession {
         self.inner.lock().await.snapshot.clone()
     }
 
+    pub async fn mark_subagent_terminal(&self, child_session_id: &str, status: &str) -> bool {
+        self.inner
+            .lock()
+            .await
+            .snapshot
+            .mark_subagent_terminal(child_session_id, status)
+    }
+
+    pub async fn mark_subagent_tool_terminal(&self, tool_call_id: &str, status: &str) -> bool {
+        let tool_status = if matches!(
+            status.trim().to_ascii_lowercase().as_str(),
+            "failed" | "error" | "aborted" | "cancelled" | "canceled"
+        ) {
+            agent_client_protocol::schema::v1::ToolCallStatus::Failed
+        } else {
+            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+        };
+        self.inner
+            .lock()
+            .await
+            .snapshot
+            .mark_subagent_tool_terminal(tool_call_id, status, tool_status)
+    }
+
     pub async fn active_interaction_generation(&self) -> Option<u64> {
         let state = self.inner.lock().await;
         match state.generation_state {

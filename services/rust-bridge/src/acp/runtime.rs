@@ -2032,6 +2032,7 @@ mod tests {
 
     #[tokio::test]
     async fn semantic_session_cancel_responds_before_cancel_notification() {
+        const WAIT: Duration = Duration::from_secs(5);
         let (order_tx, mut order_rx) = mpsc::unbounded_channel::<&'static str>();
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
@@ -2108,7 +2109,9 @@ mod tests {
             )
             .await
             .expect("prompt admitted");
-        requested_event(&mut events, true).await;
+        tokio::time::timeout(WAIT, requested_event(&mut events, true))
+            .await
+            .expect("permission request event timed out");
         assert!(matches!(
             connection
                 .cancel_turn(created.session_id.clone(), "completed-turn")
@@ -2122,12 +2125,25 @@ mod tests {
             Some(("ordered-run".into(), "ordered-turn".into(), 1))
         );
         assert!(order_rx.try_recv().is_err());
-        connection
-            .cancel_turn(created.session_id.clone(), "ordered-turn")
-            .await
-            .expect("matching turn cancels");
-        assert_eq!(order_rx.recv().await, Some("permission"));
-        assert_eq!(order_rx.recv().await, Some("cancel"));
+        tokio::time::timeout(
+            WAIT,
+            connection.cancel_turn(created.session_id.clone(), "ordered-turn"),
+        )
+        .await
+        .expect("matching turn cancellation timed out")
+        .expect("matching turn cancels");
+        assert_eq!(
+            tokio::time::timeout(WAIT, order_rx.recv())
+                .await
+                .expect("permission response ordering timed out"),
+            Some("permission")
+        );
+        assert_eq!(
+            tokio::time::timeout(WAIT, order_rx.recv())
+                .await
+                .expect("cancel notification ordering timed out"),
+            Some("cancel")
+        );
         assert!(matches!(
             connection
                 .prompt(
@@ -2138,29 +2154,37 @@ mod tests {
                 .await,
             Err(AcpRuntimeError::SessionBusy)
         ));
-        loop {
-            let snapshot = session.snapshot().await;
-            if snapshot
-                .messages
-                .iter()
-                .any(|message| message.id == "late-cancelled-generation")
-            {
-                assert_eq!(snapshot.active_generation, Some(1));
-                break;
+        tokio::time::timeout(WAIT, async {
+            loop {
+                let snapshot = session.snapshot().await;
+                if snapshot
+                    .messages
+                    .iter()
+                    .any(|message| message.id == "late-cancelled-generation::agent")
+                {
+                    assert_eq!(snapshot.active_generation, Some(1));
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
+        })
+        .await
+        .expect("late cancellation notification timed out");
         if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
         }
-        loop {
-            if session.snapshot().await.active_generation.is_none() {
-                break;
+        tokio::time::timeout(WAIT, async {
+            loop {
+                if session.snapshot().await.active_generation.is_none() {
+                    break;
+                }
+                tokio::task::yield_now().await;
             }
-            tokio::task::yield_now().await;
-        }
+        })
+        .await
+        .expect("cancelled prompt did not terminalize");
         assert!(matches!(
             connection
                 .cancel_turn(created.session_id.clone(), "ordered-turn")
@@ -2169,16 +2193,22 @@ mod tests {
                 "stale turn interrupt correlation"
             ))
         ));
-        let next = connection
-            .prompt(
+        let next = tokio::time::timeout(
+            WAIT,
+            connection.prompt(
                 PromptRequest::new(created.session_id, vec!["next".into()]),
                 "next-run".into(),
                 "next-turn".into(),
-            )
-            .await
-            .expect("next prompt admitted after matching terminal callback");
+            ),
+        )
+        .await
+        .expect("next prompt admission timed out")
+        .expect("next prompt admitted after matching terminal callback");
         assert_eq!(next.generation, 2);
-        connection.shutdown().await.expect("shutdown");
+        tokio::time::timeout(WAIT, connection.shutdown())
+            .await
+            .expect("shutdown timed out")
+            .expect("shutdown");
     }
 
     #[tokio::test]

@@ -565,6 +565,23 @@ struct AgentRuntime {
     last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct SubagentGenerationState {
+    parent_thread_id: String,
+    tool_call_id: String,
+    observed_generation: Option<u64>,
+    minimum_generation: Option<u64>,
+    armed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AcceptedSubagentTerminal {
+    pub(crate) parent_thread_id: String,
+    pub(crate) tool_call_id: String,
+}
+
+const MAX_TRACKED_SUBAGENT_GENERATIONS: usize = 2048;
+
 pub struct AgentManager {
     agents: HashMap<AgentId, AgentRuntime>,
     preferred_agent_id: AgentId,
@@ -572,6 +589,7 @@ pub struct AgentManager {
     session_index: Arc<Mutex<DurableSessionIndex>>,
     pending_durable_sessions: Mutex<HashMap<String, SessionIndexEntry>>,
     reconstruction_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    subagent_generations: Mutex<HashMap<String, SubagentGenerationState>>,
     workspace_root: PathBuf,
     allow_outside_root_cwd: bool,
     events: CanonicalEventSender,
@@ -694,6 +712,7 @@ impl AgentManager {
             )),
             pending_durable_sessions: Mutex::new(HashMap::new()),
             reconstruction_locks: Mutex::new(HashMap::new()),
+            subagent_generations: Mutex::new(HashMap::new()),
             workspace_root,
             allow_outside_root_cwd,
             events,
@@ -1174,6 +1193,169 @@ impl AgentManager {
             .snapshot
             .page(before, after, limit)
             .map_err(|_| AgentManagerError::InvalidCursor)
+    }
+
+    pub async fn mark_parent_subagent_terminal(
+        &self,
+        child_thread_id: &str,
+        status: &str,
+    ) -> Result<Option<ManagedSession>, AgentManagerError> {
+        let (child, _, _) = self.route_thread(child_thread_id)?;
+        let parent_thread_id = {
+            let index = self.session_index.lock().await;
+            index
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.agent_id == child.agent_id && entry.acp_session_id == child.acp_session_id
+                })
+                .and_then(parent_thread_id)
+        };
+        let Some(parent_thread_id) = parent_thread_id else {
+            return Ok(None);
+        };
+        self.read_session(&parent_thread_id).await?;
+        let (_, parent_session_id, connection) = self.route_thread(&parent_thread_id)?;
+        let Some(parent_session) = connection.session(&parent_session_id).await else {
+            return Ok(None);
+        };
+        let changed = parent_session
+            .mark_subagent_terminal(&child.acp_session_id, status)
+            .await;
+        if !changed {
+            return Ok(None);
+        }
+        self.read_known_session_from(connection, &parent_session_id)
+            .await
+            .map(Some)
+    }
+
+    pub async fn mark_parent_subagent_tool_terminal(
+        &self,
+        parent_thread_id: &str,
+        tool_call_id: &str,
+        status: &str,
+    ) -> Result<Option<ManagedSession>, AgentManagerError> {
+        self.read_session(parent_thread_id).await?;
+        let (_, parent_session_id, connection) = self.route_thread(parent_thread_id)?;
+        let Some(parent_session) = connection.session(&parent_session_id).await else {
+            return Ok(None);
+        };
+        if !parent_session
+            .mark_subagent_tool_terminal(tool_call_id, status)
+            .await
+        {
+            return Ok(None);
+        }
+        self.read_known_session_from(connection, &parent_session_id)
+            .await
+            .map(Some)
+    }
+
+    pub async fn note_subagent_link(
+        &self,
+        parent_thread_id: &str,
+        child_thread_id: &str,
+        tool_call_id: &str,
+    ) {
+        let mut generations = self.subagent_generations.lock().await;
+        if !generations.contains_key(child_thread_id)
+            && generations.len() >= MAX_TRACKED_SUBAGENT_GENERATIONS
+        {
+            if let Some(expired) = generations.keys().next().cloned() {
+                generations.remove(&expired);
+            }
+        }
+        match generations.get_mut(child_thread_id) {
+            Some(state)
+                if state.parent_thread_id == parent_thread_id
+                    && state.tool_call_id == tool_call_id
+                    && state.armed => {}
+            Some(state) => {
+                state.parent_thread_id = parent_thread_id.to_string();
+                state.tool_call_id = tool_call_id.to_string();
+                let observed_floor = state
+                    .observed_generation
+                    .map(|generation| generation.saturating_add(1));
+                state.minimum_generation = match (state.minimum_generation, observed_floor) {
+                    (Some(existing), Some(observed)) => Some(existing.max(observed)),
+                    (Some(existing), None) => Some(existing),
+                    (None, Some(observed)) => Some(observed),
+                    (None, None) => None,
+                };
+                state.armed = true;
+            }
+            None => {
+                generations.insert(
+                    child_thread_id.to_string(),
+                    SubagentGenerationState {
+                        parent_thread_id: parent_thread_id.to_string(),
+                        tool_call_id: tool_call_id.to_string(),
+                        observed_generation: None,
+                        minimum_generation: None,
+                        armed: true,
+                    },
+                );
+            }
+        }
+    }
+
+    pub async fn retire_subagent_link(&self, child_thread_id: &str, tool_call_id: &str) {
+        let mut generations = self.subagent_generations.lock().await;
+        if let Some(state) = generations
+            .get_mut(child_thread_id)
+            .filter(|state| state.tool_call_id == tool_call_id)
+        {
+            state.armed = false;
+            // Keep the last observed generation as a bounded tombstone. A later
+            // retask can then reject a duplicate terminal from the old child run.
+        }
+    }
+
+    pub async fn note_subagent_started(&self, child_thread_id: &str, generation: u64) {
+        let mut generations = self.subagent_generations.lock().await;
+        let Some(state) = generations.get_mut(child_thread_id) else {
+            return;
+        };
+        if state
+            .minimum_generation
+            .is_some_and(|minimum| generation < minimum)
+        {
+            return;
+        }
+        state.observed_generation = Some(generation);
+    }
+
+    pub async fn accepted_subagent_terminal(
+        &self,
+        child_thread_id: &str,
+        generation: u64,
+    ) -> Option<AcceptedSubagentTerminal> {
+        let generations = self.subagent_generations.lock().await;
+        let state = generations.get(child_thread_id)?;
+        if !state.armed {
+            return None;
+        }
+        if state
+            .minimum_generation
+            .is_some_and(|minimum| generation < minimum)
+        {
+            return None;
+        }
+        let accepted = state
+            .observed_generation
+            .is_none_or(|observed| observed == generation);
+        accepted.then(|| AcceptedSubagentTerminal {
+            parent_thread_id: state.parent_thread_id.clone(),
+            tool_call_id: state.tool_call_id.clone(),
+        })
+    }
+
+    pub async fn tracks_subagent_generation(&self, child_thread_id: &str) -> bool {
+        self.subagent_generations
+            .lock()
+            .await
+            .contains_key(child_thread_id)
     }
 
     pub async fn adopt_related_session(
@@ -2170,7 +2352,7 @@ mod tests {
         AgentCapabilities, CancelNotification, InitializeRequest, InitializeResponse,
         ListSessionsRequest, ListSessionsResponse, LoadSessionResponse, NewSessionResponse,
         PromptResponse, ResumeSessionResponse, SessionCapabilities, SessionInfo,
-        SessionListCapabilities, SessionResumeCapabilities, StopReason,
+        SessionListCapabilities, SessionResumeCapabilities, StopReason, ToolCallStatus, ToolKind,
     };
     use agent_client_protocol::Agent;
     use sha2::{Digest, Sha256};
@@ -3041,6 +3223,224 @@ mod tests {
             "child-session"
         );
         assert_eq!(observed_rx.recv().await.as_deref(), Some("load:alpha"));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn late_child_terminal_loads_and_updates_the_parent_session() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let ready = connection_with_capabilities(
+            "alpha",
+            AgentCapabilities::new().load_session(true),
+            observed_tx,
+        )
+        .await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+        let parent = AgentSessionId::new("alpha", "parent-session").unwrap();
+        let parent_thread_id = parent.encode();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(parent.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        manager
+            .read_session(&parent_thread_id)
+            .await
+            .expect("parent loads");
+        let (_, parent_session_id, connection) = manager.route_thread(&parent_thread_id).unwrap();
+        let parent_session = connection
+            .session(&parent_session_id)
+            .await
+            .expect("loaded parent session");
+        parent_session
+            .emit(CanonicalEvent::Tool {
+                agent_id: "alpha".to_string(),
+                thread_id: parent_thread_id.clone(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                tool_call_id: "task-1".to_string(),
+                kind: ToolKind::Other,
+                status: ToolCallStatus::InProgress,
+                title: "Research dependency options".to_string(),
+                content: FieldUpdate::Set(
+                    "<task id=\"child-session\" state=\"running\">\nWorking\n</task>".to_string(),
+                ),
+                structured_content: FieldUpdate::Set(Vec::new()),
+                locations: FieldUpdate::Set(Vec::new()),
+            })
+            .await;
+
+        let child_thread_id = manager
+            .adopt_related_session(&parent_thread_id, "child-session", Some("Child task"))
+            .await
+            .expect("child adopted");
+        let updated_parent = manager
+            .mark_parent_subagent_terminal(&child_thread_id, "failed")
+            .await
+            .expect("parent correction succeeds")
+            .expect("parent was updated");
+        assert_eq!(
+            updated_parent.snapshot.tools["task-1"].status,
+            ToolCallStatus::Failed
+        );
+        assert_eq!(
+            updated_parent.snapshot.subagent_header("task-1"),
+            Some("<task id=\"child-session\" state=\"failed\">")
+        );
+
+        manager
+            .note_subagent_link(&parent_thread_id, &child_thread_id, "task-old")
+            .await;
+        manager.note_subagent_started(&child_thread_id, 1).await;
+        manager
+            .note_subagent_link(&parent_thread_id, &child_thread_id, "task-new")
+            .await;
+        assert!(
+            manager
+                .accepted_subagent_terminal(&child_thread_id, 1)
+                .await
+                .is_none(),
+            "stale child generation was accepted for a newer retask"
+        );
+        manager.note_subagent_started(&child_thread_id, 2).await;
+        let current = manager
+            .accepted_subagent_terminal(&child_thread_id, 2)
+            .await
+            .expect("current child generation was rejected");
+        assert_eq!(current.tool_call_id, "task-new");
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn retask_after_retired_correlation_rejects_duplicate_old_terminal() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+
+        manager
+            .note_subagent_link("parent", "child", "task-1")
+            .await;
+        manager.note_subagent_started("child", 1).await;
+        let accepted = manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .expect("linked terminal accepted");
+        assert_eq!(accepted.tool_call_id, "task-1");
+        manager.retire_subagent_link("child", "task-1").await;
+
+        manager
+            .note_subagent_link("parent", "child", "task-2")
+            .await;
+        assert!(
+            manager
+                .accepted_subagent_terminal("child", 1)
+                .await
+                .is_none(),
+            "duplicate old terminal was accepted for the rearmed retask"
+        );
+        manager.note_subagent_started("child", 2).await;
+        let rearmed = manager
+            .accepted_subagent_terminal("child", 2)
+            .await
+            .expect("new link rearmed correlation");
+        assert_eq!(rearmed.tool_call_id, "task-2");
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn failed_parent_correction_keeps_terminal_correlation_retryable() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+
+        manager
+            .note_subagent_link("parent", "child", "task-1")
+            .await;
+        manager.note_subagent_started("child", 1).await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_some());
+        // A failed parent correction leaves the target armed for a duplicate
+        // terminal notification to retry.
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_some());
+        manager.retire_subagent_link("child", "task-1").await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_none());
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn terminal_task_link_does_not_authorize_a_later_independent_child_run() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+
+        manager
+            .note_subagent_link("parent", "child", "task-1")
+            .await;
+        manager.retire_subagent_link("child", "task-1").await;
+        manager.note_subagent_started("child", 2).await;
+        assert!(
+            manager
+                .accepted_subagent_terminal("child", 2)
+                .await
+                .is_none(),
+            "terminal wrapper left correlation armed for an independent child run"
+        );
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn terminal_discovered_task_retires_manager_correlation_even_when_adoption_fails() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+
+        manager
+            .note_subagent_link("parent", "child", "task-terminal")
+            .await;
+        manager.retire_subagent_link("child", "task-terminal").await;
+        // No adoption/index operation succeeds in this scenario. Retirement must
+        // still happen before that fallible work.
+        manager.note_subagent_started("child", 1).await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_none());
         manager.shutdown().await;
     }
 

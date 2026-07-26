@@ -12,6 +12,7 @@ use super::events::{
 
 const MAX_MESSAGES: usize = 128;
 const MAX_TOOLS: usize = 128;
+const MAX_ACTIVE_TOOL_TOMBSTONES: usize = MAX_TOOLS;
 const MAX_TIMELINE_ENTRIES: usize = MAX_MESSAGES + MAX_TOOLS;
 const MAX_ENTRIES: usize = 128;
 const MAX_TEXT_BYTES: usize = 32 * 1024;
@@ -37,6 +38,8 @@ pub struct SessionSnapshot {
     pub active_tool_ids: HashSet<String>,
     pub messages: VecDeque<SnapshotMessage>,
     pub tools: BTreeMap<String, SnapshotTool>,
+    #[serde(skip)]
+    subagent_headers: BTreeMap<String, String>,
     pub timeline: VecDeque<SnapshotTimelineEntry>,
     pub next_sequence: u64,
     total_messages: u64,
@@ -205,11 +208,18 @@ impl From<SessionSnapshot> for BridgeThreadSnapshot {
         let reasoning_collection = snapshot.collection_metadata(SnapshotTimelineKind::Reasoning);
         let tool_collection = snapshot.collection_metadata(SnapshotTimelineKind::Tool);
         let continuation = snapshot.continuation();
+        let mut tools = snapshot.tools;
+        for (tool_call_id, header) in snapshot.subagent_headers {
+            let Some(tool) = tools.get_mut(&tool_call_id) else {
+                continue;
+            };
+            SessionSnapshot::ensure_durable_subagent_header(tool, &header);
+        }
         Self {
             version: 2,
             timeline: snapshot.timeline.into_iter().collect(),
             messages: snapshot.messages.into_iter().collect(),
-            tools: snapshot.tools.into_values().collect(),
+            tools: tools.into_values().collect(),
             message_collection,
             reasoning_collection,
             tool_collection,
@@ -260,6 +270,7 @@ impl SessionSnapshot {
     pub fn restore_transcript_from(&mut self, previous: SessionSnapshot) {
         self.messages = previous.messages;
         self.tools = previous.tools;
+        self.subagent_headers = previous.subagent_headers;
         self.timeline = previous.timeline;
         self.next_sequence = previous.next_sequence;
         self.total_messages = previous.total_messages;
@@ -278,6 +289,51 @@ impl SessionSnapshot {
         }
     }
 
+    pub(crate) fn subagent_header(&self, tool_call_id: &str) -> Option<&str> {
+        self.subagent_headers.get(tool_call_id).map(String::as_str)
+    }
+
+    pub(crate) fn mark_subagent_terminal(&mut self, child_session_id: &str, status: &str) -> bool {
+        let tool_call_id = self
+            .subagent_headers
+            .iter()
+            .filter_map(|(tool_call_id, header)| {
+                let matches_child = Self::task_header_id(header) == Some(child_session_id);
+                let unresolved = Self::task_header_state(header)
+                    .is_some_and(|state| !Self::is_terminal_subagent_state(state));
+                (matches_child && unresolved).then_some(tool_call_id.clone())
+            })
+            .max_by_key(|tool_call_id| {
+                self.history
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.canonical_id == **tool_call_id)
+                    .map_or(0, |entry| entry.sequence)
+            });
+        let Some(tool_call_id) = tool_call_id else {
+            return false;
+        };
+        let tool_status = if Self::is_failed_subagent_state(status) {
+            ToolCallStatus::Failed
+        } else {
+            ToolCallStatus::Completed
+        };
+        self.mark_subagent_tool_terminal(&tool_call_id, status, tool_status)
+    }
+
+    pub(crate) fn mark_subagent_tool_terminal(
+        &mut self,
+        tool_call_id: &str,
+        status: &str,
+        tool_status: ToolCallStatus,
+    ) -> bool {
+        if !self.subagent_headers.contains_key(tool_call_id) {
+            return false;
+        }
+        self.update_subagent_tool_terminal(tool_call_id, status, tool_status);
+        true
+    }
+
     pub fn apply(&mut self, event: &CanonicalEvent) {
         match event {
             CanonicalEvent::RunStarted {
@@ -286,15 +342,39 @@ impl SessionSnapshot {
                 generation,
                 ..
             } => {
+                if let Some(active_generation) = self.active_generation {
+                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_unresolved_subagents("failed", active_generation);
+                }
                 self.active_run_id = Some(run_id.clone());
                 self.active_source_turn_id = Some(source_turn_id.clone());
                 self.active_generation = Some(*generation);
                 self.active_tool_ids.clear();
             }
-            CanonicalEvent::RunFinished { generation, .. }
-            | CanonicalEvent::RunFailed { generation, .. }
+            CanonicalEvent::RunFinished {
+                generation,
+                stop_reason,
+                ..
+            } if self.active_generation == Some(*generation) => {
+                if matches!(
+                    stop_reason,
+                    agent_client_protocol::schema::v1::StopReason::Cancelled
+                ) {
+                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_unresolved_subagents("cancelled", *generation);
+                } else {
+                    self.terminalize_active_tools(ToolCallStatus::Completed);
+                }
+                self.active_run_id = None;
+                self.active_source_turn_id = None;
+                self.active_generation = None;
+                self.active_tool_ids.clear();
+            }
+            CanonicalEvent::RunFailed { generation, .. }
                 if self.active_generation == Some(*generation) =>
             {
+                self.terminalize_active_tools(ToolCallStatus::Failed);
+                self.terminalize_unresolved_subagents("failed", *generation);
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
                 self.active_generation = None;
@@ -448,11 +528,54 @@ impl SessionSnapshot {
                 .map(|entry| entry.canonical_id.clone())
                 .expect("full tool snapshot");
             self.tools.remove(&oldest);
-            self.active_tool_ids.remove(&oldest);
+            let unresolved_subagent = self
+                .subagent_headers
+                .get(&oldest)
+                .and_then(|header| Self::task_header_state(header))
+                .is_some_and(|state| !Self::is_terminal_subagent_state(state));
+            if !self.active_tool_ids.contains(&oldest) && !unresolved_subagent {
+                self.subagent_headers.remove(&oldest);
+            }
             self.timeline.retain(|entry| entry.canonical_id != oldest);
+            self.enforce_active_tool_tombstone_bounds();
         }
+        let mut retained_tool = None;
         if !self.tools.contains_key(id) {
-            self.push_timeline(SnapshotTimelineKind::Tool, id.to_string());
+            let prior_entry = self
+                .history
+                .iter()
+                .rev()
+                .find(|entry| entry.canonical_id == id && entry.tool.is_some())
+                .cloned();
+            if let Some(prior_entry) = prior_entry {
+                retained_tool = prior_entry.tool.clone();
+                if let Some(header) = prior_entry
+                    .tool
+                    .as_ref()
+                    .and_then(|tool| Self::latest_valid_task_header(&tool.content))
+                {
+                    self.subagent_headers
+                        .insert(id.to_string(), header.to_string());
+                }
+                let position = self
+                    .timeline
+                    .iter()
+                    .position(|entry| entry.sequence > prior_entry.sequence)
+                    .unwrap_or(self.timeline.len());
+                self.timeline.insert(
+                    position,
+                    SnapshotTimelineEntry {
+                        sequence: prior_entry.sequence,
+                        kind: SnapshotTimelineKind::Tool,
+                        canonical_id: id.to_string(),
+                    },
+                );
+            } else {
+                if !self.active_tool_ids.contains(id) {
+                    self.subagent_headers.remove(id);
+                }
+                self.push_timeline(SnapshotTimelineKind::Tool, id.to_string());
+            }
         }
         let terminal = matches!(
             projection.status,
@@ -465,7 +588,7 @@ impl SessionSnapshot {
                 self.active_tool_ids.insert(id.to_string());
             }
         }
-        let existing = self.tools.get(id);
+        let existing = self.tools.get(id).cloned().or(retained_tool);
         let mut tool = SnapshotTool {
             id: id.to_string(),
             generation,
@@ -473,17 +596,34 @@ impl SessionSnapshot {
             status: *projection.status,
             title: bound(projection.title.to_string(), MAX_TEXT_BYTES),
             content: existing
+                .as_ref()
                 .map(|tool| tool.content.clone())
                 .unwrap_or_default(),
             structured_content: existing
+                .as_ref()
                 .map(|tool| tool.structured_content.clone())
                 .unwrap_or_default(),
             locations: existing
+                .as_ref()
                 .map(|tool| tool.locations.clone())
                 .unwrap_or_default(),
-            truncated: existing.is_some_and(|tool| tool.truncated),
+            truncated: existing.as_ref().is_some_and(|tool| tool.truncated),
         };
         tool.truncated |= apply_tool_text(&mut tool.content, projection.content);
+        if let Some(header) = Self::latest_valid_task_header(&tool.content) {
+            let incoming_state = Self::task_header_state(header);
+            let preserved_terminal = self
+                .subagent_headers
+                .get(id)
+                .and_then(|preserved| Self::task_header_state(preserved))
+                .is_some_and(Self::is_terminal_subagent_state);
+            let incoming_nonterminal =
+                incoming_state.is_some_and(|state| !Self::is_terminal_subagent_state(state));
+            if !(terminal && preserved_terminal && incoming_nonterminal) {
+                self.subagent_headers
+                    .insert(id.to_string(), bound(header.to_string(), MAX_TEXT_BYTES));
+            }
+        }
         tool.truncated |= apply_tool_values(
             &mut tool.structured_content,
             projection.structured_content,
@@ -496,6 +636,284 @@ impl SessionSnapshot {
         );
         self.tools.insert(id.to_string(), tool.clone());
         self.attach_or_update_history_tool(tool);
+    }
+
+    fn latest_valid_task_header(content: &str) -> Option<&str> {
+        content
+            .rmatch_indices("<task ")
+            .map(|(index, _)| &content[index..])
+            .filter_map(|candidate| {
+                let end = candidate.find('>')?;
+                let header = &candidate[..=end];
+                (header.contains("id=\"") && header.contains("state=\"")).then_some(header)
+            })
+            .next()
+    }
+
+    fn ensure_durable_subagent_header(tool: &mut SnapshotTool, preserved_header: &str) {
+        let current_header = Self::latest_valid_task_header(&tool.content);
+        let preserved_terminal =
+            Self::task_header_state(preserved_header).is_some_and(Self::is_terminal_subagent_state);
+        let current_nonterminal = current_header
+            .and_then(Self::task_header_state)
+            .is_some_and(|state| !Self::is_terminal_subagent_state(state));
+        let tool_terminal = matches!(
+            tool.status,
+            ToolCallStatus::Completed | ToolCallStatus::Failed
+        );
+        let source_header = if tool_terminal && preserved_terminal && current_nonterminal {
+            preserved_header
+        } else {
+            current_header.unwrap_or(preserved_header)
+        };
+        let child_state = Self::task_header_state(source_header);
+        let state = match tool.status {
+            ToolCallStatus::Completed => child_state
+                .filter(|state| Self::is_failed_subagent_state(state))
+                .unwrap_or("completed"),
+            ToolCallStatus::Failed => child_state
+                .filter(|state| Self::is_failed_subagent_state(state))
+                .unwrap_or("failed"),
+            _ => child_state
+                .filter(|state| Self::is_terminal_subagent_state(state))
+                .unwrap_or("running"),
+        };
+        let normalized_header = Self::task_header_with_state(source_header, state);
+        let combined = if let Some(current_header) = current_header {
+            let mut content = tool.content.clone();
+            if let Some(start) = content.rfind(current_header) {
+                content.replace_range(start..start + current_header.len(), &normalized_header);
+            }
+            content
+        } else {
+            format!("{normalized_header}\n{}", tool.content)
+        };
+        let bounded = bound(combined.clone(), MAX_TOOL_TEXT_BYTES);
+        tool.truncated |= bounded.len() < combined.len();
+        tool.content = bounded;
+    }
+
+    fn task_header_with_state(header: &str, state: &str) -> String {
+        let Some(value_start) = header
+            .find("state=\"")
+            .map(|index| index + "state=\"".len())
+        else {
+            return header.to_string();
+        };
+        let Some(value_end) = header[value_start..]
+            .find('"')
+            .map(|index| value_start + index)
+        else {
+            return header.to_string();
+        };
+        let mut normalized = header.to_string();
+        normalized.replace_range(value_start..value_end, state);
+        normalized
+    }
+
+    fn task_header_state(header: &str) -> Option<&str> {
+        let value_start = header.find("state=\"")? + "state=\"".len();
+        let value_end = header[value_start..].find('"')? + value_start;
+        Some(&header[value_start..value_end])
+    }
+
+    fn task_header_id(header: &str) -> Option<&str> {
+        let value_start = header.find("id=\"")? + "id=\"".len();
+        let value_end = header[value_start..].find('"')? + value_start;
+        Some(&header[value_start..value_end])
+    }
+
+    fn is_terminal_subagent_state(state: &str) -> bool {
+        matches!(
+            state.trim().to_ascii_lowercase().as_str(),
+            "completed"
+                | "complete"
+                | "succeeded"
+                | "failed"
+                | "error"
+                | "aborted"
+                | "cancelled"
+                | "canceled"
+                | "closed"
+        )
+    }
+
+    fn is_failed_subagent_state(state: &str) -> bool {
+        matches!(
+            state.trim().to_ascii_lowercase().as_str(),
+            "failed" | "error" | "aborted" | "cancelled" | "canceled"
+        )
+    }
+
+    fn terminalize_active_tools(&mut self, status: ToolCallStatus) {
+        let active_tool_ids = self.active_tool_ids.iter().cloned().collect::<Vec<_>>();
+        let updates = active_tool_ids
+            .iter()
+            .filter_map(|tool_call_id| {
+                let tool = self.tools.get_mut(tool_call_id)?;
+                tool.status = status;
+                Some(tool.clone())
+            })
+            .collect::<Vec<_>>();
+        for tool in updates {
+            self.attach_or_update_history_tool(tool);
+        }
+
+        for tool_call_id in &active_tool_ids {
+            if self.tools.contains_key(tool_call_id) {
+                continue;
+            }
+            let header = self.subagent_headers.get(tool_call_id).cloned();
+            let Some(tool) = self
+                .history
+                .iter_mut()
+                .rev()
+                .find(|entry| entry.canonical_id == *tool_call_id)
+                .and_then(|entry| entry.tool.as_mut())
+            else {
+                continue;
+            };
+            tool.status = status;
+            if let Some(header) = header {
+                Self::ensure_durable_subagent_header(tool, &header);
+            }
+        }
+        self.remeasure_history();
+        for tool_call_id in active_tool_ids {
+            if !self.tools.contains_key(&tool_call_id) {
+                self.subagent_headers.remove(&tool_call_id);
+            }
+        }
+    }
+
+    fn terminalize_unresolved_subagents(&mut self, status: &str, generation: u64) {
+        let unresolved = self
+            .subagent_headers
+            .iter()
+            .filter_map(|(tool_call_id, header)| {
+                let child_status = Self::task_header_state(header)?;
+                let belongs_to_generation = self.tool_generation(tool_call_id) == Some(generation);
+                (!Self::is_terminal_subagent_state(child_status) && belongs_to_generation)
+                    .then_some(tool_call_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let tool_status = if Self::is_failed_subagent_state(status) {
+            ToolCallStatus::Failed
+        } else {
+            ToolCallStatus::Completed
+        };
+        for tool_call_id in unresolved {
+            self.update_subagent_tool_terminal(&tool_call_id, status, tool_status);
+        }
+    }
+
+    fn tool_generation(&self, tool_call_id: &str) -> Option<u64> {
+        self.tools
+            .get(tool_call_id)
+            .and_then(|tool| tool.generation)
+            .or_else(|| {
+                self.history
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.canonical_id == tool_call_id)
+                    .and_then(|entry| entry.tool.as_ref())
+                    .and_then(|tool| tool.generation)
+            })
+    }
+
+    fn update_subagent_tool_terminal(
+        &mut self,
+        tool_call_id: &str,
+        status: &str,
+        tool_status: ToolCallStatus,
+    ) {
+        if let Some(header) = self.subagent_headers.get_mut(tool_call_id) {
+            *header = Self::task_header_with_state(header, status);
+        }
+        let header = self.subagent_headers.get(tool_call_id).cloned();
+        let current = self.tools.get_mut(tool_call_id).map(|tool| {
+            tool.status = tool_status;
+            if let Some(header) = &header {
+                Self::ensure_durable_subagent_header(tool, header);
+            }
+            tool.clone()
+        });
+        if let Some(current) = current {
+            self.attach_or_update_history_tool(current);
+        } else if let Some(tool) = self
+            .history
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.canonical_id == tool_call_id)
+            .and_then(|entry| entry.tool.as_mut())
+        {
+            tool.status = tool_status;
+            if let Some(header) = &header {
+                Self::ensure_durable_subagent_header(tool, header);
+            }
+            self.remeasure_history();
+        }
+        self.active_tool_ids.remove(tool_call_id);
+        if !self.tools.contains_key(tool_call_id) {
+            self.subagent_headers.remove(tool_call_id);
+        }
+    }
+
+    fn enforce_active_tool_tombstone_bounds(&mut self) {
+        while self
+            .subagent_headers
+            .keys()
+            .chain(self.active_tool_ids.iter())
+            .filter(|tool_call_id| self.is_retained_tool_tombstone(tool_call_id))
+            .collect::<HashSet<_>>()
+            .len()
+            > MAX_ACTIVE_TOOL_TOMBSTONES
+        {
+            let Some(expired) = self
+                .history
+                .iter()
+                .filter(|entry| self.is_retained_tool_tombstone(&entry.canonical_id))
+                .min_by_key(|entry| entry.sequence)
+                .map(|entry| entry.canonical_id.clone())
+                .or_else(|| {
+                    self.subagent_headers
+                        .keys()
+                        .chain(self.active_tool_ids.iter())
+                        .find(|tool_call_id| self.is_retained_tool_tombstone(tool_call_id))
+                        .cloned()
+                })
+            else {
+                break;
+            };
+            let header = self.subagent_headers.get(&expired).cloned();
+            if let Some(tool) = self
+                .history
+                .iter_mut()
+                .rev()
+                .find(|entry| entry.canonical_id == expired)
+                .and_then(|entry| entry.tool.as_mut())
+            {
+                tool.status = ToolCallStatus::Failed;
+                if let Some(header) = header {
+                    Self::ensure_durable_subagent_header(tool, &header);
+                }
+            }
+            self.active_tool_ids.remove(&expired);
+            self.subagent_headers.remove(&expired);
+        }
+        self.remeasure_history();
+    }
+
+    fn is_retained_tool_tombstone(&self, tool_call_id: &str) -> bool {
+        if self.tools.contains_key(tool_call_id) {
+            return false;
+        }
+        self.active_tool_ids.contains(tool_call_id)
+            || self
+                .subagent_headers
+                .get(tool_call_id)
+                .and_then(|header| Self::task_header_state(header))
+                .is_some_and(|state| !Self::is_terminal_subagent_state(state))
     }
 
     fn push_timeline(&mut self, kind: SnapshotTimelineKind, canonical_id: String) {
@@ -550,7 +968,10 @@ impl SessionSnapshot {
         self.remeasure_history();
     }
 
-    fn attach_or_update_history_tool(&mut self, tool: SnapshotTool) {
+    fn attach_or_update_history_tool(&mut self, mut tool: SnapshotTool) {
+        if let Some(header) = self.subagent_headers.get(&tool.id).cloned() {
+            Self::ensure_durable_subagent_header(&mut tool, &header);
+        }
         if let Some(entry) = self
             .history
             .iter_mut()
@@ -1021,6 +1442,656 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_preserves_subagent_header_after_plain_text_replaces_tool_content() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading files\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set("Found three options".to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+
+        assert_eq!(snapshot.tools["task-1"].content, "Found three options");
+        assert_eq!(
+            snapshot.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"running\">")
+        );
+
+        let restored_source = snapshot.clone();
+        let mut restored = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        restored.restore_transcript_from(restored_source);
+        assert_eq!(
+            restored.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"running\">")
+        );
+
+        let page = snapshot.page(None, None, 10).expect("snapshot page");
+        let paged_tool = page
+            .entries
+            .iter()
+            .find_map(|entry| entry.tool.as_ref())
+            .expect("paged tool");
+        assert!(
+            paged_tool
+                .content
+                .starts_with("<task id=\"child-1\" state=\"completed\">\n"),
+            "paged history lost terminal sub-agent metadata: {paged_tool:?}"
+        );
+
+        let mut evicted = snapshot.clone();
+        for index in 0..MAX_TOOLS {
+            evicted.apply(&tool(
+                &format!("other-{index}"),
+                None,
+                ToolCallStatus::Completed,
+            ));
+        }
+        assert!(!evicted.tools.contains_key("task-1"));
+        assert_eq!(
+            evicted.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"running\">")
+        );
+        assert!(evicted.mark_subagent_terminal("child-1", "failed"));
+        let evicted_history_tool = evicted
+            .history
+            .iter()
+            .find(|entry| entry.canonical_id == "task-1")
+            .and_then(|entry| entry.tool.as_ref())
+            .expect("evicted history tool");
+        assert!(
+            evicted_history_tool
+                .content
+                .starts_with("<task id=\"child-1\" state=\"failed\">\n"),
+            "evicted history lost sub-agent metadata: {evicted_history_tool:?}"
+        );
+
+        let durable = BridgeThreadSnapshot::from(snapshot);
+        assert_eq!(durable.tools.len(), 1);
+        assert!(
+            durable.tools[0]
+                .content
+                .starts_with("<task id=\"child-1\" state=\"completed\">\n"),
+            "durable thread snapshot lost sub-agent classification: {:?}",
+            durable.tools[0]
+        );
+        let serialized = serde_json::to_value(durable).expect("serializable snapshot");
+        assert!(
+            serialized.get("subagentHeaders").is_none(),
+            "internal metadata leaked into the bridge contract: {serialized}"
+        );
+
+        let mut child_failed =
+            SessionSnapshot::new("agent".to_string(), "failed-thread".to_string());
+        child_failed.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "failed-thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-failed".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Audit dependency risks".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-failed\" state=\"error\">\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        let child_failed = BridgeThreadSnapshot::from(child_failed);
+        assert!(
+            child_failed.tools[0]
+                .content
+                .starts_with("<task id=\"child-failed\" state=\"error\">\n"),
+            "successful wrapper overwrote the child's failure: {:?}",
+            child_failed.tools[0]
+        );
+    }
+
+    #[test]
+    fn active_subagent_eviction_keeps_a_terminalizable_history_tombstone() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-active\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        for index in 0..MAX_TOOLS {
+            snapshot.apply(&tool(
+                &format!("other-{index}"),
+                None,
+                ToolCallStatus::Completed,
+            ));
+        }
+        assert!(!snapshot.tools.contains_key("task-active"));
+        assert!(snapshot.active_tool_ids.contains("task-active"));
+
+        snapshot.apply(&CanonicalEvent::RunFailed {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "parent failed".to_string(),
+        });
+        let history_tool = snapshot
+            .history
+            .iter()
+            .find(|entry| entry.canonical_id == "task-active")
+            .and_then(|entry| entry.tool.as_ref())
+            .expect("active history tombstone");
+        assert_eq!(history_tool.status, ToolCallStatus::Failed);
+        assert!(
+            history_tool
+                .content
+                .starts_with("<task id=\"child-active\" state=\"failed\">\n"),
+            "evicted active task stayed running: {history_tool:?}"
+        );
+
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set("Wrapper completed".to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        let restored_tool = snapshot.tools.get("task-active").expect("restored tool");
+        let durable = BridgeThreadSnapshot::from(snapshot.clone());
+        let durable_tool = durable
+            .tools
+            .iter()
+            .find(|tool| tool.id == "task-active")
+            .expect("durable restored tool");
+        assert_eq!(restored_tool.content, "Wrapper completed");
+        assert!(
+            durable_tool
+                .content
+                .starts_with("<task id=\"child-active\" state=\"failed\">\n"),
+            "plain terminal update lost evicted child failure: {durable_tool:?}"
+        );
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .filter(|entry| entry.canonical_id == "task-active")
+                .count(),
+            1,
+            "restoring an evicted tool duplicated paged history"
+        );
+    }
+
+    #[test]
+    fn active_tool_tombstones_are_bounded() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        for index in 0..(MAX_TOOLS + MAX_ACTIVE_TOOL_TOMBSTONES + 16) {
+            snapshot.apply(&tool(
+                &format!("active-{index:03}"),
+                Some(1),
+                ToolCallStatus::InProgress,
+            ));
+        }
+
+        assert_eq!(snapshot.tools.len(), MAX_TOOLS);
+        assert!(
+            snapshot.active_tool_ids.len() <= MAX_TOOLS + MAX_ACTIVE_TOOL_TOMBSTONES,
+            "active tool ids escaped their bound: {}",
+            snapshot.active_tool_ids.len()
+        );
+        assert!(
+            snapshot
+                .history
+                .iter()
+                .filter_map(|entry| entry.tool.as_ref())
+                .any(|tool| tool.status == ToolCallStatus::Failed),
+            "expiring a tombstone did not terminalize its history"
+        );
+    }
+
+    #[test]
+    fn history_rollover_keeps_active_subagent_classification_for_a_late_update() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-active\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        for index in 0..MAX_TOOLS {
+            snapshot.apply(&tool(
+                &format!("other-{index:03}"),
+                None,
+                ToolCallStatus::Completed,
+            ));
+        }
+        assert!(!snapshot.tools.contains_key("task-active"));
+        for index in 0..=MAX_HISTORY_ENTRIES {
+            snapshot.apply(&CanonicalEvent::MessageChunk {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                role: MessageRole::Agent,
+                message_id: format!("message-{index:04}"),
+                content: "x".to_string(),
+                content_block: None,
+            });
+        }
+        assert!(
+            snapshot
+                .history
+                .iter()
+                .all(|entry| entry.canonical_id != "task-active"),
+            "fixture did not roll the active task out of history"
+        );
+        assert!(snapshot.active_tool_ids.contains("task-active"));
+        assert!(snapshot.subagent_header("task-active").is_some());
+
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set("Wrapper completed".to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        let durable = BridgeThreadSnapshot::from(snapshot);
+        let task = durable
+            .tools
+            .iter()
+            .find(|tool| tool.id == "task-active")
+            .expect("late task update");
+        assert!(
+            task.content
+                .starts_with("<task id=\"child-active\" state=\"completed\">\n"),
+            "late update lost rolled-over classification: {task:?}"
+        );
+    }
+
+    #[test]
+    fn late_child_failure_survives_a_successful_parent_wrapper_snapshot() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert!(snapshot.mark_subagent_terminal("child-1", "failed"));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set("Wrapper completed".to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+
+        let durable = BridgeThreadSnapshot::from(snapshot);
+        assert_eq!(durable.tools[0].status, ToolCallStatus::Completed);
+        assert!(
+            durable.tools[0]
+                .content
+                .starts_with("<task id=\"child-1\" state=\"failed\">\n"),
+            "wrapper completion erased the persisted child failure: {:?}",
+            durable.tools[0]
+        );
+    }
+
+    #[test]
+    fn late_append_to_an_evicted_tool_preserves_its_retained_state() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-active\" state=\"running\">\nfirst chunk".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(vec![serde_json::json!({"kind":"retained"})]),
+            locations: FieldUpdate::Set(vec![serde_json::json!({"path":"src/a.rs"})]),
+        });
+        for index in 0..MAX_TOOLS {
+            snapshot.apply(&tool(
+                &format!("other-{index:03}"),
+                None,
+                ToolCallStatus::Completed,
+            ));
+        }
+        assert!(!snapshot.tools.contains_key("task-active"));
+
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-active".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Append("\nsecond chunk".to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+
+        let restored = snapshot.tools.get("task-active").expect("restored tool");
+        assert!(restored.content.contains("first chunk\nsecond chunk"));
+        assert_eq!(
+            restored.structured_content,
+            vec![serde_json::json!({"kind":"retained"})]
+        );
+        assert_eq!(
+            restored.locations,
+            vec![serde_json::json!({"path":"src/a.rs"})]
+        );
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .filter(|entry| entry.canonical_id == "task-active")
+                .count(),
+            1,
+            "late append duplicated retained history"
+        );
+    }
+
+    #[test]
+    fn later_parent_failure_does_not_fail_unresolved_child_from_earlier_turn() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        snapshot.apply(&CanonicalEvent::RunFinished {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        snapshot.apply(&run_started(2));
+
+        assert_eq!(snapshot.tools["task-1"].status, ToolCallStatus::Completed);
+        assert_eq!(
+            snapshot.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"running\">")
+        );
+        snapshot.apply(&CanonicalEvent::RunFailed {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-2".to_string(),
+            source_turn_id: "turn-2".to_string(),
+            generation: 2,
+            message: "follow-up failed".to_string(),
+        });
+        assert_eq!(snapshot.tools["task-1"].status, ToolCallStatus::Completed);
+        assert_eq!(
+            snapshot.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"running\">")
+        );
+    }
+
+    #[test]
+    fn starting_a_followup_does_not_fail_an_unresolved_child_from_a_finished_parent_run() {
+        later_parent_failure_does_not_fail_unresolved_child_from_earlier_turn();
+    }
+
+    #[test]
+    fn retasked_child_terminal_status_only_updates_the_latest_unresolved_card() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        for (tool_call_id, state) in [("task-1", "completed"), ("task-2", "running")] {
+            snapshot.apply(&CanonicalEvent::Tool {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                tool_call_id: tool_call_id.to_string(),
+                kind: ToolKind::Other,
+                status: if state == "completed" {
+                    ToolCallStatus::Completed
+                } else {
+                    ToolCallStatus::InProgress
+                },
+                title: "Research dependency options".to_string(),
+                content: FieldUpdate::Set(format!(
+                    "<task id=\"child-1\" state=\"{state}\">\n</task>"
+                )),
+                structured_content: FieldUpdate::Set(Vec::new()),
+                locations: FieldUpdate::Set(Vec::new()),
+            });
+        }
+
+        assert!(snapshot.mark_subagent_terminal("child-1", "failed"));
+        assert_eq!(
+            snapshot.subagent_header("task-1"),
+            Some("<task id=\"child-1\" state=\"completed\">")
+        );
+        assert_eq!(
+            snapshot.subagent_header("task-2"),
+            Some("<task id=\"child-1\" state=\"failed\">")
+        );
+    }
+
+    #[test]
+    fn terminal_wrapper_with_a_stale_running_header_cannot_clear_a_known_child_failure() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert!(snapshot.mark_subagent_terminal("child-1", "failed"));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWrapper completed\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+
+        let durable = BridgeThreadSnapshot::from(snapshot);
+        assert!(
+            durable.tools[0]
+                .content
+                .starts_with("<task id=\"child-1\" state=\"failed\">\n"),
+            "stale wrapper header resurrected the child: {:?}",
+            durable.tools[0]
+        );
+    }
+
+    #[test]
+    fn unresolved_subagent_link_remains_correctable_until_child_terminal() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        for index in 0..MAX_TOOLS {
+            snapshot.apply(&tool(
+                &format!("other-{index:03}"),
+                None,
+                ToolCallStatus::Completed,
+            ));
+        }
+        assert!(!snapshot.tools.contains_key("task-1"));
+        assert!(snapshot.subagent_header("task-1").is_some());
+
+        assert!(snapshot.mark_subagent_terminal("child-1", "failed"));
+        let history_tool = snapshot
+            .history
+            .iter()
+            .find(|entry| entry.canonical_id == "task-1")
+            .and_then(|entry| entry.tool.as_ref())
+            .expect("evicted unresolved card");
+        assert_eq!(history_tool.status, ToolCallStatus::Failed);
+        assert!(history_tool
+            .content
+            .starts_with("<task id=\"child-1\" state=\"failed\">\n"));
+    }
+
+    #[test]
     fn snapshot_preserves_ordered_typed_message_content() {
         let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         let event = CanonicalEvent::MessageChunk {
@@ -1067,6 +2138,92 @@ mod tests {
                 serde_json::json!({"type":"image"}),
                 serde_json::json!({"type":"text","text":"B"}),
             ]
+        );
+    }
+
+    #[test]
+    fn accepted_child_terminal_updates_only_the_current_retask_generation() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        for (tool_call_id, state) in [("task-old", "completed"), ("task-current", "running")] {
+            snapshot.apply(&CanonicalEvent::Tool {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                tool_call_id: tool_call_id.to_string(),
+                kind: ToolKind::Other,
+                status: if state == "completed" {
+                    ToolCallStatus::Completed
+                } else {
+                    ToolCallStatus::InProgress
+                },
+                title: "Research dependency options".to_string(),
+                content: FieldUpdate::Set(format!(
+                    "<task id=\"child-1\" state=\"{state}\">\n</task>"
+                )),
+                structured_content: FieldUpdate::Set(Vec::new()),
+                locations: FieldUpdate::Set(Vec::new()),
+            });
+        }
+        for index in 0..=MAX_HISTORY_ENTRIES {
+            snapshot.apply(&CanonicalEvent::MessageChunk {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: Some("run-1".to_string()),
+                source_turn_id: Some("turn-1".to_string()),
+                generation: Some(1),
+                role: MessageRole::Agent,
+                message_id: format!("rollover-{index:04}"),
+                content: "x".to_string(),
+                content_block: None,
+            });
+        }
+
+        assert!(snapshot.mark_subagent_tool_terminal(
+            "task-current",
+            "failed",
+            ToolCallStatus::Failed,
+        ));
+        assert_eq!(
+            snapshot.subagent_header("task-old"),
+            Some("<task id=\"child-1\" state=\"completed\">")
+        );
+        assert_eq!(
+            snapshot.subagent_header("task-current"),
+            Some("<task id=\"child-1\" state=\"failed\">")
+        );
+    }
+
+    #[test]
+    fn cancelled_status_survives_authoritative_snapshot_normalization() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research dependency options".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert!(snapshot.mark_subagent_terminal("child-1", "cancelled"));
+
+        let durable = BridgeThreadSnapshot::from(snapshot);
+        assert_eq!(durable.tools[0].status, ToolCallStatus::Failed);
+        assert!(
+            durable.tools[0]
+                .content
+                .starts_with("<task id=\"child-1\" state=\"cancelled\">\n"),
+            "cancelled state collapsed to failed: {:?}",
+            durable.tools[0]
         );
     }
 
@@ -1535,7 +2692,14 @@ mod tests {
         }
         nonlexical.apply(&tool("m-newest", Some(1), ToolCallStatus::Pending));
         assert!(!nonlexical.tools.contains_key("z-oldest"));
-        assert!(!nonlexical.active_tool_ids.contains("z-oldest"));
+        assert!(nonlexical.active_tool_ids.contains("z-oldest"));
+        assert!(nonlexical.history.iter().any(|entry| {
+            entry.canonical_id == "z-oldest"
+                && entry
+                    .tool
+                    .as_ref()
+                    .is_some_and(|tool| tool.status == ToolCallStatus::InProgress)
+        }));
         assert!(nonlexical.tools.contains_key("a-newer-001"));
         assert!(nonlexical.tools.contains_key("m-newest"));
         assert_eq!(
