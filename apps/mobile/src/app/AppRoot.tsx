@@ -48,6 +48,7 @@ export function AppRoot() {
   const handleBackSwipe = useAppBackHandler();
   const drawer = useDrawerController({
     usesTabletLayout,
+    screenWidth,
     drawerWidth,
     onBackSwipe: handleBackSwipe,
   });

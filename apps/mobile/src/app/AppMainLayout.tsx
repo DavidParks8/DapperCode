@@ -75,7 +75,12 @@ export function AppMainLayout({
                 >
                   <GestureDetector gesture={drawer.backSwipeGesture as never}>
                     <View style={styles.screen}>
-                      <AppScreenRenderer />
+                      <AppScreenRenderer
+                        backSwipeUnderlayAnimatedStyle={drawer.backSwipeUnderlayAnimatedStyle}
+                        backSwipePushedScreenAnimatedStyle={
+                          drawer.backSwipePushedScreenAnimatedStyle
+                        }
+                      />
                       {chatTransitionChatId || (currentScreen === 'Main' && mainOpeningChatId) ? (
                         <View style={styles.chatTransitionOverlay}>
                           <View

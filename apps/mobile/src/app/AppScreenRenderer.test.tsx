@@ -2,11 +2,18 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppScreenRenderer } from './AppScreenRenderer';
 import { createBridgeTestStore, withAppStore } from '../state/testing';
+import { gitChatAtom } from '../state/chat/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
+import type { Chat } from '../api/types';
 import type { HostBridgeApiClient } from '../api/client';
 import type { AppStore } from '../state/types';
 
 let mainMountCount = 0;
+
+jest.mock('react-native-reanimated', () => {
+  const MockView = jest.requireActual('react-native').View;
+  return { __esModule: true, default: { View: MockView } };
+});
 
 jest.mock('../screens/main/MainScreen', () => {
   const mockReact = jest.requireActual('react');
@@ -31,7 +38,11 @@ jest.mock('../screens/gitCheckout/GitCheckoutScreen', () => {
   return { GitCheckoutScreen: () => mockReact.createElement(MockText, null, 'CHECKOUT') };
 });
 jest.mock('../screens/browser/BrowserScreen', () => ({ BrowserScreen: () => null }));
-jest.mock('../screens/git/GitScreen', () => ({ GitScreen: () => null }));
+jest.mock('../screens/git/GitScreen', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return { GitScreen: () => mockReact.createElement(MockText, null, 'GIT') };
+});
 jest.mock('../screens/settings/SettingsScreen', () => ({ SettingsScreen: () => null }));
 jest.mock('../screens/legal/PrivacyScreen', () => ({ PrivacyScreen: () => null }));
 jest.mock('../screens/legal/TermsScreen', () => ({ TermsScreen: () => null }));
@@ -71,8 +82,27 @@ describe('AppScreenRenderer', () => {
     expect(textOf(tree)).toContain('CHECKOUT');
     expect(mainMountCount).toBe(1);
 
+    const chat = {
+      id: 'chat-1',
+      title: 'Chat',
+      status: 'complete',
+      createdAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+      lastMessagePreview: '',
+      messages: [],
+    } as Chat;
+    act(() => {
+      store.set(gitChatAtom, chat);
+      store.set(currentScreenAtom, 'ChatGit');
+    });
+    expect(textOf(tree)).toContain('GIT');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
     act(() => store.set(currentScreenAtom, 'Main'));
     expect(textOf(tree)).not.toContain('CHECKOUT');
+    expect(textOf(tree)).not.toContain('GIT');
     expect(mainMountCount).toBe(1);
 
     act(() => tree.unmount());
