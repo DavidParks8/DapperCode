@@ -19,6 +19,7 @@ lives under `apps/mobile/src/state`.
 | `state/drawer/atoms.ts` | Drawer visibility plus the imperative drawer commands |
 | `state/commands.ts` | Screen-registered imperative entry points (replaces `useImperativeHandle` refs) |
 | `state/theme.ts` | Theme derived from settings and the system colour scheme |
+| `state/mainScreen/*` | MainScreen screen state, grouped by domain, plus the reset registry |
 | `state/testing.ts` | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`) |
 
 ## Conventions
@@ -69,9 +70,27 @@ expect(store.get(currentScreenAtom)).toBe('Settings');
 
 Assert on store state rather than on callback props: screens no longer receive their wiring as props.
 
+## MainScreen state
+
+Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState` left in the
+`mainScreen*` modules. Atoms are grouped by domain (`session`, `turn`, `models`, `workspace`,
+`composer`, `modals`, `gitCheckout`).
+
+- **Always create them with `screenAtom`,** not `atom`. `screenAtom` registers the atom's initial
+  value with `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive
+  the component, so an atom created with plain `atom()` would silently leak state across bridge
+  profiles. `registry.test.ts` guards the registry.
+- **Non-React helpers use the store, not hooks.** The WS event processors (`processAgUiRunEvents`,
+  `processTurnLifecycleEvents`, …) and the command executors (`executeSendMessage`,
+  `executeSlashCommand`, …) are plain functions. They take the jotai store from
+  `context.store` and use `store.get(atom)` / `screenSetter(store, atom)`.
+- `MainScreen` is still keyed by bridge profile id. The key is what clears the ~40 `useRef` caches in
+  the hook chain (thread runtime snapshots, reasoning buffers, model preferences); the atom reset
+  covers the state. Dropping the key requires converting those refs too.
+
 ## Known follow-up
 
-`MainScreen` is fed from atoms and registers its imperative commands through
-`mainScreenCommandsAtom`, but its internal 35-hook context-accumulation chain (the `mainScreen*`
-modules) still threads a growing `context` object. Converting that chain to atoms is the remaining
-step; until then `MainScreen` is still remounted per bridge profile via a `key`.
+The 35-hook chain in `MainScreen.tsx` still threads an accumulated `context` object, and the
+`MainScreen*.tsx` views still take it as a prop. It now carries derived values, actions and refs
+rather than raw state, so the remaining work is mechanical: turn the derived values into derived
+atoms and let the views subscribe directly.
