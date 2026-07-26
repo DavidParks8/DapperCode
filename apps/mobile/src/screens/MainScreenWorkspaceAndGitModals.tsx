@@ -1,9 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useAtomValue } from 'jotai';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { WorkspacePickerModal } from '../components/WorkspacePickerModal';
 import { decorativeAccessibilityProps } from '../accessibility';
 import { normalizeCloneDirectoryName } from './mainScreenHelpers';
 import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
+import {
+  gitCheckoutCloningAtom,
+  gitCheckoutDirectoryNameAtom,
+  gitCheckoutErrorAtom,
+  gitCheckoutModalVisibleAtom,
+  gitCheckoutParentPathAtom,
+  gitCheckoutRepoUrlAtom,
+} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -21,7 +30,6 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     saveTitle,
     workspaceModalVisible,
     workspacePickerPurpose,
-    gitCheckoutParentPath,
     preferredStartCwd,
     workspaceBridgeRoot,
     workspaceRoots,
@@ -38,21 +46,22 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     setWorkspaceModalVisible,
     openGitCheckoutModal,
     closeWorkspaceModal,
-    gitCheckoutModalVisible,
     closeGitCheckoutModal,
     safeAreaInsets,
     theme,
-    gitCheckoutRepoUrl,
     handleGitCheckoutRepoUrlChange,
-    gitCheckoutCloning,
     openGitCheckoutDestinationPicker,
     gitCheckoutDestinationLabel,
-    gitCheckoutDirectoryName,
     handleGitCheckoutDirectoryNameChange,
     submitGitCheckout,
     gitCheckoutTargetPath,
-    gitCheckoutError,
   } = context;
+  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
+  const gitCheckoutModalVisible = useAtomValue(gitCheckoutModalVisibleAtom);
+  const gitCheckoutRepoUrl = useAtomValue(gitCheckoutRepoUrlAtom);
+  const gitCheckoutCloning = useAtomValue(gitCheckoutCloningAtom);
+  const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
+  const gitCheckoutError = useAtomValue(gitCheckoutErrorAtom);
 
   return (
     <>

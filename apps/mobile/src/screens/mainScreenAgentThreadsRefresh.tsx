@@ -1,7 +1,12 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { AGENT_THREADS_SYNC_INTERVAL_MS, AGENT_THREADS_IDLE_SYNC_INTERVAL_MS, AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS } from './mainScreenHelpers';
 import { areChatSummaryListsEquivalent } from './mainScreenChatState';
 import type { MainScreenWorkspaceBrowserStateContext, MainScreenWorkspaceBrowserStateResult } from './mainScreenWorkspaceBrowserState';
+import {
+  gitCheckoutModalVisibleAtom,
+  resumeGitCheckoutAfterWorkspacePickerAtom,
+} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -22,20 +27,24 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     clearDeferredDisconnectActivity,
     clearForegroundAgentRefresh,
     relatedAgentThreads,
-    resumeGitCheckoutAfterWorkspacePicker,
     runWatchdogUntilRef,
     selectedChatId,
     selectedChatRef,
     setAgentRootThreadId,
     setAgentThreadMenuVisible,
     setError,
-    setGitCheckoutModalVisible,
     setLoadingAgentThreads,
     setRelatedAgentThreads,
-    setResumeGitCheckoutAfterWorkspacePicker,
     setWorkspaceModalVisible,
     workspacePickerPurpose,
   } = context;
+  const resumeGitCheckoutAfterWorkspacePicker = useAtomValue(
+    resumeGitCheckoutAfterWorkspacePickerAtom
+  );
+  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
+  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
+    resumeGitCheckoutAfterWorkspacePickerAtom
+  );
 
 
   const refreshAgentThreads = useCallback(

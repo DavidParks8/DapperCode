@@ -1,4 +1,7 @@
+import { useStore } from 'jotai';
+import { useMemo } from 'react';
 import type { Chat } from '../api/types';
+import { resetMainScreenStateAtom } from '../state/mainScreen/registry';
 import { useMainScreenBaseContext } from './useMainScreenBaseContext';
 import { useMainScreenCoreBootstrap } from './mainScreenCoreBootstrap';
 import { useMainScreenLifecycleRecovery } from './mainScreenLifecycleRecovery';
@@ -49,6 +52,10 @@ export interface MainScreenHandle {
 }
 
 export function MainScreen() {
+    const store = useStore();
+    // MainScreen state lives in atoms that outlive this component, so a fresh mount (a new bridge
+    // profile) has to clear it explicitly before any child reads it.
+    useMemo(() => store.set(resetMainScreenStateAtom), [store]);
     const mainScreenBaseContext = useMainScreenBaseContext();
     const coreBootstrapResult = useMainScreenCoreBootstrap(mainScreenBaseContext);
     const coreBootstrapContext = { ...mainScreenBaseContext, ...coreBootstrapResult };

@@ -1,9 +1,14 @@
+import { useAtomValue } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import type { Chat } from '../api/types';
 import { GENERIC_RUNNING_ACTIVITY_DELAY_MS, GENERIC_RUNNING_ACTIVITY_TITLES, normalizeCloneDirectoryName, joinWorkspacePath } from './mainScreenHelpers';
 import { areChatStatusMapsEquivalent } from './mainScreenChatState';
 import { resolveDisplayedActivity, resolveVisibleActivity } from './mainScreenActivityIndicator';
 import type { MainScreenUiActionHandlersContext, MainScreenUiActionHandlersResult } from './mainScreenUiActionHandlers';
+import {
+  gitCheckoutDirectoryNameAtom,
+  gitCheckoutParentPathAtom,
+} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -18,8 +23,6 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     activity,
     clearGenericRunningActivityDelay,
     genericRunningActivityTimeoutRef,
-    gitCheckoutDirectoryName,
-    gitCheckoutParentPath,
     heldActivity,
     isLoading,
     isOpeningChat,
@@ -38,6 +41,8 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     workspaceBridgeRoot,
     ws,
   } = context;
+  const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
+  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
 
   const indicatorInputs = {
     activity,

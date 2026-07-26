@@ -1,7 +1,18 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
 import { scheduleIdleTask, normalizeWorkspacePath, normalizeCloneDirectoryName, deriveCloneDirectoryName, formatGitCloneFailureMessage, joinWorkspacePath, isBridgeConnectionErrorMessage } from './mainScreenHelpers';
 import type { MainScreenAgentThreadsRefreshContext, MainScreenAgentThreadsRefreshResult } from './mainScreenAgentThreadsRefresh';
+import {
+  gitCheckoutCloningAtom,
+  gitCheckoutDirectoryNameAtom,
+  gitCheckoutDirectoryNameEditedAtom,
+  gitCheckoutErrorAtom,
+  gitCheckoutModalVisibleAtom,
+  gitCheckoutParentPathAtom,
+  gitCheckoutRepoUrlAtom,
+  resumeGitCheckoutAfterWorkspacePickerAtom,
+} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -18,10 +29,6 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     clearDeferredDisconnectActivity,
     clearForegroundAgentRefresh,
     foregroundAgentRefreshHandleRef,
-    gitCheckoutDirectoryName,
-    gitCheckoutDirectoryNameEdited,
-    gitCheckoutParentPath,
-    gitCheckoutRepoUrl,
     lastAppForegroundedAtRef,
     onDefaultStartCwdChange,
     refreshWorkspaceRoots,
@@ -29,14 +36,6 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     scheduleDisconnectActivity,
     setBridgeRecoveryBannerVisible,
     setError,
-    setGitCheckoutCloning,
-    setGitCheckoutDirectoryName,
-    setGitCheckoutDirectoryNameEdited,
-    setGitCheckoutError,
-    setGitCheckoutModalVisible,
-    setGitCheckoutParentPath,
-    setGitCheckoutRepoUrl,
-    setResumeGitCheckoutAfterWorkspacePicker,
     setWorkspaceBrowseError,
     setWorkspaceBrowseParentPath,
     setWorkspaceBrowsePath,
@@ -45,6 +44,20 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     workspacePickerPurpose,
     ws,
   } = context;
+  const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
+  const gitCheckoutDirectoryNameEdited = useAtomValue(gitCheckoutDirectoryNameEditedAtom);
+  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
+  const gitCheckoutRepoUrl = useAtomValue(gitCheckoutRepoUrlAtom);
+  const setGitCheckoutCloning = useSetAtom(gitCheckoutCloningAtom);
+  const setGitCheckoutDirectoryName = useSetAtom(gitCheckoutDirectoryNameAtom);
+  const setGitCheckoutDirectoryNameEdited = useSetAtom(gitCheckoutDirectoryNameEditedAtom);
+  const setGitCheckoutError = useSetAtom(gitCheckoutErrorAtom);
+  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
+  const setGitCheckoutParentPath = useSetAtom(gitCheckoutParentPathAtom);
+  const setGitCheckoutRepoUrl = useSetAtom(gitCheckoutRepoUrlAtom);
+  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
+    resumeGitCheckoutAfterWorkspacePickerAtom
+  );
 
 
   useEffect(() => {

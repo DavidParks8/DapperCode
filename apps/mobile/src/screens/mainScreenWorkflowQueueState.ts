@@ -1,9 +1,11 @@
+import { useAtomValue } from 'jotai';
 import { Platform } from 'react-native';
 import { useAccessibilityAnnouncement } from '../accessibility';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { hasStructuredPlanCardContent, resolveWorkflowCardMode } from './planCardState';
 import { canOfferQueuedMessageSteer, isBridgeConnectionErrorMessage, resolveDisplayedThreadPlan, toPersistedActivePlanState, resolveUndismissedPlanImplementationPrompt, resolvePersistedPlanImplementationPrompt, formatAgentThreadOptionTitle } from './mainScreenHelpers';
 import type { MainScreenHeaderActivityViewModelContext, MainScreenHeaderActivityViewModelResult } from './mainScreenHeaderActivityViewModel';
+import { gitCheckoutErrorAtom } from '../state/mainScreen/gitCheckout';
 
 
 
@@ -32,7 +34,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     draft,
     effortModalVisible,
     error,
-    gitCheckoutError,
     isOpeningChat,
     keyboardVisible,
     modelModalVisible,
@@ -60,6 +61,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     workspaceModalVisible,
     ws,
   } = context;
+  const gitCheckoutError = useAtomValue(gitCheckoutErrorAtom);
 
   const agentDetailSummary = agentDetailThreadId
     ? relatedAgentThreads.find((chat) => chat.id === agentDetailThreadId) ??

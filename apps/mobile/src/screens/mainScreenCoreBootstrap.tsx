@@ -125,16 +125,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
   const [favoriteWorkspacePaths, setFavoriteWorkspacePaths] = useState<string[]>([]);
-  const [resumeGitCheckoutAfterWorkspacePicker, setResumeGitCheckoutAfterWorkspacePicker] =
-    useState(false);
-  const [gitCheckoutModalVisible, setGitCheckoutModalVisible] = useState(false);
-  const [gitCheckoutRepoUrl, setGitCheckoutRepoUrl] = useState('');
-  const [gitCheckoutParentPath, setGitCheckoutParentPath] = useState<string | null>(null);
-  const [gitCheckoutDirectoryName, setGitCheckoutDirectoryName] = useState('');
-  const [gitCheckoutDirectoryNameEdited, setGitCheckoutDirectoryNameEdited] =
-    useState(false);
-  const [gitCheckoutError, setGitCheckoutError] = useState<string | null>(null);
-  const [gitCheckoutCloning, setGitCheckoutCloning] = useState(false);
   const [agentThreadMenuVisible, setAgentThreadMenuVisible] = useState(false);
   const [modelModalVisible, setModelModalVisible] = useState(false);
   const [agentModalVisible, setAgentModalVisible] = useState(false);
@@ -284,22 +274,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     workspaceBrowseRequestRef,
     favoriteWorkspacePaths,
     setFavoriteWorkspacePaths,
-    resumeGitCheckoutAfterWorkspacePicker,
-    setResumeGitCheckoutAfterWorkspacePicker,
-    gitCheckoutModalVisible,
-    setGitCheckoutModalVisible,
-    gitCheckoutRepoUrl,
-    setGitCheckoutRepoUrl,
-    gitCheckoutParentPath,
-    setGitCheckoutParentPath,
-    gitCheckoutDirectoryName,
-    setGitCheckoutDirectoryName,
-    gitCheckoutDirectoryNameEdited,
-    setGitCheckoutDirectoryNameEdited,
-    gitCheckoutError,
-    setGitCheckoutError,
-    gitCheckoutCloning,
-    setGitCheckoutCloning,
     agentThreadMenuVisible,
     setAgentThreadMenuVisible,
     modelModalVisible,

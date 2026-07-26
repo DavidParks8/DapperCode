@@ -1,7 +1,18 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { FileSystemListResponse } from '../api/types';
 import { scheduleIdleTask, type WorkspacePickerPurpose, normalizeWorkspacePath, getWorkspaceBrowseCacheKey } from './mainScreenHelpers';
 import type { MainScreenCapabilityFlagsContext, MainScreenCapabilityFlagsResult } from './mainScreenCapabilityFlags';
+import {
+  gitCheckoutCloningAtom,
+  gitCheckoutDirectoryNameAtom,
+  gitCheckoutDirectoryNameEditedAtom,
+  gitCheckoutErrorAtom,
+  gitCheckoutModalVisibleAtom,
+  gitCheckoutParentPathAtom,
+  gitCheckoutRepoUrlAtom,
+  resumeGitCheckoutAfterWorkspacePickerAtom,
+} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -13,20 +24,10 @@ export type MainScreenWorkspaceBrowserStateContext = MainScreenCapabilityFlagsCo
 export function useMainScreenWorkspaceBrowserState(context: MainScreenWorkspaceBrowserStateContext) {
   const {
     api,
-    gitCheckoutCloning,
-    gitCheckoutParentPath,
     onDefaultStartCwdChange,
     preferredStartCwd,
     refreshWorkspaceRoots,
-    setGitCheckoutCloning,
-    setGitCheckoutDirectoryName,
-    setGitCheckoutDirectoryNameEdited,
-    setGitCheckoutError,
-    setGitCheckoutModalVisible,
-    setGitCheckoutParentPath,
-    setGitCheckoutRepoUrl,
     setLoadingWorkspaceBrowse,
-    setResumeGitCheckoutAfterWorkspacePicker,
     setWorkspaceBridgeRoot,
     setWorkspaceBrowseEntries,
     setWorkspaceBrowseError,
@@ -40,6 +41,18 @@ export function useMainScreenWorkspaceBrowserState(context: MainScreenWorkspaceB
     workspaceBrowsePath,
     workspaceBrowseRequestRef,
   } = context;
+  const gitCheckoutCloning = useAtomValue(gitCheckoutCloningAtom);
+  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
+  const setGitCheckoutCloning = useSetAtom(gitCheckoutCloningAtom);
+  const setGitCheckoutDirectoryName = useSetAtom(gitCheckoutDirectoryNameAtom);
+  const setGitCheckoutDirectoryNameEdited = useSetAtom(gitCheckoutDirectoryNameEditedAtom);
+  const setGitCheckoutError = useSetAtom(gitCheckoutErrorAtom);
+  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
+  const setGitCheckoutParentPath = useSetAtom(gitCheckoutParentPathAtom);
+  const setGitCheckoutRepoUrl = useSetAtom(gitCheckoutRepoUrlAtom);
+  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
+    resumeGitCheckoutAfterWorkspacePickerAtom
+  );
 
 
   const browseWorkspacePath = useCallback(
