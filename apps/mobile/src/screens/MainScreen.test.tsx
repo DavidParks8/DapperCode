@@ -27,6 +27,7 @@ import type { AppStore } from '../state/types';
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
+jest.mock('@gorhom/bottom-sheet', () => require('../testing/bottomSheetMock'));
 jest.mock('react-native-reanimated', () => {
   const View = jest.requireActual('react-native').View;
   const transition = { duration: () => transition, easing: () => transition };

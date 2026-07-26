@@ -1,5 +1,4 @@
 import React from 'react';
-import { Modal } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, {
   act,
@@ -9,6 +8,8 @@ import renderer, {
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { SelectionSheet, type SelectionSheetOption } from './SelectionSheet';
+
+jest.mock('@gorhom/bottom-sheet', () => require('../testing/bottomSheetMock'));
 
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
@@ -78,10 +79,6 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
   return callback(...args);
 }
 
-function findType(root: QueryableInstance, type: unknown): QueryableInstance {
-  return root.findByType(type as React.ElementType) as QueryableInstance;
-}
-
 describe('SelectionSheet', () => {
   it('renders and invokes populated SelectionSheet option variants', () => {
     const onClose = jest.fn();
@@ -118,10 +115,8 @@ describe('SelectionSheet', () => {
     expect(invokeStyle(plain, false)).toBeDefined();
     act(() => invokeProp(selected, 'onPress'));
     expect(optionPresses[0]).toHaveBeenCalled();
-    act(() => invokeProp(findPressable(root, 'Close Choose one'), 'onPress'));
     act(() => invokeProp(findPressable(root, 'Done'), 'onPress'));
-    act(() => invokeProp(findType(root, Modal), 'onRequestClose'));
-    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(onClose).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });
 
@@ -145,7 +140,7 @@ describe('SelectionSheet', () => {
         <SelectionSheet visible={false} title="Hidden" options={[]} onClose={onClose} />
       ));
     });
-    expect(findType(queryRoot(tree), Modal).props.visible).toBe(false);
+    expect(textContent(queryRoot(tree))).not.toContain('Hidden');
     act(() => tree.unmount());
   });
 });
