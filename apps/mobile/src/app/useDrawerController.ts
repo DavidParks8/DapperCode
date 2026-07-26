@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
@@ -89,6 +89,10 @@ export function useDrawerController({
     [store]
   );
 
+  const toggleTabletSidebar = useCallback(() => {
+    setTabletSidebarVisible((visible) => !visible);
+  }, [setTabletSidebarVisible]);
+
   const {
     closeDrawer,
     handleNavigationToggle,
@@ -106,16 +110,21 @@ export function useDrawerController({
     drawerDragStartOffset,
     drawerGestureDidSettle,
     onDrawerSettled: handleDrawerSettled,
-    onToggleTabletSidebar: () => setTabletSidebarVisible((visible) => !visible),
+    onToggleTabletSidebar: toggleTabletSidebar,
     onBackSwipe,
   });
 
+  const drawerCommands = useMemo(
+    () => ({ closeDrawer, toggleNavigation: handleNavigationToggle }),
+    [closeDrawer, handleNavigationToggle]
+  );
+
   useEffect(() => {
-    setDrawerCommands({ closeDrawer, toggleNavigation: handleNavigationToggle });
+    setDrawerCommands(drawerCommands);
     return () => {
       setDrawerCommands(null);
     };
-  }, [closeDrawer, handleNavigationToggle, setDrawerCommands]);
+  }, [drawerCommands, setDrawerCommands]);
 
   useEffect(() => {
     if (!usesTabletLayout) {

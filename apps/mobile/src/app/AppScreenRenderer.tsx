@@ -21,8 +21,9 @@ export function AppScreenRenderer() {
   const currentScreen = useAtomValue(currentScreenAtom);
   const gitChat = useAtomValue(gitChatAtom);
   const onOpenDrawer = useOpenDrawer();
+  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
   // MainScreen still owns per-profile session state, so it is remounted per bridge profile.
-  const mainScreen = <MainScreen key={useAtomValue(activeBridgeProfileAtom)?.id} />;
+  const mainScreen = <MainScreen key={activeBridgeProfileId} />;
 
   switch (currentScreen) {
     case 'ChatGit':
