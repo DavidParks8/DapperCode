@@ -67,8 +67,6 @@ export function OnboardingScreen({
               theme={theme}
               introHeroAnimatedStyle={controller.introHeroAnimatedStyle}
               introActionsAnimatedStyle={controller.introActionsAnimatedStyle}
-              introAgentAnimatedStyle={controller.introAgentAnimatedStyle}
-              introAgentLabel={controller.introAgentLabel}
               onContinue={controller.goToConnectStep}
             />
           ) : (

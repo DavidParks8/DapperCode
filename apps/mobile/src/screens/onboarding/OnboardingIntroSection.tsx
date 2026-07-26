@@ -15,8 +15,6 @@ interface IntroSectionProps {
   theme: AppTheme;
   introHeroAnimatedStyle: OnboardingHeroAnimatedStyle;
   introActionsAnimatedStyle: OnboardingTranslateAnimatedStyle;
-  introAgentAnimatedStyle: OnboardingTranslateAnimatedStyle;
-  introAgentLabel: string;
   onContinue: () => void;
 }
 
@@ -25,8 +23,6 @@ export function OnboardingIntroSection({
   theme,
   introHeroAnimatedStyle,
   introActionsAnimatedStyle,
-  introAgentAnimatedStyle,
-  introAgentLabel,
   onContinue,
 }: IntroSectionProps) {
   return (
@@ -49,11 +45,11 @@ export function OnboardingIntroSection({
               </View>
             </View>
             <View style={styles.introHeroTitleWrap}>
-              <Animated.View style={[styles.introHeroAgentWord, introAgentAnimatedStyle]}>
+              <View style={styles.introHeroAgentWord}>
                 <Text style={styles.introHeroAgentLabel} numberOfLines={1} adjustsFontSizeToFit>
-                  {introAgentLabel}
+                  ACP agents
                 </Text>
-              </Animated.View>
+              </View>
               <Text style={styles.introHeroTitleTail} numberOfLines={1} adjustsFontSizeToFit>
                 on your phone
               </Text>
