@@ -1,4 +1,4 @@
-import { atom, type PrimitiveAtom, type Setter } from 'jotai';
+import { atom, type Atom, type PrimitiveAtom, type Setter } from 'jotai';
 import type { SetStateAction } from 'react';
 
 import type { AppStore } from '../types';
@@ -33,4 +33,22 @@ export function screenSetter<Value>(
   target: PrimitiveAtom<Value>
 ): (update: SetStateAction<Value>) => void {
   return (update) => store.set(target, update);
+}
+
+/**
+ * A read-only `{ current }` view over an atom.
+ *
+ * Several modules used to mirror state into a ref so callbacks could read the newest value without
+ * re-subscribing. Jotai store writes are synchronously visible, so a live read is both simpler and
+ * strictly fresher than the mirrored ref, while keeping the `.current` call sites unchanged.
+ */
+export function screenRefView<Value>(
+  store: AppStore,
+  source: Atom<Value>
+): { readonly current: Value } {
+  return {
+    get current(): Value {
+      return store.get(source);
+    },
+  };
 }

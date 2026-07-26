@@ -51,7 +51,6 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       setSending(false);
       setCreating(false);
       setActiveTurnId(turnId);
-      activeTurnIdRef.current = turnId;
       setActivity({ tone: 'running', title: 'Working' });
       setShowDelayedGenericRunningActivity(true);
       setSelectedChat((prev) => {

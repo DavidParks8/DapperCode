@@ -11,6 +11,7 @@ import {
   selectedParentChatAtom,
   transcriptContinuationStateAtom,
 } from '../state/mainScreen/session';
+import { screenRefView } from '../state/mainScreen/registry';
 import { type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FileSystemListResponse } from '../api/types';
@@ -117,15 +118,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const workspaceBrowseRequestRef = useRef(0);
   const pendingAgentId = useAtomValue(pendingAgentIdAtom);
   const setPendingAgentId = useSetAtom(pendingAgentIdAtom);
-  const sending = useAtomValue(sendingAtom);
-  const creating = useAtomValue(creatingAtom);
-  const stoppingTurn = useAtomValue(stoppingTurnAtom);
-  const sendingRef = useRef(sending);
-  sendingRef.current = sending;
-  const creatingRef = useRef(creating);
-  creatingRef.current = creating;
-  const stoppingTurnRef = useRef(stoppingTurn);
-  stoppingTurnRef.current = stoppingTurn;
+  const sendingRef = screenRefView(store, sendingAtom);
+  const creatingRef = screenRefView(store, creatingAtom);
+  const stoppingTurnRef = screenRefView(store, stoppingTurnAtom);
   const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);

@@ -13,13 +13,15 @@ import {
   androidKeyboardInsetAtom,
   keyboardVisibleAtom
 } from '../state/mainScreen/composer';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useEffect, useRef } from 'react';
 import {
   chatModelPreferencesLoadedAtom,
   chatPlanSnapshotsLoadedAtom,
   runWatchdogNowAtom,
+  selectedChatIdAtom,
 } from '../state/mainScreen/session';
+import { screenRefView } from '../state/mainScreen/registry';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../agents';
 import type { BridgeUiSurface, Chat } from '../api/types';
@@ -53,11 +55,10 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     selectedChatId,
     setDraft,
   } = context;
-  const activeTurnId = useAtomValue(activeTurnIdAtom);
+  const store = useStore();
   const setError = useSetAtom(errorAtom);
   const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
   const modelOptionsByAgent = useAtomValue(modelOptionsByAgentAtom);
-  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
   const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);
 
@@ -103,23 +104,19 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     };
   }, []);
 
-  // Ref so the WS handler always reads the latest chat ID without
-  // needing to re-subscribe on every change.
-  const chatIdRef = useRef<string | null>(null);
-  chatIdRef.current = selectedChatId;
+  // Live views so callbacks always read the newest value without re-subscribing.
+  const chatIdRef = screenRefView(store, selectedChatIdAtom);
   const selectedChatRef = useRef<Chat | null>(selectedChat);
   selectedChatRef.current = selectedChat;
   const selectedChatIdRef = useRef<string | null>(selectedChatId);
   selectedChatIdRef.current = selectedChatId;
   const parentChatCacheRef = useRef<Record<string, Chat>>({});
-  const agentRootThreadIdRef = useRef<string | null>(agentRootThreadId);
-  agentRootThreadIdRef.current = agentRootThreadId;
+  const agentRootThreadIdRef = screenRefView(store, agentRootThreadIdAtom);
   const planPanelLastTurnByThreadRef = useRef<Record<string, string>>({});
   const planItemTurnIdByThreadRef = useRef<Record<string, string>>({});
   const autoEnabledPlanTurnIdByThreadRef = useRef<Record<string, string>>({});
   const dismissedPlanImplementationTurnIdByThreadRef = useRef<Record<string, string>>({});
-  const activeTurnIdRef = useRef<string | null>(null);
-  activeTurnIdRef.current = activeTurnId;
+  const activeTurnIdRef = screenRefView(store, activeTurnIdAtom);
   const stopRequestedRef = useRef(false);
   const stopSystemMessageLoggedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
