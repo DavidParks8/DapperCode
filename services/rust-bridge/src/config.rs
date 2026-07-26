@@ -19,6 +19,10 @@ pub(crate) struct BridgeConfig {
     pub(crate) connect_url: Option<String>,
     pub(crate) preview_connect_url: Option<String>,
     pub(crate) workdir: PathBuf,
+    /// Directory holding bridge-owned state (session index, push registry).
+    pub(crate) state_dir: PathBuf,
+    /// Directory holding mobile uploads.
+    pub(crate) attachments_dir: PathBuf,
     pub(crate) acp_manifest_path: PathBuf,
     pub(crate) acp_approved_executable_roots: Vec<PathBuf>,
     pub(crate) acp_initialize_timeout: Duration,
@@ -65,6 +69,14 @@ impl BridgeConfig {
             .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let workdir = resolve_bridge_workdir(configured_workdir)?;
 
+        // The desktop app points these at its central data directory so nothing app-owned lands in
+        // a repository. The development flow keeps working through the workdir-relative defaults.
+        let state_dir = parse_absolute_dir_env("BRIDGE_STATE_DIR", workdir.join(".dappercode"))?;
+        let attachments_dir = parse_absolute_dir_env(
+            "BRIDGE_ATTACHMENTS_DIR",
+            workdir.join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME),
+        )?;
+
         let acp_manifest_path = env::var("ACP_AGENT_MANIFEST")
             .map(PathBuf::from)
             .unwrap_or_else(|_| workdir.join(".dappercode/agents.json"));
@@ -105,6 +117,8 @@ impl BridgeConfig {
             connect_url,
             preview_connect_url,
             workdir,
+            state_dir,
+            attachments_dir,
             acp_manifest_path,
             acp_approved_executable_roots,
             acp_initialize_timeout,
@@ -251,6 +265,35 @@ pub(crate) fn constant_time_eq(left: &str, right: &str) -> bool {
 
 pub(crate) fn resolve_bridge_workdir(raw_workdir: PathBuf) -> Result<PathBuf, String> {
     PathPolicy::new(raw_workdir, false).map(|policy| policy.root().to_path_buf())
+}
+
+/// Resolves a directory environment variable, creating it when absent.
+///
+/// The value must be absolute so that a bridge started from any working directory reaches the same
+/// state, and so a relative path can never resolve into an unexpected part of the repository.
+fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, String> {
+    let configured = match env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
+        _ => default,
+    };
+    if !configured.is_absolute() {
+        return Err(format!(
+            "{name} must be an absolute path (got: {})",
+            configured.to_string_lossy()
+        ));
+    }
+    std::fs::create_dir_all(&configured).map_err(|error| {
+        format!(
+            "{name} could not be created ({}): {error}",
+            configured.to_string_lossy()
+        )
+    })?;
+    std::fs::canonicalize(&configured).map_err(|error| {
+        format!(
+            "{name} is invalid or inaccessible ({}): {error}",
+            configured.to_string_lossy()
+        )
+    })
 }
 
 pub(crate) fn parse_bool_env(name: &str) -> bool {
@@ -450,6 +493,128 @@ fn validate_no_auth_listener(host: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Scratch directory that cleans itself up, mirroring the helper the attachment tests use so
+    /// the bridge keeps its dependency-free test setup.
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!(
+                "dappercode-config-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock")
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path).expect("create test directory");
+            Self(path)
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Serializes the process-wide environment mutations these tests need.
+    struct DirEnvGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl DirEnvGuard {
+        fn set(name: &'static str, value: &std::path::Path) -> Self {
+            let previous = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, previous }
+        }
+
+        fn set_raw(name: &'static str, value: &str) -> Self {
+            let previous = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for DirEnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => env::set_var(self.name, value),
+                None => env::remove_var(self.name),
+            }
+        }
+    }
+
+    #[test]
+    fn state_and_attachment_directories_default_beside_the_workspace() {
+        let temp = TestDir::new();
+        let workdir = temp.path().canonicalize().expect("canonical workdir");
+
+        let state = parse_absolute_dir_env(
+            "BRIDGE_STATE_DIR_UNSET_FOR_TEST",
+            workdir.join(".dappercode"),
+        )
+        .expect("default state dir");
+        assert_eq!(state, workdir.join(".dappercode"));
+        assert!(state.is_dir(), "the default state directory is created");
+    }
+
+    #[test]
+    fn an_explicit_state_directory_overrides_the_default() {
+        let temp = TestDir::new();
+        let configured = temp.path().join("central/state");
+        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", &configured);
+
+        let resolved = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().join("ignored"))
+            .expect("explicit state dir");
+        assert_eq!(resolved, configured.canonicalize().expect("canonical"));
+        assert!(!temp.path().join("ignored").exists());
+    }
+
+    #[test]
+    fn a_blank_directory_variable_falls_back_to_the_default() {
+        let temp = TestDir::new();
+        let _guard = DirEnvGuard::set_raw("BRIDGE_STATE_DIR", "   ");
+
+        let resolved = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().join("fallback"))
+            .expect("fallback state dir");
+        assert_eq!(
+            resolved,
+            temp.path()
+                .join("fallback")
+                .canonicalize()
+                .expect("canonical")
+        );
+    }
+
+    #[test]
+    fn a_relative_directory_variable_is_rejected() {
+        let temp = TestDir::new();
+        let _guard = DirEnvGuard::set_raw("BRIDGE_STATE_DIR", "relative/state");
+
+        let error = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().to_path_buf())
+            .expect_err("relative paths must be rejected");
+        assert!(error.contains("must be an absolute path"), "{error}");
+    }
+
+    #[test]
+    fn a_directory_variable_that_cannot_be_created_is_reported() {
+        let temp = TestDir::new();
+        let blocking_file = temp.path().join("blocked");
+        std::fs::write(&blocking_file, b"file").expect("write blocking file");
+        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", &blocking_file.join("child"));
+
+        let error = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().to_path_buf())
+            .expect_err("a file cannot host a directory");
+        assert!(error.contains("could not be created"), "{error}");
+    }
+
     fn no_auth_config(host: &str) -> BridgeConfig {
         BridgeConfig {
             host: host.to_string(),
@@ -459,6 +624,8 @@ mod tests {
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp/workdir"),
+            state_dir: PathBuf::from("/tmp/workdir/.dappercode"),
+            attachments_dir: PathBuf::from("/tmp/workdir/.dappercode-attachments"),
             acp_manifest_path: PathBuf::from("/tmp/workdir/.dappercode/agents.json"),
             acp_approved_executable_roots: vec![PathBuf::from("/bin")],
             acp_initialize_timeout: Duration::from_secs(15),

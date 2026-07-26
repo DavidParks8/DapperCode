@@ -1,16 +1,22 @@
-use std::path::PathBuf;
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 mod config;
 mod platform_setup;
+mod secrets;
 mod setup;
+mod store;
 mod supervisor;
 
-use config::{validate_workspace, BridgeRuntimeConfig, RuntimePaths};
+use config::{validate_workspace, RuntimePaths};
 use platform_setup::NetworkMode;
-use setup::{discover_agent_executable, setup_workspace, SetupRequest};
+use secrets::SecretStore;
+use setup::{discover_agent_executable, setup_profile, SetupRequest};
+use store::{profile_id_for, AppPaths, Profile};
 use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor};
 
 #[derive(Serialize)]
@@ -34,8 +40,28 @@ struct OperatorSnapshot {
     recent_error_count: usize,
     managed_process: bool,
     workspace: PathBuf,
+    profile_id: String,
+    bridge_port: Option<u16>,
     pairing_payload: Option<String>,
     log_path: PathBuf,
+    config_path: PathBuf,
+    secret_backend: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopAllResult {
+    stopped: usize,
+    results: Vec<StopOutcome>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopOutcome {
+    profile_id: String,
+    workspace: PathBuf,
+    ok: bool,
+    detail: String,
 }
 
 fn main() {
@@ -69,32 +95,64 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let workspace = workspace_arg(&mut args)?;
+    let paths = AppPaths::discover()?;
+    let secrets = SecretStore::discover();
+
     match command.as_str() {
+        "list" => {
+            let owner_pid = owner_pid_arg(&mut args)?;
+            ensure_no_args(&args)?;
+            emit(list_profiles(&paths, &secrets, owner_pid)?, human)
+        }
+        "stop" if take_flag(&mut args, "--all") => {
+            let _ = workspace_arg(&mut args)?;
+            ensure_no_args(&args)?;
+            emit(stop_all(&paths, &secrets)?, human)
+        }
+        _ => {
+            let workspace = workspace_arg(&mut args)?;
+            run_workspace_command(&command, workspace, args, human, &paths, &secrets)
+        }
+    }
+}
+
+fn run_workspace_command(
+    command: &str,
+    workspace: PathBuf,
+    mut args: Vec<String>,
+    human: bool,
+    paths: &AppPaths,
+    secrets: &SecretStore,
+) -> Result<()> {
+    match command {
         "status" => {
             ensure_no_args(&args)?;
-            let supervisor = supervisor(workspace)?;
-            emit(operator_snapshot(&supervisor, supervisor.snapshot()), human)
+            match supervisor(workspace.clone(), paths, secrets, None)? {
+                Some(supervisor) => emit(
+                    operator_snapshot(&supervisor, supervisor.snapshot(), paths),
+                    human,
+                ),
+                None => emit(unconfigured_snapshot(&workspace, paths)?, human),
+            }
         }
-        "start" => {
+        "start" | "stop" | "restart" => {
+            let owner_pid = owner_pid_arg(&mut args)?;
             ensure_no_args(&args)?;
-            let supervisor = supervisor(workspace)?;
-            let snapshot = supervisor.start()?;
-            emit(operator_snapshot(&supervisor, snapshot), human)
+            let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, owner_pid)? else {
+                bail!("this workspace is not set up yet; run 'dappercode setup' first");
+            };
+            let snapshot = match command {
+                "start" => supervisor.start()?,
+                "stop" => supervisor.stop()?,
+                _ => supervisor.restart()?,
+            };
+            emit(operator_snapshot(&supervisor, snapshot, paths), human)
         }
-        "stop" => {
+        "setup" => run_setup(workspace, args, human, paths, secrets),
+        "forget" => {
             ensure_no_args(&args)?;
-            let supervisor = supervisor(workspace)?;
-            let snapshot = supervisor.stop()?;
-            emit(operator_snapshot(&supervisor, snapshot), human)
+            emit(forget_profile(workspace, paths, secrets)?, human)
         }
-        "restart" => {
-            ensure_no_args(&args)?;
-            let supervisor = supervisor(workspace)?;
-            let snapshot = supervisor.restart()?;
-            emit(operator_snapshot(&supervisor, snapshot), human)
-        }
-        "setup" => run_setup(workspace, args, human),
         "discover-agent" => {
             let agent_id = option(&mut args, "--agent-id").unwrap_or_else(|| "opencode".into());
             ensure_no_args(&args)?;
@@ -110,7 +168,13 @@ fn run() -> Result<()> {
     }
 }
 
-fn run_setup(workspace: PathBuf, mut args: Vec<String>, human: bool) -> Result<()> {
+fn run_setup(
+    workspace: PathBuf,
+    mut args: Vec<String>,
+    human: bool,
+    paths: &AppPaths,
+    secrets: &SecretStore,
+) -> Result<()> {
     let network_mode = option(&mut args, "--network").unwrap_or_else(|| "tailscale".into());
     let mode = match network_mode.as_str() {
         "local" => NetworkMode::Local,
@@ -126,8 +190,7 @@ fn run_setup(workspace: PathBuf, mut args: Vec<String>, human: bool) -> Result<(
                 .parse::<u16>()
                 .context("--port must be a valid TCP port")
         })
-        .transpose()?
-        .unwrap_or(8787);
+        .transpose()?;
     let agent_id = option(&mut args, "--agent-id").unwrap_or_else(|| "opencode".into());
     let display_name = option(&mut args, "--display-name").unwrap_or_else(|| agent_id.clone());
     let executable = option(&mut args, "--agent-executable")
@@ -139,30 +202,194 @@ fn run_setup(workspace: PathBuf, mut args: Vec<String>, human: bool) -> Result<(
         .unwrap_or_else(|| default_agent_args(&agent_id));
     ensure_no_args(&args)?;
 
-    let result = setup_workspace(SetupRequest {
-        workspace,
-        network_mode,
-        bridge_host: host,
-        bridge_port,
-        agent_id,
-        display_name,
-        executable,
-        argv: agent_args,
-    })?;
+    let result = setup_profile(
+        SetupRequest {
+            workspace,
+            network_mode,
+            bridge_host: host,
+            bridge_port,
+            agent_id,
+            display_name,
+            executable,
+            argv: agent_args,
+        },
+        paths,
+        secrets,
+    )?;
     emit(result, human)
 }
 
-fn supervisor(workspace: PathBuf) -> Result<BridgeSupervisor> {
-    Ok(BridgeSupervisor::new(
-        validate_workspace(&workspace)?,
-        RuntimePaths::discover()?,
-    ))
+/// Removes a workspace's profile entirely: its stored token, its profile directory, and its entry
+/// in `config.json`. Refuses while that profile's bridge is still running.
+fn forget_profile(
+    workspace: PathBuf,
+    paths: &AppPaths,
+    secrets: &SecretStore,
+) -> Result<serde_json::Value> {
+    let workspace = validate_workspace(&workspace)?;
+    let profile_id = profile_id_for(&workspace);
+    if let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, None)? {
+        if supervisor.owns_running_process() {
+            bail!("stop this workspace's bridge before forgetting it");
+        }
+    }
+
+    let existed = paths.update_config(|config| Ok(config.remove(&profile_id)))?;
+    secrets.delete(paths, &profile_id)?;
+    let profile_dir = paths.profile_dir(&profile_id);
+    if profile_dir.exists() {
+        std::fs::remove_dir_all(&profile_dir)
+            .with_context(|| format!("failed to remove {}", profile_dir.display()))?;
+    }
+
+    Ok(serde_json::json!({
+        "workspace": workspace,
+        "profileId": profile_id,
+        "removed": existed,
+    }))
 }
 
-fn operator_snapshot(supervisor: &BridgeSupervisor, snapshot: BridgeSnapshot) -> OperatorSnapshot {
-    let pairing_payload = BridgeRuntimeConfig::load(supervisor.workspace())
-        .ok()
-        .and_then(|config| config.pairing_payload().ok());
+/// Every configured profile, so the desktop app can show all parallel bridges at once.
+fn list_profiles(
+    paths: &AppPaths,
+    secrets: &SecretStore,
+    owner_pid: Option<u32>,
+) -> Result<Vec<OperatorSnapshot>> {
+    let runtime = RuntimePaths::discover().ok();
+    let mut snapshots = Vec::new();
+    for profile in paths.load_config()?.profiles {
+        let Some(runtime) = runtime.clone() else {
+            snapshots.push(profile_snapshot(
+                &profile,
+                BridgeSnapshot::error("DapperCode runtime resources were not found."),
+                paths,
+                None,
+                None,
+            ));
+            continue;
+        };
+        let supervisor = BridgeSupervisor::new(
+            profile.clone(),
+            paths.clone(),
+            secrets.clone(),
+            runtime,
+            owner_pid,
+        );
+        let snapshot = supervisor.snapshot();
+        snapshots.push(operator_snapshot(&supervisor, snapshot, paths));
+    }
+    Ok(snapshots)
+}
+
+/// Stops every bridge this app owns. Used when the desktop app quits, so parallel bridges from
+/// different worktrees are all torn down. One failing profile does not abort the rest.
+fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
+    let runtime = RuntimePaths::discover()?;
+    let mut results = Vec::new();
+    let mut stopped = 0;
+    for profile in paths.load_config()?.profiles {
+        let supervisor = BridgeSupervisor::new(
+            profile.clone(),
+            paths.clone(),
+            secrets.clone(),
+            runtime.clone(),
+            None,
+        );
+        if !supervisor.owns_running_process() {
+            continue;
+        }
+        match supervisor.stop() {
+            Ok(snapshot) => {
+                stopped += 1;
+                results.push(StopOutcome {
+                    profile_id: profile.profile_id,
+                    workspace: profile.workspace,
+                    ok: true,
+                    detail: snapshot.headline,
+                });
+            }
+            Err(error) => results.push(StopOutcome {
+                profile_id: profile.profile_id,
+                workspace: profile.workspace,
+                ok: false,
+                detail: format!("{error:#}"),
+            }),
+        }
+    }
+    Ok(StopAllResult { stopped, results })
+}
+
+fn supervisor(
+    workspace: PathBuf,
+    paths: &AppPaths,
+    secrets: &SecretStore,
+    owner_pid: Option<u32>,
+) -> Result<Option<BridgeSupervisor>> {
+    let workspace = validate_workspace(&workspace)?;
+    let profile_id = profile_id_for(&workspace);
+    let Some(profile) = paths.load_config()?.find(&profile_id).cloned() else {
+        return Ok(None);
+    };
+    Ok(Some(BridgeSupervisor::new(
+        profile,
+        paths.clone(),
+        secrets.clone(),
+        RuntimePaths::discover()?,
+        owner_pid,
+    )))
+}
+
+fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorSnapshot> {
+    let workspace = validate_workspace(workspace)?;
+    let profile_id = profile_id_for(&workspace);
+    let snapshot = BridgeSnapshot::needs_setup(&workspace);
+    Ok(OperatorSnapshot {
+        state: state_name(&snapshot.state).to_string(),
+        headline: snapshot.headline,
+        detail: snapshot.detail,
+        bridge_url: None,
+        uptime_sec: None,
+        connected_clients: 0,
+        ready_agents: 0,
+        total_agents: 0,
+        recent_error_count: 0,
+        managed_process: false,
+        workspace,
+        profile_id,
+        bridge_port: None,
+        pairing_payload: None,
+        log_path: PathBuf::new(),
+        config_path: paths.config_path(),
+        secret_backend: None,
+    })
+}
+
+fn operator_snapshot(
+    supervisor: &BridgeSupervisor,
+    snapshot: BridgeSnapshot,
+    paths: &AppPaths,
+) -> OperatorSnapshot {
+    let runtime_config = supervisor.runtime_config().ok();
+    profile_snapshot(
+        supervisor.profile(),
+        snapshot,
+        paths,
+        runtime_config
+            .as_ref()
+            .and_then(|config| config.pairing_payload().ok()),
+        runtime_config
+            .as_ref()
+            .map(|config| config.secret_backend.as_str().to_string()),
+    )
+}
+
+fn profile_snapshot(
+    profile: &Profile,
+    snapshot: BridgeSnapshot,
+    paths: &AppPaths,
+    pairing_payload: Option<String>,
+    secret_backend: Option<String>,
+) -> OperatorSnapshot {
     OperatorSnapshot {
         state: state_name(&snapshot.state).to_string(),
         headline: snapshot.headline,
@@ -174,9 +401,13 @@ fn operator_snapshot(supervisor: &BridgeSupervisor, snapshot: BridgeSnapshot) ->
         total_agents: snapshot.total_agents,
         recent_error_count: snapshot.recent_error_count,
         managed_process: snapshot.managed_process,
-        workspace: supervisor.workspace().to_path_buf(),
+        workspace: profile.workspace.clone(),
+        profile_id: profile.profile_id.clone(),
+        bridge_port: Some(profile.bridge_port),
         pairing_payload,
-        log_path: supervisor.log_path(),
+        log_path: paths.log_path(&profile.profile_id),
+        config_path: paths.config_path(),
+        secret_backend,
     }
 }
 
@@ -213,6 +444,20 @@ fn workspace_arg(args: &mut Vec<String>) -> Result<PathBuf> {
         .or_else(|| std::env::var_os("DAPPERCODE_WORKSPACE_ROOT").map(PathBuf::from))
         .unwrap_or(std::env::current_dir()?);
     Ok(workspace)
+}
+
+fn owner_pid_arg(args: &mut Vec<String>) -> Result<Option<u32>> {
+    option(args, "--owner-pid")
+        .map(|value| {
+            let pid = value
+                .parse::<u32>()
+                .context("--owner-pid must be a process ID")?;
+            if pid == 0 {
+                bail!("--owner-pid must be a process ID");
+            }
+            Ok(pid)
+        })
+        .transpose()
 }
 
 fn option(args: &mut Vec<String>, name: &str) -> Option<String> {
@@ -261,17 +506,22 @@ fn print_help() {
 Usage: dappercode <command> [--workspace PATH] [--human]\n\n\
 Commands:\n\
   status\n\
-  start\n\
-  stop\n\
-  restart\n\
+  list [--owner-pid PID]\n\
+  start [--owner-pid PID]\n\
+  stop [--all]\n\
+  restart [--owner-pid PID]\n\
   setup --host HOST [--network local|tailscale] [--port 8787]\n\
         [--agent-id opencode] [--agent-executable PATH] [--agent-args 'acp']\n\
+  forget\n\
   discover-agent [--agent-id opencode]\n\
-  version\n"
+  version\n\n\
+Configuration lives in the DapperCode data directory, never in your repositories.\n\
+Bridge ports are allocated per workspace so several worktrees can run at once.\n"
     );
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -284,5 +534,28 @@ mod tests {
         );
         assert_eq!(args, vec!["tail"]);
         assert_eq!(default_agent_args("opencode"), vec!["acp"]);
+    }
+
+    #[test]
+    fn parses_and_validates_the_owner_pid() {
+        let mut args = vec!["--owner-pid".into(), "4321".into()];
+        assert_eq!(owner_pid_arg(&mut args).unwrap(), Some(4321));
+        assert!(args.is_empty());
+
+        assert_eq!(owner_pid_arg(&mut Vec::new()).unwrap(), None);
+        assert!(owner_pid_arg(&mut vec!["--owner-pid".into(), "0".into()]).is_err());
+        assert!(owner_pid_arg(&mut vec!["--owner-pid".into(), "nope".into()]).is_err());
+    }
+
+    #[test]
+    fn recognizes_the_stop_all_flag_without_consuming_other_arguments() {
+        let mut args = vec!["--all".into(), "--workspace".into(), "/tmp/project".into()];
+        assert!(take_flag(&mut args, "--all"));
+        assert_eq!(
+            option(&mut args, "--workspace").as_deref(),
+            Some("/tmp/project")
+        );
+        assert!(args.is_empty());
+        assert!(!take_flag(&mut Vec::new(), "--all"));
     }
 }

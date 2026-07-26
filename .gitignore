@@ -80,6 +80,8 @@ coverage/
 *.log
 *.pid
 *.seed
+# The desktop app no longer writes these; they remain ignored for the `npm run bridge` development
+# flow and for checkouts upgraded from an older release.
 .dappercode/
 .dappercode-push-registry.json
 .claude/

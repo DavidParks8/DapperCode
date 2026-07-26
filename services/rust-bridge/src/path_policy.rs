@@ -18,9 +18,17 @@ pub(crate) enum PathKind {
 #[derive(Debug, Clone)]
 pub(crate) struct PathPolicy {
     root: PathBuf,
+    /// Second allowed root holding mobile uploads.
+    ///
+    /// Attachments live in the central DapperCode data directory so that nothing app-owned is
+    /// written into a user's repository, but agents and the mobile client still need to read them
+    /// back by path. Only this directory is granted the extra access.
+    attachments_root: PathBuf,
     allow_outside_root: bool,
     #[cfg(unix)]
     root_fd: Arc<OwnedFd>,
+    #[cfg(unix)]
+    attachments_fd: Arc<OwnedFd>,
 }
 
 #[derive(Debug)]
@@ -96,6 +104,14 @@ impl SecureDirectory {
 
 impl PathPolicy {
     pub(crate) fn new(root: PathBuf, allow_outside_root: bool) -> Result<Self, String> {
+        Self::with_attachments_root(root, allow_outside_root, None)
+    }
+
+    pub(crate) fn with_attachments_root(
+        root: PathBuf,
+        allow_outside_root: bool,
+        attachments_root: Option<PathBuf>,
+    ) -> Result<Self, String> {
         if !root.is_absolute() {
             return Err(format!(
                 "BRIDGE_WORKDIR must be an absolute path (got: {})",
@@ -114,6 +130,21 @@ impl PathPolicy {
                 root.to_string_lossy()
             ));
         }
+        let attachments_root = attachments_root
+            .unwrap_or_else(|| root.join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME));
+        if !attachments_root.is_absolute() {
+            return Err(format!(
+                "BRIDGE_ATTACHMENTS_DIR must be an absolute path (got: {})",
+                attachments_root.to_string_lossy()
+            ));
+        }
+        create_private_directory(&attachments_root)?;
+        let attachments_root = std::fs::canonicalize(&attachments_root).map_err(|error| {
+            format!(
+                "BRIDGE_ATTACHMENTS_DIR is invalid or inaccessible ({}): {error}",
+                attachments_root.to_string_lossy()
+            )
+        })?;
         #[cfg(unix)]
         let root_fd = unix_fs::open(
             &root,
@@ -121,16 +152,31 @@ impl PathPolicy {
             Mode::empty(),
         )
         .map_err(|error| format!("failed to retain BRIDGE_WORKDIR descriptor: {error}"))?;
+        #[cfg(unix)]
+        let attachments_fd = unix_fs::open(
+            &attachments_root,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|error| format!("failed to retain BRIDGE_ATTACHMENTS_DIR descriptor: {error}"))?;
         Ok(Self {
             root,
+            attachments_root,
             allow_outside_root,
             #[cfg(unix)]
             root_fd: Arc::new(root_fd),
+            #[cfg(unix)]
+            attachments_fd: Arc::new(attachments_fd),
         })
     }
 
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attachments_root(&self) -> &Path {
+        &self.attachments_root
     }
 
     pub(crate) fn resolve_cwd(&self, raw: Option<&str>) -> Result<PathBuf, BridgeError> {
@@ -263,9 +309,9 @@ impl PathPolicy {
         raw: &str,
         before_final_open: impl FnOnce(),
     ) -> Result<(std::fs::File, PathBuf), BridgeError> {
-        let relative = self.secure_relative_path(raw)?;
+        let (base_root, base_fd, relative) = self.secure_relative_path(raw)?;
         let mut components = relative.components().peekable();
-        let mut directory = rustix::io::dup(&*self.root_fd).map_err(|error| {
+        let mut directory = rustix::io::dup(base_fd).map_err(|error| {
             BridgeError::server(&format!("failed to duplicate root descriptor: {error}"))
         })?;
         let mut final_name = None;
@@ -321,7 +367,7 @@ impl PathPolicy {
                 ));
             }
         }
-        Ok((file, self.root.join(relative)))
+        Ok((file, base_root.join(relative)))
     }
 
     #[cfg(not(unix))]
@@ -334,13 +380,23 @@ impl PathPolicy {
         ))
     }
 
+    /// Creates (or opens) a directory beneath the attachments root.
     #[cfg(unix)]
-    pub(crate) fn secure_root_owned_directory(
+    pub(crate) fn secure_attachments_directory(
         &self,
         relative: &Path,
     ) -> Result<SecureDirectory, BridgeError> {
+        self.secure_directory_beneath(&self.attachments_fd, relative)
+    }
+
+    #[cfg(unix)]
+    fn secure_directory_beneath(
+        &self,
+        base_fd: &OwnedFd,
+        relative: &Path,
+    ) -> Result<SecureDirectory, BridgeError> {
         validate_relative_components(relative)?;
-        let mut directory = rustix::io::dup(&*self.root_fd).map_err(|error| {
+        let mut directory = rustix::io::dup(base_fd).map_err(|error| {
             BridgeError::server(&format!("failed to duplicate root descriptor: {error}"))
         })?;
         for component in relative.components() {
@@ -375,18 +431,18 @@ impl PathPolicy {
     }
 
     #[cfg(unix)]
-    pub(crate) fn rename_root_owned_file(
+    pub(crate) fn rename_attachment_file(
         &self,
         source: &SecureDirectory,
         source_name: &str,
         target_relative: &Path,
         target_name: &str,
     ) -> Result<PathBuf, BridgeError> {
-        self.rename_root_owned_file_with(source, source_name, target_relative, target_name, || {})
+        self.rename_attachment_file_with(source, source_name, target_relative, target_name, || {})
     }
 
     #[cfg(unix)]
-    fn rename_root_owned_file_with(
+    fn rename_attachment_file_with(
         &self,
         source: &SecureDirectory,
         source_name: &str,
@@ -395,13 +451,16 @@ impl PathPolicy {
         before_target_open: impl FnOnce(),
     ) -> Result<PathBuf, BridgeError> {
         before_target_open();
-        let target = self.secure_root_owned_directory(target_relative)?;
+        let target = self.secure_attachments_directory(target_relative)?;
         source.rename_to(source_name, &target, target_name)?;
-        Ok(self.root.join(target_relative).join(target_name))
+        Ok(self
+            .attachments_root
+            .join(target_relative)
+            .join(target_name))
     }
 
     #[cfg(not(unix))]
-    pub(crate) fn secure_root_owned_directory(
+    pub(crate) fn secure_attachments_directory(
         &self,
         _relative: &Path,
     ) -> Result<SecureDirectory, BridgeError> {
@@ -411,7 +470,7 @@ impl PathPolicy {
     }
 
     #[cfg(not(unix))]
-    pub(crate) fn rename_root_owned_file(
+    pub(crate) fn rename_attachment_file(
         &self,
         _source: &SecureDirectory,
         _source_name: &str,
@@ -423,21 +482,38 @@ impl PathPolicy {
         ))
     }
 
-    fn secure_relative_path(&self, raw: &str) -> Result<PathBuf, BridgeError> {
+    /// Resolves a caller-supplied path to the allowed root that owns it.
+    ///
+    /// Absolute paths may name either the workspace root or the attachments root; relative paths are
+    /// always interpreted against the workspace root.
+    #[cfg(unix)]
+    fn secure_relative_path(
+        &self,
+        raw: &str,
+    ) -> Result<(&Path, &Arc<OwnedFd>, PathBuf), BridgeError> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err(BridgeError::invalid_params("path must not be empty"));
         }
         let requested = Path::new(trimmed);
-        let relative = if requested.is_absolute() {
-            requested
-                .strip_prefix(&self.root)
-                .map_err(|_| BridgeError::invalid_params("path must stay beneath BRIDGE_WORKDIR"))?
+        let (base_root, base_fd, relative) = if requested.is_absolute() {
+            if let Ok(relative) = requested.strip_prefix(&self.attachments_root) {
+                (
+                    self.attachments_root.as_path(),
+                    &self.attachments_fd,
+                    relative,
+                )
+            } else {
+                let relative = requested.strip_prefix(&self.root).map_err(|_| {
+                    BridgeError::invalid_params("path must stay beneath BRIDGE_WORKDIR")
+                })?;
+                (self.root.as_path(), &self.root_fd, relative)
+            }
         } else {
-            requested
+            (self.root.as_path(), &self.root_fd, requested)
         };
         validate_relative_components(relative)?;
-        Ok(relative.to_path_buf())
+        Ok((base_root, base_fd, relative.to_path_buf()))
     }
 
     pub(crate) fn parent_for_browsing(&self, path: &Path) -> Option<PathBuf> {
@@ -448,13 +524,46 @@ impl PathPolicy {
     }
 
     fn enforce_scope(&self, canonical: &Path, root_owned: bool) -> Result<(), BridgeError> {
-        if (root_owned || !self.allow_outside_root) && !canonical.starts_with(&self.root) {
-            return Err(BridgeError::invalid_params(
-                "path must stay within BRIDGE_WORKDIR",
-            ));
+        if !(root_owned || !self.allow_outside_root) {
+            return Ok(());
         }
-        Ok(())
+        if canonical.starts_with(&self.root) || canonical.starts_with(&self.attachments_root) {
+            return Ok(());
+        }
+        Err(BridgeError::invalid_params(
+            "path must stay within BRIDGE_WORKDIR",
+        ))
     }
+}
+
+fn create_private_directory(path: &Path) -> Result<(), String> {
+    // A symlink here would silently widen the second allowed root to wherever it points, so the
+    // attachments directory must be a real directory.
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!(
+            "BRIDGE_ATTACHMENTS_DIR must not be a symlink ({})",
+            path.to_string_lossy()
+        ));
+    }
+    std::fs::create_dir_all(path).map_err(|error| {
+        format!(
+            "BRIDGE_ATTACHMENTS_DIR could not be created ({}): {error}",
+            path.to_string_lossy()
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path)
+            .map_err(|error| format!("BRIDGE_ATTACHMENTS_DIR is inaccessible: {error}"))?
+            .permissions();
+        if permissions.mode() & 0o077 != 0 {
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(path, permissions)
+                .map_err(|error| format!("BRIDGE_ATTACHMENTS_DIR could not be secured: {error}"))?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_relative_components(path: &Path) -> Result<(), BridgeError> {
@@ -583,6 +692,11 @@ mod tests {
             .resolve_root_owned_directory(PathBuf::from("attachments/thread").as_path())
             .expect_err("reject root-owned symlink escape");
         assert_eq!(error.code, -32602);
+
+        let attachment_error = policy
+            .secure_attachments_directory(PathBuf::from("../escaped").as_path())
+            .expect_err("reject traversal out of the attachments root");
+        assert_eq!(attachment_error.code, -32602);
     }
 
     #[cfg(unix)]
@@ -621,10 +735,10 @@ mod tests {
         fs::create_dir(&outside).expect("create outside");
         let policy = PathPolicy::new(root.clone(), false).expect("create policy");
         let staging = policy
-            .secure_root_owned_directory(PathBuf::from("attachments/.tmp").as_path())
+            .secure_attachments_directory(PathBuf::from(".tmp").as_path())
             .expect("open staging directory");
         policy
-            .secure_root_owned_directory(PathBuf::from("attachments/thread").as_path())
+            .secure_attachments_directory(PathBuf::from("thread").as_path())
             .expect("open target directory");
         staging
             .create_file("upload.tmp")
@@ -633,16 +747,17 @@ mod tests {
             .expect("write staged file");
 
         let detached = outside.join("detached-thread");
+        let attachments_root = policy.attachments_root().to_path_buf();
         let error = policy
-            .rename_root_owned_file_with(
+            .rename_attachment_file_with(
                 &staging,
                 "upload.tmp",
-                PathBuf::from("attachments/thread").as_path(),
+                PathBuf::from("thread").as_path(),
                 "saved.txt",
                 || {
-                    fs::rename(root.join("attachments/thread"), &detached)
+                    fs::rename(attachments_root.join("thread"), &detached)
                         .expect("move target outside root");
-                    symlink(&outside, root.join("attachments/thread"))
+                    symlink(&outside, attachments_root.join("thread"))
                         .expect("swap target to symlink");
                 },
             )
@@ -651,6 +766,94 @@ mod tests {
         assert_eq!(error.code, -32602);
         assert!(!outside.join("saved.txt").exists());
         assert!(!detached.join("saved.txt").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_central_attachments_root_is_readable_but_only_that_directory() {
+        use std::io::Write;
+
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        let central = temp.0.join("central/attachments");
+        let outside = temp.0.join("outside");
+        fs::create_dir_all(&root).expect("create root");
+        fs::create_dir_all(&outside).expect("create outside");
+        fs::write(outside.join("secret.txt"), b"secret").expect("write outside file");
+
+        let policy = PathPolicy::with_attachments_root(root.clone(), false, Some(central.clone()))
+            .expect("create policy with a central attachments root");
+        let central = central.canonicalize().expect("canonical attachments root");
+        assert_eq!(policy.attachments_root(), central);
+        assert!(!central.starts_with(policy.root()));
+
+        // An upload lands in the central root and stays readable by absolute path.
+        let staging = policy
+            .secure_attachments_directory(&PathBuf::from(".tmp"))
+            .expect("open staging");
+        staging
+            .create_file("upload.tmp")
+            .expect("create staged file")
+            .write_all(b"payload")
+            .expect("write staged file");
+        let saved = policy
+            .rename_attachment_file(
+                &staging,
+                "upload.tmp",
+                &PathBuf::from("threads"),
+                "saved.txt",
+            )
+            .expect("finalize upload");
+        assert!(saved.starts_with(&central));
+
+        let (mut file, resolved) = policy
+            .open_regular_file_beneath(saved.to_str().expect("utf-8 path"))
+            .expect("read the attachment back");
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut file, &mut contents).expect("read attachment");
+        assert_eq!(contents, "payload");
+        assert_eq!(resolved, saved);
+
+        // Widening access to the attachments root must not widen it to anything else.
+        let escape = outside.join("secret.txt");
+        assert!(policy
+            .open_regular_file_beneath(escape.to_str().expect("utf-8 path"))
+            .is_err());
+        assert!(policy
+            .resolve_existing(escape.to_str().expect("utf-8 path"), PathKind::File)
+            .is_err());
+        assert!(policy.resolve_existing("", PathKind::Any).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_attachments_root_is_rejected() {
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        fs::create_dir_all(&root).expect("create root");
+
+        let error =
+            PathPolicy::with_attachments_root(root, false, Some(PathBuf::from("relative/uploads")))
+                .expect_err("relative attachments roots must be rejected");
+        assert!(error.contains("must be an absolute path"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_regular_or_hardlinked_attachment_is_refused() {
+        let temp = TestDir::new();
+        let root = temp.0.join("root");
+        fs::create_dir_all(root.join("images")).expect("create image directory");
+        fs::write(root.join("images/image.png"), b"image").expect("write image");
+        let policy = PathPolicy::new(root.clone(), false).expect("create policy");
+
+        // A directory is not a regular file.
+        assert!(policy.open_regular_file_beneath("images").is_err());
+        // Traversal cannot be laundered through an absolute workspace path.
+        let traversal = root.join("images/../../escape");
+        assert!(policy
+            .open_regular_file_beneath(traversal.to_str().expect("utf-8 path"))
+            .is_err());
     }
 
     #[cfg(unix)]
@@ -698,18 +901,18 @@ mod tests {
             .is_err());
 
         for invalid in [PathBuf::new(), PathBuf::from("../bad"), root.clone()] {
-            assert!(policy.secure_root_owned_directory(&invalid).is_err());
+            assert!(policy.secure_attachments_directory(&invalid).is_err());
         }
-        fs::write(root.join("blocked"), b"file").expect("write blocking file");
+        fs::write(policy.attachments_root().join("blocked"), b"file").expect("write blocking file");
         assert!(policy
-            .secure_root_owned_directory(PathBuf::from("blocked/child").as_path())
+            .secure_attachments_directory(PathBuf::from("blocked/child").as_path())
             .is_err());
 
         let staging = policy
-            .secure_root_owned_directory(PathBuf::from("storage/.tmp").as_path())
+            .secure_attachments_directory(PathBuf::from("storage/.tmp").as_path())
             .expect("create staging");
         policy
-            .secure_root_owned_directory(PathBuf::from("storage/.tmp").as_path())
+            .secure_attachments_directory(PathBuf::from("storage/.tmp").as_path())
             .expect("reopen existing staging");
         for name in ["", "../bad", "nested/bad"] {
             assert!(staging.create_file(name).is_err(), "accepted {name:?}");
@@ -722,7 +925,7 @@ mod tests {
         staging.remove_file("../ignored");
 
         let final_directory = policy
-            .secure_root_owned_directory(PathBuf::from("storage/final").as_path())
+            .secure_attachments_directory(PathBuf::from("storage/final").as_path())
             .expect("create final directory");
         assert!(staging
             .rename_to("../bad", &final_directory, "saved.txt")
@@ -732,7 +935,7 @@ mod tests {
             .is_err());
 
         let saved = policy
-            .rename_root_owned_file(
+            .rename_attachment_file(
                 &staging,
                 "upload.tmp",
                 PathBuf::from("storage/final").as_path(),
@@ -741,7 +944,7 @@ mod tests {
             .expect("finalize upload");
         assert_eq!(fs::read(saved).expect("read finalized upload"), b"payload");
         assert!(policy
-            .rename_root_owned_file(
+            .rename_attachment_file(
                 &staging,
                 "missing.tmp",
                 PathBuf::from("storage/final").as_path(),
@@ -751,7 +954,10 @@ mod tests {
         let cleanup = staging.create_file("cleanup.tmp").expect("create cleanup");
         drop(cleanup);
         staging.remove_file("cleanup.tmp");
-        assert!(!root.join("storage/.tmp/cleanup.tmp").exists());
+        assert!(!policy
+            .attachments_root()
+            .join("storage/.tmp/cleanup.tmp")
+            .exists());
     }
 
     #[test]

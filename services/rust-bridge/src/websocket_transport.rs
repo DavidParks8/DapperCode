@@ -1350,6 +1350,8 @@ mod tests {
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp"),
+            state_dir: PathBuf::from("/tmp/.dappercode"),
+            attachments_dir: PathBuf::from("/tmp/.dappercode-attachments"),
             acp_manifest_path: PathBuf::from("/tmp/agents.json"),
             acp_approved_executable_roots: vec![PathBuf::from("/tmp")],
             acp_initialize_timeout: Duration::from_secs(15),

@@ -262,7 +262,8 @@ jobs:
         with:
           workspaces: |
             services/rust-bridge -> target
-          key: llvm-cov-branch-nightly-2026-07-15-v1
+            apps/desktop -> target
+          key: llvm-cov-branch-nightly-2026-07-15-v2
           cache-bin: false
           cache-on-failure: true
 
@@ -277,4 +278,6 @@ jobs:
           path: |
             services/rust-bridge/target/llvm-cov/coverage.json
             services/rust-bridge/target/llvm-cov/html
+            apps/desktop/target/llvm-cov/coverage.json
+            apps/desktop/target/llvm-cov/html
           if-no-files-found: warn

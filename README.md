@@ -46,9 +46,14 @@ The equivalent guarantee on Windows will require a native WinUI shell so Mica an
 styling come from Windows itself.
 
 First-time setup registers an ACP executable already installed on the Mac, such as OpenCode. The
-Rust operator hashes that executable and atomically writes `.dappercode/agents.json` and
-`.env.secure`. It does not invoke npm, npx, Node.js, shell setup scripts, or floating package
-resolution.
+Rust operator hashes that executable and stores the resulting configuration centrally, in
+`~/Library/Application Support/dev.dappercode.desktop`, never inside your repositories. The bridge
+bearer token is kept in the macOS keychain. It does not invoke npm, npx, Node.js, shell setup
+scripts, or floating package resolution.
+
+Each workspace gets its own profile, port pair, and token, so bridges for several worktrees run at
+the same time. Quitting DapperCode stops all of them, and each bridge also exits on its own if the
+app is force-quit or crashes.
 
 ## Rust Operator
 

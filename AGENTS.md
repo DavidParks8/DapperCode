@@ -34,8 +34,14 @@ SwiftUI/AppKit controls. Windows will require a native WinUI shell for Mica/futu
 - `src/services/git.rs`: Git helpers
 - `src/services/terminal.rs`: constrained terminal execution
 
-The bridge reads `.env.secure` and `.dappercode/agents.json`. Rust setup registers and hashes an
-already-installed ACP executable; it does not install package-manager distributions.
+The bridge is configured purely by environment variables. The desktop operator builds that
+environment in memory from its central store and never writes a secret to a repository. Rust setup
+registers and hashes an already-installed ACP executable; it does not install package-manager
+distributions.
+
+- `apps/desktop/src/store.rs`: central data directory, per-workspace profiles, `config.json`
+- `apps/desktop/src/secrets.rs`: keychain-backed bridge tokens with a private-file fallback
+- `services/rust-bridge/src/owner_watchdog.rs`: bridge exits when the desktop app does
 
 ### Mobile
 
@@ -63,6 +69,7 @@ npm run typecheck
 npm run test
 npm run contract:check
 npm run coverage:rust
+npm run release:testflight -- --dry-run
 ```
 
 Do not automatically restart a user bridge during debugging unless explicitly requested.
@@ -72,7 +79,10 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 - Keep bridge contract changes mirrored in Rust, mobile types/client, fixtures, tests, and docs.
 - Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not npm scripts.
 - Never add an npm bridge package, JavaScript operator fallback, or bridge update RPC.
-- Preserve `.env.secure`, `.dappercode`, bridge logs, and user-installed agent state.
+- Never write app-owned configuration or state into a user repository; it belongs in the central data
+  directory (`DAPPERCODE_DATA_DIR` overrides it for tests).
+- Preserve the central data directory, keychain entries, bridge logs, and user-installed agent state.
+- Bridge ports are allocated per workspace, never hard-coded, so parallel worktrees keep working.
 - Cross-component mobile state lives in `apps/mobile/src/state` as jotai atoms; keep state used by a
   single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.

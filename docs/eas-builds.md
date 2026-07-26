@@ -70,7 +70,34 @@ eas build:list --limit 10
 eas build:view <BUILD_ID>
 ```
 
-## Submit To Stores
+## Release To TestFlight
+
+Use the wrapper rather than remembering flags. It runs preflight checks, builds, and submits in one
+step, from the repository root:
+
+```bash
+npm run release:testflight
+```
+
+Preflight refuses a dirty working tree, because EAS archives the *local* git state: releasing with
+uncommitted changes ships work that no commit records. It also verifies the requested profile
+exists, that `submit.<profile>.ios.ascAppId` is configured, and that you are signed in to an EAS
+account with access to `davidparks8s-team`.
+
+Options:
+
+```bash
+npm run release:testflight -- --dry-run                      # preflight only, print the command
+npm run release:testflight -- --no-submit                    # build without submitting
+npm run release:testflight -- --no-wait                      # queue and return immediately
+npm run release:testflight -- --platform android --profile preview
+npm run release:testflight -- --allow-dirty                  # opt out of the clean-tree check
+```
+
+The script lives at `scripts/release-testflight.mts` and runs through Node's built-in TypeScript
+support, so there is no build step.
+
+## Submit To Stores Manually
 
 ```bash
 eas submit --platform ios --latest --profile production
