@@ -14,7 +14,7 @@ use crate::{
     BridgeError,
 };
 
-const PUSH_REGISTRY_FILE_NAME: &str = ".dappercode-push-registry.json";
+const PUSH_REGISTRY_FILE_NAME: &str = "push-registry.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

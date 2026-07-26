@@ -61,6 +61,7 @@ mod attachments;
 mod config;
 mod health;
 mod observability;
+mod owner_watchdog;
 mod path_policy;
 mod preview;
 mod protocol_constants;
@@ -139,6 +140,21 @@ async fn main() {
         }
     };
 
+    let owner_pid = match owner_watchdog::owner_pid_from_env() {
+        Ok(owner_pid) => owner_pid,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(owner_pid) = owner_pid {
+        if !owner_watchdog::process_is_alive(owner_pid) {
+            eprintln!("owning process {owner_pid} is not running; refusing to start");
+            std::process::exit(1);
+        }
+        eprintln!("bridge will exit when process {owner_pid} does");
+    }
+
     if !config.auth_enabled && config.allow_insecure_no_auth {
         eprintln!(
             "bridge auth is disabled by BRIDGE_ALLOW_INSECURE_NO_AUTH=true (local development only)"
@@ -165,8 +181,12 @@ async fn main() {
             }
         };
     let path_policy = Arc::new(
-        PathPolicy::new(config.workdir.clone(), config.allow_outside_root_cwd)
-            .expect("validated bridge path policy"),
+        PathPolicy::with_attachments_root(
+            config.workdir.clone(),
+            config.allow_outside_root_cwd,
+            Some(config.attachments_dir.clone()),
+        )
+        .expect("validated bridge path policy"),
     );
 
     let terminal = Arc::new(TerminalService::new(
@@ -188,7 +208,7 @@ async fn main() {
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "DapperCode".to_string());
-    let push = PushService::load(&config.workdir, project_label, metrics.clone()).await;
+    let push = PushService::load(&config.state_dir, project_label, metrics.clone()).await;
     push.spawn_event_loop_with_queue(&hub, backend.clone(), Some(queue.clone()));
 
     let state = Arc::new(AppState {
@@ -229,6 +249,8 @@ async fn main() {
     };
 
     println!("rust-bridge listening on {bind_addr}");
+    println!("bridge state directory: {}", config.state_dir.display());
+    println!("attachment directory: {}", config.attachments_dir.display());
     if preview_listener.is_some() {
         println!("browser preview listening on {preview_bind_addr}");
     }
@@ -262,7 +284,10 @@ async fn main() {
     let shutdown_signal_tx = shutdown_tx.clone();
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            let signal = wait_for_shutdown_signal().await;
+            let signal = tokio::select! {
+                signal = wait_for_shutdown_signal() => signal,
+                () = owner_watchdog::wait_for_owner_exit(owner_pid) => "owner exit",
+            };
             eprintln!("shutdown signal received ({signal}), terminating managed backends");
             let _ = shutdown_signal_tx.send(true);
             shutdown_backend.shutdown().await;

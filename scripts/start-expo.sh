@@ -9,6 +9,13 @@ fi
 
 MODE="${1:-mobile}"
 SECURE_ENV_FILE="$ROOT_DIR/.env.secure"
+if [[ -n "${DAPPERCODE_DATA_DIR:-}" ]]; then
+  CENTRAL_CONFIG_FILE="$DAPPERCODE_DATA_DIR/config.json"
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  CENTRAL_CONFIG_FILE="$HOME/Library/Application Support/dev.dappercode.desktop/config.json"
+else
+  CENTRAL_CONFIG_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/dappercode/config.json"
+fi
 MOBILE_WORKSPACE="apps/mobile"
 AUTO_REPAIR="${EXPO_AUTO_REPAIR:-true}"
 CLEAR_CACHE="${EXPO_CLEAR_CACHE:-false}"
@@ -53,8 +60,39 @@ extract_env_value() {
   awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=")+1); exit }' "$file"
 }
 
+# Reads BRIDGE_HOST from the central DapperCode configuration, preferring the profile for this
+# repository and otherwise falling back to the most recently updated one.
+extract_central_bridge_host() {
+  local config_file="$1"
+
+  node -e '
+    const { readFileSync } = require("node:fs");
+    try {
+      const config = JSON.parse(readFileSync(process.argv[1], "utf8"));
+      const profiles = Array.isArray(config.profiles) ? config.profiles : [];
+      if (profiles.length === 0) process.exit(0);
+      const workspace = process.argv[2];
+      const match = profiles.find((profile) => profile.workspace === workspace);
+      const chosen = match ?? [...profiles].sort(
+        (a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""))
+      )[0];
+      if (chosen?.bridgeHost) process.stdout.write(String(chosen.bridgeHost));
+    } catch {
+      // A missing or malformed configuration falls through to the other host sources.
+    }
+  ' "$config_file" "$ROOT_DIR" 2>/dev/null
+}
+
 resolve_expo_host() {
   local host=""
+
+  if [[ -f "$CENTRAL_CONFIG_FILE" ]] && command -v node >/dev/null 2>&1; then
+    host="$(extract_central_bridge_host "$CENTRAL_CONFIG_FILE" | tr -d '"'"'[:space:]'"'"')"
+    if [[ -n "$host" ]]; then
+      printf '%s' "$host"
+      return 0
+    fi
+  fi
 
   if [[ -f "$SECURE_ENV_FILE" ]]; then
     host="$(extract_env_value "$SECURE_ENV_FILE" "BRIDGE_HOST" | tr -d '[:space:]')"

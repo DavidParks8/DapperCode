@@ -14,7 +14,7 @@ private struct OperatorFailure: Decodable {
     let error: String
 }
 
-private struct BridgeSnapshot: Decodable {
+private struct BridgeSnapshot: Decodable, Identifiable {
     let state: String
     let headline: String
     let detail: String
@@ -26,8 +26,23 @@ private struct BridgeSnapshot: Decodable {
     let recentErrorCount: Int
     let managedProcess: Bool
     let workspace: String
+    let profileId: String
+    let bridgePort: UInt16?
     let pairingPayload: String?
     let logPath: String
+    let configPath: String
+    let secretBackend: String?
+
+    var id: String { profileId }
+
+    var workspaceName: String {
+        let name = (workspace as NSString).lastPathComponent
+        return name.isEmpty ? workspace : name
+    }
+
+    var isRunning: Bool {
+        ["running", "degraded", "unhealthy", "inaccessible"].contains(state)
+    }
 
     static let loading = BridgeSnapshot(
         state: "loading",
@@ -41,17 +56,30 @@ private struct BridgeSnapshot: Decodable {
         recentErrorCount: 0,
         managedProcess: false,
         workspace: "",
+        profileId: "",
+        bridgePort: nil,
         pairingPayload: nil,
-        logPath: ""
+        logPath: "",
+        configPath: "",
+        secretBackend: nil
     )
 }
 
 private struct SetupResult: Decodable {
     let workspace: String
+    let profileId: String
     let bridgeUrl: String
+    let bridgePort: UInt16
+    let previewPort: UInt16
     let agentId: String
     let agentVersion: String
     let executable: String
+    let configPath: String
+    let secretBackend: String
+}
+
+private struct StopAllResult: Decodable {
+    let stopped: Int
 }
 
 private enum NetworkMode: String, CaseIterable, Identifiable {
@@ -137,11 +165,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let workspace = UserDefaults.standard.string(forKey: "workspace")
-            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        // Every parallel bridge belongs to this app, so quitting stops all of them.
         let process = Process()
         process.executableURL = operatorURL
-        process.arguments = ["stop", "--workspace", workspace]
+        process.arguments = ["stop", "--all"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
@@ -163,11 +190,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 private final class BridgeModel: ObservableObject {
     @Published var snapshot = BridgeSnapshot.loading
+    @Published var bridges: [BridgeSnapshot] = []
     @Published var isBusy = false
     @Published var errorMessage: String?
     @Published var networkMode = NetworkMode.tailscale
     @Published var host = ""
-    @Published var bridgePort = "8787"
+    @Published var bridgePort = ""
     @Published var agentId = "opencode"
     @Published var agentDisplayName = "OpenCode"
     @Published var agentExecutable = ""
@@ -189,8 +217,18 @@ private final class BridgeModel: ObservableObject {
         snapshot.state != "needsSetup" && snapshot.state != "error" || snapshot.managedProcess
     }
 
-    var isRunning: Bool {
-        ["running", "degraded", "unhealthy", "inaccessible"].contains(snapshot.state)
+    var isRunning: Bool { snapshot.isRunning }
+
+    var runningBridgeCount: Int {
+        bridges.filter(\.isRunning).count
+    }
+
+    var secretBackendLabel: String {
+        switch snapshot.secretBackend {
+        case "keychain": return "Keychain"
+        case "file": return "File — keychain unavailable"
+        default: return "Not stored yet"
+        }
     }
 
     var primaryTitle: String { isRunning || snapshot.managedProcess ? "Stop Bridge" : "Start Bridge" }
@@ -206,8 +244,39 @@ private final class BridgeModel: ObservableObject {
     func refresh() async {
         do {
             snapshot = try await invoke("status", as: BridgeSnapshot.self)
+            bridges = try await invoke(["list"], as: [BridgeSnapshot].self, includeWorkspace: false)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func perform(_ command: String, on bridge: BridgeSnapshot) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            _ = try await invoke(
+                [command, "--workspace", bridge.workspace],
+                as: BridgeSnapshot.self,
+                includeWorkspace: false
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        await refresh()
+    }
+
+    func revealConfig() {
+        guard !snapshot.configPath.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: snapshot.configPath)])
+    }
+
+    func openLogs(for bridge: BridgeSnapshot) {
+        guard !bridge.logPath.isEmpty else { return }
+        let url = URL(fileURLWithPath: bridge.logPath)
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
         }
     }
 
@@ -224,7 +293,7 @@ private final class BridgeModel: ObservableObject {
             errorMessage = "Choose an installed ACP agent executable."
             return
         }
-        guard UInt16(bridgePort) != nil else {
+        guard bridgePort.isEmpty || UInt16(bridgePort) != nil else {
             errorMessage = "Bridge port must be a valid TCP port."
             return
         }
@@ -235,12 +304,16 @@ private final class BridgeModel: ObservableObject {
             var arguments = [
                 "setup",
                 "--network", networkMode.rawValue,
-                "--port", bridgePort,
                 "--agent-id", agentId,
                 "--display-name", agentDisplayName,
                 "--agent-executable", agentExecutable,
                 "--agent-args", agentArguments,
             ]
+            // Without an explicit port the operator allocates a free pair, so several worktrees can
+            // run their bridges at the same time.
+            if !bridgePort.isEmpty {
+                arguments += ["--port", bridgePort]
+            }
             if !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 arguments += ["--host", host]
             }
@@ -292,15 +365,7 @@ private final class BridgeModel: ObservableObject {
         copy(value)
     }
 
-    func openLogs() {
-        guard !snapshot.logPath.isEmpty else { return }
-        let url = URL(fileURLWithPath: snapshot.logPath)
-        if FileManager.default.fileExists(atPath: url.path) {
-            NSWorkspace.shared.open(url)
-        } else {
-            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
-        }
-    }
+    func openLogs() { openLogs(for: snapshot) }
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
@@ -351,8 +416,17 @@ private final class BridgeModel: ObservableObject {
         try await invoke([command], as: type)
     }
 
-    private func invoke<Value: Decodable>(_ arguments: [String], as type: Value.Type) async throws -> Value {
+    private func invoke<Value: Decodable>(
+        _ arguments: [String],
+        as type: Value.Type,
+        includeWorkspace: Bool = true
+    ) async throws -> Value {
         let workspace = workspace
+        // Bridges exit on their own when this process does, even after a force quit.
+        let ownerArguments = Self.ownsBridgeLifetime(arguments)
+            ? ["--owner-pid", String(ProcessInfo.processInfo.processIdentifier)]
+            : []
+        let workspaceArguments = includeWorkspace ? ["--workspace", workspace] : []
         return try await Task.detached(priority: .userInitiated) {
             guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
                   FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
@@ -361,7 +435,7 @@ private final class BridgeModel: ObservableObject {
 
             let process = Process()
             process.executableURL = operatorURL
-            process.arguments = arguments + ["--workspace", workspace]
+            process.arguments = arguments + ownerArguments + workspaceArguments
             let stdout = Pipe()
             let stderr = Pipe()
             process.standardOutput = stdout
@@ -384,6 +458,11 @@ private final class BridgeModel: ObservableObject {
             }
             return envelope.result
         }.value
+    }
+
+    private static func ownsBridgeLifetime(_ arguments: [String]) -> Bool {
+        guard let command = arguments.first else { return false }
+        return ["start", "restart", "list"].contains(command)
     }
 
     private func copy(_ value: String) {
@@ -452,6 +531,18 @@ private struct DashboardView: View {
                 }
             }
 
+            if model.bridges.count > 1 {
+                Section {
+                    ForEach(model.bridges) { bridge in
+                        BridgeRow(model: model, bridge: bridge)
+                    }
+                } header: {
+                    Text("Bridges")
+                } footer: {
+                    Text("Each workspace gets its own port and token, so worktrees can run at the same time. Quitting DapperCode stops every bridge.")
+                }
+            }
+
             Section {
                 HStack {
                     Button("Open Logs", systemImage: "doc.text") { model.openLogs() }
@@ -465,9 +556,45 @@ private struct DashboardView: View {
                     }
                     .disabled(model.isBusy || (!model.snapshot.managedProcess && model.snapshot.state == "needsSetup"))
                 }
+            } footer: {
+                HStack {
+                    Text("Settings: \(model.secretBackendLabel)")
+                    Spacer()
+                    Button("Reveal Config in Finder", systemImage: "folder") { model.revealConfig() }
+                        .buttonStyle(.link)
+                }
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct BridgeRow: View {
+    @ObservedObject var model: BridgeModel
+    let bridge: BridgeSnapshot
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bridge.workspaceName)
+                Text(portLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(bridge.isRunning ? "Stop" : "Start") {
+                Task { await model.perform(bridge.isRunning ? "stop" : "start", on: bridge) }
+            }
+            .disabled(model.isBusy || bridge.state == "needsSetup")
+            Button("Logs", systemImage: "doc.text") { model.openLogs(for: bridge) }
+                .labelStyle(.iconOnly)
+        }
+        .accessibilityLabel("\(bridge.workspaceName): \(bridge.headline)")
+    }
+
+    private var portLabel: String {
+        guard let port = bridge.bridgePort else { return bridge.headline }
+        return "\(bridge.headline) · port \(port)"
     }
 }
 
@@ -496,7 +623,7 @@ private struct SetupView: View {
                     }
                 }
                 TextField(model.networkMode == .tailscale ? "Tailscale IP (detected automatically)" : "LAN IP (detected automatically)", text: $model.host)
-                TextField("Bridge Port", text: $model.bridgePort)
+                TextField("Bridge Port (blank allocates a free port)", text: $model.bridgePort)
             }
 
             Section {
@@ -505,7 +632,7 @@ private struct SetupView: View {
                 }
                 .disabled(model.isBusy || model.agentExecutable.isEmpty)
             } footer: {
-                Text("The bridge is for authenticated private networks only. Never expose it directly to the public internet.")
+                Text("Settings are stored by DapperCode, never in your repository, and the bridge token is kept in your keychain. The bridge is for authenticated private networks only; never expose it directly to the public internet.")
             }
         }
         .formStyle(.grouped)
@@ -555,6 +682,9 @@ private struct TrayMenu: View {
         }
         Divider()
         Text(model.snapshot.headline)
+        if model.runningBridgeCount > 1 {
+            Text("\(model.runningBridgeCount) bridges running")
+        }
         Button(model.primaryTitle, systemImage: model.isRunning ? "stop.fill" : "play.fill") {
             Task { await model.performPrimaryAction() }
         }

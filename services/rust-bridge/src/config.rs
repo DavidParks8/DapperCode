@@ -19,6 +19,10 @@ pub(crate) struct BridgeConfig {
     pub(crate) connect_url: Option<String>,
     pub(crate) preview_connect_url: Option<String>,
     pub(crate) workdir: PathBuf,
+    /// Directory holding bridge-owned state (session index, push registry).
+    pub(crate) state_dir: PathBuf,
+    /// Directory holding mobile uploads.
+    pub(crate) attachments_dir: PathBuf,
     pub(crate) acp_manifest_path: PathBuf,
     pub(crate) acp_approved_executable_roots: Vec<PathBuf>,
     pub(crate) acp_initialize_timeout: Duration,
@@ -65,6 +69,14 @@ impl BridgeConfig {
             .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let workdir = resolve_bridge_workdir(configured_workdir)?;
 
+        // The desktop app points these at its central data directory so nothing app-owned lands in
+        // a repository. The development flow keeps working through the workdir-relative defaults.
+        let state_dir = parse_absolute_dir_env("BRIDGE_STATE_DIR", workdir.join(".dappercode"))?;
+        let attachments_dir = parse_absolute_dir_env(
+            "BRIDGE_ATTACHMENTS_DIR",
+            workdir.join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME),
+        )?;
+
         let acp_manifest_path = env::var("ACP_AGENT_MANIFEST")
             .map(PathBuf::from)
             .unwrap_or_else(|_| workdir.join(".dappercode/agents.json"));
@@ -105,6 +117,8 @@ impl BridgeConfig {
             connect_url,
             preview_connect_url,
             workdir,
+            state_dir,
+            attachments_dir,
             acp_manifest_path,
             acp_approved_executable_roots,
             acp_initialize_timeout,
@@ -251,6 +265,35 @@ pub(crate) fn constant_time_eq(left: &str, right: &str) -> bool {
 
 pub(crate) fn resolve_bridge_workdir(raw_workdir: PathBuf) -> Result<PathBuf, String> {
     PathPolicy::new(raw_workdir, false).map(|policy| policy.root().to_path_buf())
+}
+
+/// Resolves a directory environment variable, creating it when absent.
+///
+/// The value must be absolute so that a bridge started from any working directory reaches the same
+/// state, and so a relative path can never resolve into an unexpected part of the repository.
+fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, String> {
+    let configured = match env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
+        _ => default,
+    };
+    if !configured.is_absolute() {
+        return Err(format!(
+            "{name} must be an absolute path (got: {})",
+            configured.to_string_lossy()
+        ));
+    }
+    std::fs::create_dir_all(&configured).map_err(|error| {
+        format!(
+            "{name} could not be created ({}): {error}",
+            configured.to_string_lossy()
+        )
+    })?;
+    std::fs::canonicalize(&configured).map_err(|error| {
+        format!(
+            "{name} is invalid or inaccessible ({}): {error}",
+            configured.to_string_lossy()
+        )
+    })
 }
 
 pub(crate) fn parse_bool_env(name: &str) -> bool {
@@ -459,6 +502,8 @@ mod tests {
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp/workdir"),
+            state_dir: PathBuf::from("/tmp/workdir/.dappercode"),
+            attachments_dir: PathBuf::from("/tmp/workdir/.dappercode-attachments"),
             acp_manifest_path: PathBuf::from("/tmp/workdir/.dappercode/agents.json"),
             acp_approved_executable_roots: vec![PathBuf::from("/bin")],
             acp_initialize_timeout: Duration::from_secs(15),

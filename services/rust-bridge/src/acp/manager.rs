@@ -604,6 +604,7 @@ impl AgentManager {
         host_environment: &BTreeMap<String, String>,
         initialize_timeout: Duration,
         storage_root: &Path,
+        state_dir: &Path,
         allow_outside_root_cwd: bool,
     ) -> Result<Self, AgentManagerError> {
         manifests.validate(approved_roots)?;
@@ -619,7 +620,7 @@ impl AgentManager {
             .await;
             results.push((manifest, result));
         }
-        let storage_dir = storage_root.join(".dappercode");
+        let storage_dir = state_dir.to_path_buf();
         tokio::fs::create_dir_all(&storage_dir)
             .await
             .map_err(|error| AgentManagerError::SessionIndex(error.to_string()))?;

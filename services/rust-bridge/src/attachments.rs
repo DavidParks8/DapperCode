@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{path_policy::PathPolicy, resource_limits::ATTACHMENT_MAX_BYTES, BridgeError};
 
-const MOBILE_ATTACHMENTS_DIR: &str = ".dappercode-attachments";
+pub(crate) const DEFAULT_ATTACHMENTS_DIR_NAME: &str = ".dappercode-attachments";
 pub(crate) const ATTACHMENT_MULTIPART_MAX_BYTES: usize = ATTACHMENT_MAX_BYTES + 64 * 1024;
 const ATTACHMENT_METADATA_MAX_BYTES: usize = 4 * 1024;
 
@@ -25,8 +25,7 @@ pub(crate) async fn save_multipart_attachment(
     mut multipart: Multipart,
     path_policy: &PathPolicy,
 ) -> Result<AttachmentUploadResponse, BridgeError> {
-    let temporary_dir = path_policy
-        .secure_root_owned_directory(&PathBuf::from(MOBILE_ATTACHMENTS_DIR).join(".tmp"))?;
+    let temporary_dir = path_policy.secure_attachments_directory(Path::new(".tmp"))?;
     let temporary_name = format!("{}.upload", Uuid::new_v4());
     let mut temporary_file: Option<fs::File> = None;
     let mut uploaded_size = 0usize;
@@ -86,16 +85,16 @@ pub(crate) async fn save_multipart_attachment(
             mime_type.as_deref(),
             normalized_kind,
         );
-        let mut attachment_relative = PathBuf::from(MOBILE_ATTACHMENTS_DIR);
+        let mut attachment_relative = PathBuf::from("threads");
         if let Some(thread_id) = thread_id.as_deref() {
             let normalized_thread = sanitize_path_segment(thread_id);
             if !normalized_thread.is_empty() {
                 attachment_relative = attachment_relative.join(normalized_thread);
             }
         }
-        path_policy.secure_root_owned_directory(&attachment_relative)?;
+        path_policy.secure_attachments_directory(&attachment_relative)?;
         let target_name = format!("{}-{final_file_name}", Uuid::new_v4());
-        let target_path = path_policy.rename_root_owned_file(
+        let target_path = path_policy.rename_attachment_file(
             &temporary_dir,
             &temporary_name,
             &attachment_relative,
@@ -316,7 +315,7 @@ mod tests {
         append_bounded_chunk, build_attachment_file_name, infer_extension_from_mime,
         infer_image_content_type_from_path, non_empty, normalize_attachment_kind, private_new_file,
         sanitize_filename, sanitize_path_segment, save_multipart_attachment, secure_directory,
-        MOBILE_ATTACHMENTS_DIR,
+        DEFAULT_ATTACHMENTS_DIR_NAME,
     };
     use crate::path_policy::PathPolicy;
     use crate::resource_limits::ATTACHMENT_MAX_BYTES;
@@ -499,7 +498,7 @@ mod tests {
         assert_eq!(uploaded.kind, "file");
         assert_eq!(
             PathBuf::from(uploaded.path).parent(),
-            Some(policy.root().join(MOBILE_ATTACHMENTS_DIR).as_path())
+            Some(policy.attachments_root().join("threads").as_path())
         );
     }
 
@@ -537,7 +536,7 @@ mod tests {
             );
         }
 
-        let temporary_dir = root.join(MOBILE_ATTACHMENTS_DIR).join(".tmp");
+        let temporary_dir = policy.attachments_root().join(".tmp");
         assert!(fs::read_dir(temporary_dir).unwrap().next().is_none());
     }
 
@@ -614,7 +613,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn staging_directory_rejects_symlink_escape() {
+    fn attachments_root_rejects_symlink_escape() {
         use std::os::unix::fs::symlink;
 
         let temp = TestDir::new();
@@ -622,13 +621,11 @@ mod tests {
         let outside = temp.0.join("outside");
         fs::create_dir(&root).expect("create root");
         fs::create_dir(&outside).expect("create outside");
-        symlink(&outside, root.join(MOBILE_ATTACHMENTS_DIR)).expect("create attachment symlink");
-        let policy = PathPolicy::new(root, true).expect("create policy");
+        symlink(&outside, root.join(DEFAULT_ATTACHMENTS_DIR_NAME))
+            .expect("create attachment symlink");
 
-        let error = policy
-            .resolve_root_owned_directory(&PathBuf::from(MOBILE_ATTACHMENTS_DIR).join(".tmp"))
-            .expect_err("reject attachment symlink escape");
-        assert_eq!(error.code, -32602);
+        let error = PathPolicy::new(root, true).expect_err("reject attachment symlink escape");
+        assert!(error.contains("must not be a symlink"), "{error}");
         assert!(fs::read_dir(outside)
             .expect("read outside")
             .next()

@@ -227,6 +227,7 @@ impl RuntimeBackend {
                 &host_environment,
                 config.acp_initialize_timeout,
                 &config.workdir,
+                &config.state_dir,
                 config.allow_outside_root_cwd,
             )
             .await

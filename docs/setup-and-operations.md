@@ -29,18 +29,58 @@ Styling and materials come from AppKit/SwiftUI on the installed macOS release.
 Tailscale mode requires the Tailscale app to be installed and connected. Local mode detects common
 macOS interfaces; a concrete LAN IP can also be entered manually.
 
-## What Setup Writes
+## Where Configuration Lives
 
-Rust setup registers an existing executable; it does not download or execute package-manager code.
-It writes:
+Nothing DapperCode owns is written into your repositories. Configuration, runtime state, and logs
+live in a central per-user data directory:
 
-- `.env.secure`: private bridge configuration and bearer token
-- `.dappercode/agents.json`: typed ACP manifest with canonical executable path and SHA-256 digest
+- macOS: `~/Library/Application Support/dev.dappercode.desktop`
+- Windows: `%APPDATA%\DapperCode`
+- other Unix: `$XDG_DATA_HOME/dappercode`, else `~/.local/share/dappercode`
+- override for development and tests: `DAPPERCODE_DATA_DIR`
 
-Both are written through restrictive-mode temporary files and atomic rename. A previous bridge
-token is preserved when setup is rerun.
+```
+<data-dir>/
+  config.json                  non-secret settings for every workspace
+  runtime/config.lock          guards concurrent config.json updates
+  secrets/<profileId>.json     only when the keychain is unavailable
+  profiles/<profileId>/
+    agents.json                typed ACP manifest with digest
+    bridge.log
+    runtime/                   ownership record, transition lock, pid mirror
+    state/                     session index, push registry
+    attachments/               mobile uploads
+```
+
+Each workspace gets a profile keyed by a hash of its canonical path, so separate worktrees of the
+same repository are independent. Every file is written through restrictive-mode temporary files and
+atomic rename.
+
+The bridge bearer token is **not** in `config.json`. It is stored in the operating system keychain
+under service `dev.dappercode.desktop`, account `bridge-auth-token:<profileId>`. When no keychain is
+available (headless Linux, CI) the token falls back to a `0600` file under `secrets/`, and the app
+reports which backend is in use. Set `DAPPERCODE_SECRETS_BACKEND=file` to force the fallback.
+
+Because the macOS app is ad-hoc code-signed, every rebuild produces a new code signature and macOS
+asks for keychain access again. That is expected until the app is signed with a stable identity.
+
+Setup registers an existing executable; it does not download or execute package-manager code. A
+previous bridge token and port assignment are preserved when setup is rerun.
 
 For OpenCode, the default ACP argument is `acp`. Other agents may require a different argument list.
+
+## Running Several Worktrees at Once
+
+Bridge ports are allocated per workspace rather than defaulted, so several bridges run in parallel:
+
+- Setup scans upward from port 8787 in steps of two for a free consecutive `(bridge, preview)` pair.
+- Pairs already assigned to another profile are skipped, and each candidate is bind-probed so ports
+  held by unrelated processes are skipped too.
+- The assignment is persisted, so a paired phone keeps working across restarts.
+- Passing an explicit `--port` that another workspace owns fails and names that workspace.
+
+`dappercode list` reports every configured profile with its state and port. `dappercode stop --all`
+tears down every bridge this app owns, which is what the desktop app runs when you quit it.
 
 ## Agent Integrity
 
@@ -64,21 +104,28 @@ checkout:
 npm run operator -- discover-agent --agent-id opencode
 npm run operator -- setup --workspace /path/to/repository \
   --network tailscale --agent-id opencode --agent-args acp
-npm run operator -- start --workspace /path/to/repository
+npm run operator -- start --workspace /path/to/repository --owner-pid $$
 npm run operator -- status --workspace /path/to/repository --human
 npm run operator -- restart --workspace /path/to/repository
 npm run operator -- stop --workspace /path/to/repository
+npm run operator -- list --human
+npm run operator -- stop --all
+npm run operator -- forget --workspace /path/to/repository
 ```
 
 `setup` accepts:
 
 - `--network local|tailscale`
 - `--host <ip-or-hostname>`; optional when the platform backend can discover it
-- `--port <port>`; defaults to `8787`, with preview on the adjacent port
+- `--port <port>`; optional. Omit it to allocate the next free pair at or above `8787`
 - `--agent-id <id>`
 - `--display-name <name>`
 - `--agent-executable <path>`; optional when the agent is discoverable
 - `--agent-args '<space-separated arguments>'`
+
+`start` and `restart` accept `--owner-pid <pid>`; the bridge exits when that process does. `list`
+returns one snapshot per configured workspace. `stop --all` stops every bridge this app owns.
+`forget` removes a workspace's profile, token, and profile directory once its bridge is stopped.
 
 ## Process Ownership
 
@@ -91,13 +138,27 @@ a versioned ownership record containing:
 - canonical workspace
 - secure-config SHA-256
 
-The legacy `.bridge.pid` file is only a compatibility mirror and never authorizes a signal by itself.
-A live owned process remains stoppable when health is temporarily unavailable or `.env.secure` is
-missing/corrupt.
+The legacy pid file under `profiles/<profileId>/runtime/` is only a compatibility mirror and never
+authorizes a signal by itself. A live owned process remains stoppable when health is temporarily
+unavailable or its stored configuration needs repair.
+
+The recorded configuration digest covers everything the bridge was started with **except** the token,
+so the ownership record never contains a secret.
+
+## Bridge Lifetime
+
+The desktop app passes its own process ID as `--owner-pid`, which the operator forwards to the bridge
+as `BRIDGE_OWNER_PID`. Quitting the app runs `dappercode stop --all`; if the app is force-quit,
+crashes, or is killed, each bridge notices its owner has exited and shuts itself down. On macOS this
+uses a `kqueue` `NOTE_EXIT` watch, which cannot be fooled by a recycled process ID; other platforms
+poll every two seconds. A bridge started without an owner (the `npm run bridge` development flow)
+keeps running as before.
 
 ## Runtime Configuration
 
-Important `.env.secure` values:
+The operator builds the bridge environment in memory and passes it directly to the child process, so
+the token never reaches disk outside the keychain. The bridge itself is still configured purely by
+environment variables, which is what keeps `npm run bridge` working:
 
 - `BRIDGE_NETWORK_MODE`
 - `BRIDGE_HOST`, `BRIDGE_PORT`
@@ -105,9 +166,16 @@ Important `.env.secure` values:
 - `BRIDGE_CONNECT_URL`, `BRIDGE_PREVIEW_CONNECT_URL`
 - `BRIDGE_AUTH_TOKEN`
 - `BRIDGE_ALLOW_QUERY_TOKEN_AUTH`
+- `BRIDGE_WORKDIR`
+- `BRIDGE_STATE_DIR`: bridge-owned state; defaults to `<workdir>/.dappercode`
+- `BRIDGE_ATTACHMENTS_DIR`: mobile uploads; defaults to `<workdir>/.dappercode-attachments`
+- `BRIDGE_OWNER_PID`: exit when this process does; unset means run until signalled
 - `ACP_AGENT_MANIFEST`, `ACP_AGENT_ROOTS`
 - `ACP_INITIALIZE_TIMEOUT_MS`
-- `BRIDGE_WORKDIR`
+
+`BRIDGE_ATTACHMENTS_DIR` is a second allowed path root so agents and the mobile client can still read
+uploads after they move out of the workspace. It must be an absolute path and must not be a symlink;
+every other path surface stays confined to `BRIDGE_WORKDIR`.
 
 Inbound WebSocket frames and reassembled messages default to a 32 MiB limit. Upload, Git,
 filesystem, replay, queue, and preview surfaces have additional bounded byte or collection limits;
@@ -137,8 +205,9 @@ Start Expo independently after the desktop app has configured the bridge:
 npm run mobile
 ```
 
-The Expo bootstrap reads `.env.secure` to choose a reachable packager hostname. Real phones must use
-a LAN or Tailscale bridge URL, not localhost.
+The Expo bootstrap reads the bridge host from the central `config.json`, falling back to a repo-root
+`.env.secure` for the `npm run bridge` development flow. Real phones must use a LAN or Tailscale
+bridge URL, not localhost.
 
 ## Distribution
 

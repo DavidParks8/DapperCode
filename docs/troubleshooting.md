@@ -57,7 +57,7 @@ Common causes:
 
 - the registered agent executable moved or changed after setup
 - the configured host/port is already in use
-- `.env.secure` or `.dappercode/agents.json` is missing or invalid
+- the workspace has no profile yet, or its stored agent manifest is missing or invalid
 - Tailscale/LAN connectivity changed
 
 Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
@@ -65,7 +65,7 @@ Rerun setup after moving or upgrading an agent so its canonical path and SHA-256
 ## Stop or Restart After Config Damage
 
 The Rust operator verifies its private ownership record independently of current config. It can stop
-a live owned bridge even when `.env.secure` is missing or corrupt:
+a live owned bridge even when the stored configuration needs repair:
 
 ```bash
 npm run operator -- stop --workspace /path/to/repository
@@ -89,4 +89,29 @@ Configure the bridge through the desktop app or Rust operator first, then run:
 npm run mobile
 ```
 
-The Expo script reads `.env.secure` from the repository workspace.
+The Expo script reads the bridge host from the central `config.json`, falling back to a repo-root
+`.env.secure` for the `npm run bridge` development flow.
+
+## macOS Asks for Keychain Access After a Rebuild
+
+The app is ad-hoc code-signed, so `npm run desktop:build:macos` produces a new code signature and
+macOS treats it as a different application. Approve the prompt, or set
+`DAPPERCODE_SECRETS_BACKEND=file` to keep tokens in a `0600` file under `secrets/` in the data
+directory instead. The desktop app shows which backend is in use.
+
+## A Port Is Already Taken
+
+Setup allocates the next free consecutive port pair, skipping ports owned by other workspaces and
+ports held by unrelated processes. If you passed an explicit `--port` that another workspace owns,
+the error names that workspace; either choose a different port or omit `--port` entirely.
+
+## Removing a Workspace's Configuration
+
+Stop that workspace's bridge, then:
+
+```bash
+npm run operator -- forget --workspace /path/to/repository
+```
+
+That removes the profile from `config.json`, deletes its token, and removes its profile directory.
+Deleting the whole data directory resets every workspace and requires running setup again.
