@@ -1,3 +1,7 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import { executePlanCommand } from './mainScreenPlanCommand';
 import { formatCollaborationModeLabel, parseSlashCommand, findSlashCommandDefinition, isSlashCommandAvailable } from './mainScreenHelpers';
 import type { MainScreenSlashCommandHandlerContext } from './mainScreenSlashCommandHandler';
@@ -16,7 +20,6 @@ export async function executeSlashCommand(context: MainScreenSlashCommandHandler
     appendLocalAssistantMessage,
     activeAgentId,
     startNewChat,
-    setActivity,
     preferredStartCwd,
     selectedChat,
     activeModelLabel,
@@ -25,7 +28,9 @@ export async function executeSlashCommand(context: MainScreenSlashCommandHandler
     supportsFastMode,
     fastModeEnabled,
     onOpenGit,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
 
       const parsed = parseSlashCommand(input);
       if (!parsed) {

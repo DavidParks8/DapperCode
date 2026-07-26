@@ -6,7 +6,7 @@ import { type AgUiLiveAssistantMessages } from '../api/agUi';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
-import { type ActivityState, type ActivePlanState, type IdleTaskHandle, type PendingPlanImplementationPrompt, type WorkspacePickerPurpose, type SelectedServiceTier } from './mainScreenHelpers';
+import { type ActivePlanState, type IdleTaskHandle, type WorkspacePickerPurpose, type SelectedServiceTier } from './mainScreenHelpers';
 import { ApprovalController } from './controllers/approvalController';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
@@ -142,11 +142,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [selectedCollaborationMode, setSelectedCollaborationMode] =
     useState<CollaborationMode>('default');
   const [selectedAcpModeId, setSelectedAcpModeId] = useState<string | null>(null);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
-  const [composerHeight, setComposerHeight] = useState(0);
-  const [queueActionItemId, setQueueActionItemId] = useState<string | null>(null);
-  const [queueActionKind, setQueueActionKind] = useState<'steer' | 'cancel' | null>(null);
   const [relatedAgentThreads, setRelatedAgentThreads] = useState<ChatSummary[]>([]);
   const [agentRootThreadId, setAgentRootThreadId] = useState<string | null>(null);
   const [agentRuntimeRevision, setAgentRuntimeRevision] = useState(0);
@@ -157,14 +152,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [agentDetailParentChat, setAgentDetailParentChat] = useState<Chat | null>(null);
   const [agentDetailLoading, setAgentDetailLoading] = useState(false);
   const [agentDetailError, setAgentDetailError] = useState<string | null>(null);
-  const [activity, setActivity] = useState<ActivityState>({
-    tone: 'idle',
-    title: 'Ready',
-  });
-  const [bridgeRecoveryBannerVisible, setBridgeRecoveryBannerVisible] = useState(false);
-  const [heldActivity, setHeldActivity] = useState<ActivityState | null>(null);
-  const [showDelayedGenericRunningActivity, setShowDelayedGenericRunningActivity] =
-    useState(false);
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
   const creatingRef = useRef(creating);
@@ -174,11 +161,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);
-  const [planPanelCollapsedByThread, setPlanPanelCollapsedByThread] = useState<
-    Record<string, boolean>
-  >({});
-  const [pendingPlanImplementationPrompts, setPendingPlanImplementationPrompts] =
-    useState<Record<string, PendingPlanImplementationPrompt>>({});
   const safeAreaInsets = useSafeAreaInsets();
   const scrollRef = useRef<FlatList<TranscriptDisplayItem>>(null);
   const scrollRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -285,16 +267,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setSelectedCollaborationMode,
     selectedAcpModeId,
     setSelectedAcpModeId,
-    keyboardVisible,
-    setKeyboardVisible,
-    androidKeyboardInset,
-    setAndroidKeyboardInset,
-    composerHeight,
-    setComposerHeight,
-    queueActionItemId,
-    setQueueActionItemId,
-    queueActionKind,
-    setQueueActionKind,
     relatedAgentThreads,
     setRelatedAgentThreads,
     agentRootThreadId,
@@ -315,24 +287,12 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setAgentDetailLoading,
     agentDetailError,
     setAgentDetailError,
-    activity,
-    setActivity,
-    bridgeRecoveryBannerVisible,
-    setBridgeRecoveryBannerVisible,
-    heldActivity,
-    setHeldActivity,
-    showDelayedGenericRunningActivity,
-    setShowDelayedGenericRunningActivity,
     sendingRef,
     creatingRef,
     stoppingTurnRef,
     heldActivityTimeoutRef,
     genericRunningActivityTimeoutRef,
     foregroundAgentRefreshHandleRef,
-    planPanelCollapsedByThread,
-    setPlanPanelCollapsedByThread,
-    pendingPlanImplementationPrompts,
-    setPendingPlanImplementationPrompts,
     safeAreaInsets,
     scrollRef,
     scrollRetryTimeoutsRef,

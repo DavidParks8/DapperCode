@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import { buildUserInputAnswers } from './controllers/approvalController';
@@ -37,7 +41,6 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
     sending,
     setActiveCommands,
     setActiveTurnId,
-    setActivity,
     setError,
     setPendingApproval,
     setPendingUserInputRequest,
@@ -49,6 +52,7 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
     setUserInputError,
     userInputDrafts,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   const applySynchronizedChat = useCallback((latest: Chat, assessment: ChatSyncAssessment) => {

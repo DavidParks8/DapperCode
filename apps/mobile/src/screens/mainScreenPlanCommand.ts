@@ -1,3 +1,7 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import type { ChatMessage as ChatTranscriptMessage } from '../api/types';
 import { getMessageText } from '../api/messages';
 import { normalizeChatMessageMatchContent, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
@@ -6,7 +10,6 @@ import type { MainScreenSlashCommandHandlerContext } from './mainScreenSlashComm
 export async function executePlanCommand(context: MainScreenSlashCommandHandlerContext, argText: string): Promise<boolean> {
   const {
     setSelectedCollaborationMode,
-    setActivity,
     setError,
     selectedChatId,
     submissionController,
@@ -46,7 +49,9 @@ export async function executePlanCommand(context: MainScreenSlashCommandHandlerC
     cacheThreadPlan,
     selectedChat,
     scrollToBottomReliable,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
         const lowered = argText.toLowerCase();
         if (!argText || lowered === 'on' || lowered === 'enable' || lowered === 'enabled') {
           setSelectedCollaborationMode('plan');

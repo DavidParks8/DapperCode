@@ -1,4 +1,9 @@
-import { useAtomValue } from 'jotai';
+import {
+  activityAtom,
+  heldActivityAtom,
+  showDelayedGenericRunningActivityAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import type { Chat } from '../api/types';
 import { GENERIC_RUNNING_ACTIVITY_DELAY_MS, GENERIC_RUNNING_ACTIVITY_TITLES, normalizeCloneDirectoryName, joinWorkspacePath } from './mainScreenHelpers';
@@ -20,10 +25,8 @@ export type MainScreenHeaderActivityViewModelContext = MainScreenUiActionHandler
 export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderActivityViewModelContext) {
   const {
     activeTurnId,
-    activity,
     clearGenericRunningActivityDelay,
     genericRunningActivityTimeoutRef,
-    heldActivity,
     isLoading,
     isOpeningChat,
     isTurnLikelyRunning,
@@ -34,13 +37,15 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     relatedAgentThreads,
     selectedChat,
     selectorAgentCount,
-    setShowDelayedGenericRunningActivity,
     showBridgeRecoveryBanner,
-    showDelayedGenericRunningActivity,
     turnFailureDetail,
     workspaceBridgeRoot,
     ws,
   } = context;
+  const activity = useAtomValue(activityAtom);
+  const heldActivity = useAtomValue(heldActivityAtom);
+  const showDelayedGenericRunningActivity = useAtomValue(showDelayedGenericRunningActivityAtom);
+  const setShowDelayedGenericRunningActivity = useSetAtom(showDelayedGenericRunningActivityAtom);
   const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
   const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
 

@@ -1,3 +1,6 @@
+import {
+  bridgeRecoveryBannerVisibleAtom
+} from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
@@ -34,7 +37,6 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     refreshWorkspaceRoots,
     scheduleAgentThreadsRefresh,
     scheduleDisconnectActivity,
-    setBridgeRecoveryBannerVisible,
     setError,
     setWorkspaceBrowseError,
     setWorkspaceBrowseParentPath,
@@ -44,6 +46,7 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     workspacePickerPurpose,
     ws,
   } = context;
+  const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
   const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
   const gitCheckoutDirectoryNameEdited = useAtomValue(gitCheckoutDirectoryNameEditedAtom);
   const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);

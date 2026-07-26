@@ -1,3 +1,8 @@
+import {
+  activityAtom,
+  queueActionItemIdAtom,
+  queueActionKindAtom
+} from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
@@ -33,7 +38,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     selectedChatRef,
     setActivePlan,
     setActiveTurnId,
-    setActivity,
     setAgentDetailChat,
     setAgentDetailError,
     setAgentDetailLoading,
@@ -44,8 +48,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     setError,
     setOpeningChatId,
     setPendingUserInputRequest,
-    setQueueActionItemId,
-    setQueueActionKind,
     setResolvingUserInput,
     setSelectedChat,
     setSelectedChatId,
@@ -59,6 +61,9 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     transcriptContinuationController,
     transcriptContinuationState,
   } = context;
+  const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
+  const setQueueActionKind = useSetAtom(queueActionKindAtom);
+  const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
 

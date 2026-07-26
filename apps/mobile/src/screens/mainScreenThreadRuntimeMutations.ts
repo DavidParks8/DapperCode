@@ -1,3 +1,7 @@
+import {
+  pendingPlanImplementationPromptsAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { BridgeUiSurface, BridgeThreadQueueState } from '../api/types';
 import { type ActivePlanState, type ThreadContextUsage, mergeThreadContextUsage, upsertBridgeUiSurfaceList, removeBridgeUiSurfaceFromList } from './mainScreenHelpers';
@@ -15,10 +19,10 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
     bumpAgentRuntimeRevision,
     rememberBridgeUiSurfaceSnapshots,
     rememberChatPlanSnapshot,
-    setPendingPlanImplementationPrompts,
     threadRuntimeSnapshotsRef,
     upsertThreadRuntimeSnapshot,
   } = context;
+  const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);
 
 
   const cacheThreadBridgeUiSurface = useCallback(

@@ -1,4 +1,7 @@
-import { useAtomValue } from 'jotai';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import type { CollaborationMode } from '../api/types';
 import { selectAgentId } from '../agents';
@@ -18,7 +21,6 @@ export type MainScreenModelCatalogStateContext = MainScreenSelectedRuntimeSelect
 
 export function useMainScreenModelCatalogState(context: MainScreenModelCatalogStateContext) {
   const {
-    activity,
     bridgeCapabilities,
     chatModelPreferencesLoaded,
     chatModelPreferencesRef,
@@ -37,7 +39,6 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     selectedEffort,
     selectedModelId,
     selectedServiceTier,
-    setActivity,
     setPendingAgentId,
     setSelectedCollaborationMode,
     setSelectedEffort,
@@ -45,6 +46,8 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     setSelectedServiceTier,
     supportsFastMode,
   } = context;
+  const activity = useAtomValue(activityAtom);
+  const setActivity = useSetAtom(activityAtom);
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
 
 

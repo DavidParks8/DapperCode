@@ -1,3 +1,12 @@
+import {
+  androidKeyboardInsetAtom,
+  composerHeightAtom,
+  keyboardVisibleAtom,
+  pendingPlanImplementationPromptsAtom,
+  planPanelCollapsedByThreadAtom,
+  queueActionItemIdAtom,
+  queueActionKindAtom
+} from '../state/mainScreen/composer';
 import { useAtomValue } from 'jotai';
 import { Platform } from 'react-native';
 import { useAccessibilityAnnouncement } from '../accessibility';
@@ -27,25 +36,18 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     agentDetailThreadId,
     agentRootThreadId,
     agentThreadRows,
-    androidKeyboardInset,
     api,
     attachmentMenuVisible,
     attachmentModalVisible,
     chatPlanSnapshotsRef,
-    composerHeight,
     creating,
     dismissedPlanImplementationTurnIdByThreadRef,
     draft,
     error,
     isOpeningChat,
-    keyboardVisible,
     pendingApproval,
     pendingOptimisticQueuedMessagesRef,
-    pendingPlanImplementationPrompts,
     pendingUserInputRequest,
-    planPanelCollapsedByThread,
-    queueActionItemId,
-    queueActionKind,
     relatedAgentThreads,
     runWatchdogNow,
     safeAreaInsets,
@@ -63,6 +65,13 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     workspaceModalVisible,
     ws,
   } = context;
+  const keyboardVisible = useAtomValue(keyboardVisibleAtom);
+  const androidKeyboardInset = useAtomValue(androidKeyboardInsetAtom);
+  const composerHeight = useAtomValue(composerHeightAtom);
+  const queueActionItemId = useAtomValue(queueActionItemIdAtom);
+  const queueActionKind = useAtomValue(queueActionKindAtom);
+  const planPanelCollapsedByThread = useAtomValue(planPanelCollapsedByThreadAtom);
+  const pendingPlanImplementationPrompts = useAtomValue(pendingPlanImplementationPromptsAtom);
   const modelModalVisible = useAtomValue(modelModalVisibleAtom);
   const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
   const effortModalVisible = useAtomValue(effortModalVisibleAtom);

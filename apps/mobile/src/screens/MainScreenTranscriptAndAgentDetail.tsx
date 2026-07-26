@@ -1,3 +1,6 @@
+import {
+  keyboardVisibleAtom
+} from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { ActivityBar } from '../components/ActivityBar';
@@ -54,7 +57,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     supportsFastMode,
     fastModeEnabled,
     fastModeLabel,
-    keyboardVisible,
     setDraft,
     openWorkspaceModal,
     openAgentModal,
@@ -87,6 +89,7 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     agentPickerOptions,
     closeAgentModal,
   } = context;
+  const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const agentThreadMenuVisible = useAtomValue(agentThreadMenuVisibleAtom);
   const agentModalVisible = useAtomValue(agentModalVisibleAtom);
   const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);

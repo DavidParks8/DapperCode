@@ -1,3 +1,7 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import type { RpcNotification } from '../api/types';
 import { mergeChatSummaryPreservingMessages } from './mainScreenChatState';
 import {
@@ -29,7 +33,6 @@ export function processTurnLifecycleEvents(
     setSelectedCollaborationMode,
     bumpRunWatchdog,
     setActivePlan,
-    setActivity,
     reasoningSummaryRef,
     cacheThreadActiveCommand,
     pushActiveCommand,
@@ -46,7 +49,9 @@ export function processTurnLifecycleEvents(
     reasoningBufferRef,
     scheduleExternalStatusFullSync,
     refreshPendingApprovalsForThread,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'item/commandExecution/outputDelta') {
         const params = toRecord(event.params);

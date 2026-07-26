@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Chat, ChatMessage as ChatTranscriptMessage } from '../api/types';
 import { toMentionInput, toOptimisticUserContent, countUserMessages, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
@@ -43,7 +47,6 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     selectedEffort,
     setActivePlan,
     setActiveTurnId,
-    setActivity,
     setCreating,
     setDraft,
     setError,
@@ -60,6 +63,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     submissionController,
     turnExecutionController,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
   const pendingRestoredDraftRef = useRef<string | null>(null);
 
   useEffect(() => {

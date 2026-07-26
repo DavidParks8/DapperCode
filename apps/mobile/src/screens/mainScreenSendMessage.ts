@@ -1,3 +1,8 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom,
+  showDelayedGenericRunningActivityAtom
+} from '../state/mainScreen/composer';
 import type {
   BridgeUiSurface,
   ChatMessage as ChatTranscriptMessage,
@@ -46,7 +51,6 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     discardOptimisticUserMessage,
     setSelectedChat,
     setSending,
-    setActivity,
     bumpRunWatchdog,
     attachmentController,
     queueOptimisticUserMessage,
@@ -74,9 +78,11 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     mergeChatWithPendingOptimisticMessages,
     setSelectedCollaborationMode,
     supportsPlanMode,
-    setShowDelayedGenericRunningActivity,
     handleTurnFailure,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
+  const setShowDelayedGenericRunningActivity = screenSetter(store, showDelayedGenericRunningActivityAtom);
 
       const content = rawContent.trim();
       if (!selectedChatId || !content) {

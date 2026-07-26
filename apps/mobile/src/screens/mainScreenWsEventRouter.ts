@@ -4,7 +4,9 @@ import { processThreadStateEvents } from './mainScreenThreadStateEvents';
 import { processPlanAndReasoningEvents } from './mainScreenPlanAndReasoningEvents';
 import { processBridgeInteractionEvents } from './mainScreenBridgeInteractionEvents';
 import { processBridgeConnectionEvents } from './mainScreenBridgeConnectionEvents';
+import { useSetAtom } from 'jotai';
 import { useEffect } from 'react';
+import { activityAtom } from '../state/mainScreen/composer';
 import type { RpcNotification } from '../api/types';
 import { parseAgUiEventNotification } from '../api/agUi';
 import type { MainScreenReplayRecoveryEngineContext, MainScreenReplayRecoveryEngineResult } from './mainScreenReplayRecoveryEngine';
@@ -56,6 +58,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     upsertThreadRuntimeSnapshot,
     ws,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   useEffect(() => {
@@ -85,7 +88,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
         event.method === 'item/mcpToolCall/progress' ||
         event.method === 'item/commandExecution/terminalInteraction'
       ) {
-        processPlanAndReasoningEvents(context, event, currentId);
+        processPlanAndReasoningEvents(context, event, currentId, setActivity);
         return;
       }
       if (

@@ -1,3 +1,8 @@
+import {
+  keyboardVisibleAtom,
+  planPanelCollapsedByThreadAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { shouldCollapseWorkflowCardForKeyboard } from './planCardState';
 import type { MainScreenPlanExecutionActionsContext, MainScreenPlanExecutionActionsResult } from './mainScreenPlanExecutionActions';
@@ -11,12 +16,12 @@ export type MainScreenPanelCollapseCoordinatorContext = MainScreenPlanExecutionA
 
 export function useMainScreenPanelCollapseCoordinator(context: MainScreenPanelCollapseCoordinatorContext) {
   const {
-    keyboardVisible,
     planPanelCollapsed,
     selectedChat,
-    setPlanPanelCollapsedByThread,
     workflowCardMode,
   } = context;
+  const keyboardVisible = useAtomValue(keyboardVisibleAtom);
+  const setPlanPanelCollapsedByThread = useSetAtom(planPanelCollapsedByThreadAtom);
 
 
   useEffect(() => {

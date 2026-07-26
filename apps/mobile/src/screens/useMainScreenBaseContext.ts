@@ -1,4 +1,4 @@
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useCallback } from 'react';
 
 import type { HostBridgeApiClient } from '../api/client';
@@ -10,6 +10,7 @@ import type {
   CollaborationMode,
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
+import type { AppStore } from '../state/types';
 import {
   agentSettingsAtom,
   approvalModeAtom,
@@ -38,6 +39,8 @@ import {
 } from '../state/navigation/actions';
 
 export interface MainScreenBaseContext {
+  /** Lets non-React helpers read and write MainScreen atoms. */
+  store: AppStore;
   api: HostBridgeApiClient;
   ws: HostBridgeWsClient;
   bridgeUrl: string;
@@ -82,6 +85,7 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
   }, [setPendingChatId, setPendingChatSnapshot]);
 
   return {
+    store: useStore(),
     api,
     ws,
     bridgeUrl: useAtomValue(bridgeUrlAtom) ?? '',

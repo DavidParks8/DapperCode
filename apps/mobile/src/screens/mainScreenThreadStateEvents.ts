@@ -1,3 +1,7 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import type { RpcNotification } from '../api/types';
 import { RUN_WATCHDOG_MS, toRecord, readString, readNumber, describeStartedToolEvent, extractNotificationThreadId } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
@@ -36,10 +40,11 @@ export function processThreadStateEvents(
     cacheThreadActivity,
     bumpRunWatchdog,
     pushActiveCommand,
-    setActivity,
     setSelectedCollaborationMode,
     upsertLiveReasoningMessage,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'bridge/events/snapshotRequired') {
         const params = toRecord(event.params);

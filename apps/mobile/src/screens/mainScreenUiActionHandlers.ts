@@ -1,3 +1,9 @@
+import {
+  activityAtom,
+  bridgeRecoveryBannerVisibleAtom,
+  heldActivityAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
 import { ACTIVITY_DETAIL_HOLD_MS, isThreadOrSubAgentRunning, removeBridgeUiSurfaceFromList, resolveHeldActivity } from './mainScreenHelpers';
@@ -13,10 +19,8 @@ export type MainScreenUiActionHandlersContext = MainScreenApprovalAndUserInputRe
 export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandlersContext) {
   const {
     activeTurnId,
-    activity,
     api,
     approvalController,
-    bridgeRecoveryBannerVisible,
     cacheThreadPendingUserInputRequest,
     clearHeldActivity,
     createChat,
@@ -37,9 +41,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     sendMessage,
     sending,
     setActiveBridgeUiSurfaces,
-    setActivity,
     setError,
-    setHeldActivity,
     setPendingUserInputRequest,
     setResolvingUserInput,
     setUserInputDrafts,
@@ -47,6 +49,10 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     uploadingAttachment,
     ws,
   } = context;
+  const activity = useAtomValue(activityAtom);
+  const bridgeRecoveryBannerVisible = useAtomValue(bridgeRecoveryBannerVisibleAtom);
+  const setActivity = useSetAtom(activityAtom);
+  const setHeldActivity = useSetAtom(heldActivityAtom);
 
 
   const dismissUserInputRequest = useCallback(

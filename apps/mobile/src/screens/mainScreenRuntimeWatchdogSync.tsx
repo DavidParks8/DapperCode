@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { PendingApproval, PendingUserInputRequest } from '../api/types';
 import { env } from '../config';
@@ -23,10 +27,10 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     externalStatusFullSyncQueuedThreadRef,
     externalStatusFullSyncTimerRef,
     mergeChatWithPendingOptimisticMessages,
-    setActivity,
     setSelectedChat,
     threadRuntimeSnapshotsRef,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   const clearExternalStatusFullSync = useCallback(() => {

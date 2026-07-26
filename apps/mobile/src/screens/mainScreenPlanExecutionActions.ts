@@ -1,3 +1,8 @@
+import {
+  pendingPlanImplementationPromptsAtom,
+  planPanelCollapsedByThreadAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { PLAN_IMPLEMENTATION_CODING_MESSAGE, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
 import type { MainScreenComposerRendererContext, MainScreenComposerRendererResult } from './mainScreenComposerRenderer';
@@ -15,7 +20,6 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     clearPendingPlanImplementationPrompt,
     dismissedPlanImplementationTurnIdByThreadRef,
     isOpeningChat,
-    pendingPlanImplementationPrompts,
     planPanelLastTurnByThreadRef,
     scrollToBottomIfPinned,
     selectedChat,
@@ -24,12 +28,13 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     selectedPlanImplementationPrompt,
     selectedThreadPlan,
     sendMessageContent,
-    setPendingPlanImplementationPrompts,
-    setPlanPanelCollapsedByThread,
     setSelectedCollaborationMode,
     showActivity,
     supportsPlanMode,
   } = context;
+  const pendingPlanImplementationPrompts = useAtomValue(pendingPlanImplementationPromptsAtom);
+  const setPlanPanelCollapsedByThread = useSetAtom(planPanelCollapsedByThreadAtom);
+  const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);
 
 
   useEffect(() => {

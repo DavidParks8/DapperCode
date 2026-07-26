@@ -1,14 +1,19 @@
 import type { RpcNotification } from '../api/types';
 import { RUN_WATCHDOG_MS, toRecord, readString, readNumber, buildNextPlanStateFromDelta, extractFirstBoldSnippet, toReasoningActivityDetail } from './mainScreenHelpers';
+import type { ActivityState } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
 
+export type SetActivity = (
+  update: ActivityState | ((previous: ActivityState) => ActivityState)
+) => void;
 
 export function processPlanAndReasoningEvents(
   context: MainScreenWsEventRouterContext,
   event: RpcNotification,
-  currentId: string | null
+  currentId: string | null,
+  setActivity: SetActivity
 ): void {
-  const { planItemTurnIdByThreadRef, cacheThreadTurnState, cacheThreadActivity, cacheThreadPlan, setSelectedCollaborationMode, bumpRunWatchdog, setActivePlan, setActivity, reasoningSummaryRef, threadReasoningBuffersRef, upsertLiveReasoningMessage } = context;
+  const { planItemTurnIdByThreadRef, cacheThreadTurnState, cacheThreadActivity, cacheThreadPlan, setSelectedCollaborationMode, bumpRunWatchdog, setActivePlan, reasoningSummaryRef, threadReasoningBuffersRef, upsertLiveReasoningMessage } = context;
 
       if (event.method === 'item/plan/delta') {
         const params = toRecord(event.params);

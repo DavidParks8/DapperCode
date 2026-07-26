@@ -1,3 +1,10 @@
+import {
+  activityAtom,
+  bridgeRecoveryBannerVisibleAtom,
+  heldActivityAtom,
+  showDelayedGenericRunningActivityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import type { AppStateStatus } from 'react-native';
 import { type AutoScrollState, APP_FOCUS_DISCONNECT_GRACE_MS, STREAMING_SCROLL_THROTTLE_MS } from './mainScreenHelpers';
@@ -26,13 +33,13 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
     scheduledPinnedScrollTimeoutRef,
     scrollRef,
     scrollRetryTimeoutsRef,
-    setActivity,
     setAgentRuntimeRevision,
-    setBridgeRecoveryBannerVisible,
-    setHeldActivity,
-    setShowDelayedGenericRunningActivity,
     ws,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
+  const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
+  const setHeldActivity = useSetAtom(heldActivityAtom);
+  const setShowDelayedGenericRunningActivity = useSetAtom(showDelayedGenericRunningActivityAtom);
 
   const autoScrollStateRef = useRef<AutoScrollState>({
     shouldStickToBottom: true,

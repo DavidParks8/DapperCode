@@ -1,3 +1,7 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import type { RpcNotification } from '../api/types';
 import { toRecord, readString, toPendingUserInputRequest, buildUserInputDrafts, parseBridgeThreadQueueState, toPendingApproval, toBridgeUiSurface, upsertBridgeUiSurfaceList, removeBridgeUiSurfaceFromList } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
@@ -10,7 +14,6 @@ export function processBridgeInteractionEvents(context: MainScreenWsEventRouterC
     cacheThreadActivity,
     clearRunWatchdog,
     setPendingApproval,
-    setActivity,
     cacheThreadPendingUserInputRequest,
     setSelectedCollaborationMode,
     setPendingUserInputRequest,
@@ -22,7 +25,9 @@ export function processBridgeInteractionEvents(context: MainScreenWsEventRouterC
     cacheThreadBridgeUiSurface,
     setActiveBridgeUiSurfaces,
     removeThreadBridgeUiSurface,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'bridge/thread/queue/updated') {
         const parsed = parseBridgeThreadQueueState(event.params);

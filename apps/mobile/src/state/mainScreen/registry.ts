@@ -1,4 +1,7 @@
 import { atom, type PrimitiveAtom, type Setter } from 'jotai';
+import type { SetStateAction } from 'react';
+
+import type { AppStore } from '../types';
 
 const resetters: Array<(set: Setter) => void> = [];
 
@@ -20,3 +23,14 @@ export const resetMainScreenStateAtom = atom(null, (get, set): void => {
     reset(set);
   }
 });
+
+/**
+ * Binds a screen atom to a store so non-React helpers (the WS event processors and command
+ * executors) can update screen state without hooks.
+ */
+export function screenSetter<Value>(
+  store: AppStore,
+  target: PrimitiveAtom<Value>
+): (update: SetStateAction<Value>) => void {
+  return (update) => store.set(target, update);
+}

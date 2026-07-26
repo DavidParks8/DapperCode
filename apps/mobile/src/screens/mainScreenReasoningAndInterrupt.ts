@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { mergeStreamingDelta, formatLiveReasoningMessage } from './mainScreenHelpers';
 import type { MainScreenLocalCommandChatContext, MainScreenLocalCommandChatResult } from './mainScreenLocalCommandChat';
@@ -18,7 +22,6 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
     liveReasoningMessageIdsRef,
     schedulePinnedScrollToBottom,
     setActiveTurnId,
-    setActivity,
     setError,
     setSelectedChat,
     setStoppingTurn,
@@ -26,6 +29,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
     stopSystemMessageLoggedRef,
     turnExecutionController,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   const upsertLiveReasoningMessage = useCallback(

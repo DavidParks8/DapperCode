@@ -1,3 +1,8 @@
+import {
+  queueActionItemIdAtom,
+  queueActionKindAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type { MainScreenSendMessageHandlerContext, MainScreenSendMessageHandlerResult } from './mainScreenSendMessageHandler';
 
@@ -29,14 +34,14 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
     sendingRef,
     setDraft,
     setError,
-    setQueueActionItemId,
-    setQueueActionKind,
     stoppingTurnRef,
     submissionController,
     threadRuntimeSnapshotsRef,
     turnExecutionController,
     uploadingAttachment,
   } = context;
+  const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
+  const setQueueActionKind = useSetAtom(queueActionKindAtom);
 
 
   const sendMessageContentRef = useRef(sendMessageContent);

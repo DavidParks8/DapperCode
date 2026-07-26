@@ -1,3 +1,6 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { AgentId, ServiceTier } from '../api/types';
@@ -39,7 +42,6 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     saveChatModelPreferences,
     retryFailedUploads,
     selectedChatId,
-    setActivity,
     setError,
     setPendingAgentId,
     setSelectedAcpModeId,
@@ -51,6 +53,7 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     uploadingAttachment,
     ws,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
   const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
   const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);

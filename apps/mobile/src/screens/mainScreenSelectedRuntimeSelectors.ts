@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { buildUserInputDrafts, resolveSnapshotCollaborationMode, appendRunEventHistory, upsertBridgeUiSurfaceList } from './mainScreenHelpers';
 import type { MainScreenThreadRuntimeMutationsContext, MainScreenThreadRuntimeMutationsResult } from './mainScreenThreadRuntimeMutations';
@@ -29,7 +33,6 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
     setActiveCommands,
     setActivePlan,
     setActiveTurnId,
-    setActivity,
     setBridgeCapabilities,
     setChatPlanSnapshotsLoaded,
     setPendingApproval,
@@ -43,6 +46,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
     threadRuntimeSnapshotsRef,
     upsertThreadRuntimeSnapshot,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   // Held in a ref so the snapshot applier keeps a stable identity. The capability

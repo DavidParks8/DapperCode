@@ -1,3 +1,10 @@
+import {
+  composerHeightAtom,
+  keyboardVisibleAtom,
+  queueActionItemIdAtom,
+  queueActionKindAtom
+} from '../state/mainScreen/composer';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { ActivityBar } from '../components/ActivityBar';
@@ -40,7 +47,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     isLoading,
     isTurnLikelyRunning,
     isTurnLoading,
-    keyboardVisible,
     loadingAttachmentFileCandidates,
     mentionPathSuggestions,
     mentionQuery,
@@ -49,15 +55,12 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     onOpenBridgeRecoveryGuide,
     openAttachmentMenu,
     pendingApproval,
-    queueActionItemId,
-    queueActionKind,
     queuedMessageSteerDisabledReason,
     remainingQueuedMessagesCount,
     removeComposerAttachment,
     selectMentionSuggestion,
     selectedChat,
     selectedThreadRuntimeSnapshot,
-    setComposerHeight,
     setDraft,
     showBridgeRecoveryBanner,
     showFloatingActivity,
@@ -71,6 +74,10 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     theme,
     visibleError,
   } = context;
+  const keyboardVisible = useAtomValue(keyboardVisibleAtom);
+  const queueActionItemId = useAtomValue(queueActionItemIdAtom);
+  const queueActionKind = useAtomValue(queueActionKindAtom);
+  const setComposerHeight = useSetAtom(composerHeightAtom);
 
   const renderComposer = (overlay: boolean) => (
     <View

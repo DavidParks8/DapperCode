@@ -1,3 +1,8 @@
+import { screenSetter } from '../state/mainScreen/registry';
+import {
+  activityAtom,
+  pendingPlanImplementationPromptsAtom
+} from '../state/mainScreen/composer';
 import { parseAgUiEventNotification, updateAgUiLiveAssistantMessages } from '../api/agUi';
 import type { RpcNotification } from '../api/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from './mainScreenHelpers';
@@ -20,7 +25,6 @@ export function processAgUiRunEvents(
     setError,
     setActiveTurnId,
     setActiveCommands,
-    setActivity,
     bumpRunWatchdog,
     cacheThreadTurnState,
     cacheThreadActivity,
@@ -39,10 +43,12 @@ export function processAgUiRunEvents(
     reasoningBufferRef,
     appendStopSystemMessageIfNeeded,
     setSelectedChat,
-    setPendingPlanImplementationPrompts,
     clearPendingPlanImplementationPrompt,
     loadChat,
+    store,
   } = context;
+  const setActivity = screenSetter(store, activityAtom);
+  const setPendingPlanImplementationPrompts = screenSetter(store, pendingPlanImplementationPromptsAtom);
 
       const agUiEnvelope = parseAgUiEventNotification(event);
       if (agUiEnvelope) {

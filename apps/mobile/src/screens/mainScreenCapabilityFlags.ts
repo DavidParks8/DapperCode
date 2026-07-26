@@ -1,3 +1,8 @@
+import {
+  activityAtom,
+  queueActionItemIdAtom,
+  queueActionKindAtom
+} from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgentId } from '../api/types';
@@ -38,15 +43,12 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setActiveCommands,
     setActivePlan,
     setActiveTurnId,
-    setActivity,
     setError,
     setLoadingWorkspaceRoots,
     setOpeningChatId,
     setPendingAgentId,
     setPendingApproval,
     setPendingUserInputRequest,
-    setQueueActionItemId,
-    setQueueActionKind,
     setResolvingUserInput,
     setSelectedAcpModeId,
     setSelectedChat,
@@ -64,6 +66,9 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     stopRequestedRef,
     stopSystemMessageLoggedRef,
   } = context;
+  const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
+  const setQueueActionKind = useSetAtom(queueActionKindAtom);
+  const setActivity = useSetAtom(activityAtom);
   const titleDraft = useAtomValue(titleDraftAtom);
   const titleSaving = useAtomValue(titleSavingAtom);
   const setTitleModalVisible = useSetAtom(titleModalVisibleAtom);

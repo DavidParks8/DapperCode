@@ -1,3 +1,8 @@
+import {
+  androidKeyboardInsetAtom,
+  keyboardVisibleAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../agents';
@@ -34,11 +39,11 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     replayRecoveryRetryTimerRef,
     selectedChat,
     selectedChatId,
-    setAndroidKeyboardInset,
     setDraft,
     setError,
-    setKeyboardVisible,
   } = context;
+  const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
+  const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);
 
 
   useEffect(() => {

@@ -1,3 +1,7 @@
+import {
+  activityAtom
+} from '../state/mainScreen/composer';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { sleep, RUN_WATCHDOG_MS, shouldSurfaceChatLoadError, isChatLikelyRunning } from './mainScreenHelpers';
 import { getTranscriptContinuationState } from './controllers/transcriptContinuationController';
@@ -34,7 +38,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
     selectedChatRef,
     setActiveCommands,
     setActiveTurnId,
-    setActivity,
     setError,
     setOpeningChatId,
     setPendingApproval,
@@ -46,6 +49,7 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
     stopSystemMessageLoggedRef,
     threadRuntimeSnapshotsRef,
   } = context;
+  const setActivity = useSetAtom(activityAtom);
 
 
   const loadChat = useCallback(
