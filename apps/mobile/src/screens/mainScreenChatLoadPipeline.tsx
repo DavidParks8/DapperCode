@@ -9,11 +9,15 @@ import {
 } from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import { sleep, RUN_WATCHDOG_MS, shouldSurfaceChatLoadError, isChatLikelyRunning } from './mainScreenHelpers';
+import { sleep, RUN_WATCHDOG_MS, shouldSurfaceChatLoadError, isChatLikelyRunning, resolveSettledActivity, retireOpeningChatActivity } from './mainScreenHelpers';
 import { getTranscriptContinuationState } from './controllers/transcriptContinuationController';
 import { resolveEquivalentChat } from './mainScreenChatState';
 import type { MainScreenSlashCommandHandlerContext, MainScreenSlashCommandHandlerResult } from './mainScreenSlashCommandHandler';
 import { OPEN_CHAT_MIN_LOADING_MS } from './mainScreenConstants';
+import {
+  shouldReleaseOpeningChat,
+  shouldScrollAfterLoad,
+} from './mainScreenOpeningChatState';
 
 
 
@@ -82,6 +86,11 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
         const loadedChat = await chatSyncController.load(chatId);
         const chat = mergeChatWithPendingOptimisticMessages(loadedChat);
         if (requestId !== loadChatRequestRef.current) {
+          // Superseded loads report nothing about the thread, but they must still retire the
+          // "Opening chat" placeholder they were opened with: the request that replaced this
+          // one may preserve runtime state and deliberately leave the header alone, and then
+          // nobody clears a running placeholder on a thread that is not running.
+          setActivity((current) => retireOpeningChatActivity(current, chat));
           return false;
         }
         loadedSuccessfully = true;
@@ -124,28 +133,14 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
               activeTurnId: null,
               runWatchdogUntil: 0,
             });
-            setActivity(
-              chat.status === 'complete'
-                ? {
-                    tone: 'complete',
-                    title: 'Turn completed',
-                  }
-                : chat.status === 'error'
-                  ? {
-                      tone: 'error',
-                      title: 'Turn failed',
-                      detail: chat.lastError ?? undefined,
-                    }
-                  : {
-                      tone: 'idle',
-                      title: 'Ready',
-                    }
-            );
+            setActivity(resolveSettledActivity(chat));
           }
           reasoningSummaryRef.current = {};
           reasoningBufferRef.current = '';
           hadCommandRef.current = false;
           applyThreadRuntimeSnapshot(chatId);
+        } else {
+          setActivity((current) => retireOpeningChatActivity(current, chat));
         }
         void refreshPendingApprovalsForThread(chatId);
       } catch (err) {
@@ -170,25 +165,23 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
           detail: (err as Error).message,
         });
       } finally {
-        if (requestId !== loadChatRequestRef.current) {
-          return false;
-        }
+        const superseded = requestId !== loadChatRequestRef.current;
 
-        if (loadedSuccessfully) {
+        if (shouldScrollAfterLoad({ loadedSuccessfully, superseded })) {
           if (options?.forceScroll) {
             scrollToBottomReliable(false);
           } else {
             scrollToBottomIfPinned(false);
           }
+        }
+
+        if (shouldReleaseOpeningChat({ loadedSuccessfully, superseded })) {
           const startedAt = openingChatStartedAtRef.current;
-          if (startedAt > 0) {
+          if (loadedSuccessfully && startedAt > 0) {
             const remainingMs = OPEN_CHAT_MIN_LOADING_MS - (Date.now() - startedAt);
             if (remainingMs > 0) {
               await sleep(remainingMs);
             }
-          }
-          if (requestId !== loadChatRequestRef.current) {
-            return false;
           }
           setOpeningChatId((current) => {
             if (current === chatId) {
@@ -197,9 +190,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
             }
             return current;
           });
-        } else {
-          openingChatStartedAtRef.current = 0;
-          setOpeningChatId(null);
         }
         return loadedSuccessfully;
       }

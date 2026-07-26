@@ -290,7 +290,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
     styles,
     theme,
     toggleAttentionSection,
-    totalChatCount: chats.length,
+    totalChatCount: attentionModel.sessionCount,
     visibleAttentionSections,
     visibleChatCount: attentionModel.visibleChatCount,
     workingCount: attentionModel.workingCount,

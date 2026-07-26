@@ -624,6 +624,31 @@ impl SessionSnapshot {
                     .insert(id.to_string(), bound(header.to_string(), MAX_TEXT_BYTES));
             }
         }
+        // A `<task …>` header is only refreshed while the run that emitted it is alive.
+        // Replayed events carry no generation and are never followed by a `RunFinished`, so a
+        // tool call that history records as settled keeps whatever header it last saw --
+        // typically `state="running"`. Left alone, every restart resurrects a finished
+        // sub-agent and the thread reads as still working forever. Live events are untouched:
+        // their run owns reconciliation and terminalizes the header when it ends.
+        if generation.is_none() && terminal {
+            if let Some(header) = self.subagent_headers.get(id) {
+                if Self::task_header_state(header)
+                    .is_some_and(|state| !Self::is_terminal_subagent_state(state))
+                {
+                    let settled = if matches!(projection.status, ToolCallStatus::Failed) {
+                        "failed"
+                    } else {
+                        "completed"
+                    };
+                    let normalized = Self::task_header_with_state(header, settled);
+                    self.subagent_headers
+                        .insert(id.to_string(), bound(normalized, MAX_TEXT_BYTES));
+                }
+            }
+            if let Some(header) = self.subagent_headers.get(id).cloned() {
+                Self::ensure_durable_subagent_header(&mut tool, &header);
+            }
+        }
         tool.truncated |= apply_tool_values(
             &mut tool.structured_content,
             projection.structured_content,
@@ -805,6 +830,55 @@ impl SessionSnapshot {
         for tool_call_id in unresolved {
             self.update_subagent_tool_terminal(&tool_call_id, status, tool_status);
         }
+    }
+
+    /// Settles sub-agent headers that outlived the run which was writing them.
+    ///
+    /// A `<task …>` header is only refreshed while the run that emitted it is alive. Live runs
+    /// reconcile it through `RunFinished`, but a replayed history never emits one, so a tool call
+    /// that is already `completed` keeps whatever header it last saw — typically
+    /// `state="running"`. Persisting that contradiction makes a finished thread report a working
+    /// sub-agent forever, on every future read, so the snapshot settles it as soon as the
+    /// reconstruction that produced it commits.
+    pub fn settle_unresolved_subagents_without_run(&mut self) {
+        if self.active_generation.is_some() {
+            return;
+        }
+        let unresolved = self
+            .subagent_headers
+            .iter()
+            .filter_map(|(tool_call_id, header)| {
+                let child_status = Self::task_header_state(header)?;
+                if Self::is_terminal_subagent_state(child_status) {
+                    return None;
+                }
+                let status = self.tool_status(tool_call_id)?;
+                matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed)
+                    .then(|| (tool_call_id.clone(), status))
+            })
+            .collect::<Vec<_>>();
+        for (tool_call_id, tool_status) in unresolved {
+            let status = if matches!(tool_status, ToolCallStatus::Failed) {
+                "failed"
+            } else {
+                "completed"
+            };
+            self.update_subagent_tool_terminal(&tool_call_id, status, tool_status);
+        }
+    }
+
+    fn tool_status(&self, tool_call_id: &str) -> Option<ToolCallStatus> {
+        self.tools
+            .get(tool_call_id)
+            .map(|tool| tool.status)
+            .or_else(|| {
+                self.history
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.canonical_id == tool_call_id)
+                    .and_then(|entry| entry.tool.as_ref())
+                    .map(|tool| tool.status)
+            })
     }
 
     fn tool_generation(&self, tool_call_id: &str) -> Option<u64> {
@@ -1380,6 +1454,136 @@ mod tests {
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
         }
+    }
+
+    /// Reproduces "a long complete session showed as in progress".
+    ///
+    /// Restarting the bridge replays a thread from history. Replayed tool events carry no
+    /// generation and are never followed by a `RunFinished`, so the run-scoped terminalizer
+    /// cannot reach them: the tool call settles to `completed` while the last `<task …>`
+    /// header it ever saw still reads `state="running"`. Committing that contradiction made
+    /// every finished thread report a working sub-agent on every future read.
+    #[test]
+    fn replayed_subagent_header_settles_with_its_tool_call() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            tool_call_id: "call-task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nAudit the tests\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+
+        // Applying the replayed event settles the header with the tool that carries it, so
+        // the contradiction never reaches the snapshot in the first place.
+        assert!(snapshot
+            .subagent_header("call-task-1")
+            .expect("replayed sub-agent header")
+            .contains("state=\"completed\""));
+
+        // Sweeping again is idempotent: it must not reopen or relabel a settled header.
+        snapshot.settle_unresolved_subagents_without_run();
+
+        assert!(snapshot
+            .subagent_header("call-task-1")
+            .expect("settled sub-agent header")
+            .contains("state=\"completed\""));
+        assert!(!snapshot
+            .tools
+            .get("call-task-1")
+            .expect("tool")
+            .content
+            .contains("state=\"running\""));
+    }
+
+    /// A failed tool call must settle its header as failed, not launder it into a success.
+    #[test]
+    fn replayed_failed_subagent_header_settles_as_failed() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            tool_call_id: "call-task-2".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Failed,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-2\" state=\"running\">\nAudit\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+
+        snapshot.settle_unresolved_subagents_without_run();
+
+        assert!(snapshot
+            .subagent_header("call-task-2")
+            .expect("settled sub-agent header")
+            .contains("state=\"failed\""));
+    }
+
+    /// A tool call that has not settled is still genuinely working, and a live run owns its
+    /// own reconciliation, so neither may be forced terminal.
+    #[test]
+    fn settling_leaves_unfinished_subagents_and_live_runs_alone() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            tool_call_id: "call-task-3".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-3\" state=\"running\">\nAudit\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        snapshot.settle_unresolved_subagents_without_run();
+        assert!(snapshot
+            .subagent_header("call-task-3")
+            .expect("header")
+            .contains("state=\"running\""));
+
+        let mut live = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        live.apply(&run_started(1));
+        live.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "call-task-4".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-4\" state=\"running\">\nAudit\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        live.settle_unresolved_subagents_without_run();
+        assert!(live
+            .subagent_header("call-task-4")
+            .expect("header")
+            .contains("state=\"running\""));
     }
 
     #[test]

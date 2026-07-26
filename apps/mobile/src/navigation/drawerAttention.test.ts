@@ -321,3 +321,29 @@ describe('buildDrawerAttentionModel', () => {
     ).toBe(true);
   });
 });
+
+describe('the drawer footer count agrees with the list above it', () => {
+  /**
+   * The footer counted every thread while the list hides sub-agents, so a workspace with two
+   * sessions and two sub-agents advertised "4 sessions" above a list showing two.
+   */
+  it('counts sessions, not sub-agent threads', () => {
+    const model = buildDrawerAttentionModel({
+      chats: [
+        chat('root-1'),
+        chat('sub-a', { sourceKind: 'subAgent', parentThreadId: 'root-1' }),
+        chat('sub-b', { sourceKind: 'subAgentThreadSpawn', parentThreadId: 'root-1' }),
+        chat('root-2'),
+      ],
+      agents,
+      runIndicatorsByThread: {},
+      pendingApprovals: [],
+      pendingUserInputs: [],
+      selectedFolderKey: null,
+      workspaceChatLimit: 5,
+    });
+
+    expect(model.sessionCount).toBe(2);
+    expect(model.sessionCount).toBe(model.visibleChatCount);
+  });
+});
