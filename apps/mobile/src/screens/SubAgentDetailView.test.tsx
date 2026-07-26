@@ -108,6 +108,24 @@ describe('SubAgentDetailView starting state', () => {
     act(() => tree.unmount());
   });
 
+  it('never shows a starting state for a sub-agent that has already finished', () => {
+    // Regression: a finished sub-agent that left no transcript spun on "Starting…"
+    // forever, because the state was derived from the message count alone.
+    for (const status of ['complete', 'idle', 'error'] as const) {
+      const tree = render({ chat: { ...chat(), status } });
+      expect(isStarting(tree)).toBe(false);
+      expect(countByLabel(tree, 'Sub-agent reported no transcript')).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    }
+  });
+
+  it('still reports a running sub-agent with no transcript as starting', () => {
+    const tree = render({ chat: { ...chat(), status: 'running' } });
+    expect(isStarting(tree)).toBe(true);
+    expect(countByLabel(tree, 'Sub-agent reported no transcript')).toBe(0);
+    act(() => tree.unmount());
+  });
+
   it('shows the loading shell instead of a starting state before the chat resolves', () => {
     const tree = render({ chat: null, loading: true });
     expect(isStarting(tree)).toBe(false);

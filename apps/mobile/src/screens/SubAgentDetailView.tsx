@@ -103,17 +103,15 @@ export function SubAgentDetailView({
   // A sub-agent that has just been spawned has no transcript yet. Rendering an
   // empty scroll view makes a live agent look dead, so it gets an explicit
   // starting state until its first message arrives.
-  const hasStarted = useMemo(() => {
-    if (!chat) return false;
-    return (
-      projectTranscript({
-        chat,
-        parentChat,
-        showToolCalls,
-        threadStatuses: agentThreadStatusById,
-        liveMessageState: resolvedLiveMessageState,
-      }).messages.length > 0
-    );
+  const projectedMessageCount = useMemo(() => {
+    if (!chat) return 0;
+    return projectTranscript({
+      chat,
+      parentChat,
+      showToolCalls,
+      threadStatuses: agentThreadStatusById,
+      liveMessageState: resolvedLiveMessageState,
+    }).messages.length;
   }, [
     agentThreadStatusById,
     chat,
@@ -121,6 +119,11 @@ export function SubAgentDetailView({
     resolvedLiveMessageState,
     showToolCalls,
   ]);
+
+  // A sub-agent that has already stopped is never "starting", even when it left no
+  // transcript behind -- otherwise opening a finished agent spins forever.
+  const isStarting = Boolean(chat) && chat?.status === 'running' && projectedMessageCount === 0;
+  const isEmpty = Boolean(chat) && !isStarting && projectedMessageCount === 0;
 
   const activityDetail = display?.detail ?? latestCommand?.detail ?? role?.trim() ?? null;
   const modalFocusRef = useModalAccessibilityFocus(visible);
@@ -224,7 +227,7 @@ export function SubAgentDetailView({
         {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.transcript}>
-          {chat && !hasStarted ? (
+          {isStarting ? (
             <View
               style={styles.loadingShell}
               accessibilityRole="progressbar"
@@ -234,6 +237,19 @@ export function SubAgentDetailView({
               <Text style={styles.loadingText}>Starting…</Text>
               <Text style={styles.startingHint}>
                 This agent has not reported anything yet. Its work will stream in here.
+              </Text>
+            </View>
+          ) : isEmpty ? (
+            <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="document-text-outline"
+                size={20}
+                color={theme.colors.textMuted}
+              />
+              <Text style={styles.loadingText}>No transcript</Text>
+              <Text style={styles.startingHint}>
+                This agent reported back through its parent instead of streaming its own session.
               </Text>
             </View>
           ) : chat ? (

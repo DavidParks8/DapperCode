@@ -1482,7 +1482,8 @@ describe('MainScreen controls and modals', () => {
     // A just-spawned sub-agent has no transcript. Rendering an empty scroll view
     // makes a live agent look dead, so the page says it is starting until its
     // first message streams in.
-    const emptyChild: Chat = { ...subAgentChat, messages: [] };
+    // Still running: a finished agent with no transcript is a different state.
+    const emptyChild: Chat = { ...subAgentChat, status: 'running', messages: [] };
     const chats: ChatSummary[] = [rootChat, emptyChild];
     const api = createApi({ chats });
     (api.getChat as jest.Mock).mockImplementation((id: string) =>

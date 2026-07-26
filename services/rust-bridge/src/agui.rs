@@ -1413,8 +1413,46 @@ fn task_result_preview(content: &str) -> Option<String> {
         .split_once("</task_result>")?
         .0
         .trim();
-    (!result.is_empty()).then(|| bounded(result, 2 * 1024))
+    (!result.is_empty()).then(|| summarize_task_result(result))
 }
+
+/// A one-line "done" summary of a sub-agent's result.
+///
+/// The full result is markdown and routinely runs to kilobytes. Rendering it on
+/// the card buries the transcript under a wall of raw text before the user has
+/// asked for it, so the card states the outcome and the detail view holds the
+/// rest.
+fn summarize_task_result(result: &str) -> String {
+    let strip = |line: &str| {
+        line.trim()
+            .trim_start_matches(['#', '>', '-', '*', ' '])
+            .trim()
+            .to_string()
+    };
+    // A leading "## Summary" heading says nothing the card does not already say, so
+    // prefer the first line of prose and fall back to the heading only if that is
+    // all there is.
+    let body = result
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("```"))
+        .map(strip)
+        .filter(|line| !line.is_empty());
+    let line = body.unwrap_or_else(|| {
+        result
+            .lines()
+            .map(strip)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+    });
+    if line.is_empty() {
+        "Done".to_string()
+    } else {
+        bounded(&line, TASK_RESULT_SUMMARY_BYTES)
+    }
+}
+
+const TASK_RESULT_SUMMARY_BYTES: usize = 140;
 
 fn is_subagent_task_tool(kind: agent_client_protocol::schema::v1::ToolKind, title: &str) -> bool {
     let normalized = title
@@ -2488,6 +2526,63 @@ mod tests {
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
         }
+    }
+
+    #[test]
+    fn a_finished_sub_agent_card_states_the_outcome_without_dumping_the_result() {
+        // The result is markdown and routinely runs to kilobytes. Rendering it on the
+        // card buries the transcript before the user has asked to see it.
+        let body = format!(
+            "<task_result>\n# Summary\n\nAdded retry logic to the client.\n\n{}\n</task_result>",
+            "detail line\n".repeat(200)
+        );
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("Working\n".to_string()),
+        ));
+
+        let cards = subagent_cards(&projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set(body.clone()),
+        )));
+        assert_eq!(cards.len(), 1, "expected one card, got {cards:?}");
+        let text = &cards[0].1;
+
+        assert!(
+            text.contains("Sub-agent completed"),
+            "card must state the outcome: {text}"
+        );
+        assert!(
+            text.contains("Added retry logic to the client."),
+            "card must keep a one-line summary: {text}"
+        );
+        assert!(
+            !text.contains("detail line"),
+            "card must not dump the result body: {text}"
+        );
+        assert!(
+            text.len() < 400,
+            "card grew to {} bytes: {text}",
+            text.len()
+        );
+    }
+
+    #[test]
+    fn a_result_summary_survives_markdown_and_empty_bodies() {
+        assert_eq!(
+            summarize_task_result("## Done\n\nShipped it."),
+            "Shipped it."
+        );
+        assert_eq!(summarize_task_result("- first item\nsecond"), "first item");
+        assert_eq!(summarize_task_result("```\ncode\n```"), "code");
+        assert_eq!(summarize_task_result("###"), "Done");
+        assert_eq!(summarize_task_result("   "), "Done");
     }
 
     #[test]
