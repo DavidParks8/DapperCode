@@ -23,7 +23,11 @@ export const loadingWorkspaceRootsAtom = screenAtom(false);
 
 export const pendingAgentIdAtom = screenAtom<string | null>(null);
 
-export const runWatchdogNowAtom = screenAtom(0);
+/**
+ * "Now" for run-watchdog comparisons (`runWatchdogUntil > runWatchdogNow`). It must start at the
+ * current time: seeding it to 0 would make every watchdog look active until the first tick.
+ */
+export const runWatchdogNowAtom = screenAtom(() => Date.now());
 
 export const chatModelPreferencesLoadedAtom = screenAtom(false);
 

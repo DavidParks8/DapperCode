@@ -3,7 +3,7 @@ import { gitCheckoutRepoUrlAtom } from './gitCheckout';
 import { titleDraftAtom } from './modals';
 import { selectedModelIdAtom } from './models';
 import { listScreenAtomEntries, resetMainScreenStateAtom } from './registry';
-import { selectedChatIdAtom } from './session';
+import { runWatchdogNowAtom, selectedChatIdAtom } from './session';
 import { sendingAtom } from './turn';
 import { workspaceBrowsePathAtom } from './workspace';
 import { readdirSync, readFileSync } from 'fs';
@@ -68,6 +68,20 @@ describe('MainScreen atom registry', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('seeds the run-watchdog clock with the current time', () => {
+    // runWatchdogUntil is compared against this value, so a 0 baseline would report every
+    // watchdog as still running until the first tick.
+    const store = createTestStore();
+    // The module-load baseline is already a real timestamp rather than 0.
+    expect(store.get(runWatchdogNowAtom)).toBeGreaterThan(0);
+
+    // Every mount resets, and that reset has to produce a current timestamp.
+    store.set(runWatchdogNowAtom, 0);
+    const beforeReset = Date.now();
+    store.set(resetMainScreenStateAtom);
+    expect(store.get(runWatchdogNowAtom)).toBeGreaterThanOrEqual(beforeReset);
   });
 
   it('isolates screen state between stores', () => {
