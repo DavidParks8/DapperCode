@@ -6,7 +6,10 @@ import {
 import {
   generateLocalId,
   isChatMessagePart,
+  isFailedSubAgentState,
+  isTerminalSubAgentState,
   parseSnapshotTaskSubagent,
+  resolveSubAgentState,
   stringifyStructuredMessageContent,
 } from "./chatMappingPlanParsing";
 import {
@@ -62,20 +65,15 @@ export function mapMessages(
             raw.acpSnapshot?.session.agentId,
           );
           if (taskSubagent || isSnapshotSubagentTool(tool)) {
-            const state =
-              taskSubagent?.state ??
-              (["failed", "error"].includes(tool.status.toLowerCase())
-                ? "failed"
-                : ["completed", "complete", "succeeded"].includes(
-                      tool.status.toLowerCase(),
-                    )
-                  ? "completed"
-                  : "running");
+            const state = resolveSubAgentState(
+              tool.status,
+              taskSubagent?.state,
+            );
             const text = [
-              state === "completed"
-                ? "• Sub-agent completed"
-                : state === "failed"
-                  ? "• Sub-agent failed"
+              isFailedSubAgentState(state)
+                ? "• Sub-agent failed"
+                : isTerminalSubAgentState(state)
+                  ? "• Sub-agent completed"
                   : "• Sub-agent working",
               `  Status: ${state}`,
               taskSubagent?.result ? `  Latest: ${taskSubagent.result}` : null,

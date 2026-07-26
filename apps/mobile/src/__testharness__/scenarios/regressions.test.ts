@@ -1,4 +1,15 @@
 import { EventType, type AGUIEvent } from '@ag-ui/core';
+import { mapChat, toRawThread } from '../../api/chatMapping';
+import { resolveSubAgentState } from '../../api/chatMappingPlanParsing';
+import type { Chat, ChatSummary } from '../../api/types';
+import {
+  didAssistantMessageProgress,
+  isChatLikelyRunning,
+  isThreadOrSubAgentRunning,
+  OPENING_CHAT_ACTIVITY_TITLE,
+  retireOpeningChatActivity,
+} from '../../screens/mainScreenHelperStatus';
+import { assessChatSync } from '../../screens/controllers/chatSyncController';
 import { registerTestHarnessMatchers } from '../AssertionHelpers';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
@@ -980,5 +991,279 @@ describe('Sub-agents across turns', () => {
     expect(state).toHaveRunningSubAgents('parent', 1);
     expect(state).toHaveSubAgentCard('parent', 'child-1', { status: 'completed' });
     expect(state).toHaveSubAgentCard('parent', 'child-2', { status: 'running' });
+  });
+});
+
+describe('Settled sub-agents after a bridge restart', () => {
+  /**
+   * Reproduces "a long complete session showed as in progress".
+   *
+   * A `<task …>` header is only refreshed while the run that emitted it is alive. Restarting
+   * the bridge replays the thread from history, which settles the tool call to `completed`
+   * while leaving the last header it ever saw reading `state="running"`. Trusting the header
+   * there left every finished thread reporting a working sub-agent, on every future read.
+   */
+  it('reports a settled sub-agent tool as completed even when its header still says running', () => {
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-restarted',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-task-1' }],
+          messages: [],
+          tools: [
+            {
+              id: 'call-task-1',
+              kind: 'think',
+              status: 'completed',
+              title: 'Task',
+              content: '<task id="child-session" state="running">\nAudit the tests\n</task>',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: {
+            agentId: 'stub',
+            threadId: 'parent-restarted',
+            historyReconstruction: false,
+          },
+          active: { toolIds: [] },
+        },
+      })
+    );
+
+    const message = mapped.messages[0];
+    if (message.role !== 'activity') throw new Error('expected activity message');
+    expect(message.content.text).toContain('Sub-agent completed');
+    expect(message.content.text).not.toContain('Sub-agent working');
+    expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed' });
+  });
+
+  /** A failed child must not be laundered into a success just because the tool call ended. */
+  it('keeps a failed header when the tool call settles', () => {
+    expect(resolveSubAgentState('completed', 'failed')).toBe('failed');
+    expect(resolveSubAgentState('completed', 'cancelled')).toBe('cancelled');
+    expect(resolveSubAgentState('failed', 'running')).toBe('failed');
+  });
+
+  /** While the tool is genuinely in flight the header remains the better signal. */
+  it('still trusts the header while the tool call is unsettled', () => {
+    expect(resolveSubAgentState('in_progress', 'running')).toBe('running');
+    expect(resolveSubAgentState('pending', 'completed')).toBe('completed');
+    expect(resolveSubAgentState('in_progress', null)).toBe('running');
+  });
+});
+
+describe('Reopened threads after a bridge restart', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  function chatEndingWithPrompt(promptSentAt: number, updatedAt: number): Chat {
+    return {
+      id: 'thread-restarted',
+      title: 'Old thread',
+      createdAt: new Date(promptSentAt).toISOString(),
+      updatedAt: new Date(updatedAt).toISOString(),
+      status: null,
+      messages: [
+        {
+          id: 'm1',
+          role: 'user',
+          content: { text: 'do the thing' },
+          createdAt: new Date(promptSentAt).toISOString(),
+        },
+      ],
+    } as unknown as Chat;
+  }
+
+  /**
+   * Reproduces "a long complete session showed as in progress".
+   *
+   * Replaying a thread stamps `updatedAt` with the moment of the replay, so anchoring the
+   * "probably still running" heuristic to it made every reopened thread whose last message is
+   * a prompt look like it had just been sent — permanently "Working", with the composer
+   * blocked and a run watchdog armed for a run that ended days ago.
+   */
+  it('does not resurrect an old unanswered prompt when a reload refreshes updatedAt', () => {
+    const now = Date.now();
+    expect(isChatLikelyRunning(chatEndingWithPrompt(now - 72 * HOUR, now))).toBe(false);
+  });
+
+  it('still reports a prompt that was just sent as running', () => {
+    const now = Date.now();
+    expect(isChatLikelyRunning(chatEndingWithPrompt(now - 1000, now))).toBe(true);
+  });
+});
+
+describe('Sub-agent activity is scoped to the thread it belongs to', () => {
+  function summary(id: string, parentThreadId: string | null, status: string): ChatSummary {
+    return { id, title: id, parentThreadId, status } as unknown as ChatSummary;
+  }
+
+  function finishedChat(id: string): Chat {
+    return {
+      id,
+      title: id,
+      createdAt: '2026-07-18T12:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+      status: null,
+      messages: [
+        {
+          id: `${id}-a1`,
+          role: 'assistant',
+          content: { text: 'all done' },
+          createdAt: '2026-07-18T12:00:00.000Z',
+        },
+      ],
+    } as unknown as Chat;
+  }
+
+  /**
+   * Reproduces a finished session opening as "in progress".
+   *
+   * `relatedAgentThreads` describes the whole tree of the thread that was open last and is
+   * replaced asynchronously, so right after switching chats it still describes the previous
+   * one. Counting any parented thread meant the chat you just opened inherited the previous
+   * chat's live sub-agent and sat on "Working" with the composer blocked.
+   */
+  it('ignores a live sub-agent that belongs to a different thread', () => {
+    const stale = [summary('other-child', 'other-parent', 'running')];
+    expect(isThreadOrSubAgentRunning(finishedChat('thread-a'), stale)).toBe(false);
+  });
+
+  it('still reports its own live sub-agent, at any depth', () => {
+    const own = [
+      summary('child', 'thread-a', 'idle'),
+      summary('grandchild', 'child', 'running'),
+    ];
+    expect(isThreadOrSubAgentRunning(finishedChat('thread-a'), own)).toBe(true);
+  });
+
+  it('ignores a live sibling of the sub-agent thread being viewed', () => {
+    const tree = [
+      summary('child-a', 'root', 'idle'),
+      summary('child-b', 'root', 'running'),
+    ];
+    expect(isThreadOrSubAgentRunning(finishedChat('child-a'), tree)).toBe(false);
+  });
+});
+
+describe('The "Opening chat" placeholder never outlives a load', () => {
+  const opening = { tone: 'running', title: OPENING_CHAT_ACTIVITY_TITLE } as const;
+
+  function chatWithStatus(status: Chat['status']): Chat {
+    return {
+      id: 'thread-a',
+      title: 'Thread',
+      createdAt: '2026-07-18T12:00:00.000Z',
+      updatedAt: '2026-07-18T12:00:00.000Z',
+      status,
+      messages: [],
+    } as unknown as Chat;
+  }
+
+  /**
+   * Reproduces a finished session opening as "in progress".
+   *
+   * Opening a chat writes a running placeholder before there is a transcript. A load that is
+   * superseded while opening returns before it can report the thread's status, and the
+   * revalidation that replaced it preserves runtime state and so deliberately leaves the
+   * header alone. The placeholder is a running state, so the header rendered "Working" on a
+   * finished thread — and nothing else reports on a thread that is not running, so it stayed.
+   */
+  it('retires the placeholder into the thread status', () => {
+    expect(retireOpeningChatActivity(opening, chatWithStatus('idle'))).toEqual({
+      tone: 'idle',
+      title: 'Ready',
+    });
+    expect(retireOpeningChatActivity(opening, chatWithStatus('complete'))).toEqual({
+      tone: 'complete',
+      title: 'Turn completed',
+    });
+  });
+
+  it('leaves a genuine running state alone', () => {
+    const working = { tone: 'running', title: 'Working' } as const;
+    expect(retireOpeningChatActivity(working, chatWithStatus('idle'))).toBe(working);
+  });
+
+  it('leaves a settled state alone', () => {
+    const ready = { tone: 'idle', title: 'Ready' } as const;
+    expect(retireOpeningChatActivity(ready, chatWithStatus('idle'))).toBe(ready);
+  });
+});
+
+describe('Opening a finished session does not look like a live run', () => {
+  function message(
+    id: string,
+    role: 'user' | 'assistant',
+    text: string
+  ): Chat['messages'][number] {
+    return {
+      id,
+      role,
+      createdAt: '2024-03-02T00:00:00.000Z',
+      content: text,
+    } as unknown as Chat['messages'][number];
+  }
+
+  function chatWith(messages: Chat['messages']): Chat {
+    return {
+      id: 'thread-a',
+      title: 'Thread',
+      createdAt: '2024-03-02T00:00:00.000Z',
+      updatedAt: '2024-03-02T00:00:00.000Z',
+      status: 'idle',
+      messages,
+    } as unknown as Chat;
+  }
+
+  /**
+   * Reproduces "a long complete session showed as in progress".
+   *
+   * Tapping a session selects it before its transcript exists, so the first poll compared a
+   * replayed fourteen-message history against an empty placeholder. That read as the assistant
+   * streaming, which armed the run watchdog, and the watchdog then kept the header on "Working"
+   * for a session that had been finished for days.
+   */
+  it('does not mistake a replayed transcript for a streaming assistant', () => {
+    const placeholder = chatWith([]);
+    const replayed = chatWith([
+      message('m1', 'user', 'spawn a subagent and add a multiply helper'),
+      message('m2', 'assistant', 'Done. multiply is added and the tests pass.'),
+    ]);
+
+    expect(didAssistantMessageProgress(placeholder, replayed)).toBe(false);
+
+    const assessment = assessChatSync(placeholder, replayed, false);
+    expect(assessment.shouldShowRunning).toBe(false);
+    expect(assessment.shouldRefreshWatchdog).toBe(false);
+  });
+
+  it('still reports a genuinely growing assistant message', () => {
+    const before = chatWith([
+      message('m1', 'user', 'hello'),
+      message('m2', 'assistant', 'Working on'),
+    ]);
+    const after = chatWith([
+      message('m1', 'user', 'hello'),
+      message('m2', 'assistant', 'Working on it now'),
+    ]);
+
+    expect(didAssistantMessageProgress(before, after)).toBe(true);
+    expect(assessChatSync(before, after, false).shouldShowRunning).toBe(true);
+  });
+
+  it('still reports a newly appended assistant message', () => {
+    const before = chatWith([message('m1', 'user', 'hello')]);
+    const after = chatWith([
+      message('m1', 'user', 'hello'),
+      message('m2', 'assistant', 'On it.'),
+    ]);
+
+    expect(didAssistantMessageProgress(before, after)).toBe(true);
   });
 });

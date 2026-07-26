@@ -1036,7 +1036,10 @@ describe('mainScreenHelpers branch behavior', () => {
 
     // A running parent is working regardless of its sub-agents.
     expect(helpers.isThreadOrSubAgentRunning(chat({ status: 'running' }), [])).toBe(true);
-    expect(helpers.isThreadOrSubAgentRunning(null, [busyChild])).toBe(true);
+
+    // With no thread open there is nothing for a sub-agent to be working on behalf of, and
+    // the list still describes whichever thread was open last.
+    expect(helpers.isThreadOrSubAgentRunning(null, [busyChild])).toBe(false);
   });
 
   it('evaluates running and unanswered chat heuristics', () => {
@@ -1051,8 +1054,11 @@ describe('mainScreenHelpers branch behavior', () => {
     const unknownStatus = 'unknown' as ChatStatus;
     expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [] }))).toBe(false);
     expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('a', 'assistant', 'x')] }))).toBe(false);
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x')], updatedAt: 'bad' }))).toBe(false);
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x')], updatedAt: new Date(now - 1000).toISOString() }))).toBe(true);
+    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x', 'bad')] }))).toBe(false);
+    // Anchored to when the prompt was sent, not to `updatedAt`: a reload refreshes `updatedAt`,
+    // and trusting it reopened long-finished threads as "Working" forever.
+    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x')], updatedAt: new Date(now - 1000).toISOString() }))).toBe(false);
+    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString())] }))).toBe(true);
     expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [] }))).toBe(false);
     expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', 'bad')] }))).toBe(false);
     expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString()), message('a', 'assistant', 'done')] }))).toBe(false);

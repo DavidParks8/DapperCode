@@ -35,6 +35,55 @@ export function parseSnapshotTaskSubagent(
   };
 }
 
+const FAILED_SUBAGENT_STATES = new Set([
+  "failed",
+  "error",
+  "aborted",
+  "cancelled",
+  "canceled",
+]);
+
+const TERMINAL_SUBAGENT_STATES = new Set([
+  ...FAILED_SUBAGENT_STATES,
+  "completed",
+  "complete",
+  "succeeded",
+  "closed",
+]);
+
+export function isFailedSubAgentState(state: string): boolean {
+  return FAILED_SUBAGENT_STATES.has(state.trim().toLowerCase());
+}
+
+export function isTerminalSubAgentState(state: string): boolean {
+  return TERMINAL_SUBAGENT_STATES.has(state.trim().toLowerCase());
+}
+
+/**
+ * Resolves the state a sub-agent card should report.
+ *
+ * The `<task …>` header is written by the agent and is only refreshed while the run that
+ * produced it is alive. A bridge restart — or any reload that replays history — settles the
+ * tool call to `completed` while leaving the last header it ever saw reading `state="running"`.
+ * Trusting the header there leaves a finished thread showing "Sub-agent working" forever, so a
+ * settled tool call always wins. The header is still consulted for terminal states so a child
+ * that failed is not reported as a plain success.
+ */
+export function resolveSubAgentState(
+  toolStatus: string,
+  headerState: string | null | undefined,
+): string {
+  const normalizedTool = toolStatus.trim().toLowerCase();
+  const header = headerState?.trim() ? headerState.trim() : null;
+  if (isFailedSubAgentState(normalizedTool)) {
+    return header && isFailedSubAgentState(header) ? header : "failed";
+  }
+  if (isTerminalSubAgentState(normalizedTool)) {
+    return header && isFailedSubAgentState(header) ? header : "completed";
+  }
+  return header ?? "running";
+}
+
 export function base64UrlUtf8(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = "";

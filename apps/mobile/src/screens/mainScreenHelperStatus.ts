@@ -10,6 +10,7 @@ import { stripMarkdownInline, toTickerSnippet } from './mainScreenHelperTimeline
 import {
   LIKELY_RUNNING_RECENT_UPDATE_MS,
   UNANSWERED_USER_RUNNING_TTL_MS,
+  type ActivityState,
 } from './mainScreenHelperTypes';
 
 export function normalizeExternalStatusHint(value: string | null | undefined): string | null {
@@ -171,8 +172,12 @@ export function isChatSummaryLikelyRunning(chat: ChatSummary): boolean {
  * A parent's own run can settle to `complete` while a sub-agent it spawned is still
  * streaming. Reporting "Ready" then contradicts the sub-agent card spinning in the
  * same transcript, and makes the composer look safe to use when it is not.
- * `relatedAgentThreads` holds every descendant of the root, so this covers
- * sub-agents of sub-agents at any depth.
+ *
+ * Only descendants of `chat` count. `relatedAgentThreads` holds every thread in the root's
+ * tree — the selected thread's ancestors and siblings included — and it is refreshed
+ * asynchronously, so after switching chats it still describes the thread the user just left.
+ * Accepting any parented thread let one chat's live sub-agent pin an unrelated, finished chat
+ * to "Working" the moment it was opened second.
  */
 export function isThreadOrSubAgentRunning(
   chat: Chat | null,
@@ -182,12 +187,46 @@ export function isThreadOrSubAgentRunning(
     return true;
   }
 
-  return relatedAgentThreads.some(
-    (thread) =>
-      thread.id !== chat?.id &&
-      Boolean(thread.parentThreadId) &&
-      isChatSummaryLikelyRunning(thread)
-  );
+  if (!chat) {
+    return false;
+  }
+
+  return descendantsOf(chat.id, relatedAgentThreads).some(isChatSummaryLikelyRunning);
+}
+
+function descendantsOf(
+  threadId: string,
+  relatedAgentThreads: readonly ChatSummary[]
+): ChatSummary[] {
+  const byParent = new Map<string, ChatSummary[]>();
+  for (const thread of relatedAgentThreads) {
+    const parentThreadId = thread.parentThreadId;
+    if (!parentThreadId || thread.id === threadId) {
+      continue;
+    }
+    const siblings = byParent.get(parentThreadId);
+    if (siblings) {
+      siblings.push(thread);
+    } else {
+      byParent.set(parentThreadId, [thread]);
+    }
+  }
+
+  const descendants: ChatSummary[] = [];
+  const seen = new Set<string>([threadId]);
+  const queue = [threadId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const child of byParent.get(current) ?? []) {
+      if (seen.has(child.id)) {
+        continue;
+      }
+      seen.add(child.id);
+      descendants.push(child);
+      queue.push(child.id);
+    }
+  }
+  return descendants;
 }
 
 export function isChatLikelyRunning(chat: Chat): boolean {
@@ -205,12 +244,16 @@ export function isChatLikelyRunning(chat: Chat): boolean {
     return false;
   }
 
-  const updatedAtMs = Date.parse(chat.updatedAt);
-  if (!Number.isFinite(updatedAtMs)) {
+  // Anchored to when the prompt was written, not to `chat.updatedAt`. A reload rewrites
+  // `updatedAt` — replaying a thread after the bridge restarts stamps it with the moment of
+  // the replay — so an unanswered prompt from days ago looked like it had just been sent and
+  // every such thread reopened as "Working" and never settled.
+  const promptSentAtMs = Date.parse(lastMessage.createdAt);
+  if (!Number.isFinite(promptSentAtMs)) {
     return false;
   }
 
-  return Date.now() - updatedAtMs < LIKELY_RUNNING_RECENT_UPDATE_MS;
+  return Date.now() - promptSentAtMs < LIKELY_RUNNING_RECENT_UPDATE_MS;
 }
 
 export function hasRecentUnansweredUserTurn(chat: Chat): boolean {
@@ -243,6 +286,14 @@ export function hasRecentUnansweredUserTurn(chat: Chat): boolean {
 
 export function didAssistantMessageProgress(previous: Chat | null, next: Chat): boolean {
   if (!previous || previous.id !== next.id) {
+    return false;
+  }
+
+  // An empty previous transcript is not a baseline, it is the placeholder shown between
+  // tapping a session and its history arriving. Treating the jump from nothing to a full
+  // replayed transcript as progress armed the run watchdog on every open, so a session that
+  // finished days ago announced itself as working for as long as the watchdog ran.
+  if (previous.messages.length === 0) {
     return false;
   }
 
@@ -370,4 +421,48 @@ export function toPendingApproval(value: unknown): PendingApproval | null {
         })
       : [],
   };
+}
+
+/**
+ * The header state written while a chat is being opened, before there is a transcript.
+ *
+ * It is a placeholder, not a report about the thread, so anything that finishes a load has to
+ * retire it.
+ */
+export const OPENING_CHAT_ACTIVITY_TITLE = 'Opening chat';
+
+/**
+ * The header state a thread that is not running should settle on.
+ */
+export function resolveSettledActivity(chat: Chat): ActivityState {
+  if (chat.status === 'complete') {
+    return { tone: 'complete', title: 'Turn completed' };
+  }
+  if (chat.status === 'error') {
+    return {
+      tone: 'error',
+      title: 'Turn failed',
+      detail: chat.lastError ?? undefined,
+    };
+  }
+  return { tone: 'idle', title: 'Ready' };
+}
+
+/**
+ * Retires the "Opening chat" placeholder once a load has produced a transcript.
+ *
+ * A load that is superseded while opening a chat returns before it can report the thread's
+ * status, and the revalidation that replaced it preserves runtime state and so deliberately
+ * leaves the header alone. Between them the placeholder was never retired, and because it is
+ * a running state the header rendered "Working" on a finished thread until something else
+ * happened to write it. Nothing else reports on a thread that is not running, so it never did.
+ */
+export function retireOpeningChatActivity(
+  current: ActivityState,
+  chat: Chat
+): ActivityState {
+  if (current.tone !== 'running' || current.title !== OPENING_CHAT_ACTIVITY_TITLE) {
+    return current;
+  }
+  return resolveSettledActivity(chat);
 }

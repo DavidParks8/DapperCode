@@ -49,6 +49,7 @@ export interface DrawerAttentionModel {
   workingCount: number;
   recentCount: number;
   visibleChatCount: number;
+  sessionCount: number;
 }
 
 interface PendingInteractionSummary {
@@ -199,6 +200,9 @@ export function buildDrawerAttentionModel({
     recentCount: rowsByLane.recent.length,
     visibleChatCount:
       rowsByLane.attention.length + rowsByLane.working.length + rowsByLane.recent.length,
+    // Sub-agents are reported inside their parent's transcript rather than as sessions of
+    // their own, so counting them makes the footer contradict the list above it.
+    sessionCount: chats.filter((chat) => !isSubAgentSource(chat.sourceKind)).length,
   };
 }
 

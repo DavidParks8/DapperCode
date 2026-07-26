@@ -17,7 +17,8 @@ import {
   agentDetailParentChatAtom,
   agentDetailStackAtom,
   agentDetailThreadIdAtom,
-  agentRootThreadIdAtom
+  agentRootThreadIdAtom,
+  relatedAgentThreadsAtom
 } from '../state/mainScreen/workspace';
 import {
   activityAtom,
@@ -28,6 +29,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import { resolveEquivalentChat } from './mainScreenChatState';
+import { OPENING_CHAT_ACTIVITY_TITLE } from './mainScreenHelpers';
 import type { MainScreenChatLoadPipelineContext, MainScreenChatLoadPipelineResult } from './mainScreenChatLoadPipeline';
 import {
   agentThreadMenuVisibleAtom
@@ -75,6 +77,8 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
+  const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
   const agentDetailStack = useAtomValue(agentDetailStackAtom);
   const setAgentDetailThreadId = useSetAtom(agentDetailThreadIdAtom);
   const setAgentDetailStack = useSetAtom(agentDetailStackAtom);
@@ -135,6 +139,11 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       setSelectedChatId(id);
       openingChatStartedAtRef.current = hasHydratedSnapshot ? 0 : Date.now();
       setOpeningChatId(hasHydratedSnapshot ? null : id);
+      // The previous chat's sub-agent tree describes work that has nothing to do with this
+      // chat, and the refresh that replaces it is asynchronous. Leaving it in place made a
+      // finished chat open as "Working" whenever the chat before it had a live sub-agent.
+      setRelatedAgentThreads([]);
+      setAgentRootThreadId(null);
       setSending(false);
       setCreating(false);
       setError(null);
@@ -160,7 +169,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       }
       setActivity({
         tone: 'running',
-        title: 'Opening chat',
+        title: OPENING_CHAT_ACTIVITY_TITLE,
       });
 
       applyThreadRuntimeSnapshot(id);

@@ -178,6 +178,7 @@ impl AcpSession {
         }
         if commit {
             state.snapshot.history_reconstruction = false;
+            state.snapshot.settle_unresolved_subagents_without_run();
         }
     }
     pub async fn admit_prompt(
@@ -888,7 +889,10 @@ impl SessionRegistry {
                         state.pending_notification_count.saturating_sub(1);
                     Some(notification)
                 } else {
-                    session.inner.lock().await.snapshot.history_reconstruction = false;
+                    let mut inner = session.inner.lock().await;
+                    inner.snapshot.history_reconstruction = false;
+                    inner.snapshot.settle_unresolved_subagents_without_run();
+                    drop(inner);
                     let last_access = state.next_access;
                     state.next_access = state.next_access.saturating_add(1);
                     state.sessions.insert(
