@@ -193,15 +193,6 @@ private final class BridgeModel: ObservableObject {
         ["running", "degraded", "unhealthy", "inaccessible"].contains(snapshot.state)
     }
 
-    var statusSymbol: String {
-        switch snapshot.state {
-        case "running": return "checkmark.circle.fill"
-        case "degraded", "unhealthy", "inaccessible", "error": return "exclamationmark.triangle.fill"
-        case "stopped", "needsSetup": return "pause.circle.fill"
-        default: return "arrow.trianglehead.2.clockwise.rotate.90"
-        }
-    }
-
     var primaryTitle: String { isRunning || snapshot.managedProcess ? "Stop Bridge" : "Start Bridge" }
 
     init() {
@@ -598,6 +589,31 @@ private enum QRCode {
     }
 }
 
+private enum TrayIcon {
+    private static let size = NSSize(width: 18, height: 18)
+    private static let active = render(opacity: 1)
+    private static let idle = render(opacity: 0.45)
+
+    static func image(isRunning: Bool) -> NSImage { isRunning ? active : idle }
+
+    private static func render(opacity: CGFloat) -> NSImage {
+        guard let mark = NSImage(named: "MenuBarIcon") ?? fallbackMark() else { return NSImage(size: size) }
+        let image = NSImage(size: size, flipped: false) { rect in
+            mark.draw(in: rect, from: .zero, operation: .sourceOver, fraction: opacity)
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    private static func fallbackMark() -> NSImage? {
+        NSImage(
+            systemSymbolName: "chevron.left.forwardslash.chevron.right",
+            accessibilityDescription: "DapperCode"
+        )
+    }
+}
+
 @main
 private struct TetherCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -607,7 +623,8 @@ private struct TetherCodeApp: App {
         MenuBarExtra {
             TrayMenu(model: model)
         } label: {
-            Label("TetherCode", systemImage: model.statusSymbol)
+            Image(nsImage: TrayIcon.image(isRunning: model.isRunning))
+                .accessibilityLabel("DapperCode: \(model.snapshot.headline)")
         }
         .menuBarExtraStyle(.menu)
 

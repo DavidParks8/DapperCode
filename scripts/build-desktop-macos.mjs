@@ -68,6 +68,18 @@ function makeIcon() {
   rmSync(iconset, { recursive: true, force: true });
 }
 
+function makeMenuBarIcon() {
+  const source = path.join(rootDir, 'apps/mobile/assets/brand/mark.png');
+  const cropped = path.join(distDir, 'menu-bar-mark.png');
+  run('sips', ['-c', '168', '168', source, '--out', cropped], { stdio: 'ignore' });
+  for (const [name, pixels] of [['MenuBarIcon.png', 18], ['MenuBarIcon@2x.png', 36]]) {
+    run('sips', ['-z', String(pixels), String(pixels), cropped, '--out', path.join(resourcesDir, name)], {
+      stdio: 'ignore',
+    });
+  }
+  rmSync(cropped, { force: true });
+}
+
 function walk(directory) {
   const paths = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -97,6 +109,8 @@ function assertRustNativeBundle() {
     path.join(macosDir, 'TetherCode'),
     path.join(binDir, 'tethercode'),
     path.join(binDir, 'tethercode-bridge'),
+    path.join(resourcesDir, 'MenuBarIcon.png'),
+    path.join(resourcesDir, 'MenuBarIcon@2x.png'),
   ];
   for (const file of required) {
     if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`Missing bundled executable: ${file}`);
@@ -137,6 +151,7 @@ run('node', [
 ]);
 
 makeIcon();
+makeMenuBarIcon();
 const version = packageVersion();
 const bundleVersion = version.split('-', 1)[0];
 writeFileSync(path.join(contentsDir, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
