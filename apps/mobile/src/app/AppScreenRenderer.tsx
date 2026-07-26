@@ -71,11 +71,13 @@ export function AppScreenRenderer() {
       return <PrivacyScreen policyUrl={env.privacyPolicyUrl} onOpenDrawer={onOpenDrawer} />;
     case 'Terms':
       return <TermsScreen termsUrl={env.termsOfServiceUrl} onOpenDrawer={onOpenDrawer} />;
+    case 'Main':
     case 'WorkspacePicker':
     case 'GitCheckout':
-      return <ScreenStack pushed={pushedScreen}>{mainScreen}</ScreenStack>;
     default:
-      return mainScreen;
+      // One shared shape for the chat and the screens pushed over it, so pushing and popping
+      // never remounts the chat.
+      return <ScreenStack pushed={pushedScreen}>{mainScreen}</ScreenStack>;
   }
 }
 
