@@ -69,6 +69,7 @@ npm run typecheck
 npm run test
 npm run contract:check
 npm run coverage:rust
+npm run release:testflight -- --dry-run
 ```
 
 Do not automatically restart a user bridge during debugging unless explicitly requested.
