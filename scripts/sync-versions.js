@@ -85,7 +85,7 @@ function replaceNamedPackageVersionInCargoLock(source, packageName, version, rel
 function replacePackageVersionInCargoLock(source, version, relativePath) {
   return replaceNamedPackageVersionInCargoLock(
     source,
-    'tethercode-bridge',
+    'dappercode-bridge',
     version,
     relativePath
   );
@@ -139,7 +139,7 @@ function collectVersionUpdates(rootDir) {
       desktopCargoLockPath,
       replaceNamedPackageVersionInCargoLock(
         load(desktopCargoLockPath),
-        'tethercode-desktop',
+        'dappercode-desktop',
         version,
         desktopCargoLockPath
       )
@@ -178,7 +178,7 @@ function collectVersionUpdates(rootDir) {
 
   const iosRoot = path.join(rootDir, 'apps/mobile/ios');
   if (fs.existsSync(iosRoot)) {
-    const infoPlistPath = 'apps/mobile/ios/TetherCodeMobile/Info.plist';
+    const infoPlistPath = 'apps/mobile/ios/DapperCodeMobile/Info.plist';
     const infoPlist = load(infoPlistPath);
     updates.set(infoPlistPath, replaceExactly(
       infoPlist,
@@ -188,7 +188,7 @@ function collectVersionUpdates(rootDir) {
       'CFBundleShortVersionString'
     ));
 
-    const xcodeProjectPath = 'apps/mobile/ios/TetherCodeMobile.xcodeproj/project.pbxproj';
+    const xcodeProjectPath = 'apps/mobile/ios/DapperCodeMobile.xcodeproj/project.pbxproj';
     const xcodeProject = load(xcodeProjectPath);
     updates.set(xcodeProjectPath, replaceExactly(
       xcodeProject,

@@ -619,7 +619,7 @@ impl AgentManager {
             .await;
             results.push((manifest, result));
         }
-        let storage_dir = storage_root.join(".tethercode");
+        let storage_dir = storage_root.join(".dappercode");
         tokio::fs::create_dir_all(&storage_dir)
             .await
             .map_err(|error| AgentManagerError::SessionIndex(error.to_string()))?;
@@ -2624,7 +2624,7 @@ mod tests {
                             SessionInfo::new("", "/tmp"),
                             SessionInfo::new(
                                 "invalid-cwd",
-                                "/definitely/missing/tethercode-remote-workspace",
+                                "/definitely/missing/dappercode-remote-workspace",
                             ),
                         ])
                         .next_cursor("page-2")
@@ -3594,7 +3594,7 @@ mod tests {
     #[tokio::test]
     async fn durable_index_survives_restart_for_agent_without_list_capability() {
         let directory =
-            std::env::temp_dir().join(format!("tethercode-session-index-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("dappercode-session-index-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let index_path = directory.join(SESSION_INDEX_FILE);
         let (observed, _) = mpsc::unbounded_channel();
@@ -3641,7 +3641,7 @@ mod tests {
     #[tokio::test]
     async fn durable_reads_lazy_reconstruct_typed_history_once_for_read_and_page() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-lazy-read-{}",
+            "dappercode-session-lazy-read-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -3766,7 +3766,7 @@ mod tests {
         let identity = AgentSessionId::new("alpha", "stale").unwrap();
         manager.session_index.lock().await.entries.push(index_entry(
             identity.clone(),
-            PathBuf::from("/definitely/missing/tethercode-workspace"),
+            PathBuf::from("/definitely/missing/dappercode-workspace"),
         ));
         assert!(matches!(
             manager.read_session(&identity.encode()).await,
@@ -3811,7 +3811,7 @@ mod tests {
     #[tokio::test]
     async fn durable_index_rejects_invalid_storage_and_bounds_valid_entries() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-index-validation-{}",
+            "dappercode-session-index-validation-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -3948,7 +3948,7 @@ mod tests {
     #[tokio::test]
     async fn durable_index_write_failure_rolls_back_and_retry_survives_restart() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-index-transaction-{}",
+            "dappercode-session-index-transaction-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -3986,7 +3986,7 @@ mod tests {
     #[tokio::test]
     async fn create_durability_failure_is_explicit_and_pending_list_flush_retries() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-create-durability-{}",
+            "dappercode-session-create-durability-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -4028,7 +4028,7 @@ mod tests {
     #[tokio::test]
     async fn resume_durability_failure_retains_live_session_and_flushes_on_retry() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-resume-durability-{}",
+            "dappercode-session-resume-durability-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -4078,7 +4078,7 @@ mod tests {
     #[tokio::test]
     async fn workspace_policy_canonicalizes_relative_paths_and_rejects_outside_root() {
         let directory = std::env::temp_dir().join(format!(
-            "tethercode-session-workspace-policy-{}",
+            "dappercode-session-workspace-policy-{}",
             uuid::Uuid::new_v4()
         ));
         let nested = directory.join("nested");

@@ -329,7 +329,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
           {
             id: 'subagent:tc-sub-2',
             role: 'activity',
-            activityType: 'tethercode.subagent',
+            activityType: 'dappercode.subagent',
             content: { text: 'stale' },
             createdAt: '2024-01-01T00:00:02.000Z',
           } as ChatMessage,
@@ -349,7 +349,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
       expect(next.messages[0]).toMatchObject({
         id: 'subagent:tc-sub-2',
         role: 'activity',
-        activityType: 'tethercode.subagent',
+        activityType: 'dappercode.subagent',
       });
       const content = next.messages[0]?.role === 'activity' ? next.messages[0].content.text : '';
       expect(content).toContain('Spawned sub-agent');

@@ -2,7 +2,7 @@
 
 ## Supported Scope
 
-`tethercode` is intended for trusted/private networks only.
+`dappercode` is intended for trusted/private networks only.
 It is not designed to be exposed directly to the public internet.
 
 Security reports are especially valuable for:
@@ -33,8 +33,8 @@ We will acknowledge the report as soon as practical and work toward a fix and co
 - `BRIDGE_ALLOW_INSECURE_NO_AUTH=true` is restricted to literal loopback listeners. No-auth browser access to RPC, status, and local images accepts only the listener origin or exact `BRIDGE_NO_AUTH_ALLOWED_ORIGINS`; origin-less native/operator clients remain supported.
 - Never allow wildcard or `null` browser origins.
 - Do not expose the bridge directly to the public internet.
-- Desktop setup registers an ACP executable already installed by the user. It canonicalizes and hashes the executable before atomically writing `.tethercode/agents.json`; it never resolves or executes npm, npx, uvx, shell installer, registry, or floating package sources.
-- Treat `.tethercode/` as local executable state, not source data. It is ignored by Git. Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
+- Desktop setup registers an ACP executable already installed by the user. It canonicalizes and hashes the executable before atomically writing `.dappercode/agents.json`; it never resolves or executes npm, npx, uvx, shell installer, registry, or floating package sources.
+- Treat `.dappercode/` as local executable state, not source data. It is ignored by Git. Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
 - ACP agent processes do not inherit the bridge environment. Runtime clears the child environment, restores only `PATH`, `HOME`, `TMPDIR`, and `LANG` as a safe baseline, then applies validated manifest entries. Host references are limited to `CODEX_PATH`, `HOME`, `PATH`, and `XDG_CONFIG_HOME`. `BRIDGE_AUTH_TOKEN`, `EXPO_ACCESS_TOKEN`, and names matching token, key, secret, or password patterns are denied even as literals. Agent authentication has no broad default exception and requires a narrowly approved policy change.
 - Private Rust metadata writes set mode `0600` before publication, sync the temporary file, atomically rename relative to an open no-follow parent descriptor on Unix/macOS, and sync the parent directory before reporting success. Parent-sync failures propagate even when the replacement is already visible.
 - Credentialed Git network operations run with a cleared environment and controlled credential helper, ignore system/global configuration, reject repository, worktree, and included proxy/TLS/helper/URL-rewrite overrides, and force TLS verification with HTTPS as the only allowed transport. Process-level Git/curl proxy, CA, and TLS override variables cause the operation to fail closed. Credentials are never included in command output.

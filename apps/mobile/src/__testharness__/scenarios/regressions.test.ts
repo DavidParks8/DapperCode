@@ -336,7 +336,7 @@ describe('Sub-agent card lifecycle', () => {
         event: {
           type: EventType.ACTIVITY_SNAPSHOT,
           messageId: 'subagent:parent::task-1',
-          activityType: 'tethercode.subagent',
+          activityType: 'dappercode.subagent',
           content: {
             text: '• Sub-agent failed\n  Status: error\n  Latest: Child failed',
             subAgent: {
@@ -398,7 +398,7 @@ describe('Sub-agent card lifecycle', () => {
         event: {
           type: EventType.ACTIVITY_SNAPSHOT,
           messageId: 'subagent:parent::task-1',
-          activityType: 'tethercode.subagent',
+          activityType: 'dappercode.subagent',
           content: {
             text: '• Sub-agent failed\n  Status: failed\n  Latest: Child failed late',
             subAgent: {
@@ -424,7 +424,7 @@ describe('Sub-agent card lifecycle', () => {
             {
               id: 'subagent:parent::task-1',
               role: 'activity',
-              activityType: 'tethercode.subagent',
+              activityType: 'dappercode.subagent',
               content: {
                 text: '• Sub-agent completed\n  Status: completed\n  Latest: Wrapper completed',
                 subAgent: {
@@ -458,7 +458,7 @@ describe('Sub-agent card lifecycle', () => {
         event: {
           type: EventType.ACTIVITY_SNAPSHOT,
           messageId: 'subagent:parent::task-1',
-          activityType: 'tethercode.subagent',
+          activityType: 'dappercode.subagent',
           content: {
             text: '• Sub-agent failed\n  Status: failed\n  Latest: First attempt failed',
             subAgent: {
@@ -483,7 +483,7 @@ describe('Sub-agent card lifecycle', () => {
             {
               id: 'subagent:parent::task-1',
               role: 'activity',
-              activityType: 'tethercode.subagent',
+              activityType: 'dappercode.subagent',
               content: {
                 text: '• Sub-agent working\n  Status: running\n  Latest: Trying again',
                 subAgent: {
@@ -516,7 +516,7 @@ describe('Sub-agent card lifecycle', () => {
         event: {
           type: EventType.ACTIVITY_SNAPSHOT,
           messageId: 'subagent:parent::task-1',
-          activityType: 'tethercode.subagent',
+          activityType: 'dappercode.subagent',
           content: {
             text: '• Sub-agent failed\n  Status: failed\n  Latest: First attempt failed',
             subAgent: {
@@ -541,7 +541,7 @@ describe('Sub-agent card lifecycle', () => {
             {
               id: 'subagent:parent::task-1',
               role: 'activity',
-              activityType: 'tethercode.subagent',
+              activityType: 'dappercode.subagent',
               content: {
                 text: '• Sub-agent completed\n  Status: completed\n  Latest: Retry passed',
                 subAgent: {
@@ -577,7 +577,7 @@ describe('Sub-agent card lifecycle', () => {
             {
               id: 'subagent:parent::task-1',
               role: 'activity',
-              activityType: 'tethercode.subagent',
+              activityType: 'dappercode.subagent',
               content: {
                 text: '• Sub-agent completed\n  Status: completed\n  Latest: Done',
                 subAgent: {
@@ -745,12 +745,12 @@ describe('Tool rendering', () => {
     );
     state.apply('t1', 'run-1', {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-text',
+      name: 'dappercode.dev/tool-text',
       value: { toolCallId, revision: 'r1', content: 'export function add() {}\n' },
     } as never);
     state.apply('t1', 'run-1', {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-content',
+      name: 'dappercode.dev/tool-content',
       value: {
         toolCallId,
         revision: 'r2',
@@ -779,7 +779,7 @@ describe('Tool rendering', () => {
     );
     state.apply('t1', 'run-1', {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-content',
+      name: 'dappercode.dev/tool-content',
       value: {
         toolCallId,
         revision: 'r1',
@@ -808,12 +808,12 @@ describe('Tool rendering', () => {
     );
     state.apply('t1', 'run-1', {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-text',
+      name: 'dappercode.dev/tool-text',
       value: { toolCallId, revision: 'r1', content: '}' },
     } as never);
     state.apply('t1', 'run-1', {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-content',
+      name: 'dappercode.dev/tool-content',
       value: {
         toolCallId,
         revision: 'r2',
@@ -851,7 +851,7 @@ describe('Tool rendering', () => {
     ] as const) {
       state.apply('t1', 'run-1', {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/tool-content',
+        name: 'dappercode.dev/tool-content',
         value: { toolCallId, revision, content: [], locations: [{ path }] },
       } as never);
     }

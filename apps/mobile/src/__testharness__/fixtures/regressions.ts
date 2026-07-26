@@ -3,7 +3,7 @@ import type { Chat } from '../../api/types';
 import { sequence } from '../EventSequenceBuilder';
 import type { EventSequenceEntry } from '../EventSequenceBuilder';
 
-const SUBAGENT_ACTIVITY = 'tethercode.subagent';
+const SUBAGENT_ACTIVITY = 'dappercode.subagent';
 
 function chat(id: string, messages: Chat['messages']): Chat {
   return {

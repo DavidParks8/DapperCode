@@ -79,10 +79,10 @@ coverage/
 *.log
 *.pid
 *.seed
-.tethercode/
-.tethercode-push-registry.json
+.dappercode/
+.dappercode-push-registry.json
 .claude/
-.tethercode-attachments/
+.dappercode-attachments/
 /app.json
 export-cheat-sheet.local.md
 .agents/

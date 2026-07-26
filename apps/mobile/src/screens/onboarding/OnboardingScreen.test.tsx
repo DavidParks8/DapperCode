@@ -245,7 +245,7 @@ describe('OnboardingScreen behavior', () => {
     await act(async () => {
       readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({
         data: JSON.stringify({
-          type: 'tethercode-bridge-pair',
+          type: 'dappercode-bridge-pair',
           bridgeUrl: 'http://127.0.0.1:3001',
           bridgeToken: ' qr-token ',
         }),
@@ -275,9 +275,9 @@ describe('OnboardingScreen behavior', () => {
 
   it.each([
     ['bridge URL and token aliases', { url: 'ws://127.0.0.1:3001/', token: ' alias-token ' }, 'http://127.0.0.1:3001', 'alias-token'],
-    ['slash pair type', { type: ' TETHERCODE/BRIDGE-PAIR ', bridgeToken: 'slash-pair' }, '', 'slash-pair'],
-    ['dash token type', { type: 'tethercode-bridge-token', bridgeToken: 'dash-token' }, '', 'dash-token'],
-    ['slash token type', { type: 'tethercode/bridge-token', token: 'slash-token' }, '', 'slash-token'],
+    ['slash pair type', { type: ' DAPPERCODE/BRIDGE-PAIR ', bridgeToken: 'slash-pair' }, '', 'slash-pair'],
+    ['dash token type', { type: 'dappercode-bridge-token', bridgeToken: 'dash-token' }, '', 'dash-token'],
+    ['slash token type', { type: 'dappercode/bridge-token', token: 'slash-token' }, '', 'slash-token'],
     ['missing type', { bridgeToken: 'typeless' }, '', 'typeless'],
   ])('accepts QR JSON payload using %s', async (_name, payload, expectedUrl, expectedToken) => {
     mockCameraGranted = true;
@@ -311,7 +311,7 @@ describe('OnboardingScreen behavior', () => {
     '',
     JSON.stringify({ type: 42, bridgeUrl: 42, bridgeToken: 42 }),
     JSON.stringify({ type: 'other', bridgeToken: 'token' }),
-    JSON.stringify({ type: 'tethercode-bridge-pair', bridgeToken: '   ' }),
+    JSON.stringify({ type: 'dappercode-bridge-pair', bridgeToken: '   ' }),
     'https://example.com/?token=nope',
     'dappercode://pair',
   ])('rejects invalid QR form %p', async (data) => {
@@ -403,11 +403,11 @@ describe('OnboardingScreen behavior', () => {
 
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     await press(findByLabel(root, 'Share bridge setup guide'));
-    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://github.com/DavidParks8/TetherCode/blob/main/docs/setup-and-operations.md' }));
+    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md' }));
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     share.mockRejectedValueOnce(new Error('cancelled'));
     await press(findByLabel(root, 'Share bridge setup guide'));
-    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining('https://github.com/DavidParks8/TetherCode/blob/main/docs/setup-and-operations.md') }));
+    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining('https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md') }));
     act(() => result.tree.unmount());
   });
 

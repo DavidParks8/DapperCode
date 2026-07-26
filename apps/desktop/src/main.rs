@@ -106,7 +106,7 @@ fn run() -> Result<()> {
                 human,
             )
         }
-        _ => bail!("unknown command '{command}'; run 'tethercode help'"),
+        _ => bail!("unknown command '{command}'; run 'dappercode help'"),
     }
 }
 
@@ -210,7 +210,7 @@ fn emit<T: Serialize>(value: T, human: bool) -> Result<()> {
 fn workspace_arg(args: &mut Vec<String>) -> Result<PathBuf> {
     let workspace = option(args, "--workspace")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("TETHERCODE_WORKSPACE_ROOT").map(PathBuf::from))
+        .or_else(|| std::env::var_os("DAPPERCODE_WORKSPACE_ROOT").map(PathBuf::from))
         .unwrap_or(std::env::current_dir()?);
     Ok(workspace)
 }
@@ -257,8 +257,8 @@ fn split_args(value: &str) -> Vec<String> {
 
 fn print_help() {
     println!(
-        "TetherCode operator\n\n\
-Usage: tethercode <command> [--workspace PATH] [--human]\n\n\
+        "DapperCode operator\n\n\
+Usage: dappercode <command> [--workspace PATH] [--human]\n\n\
 Commands:\n\
   status\n\
   start\n\

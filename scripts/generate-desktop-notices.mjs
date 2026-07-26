@@ -82,7 +82,7 @@ function generate(rootDir) {
   }
 
   const lines = [
-    'TetherCode Desktop Third-Party Notices', '',
+    'DapperCode Desktop Third-Party Notices', '',
     'The macOS application uses operating-system SwiftUI/AppKit frameworks and bundles only Rust executables.', '',
     'Bundled Rust packages:', '',
     ...packages.map((pkg) => `- ${pkg.name} ${pkg.version} (${pkg.license})`),

@@ -4,9 +4,9 @@ import { Platform } from 'react-native';
 
 import type { AppStatePersistenceAdapter, LegacyAppStateSource } from './appState';
 
-const APP_STATE_STORE_KEY = 'tethercode.app-state.v1';
-const LEGACY_BRIDGE_PROFILE_STORE_KEY = 'tethercode.bridge-profiles.v1';
-const LEGACY_APP_SETTINGS_FILE = 'tethercode-app-settings.json';
+const APP_STATE_STORE_KEY = 'dappercode.app-state.v1';
+const LEGACY_BRIDGE_PROFILE_STORE_KEY = 'dappercode.bridge-profiles.v1';
+const LEGACY_APP_SETTINGS_FILE = 'dappercode-app-settings.json';
 
 interface WebStorageLike {
   getItem(key: string): string | null;

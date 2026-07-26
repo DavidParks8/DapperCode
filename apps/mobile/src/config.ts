@@ -1,9 +1,9 @@
 import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from './bridgeUrl';
 
 const defaultPrivacyPolicyUrl =
-  'https://github.com/DavidParks8/TetherCode/blob/main/docs/privacy-policy.md';
+  'https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md';
 const defaultTermsOfServiceUrl =
-  'https://github.com/DavidParks8/TetherCode/blob/main/docs/terms-of-service.md';
+  'https://github.com/DavidParks8/DapperCode/blob/main/docs/terms-of-service.md';
 
 const legacyHostBridgeUrl = normalizeBridgeUrlInput(
   process.env.EXPO_PUBLIC_HOST_BRIDGE_URL ??

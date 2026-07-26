@@ -8,21 +8,21 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 const { syncVersions } = require('../sync-versions.js');
 
-function createFixture(t, { cargoLockName = 'tethercode-bridge' } = {}) {
-  const root = mkdtempSync(path.join(tmpdir(), 'tethercode-version-sync-'));
+function createFixture(t, { cargoLockName = 'dappercode-bridge' } = {}) {
+  const root = mkdtempSync(path.join(tmpdir(), 'dappercode-version-sync-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
   const files = {
-    'package.json': { name: 'tethercode-workspace', version: '6.0.0-beta.1', private: true },
+    'package.json': { name: 'dappercode-workspace', version: '6.0.0-beta.1', private: true },
     'package-lock.json': {
-      name: 'tethercode-workspace',
+      name: 'dappercode-workspace',
       version: '5.2.3',
       packages: {
-        '': { name: 'tethercode-workspace', version: '5.2.3' },
-        'apps/mobile': { name: 'tethercode', version: '5.2.3' },
+        '': { name: 'dappercode-workspace', version: '5.2.3' },
+        'apps/mobile': { name: 'dappercode', version: '5.2.3' },
       },
     },
-    'apps/mobile/package.json': { name: 'tethercode', version: '5.2.3' },
+    'apps/mobile/package.json': { name: 'dappercode', version: '5.2.3' },
     'apps/mobile/app.json': {
       expo: {
         version: '5.2.3',
@@ -39,10 +39,10 @@ function createFixture(t, { cargoLockName = 'tethercode-bridge' } = {}) {
   }
   mkdirSync(path.join(root, 'services/rust-bridge'), { recursive: true });
   mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
-  writeFileSync(path.join(root, 'services/rust-bridge/Cargo.toml'), '[package]\nname = "tethercode-bridge"\nversion = "5.2.3"\n\n[dependencies]\n');
+  writeFileSync(path.join(root, 'services/rust-bridge/Cargo.toml'), '[package]\nname = "dappercode-bridge"\nversion = "5.2.3"\n\n[dependencies]\n');
   writeFileSync(path.join(root, 'services/rust-bridge/Cargo.lock'), `version = 4\n\n[[package]]\nname = "${cargoLockName}"\nversion = "5.2.3"\n`);
-  writeFileSync(path.join(root, 'apps/desktop/Cargo.toml'), '[package]\nname = "tethercode-desktop"\nversion = "5.2.3"\n\n[dependencies]\n');
-  writeFileSync(path.join(root, 'apps/desktop/Cargo.lock'), 'version = 4\n\n[[package]]\nname = "tethercode-desktop"\nversion = "5.2.3"\n');
+  writeFileSync(path.join(root, 'apps/desktop/Cargo.toml'), '[package]\nname = "dappercode-desktop"\nversion = "5.2.3"\n\n[dependencies]\n');
+  writeFileSync(path.join(root, 'apps/desktop/Cargo.lock'), 'version = 4\n\n[[package]]\nname = "dappercode-desktop"\nversion = "5.2.3"\n');
   return root;
 }
 
@@ -65,7 +65,7 @@ test('preflights every target before writing version metadata', (t) => {
 
   assert.throws(
     () => syncVersions({ rootDir }),
-    /Expected one tethercode-bridge package/
+    /Expected one dappercode-bridge package/
   );
   assert.equal(readFileSync(mobilePackagePath, 'utf8'), before);
 });

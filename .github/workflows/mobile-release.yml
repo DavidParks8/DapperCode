@@ -60,10 +60,10 @@ jobs:
         run: |
           npm run version:check
           npm run payment:check
-          npm run lint -w @tethercode/mobile
+          npm run lint -w @dappercode/mobile
           npm run duplicates:mobile
-          npm run typecheck -w @tethercode/mobile
-          npm run test:coverage -w @tethercode/mobile
+          npm run typecheck -w @dappercode/mobile
+          npm run test:coverage -w @dappercode/mobile
 
       - name: Validate submission policy
         env:
@@ -107,7 +107,7 @@ jobs:
         working-directory: apps/mobile
         run: |
           PROJECT_INFO="$(eas project:info --json --non-interactive)"
-          echo "$PROJECT_INFO" | grep -q '@davidparks8s-team/tethercode'
+          echo "$PROJECT_INFO" | grep -q '@davidparks8s-team/dappercode'
           echo "$PROJECT_INFO" | grep -q 'dc4bb45d-72cf-4c82-8fcd-f841b1ef6c71'
 
       - name: Build on EAS

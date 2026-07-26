@@ -70,11 +70,11 @@ private enum OperatorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable:
-            return "The bundled TetherCode operator is unavailable. Reinstall the app."
+            return "The bundled DapperCode operator is unavailable. Reinstall the app."
         case .failed(let message):
             return message
         case .invalidResponse:
-            return "The TetherCode operator returned an invalid response."
+            return "The DapperCode operator returned an invalid response."
         }
     }
 }
@@ -90,7 +90,7 @@ private final class OperatorProcessRegistry: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !isTerminating else {
-            throw OperatorError.failed("TetherCode is quitting.")
+            throw OperatorError.failed("DapperCode is quitting.")
         }
         try process.run()
         processes[ObjectIdentifier(process)] = process
@@ -132,7 +132,7 @@ private final class OperatorProcessRegistry: @unchecked Sendable {
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         OperatorProcessRegistry.shared.settleBeforeTermination()
-        guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/tethercode"),
+        guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
               FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
             return
         }
@@ -354,7 +354,7 @@ private final class BridgeModel: ObservableObject {
     private func invoke<Value: Decodable>(_ arguments: [String], as type: Value.Type) async throws -> Value {
         let workspace = workspace
         return try await Task.detached(priority: .userInitiated) {
-            guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/tethercode"),
+            guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
                   FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
                 throw OperatorError.unavailable
             }
@@ -525,7 +525,7 @@ private struct MainView: View {
         }
         .frame(width: 540)
         .disabled(model.isBusy)
-        .alert("TetherCode", isPresented: Binding(
+        .alert("DapperCode", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
@@ -549,7 +549,7 @@ private struct TrayMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Open TetherCode", systemImage: "macwindow") {
+        Button("Open DapperCode", systemImage: "macwindow") {
             openWindow(id: "main")
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
@@ -569,9 +569,9 @@ private struct TrayMenu: View {
             get: { model.launchAtLogin },
             set: { model.setLaunchAtLogin($0) }
         ))
-        Button("About TetherCode") { NSApplication.shared.orderFrontStandardAboutPanel(nil) }
+        Button("About DapperCode") { NSApplication.shared.orderFrontStandardAboutPanel(nil) }
         Divider()
-        Button("Quit TetherCode") { NSApplication.shared.terminate(nil) }
+        Button("Quit DapperCode") { NSApplication.shared.terminate(nil) }
     }
 }
 
@@ -615,7 +615,7 @@ private enum TrayIcon {
 }
 
 @main
-private struct TetherCodeApp: App {
+private struct DapperCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = BridgeModel()
 
@@ -628,7 +628,7 @@ private struct TetherCodeApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("TetherCode", id: "main") {
+        Window("DapperCode", id: "main") {
             MainView(model: model)
         }
         .defaultPosition(.center)

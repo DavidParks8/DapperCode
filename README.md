@@ -1,6 +1,6 @@
-# TetherCode
+# DapperCode
 
-TetherCode controls ACP-compatible coding agents from a phone. The desktop app owns an authenticated
+DapperCode controls ACP-compatible coding agents from a phone. The desktop app owns an authenticated
 Rust bridge beside your repositories; the Expo mobile app connects over a trusted LAN, VPN, or
 Tailscale network.
 
@@ -9,7 +9,7 @@ the public internet.
 
 ## Product Layout
 
-- `apps/desktop`: Rust `tethercode` operator plus the native macOS SwiftUI/AppKit shell
+- `apps/desktop`: Rust `dappercode` operator plus the native macOS SwiftUI/AppKit shell
 - `services/rust-bridge`: Axum bridge and ACP process manager
 - `apps/mobile`: Expo and React Native client
 - `contracts`: versioned bridge RPC fixtures
@@ -19,11 +19,11 @@ There is no npm bridge package and no JavaScript operator CLI. npm is used only 
 repository development toolchain. The macOS app bundles both Rust executables:
 
 ```text
-TetherCode.app
-├── Contents/MacOS/TetherCode                  # native SwiftUI/AppKit shell
+DapperCode.app
+├── Contents/MacOS/DapperCode                  # native SwiftUI/AppKit shell
 └── Contents/Resources/bin/
-    ├── tethercode                             # Rust operator CLI
-    └── tethercode-bridge                      # Rust bridge
+    ├── dappercode                             # Rust operator CLI
+    └── dappercode-bridge                      # Rust bridge
 ```
 
 ## macOS App
@@ -33,7 +33,7 @@ Build and open the self-contained app:
 ```bash
 npm ci
 npm run desktop:build:macos
-open apps/desktop/dist/TetherCode.app
+open apps/desktop/dist/DapperCode.app
 ```
 
 The app provides native menu-bar lifecycle, first-time setup, bridge start/stop/restart,
@@ -41,12 +41,12 @@ authenticated status, pairing QR, logs, workspace selection, and launch-at-login
 
 The shell uses standard SwiftUI and AppKit controls, menus, forms, materials, panels, and SF
 Symbols. It does not draw or freeze a custom theme. Appearance is inherited from the installed
-macOS version, so changes such as Liquid Glass are supplied by the OS without a TetherCode update.
+macOS version, so changes such as Liquid Glass are supplied by the OS without a DapperCode update.
 The equivalent guarantee on Windows will require a native WinUI shell so Mica and future Windows
 styling come from Windows itself.
 
 First-time setup registers an ACP executable already installed on the Mac, such as OpenCode. The
-Rust operator hashes that executable and atomically writes `.tethercode/agents.json` and
+Rust operator hashes that executable and atomically writes `.dappercode/agents.json` and
 `.env.secure`. It does not invoke npm, npx, Node.js, shell setup scripts, or floating package
 resolution.
 
@@ -67,7 +67,7 @@ npm run operator -- stop --workspace "$PWD"
 The installed app's operator is at:
 
 ```text
-TetherCode.app/Contents/Resources/bin/tethercode
+DapperCode.app/Contents/Resources/bin/dappercode
 ```
 
 The operator is the only bridge process-control authority. It serializes transitions with a
@@ -120,4 +120,4 @@ protected workflow. There is no npm publication workflow for the bridge.
 
 ## License
 
-TetherCode is distributed under the [MIT License](LICENSE).
+DapperCode is distributed under the [MIT License](LICENSE).

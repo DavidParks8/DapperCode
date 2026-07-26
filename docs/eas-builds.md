@@ -27,7 +27,7 @@ npm exec --workspace apps/mobile -- eas <command>
 - Logged in (`eas login`)
 - Access to the Expo organization `davidparks8s-team`
 
-The active app is linked as `@davidparks8s-team/tethercode` with EAS project ID
+The active app is linked as `@davidparks8s-team/dappercode` with EAS project ID
 `dc4bb45d-72cf-4c82-8fcd-f841b1ef6c71`. Verify it from `apps/mobile`:
 
 ```bash
@@ -88,7 +88,7 @@ the `preview` or `production` EAS profile, and can auto-submit production builds
 requested. Configure an `EXPO_TOKEN` secret in the protected `mobile-release` environment before
 running it. Store credentials remain in EAS or the platform stores, not in this repository.
 
-TetherCode currently includes no payment SDK, offering, tip jar, subscription, or inherited store
+DapperCode currently includes no payment SDK, offering, tip jar, subscription, or inherited store
 product configuration.
 
 ## Local Native Build Option (No EAS Cloud)

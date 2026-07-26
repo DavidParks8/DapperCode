@@ -457,7 +457,7 @@ impl BridgeSupervisor {
         let candidates = self.runtime.bridge_binary_candidates();
         resolve_existing_executable(&candidates).ok_or_else(|| {
             anyhow!(
-                "bridge binary is not installed; build it with 'cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml' or reinstall TetherCode"
+                "bridge binary is not installed; build it with 'cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml' or reinstall DapperCode"
             )
         })
     }
@@ -468,13 +468,13 @@ impl BridgeSupervisor {
 
     fn ownership_path(&self) -> PathBuf {
         self.workspace
-            .join(".tethercode")
+            .join(".dappercode")
             .join("desktop-bridge-process.json")
     }
 
     fn transition_lock_path(&self) -> PathBuf {
         self.workspace
-            .join(".tethercode")
+            .join(".dappercode")
             .join("desktop-bridge-transition.lock")
     }
 
@@ -916,9 +916,9 @@ mod tests {
     #[test]
     fn live_owned_process_with_failed_health_cannot_start_again() {
         let temp = tempdir().unwrap();
-        let agents_root = temp.path().join(".tethercode/agents");
+        let agents_root = temp.path().join(".dappercode/agents");
         fs::create_dir_all(&agents_root).unwrap();
-        let manifest = temp.path().join(".tethercode/agents.json");
+        let manifest = temp.path().join(".dappercode/agents.json");
         fs::write(&manifest, "{}\n").unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -949,7 +949,7 @@ mod tests {
                 identity
             })
             .expect("sleep process identity");
-        let ownership_path = temp.path().join(".tethercode/desktop-bridge-process.json");
+        let ownership_path = temp.path().join(".dappercode/desktop-bridge-process.json");
         let pid_path = temp.path().join(".bridge.pid");
         write_ownership_record(&ownership_path, &ownership).unwrap();
         write_compatibility_pid_file(&pid_path, ownership.pid).unwrap();

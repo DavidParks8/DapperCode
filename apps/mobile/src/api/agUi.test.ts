@@ -144,13 +144,13 @@ describe('AG-UI bridge notifications', () => {
       { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'message', delta: 'A' },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/message-content',
+        name: 'dappercode.dev/message-content',
         value: { messageId: 'message', role: 'agent', content: { type: 'image', url: 'image.png' } },
       },
       { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'message', delta: 'B' },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/message-content',
+        name: 'dappercode.dev/message-content',
         value: {
           messageId: 'message',
           role: 'agent',
@@ -159,7 +159,7 @@ describe('AG-UI bridge notifications', () => {
       },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/message-content',
+        name: 'dappercode.dev/message-content',
         value: {
           messageId: 'message',
           role: 'agent',
@@ -194,7 +194,7 @@ describe('AG-UI bridge notifications', () => {
       { type: EventType.REASONING_MESSAGE_CONTENT, messageId: 'reasoning-r', delta: 'R' },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/tool-text',
+        name: 'dappercode.dev/tool-text',
         value: { toolCallId: 'tool-t', revision: 'updated', content: 'updated' },
       },
     ];
@@ -240,7 +240,7 @@ describe('AG-UI bridge notifications', () => {
           runId: 'run',
           event: {
             type: EventType.CUSTOM,
-            name: 'tethercode.dev/tool-content-chunk',
+            name: 'dappercode.dev/tool-content-chunk',
             value: {
               canonicalId: 'tool',
               revision: 'sha256:fixture',
@@ -273,9 +273,9 @@ describe('AG-UI bridge notifications', () => {
       params: {
         threadId: 'thread',
         runId: 'run',
-        event: { type: EventType.CUSTOM, name: 'tethercode.dev/plan', value: { entries: [] } },
+        event: { type: EventType.CUSTOM, name: 'dappercode.dev/plan', value: { entries: [] } },
       },
-    })?.event).toMatchObject({ type: EventType.CUSTOM, name: 'tethercode.dev/plan' });
+    })?.event).toMatchObject({ type: EventType.CUSTOM, name: 'dappercode.dev/plan' });
     expect(parseAgUiEventNotification({
       method: 'bridge/agui.event',
       params: {
@@ -283,7 +283,7 @@ describe('AG-UI bridge notifications', () => {
         runId: 'run',
         event: {
           type: EventType.CUSTOM,
-          name: 'tethercode.dev/tool-content',
+          name: 'dappercode.dev/tool-content',
           value: {
             toolCallId: 'tool',
             content: [
@@ -297,7 +297,7 @@ describe('AG-UI bridge notifications', () => {
       },
     })?.event).toMatchObject({
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-content',
+      name: 'dappercode.dev/tool-content',
     });
   });
 
@@ -325,28 +325,28 @@ describe('AG-UI bridge notifications', () => {
       runId: 'run',
       event: {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/message-content',
+        name: 'dappercode.dev/message-content',
         value: { messageId: 'image', role: 'agent', content: { type: 'image', mimeType: 'image/png', data: 'redacted-fixture' } },
       },
     });
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
-      event: { type: EventType.CUSTOM, name: 'tethercode.dev/usage', value: { used: 10, size: 100 } },
+      event: { type: EventType.CUSTOM, name: 'dappercode.dev/usage', value: { used: 10, size: 100 } },
     });
     expect(messages(state)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'reasoning', role: 'reasoning', content: 'thinking' }),
       expect.objectContaining({ id: 'tool-result', role: 'tool', toolCallId: 'tool', content: expect.stringContaining('done') }),
       expect.objectContaining({ id: 'image', role: 'assistant' }),
     ]));
-    expect(state.thread?.customMetadata['tethercode.dev/usage']).toEqual({ used: 10, size: 100 });
+    expect(state.thread?.customMetadata['dappercode.dev/usage']).toEqual({ used: 10, size: 100 });
     expect(state.thread?.terminalMessageIds).toEqual(expect.arrayContaining(['reasoning', 'tool-call:tool']));
 
     for (let index = 0; index < 140; index += 1) {
       state = updateAgUiLiveAssistantMessages(state, {
         threadId: 'thread',
         runId: 'run',
-        event: { type: EventType.CUSTOM, name: `tethercode.dev/config-${index}`, value: { index } },
+        event: { type: EventType.CUSTOM, name: `dappercode.dev/config-${index}`, value: { index } },
       });
     }
     expect(messages(state).length).toBeLessThanOrEqual(128);
@@ -375,7 +375,7 @@ describe('AG-UI bridge notifications', () => {
   it('stores duplicate command metadata without rendering transcript rows', () => {
     const commandEvent: AGUIEvent = {
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/commands',
+      name: 'dappercode.dev/commands',
       value: { commands: [{ name: 'review', description: 'Review changes' }] },
     };
     let state: AgUiLiveAssistantMessages = {};
@@ -383,8 +383,8 @@ describe('AG-UI bridge notifications', () => {
     state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event: commandEvent });
 
     expect(messages(state)).toEqual([]);
-    expect(state.thread?.customMetadata['tethercode.dev/commands']).toEqual(commandEvent.value);
-    expect(state.thread?.customMetadataOrder).toEqual(['tethercode.dev/commands']);
+    expect(state.thread?.customMetadata['dappercode.dev/commands']).toEqual(commandEvent.value);
+    expect(state.thread?.customMetadataOrder).toEqual(['dappercode.dev/commands']);
   });
 
   it('keeps live assistant messages isolated by thread and run', () => {
@@ -543,7 +543,7 @@ describe('AG-UI bridge notifications', () => {
     });
     const structured = (revision: string, terminalId: string): AGUIEvent => ({
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-content',
+      name: 'dappercode.dev/tool-content',
       value: {
         toolCallId: 'tool',
         revision,
@@ -569,7 +569,7 @@ describe('AG-UI bridge notifications', () => {
       runId: 'run',
       event: {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/tool-content',
+        name: 'dappercode.dev/tool-content',
         value: { toolCallId: 'tool', revision: 'empty', content: [], locations: [] },
       },
     });
@@ -585,7 +585,7 @@ describe('AG-UI bridge notifications', () => {
     });
     const replacement = (revision: string, content: string): AGUIEvent => ({
       type: EventType.CUSTOM,
-      name: 'tethercode.dev/tool-text',
+      name: 'dappercode.dev/tool-text',
       value: { toolCallId: 'tool', revision, content },
     });
     state = updateAgUiLiveAssistantMessages(state, {
@@ -628,7 +628,7 @@ describe('AG-UI bridge notifications', () => {
     const subagent: AGUIEvent = {
       type: EventType.ACTIVITY_SNAPSHOT,
       messageId: 'subagent:task-1',
-      activityType: 'tethercode.subagent',
+      activityType: 'dappercode.subagent',
       replace: true,
       content: {
         text: '• Spawning sub-agent\n  Thread: child\n  Status: running\n  Result: Inspected README.',
@@ -650,7 +650,7 @@ describe('AG-UI bridge notifications', () => {
     expect(message).toMatchObject({
       id: 'subagent:task-1',
       role: 'activity',
-      activityType: 'tethercode.subagent',
+      activityType: 'dappercode.subagent',
     });
     expect(message.role).toBe('activity');
     if (message.role !== 'activity') {
@@ -682,12 +682,12 @@ describe('AG-UI bridge notifications', () => {
       },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/tool-text',
+        name: 'dappercode.dev/tool-text',
         value: { toolCallId: 'task-1', revision: 'late-text', content: 'late text' },
       },
       {
         type: EventType.CUSTOM,
-        name: 'tethercode.dev/tool-content',
+        name: 'dappercode.dev/tool-content',
         value: { toolCallId: 'task-1', revision: 'late-content', content: [], locations: [] },
       },
     ] as AGUIEvent[]) {
@@ -768,7 +768,7 @@ describe('AG-UI bridge notifications', () => {
     it('validates chunk metadata and handles reset, parse failure, and completed assemblies', () => {
       const chunk = (value: Record<string, unknown>): AgUiEventEnvelope => ({
         threadId: 'thread', runId: 'run',
-        event: { type: EventType.CUSTOM, name: 'tethercode.dev/message-content-chunk', value },
+        event: { type: EventType.CUSTOM, name: 'dappercode.dev/message-content-chunk', value },
       });
       const previous: AgUiLiveAssistantMessages = {};
       [
@@ -801,13 +801,13 @@ describe('AG-UI bridge notifications', () => {
     it('covers custom tool fallbacks, duplicate revisions, and generic custom events', () => {
       let state: AgUiLiveAssistantMessages = {};
       const customEvents: AGUIEvent[] = [
-        { type: EventType.CUSTOM, name: 'tethercode.dev/message-content', value: { role: 'other', content: { type: 'resourceLink', uri: 'file:///a' } } },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/tool-content', value: { content: [{ type: 'text', text: 'structured' }], locations: [] } },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/tool-text', value: {} },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/plan', value: { entries: [] } },
-        { type: EventType.CUSTOM, name: 'tethercode.dev/unknown', value: 'value' },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/message-content', value: { role: 'other', content: { type: 'resourceLink', uri: 'file:///a' } } },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-content', value: { content: [{ type: 'text', text: 'structured' }], locations: [] } },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: {} },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/plan', value: { entries: [] } },
+        { type: EventType.CUSTOM, name: 'dappercode.dev/unknown', value: 'value' },
       ];
       customEvents.forEach((event) => {
         state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event });
@@ -817,8 +817,8 @@ describe('AG-UI bridge notifications', () => {
         expect.objectContaining({ id: 'tool-result:unknown', role: 'tool' }),
       ]));
       expect(state.thread?.customMetadata).toEqual(expect.objectContaining({
-        'tethercode.dev/plan': { entries: [] },
-        'tethercode.dev/unknown': 'value',
+        'dappercode.dev/plan': { entries: [] },
+        'dappercode.dev/unknown': 'value',
       }));
     });
 

@@ -33,10 +33,10 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
     const bridgeToken = bridgeTokenRaw.trim();
     if (
       bridgeToken &&
-      (type === 'tethercode-bridge-pair' ||
-        type === 'tethercode/bridge-pair' ||
-        type === 'tethercode-bridge-token' ||
-        type === 'tethercode/bridge-token' ||
+      (type === 'dappercode-bridge-pair' ||
+        type === 'dappercode/bridge-pair' ||
+        type === 'dappercode-bridge-token' ||
+        type === 'dappercode/bridge-token' ||
         !type)
     ) {
       return bridgeUrl ? { bridgeToken, bridgeUrl } : { bridgeToken };

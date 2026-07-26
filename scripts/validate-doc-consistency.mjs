@@ -65,8 +65,8 @@ if (/content-free/i.test(push)) fail('push guide incorrectly describes payloads 
 
 const operations = readFileSync(path.join(root, 'docs/setup-and-operations.md'), 'utf8');
 for (const required of [
-  'tethercode-tree-v1',
-  '`.tethercode-install.json`',
+  'dappercode-tree-v1',
+  '`.dappercode-install.json`',
   '100,000 entries',
   '2 GiB',
   '4,096 UTF-8 bytes',

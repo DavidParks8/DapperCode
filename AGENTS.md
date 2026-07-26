@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TetherCode controls ACP-compatible coding agents from a phone.
+DapperCode controls ACP-compatible coding agents from a phone.
 
 - `apps/mobile`: Expo React Native client
 - `apps/desktop`: Rust operator plus native desktop shells
@@ -15,11 +15,11 @@ The bridge is private-network software. Never treat it as internet-safe by defau
 
 ### Desktop
 
-- `apps/desktop/src/main.rs`: Rust `tethercode` operator CLI and JSON contract
+- `apps/desktop/src/main.rs`: Rust `dappercode` operator CLI and JSON contract
 - `apps/desktop/src/setup.rs`: local ACP executable registration and secure config
 - `apps/desktop/src/supervisor.rs`: locked process lifecycle and authenticated status
 - `apps/desktop/src/config.rs`: runtime/resource/config discovery
-- `apps/desktop/macos/TetherCodeApp.swift`: native SwiftUI/AppKit menu-bar shell
+- `apps/desktop/macos/DapperCodeApp.swift`: native SwiftUI/AppKit menu-bar shell
 - `scripts/build-desktop-macos.mjs`: deterministic macOS app assembly
 
 The app bundle contains a native Swift executable and two Rust executables. It must not contain
@@ -34,7 +34,7 @@ SwiftUI/AppKit controls. Windows will require a native WinUI shell for Mica/futu
 - `src/services/git.rs`: Git helpers
 - `src/services/terminal.rs`: constrained terminal execution
 
-The bridge reads `.env.secure` and `.tethercode/agents.json`. Rust setup registers and hashes an
+The bridge reads `.env.secure` and `.dappercode/agents.json`. Rust setup registers and hashes an
 already-installed ACP executable; it does not install package-manager distributions.
 
 ### Mobile
@@ -72,7 +72,7 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 - Keep bridge contract changes mirrored in Rust, mobile types/client, fixtures, tests, and docs.
 - Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not npm scripts.
 - Never add an npm bridge package, JavaScript operator fallback, or bridge update RPC.
-- Preserve `.env.secure`, `.tethercode`, bridge logs, and user-installed agent state.
+- Preserve `.env.secure`, `.dappercode`, bridge logs, and user-installed agent state.
 - Cross-component mobile state lives in `apps/mobile/src/state` as jotai atoms; keep state used by a
   single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.
@@ -101,9 +101,9 @@ cargo test --locked --all-targets --all-features --manifest-path services/rust-b
 Mobile changes:
 
 ```bash
-npm run lint -w @tethercode/mobile
-npm run typecheck -w @tethercode/mobile
-npm run test -w @tethercode/mobile
+npm run lint -w @dappercode/mobile
+npm run typecheck -w @dappercode/mobile
+npm run test -w @dappercode/mobile
 ```
 
 Use `docs/setup-and-operations.md` for smoke tests and `docs/troubleshooting.md` for recovery.

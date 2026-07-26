@@ -1714,7 +1714,7 @@ describe('HostBridgeApiClient', () => {
                     },
                     {
                       type: 'localImage',
-                      path: '.tethercode-attachments/example.png',
+                      path: '.dappercode-attachments/example.png',
                     },
                   ],
                 },
@@ -1732,7 +1732,7 @@ describe('HostBridgeApiClient', () => {
         { path: 'apps/mobile/src/screens/MainScreen.tsx' },
         { path: 'apps/mobile/src/api/client.ts', name: 'client.ts' },
       ],
-      localImages: [{ path: '.tethercode-attachments/example.png' }],
+      localImages: [{ path: '.dappercode-attachments/example.png' }],
     });
 
     expect(ws.request).toHaveBeenNthCalledWith(
@@ -1756,7 +1756,7 @@ describe('HostBridgeApiClient', () => {
           }),
           expect.objectContaining({
             type: 'localImage',
-            path: '.tethercode-attachments/example.png',
+            path: '.dappercode-attachments/example.png',
           }),
         ]),
       })
@@ -1771,7 +1771,7 @@ describe('HostBridgeApiClient', () => {
       headers: {},
       mimeType: 'application/json',
       body: JSON.stringify({
-        path: '.tethercode-attachments/file.txt',
+        path: '.dappercode-attachments/file.txt',
         fileName: 'file.txt',
         mimeType: 'text/plain',
         sizeBytes: 10,
@@ -1801,7 +1801,7 @@ describe('HostBridgeApiClient', () => {
       uploadType: 1,
     });
     expect(ws.request).not.toHaveBeenCalled();
-    expect(uploaded.path).toBe('.tethercode-attachments/file.txt');
+    expect(uploaded.path).toBe('.dappercode-attachments/file.txt');
   });
 
   it('interruptTurn() calls turn/interrupt with thread and turn id', async () => {

@@ -9,11 +9,11 @@ import {
   View,
 } from 'react-native';
 
-import tethercodeMark from '../../assets/brand/mark.png';
+import dappercodeMark from '../../assets/brand/mark.png';
 import { useAppTheme, type AppTheme } from '../theme';
 
 type ChoiceActionVariant = 'primary' | 'secondary';
-type ChoiceActionLogo = 'github' | 'tethercode';
+type ChoiceActionLogo = 'github' | 'dappercode';
 
 interface ChoiceActionProps {
   title: string;
@@ -58,9 +58,9 @@ export function ChoiceAction({
           <ActivityIndicator size="small" color={iconColor} />
         ) : logo === 'github' ? (
           <Ionicons name="logo-github" size={19} color={iconColor} />
-        ) : logo === 'tethercode' ? (
+        ) : logo === 'dappercode' ? (
           <Image
-            source={tethercodeMark}
+            source={dappercodeMark}
             resizeMode="contain"
             style={[styles.logoImage, { tintColor: iconColor }]}
           />

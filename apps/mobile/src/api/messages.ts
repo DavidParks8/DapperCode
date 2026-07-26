@@ -2,10 +2,10 @@ import type { ActivityMessage, Message } from '@ag-ui/core';
 
 import type { ChatMessage, ChatMessageSubAgentMeta } from './types';
 
-export const SUBAGENT_ACTIVITY_TYPE = 'tethercode.subagent';
-export const COMPACTION_ACTIVITY_TYPE = 'tethercode.compaction';
+export const SUBAGENT_ACTIVITY_TYPE = 'dappercode.subagent';
+export const COMPACTION_ACTIVITY_TYPE = 'dappercode.compaction';
 
-export interface TetherCodeActivityContent extends Record<string, unknown> {
+export interface DapperCodeActivityContent extends Record<string, unknown> {
   text: string;
   subAgent?: ChatMessageSubAgentMeta;
 }
@@ -55,7 +55,7 @@ export function getToolCallDisplayLines(message: Message | ChatMessage): string[
 export function createActivityMessage(
   id: string,
   activityType: string,
-  content: TetherCodeActivityContent,
+  content: DapperCodeActivityContent,
   createdAt: string
 ): ChatMessage {
   return {

@@ -1,13 +1,13 @@
 # Changelog
 
-All notable TetherCode changes are documented here.
+All notable DapperCode changes are documented here.
 
 ## 0.1.0 - Unreleased
 
 ### Changed
 
 - Rebranded the mobile app, CLI, bridge, protocol extensions, persistence paths, and package
-	identities as TetherCode.
+	identities as DapperCode.
 - Reset native and hosted-service ownership so new Expo, Apple, Google, Firebase, npm, and store
 	accounts can be connected explicitly.
 - Removed the inherited payment SDK, tip purchase flow, payment environment variables, and

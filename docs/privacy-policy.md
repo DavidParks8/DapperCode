@@ -63,4 +63,4 @@ You are responsible for:
 
 For support, use the project support channel:
 
-https://github.com/DavidParks8/TetherCode/issues
+https://github.com/DavidParks8/DapperCode/issues

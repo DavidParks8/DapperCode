@@ -34,7 +34,7 @@ jest.mock('@expo/vector-icons', () => {
 describe('WorkspacePicker', () => {
   const theme = createAppTheme('dark');
   const oldSelectionPath =
-    '/Users/davidparks/Documents/github/serious-projects/tethercode';
+    '/Users/davidparks/Documents/github/serious-projects/dappercode';
   const githubPath = '/Users/davidparks/Documents/github';
   const seriousProjectsPath = '/Users/davidparks/Documents/github/serious-projects';
 
@@ -75,7 +75,7 @@ describe('WorkspacePicker', () => {
           onSelectPath,
           currentPath: seriousProjectsPath,
           parentPath: githubPath,
-          entries: [directoryEntry('tethercode', oldSelectionPath)],
+          entries: [directoryEntry('dappercode', oldSelectionPath)],
         })
       );
     });
@@ -315,7 +315,7 @@ describe('WorkspacePicker', () => {
     const action = root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0];
     expect(action.props.accessibilityHint).toBe('Create a checkout here');
     act(() => readOnPress(action.props)());
-    expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/tethercode');
+    expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/dappercode');
     act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)());
     expect(onClose).toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
@@ -351,13 +351,13 @@ describe('WorkspacePicker', () => {
       <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
         <AppThemeProvider theme={theme}>
           <WorkspacePicker
-            selectedPath="/Users/davidparks/Code/tethercode"
+            selectedPath="/Users/davidparks/Code/dappercode"
             bridgeRoot="/Users/davidparks/Code"
             recentWorkspaces={[{ path: '/Users/davidparks/Code', chatCount: 12 }]}
             favoriteWorkspacePaths={['/Users/davidparks/Code']}
             currentPath="/Users/davidparks/Code"
             parentPath="/Users/davidparks"
-            entries={[directoryEntry('tethercode', '/Users/davidparks/Code/tethercode'), directoryEntry('notes', '/Users/davidparks/Code/notes')]}
+            entries={[directoryEntry('dappercode', '/Users/davidparks/Code/dappercode'), directoryEntry('notes', '/Users/davidparks/Code/notes')]}
             onBrowsePath={jest.fn()}
             onSelectPath={jest.fn()}
             onClose={jest.fn()}

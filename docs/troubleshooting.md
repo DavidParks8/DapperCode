@@ -5,8 +5,8 @@
 Verify the bundle and launch it directly:
 
 ```bash
-codesign --verify --deep --strict apps/desktop/dist/TetherCode.app
-open apps/desktop/dist/TetherCode.app
+codesign --verify --deep --strict apps/desktop/dist/DapperCode.app
+open apps/desktop/dist/DapperCode.app
 ```
 
 Local builds are ad-hoc signed. Downloaded public builds additionally require Apple notarization.
@@ -16,8 +16,8 @@ Local builds are ad-hoc signed. Downloaded public builds additionally require Ap
 The native shell expects:
 
 ```text
-TetherCode.app/Contents/Resources/bin/tethercode
-TetherCode.app/Contents/Resources/bin/tethercode-bridge
+DapperCode.app/Contents/Resources/bin/dappercode
+DapperCode.app/Contents/Resources/bin/dappercode-bridge
 ```
 
 Rebuild or reinstall the app if either file is missing. The app does not fall back to npm, Node.js,
@@ -31,7 +31,7 @@ Use the native file picker or inspect discovery directly:
 npm run operator -- discover-agent --agent-id opencode
 ```
 
-Install the ACP-capable agent independently, then select its executable. TetherCode setup registers
+Install the ACP-capable agent independently, then select its executable. DapperCode setup registers
 and hashes an existing executable; it does not install packages.
 
 ## Tailscale Has No Address
@@ -57,7 +57,7 @@ Common causes:
 
 - the registered agent executable moved or changed after setup
 - the configured host/port is already in use
-- `.env.secure` or `.tethercode/agents.json` is missing or invalid
+- `.env.secure` or `.dappercode/agents.json` is missing or invalid
 - Tailscale/LAN connectivity changed
 
 Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.

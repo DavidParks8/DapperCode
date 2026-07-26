@@ -283,16 +283,16 @@ export function reduceCustomEvent(
   if (event.name.endsWith("-chunk")) {
     return reduceCustomChunk(current, envelope, value);
   }
-  if (event.name === "tethercode.dev/message-content") {
+  if (event.name === "dappercode.dev/message-content") {
     return reduceStructuredMessageContent(current, envelope, value);
   }
-  if (event.name === "tethercode.dev/tool-text") {
+  if (event.name === "dappercode.dev/tool-text") {
     return reduceToolText(current, envelope, value);
   }
-  if (event.name === "tethercode.dev/tool-content") {
+  if (event.name === "dappercode.dev/tool-content") {
     return reduceToolContent(current, envelope, value);
   }
-  if (event.name === "tethercode.dev/subagent") {
+  if (event.name === "dappercode.dev/subagent") {
     return reduceSubagentActivity(current, envelope, value);
   }
   return storeCustomMetadata(current, event.name, event.value);

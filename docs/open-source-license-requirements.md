@@ -30,7 +30,7 @@ distribution notices.
 
 The macOS desktop shell uses operating-system SwiftUI/AppKit frameworks and bundles only the Rust
 operator and Rust bridge. Include generated `THIRD_PARTY_NOTICES.txt` for both Cargo dependency
-closures and the TetherCode license in every distributed `.app` or archive.
+closures and the DapperCode license in every distributed `.app` or archive.
 
 ## Practical Policy
 

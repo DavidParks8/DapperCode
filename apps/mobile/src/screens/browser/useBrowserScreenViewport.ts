@@ -110,7 +110,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
 
       try {
         const payload = JSON.parse(event.nativeEvent.data) as { type?: string; height?: number };
-        if (payload.type !== 'tethercodeOverviewMetrics') {
+        if (payload.type !== 'dappercodeOverviewMetrics') {
           return;
         }
         const nextHeight = Math.round(Number(payload.height));

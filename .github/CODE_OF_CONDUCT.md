@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We want `tethercode` to be a respectful, technically serious, and inclusive project.
+We want `dappercode` to be a respectful, technically serious, and inclusive project.
 Contributors, maintainers, and community members are expected to engage professionally and constructively.
 
 ## Expected Behavior

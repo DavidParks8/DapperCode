@@ -33,4 +33,4 @@ The software is provided on an as-is basis. You assume responsibility for how it
 
 For support, use the project support channel:
 
-https://github.com/DavidParks8/TetherCode/issues
+https://github.com/DavidParks8/DapperCode/issues

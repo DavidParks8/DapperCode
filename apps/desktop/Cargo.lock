@@ -607,7 +607,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tethercode-desktop"
+name = "dappercode-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",

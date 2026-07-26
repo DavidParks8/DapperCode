@@ -1,10 +1,10 @@
 [package]
-name = "tethercode-bridge"
+name = "dappercode-bridge"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/DavidParks8/TetherCode"
+repository = "https://github.com/DavidParks8/DapperCode"
 publish = false
 
 [lints.rust]

@@ -493,7 +493,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let path =
-                std::env::temp_dir().join(format!("tethercode-path-policy-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("dappercode-path-policy-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create test directory");
             Self(path)
         }

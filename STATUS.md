@@ -10,8 +10,8 @@ Native desktop shell -> Rust operator -> authenticated Rust bridge -> installed 
 Expo mobile app -> authenticated private-network WebSocket/HTTP
 ```
 
-- macOS shell: `apps/desktop/macos/TetherCodeApp.swift` using SwiftUI/AppKit
-- Operator CLI: Rust `tethercode` binary under `apps/desktop`
+- macOS shell: `apps/desktop/macos/DapperCodeApp.swift` using SwiftUI/AppKit
+- Operator CLI: Rust `dappercode` binary under `apps/desktop`
 - Bridge: `services/rust-bridge`
 - Mobile: `apps/mobile`
 

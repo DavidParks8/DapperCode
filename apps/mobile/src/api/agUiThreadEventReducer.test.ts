@@ -357,9 +357,9 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
 
     state = reduceThreadState(
       state,
-      envelope({ type: EventType.CUSTOM, name: 'tethercode.dev/custom-meta', value: { ok: true } }),
+      envelope({ type: EventType.CUSTOM, name: 'dappercode.dev/custom-meta', value: { ok: true } }),
     );
-    expect(state.customMetadata['tethercode.dev/custom-meta']).toEqual({ ok: true });
+    expect(state.customMetadata['dappercode.dev/custom-meta']).toEqual({ ok: true });
   });
 
   it('marks all messages terminal for run finished and run error', () => {
@@ -381,7 +381,7 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
 
   it('returns current state for unknown event types', () => {
     const state = createAgUiThreadMessageState();
-    const next = reduceThreadState(state, envelope({ type: 'tethercode.dev/unknown-event' }));
+    const next = reduceThreadState(state, envelope({ type: 'dappercode.dev/unknown-event' }));
     expect(next).toBe(state);
   });
 });

@@ -54,7 +54,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
   const executeDesktopFrameCommand = useCallback(
     (command: 'goBack' | 'goForward' | 'reload') => {
       model.webViewRef.current?.injectJavaScript(
-        `window.__tethercodeDesktopFrame && window.__tethercodeDesktopFrame.${command} && window.__tethercodeDesktopFrame.${command}(); true;`
+        `window.__dappercodeDesktopFrame && window.__dappercodeDesktopFrame.${command} && window.__dappercodeDesktopFrame.${command}(); true;`
       );
     },
     [model.webViewRef]
@@ -97,7 +97,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
         return;
       }
 
-      if (!payload || payload.type !== 'tethercodeDesktopFrameState' || !model.activeSession?.targetUrl) {
+      if (!payload || payload.type !== 'dappercodeDesktopFrameState' || !model.activeSession?.targetUrl) {
         return;
       }
       if (model.currentShellRequestKey && payload.shellRequestKey !== model.currentShellRequestKey) {

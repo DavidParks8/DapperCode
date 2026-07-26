@@ -33,7 +33,7 @@
       "permissions": [
         "android.permission.CAMERA"
       ],
-      "package": "com.dappermagna.tethercode"
+      "package": "com.dappermagna.dappercode"
     },
     "web": {
       "favicon": "./assets/brand/favicon.png"

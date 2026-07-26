@@ -4,7 +4,7 @@ import { Linking, Platform } from 'react-native';
 
 export const AUTO_STORE_REVIEW_THRESHOLD_MS = 10 * 60 * 1000;
 
-const STORE_REVIEW_STATE_FILE = 'tethercode-store-review.json';
+const STORE_REVIEW_STATE_FILE = 'dappercode-store-review.json';
 const IOS_APP_STORE_ITEM_ID = process.env.EXPO_PUBLIC_IOS_APP_STORE_ID?.trim() || null;
 
 export type AutoStoreReviewState = {

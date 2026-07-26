@@ -54,7 +54,7 @@ const webStorage: MainScreenStorage = {
   },
 };
 
-const WEB_PATH_PREFIX = 'tethercode.main-screen.';
+const WEB_PATH_PREFIX = 'dappercode.main-screen.';
 
 export class MainScreenPersistenceController {
   private readonly paths: MainScreenPersistencePaths;

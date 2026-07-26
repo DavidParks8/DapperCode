@@ -13,7 +13,7 @@ MOBILE_WORKSPACE="apps/mobile"
 AUTO_REPAIR="${EXPO_AUTO_REPAIR:-true}"
 CLEAR_CACHE="${EXPO_CLEAR_CACHE:-false}"
 RUNTIME_REPAIRED="false"
-EXPO_SETUP_VERBOSE="${TETHERCODE_SETUP_VERBOSE:-false}"
+EXPO_SETUP_VERBOSE="${DAPPERCODE_SETUP_VERBOSE:-false}"
 
 info() { echo "info: $*"; }
 warn() { echo "warn: $*" >&2; }
@@ -29,7 +29,7 @@ run_quiet_command() {
     return $?
   fi
 
-  log_file="$(mktemp "${TMPDIR:-/tmp}/tethercode-expo-setup.XXXXXX.log")"
+  log_file="$(mktemp "${TMPDIR:-/tmp}/dappercode-expo-setup.XXXXXX.log")"
   if "$@" >"$log_file" 2>&1; then
     rm -f "$log_file"
     return 0
@@ -73,7 +73,7 @@ resolve_expo_host() {
   fi
 
   echo "error: cannot resolve Expo host IP for QR." >&2
-  echo "Configure the bridge in the TetherCode desktop app or with the Rust tethercode operator first." >&2
+  echo "Configure the bridge in the DapperCode desktop app or with the Rust dappercode operator first." >&2
   return 1
 }
 

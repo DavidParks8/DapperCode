@@ -1,4 +1,4 @@
-# Contributing to TetherCode
+# Contributing to DapperCode
 
 Read [README.md](README.md), [setup and operations](docs/setup-and-operations.md), and
 [troubleshooting](docs/troubleshooting.md) before starting.

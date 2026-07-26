@@ -188,7 +188,7 @@ impl AgUiProjector {
                         &mut projection.events,
                         thread_id,
                         run,
-                        "tethercode.dev/message-content",
+                        "dappercode.dev/message-content",
                         message_id,
                         json!({
                             "messageId": message_id,
@@ -725,7 +725,7 @@ impl AgUiProjector {
                             &mut projection.events,
                             thread_id,
                             run,
-                            "tethercode.dev/tool-text",
+                            "dappercode.dev/tool-text",
                             tool_call_id,
                             json!({
                                 "toolCallId": tool_call_id,
@@ -741,7 +741,7 @@ impl AgUiProjector {
                         &mut projection.events,
                         thread_id,
                         run,
-                        "tethercode.dev/tool-content",
+                        "dappercode.dev/tool-content",
                         tool_call_id,
                         json!({
                             "toolCallId": tool_call_id,
@@ -875,7 +875,7 @@ impl AgUiProjector {
                 &self.runs,
                 thread_id,
                 format!("{thread_id}::plan"),
-                "tethercode.plan",
+                "dappercode.plan",
                 json!({
                     "text": "Plan updated",
                     "entries": entries.iter().take(128).map(|entry| json!({
@@ -895,7 +895,7 @@ impl AgUiProjector {
                 &mut projection.events,
                 &self.runs,
                 thread_id,
-                "tethercode.dev/usage",
+                "dappercode.dev/usage",
                 json!({ "used": used, "size": size, "cost": cost.as_deref().map(|value| bounded(value, 256)) }),
                 timestamp,
             ),
@@ -903,7 +903,7 @@ impl AgUiProjector {
                 &mut projection.events,
                 &self.runs,
                 thread_id,
-                "tethercode.dev/mode",
+                "dappercode.dev/mode",
                 json!({ "id": bounded(id, 256) }),
                 timestamp,
             ),
@@ -913,7 +913,7 @@ impl AgUiProjector {
                 &mut projection.events,
                 &self.runs,
                 thread_id,
-                "tethercode.dev/config",
+                "dappercode.dev/config",
                 json!({ "entries": entries.iter().take(128).map(|entry| json!({
                     "id": bounded(&entry.id, 256),
                     "value": bounded(&entry.value, 2 * 1024)
@@ -929,7 +929,7 @@ impl AgUiProjector {
                 &mut projection.events,
                 &self.runs,
                 thread_id,
-                "tethercode.dev/session-info",
+                "dappercode.dev/session-info",
                 json!({ "title": field_value(title), "updatedAt": field_value(updated_at) }),
                 timestamp,
             ),
@@ -941,7 +941,7 @@ impl AgUiProjector {
                 &mut projection.events,
                 &self.runs,
                 thread_id,
-                "tethercode.dev/commands",
+                "dappercode.dev/commands",
                 json!({ "commands": commands.iter().take(128).map(|command| json!({
                     "name": bounded(&command.name, 256),
                     "description": bounded(&command.description, 2 * 1024)
@@ -1292,7 +1292,7 @@ pub(super) fn messages_snapshot_envelope(
                     });
                     messages.push(activity_message(
                         format!("subagent:{}", tool.id),
-                        "tethercode.subagent",
+                        "dappercode.subagent",
                         content,
                     ));
                     continue;
@@ -1806,7 +1806,7 @@ fn subagent_activity_envelope(
         context.parent_source_turn_id,
         activity_event(
             format!("subagent:{}", context.tool_call_id),
-            "tethercode.subagent",
+            "dappercode.subagent",
             json!({
                 "text": lines.join("\n"),
                 "subAgent": {
@@ -2116,7 +2116,7 @@ fn push_transcript_truncation(
         &run.run_id,
         run.source_turn_id.clone(),
         custom_event(
-            "tethercode.dev/transcript-truncated".to_string(),
+            "dappercode.dev/transcript-truncated".to_string(),
             json!({
                 "canonicalId": canonical_id,
                 "truncated": true,
@@ -3081,7 +3081,7 @@ mod tests {
         let value = serde_json::to_value(&messages[0]).expect("serializable message");
         assert_eq!(value["id"], "subagent:task-1");
         assert_eq!(value["role"], "activity");
-        assert_eq!(value["activityType"], "tethercode.subagent");
+        assert_eq!(value["activityType"], "dappercode.subagent");
         assert_eq!(
             value["content"]["subAgent"]["receiverThreadIds"]
                 .as_array()
@@ -4126,7 +4126,7 @@ mod tests {
         let first = projector.project_canonical(&task("completed"));
         assert_eq!(event_types(&first.events), ["ACTIVITY_SNAPSHOT"]);
         let activity = serde_json::to_value(first.events.last().unwrap()).unwrap();
-        assert_eq!(activity["event"]["activityType"], "tethercode.subagent");
+        assert_eq!(activity["event"]["activityType"], "dappercode.subagent");
         assert_eq!(
             activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
@@ -4340,7 +4340,7 @@ mod tests {
         });
         assert_eq!(event_types(&plan.events), ["ACTIVITY_SNAPSHOT"]);
         let plan_value = serde_json::to_value(&plan.events[0]).unwrap();
-        assert_eq!(plan_value["event"]["activityType"], "tethercode.plan");
+        assert_eq!(plan_value["event"]["activityType"], "dappercode.plan");
 
         let metadata = [
             CanonicalEvent::Usage {
@@ -4396,11 +4396,11 @@ mod tests {
         assert_eq!(
             names,
             [
-                "tethercode.dev/usage",
-                "tethercode.dev/mode",
-                "tethercode.dev/config",
-                "tethercode.dev/session-info",
-                "tethercode.dev/commands"
+                "dappercode.dev/usage",
+                "dappercode.dev/mode",
+                "dappercode.dev/config",
+                "dappercode.dev/session-info",
+                "dappercode.dev/commands"
             ]
         );
 
@@ -4644,7 +4644,7 @@ mod tests {
                 .events
                 .iter()
                 .filter(|envelope| {
-                    envelope.event.name.as_deref() == Some("tethercode.dev/transcript-truncated")
+                    envelope.event.name.as_deref() == Some("dappercode.dev/transcript-truncated")
                 })
                 .collect::<Vec<_>>();
             assert_eq!(truncations.len(), 1);
@@ -4713,7 +4713,7 @@ mod tests {
             ["CUSTOM", "TEXT_MESSAGE_START"]
         );
         let value = serde_json::to_value(&projected.events[0]).unwrap();
-        assert_eq!(value["event"]["name"], "tethercode.dev/message-content");
+        assert_eq!(value["event"]["name"], "dappercode.dev/message-content");
         assert_eq!(value["event"]["value"]["content"]["type"], "image");
         assert!(!value.to_string().contains("non-text content omitted"));
 
@@ -4799,13 +4799,13 @@ mod tests {
                 .events
                 .iter()
                 .filter(|envelope| envelope.event.name.as_deref()
-                    == Some("tethercode.dev/transcript-truncated"))
+                    == Some("dappercode.dev/transcript-truncated"))
                 .count(),
             1
         );
         let repeated = projector.project_canonical(&message);
         assert!(repeated.events.iter().all(|envelope| {
-            envelope.event.name.as_deref() != Some("tethercode.dev/transcript-truncated")
+            envelope.event.name.as_deref() != Some("dappercode.dev/transcript-truncated")
         }));
 
         if let CanonicalEvent::MessageChunk { content_block, .. } = &mut message {
@@ -4813,7 +4813,7 @@ mod tests {
         }
         let second = projector.project_canonical(&message);
         assert!(second.events.iter().all(|envelope| {
-            envelope.event.name.as_deref() != Some("tethercode.dev/transcript-truncated")
+            envelope.event.name.as_deref() != Some("dappercode.dev/transcript-truncated")
         }));
     }
 
@@ -4851,7 +4851,7 @@ mod tests {
         assert_eq!(event_types(&partial.events), ["CUSTOM"]);
         assert_eq!(
             serde_json::to_value(&partial.events[0]).unwrap()["event"]["name"],
-            "tethercode.dev/tool-text"
+            "dappercode.dev/tool-text"
         );
         assert!(projector
             .project_canonical(&tool(ToolCallStatus::InProgress, "first"))
@@ -4864,7 +4864,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(&empty_terminal.events[1]).unwrap()["event"]["name"],
-            "tethercode.dev/tool-text"
+            "dappercode.dev/tool-text"
         );
         let metadata_only = CanonicalEvent::Tool {
             agent_id: "alpha-agent".to_string(),
@@ -4994,7 +4994,7 @@ mod tests {
             ]
         );
         let custom = serde_json::to_value(projection.events.last().unwrap()).unwrap();
-        assert_eq!(custom["event"]["name"], "tethercode.dev/tool-content");
+        assert_eq!(custom["event"]["name"], "dappercode.dev/tool-content");
         assert_eq!(custom["event"]["value"]["content"][1]["type"], "diff");
         assert_eq!(custom["event"]["value"]["locations"][0]["line"], 7);
     }

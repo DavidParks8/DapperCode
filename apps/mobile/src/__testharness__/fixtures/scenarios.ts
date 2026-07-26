@@ -77,7 +77,7 @@ export function subAgentSpawn(
     event: {
       type: 'ACTIVITY_SNAPSHOT' as never,
       messageId: `subagent:${tcid}`,
-      activityType: 'tethercode.subagent',
+      activityType: 'dappercode.subagent',
       content: {
         text: 'Sub-agent running',
         subAgent: {
@@ -110,7 +110,7 @@ export function subAgentSpawn(
     event: {
       type: 'ACTIVITY_SNAPSHOT' as never,
       messageId: `subagent:${tcid}`,
-      activityType: 'tethercode.subagent',
+      activityType: 'dappercode.subagent',
       content: {
         text: 'Sub-agent completed',
         subAgent: {

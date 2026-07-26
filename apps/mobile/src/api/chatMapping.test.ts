@@ -49,7 +49,7 @@ describe('chatMapping', () => {
       name: 'Fix mobile session controls',
       createdAt: '2026-07-21T14:03:00.000Z',
       updatedAt: '2026-07-21T14:17:00.000Z',
-      cwd: '/private/tmp/tethercode-playground-18787',
+      cwd: '/private/tmp/dappercode-playground-18787',
       status: { type: 'idle' },
       turns: [],
     }));

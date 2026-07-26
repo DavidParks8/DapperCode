@@ -16,7 +16,7 @@ export type WebViewScrollEvent = NativeSyntheticEvent<
 >;
 
 export type DesktopFrameMessage = {
-  type: 'tethercodeDesktopFrameState';
+  type: 'dappercodeDesktopFrameState';
   shellRequestKey?: string | null;
   rawUrl?: string;
   title?: string;
@@ -45,11 +45,11 @@ export const DESKTOP_PREVIEW_USER_AGENT =
 
 export const OVERVIEW_INJECTED_JAVASCRIPT = `
   (function() {
-    if (window.__tethercodeOverviewMetricsInstalled) {
+    if (window.__dappercodeOverviewMetricsInstalled) {
       true;
       return;
     }
-    window.__tethercodeOverviewMetricsInstalled = true;
+    window.__dappercodeOverviewMetricsInstalled = true;
     var lastHeight = 0;
     function readHeight() {
       var doc = document.documentElement;
@@ -68,7 +68,7 @@ export const OVERVIEW_INJECTED_JAVASCRIPT = `
       lastHeight = nextHeight;
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'tethercodeOverviewMetrics',
+          type: 'dappercodeOverviewMetrics',
           height: nextHeight
         }));
       }

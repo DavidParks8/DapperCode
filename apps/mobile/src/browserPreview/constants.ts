@@ -15,7 +15,7 @@ export interface BrowserPreviewViewportSpec {
 export const LOCAL_PREVIEW_URL_PATTERN =
   /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?(?:[^\s<>"'`)\]]*)?/gi;
 
-export const BROWSER_PREVIEW_PROXY_PREFIX = '/__tethercode_proxy__';
+export const BROWSER_PREVIEW_PROXY_PREFIX = '/__dappercode_proxy__';
 
 export const BROWSER_PREVIEW_INTERNAL_QUERY_KEYS = [
   'sid',

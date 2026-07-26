@@ -1,12 +1,12 @@
 [package]
-name = "tethercode-desktop"
+name = "dappercode-desktop"
 version = "0.1.0"
 edition = "2021"
-description = "Native desktop control surface for the TetherCode bridge"
+description = "Native desktop control surface for the DapperCode bridge"
 license = "MIT"
 
 [[bin]]
-name = "tethercode"
+name = "dappercode"
 path = "src/main.rs"
 
 [dependencies]

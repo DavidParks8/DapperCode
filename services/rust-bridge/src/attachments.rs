@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{path_policy::PathPolicy, resource_limits::ATTACHMENT_MAX_BYTES, BridgeError};
 
-const MOBILE_ATTACHMENTS_DIR: &str = ".tethercode-attachments";
+const MOBILE_ATTACHMENTS_DIR: &str = ".dappercode-attachments";
 pub(crate) const ATTACHMENT_MULTIPART_MAX_BYTES: usize = ATTACHMENT_MAX_BYTES + 64 * 1024;
 const ATTACHMENT_METADATA_MAX_BYTES: usize = 4 * 1024;
 
@@ -335,7 +335,7 @@ mod tests {
     impl TestDir {
         fn new() -> Self {
             let path =
-                std::env::temp_dir().join(format!("tethercode-attachments-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("dappercode-attachments-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create test directory");
             Self(path)
         }

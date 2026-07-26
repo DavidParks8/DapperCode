@@ -45,7 +45,7 @@ describe('mainScreenPersistenceController', () => {
     await expect(controller.loadModelPreferences()).resolves.toMatchObject({
       thread: { modelId: 'gpt-5.4', effort: 'high' },
     });
-    expect(values.has('tethercode.main-screen.model-preferences.v1')).toBe(true);
+    expect(values.has('dappercode.main-screen.model-preferences.v1')).toBe(true);
   });
 
   it('returns an empty collection when storage cannot be read', async () => {

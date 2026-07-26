@@ -20,7 +20,7 @@ impl RuntimePaths {
 
         #[cfg(debug_assertions)]
         {
-            if let Some(package_root) = std::env::var_os("TETHERCODE_PACKAGE_ROOT") {
+            if let Some(package_root) = std::env::var_os("DAPPERCODE_PACKAGE_ROOT") {
                 candidates.push(PathBuf::from(package_root));
             }
             candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
@@ -33,7 +33,7 @@ impl RuntimePaths {
             let Ok(package_root) = candidate.canonicalize() else {
                 continue;
             };
-            let contains_bridge = package_root.join("bin/tethercode-bridge").is_file()
+            let contains_bridge = package_root.join("bin/dappercode-bridge").is_file()
                 || cfg!(debug_assertions)
                     && package_root
                         .join("services/rust-bridge/Cargo.toml")
@@ -44,15 +44,15 @@ impl RuntimePaths {
             return Ok(Self { package_root });
         }
 
-        bail!("TetherCode runtime resources were not found; reinstall the desktop app")
+        bail!("DapperCode runtime resources were not found; reinstall the desktop app")
     }
 
     #[cfg(not(debug_assertions))]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
         let binary_name = if cfg!(windows) {
-            "tethercode-bridge.exe"
+            "dappercode-bridge.exe"
         } else {
-            "tethercode-bridge"
+            "dappercode-bridge"
         };
         vec![self.package_root.join("bin").join(binary_name)]
     }
@@ -60,9 +60,9 @@ impl RuntimePaths {
     #[cfg(debug_assertions)]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
         let binary_name = if cfg!(windows) {
-            "tethercode-bridge.exe"
+            "dappercode-bridge.exe"
         } else {
-            "tethercode-bridge"
+            "dappercode-bridge"
         };
         let mut candidates = vec![self.package_root.join("bin").join(binary_name)];
         if let Some(target) = runtime_target() {
@@ -105,7 +105,7 @@ fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
         .parent()
         .map(|directory| {
             vec![
-                directory.join("../share/tethercode/runtime"),
+                directory.join("../share/dappercode/runtime"),
                 directory.join("runtime"),
             ]
         })
@@ -185,7 +185,7 @@ impl BridgeRuntimeConfig {
 
     pub fn pairing_payload(&self) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
-            "type": "tethercode-bridge-pair",
+            "type": "dappercode-bridge-pair",
             "bridgeUrl": self.connect_url,
             "bridgeToken": self.auth_token,
         }))?)
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
             serde_json::from_str(&config.pairing_payload().unwrap()).unwrap();
-        assert_eq!(payload["type"], "tethercode-bridge-pair");
+        assert_eq!(payload["type"], "dappercode-bridge-pair");
         assert_eq!(payload["bridgeToken"], "secret");
     }
 

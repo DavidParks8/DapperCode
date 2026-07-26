@@ -59,8 +59,8 @@ describe('mobile environment configuration', () => {
         allowWsQueryTokenAuth: false,
         allowInsecureRemoteBridge: false,
         externalStatusFullSyncDebounceMs: 450,
-        privacyPolicyUrl: 'https://github.com/DavidParks8/TetherCode/blob/main/docs/privacy-policy.md',
-        termsOfServiceUrl: 'https://github.com/DavidParks8/TetherCode/blob/main/docs/terms-of-service.md',
+        privacyPolicyUrl: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md',
+        termsOfServiceUrl: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/terms-of-service.md',
       })
     );
   });

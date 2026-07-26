@@ -1,7 +1,7 @@
 # Setup and Operations
 
-TetherCode's desktop app owns bridge setup and lifecycle. The bridge is not distributed through npm.
-The macOS app contains a native SwiftUI/AppKit shell, the Rust `tethercode` operator, and the Rust
+DapperCode's desktop app owns bridge setup and lifecycle. The bridge is not distributed through npm.
+The macOS app contains a native SwiftUI/AppKit shell, the Rust `dappercode` operator, and the Rust
 bridge.
 
 ## macOS Setup
@@ -11,7 +11,7 @@ Build and open the app from a source checkout:
 ```bash
 npm ci
 npm run desktop:build:macos
-open apps/desktop/dist/TetherCode.app
+open apps/desktop/dist/DapperCode.app
 ```
 
 In the app:
@@ -35,7 +35,7 @@ Rust setup registers an existing executable; it does not download or execute pac
 It writes:
 
 - `.env.secure`: private bridge configuration and bearer token
-- `.tethercode/agents.json`: typed ACP manifest with canonical executable path and SHA-256 digest
+- `.dappercode/agents.json`: typed ACP manifest with canonical executable path and SHA-256 digest
 
 Both are written through restrictive-mode temporary files and atomic rename. A previous bridge
 token is preserved when setup is rerun.
@@ -48,9 +48,9 @@ Native setup records the lowercase SHA-256 digest of the selected executable. Th
 rechecks that digest immediately before constructing the SDK process transport, so a moved or
 modified executable fails closed and must be registered again.
 
-The bridge also retains compatibility with typed `tethercode-tree-v1` manifests. When such a
+The bridge also retains compatibility with typed `dappercode-tree-v1` manifests. When such a
 manifest is loaded, it independently recomputes the complete controlled installation tree. The
-receipt is deterministic JSON Lines and excludes only `.tethercode-install.json` to avoid
+receipt is deterministic JSON Lines and excludes only `.dappercode-install.json` to avoid
 self-reference. Validation rejects more than 100,000 entries, more than 2 GiB of regular-file
 content, paths over 4,096 UTF-8 bytes, receipts over 32 MiB, escaping or broken symlinks,
 hardlinked regular files, special files, and non-UTF-8 paths.
@@ -144,8 +144,8 @@ a LAN or Tailscale bridge URL, not localhost.
 
 `npm run desktop:build:macos` creates:
 
-- `apps/desktop/dist/TetherCode.app`
-- `apps/desktop/dist/TetherCode-<version>-<arch>.zip`
+- `apps/desktop/dist/DapperCode.app`
+- `apps/desktop/dist/DapperCode-<version>-<arch>.zip`
 
 The build fails if the app contains Node, npm, npx, JavaScript, npm manifests, `node_modules`, or
 Slint artifacts. Local builds are ad-hoc signed. Public distribution requires project-owned Apple

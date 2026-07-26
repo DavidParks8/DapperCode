@@ -101,9 +101,9 @@ pub fn setup_workspace(request: SetupRequest) -> Result<SetupResult> {
     let digest = file_digest(&executable)?;
     let version = executable_version(&executable);
 
-    let tethercode_root = workspace.join(".tethercode");
-    fs::create_dir_all(&tethercode_root)?;
-    let manifest_path = tethercode_root.join("agents.json");
+    let dappercode_root = workspace.join(".dappercode");
+    fs::create_dir_all(&dappercode_root)?;
+    let manifest_path = dappercode_root.join("agents.json");
     let manifest = AgentManifestSet {
         preferred_agent_id: request.agent_id.clone(),
         agents: vec![AgentManifest {
@@ -115,7 +115,7 @@ pub fn setup_workspace(request: SetupRequest) -> Result<SetupResult> {
             argv: request.argv,
             environment: BTreeMap::new(),
             resolved_version: version.clone(),
-            provenance: "registered by TetherCode desktop operator".to_string(),
+            provenance: "registered by DapperCode desktop operator".to_string(),
             verified_digest: digest,
             integrity: ExecutableIntegrity { kind: "executable" },
         }],
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(first["BRIDGE_HOST"], "192.168.1.20");
 
         let manifest: serde_json::Value =
-            serde_json::from_slice(&fs::read(temp.path().join(".tethercode/agents.json")).unwrap())
+            serde_json::from_slice(&fs::read(temp.path().join(".dappercode/agents.json")).unwrap())
                 .unwrap();
         assert_eq!(manifest["preferredAgentId"], "echo-agent");
         assert_eq!(manifest["agents"][0]["integrity"]["kind"], "executable");

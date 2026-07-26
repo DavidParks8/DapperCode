@@ -19,7 +19,7 @@ import process from 'node:process';
 const rootDir = path.resolve(import.meta.dirname, '..');
 const desktopDir = path.join(rootDir, 'apps/desktop');
 const distDir = path.join(desktopDir, 'dist');
-const appDir = path.join(distDir, 'TetherCode.app');
+const appDir = path.join(distDir, 'DapperCode.app');
 const contentsDir = path.join(appDir, 'Contents');
 const macosDir = path.join(contentsDir, 'MacOS');
 const resourcesDir = path.join(contentsDir, 'Resources');
@@ -52,7 +52,7 @@ function escapePlist(value) {
 
 function makeIcon() {
   const source = path.join(rootDir, 'apps/mobile/assets/brand/app-icon.png');
-  const iconset = path.join(distDir, 'TetherCode.iconset');
+  const iconset = path.join(distDir, 'DapperCode.iconset');
   rmSync(iconset, { recursive: true, force: true });
   mkdirSync(iconset, { recursive: true });
   for (const [name, pixels] of [
@@ -64,7 +64,7 @@ function makeIcon() {
   ]) {
     run('sips', ['-z', String(pixels), String(pixels), source, '--out', path.join(iconset, name)], { stdio: 'ignore' });
   }
-  run('iconutil', ['-c', 'icns', iconset, '-o', path.join(resourcesDir, 'TetherCode.icns')]);
+  run('iconutil', ['-c', 'icns', iconset, '-o', path.join(resourcesDir, 'DapperCode.icns')]);
   rmSync(iconset, { recursive: true, force: true });
 }
 
@@ -106,9 +106,9 @@ function assertRustNativeBundle() {
     throw new Error(`macOS bundle contains forbidden npm/Slint runtime files:\n${forbidden.join('\n')}`);
   }
   const required = [
-    path.join(macosDir, 'TetherCode'),
-    path.join(binDir, 'tethercode'),
-    path.join(binDir, 'tethercode-bridge'),
+    path.join(macosDir, 'DapperCode'),
+    path.join(binDir, 'dappercode'),
+    path.join(binDir, 'dappercode-bridge'),
     path.join(resourcesDir, 'MenuBarIcon.png'),
     path.join(resourcesDir, 'MenuBarIcon@2x.png'),
   ];
@@ -127,21 +127,21 @@ rmSync(distDir, { recursive: true, force: true });
 mkdirSync(macosDir, { recursive: true });
 mkdirSync(binDir, { recursive: true });
 
-const rustOperator = path.join(desktopDir, 'target/release/tethercode');
-const rustBridge = path.join(rootDir, 'services/rust-bridge/target/release/tethercode-bridge');
-const nativeExecutable = path.join(macosDir, 'TetherCode');
+const rustOperator = path.join(desktopDir, 'target/release/dappercode');
+const rustBridge = path.join(rootDir, 'services/rust-bridge/target/release/dappercode-bridge');
+const nativeExecutable = path.join(macosDir, 'DapperCode');
 run('xcrun', [
   'swiftc', '-parse-as-library',
   '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`,
-  'apps/desktop/macos/TetherCodeApp.swift',
+  'apps/desktop/macos/DapperCodeApp.swift',
   '-o', nativeExecutable,
   '-framework', 'SwiftUI',
   '-framework', 'AppKit',
   '-framework', 'CoreImage',
   '-framework', 'ServiceManagement',
 ]);
-copyExecutable(rustOperator, path.join(binDir, 'tethercode'));
-copyExecutable(rustBridge, path.join(binDir, 'tethercode-bridge'));
+copyExecutable(rustOperator, path.join(binDir, 'dappercode'));
+copyExecutable(rustBridge, path.join(binDir, 'dappercode-bridge'));
 copyFileSync(path.join(rootDir, 'LICENSE'), path.join(resourcesDir, 'LICENSE'));
 
 const noticesPath = path.join(resourcesDir, 'THIRD_PARTY_NOTICES.txt');
@@ -157,12 +157,12 @@ const bundleVersion = version.split('-', 1)[0];
 writeFileSync(path.join(contentsDir, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleDisplayName</key><string>TetherCode</string>
-  <key>CFBundleExecutable</key><string>TetherCode</string>
-  <key>CFBundleIconFile</key><string>TetherCode</string>
-  <key>CFBundleIdentifier</key><string>dev.tethercode.desktop</string>
+  <key>CFBundleDisplayName</key><string>DapperCode</string>
+  <key>CFBundleExecutable</key><string>DapperCode</string>
+  <key>CFBundleIconFile</key><string>DapperCode</string>
+  <key>CFBundleIdentifier</key><string>dev.dappercode.desktop</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>TetherCode</string>
+  <key>CFBundleName</key><string>DapperCode</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${escapePlist(version)}</string>
   <key>CFBundleVersion</key><string>${escapePlist(bundleVersion)}</string>
@@ -177,7 +177,7 @@ run('plutil', ['-lint', path.join(contentsDir, 'Info.plist')]);
 run('codesign', ['--force', '--deep', '--sign', '-', appDir]);
 run('codesign', ['--verify', '--deep', '--strict', appDir]);
 
-const zipPath = path.join(distDir, `TetherCode-${version}-${os.arch()}.zip`);
+const zipPath = path.join(distDir, `DapperCode-${version}-${os.arch()}.zip`);
 run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appDir, zipPath]);
 console.log(`macOS app: ${appDir}`);
 console.log(`archive: ${zipPath}`);

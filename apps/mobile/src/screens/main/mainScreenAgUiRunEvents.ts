@@ -68,7 +68,7 @@ export function processAgUiRunEvents(
         );
         if (
           agUiEvent.type === 'CUSTOM' &&
-          agUiEvent.name === 'tethercode.dev/subagent'
+          agUiEvent.name === 'dappercode.dev/subagent'
         ) {
           scheduleAgentThreadsRefresh(agUiEnvelope.threadId);
           if (agUiEnvelope.threadId === currentId) {

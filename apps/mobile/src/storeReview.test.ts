@@ -85,7 +85,7 @@ describe('storeReview helpers', () => {
     });
     await isolated.saveAutoStoreReviewState({ accumulatedForegroundMs: 20, automaticRequestAt: null });
     expect(write).toHaveBeenCalledWith(
-      expect.stringContaining('tethercode-store-review.json'),
+      expect.stringContaining('dappercode-store-review.json'),
       JSON.stringify({ accumulatedForegroundMs: 20, automaticRequestAt: null })
     );
     read.mockRejectedValueOnce(new Error('missing'));

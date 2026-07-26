@@ -1,7 +1,7 @@
 {
-  "algorithm": "tethercode-tree-v1",
+  "algorithm": "dappercode-tree-v1",
   "exclusions": [
-    ".tethercode-install.json"
+    ".dappercode-install.json"
   ],
   "entries": [
     {

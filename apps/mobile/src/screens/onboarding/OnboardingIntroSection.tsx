@@ -62,7 +62,7 @@ export function OnboardingIntroSection({
       <Animated.View style={[styles.introFooter, introActionsAnimatedStyle]}>
         <ChoiceAction
           variant="primary"
-          logo="tethercode"
+          logo="dappercode"
           title="Private connection"
           meta="Your machine"
           onPress={onContinue}

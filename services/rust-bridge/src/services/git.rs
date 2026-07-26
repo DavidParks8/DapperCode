@@ -1385,7 +1385,7 @@ mod tests {
     impl TestDir {
         fn new(label: &str) -> Self {
             let path =
-                std::env::temp_dir().join(format!("tethercode-git-{label}-{}", Uuid::new_v4()));
+                std::env::temp_dir().join(format!("dappercode-git-{label}-{}", Uuid::new_v4()));
             fs::create_dir(&path).expect("create test directory");
             Self(path)
         }
@@ -1408,7 +1408,7 @@ mod tests {
         fn init(&self) {
             self.git(&["init", "-b", "main"]);
             self.git(&["config", "user.email", "tests@example.com"]);
-            self.git(&["config", "user.name", "TetherCode Tests"]);
+            self.git(&["config", "user.name", "DapperCode Tests"]);
             self.git(&["config", "commit.gpgSign", "false"]);
         }
 
@@ -1430,7 +1430,7 @@ mod tests {
     fn git_cwd_policy_rejects_symlink_escape() {
         use std::os::unix::fs::symlink;
 
-        let temp = std::env::temp_dir().join(format!("tethercode-git-path-{}", Uuid::new_v4()));
+        let temp = std::env::temp_dir().join(format!("dappercode-git-path-{}", Uuid::new_v4()));
         let root = temp.join("root");
         let outside = temp.join("outside");
         fs::create_dir_all(&root).expect("create root");
@@ -1606,7 +1606,7 @@ mod tests {
     #[test]
     fn parses_effective_git_configuration_fail_closed() {
         assert!(validate_effective_git_config(
-            "local\0file:.git/config\0user.name\nTetherCode Tests\0"
+            "local\0file:.git/config\0user.name\nDapperCode Tests\0"
         )
         .is_ok());
         for key_value in [
