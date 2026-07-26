@@ -9,7 +9,7 @@ import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscri
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../../components/ChatMessage', () => ({
   ChatMessage: ({ message }: { message: { content: string } }) => message.content,
-  ToolActivityGroup: () => null,
+  ToolInvocationRow: () => null,
 }));
 
 type Queryable = ReactTestInstance & {
@@ -509,7 +509,7 @@ describe('ChatTranscriptView continuation', () => {
     });
     const list = getList(tree);
     const messageItem = list.props.data.find((item) => item.kind === 'message');
-    const toolItem = list.props.data.find((item) => item.kind === 'toolGroup');
+    const toolItem = list.props.data.find((item) => item.kind === 'toolInvocation');
     if (!messageItem || !toolItem) throw new Error('Expected message and tool items');
     expect(list.props.keyExtractor(messageItem)).toBe(messageItem.renderKey);
     expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);

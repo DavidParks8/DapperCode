@@ -81,8 +81,8 @@ jest.mock('../../components/ChatMessage', () => ({
       : typeof message.content.text === 'string'
         ? message.content.text
         : '',
-  ToolActivityGroup: ({ events }: { events?: unknown[] }) =>
-    `activities:${String((events ?? []).length)}`,
+  ToolInvocationRow: ({ invocation }: { invocation: { title: string } }) =>
+    `tool:${invocation.title}`,
 }));
 
 let approvalBannerProps: Record<string, unknown> | null = null;

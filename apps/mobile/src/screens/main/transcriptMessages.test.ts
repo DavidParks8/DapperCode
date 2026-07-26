@@ -251,8 +251,19 @@ describe('getVisibleTranscriptMessages', () => {
   });
 });
 
+function summarizeItems(
+  items: TranscriptDisplayItem[],
+): Array<{ kind: string; id: string; title?: string }> {
+  return items.map((item) => {
+    if (item.kind === 'message') return { kind: item.kind, id: item.renderKey };
+    if (item.kind === 'toolInvocation')
+      return { kind: item.kind, id: item.id, title: item.invocation.title };
+    return { kind: item.kind, id: item.id };
+  });
+}
+
 describe('buildTranscriptDisplayItems', () => {
-  it('groups consecutive tool messages into one toolGroup item', () => {
+  it('emits one row per tool invocation instead of a single group', () => {
     const messages = [
       message('u1', 'user', 'Audit this'),
       message('t1', 'system', '• Ran `pwd`', { systemKind: 'tool' }),
@@ -260,26 +271,15 @@ describe('buildTranscriptDisplayItems', () => {
       message('a1', 'assistant', 'Done.'),
     ];
 
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
-      {
-        kind: 'message',
-        message: messages[0],
-        renderKey: 'user-1-Audit this',
-      },
-      {
-        kind: 'toolGroup',
-        id: 'tool-group-t1-t2',
-        messages: [messages[1], messages[2]],
-      },
-      {
-        kind: 'message',
-        message: messages[3],
-        renderKey: 'a1',
-      },
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'message', id: 'user-1-Audit this' },
+      { kind: 'toolInvocation', id: 't1', title: 'Ran `pwd`' },
+      { kind: 'toolInvocation', id: 't2', title: 'Ran `ls`' },
+      { kind: 'message', id: 'a1' },
     ]);
   });
 
-  it('groups legacy untyped tool timeline rows into one toolGroup item', () => {
+  it('turns legacy untyped tool timeline rows into individual invocations', () => {
     const messages = [
       message('u1', 'user', 'Audit this'),
       message('s1', 'system', '• Searched web for "react native flatlist"'),
@@ -287,22 +287,19 @@ describe('buildTranscriptDisplayItems', () => {
       message('a1', 'assistant', 'Done.'),
     ];
 
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'message', id: 'user-1-Audit this' },
       {
-        kind: 'message',
-        message: messages[0],
-        renderKey: 'user-1-Audit this',
+        kind: 'toolInvocation',
+        id: 's1-0',
+        title: 'Searched web for "react native flatlist"',
       },
       {
-        kind: 'toolGroup',
-        id: 'tool-group-s1-s2',
-        messages: [messages[1], messages[2]],
+        kind: 'toolInvocation',
+        id: 's2-0',
+        title: 'Called tool `openaiDeveloperDocs / search_openai_docs`',
       },
-      {
-        kind: 'message',
-        message: messages[3],
-        renderKey: 'a1',
-      },
+      { kind: 'message', id: 'a1' },
     ]);
   });
 
@@ -379,26 +376,14 @@ describe('buildTranscriptDisplayItems', () => {
       message('t2', 'system', '• Ran `ls`', { systemKind: 'tool' }),
     ];
 
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
-      {
-        kind: 'toolGroup',
-        id: 'tool-group-t1-t1',
-        messages: [messages[0]],
-      },
-      {
-        kind: 'message',
-        message: messages[1],
-        renderKey: 'c1',
-      },
-      {
-        kind: 'toolGroup',
-        id: 'tool-group-t2-t2',
-        messages: [messages[2]],
-      },
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'toolInvocation', id: 't1', title: 'Ran `pwd`' },
+      { kind: 'message', id: 'c1' },
+      { kind: 'toolInvocation', id: 't2', title: 'Ran `ls`' },
     ]);
   });
 
-  it('chunks very long consecutive tool runs into multiple tool groups', () => {
+  it('keeps every invocation in a very long consecutive tool run', () => {
     const toolMessages = Array.from(
       { length: MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP + 3 },
       (_, index) =>
@@ -406,39 +391,27 @@ describe('buildTranscriptDisplayItems', () => {
     );
 
     const items = buildTranscriptDisplayItems(toolMessages);
-    const groups = items.filter(
-      (item): item is Extract<TranscriptDisplayItem, { kind: 'toolGroup' }> =>
-        item.kind === 'toolGroup',
-    );
 
-    expect(groups.length).toBe(2);
-    expect(groups[0]?.messages.length).toBe(MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP);
-    expect(groups[1]?.messages.length).toBe(3);
+    expect(items).toHaveLength(toolMessages.length);
+    expect(items.every((item) => item.kind === 'toolInvocation')).toBe(true);
+    expect(summarizeItems(items).at(-1)).toEqual({
+      kind: 'toolInvocation',
+      id: `t${String(toolMessages.length - 1)}`,
+      title: `Tool ${String(toolMessages.length - 1)}`,
+    });
   });
 
-  it('wraps a single tool message in a toolGroup for consistent UI', () => {
+  it('renders a lone tool message as its own invocation row', () => {
     const messages = [
       message('u1', 'user', 'Audit this'),
       message('t1', 'system', '• Ran `pwd`', { systemKind: 'tool' }),
       message('a1', 'assistant', 'Done.'),
     ];
 
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
-      {
-        kind: 'message',
-        message: messages[0],
-        renderKey: 'user-1-Audit this',
-      },
-      {
-        kind: 'toolGroup',
-        id: 'tool-group-t1-t1',
-        messages: [messages[1]],
-      },
-      {
-        kind: 'message',
-        message: messages[2],
-        renderKey: 'a1',
-      },
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'message', id: 'user-1-Audit this' },
+      { kind: 'toolInvocation', id: 't1', title: 'Ran `pwd`' },
+      { kind: 'message', id: 'a1' },
     ]);
   });
 

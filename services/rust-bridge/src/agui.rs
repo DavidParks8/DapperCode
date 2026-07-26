@@ -59,6 +59,7 @@ struct AgUiToolState {
     locations: Vec<Value>,
     structured_truncated: bool,
     subagent_revision: Option<String>,
+    meta_revision: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -614,6 +615,25 @@ impl AgUiProjector {
                 // Read after the linked branch above, which can classify this tool as a
                 // sub-agent from accumulated content when the update itself carried none.
                 let is_subagent_tool = state.subagent_activity;
+                // The client renders one row per tool call and needs the ACP kind, status
+                // and title to pick its icon, its progress affordance and its failure
+                // styling. A status transition carries no content, so this cannot ride on
+                // the tool-content event, which only fires when structured content moves.
+                let kind_wire = tool_kind_wire(*kind);
+                let status_wire = tool_status_wire(*status);
+                // Mirror the fallback `TOOL_CALL_START` already uses so a blank ACP title
+                // never reaches the client as an empty row label.
+                let title_wire = if title.trim().is_empty() {
+                    kind_wire.clone()
+                } else {
+                    bounded(title, 256)
+                };
+                let meta_revision = format!("{kind_wire}\0{status_wire}\0{title_wire}");
+                let meta_changed = !is_subagent_tool
+                    && state.meta_revision.as_deref() != Some(meta_revision.as_str());
+                if meta_changed {
+                    state.meta_revision = Some(meta_revision);
+                }
                 // Agents that never stream a child session only report progress through
                 // this tool, so mirror its latest output onto the card. Without real
                 // output there is nothing to say: an empty card reports "starting" and
@@ -690,6 +710,22 @@ impl AgUiProjector {
                             finished_child_thread_id = Some(child_thread_id);
                         }
                     }
+                }
+                if meta_changed {
+                    push_structured_chunks(
+                        &mut projection.events,
+                        thread_id,
+                        run,
+                        "dappercode.dev/tool-meta",
+                        tool_call_id,
+                        json!({
+                            "toolCallId": tool_call_id,
+                            "kind": kind_wire,
+                            "status": status_wire,
+                            "title": title_wire,
+                        }),
+                        timestamp,
+                    );
                 }
                 if let Some(previous_content) = previous_content {
                     let content = content.clone().unwrap_or_default();
@@ -1337,6 +1373,23 @@ pub(super) fn messages_snapshot_envelope(
                     ));
                     continue;
                 }
+                // The generated AG-UI `Message` cannot carry the ACP kind or status, so the
+                // client reads them from an activity message that sits immediately before
+                // the pair it describes. It is folded into the tool row and never rendered
+                // on its own.
+                messages.push(activity_message(
+                    format!("tool-meta:{}", tool.id),
+                    "dappercode.tool",
+                    json!({
+                        "toolCallId": tool.id,
+                        "kind": tool_kind_wire(tool.kind),
+                        "status": tool_status_wire(tool.status),
+                        "title": bounded(&tool.title, 256),
+                        "content": tool.structured_content,
+                        "locations": tool.locations,
+                        "truncated": tool.truncated,
+                    }),
+                ));
                 messages.push(Message {
                     id: format!("tool-call:{}", tool.id),
                     role: AgUiMessageRole::Assistant,
@@ -1349,7 +1402,7 @@ pub(super) fn messages_snapshot_envelope(
                         function: Function {
                             name: bounded(
                                 if tool.title.trim().is_empty() {
-                                    format!("{:?}", tool.kind).to_ascii_lowercase()
+                                    tool_kind_wire(tool.kind)
                                 } else {
                                     tool.title.clone()
                                 },
@@ -2361,6 +2414,23 @@ fn bounded(value: impl AsRef<str>, max_bytes: usize) -> String {
         value.truncate(end);
     }
     value
+}
+
+/// Wire spelling of an ACP enum, so the client sees `switch_mode` rather than the
+/// Rust `SwitchMode` spelling and stays aligned with the session snapshot.
+fn acp_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{value:?}").to_ascii_lowercase())
+}
+
+fn tool_kind_wire(kind: agent_client_protocol::schema::v1::ToolKind) -> String {
+    acp_wire_value(&kind)
+}
+
+fn tool_status_wire(status: agent_client_protocol::schema::v1::ToolCallStatus) -> String {
+    acp_wire_value(&status)
 }
 
 #[cfg(test)]
@@ -4044,7 +4114,7 @@ mod tests {
         let started = projector.project_canonical(&tool("tool-1", ToolCallStatus::InProgress, ""));
         assert_eq!(
             event_types(&started.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
         assert!(projector
             .project_canonical(&tool("tool-1", ToolCallStatus::InProgress, ""))
@@ -4054,7 +4124,7 @@ mod tests {
             projector.project_canonical(&tool("tool-1", ToolCallStatus::Completed, "done"));
         assert_eq!(
             event_types(&completed.events),
-            ["TOOL_CALL_END", "TOOL_CALL_RESULT"]
+            ["TOOL_CALL_END", "CUSTOM", "TOOL_CALL_RESULT"]
         );
         assert!(projector
             .project_canonical(&tool("tool-1", ToolCallStatus::Completed, "done"))
@@ -4066,7 +4136,7 @@ mod tests {
                     .project_canonical(&tool("tool-open", ToolCallStatus::InProgress, ""))
                     .events
             ),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
 
         let terminal = projector.project_canonical(&CanonicalEvent::RunFinished {
@@ -4380,6 +4450,77 @@ mod tests {
         assert!(messages
             .iter()
             .any(|message| { message["role"] == "tool" && message["toolCallId"] == "tool-1" }));
+        let meta = messages
+            .iter()
+            .find(|message| message["activityType"] == "dappercode.tool")
+            .expect("snapshot carries tool metadata");
+        assert_eq!(meta["content"]["toolCallId"], "tool-1");
+        assert_eq!(meta["content"]["kind"], "read");
+        assert_eq!(meta["content"]["status"], "completed");
+        assert_eq!(meta["content"]["title"], "Read");
+    }
+
+    #[test]
+    fn tool_meta_event_tracks_kind_and_status_without_repeating_itself() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let tool = |status| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "meta-tool".to_string(),
+            kind: ToolKind::SwitchMode,
+            status,
+            title: String::new(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        };
+        let started = projector.project_canonical(&tool(ToolCallStatus::InProgress));
+        let meta = serde_json::to_value(started.events.last().unwrap()).unwrap();
+        assert_eq!(meta["event"]["name"], "dappercode.dev/tool-meta");
+        assert_eq!(meta["event"]["value"]["kind"], "switch_mode");
+        assert_eq!(meta["event"]["value"]["status"], "in_progress");
+        // A blank ACP title falls back to the kind, matching `toolCallName`.
+        assert_eq!(meta["event"]["value"]["title"], "switch_mode");
+        assert!(projector
+            .project_canonical(&tool(ToolCallStatus::InProgress))
+            .events
+            .is_empty());
+        let failed = projector.project_canonical(&tool(ToolCallStatus::Failed));
+        assert_eq!(event_types(&failed.events), ["TOOL_CALL_END", "CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&failed.events[1]).unwrap()["event"]["value"]["status"],
+            "failed"
+        );
+    }
+
+    #[test]
+    fn subagent_tools_do_not_emit_tool_meta() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let projection = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-tool".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading files\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        assert!(!serde_json::to_value(&projection.events)
+            .unwrap()
+            .to_string()
+            .contains("dappercode.dev/tool-meta"));
     }
 
     #[test]
@@ -4847,6 +4988,7 @@ mod tests {
                 "TOOL_CALL_START",
                 "TOOL_CALL_ARGS",
                 "TOOL_CALL_END",
+                "CUSTOM",
                 "CUSTOM"
             ]
         );
@@ -4929,14 +5071,14 @@ mod tests {
         let started = projector.project_canonical(&tool(ToolCallStatus::Pending, ""));
         assert_eq!(
             event_types(&started.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
         let serialized = serde_json::to_value(&started.events[0]).unwrap();
         assert_eq!(serialized["event"]["toolCallName"], "edit");
         let partial = projector.project_canonical(&tool(ToolCallStatus::InProgress, "first"));
-        assert_eq!(event_types(&partial.events), ["CUSTOM"]);
+        assert_eq!(event_types(&partial.events), ["CUSTOM", "CUSTOM"]);
         assert_eq!(
-            serde_json::to_value(&partial.events[0]).unwrap()["event"]["name"],
+            serde_json::to_value(&partial.events[1]).unwrap()["event"]["name"],
             "dappercode.dev/tool-text"
         );
         assert!(projector
@@ -4946,10 +5088,10 @@ mod tests {
         let empty_terminal = projector.project_canonical(&tool(ToolCallStatus::Failed, ""));
         assert_eq!(
             event_types(&empty_terminal.events),
-            ["TOOL_CALL_END", "CUSTOM"]
+            ["TOOL_CALL_END", "CUSTOM", "CUSTOM"]
         );
         assert_eq!(
-            serde_json::to_value(&empty_terminal.events[1]).unwrap()["event"]["name"],
+            serde_json::to_value(&empty_terminal.events[2]).unwrap()["event"]["name"],
             "dappercode.dev/tool-text"
         );
         let metadata_only = CanonicalEvent::Tool {
@@ -4966,14 +5108,25 @@ mod tests {
             structured_content: FieldUpdate::Unchanged,
             locations: FieldUpdate::Unchanged,
         };
+        // A renamed tool still has to reach the row that shows its title, so the
+        // metadata event fires even though no content moved.
+        let renamed = projector.project_canonical(&metadata_only);
+        assert_eq!(event_types(&renamed.events), ["CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&renamed.events[0]).unwrap()["event"]["value"]["title"],
+            "updated title"
+        );
         assert!(projector
             .project_canonical(&metadata_only)
             .events
             .is_empty());
         let changed_result = projector.project_canonical(&tool(ToolCallStatus::Failed, "second"));
-        assert_eq!(event_types(&changed_result.events), ["TOOL_CALL_RESULT"]);
         assert_eq!(
-            serde_json::to_value(&changed_result.events[0]).unwrap()["event"]["content"],
+            event_types(&changed_result.events),
+            ["CUSTOM", "TOOL_CALL_RESULT"]
+        );
+        assert_eq!(
+            serde_json::to_value(&changed_result.events[1]).unwrap()["event"]["content"],
             "second"
         );
         let suffix_result = projector.project_canonical(&tool(ToolCallStatus::Failed, "second!"));
@@ -5075,6 +5228,7 @@ mod tests {
                 "TOOL_CALL_START",
                 "TOOL_CALL_ARGS",
                 "TOOL_CALL_END",
+                "CUSTOM",
                 "TOOL_CALL_RESULT",
                 "CUSTOM",
             ]
@@ -5083,6 +5237,11 @@ mod tests {
         assert_eq!(custom["event"]["name"], "dappercode.dev/tool-content");
         assert_eq!(custom["event"]["value"]["content"][1]["type"], "diff");
         assert_eq!(custom["event"]["value"]["locations"][0]["line"], 7);
+        let meta = serde_json::to_value(&projection.events[3]).unwrap();
+        assert_eq!(meta["event"]["name"], "dappercode.dev/tool-meta");
+        assert_eq!(meta["event"]["value"]["kind"], "edit");
+        assert_eq!(meta["event"]["value"]["status"], "completed");
+        assert_eq!(meta["event"]["value"]["toolCallId"], "tool-structured");
     }
 
     #[test]
@@ -5108,7 +5267,7 @@ mod tests {
         let first = projector.project_canonical(&tool("terminal-1"));
         assert_eq!(
             event_types(&first.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM", "CUSTOM"]
         );
         assert!(projector
             .project_canonical(&tool("terminal-1"))
@@ -5134,7 +5293,11 @@ mod tests {
             locations: FieldUpdate::Append(vec![json!({"path":"src/main.rs"})]),
         };
         let appended = projector.project_canonical(&append);
-        let appended_value = serde_json::to_value(&appended.events[0]).unwrap();
+        let appended_value = serde_json::to_value(appended.events.last().unwrap()).unwrap();
+        assert_eq!(
+            appended_value["event"]["name"],
+            "dappercode.dev/tool-content"
+        );
         assert_eq!(
             appended_value["event"]["value"]["content"]
                 .as_array()
@@ -5161,6 +5324,14 @@ mod tests {
             *structured_content = FieldUpdate::Unchanged;
             *locations = FieldUpdate::Unchanged;
         }
+        // Only the title moved, so the structured payload stays put and the client is
+        // told about the rename alone.
+        let renamed = projector.project_canonical(&metadata_only);
+        assert_eq!(event_types(&renamed.events), ["CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&renamed.events[0]).unwrap()["event"]["name"],
+            "dappercode.dev/tool-meta"
+        );
         assert!(projector
             .project_canonical(&metadata_only)
             .events
@@ -5177,7 +5348,11 @@ mod tests {
             *locations = FieldUpdate::Clear;
         }
         let cleared = projector.project_canonical(&clear);
-        let cleared_value = serde_json::to_value(&cleared.events[0]).unwrap();
+        let cleared_value = serde_json::to_value(cleared.events.last().unwrap()).unwrap();
+        assert_eq!(
+            cleared_value["event"]["name"],
+            "dappercode.dev/tool-content"
+        );
         assert_eq!(cleared_value["event"]["value"]["content"], json!([]));
         assert_eq!(cleared_value["event"]["value"]["locations"], json!([]));
 
@@ -5231,10 +5406,10 @@ mod tests {
             locations: FieldUpdate::Unchanged,
         };
         let unavailable = projector.project_canonical(&oversized);
-        assert_eq!(unavailable.events.len(), 1);
+        assert_eq!(unavailable.events.len(), 2);
         assert_eq!(
-            serde_json::to_value(&unavailable.events[0]).unwrap()["event"]["value"]["retrieval"]
-                ["available"],
+            serde_json::to_value(unavailable.events.last().unwrap()).unwrap()["event"]["value"]
+                ["retrieval"]["available"],
             false
         );
 

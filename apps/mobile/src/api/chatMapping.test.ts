@@ -216,6 +216,16 @@ describe('chatMapping', () => {
       'message-b',
       'reasoning-r',
     ]);
+    // The persisted path must describe a tool row as richly as the live one.
+    expect(snapshot.messages[1].toolMeta).toEqual({
+      toolCallId: 'tool-t',
+      kind: 'read',
+      status: 'completed',
+      title: 'T',
+      content: [],
+      locations: [],
+      truncated: false,
+    });
   });
 
   it('maps persisted OpenCode task tools to one non-navigable subagent card', () => {

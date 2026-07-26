@@ -18,7 +18,8 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../api/messages';
 import { createAppTheme, AppThemeProvider } from '../theme';
-import { ChatMessage, ToolActivityGroup } from './ChatMessage';
+import { ChatMessage, ToolInvocationRow } from './ChatMessage';
+import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -331,7 +332,7 @@ describe('ChatMessage command rows', () => {
     act(() => {
       rendered = renderer.create(
         <AppThemeProvider theme={theme}>
-          <ToolActivityGroup messages={messages.map(toOfficialMessage)} />
+          <ToolInvocationRow invocation={onlyInvocation(messages)} />
         </AppThemeProvider>,
       );
     });
@@ -617,49 +618,119 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => completedTree.unmount());
   });
 
-  it('renders collapsed and expanded tool activity groups with error and overflow entries', () => {
-    const messages: LegacyTestMessage[] = [
-      {
-        id: 'one',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Ran npm test\n  └ pass',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-      {
-        id: 'two',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Called tool `lint`\n  └ clean',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-      {
-        id: 'three',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Tool failed `build`\n  └ compile error',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-    ];
+  it('expands a failed invocation row and shows its output', () => {
+    const invocation: ToolInvocation = {
+      id: 'build',
+      kind: 'execute',
+      status: 'failed',
+      title: 'npm run build',
+      monospaceTitle: true,
+      isError: true,
+      locations: [{ path: 'src/app.ts', line: 12 }],
+      diffs: [],
+      terminals: [{ terminalId: 'term-1', output: 'compile error\nexit 1' }],
+      textLines: [],
+      images: [],
+      truncated: true,
+      empty: false,
+    };
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
         <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup messages={messages.map(toOfficialMessage)} liveTurnActive />
+          <ToolInvocationRow invocation={invocation} />
         </AppThemeProvider>,
       );
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    expect(hasRenderedText(root, '+1 more')).toBe(true);
-    const expand = root.findAll(
+    expect(hasRenderedText(root, 'compile error')).toBe(false);
+    const control = root.findAll(
       (node) =>
         typeof node.props.onPress === 'function' &&
-        (node.props.accessibilityState as { expanded?: boolean } | undefined)?.expanded === false,
+        node.props.accessibilityLabel === 'npm run build',
     )[0];
-    if (!expand) throw new Error('Missing tool group expander');
-    act(() => readOnPress(expand.props)());
-    expect(hasRenderedText(root, 'Tool failed `build`')).toBe(true);
+    if (!control) throw new Error('Missing invocation row');
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, 'compile error')).toBe(true);
+    expect(hasRenderedText(root, 'src/app.ts:12')).toBe(true);
+    expect(hasRenderedText(root, 'Output truncated by the bridge.')).toBe(true);
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, 'compile error')).toBe(false);
+    act(() => rendered.unmount());
+  });
+
+  it('renders an edit invocation as a coloured diff', () => {
+    const invocation: ToolInvocation = {
+      id: 'edit',
+      kind: 'edit',
+      status: 'completed',
+      title: 'Edit src/app.ts',
+      monospaceTitle: false,
+      isError: false,
+      locations: [],
+      diffs: [{ path: 'src/app.ts', oldText: 'const a = 1;', newText: 'const a = 2;' }],
+      terminals: [],
+      textLines: [],
+      images: [],
+      truncated: false,
+      empty: false,
+    };
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={createAppTheme('dark')}>
+          <ToolInvocationRow invocation={invocation} />
+        </AppThemeProvider>,
+      );
+    });
+    const rendered = expectValue(tree);
+    const root = rendered.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Edit src/app.ts',
+    )[0];
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, '- const a = 1;')).toBe(true);
+    expect(hasRenderedText(root, '+ const a = 2;')).toBe(true);
+    expect(hasRenderedText(root, 'src/app.ts')).toBe(true);
+    act(() => rendered.unmount());
+  });
+
+  it('shows a spinner while a tool is still running', () => {
+    const invocation: ToolInvocation = {
+      id: 'running',
+      kind: 'read',
+      status: 'in_progress',
+      title: 'Read package.json',
+      monospaceTitle: false,
+      isError: false,
+      locations: [],
+      diffs: [],
+      terminals: [],
+      textLines: [],
+      images: [],
+      truncated: false,
+      empty: true,
+    };
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={createAppTheme('dark')}>
+          <ToolInvocationRow invocation={invocation} />
+        </AppThemeProvider>,
+      );
+    });
+    const rendered = expectValue(tree);
+    const root = rendered.root as QueryableTestInstance;
+    expect(root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Read package.json',
+    )[0];
+    expect(control.props.accessibilityState).toEqual({ disabled: true });
     act(() => rendered.unmount());
   });
 
@@ -700,48 +771,9 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it.each([
-    ['Ran command', '1 command'],
-    ['Called tool `search`', '1 tool call'],
-    ['Searched web for coverage', '1 web search'],
-    ['Applied file changes', '1 file change'],
-    ['Reading source.ts', '1 file read'],
-    ['Listing src', '1 folder listing'],
-    ['Explored tests', '1 exploration'],
-    ['Viewed image', '1 tool step'],
-  ])('summarizes %s tool groups', (title, summary) => {
-    let tree: ReactTestRenderer | undefined;
-    act(() => {
-      tree = renderer.create(
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup
-            messages={[
-              toOfficialMessage({
-                id: title,
-                role: 'system',
-                systemKind: 'tool',
-                content: `• ${title}`,
-                createdAt: '2026-04-17T00:00:00.000Z',
-              }),
-            ]}
-          />
-        </AppThemeProvider>,
-      );
-    });
-    expect(hasRenderedText(expectValue(tree).root as QueryableTestInstance, summary)).toBe(true);
-    act(() => expectValue(tree).unmount());
-  });
-
-  it('expands image and long-output tool details and updates command fades', () => {
+  it('scrolls long tool output and updates command fades', () => {
     const details = Array.from({ length: 26 }, (_, index) => `line ${String(index + 1)}`);
     const messages: LegacyTestMessage[] = [
-      {
-        id: 'view',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Viewed image\n  └ /tmp/screen.png',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
       {
         id: 'long',
         role: 'system',
@@ -754,8 +786,8 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => {
       tree = renderer.create(
         <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup
-            messages={messages.map(toOfficialMessage)}
+          <ToolInvocationRow
+            invocation={onlyInvocation(messages)}
             bridgeUrl="https://bridge"
             bridgeToken="token"
           />
@@ -764,16 +796,6 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    const header = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        String(node.props.accessibilityLabel).includes('tools'),
-    )[0];
-    act(() => readOnPress(header.props)());
-    const viewEntry = root.findAll((node) => node.props.accessibilityLabel === 'Viewed image')[0];
-    const longEntry = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Ran exhaustive command',
-    )[0];
     const commandScroll = root
       .findByProps({ testID: 'tool-command-scroll' })
       .findByType(ScrollView) as QueryableTestInstance;
@@ -788,13 +810,12 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => {
       commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 200 } } });
     });
-    act(() => {
-      readOnPress(viewEntry.props)();
-    });
-    expect(hasRenderedText(root, 'Tap to hide output')).toBe(true);
-    act(() => {
-      readOnPress(longEntry.props)();
-    });
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Ran exhaustive command',
+    )[0];
+    act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, 'line 26')).toBe(true);
     expect(
       root
@@ -834,16 +855,7 @@ describe('ChatMessage system timeline matrices', () => {
     ).toEqual({ disabled: true });
     act(() => subagent.unmount());
 
-    let emptyGroup: ReactTestRenderer | undefined;
-    act(() => {
-      emptyGroup = renderer.create(
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup messages={[]} />
-        </AppThemeProvider>,
-      );
-    });
-    expect((expectValue(emptyGroup) as QueryableRenderer).toJSON()).toBeNull();
-    act(() => expectValue(emptyGroup).unmount());
+    expect(buildToolInvocations([])).toEqual([]);
   });
 
   it.each([
@@ -919,6 +931,13 @@ function renderMessage(
     );
   });
   return expectValue(tree) as QueryableRenderer;
+}
+
+function onlyInvocation(messages: LegacyTestMessage[]): ToolInvocation {
+  const invocations = buildToolInvocations(messages.map(toOfficialMessage));
+  const invocation = invocations[0];
+  if (!invocation) throw new Error('Expected a tool invocation');
+  return invocation;
 }
 
 function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChatMessage {

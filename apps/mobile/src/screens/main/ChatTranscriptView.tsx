@@ -261,7 +261,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         : [styles.messageListContent, { paddingBottom: bottomInset }],
     [bottomInset, styles.messageListContent],
   );
-  const liveTurnActive = chat.status === 'running';
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
@@ -274,7 +273,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         styles,
         bridgeUrl,
         bridgeToken,
-        liveTurnActive,
         inlineChoiceSet,
         onInlineOptionSelect,
         onOpenLocalPreview,
@@ -285,7 +283,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       bridgeUrl,
       chat.status,
       inlineChoiceSet,
-      liveTurnActive,
       onInlineOptionSelect,
       onOpenLocalPreview,
       onOpenSubAgentThread,

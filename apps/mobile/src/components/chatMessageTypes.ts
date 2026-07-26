@@ -10,13 +10,6 @@ export interface ChatMessageProps {
   onOpenSubAgentThread?: (threadId: string) => void;
 }
 
-export interface ToolActivityGroupProps {
-  messages: ApiChatMessage[];
-  bridgeUrl?: string | null;
-  bridgeToken?: string | null;
-  liveTurnActive?: boolean;
-}
-
 export interface TimelineEntry {
   title: string;
   details: string[];

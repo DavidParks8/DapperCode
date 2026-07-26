@@ -33,6 +33,10 @@ export interface AppColors {
   inlineCodeText: string;
   toolBlockBg: string;
   toolBlockBorder: string;
+  diffAddedText: string;
+  diffAddedBg: string;
+  diffRemovedText: string;
+  diffRemovedBg: string;
   statusRunning: string;
   statusComplete: string;
   statusError: string;
@@ -103,6 +107,10 @@ const darkClassicColors: AppColors = {
   inlineCodeText: '#EEF2FB',
   toolBlockBg: 'rgba(255, 255, 255, 0.09)',
   toolBlockBorder: '#5A6376',
+  diffAddedText: '#7EE787',
+  diffAddedBg: 'rgba(46, 160, 67, 0.16)',
+  diffRemovedText: '#FF9492',
+  diffRemovedBg: 'rgba(248, 81, 73, 0.14)',
   statusRunning: '#C2C9D8',
   statusComplete: '#34C759',
   statusError: '#EF4444',
@@ -149,6 +157,10 @@ const darkGreyColors: AppColors = {
   inlineCodeText: '#e8e8e8',
   toolBlockBg: 'rgba(255, 255, 255, 0.06)',
   toolBlockBorder: 'rgba(255, 255, 255, 0.14)',
+  diffAddedText: '#89d185',
+  diffAddedBg: 'rgba(137, 209, 133, 0.14)',
+  diffRemovedText: '#f14c4c',
+  diffRemovedBg: 'rgba(241, 76, 76, 0.14)',
   statusRunning: '#89d185',
   statusComplete: '#89d185',
   statusError: '#f14c4c',
@@ -194,6 +206,10 @@ const lightColors: AppColors = {
   inlineCodeText: '#102030',
   toolBlockBg: 'rgba(67, 96, 126, 0.12)',
   toolBlockBorder: '#7289A4',
+  diffAddedText: '#116329',
+  diffAddedBg: 'rgba(17, 99, 41, 0.10)',
+  diffRemovedText: '#A40E26',
+  diffRemovedBg: 'rgba(164, 14, 38, 0.10)',
   statusRunning: '#3C5674',
   statusComplete: '#0E9F6E',
   statusError: '#D92D20',

@@ -74,7 +74,7 @@ Assert on store state rather than on callback props: screens no longer receive t
 
 Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState` left in the
 `mainScreen*` modules. Atoms are grouped by domain (`session`, `turn`, `models`, `workspace`,
-`composer`, `modals`, `gitCheckout`).
+`composer`, `modals`, `gitCheckout`, `toolInvocations`).
 
 - **Always create them with `screenAtom`,** never `atom`. `screenAtom` registers the atom with
   `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive the

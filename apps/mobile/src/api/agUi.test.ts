@@ -632,6 +632,109 @@ describe('AG-UI bridge notifications', () => {
     }
   });
 
+  it('projects tool metadata into a row before any output exists', () => {
+    const metaEvent = (status: string, title: string): AGUIEvent => ({
+      type: EventType.CUSTOM,
+      name: 'dappercode.dev/tool-meta',
+      value: { toolCallId: 'tool', kind: 'execute', status, title },
+    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      { threadId: 'thread', runId: 'run', event: metaEvent('in_progress', 'npm test') },
+    );
+    expect(messages(state)).toHaveLength(1);
+    expect(state.thread?.toolMetaByCallId.tool).toEqual({
+      toolCallId: 'tool',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'npm test',
+    });
+    expect(messages(state)[0].toolMeta?.status).toBe('in_progress');
+
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: metaEvent('completed', 'npm test'),
+    });
+    expect(messages(state)[0].toolMeta?.status).toBe('completed');
+
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: {
+        type: EventType.CUSTOM,
+        name: 'dappercode.dev/tool-content',
+        value: {
+          toolCallId: 'tool',
+          revision: 'one',
+          content: [{ type: 'terminal', terminalId: 'term-1' }],
+          locations: [{ path: 'a.ts' }],
+        },
+      },
+    });
+    const result = messages(state).find((message) => message.role === 'tool');
+    // Structured payloads must land next to the metadata without resetting it.
+    expect(result?.toolMeta).toMatchObject({
+      kind: 'execute',
+      status: 'completed',
+      content: [{ type: 'terminal', terminalId: 'term-1' }],
+      locations: [{ path: 'a.ts' }],
+    });
+
+    const ignored = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: {
+        type: EventType.CUSTOM,
+        name: 'dappercode.dev/tool-meta',
+        value: { kind: 'read' },
+      },
+    });
+    expect(ignored.thread?.toolMetaByCallId).toEqual(state.thread?.toolMetaByCallId);
+  });
+
+  it('folds snapshot tool activity messages into metadata instead of rendering them', () => {
+    const state = reduceEvents([
+      {
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [
+          {
+            id: 'tool-meta:tool',
+            role: 'activity',
+            activityType: 'dappercode.tool',
+            content: {
+              toolCallId: 'tool',
+              kind: 'edit',
+              status: 'failed',
+              title: 'Edit a.ts',
+              truncated: true,
+            },
+          },
+          {
+            id: 'tool-call:tool',
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              { id: 'tool', type: 'function', function: { name: 'edit', arguments: '{}' } },
+            ],
+          },
+          { id: 'tool-result:tool', role: 'tool', toolCallId: 'tool', content: 'boom' },
+        ],
+      } as unknown as AGUIEvent,
+    ]);
+
+    expect(messages(state).map((message) => message.id)).toEqual([
+      'tool-call:tool',
+      'tool-result:tool',
+    ]);
+    expect(messages(state)[1].toolMeta).toMatchObject({
+      kind: 'edit',
+      status: 'failed',
+      title: 'Edit a.ts',
+      truncated: true,
+    });
+  });
+
   it('upserts repeated structured terminal payloads by revision', () => {
     let state = updateAgUiLiveAssistantMessages(
       {},

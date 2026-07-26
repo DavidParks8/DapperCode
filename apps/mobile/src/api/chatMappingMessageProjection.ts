@@ -15,6 +15,7 @@ import {
 import { normalizeType, toSubAgentMeta } from './chatMappingToolArgumentParsers';
 import { renderAgUiCustomContent } from './agUi';
 import { structuredTextRemainder } from './agUiContent';
+import { toToolKind, toToolStatus } from './toolMeta';
 import { toToolLikeMessage } from './chatMappingToolMessageProjection';
 import { type ChatMessage } from './types';
 import {
@@ -103,6 +104,15 @@ export function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMess
               toolCallId: tool.id,
               content: `${details || tool.id}${tool.truncated ? '\n[tool content truncated]' : ''}`,
               createdAt: new Date(baseTs + index * 1000).toISOString(),
+              toolMeta: {
+                toolCallId: tool.id,
+                kind: toToolKind(tool.kind),
+                status: toToolStatus(tool.status),
+                title: tool.title || toToolKind(tool.kind),
+                content: tool.structuredContent,
+                locations: tool.locations,
+                truncated: tool.truncated,
+              },
             },
           ];
         }

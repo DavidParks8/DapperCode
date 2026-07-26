@@ -46,10 +46,41 @@ export type ChatMessagePart =
       };
     };
 
+export type ChatToolKind =
+  | 'read'
+  | 'edit'
+  | 'delete'
+  | 'move'
+  | 'search'
+  | 'execute'
+  | 'think'
+  | 'fetch'
+  | 'switch_mode'
+  | 'other';
+
+export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+/**
+ * The ACP facts a tool row needs that an AG-UI message cannot carry: the kind
+ * picks the icon and the body renderer, the status drives the progress and
+ * failure affordances, and the structured content keeps diffs and terminals
+ * renderable instead of pre-flattened text.
+ */
+export interface ChatToolMeta {
+  toolCallId: string;
+  kind: ChatToolKind;
+  status: ChatToolStatus;
+  title: string;
+  content?: unknown[];
+  locations?: unknown[];
+  truncated?: boolean;
+}
+
 interface ChatMessageMetadata {
   parts?: ChatMessagePart[];
   createdAt: string;
   pending?: boolean;
+  toolMeta?: ChatToolMeta;
 }
 
 export type ChatMessage = Message & ChatMessageMetadata;
