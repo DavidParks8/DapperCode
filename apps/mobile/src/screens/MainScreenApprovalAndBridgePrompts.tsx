@@ -1,3 +1,10 @@
+import {
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import { useAtomValue } from 'jotai';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { BridgeUiModal } from '../components/BridgeUiSurface';
 import { controlAccessibilityState } from '../accessibility';
@@ -10,19 +17,19 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 
 export function MainScreenApprovalAndBridgePrompts({ context }: { context: Context }) {
   const {
-    pendingUserInputRequest,
     styles,
-    userInputDrafts,
     setUserInputDraft,
     theme,
-    resolvingUserInput,
-    userInputError,
     dismissUserInputRequest,
     submitUserInputRequest,
     modalBridgeUiSurface,
     handleBridgeUiAction,
     dismissBridgeUiSurface,
   } = context;
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const userInputDrafts = useAtomValue(userInputDraftsAtom);
+  const userInputError = useAtomValue(userInputErrorAtom);
+  const resolvingUserInput = useAtomValue(resolvingUserInputAtom);
 
   return (
     <>

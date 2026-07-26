@@ -1,4 +1,15 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activePlanAtom,
+  activeTurnIdAtom,
+  errorAtom,
+  liveAssistantByThreadAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom
+} from '../state/mainScreen/turn';
+import {
   bridgeCapabilitiesAtom
 } from '../state/mainScreen/models';
 import {
@@ -37,22 +48,22 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     replayRecoveryEpochResetPendingRef,
     replayRecoveryGenerationRef,
     replayRecoveryRetryTimerRef,
-    setActiveBridgeUiSurfaces,
     setActiveCommands,
-    setActivePlan,
-    setActiveTurnId,
-    setError,
-    setLiveAssistantByThread,
-    setPendingApproval,
-    setPendingUserInputRequest,
     setSelectedChat,
-    setStoppingTurn,
     setStreamingText,
     setTranscriptContinuationState,
-    setUserInputDrafts,
     threadRuntimeSnapshotsRef,
     ws,
   } = context;
+  const setError = useSetAtom(errorAtom);
+  const setPendingApproval = useSetAtom(pendingApprovalAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setActivePlan = useSetAtom(activePlanAtom);
+  const setActiveBridgeUiSurfaces = useSetAtom(activeBridgeUiSurfacesAtom);
+  const setLiveAssistantByThread = useSetAtom(liveAssistantByThreadAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);

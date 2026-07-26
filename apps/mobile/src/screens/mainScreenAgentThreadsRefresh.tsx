@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   agentRootThreadIdAtom,
   loadingAgentThreadsAtom,
   relatedAgentThreadsAtom,
@@ -38,8 +41,8 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     runWatchdogUntilRef,
     selectedChatId,
     selectedChatRef,
-    setError,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);

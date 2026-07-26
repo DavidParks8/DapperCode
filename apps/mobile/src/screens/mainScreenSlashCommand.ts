@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
@@ -11,7 +14,6 @@ import type { MainScreenSlashCommandHandlerContext } from './mainScreenSlashComm
 
 export async function executeSlashCommand(context: MainScreenSlashCommandHandlerContext, input: string): Promise<boolean> {
   const {
-    setError,
     selectedChatId,
     supportsGoal,
     supportsPlanMode,
@@ -32,6 +34,7 @@ export async function executeSlashCommand(context: MainScreenSlashCommandHandler
     onOpenGit,
     store,
   } = context;
+  const setError = screenSetter(store, errorAtom);
   const selectedCollaborationMode = store.get(selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 

@@ -1,4 +1,9 @@
 import {
+  creatingAtom,
+  sendingAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   loadingModelsAtom
 } from '../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
@@ -58,13 +63,13 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     workflowCardMode,
     selectedThreadPlan,
     planPanelCollapsed,
-    sending,
-    creating,
-    stoppingTurn,
     toggleSelectedPlanPanel,
     implementPlan,
     stayInPlanMode,
   } = context;
+  const sending = useAtomValue(sendingAtom);
+  const creating = useAtomValue(creatingAtom);
+  const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const loadingModels = useAtomValue(loadingModelsAtom);
   const modelModalVisible = useAtomValue(modelModalVisibleAtom);
   const effortModalVisible = useAtomValue(effortModalVisibleAtom);

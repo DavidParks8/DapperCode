@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom,
@@ -38,8 +41,8 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     selectedChatId,
     selectedModel,
     serverDefaultModel,
-    setError,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const selectedModelId = useAtomValue(selectedModelIdAtom);
   const selectedEffort = useAtomValue(selectedEffortAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);

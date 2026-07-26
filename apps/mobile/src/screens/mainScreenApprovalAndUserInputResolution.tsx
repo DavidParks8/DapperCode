@@ -1,7 +1,19 @@
 import {
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import { buildUserInputAnswers } from './controllers/approvalController';
@@ -26,32 +38,32 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
     cacheThreadPendingUserInputRequest,
     chatSyncController,
     clearRunWatchdog,
-    creating,
     hadCommandRef,
     mergeChatWithPendingOptimisticMessages,
-    pendingApproval,
-    pendingUserInputRequest,
     reasoningBufferRef,
     reasoningSummaryRef,
-    resolvingUserInput,
     runWatchdogUntilRef,
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    sending,
     setActiveCommands,
-    setActiveTurnId,
-    setError,
-    setPendingApproval,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
     setSelectedChat,
-    setStoppingTurn,
     setStreamingText,
-    setUserInputDrafts,
-    setUserInputError,
-    userInputDrafts,
   } = context;
+  const sending = useAtomValue(sendingAtom);
+  const creating = useAtomValue(creatingAtom);
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const userInputDrafts = useAtomValue(userInputDraftsAtom);
+  const resolvingUserInput = useAtomValue(resolvingUserInputAtom);
+  const setError = useSetAtom(errorAtom);
+  const setPendingApproval = useSetAtom(pendingApprovalAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
 
 

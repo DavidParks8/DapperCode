@@ -1,4 +1,16 @@
 import {
+  activePlanAtom,
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom
@@ -14,21 +26,12 @@ import type { MainScreenSlashCommandHandlerContext } from './mainScreenSlashComm
 
 export async function executePlanCommand(context: MainScreenSlashCommandHandlerContext, argText: string): Promise<boolean> {
   const {
-    setError,
     selectedChatId,
     submissionController,
     draftController,
     selectedChatIdRef,
     setDraft,
-    setCreating,
-    setActiveTurnId,
-    setStoppingTurn,
     stopRequestedRef,
-    setActivePlan,
-    setPendingUserInputRequest,
-    setUserInputDrafts,
-    setUserInputError,
-    setResolvingUserInput,
     turnExecutionController,
     activeAgentId,
     preferredStartCwd,
@@ -47,12 +50,21 @@ export async function executePlanCommand(context: MainScreenSlashCommandHandlerC
     clearRunWatchdog,
     discardOptimisticUserMessage,
     handleTurnFailure,
-    setSending,
     cacheThreadPlan,
     selectedChat,
     scrollToBottomReliable,
     store,
   } = context;
+  const setSending = screenSetter(store, sendingAtom);
+  const setCreating = screenSetter(store, creatingAtom);
+  const setError = screenSetter(store, errorAtom);
+  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
+  const setUserInputDrafts = screenSetter(store, userInputDraftsAtom);
+  const setUserInputError = screenSetter(store, userInputErrorAtom);
+  const setResolvingUserInput = screenSetter(store, resolvingUserInputAtom);
+  const setActivePlan = screenSetter(store, activePlanAtom);
+  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
+  const setStoppingTurn = screenSetter(store, stoppingTurnAtom);
   const selectedEffort = store.get(selectedEffortAtom);
   const selectedAcpModeId = store.get(selectedAcpModeIdAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);

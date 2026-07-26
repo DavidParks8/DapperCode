@@ -1,8 +1,15 @@
 import {
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  sendingAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   activityAtom,
   showDelayedGenericRunningActivityAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { MainScreenReasoningAndInterruptContext, MainScreenReasoningAndInterruptResult } from './mainScreenReasoningAndInterrupt';
 
@@ -19,16 +26,16 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
     chatIdRef,
     interruptActiveTurn,
     interruptLatestTurn,
-    setActiveTurnId,
-    setCreating,
-    setError,
     setSelectedChat,
-    setSending,
-    setStoppingTurn,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
-    stoppingTurn,
   } = context;
+  const stoppingTurn = useAtomValue(stoppingTurnAtom);
+  const setSending = useSetAtom(sendingAtom);
+  const setCreating = useSetAtom(creatingAtom);
+  const setError = useSetAtom(errorAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
   const setShowDelayedGenericRunningActivity = useSetAtom(showDelayedGenericRunningActivityAtom);
 

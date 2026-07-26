@@ -1,12 +1,13 @@
+import { useAtomValue } from 'jotai';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../state/mainScreen/turn';
 import { type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AgentId, BridgeUiSurface, PendingApproval, PendingUserInputRequest, RunEvent, Chat, FileSystemListResponse } from '../api/types';
-import { type AgUiLiveAssistantMessages } from '../api/agUi';
+import type { AgentId, RunEvent, Chat, FileSystemListResponse } from '../api/types';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
-import { type ActivePlanState, type IdleTaskHandle } from './mainScreenHelpers';
+import { type IdleTaskHandle } from './mainScreenHelpers';
 import { ApprovalController } from './controllers/approvalController';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
@@ -74,20 +75,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   );
   const draftController = useDraftController(bridgeProfileId, selectedChatId);
   const { draft, setDraft } = draftController;
-  const [sending, setSending] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [, setActiveCommands] = useState<RunEvent[]>([]);
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
-  const [pendingUserInputRequest, setPendingUserInputRequest] =
-    useState<PendingUserInputRequest | null>(null);
-  const [userInputDrafts, setUserInputDrafts] = useState<Record<string, string>>({});
-  const [userInputError, setUserInputError] = useState<string | null>(null);
-  const [resolvingUserInput, setResolvingUserInput] = useState(false);
-  const [activePlan, setActivePlan] = useState<ActivePlanState | null>(null);
-  const [activeBridgeUiSurfaces, setActiveBridgeUiSurfaces] = useState<BridgeUiSurface[]>([]);
-  const [liveAssistantByThread, setLiveAssistantByThread] =
-    useState<AgUiLiveAssistantMessages>({});
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(
     (
@@ -106,14 +94,15 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     },
     []
   );
-  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
-  const [stoppingTurn, setStoppingTurn] = useState(false);
   const [, setLoadingWorkspaceRoots] = useState(false);
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
   const [pendingAgentId, setPendingAgentId] = useState<AgentId | null>(
     () => preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null
   );
+  const sending = useAtomValue(sendingAtom);
+  const creating = useAtomValue(creatingAtom);
+  const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
   const creatingRef = useRef(creating);
@@ -155,35 +144,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     draftController,
     draft,
     setDraft,
-    sending,
-    setSending,
-    creating,
-    setCreating,
-    error,
-    setError,
     setActiveCommands,
-    pendingApproval,
-    setPendingApproval,
-    pendingUserInputRequest,
-    setPendingUserInputRequest,
-    userInputDrafts,
-    setUserInputDrafts,
-    userInputError,
-    setUserInputError,
-    resolvingUserInput,
-    setResolvingUserInput,
-    activePlan,
-    setActivePlan,
-    activeBridgeUiSurfaces,
-    setActiveBridgeUiSurfaces,
-    liveAssistantByThread,
-    setLiveAssistantByThread,
     streamingTextRef,
     setStreamingText,
-    activeTurnId,
-    setActiveTurnId,
-    stoppingTurn,
-    setStoppingTurn,
     setLoadingWorkspaceRoots,
     workspaceBrowseCacheRef,
     workspaceBrowseRequestRef,

@@ -1,8 +1,11 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import type { MainScreenPickerOptionBuildersContext, MainScreenPickerOptionBuildersResult } from './mainScreenPickerOptionBuilders';
@@ -27,10 +30,10 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    setError,
     setSelectedChat,
     setSelectedChatId,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
 

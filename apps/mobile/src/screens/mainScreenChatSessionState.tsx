@@ -1,4 +1,8 @@
 import {
+  activeTurnIdAtom,
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   bridgeCapabilitiesAtom,
   modelOptionsByAgentAtom
 } from '../state/mainScreen/models';
@@ -30,7 +34,6 @@ export type MainScreenChatSessionStateContext = MainScreenLifecycleRecoveryConte
 
 export function useMainScreenChatSessionState(context: MainScreenChatSessionStateContext) {
   const {
-    activeTurnId,
     agentSettings,
     api,
     approvalMode,
@@ -44,8 +47,9 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     selectedChat,
     selectedChatId,
     setDraft,
-    setError,
   } = context;
+  const activeTurnId = useAtomValue(activeTurnIdAtom);
+  const setError = useSetAtom(errorAtom);
   const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
   const modelOptionsByAgent = useAtomValue(modelOptionsByAgentAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);

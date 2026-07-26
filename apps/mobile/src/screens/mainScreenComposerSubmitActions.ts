@@ -1,8 +1,13 @@
 import {
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   queueActionItemIdAtom,
   queueActionKindAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type { MainScreenSendMessageHandlerContext, MainScreenSendMessageHandlerResult } from './mainScreenSendMessageHandler';
 
@@ -22,10 +27,8 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
     draftController,
     handleSlashCommand,
     hasFailedAttachmentUploads,
-    pendingApproval,
     pendingLocalImagePaths,
     pendingMentionPaths,
-    pendingUserInputRequest,
     scrollToBottomReliable,
     selectedChat,
     selectedChatId,
@@ -33,13 +36,15 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
     sendMessageContent,
     sendingRef,
     setDraft,
-    setError,
     stoppingTurnRef,
     submissionController,
     threadRuntimeSnapshotsRef,
     turnExecutionController,
     uploadingAttachment,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const setError = useSetAtom(errorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
 

@@ -1,4 +1,16 @@
 import {
+  activePlanAtom,
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   agentDetailChatAtom,
   agentDetailErrorAtom,
   agentDetailLoadingAtom,
@@ -43,25 +55,25 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     refreshPendingApprovalsForThread,
     selectedChatIdRef,
     selectedChatRef,
-    setActivePlan,
-    setActiveTurnId,
-    setCreating,
-    setError,
     setOpeningChatId,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
     setSelectedChat,
     setSelectedChatId,
-    setSending,
-    setStoppingTurn,
     setTranscriptContinuationState,
-    setUserInputDrafts,
-    setUserInputError,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
     transcriptContinuationController,
     transcriptContinuationState,
   } = context;
+  const setSending = useSetAtom(sendingAtom);
+  const setCreating = useSetAtom(creatingAtom);
+  const setError = useSetAtom(errorAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActivePlan = useSetAtom(activePlanAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentDetailStack = useAtomValue(agentDetailStackAtom);
   const setAgentDetailThreadId = useSetAtom(agentDetailThreadIdAtom);

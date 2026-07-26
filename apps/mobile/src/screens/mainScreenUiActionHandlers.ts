@@ -1,4 +1,16 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  sendingAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   relatedAgentThreadsAtom
 } from '../state/mainScreen/workspace';
 import {
@@ -21,36 +33,36 @@ export type MainScreenUiActionHandlersContext = MainScreenApprovalAndUserInputRe
 
 export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandlersContext) {
   const {
-    activeTurnId,
     api,
     approvalController,
     cacheThreadPendingUserInputRequest,
     clearHeldActivity,
     createChat,
-    creating,
-    error,
     heldActivityTimeoutRef,
     onOpenGit,
     openingChatId,
-    pendingApproval,
-    pendingUserInputRequest,
     removeThreadBridgeUiSurface,
-    resolvingUserInput,
     runWatchdogNow,
     runWatchdogUntilRef,
     scrollToBottomReliable,
     selectedChat,
     sendMessage,
-    sending,
-    setActiveBridgeUiSurfaces,
-    setError,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
-    setUserInputDrafts,
-    setUserInputError,
     uploadingAttachment,
     ws,
   } = context;
+  const sending = useAtomValue(sendingAtom);
+  const creating = useAtomValue(creatingAtom);
+  const error = useAtomValue(errorAtom);
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const resolvingUserInput = useAtomValue(resolvingUserInputAtom);
+  const activeTurnId = useAtomValue(activeTurnIdAtom);
+  const setError = useSetAtom(errorAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActiveBridgeUiSurfaces = useSetAtom(activeBridgeUiSurfacesAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const activity = useAtomValue(activityAtom);
   const bridgeRecoveryBannerVisible = useAtomValue(bridgeRecoveryBannerVisibleAtom);

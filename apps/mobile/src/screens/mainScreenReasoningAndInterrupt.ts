@@ -1,4 +1,9 @@
 import {
+  activeTurnIdAtom,
+  errorAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
@@ -21,14 +26,14 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
     liveReasoningBuffersRef,
     liveReasoningMessageIdsRef,
     schedulePinnedScrollToBottom,
-    setActiveTurnId,
-    setError,
     setSelectedChat,
-    setStoppingTurn,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
     turnExecutionController,
   } = context;
+  const setError = useSetAtom(errorAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
 
 

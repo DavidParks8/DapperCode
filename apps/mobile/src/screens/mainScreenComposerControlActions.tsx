@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom,
@@ -49,12 +52,12 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     saveChatModelPreferences,
     retryFailedUploads,
     selectedChatId,
-    setError,
     setPendingAgentId,
     supportsFastMode,
     uploadingAttachment,
     ws,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const setSelectedModelId = useSetAtom(selectedModelIdAtom);
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);

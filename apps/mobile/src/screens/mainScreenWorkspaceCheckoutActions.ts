@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   workspaceBridgeRootAtom,
   workspaceBrowseErrorAtom,
   workspaceBrowseParentPathAtom,
@@ -45,9 +48,9 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     refreshWorkspaceRoots,
     scheduleAgentThreadsRefresh,
     scheduleDisconnectActivity,
-    setError,
     ws,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
   const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
   const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);

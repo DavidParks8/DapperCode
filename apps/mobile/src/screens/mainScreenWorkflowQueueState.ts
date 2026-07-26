@@ -1,4 +1,15 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activePlanAtom,
+  creatingAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import {
@@ -40,35 +51,35 @@ export type MainScreenWorkflowQueueStateContext = MainScreenHeaderActivityViewMo
 export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueueStateContext) {
   const {
     activeAgentSupports,
-    activeBridgeUiSurfaces,
-    activePlan,
     agentThreadRows,
     api,
     attachmentMenuVisible,
     attachmentModalVisible,
     chatPlanSnapshotsRef,
-    creating,
     dismissedPlanImplementationTurnIdByThreadRef,
     draft,
-    error,
     isOpeningChat,
-    pendingApproval,
     pendingOptimisticQueuedMessagesRef,
-    pendingUserInputRequest,
     runWatchdogNow,
     safeAreaInsets,
     selectedChat,
     selectedChatId,
-    sending,
     shouldShowComposer,
     showBridgeRecoveryBanner,
     slashSuggestions,
-    stoppingTurn,
     theme,
     threadRuntimeSnapshotsRef,
-    userInputError,
     ws,
   } = context;
+  const sending = useAtomValue(sendingAtom);
+  const creating = useAtomValue(creatingAtom);
+  const error = useAtomValue(errorAtom);
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const userInputError = useAtomValue(userInputErrorAtom);
+  const activePlan = useAtomValue(activePlanAtom);
+  const activeBridgeUiSurfaces = useAtomValue(activeBridgeUiSurfacesAtom);
+  const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);

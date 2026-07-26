@@ -1,4 +1,14 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activePlanAtom,
+  activeTurnIdAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   bridgeCapabilitiesAtom,
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
@@ -32,21 +42,21 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
     runWatchdogUntilRef,
     scheduleRunWatchdogExpiry,
     selectedChat,
-    setActiveBridgeUiSurfaces,
     setActiveCommands,
-    setActivePlan,
-    setActiveTurnId,
     setChatPlanSnapshotsLoaded,
-    setPendingApproval,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
     setRunWatchdogNow,
     setStreamingText,
-    setUserInputDrafts,
-    setUserInputError,
     threadRuntimeSnapshotsRef,
     upsertThreadRuntimeSnapshot,
   } = context;
+  const setPendingApproval = useSetAtom(pendingApprovalAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActivePlan = useSetAtom(activePlanAtom);
+  const setActiveBridgeUiSurfaces = useSetAtom(activeBridgeUiSurfacesAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);

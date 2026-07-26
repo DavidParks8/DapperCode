@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   loadingModelsAtom,
   modelOptionsByAgentAtom,
   selectedAcpModeIdAtom,
@@ -43,10 +46,10 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    setError,
     setSelectedChat,
     setSelectedChatId,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const loadingModels = useAtomValue(loadingModelsAtom);
   const selectedEffort = useAtomValue(selectedEffortAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);

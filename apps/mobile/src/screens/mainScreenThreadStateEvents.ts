@@ -1,4 +1,12 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activePlanAtom,
+  activeTurnIdAtom,
+  liveAssistantByThreadAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import {
@@ -23,12 +31,6 @@ export function processThreadStateEvents(
     clearRunWatchdog,
     setActiveCommands,
     setStreamingText,
-    setLiveAssistantByThread,
-    setActiveTurnId,
-    setPendingApproval,
-    setPendingUserInputRequest,
-    setActivePlan,
-    setActiveBridgeUiSurfaces,
     replaceThreadBridgeUiSurfaces,
     reasoningSummaryRef,
     reasoningBufferRef,
@@ -48,6 +50,12 @@ export function processThreadStateEvents(
     upsertLiveReasoningMessage,
     store,
   } = context;
+  const setPendingApproval = screenSetter(store, pendingApprovalAtom);
+  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
+  const setActivePlan = screenSetter(store, activePlanAtom);
+  const setActiveBridgeUiSurfaces = screenSetter(store, activeBridgeUiSurfacesAtom);
+  const setLiveAssistantByThread = screenSetter(store, liveAssistantByThreadAtom);
+  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const agentDetailThreadId = store.get(agentDetailThreadIdAtom);
   const agentDetailChat = store.get(agentDetailChatAtom);

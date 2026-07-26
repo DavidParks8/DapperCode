@@ -1,4 +1,10 @@
 import {
+  activeTurnIdAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   activityAtom
 } from '../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
@@ -37,18 +43,18 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
     scrollToBottomReliable,
     selectedChatRef,
     setActiveCommands,
-    setActiveTurnId,
-    setError,
     setOpeningChatId,
-    setPendingApproval,
     setSelectedChat,
     setSelectedChatId,
-    setStoppingTurn,
     setStreamingText,
     setTranscriptContinuationState,
     stopSystemMessageLoggedRef,
     threadRuntimeSnapshotsRef,
   } = context;
+  const setError = useSetAtom(errorAtom);
+  const setPendingApproval = useSetAtom(pendingApprovalAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
 
 

@@ -1,3 +1,13 @@
+import {
+  activeTurnIdAtom,
+  errorAtom,
+  liveAssistantByThreadAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom,
@@ -15,15 +25,12 @@ export function processAgUiRunEvents(
   currentId: string | null
 ): void {
   const {
-    setLiveAssistantByThread,
     scheduleAgentThreadsRefresh,
     schedulePinnedScrollToBottom,
     clearLiveReasoningMessage,
     planItemTurnIdByThreadRef,
     upsertThreadRuntimeSnapshot,
     registerTurnStarted,
-    setError,
-    setActiveTurnId,
     setActiveCommands,
     bumpRunWatchdog,
     cacheThreadTurnState,
@@ -33,11 +40,6 @@ export function processAgUiRunEvents(
     bumpAgentRuntimeRevision,
     clearRunWatchdog,
     setStreamingText,
-    setPendingUserInputRequest,
-    setUserInputDrafts,
-    setUserInputError,
-    setResolvingUserInput,
-    setStoppingTurn,
     hadCommandRef,
     reasoningSummaryRef,
     reasoningBufferRef,
@@ -47,6 +49,14 @@ export function processAgUiRunEvents(
     loadChat,
     store,
   } = context;
+  const setError = screenSetter(store, errorAtom);
+  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
+  const setUserInputDrafts = screenSetter(store, userInputDraftsAtom);
+  const setUserInputError = screenSetter(store, userInputErrorAtom);
+  const setResolvingUserInput = screenSetter(store, resolvingUserInputAtom);
+  const setLiveAssistantByThread = screenSetter(store, liveAssistantByThreadAtom);
+  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
+  const setStoppingTurn = screenSetter(store, stoppingTurnAtom);
   const setActivity = screenSetter(store, activityAtom);
   const setPendingPlanImplementationPrompts = screenSetter(store, pendingPlanImplementationPromptsAtom);
 

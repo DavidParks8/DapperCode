@@ -1,4 +1,15 @@
 import {
+  activePlanAtom,
+  activeTurnIdAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   defaultServiceTierAtom,
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
@@ -52,24 +63,24 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     selectedChatRef,
     selectedNewAgentId,
     setActiveCommands,
-    setActivePlan,
-    setActiveTurnId,
-    setError,
     setLoadingWorkspaceRoots,
     setOpeningChatId,
     setPendingAgentId,
-    setPendingApproval,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
     setSelectedChat,
     setSelectedChatId,
-    setStoppingTurn,
     setStreamingText,
-    setUserInputDrafts,
-    setUserInputError,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
   } = context;
+  const setError = useSetAtom(errorAtom);
+  const setPendingApproval = useSetAtom(pendingApprovalAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActivePlan = useSetAtom(activePlanAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const defaultServiceTier = useAtomValue(defaultServiceTierAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);

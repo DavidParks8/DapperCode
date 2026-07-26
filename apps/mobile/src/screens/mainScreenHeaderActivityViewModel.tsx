@@ -1,4 +1,9 @@
 import {
+  activeTurnIdAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   relatedAgentThreadsAtom,
   workspaceBridgeRootAtom
 } from '../state/mainScreen/workspace';
@@ -28,15 +33,12 @@ export type MainScreenHeaderActivityViewModelContext = MainScreenUiActionHandler
 
 export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderActivityViewModelContext) {
   const {
-    activeTurnId,
     clearGenericRunningActivityDelay,
     genericRunningActivityTimeoutRef,
     isLoading,
     isOpeningChat,
     isTurnLikelyRunning,
     isTurnLoading,
-    pendingApproval,
-    pendingUserInputRequest,
     preferredStartCwd,
     selectedChat,
     selectorAgentCount,
@@ -44,6 +46,9 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     turnFailureDetail,
     ws,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const activeTurnId = useAtomValue(activeTurnIdAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
   const activity = useAtomValue(activityAtom);

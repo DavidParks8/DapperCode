@@ -1,4 +1,8 @@
 import {
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   agentDetailThreadIdAtom
 } from '../state/mainScreen/workspace';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
@@ -43,8 +47,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     clearRunWatchdog,
     loadAgentDetail,
     loadChat,
-    pendingApproval,
-    pendingUserInputRequest,
     pushActiveCommand,
     readThreadContextUsage,
     recoverReplayGap,
@@ -60,6 +62,8 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     upsertThreadRuntimeSnapshot,
     ws,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setActivity = useSetAtom(activityAtom);
 

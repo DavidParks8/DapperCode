@@ -1,4 +1,16 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  activePlanAtom,
+  errorAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom,
   selectedEffortAtom
 } from '../state/mainScreen/models';
@@ -42,18 +54,13 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     draftController,
     threadRuntimeSnapshotsRef,
     supportsGoal,
-    activeBridgeUiSurfaces,
     replaceThreadBridgeUiSurfaces,
     selectedChatIdRef,
-    setActiveBridgeUiSurfaces,
     activeTurnIdRef,
     selectedChatRef,
-    pendingApproval,
-    pendingUserInputRequest,
     queueOptimisticQueuedMessage,
     discardOptimisticUserMessage,
     setSelectedChat,
-    setSending,
     bumpRunWatchdog,
     attachmentController,
     queueOptimisticUserMessage,
@@ -66,22 +73,27 @@ export async function executeSendMessage(context: MainScreenSendMessageHandlerCo
     discardOptimisticQueuedMessage,
     cacheThreadQueueState,
     rememberChatModelPreference,
-    setError,
     clearRunWatchdog,
     registerTurnStarted,
-    setStoppingTurn,
     stopRequestedRef,
-    setActivePlan,
     cacheThreadPlan,
-    setPendingUserInputRequest,
-    setUserInputDrafts,
-    setUserInputError,
-    setResolvingUserInput,
     mergeChatWithPendingOptimisticMessages,
     supportsPlanMode,
     handleTurnFailure,
     store,
   } = context;
+  const pendingApproval = store.get(pendingApprovalAtom);
+  const pendingUserInputRequest = store.get(pendingUserInputRequestAtom);
+  const activeBridgeUiSurfaces = store.get(activeBridgeUiSurfacesAtom);
+  const setSending = screenSetter(store, sendingAtom);
+  const setError = screenSetter(store, errorAtom);
+  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
+  const setUserInputDrafts = screenSetter(store, userInputDraftsAtom);
+  const setUserInputError = screenSetter(store, userInputErrorAtom);
+  const setResolvingUserInput = screenSetter(store, resolvingUserInputAtom);
+  const setActivePlan = screenSetter(store, activePlanAtom);
+  const setActiveBridgeUiSurfaces = screenSetter(store, activeBridgeUiSurfacesAtom);
+  const setStoppingTurn = screenSetter(store, stoppingTurnAtom);
   const selectedEffort = store.get(selectedEffortAtom);
   const selectedCollaborationMode = store.get(selectedCollaborationModeAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);

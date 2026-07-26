@@ -1,4 +1,7 @@
 import {
+  errorAtom
+} from '../state/mainScreen/turn';
+import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   agentRuntimeRevisionAtom,
@@ -36,10 +39,10 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     refreshAgentThreads,
     runWatchdogNow,
     selectedChatRef,
-    setError,
     startNewChat,
     threadRuntimeSnapshotsRef,
   } = context;
+  const setError = useSetAtom(errorAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);

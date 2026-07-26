@@ -1,4 +1,9 @@
 import {
+  activePlanAtom,
+  activeTurnIdAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
@@ -34,7 +39,6 @@ export function processTurnLifecycleEvents(
     cacheThreadActivity,
     cacheThreadPlan,
     bumpRunWatchdog,
-    setActivePlan,
     reasoningSummaryRef,
     cacheThreadActiveCommand,
     pushActiveCommand,
@@ -44,8 +48,6 @@ export function processTurnLifecycleEvents(
     setSelectedChat,
     runWatchdogUntilRef,
     clearRunWatchdog,
-    setActiveTurnId,
-    setStoppingTurn,
     setActiveCommands,
     setStreamingText,
     reasoningBufferRef,
@@ -53,6 +55,9 @@ export function processTurnLifecycleEvents(
     refreshPendingApprovalsForThread,
     store,
   } = context;
+  const setActivePlan = screenSetter(store, activePlanAtom);
+  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
+  const setStoppingTurn = screenSetter(store, stoppingTurnAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 

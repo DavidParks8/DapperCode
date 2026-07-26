@@ -1,4 +1,15 @@
 import {
+  activePlanAtom,
+  activeTurnIdAtom,
+  creatingAtom,
+  errorAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  stoppingTurnAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom
@@ -47,23 +58,23 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    setActivePlan,
-    setActiveTurnId,
-    setCreating,
     setDraft,
-    setError,
-    setPendingUserInputRequest,
-    setResolvingUserInput,
     setSelectedChat,
     setSelectedChatId,
     supportsPlanMode,
-    setStoppingTurn,
-    setUserInputDrafts,
-    setUserInputError,
     stopRequestedRef,
     submissionController,
     turnExecutionController,
   } = context;
+  const setCreating = useSetAtom(creatingAtom);
+  const setError = useSetAtom(errorAtom);
+  const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
+  const setUserInputDrafts = useSetAtom(userInputDraftsAtom);
+  const setUserInputError = useSetAtom(userInputErrorAtom);
+  const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
+  const setActivePlan = useSetAtom(activePlanAtom);
+  const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const selectedEffort = useAtomValue(selectedEffortAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);

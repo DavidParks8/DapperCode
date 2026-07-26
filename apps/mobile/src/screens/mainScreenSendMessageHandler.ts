@@ -1,4 +1,9 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
@@ -15,7 +20,6 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
   const {
     activeAgentId,
     activeApprovalPolicy,
-    activeBridgeUiSurfaces,
     activeEffort,
     activeModelId,
     activeServiceTier,
@@ -31,10 +35,8 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
     handleSlashCommand,
     handleTurnFailure,
     mergeChatWithPendingOptimisticMessages,
-    pendingApproval,
     pendingLocalImagePaths,
     pendingMentionPaths,
-    pendingUserInputRequest,
     queueOptimisticQueuedMessage,
     queueOptimisticUserMessage,
     registerTurnStarted,
@@ -45,6 +47,9 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
     selectedChatId,
     submissionController,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const activeBridgeUiSurfaces = useAtomValue(activeBridgeUiSurfacesAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
 
 

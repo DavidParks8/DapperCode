@@ -1,4 +1,9 @@
 import {
+  liveAssistantByThreadAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom
+} from '../state/mainScreen/turn';
+import {
   agentDetailChatAtom,
   agentDetailErrorAtom,
   agentDetailLoadingAtom,
@@ -42,8 +47,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     showToolCalls,
     agentThreadStatusById,
     scrollRef,
-    pendingUserInputRequest,
-    pendingApproval,
     isLoading,
     handleInlineOptionSelect,
     scrollToBottomIfPinned,
@@ -51,7 +54,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     clearPendingScrollRetries,
     autoScrollStateRef,
     androidComposerReservedInset,
-    liveAssistantByThread,
     transcriptContinuationState,
     handleLoadEarlier,
     defaultStartWorkspaceLabel,
@@ -91,6 +93,9 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     agentPickerOptions,
     closeAgentModal,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
   const loadingAgentThreads = useAtomValue(loadingAgentThreadsAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const agentDetailChat = useAtomValue(agentDetailChatAtom);

@@ -1,4 +1,8 @@
 import {
+  pendingApprovalAtom,
+  stoppingTurnAtom
+} from '../state/mainScreen/turn';
+import {
   composerHeightAtom,
   keyboardVisibleAtom,
   queueActionItemIdAtom,
@@ -54,7 +58,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     oldestQueuedMessageIsPendingSteer,
     onOpenBridgeRecoveryGuide,
     openAttachmentMenu,
-    pendingApproval,
     queuedMessageSteerDisabledReason,
     remainingQueuedMessagesCount,
     removeComposerAttachment,
@@ -69,11 +72,12 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     showingOptimisticQueuedMessage,
     slashSuggestions,
     slashSuggestionsMaxHeight,
-    stoppingTurn,
     styles,
     theme,
     visibleError,
   } = context;
+  const pendingApproval = useAtomValue(pendingApprovalAtom);
+  const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const queueActionKind = useAtomValue(queueActionKindAtom);

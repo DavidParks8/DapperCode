@@ -1,4 +1,12 @@
 import {
+  activeBridgeUiSurfacesAtom,
+  pendingApprovalAtom,
+  pendingUserInputRequestAtom,
+  resolvingUserInputAtom,
+  userInputDraftsAtom,
+  userInputErrorAtom
+} from '../state/mainScreen/turn';
+import {
   selectedCollaborationModeAtom
 } from '../state/mainScreen/models';
 import { screenSetter } from '../state/mainScreen/registry';
@@ -16,19 +24,19 @@ export function processBridgeInteractionEvents(context: MainScreenWsEventRouterC
     cacheThreadPendingApproval,
     cacheThreadActivity,
     clearRunWatchdog,
-    setPendingApproval,
     cacheThreadPendingUserInputRequest,
-    setPendingUserInputRequest,
-    setUserInputDrafts,
-    setUserInputError,
-    setResolvingUserInput,
     threadRuntimeSnapshotsRef,
     bumpRunWatchdog,
     cacheThreadBridgeUiSurface,
-    setActiveBridgeUiSurfaces,
     removeThreadBridgeUiSurface,
     store,
   } = context;
+  const setPendingApproval = screenSetter(store, pendingApprovalAtom);
+  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
+  const setUserInputDrafts = screenSetter(store, userInputDraftsAtom);
+  const setUserInputError = screenSetter(store, userInputErrorAtom);
+  const setResolvingUserInput = screenSetter(store, resolvingUserInputAtom);
+  const setActiveBridgeUiSurfaces = screenSetter(store, activeBridgeUiSurfacesAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
 
