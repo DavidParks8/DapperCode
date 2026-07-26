@@ -42,6 +42,7 @@
     "android": "./scripts/start-expo.sh android",
     "bridge": "BRIDGE_WORKDIR=$(pwd) cargo run --manifest-path services/rust-bridge/Cargo.toml",
     "bridge:ui:demo": "node ./scripts/send-bridge-ui-demo.js",
+    "release:testflight": "node --experimental-strip-types ./scripts/release-testflight.mts",
     "operator": "cargo run --manifest-path apps/desktop/Cargo.toml --",
     "desktop:check": "cargo check --locked --manifest-path apps/desktop/Cargo.toml",
     "desktop:test": "cargo test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1",
@@ -60,12 +61,13 @@
     "duplicates:check": "npm run duplicates:mobile && npm run duplicates:native",
     "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",
     "build": "npm run build -w @dappercode/mobile && cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml && cargo build --locked --release --manifest-path apps/desktop/Cargo.toml",
-    "typecheck": "npm run typecheck -w @dappercode/mobile && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
+    "typecheck": "npm run typecheck -w @dappercode/mobile && npm run typecheck:scripts && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
     "lint": "npm run format:check && npm run lint -w @dappercode/mobile && npm run duplicates:check && cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml && cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings && cargo fmt --check --manifest-path apps/desktop/Cargo.toml && cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings",
     "test": "npm run test:scripts && npm run test -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1 && npm run desktop:test",
     "coverage:check": "npm run test:coverage -w @dappercode/mobile",
     "coverage:rust": "./scripts/run-rust-coverage.sh",
-    "format": "prettier --write \"**/*.{ts,tsx,js,cjs,mjs}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,mjs}\""
+    "format": "prettier --write \"**/*.{ts,tsx,mts,js,cjs,mjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mts,js,cjs,mjs}\"",
+    "typecheck:scripts": "tsc --noEmit --project scripts/tsconfig.json"
   }
 }
