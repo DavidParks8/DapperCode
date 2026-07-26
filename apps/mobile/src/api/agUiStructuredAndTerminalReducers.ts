@@ -3,55 +3,47 @@ import {
   nonEmptyString,
   renderOrderedParts,
   timestampIso,
-} from "./agUiReducerUtilities";
-import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from "./messages";
-import {
-  renderAgUiCustomContent,
-  structuredTextRemainder,
-} from "./agUiContent";
-import { type AgUiEventEnvelope } from "./agUi";
-import { type AgUiThreadMessageState } from "./agUiMessagesState";
-import { type ChatMessage, type ChatMessageSubAgentMeta } from "./types";
-import { type ToolCall } from "@ag-ui/core";
-import { upsertMessage } from "./agUiMessageMutations";
-import { upsertToolResult } from "./agUiToolAndCustomEventReducers";
+} from './agUiReducerUtilities';
+import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
+import { renderAgUiCustomContent, structuredTextRemainder } from './agUiContent';
+import { type AgUiEventEnvelope } from './agUi';
+import { type AgUiThreadMessageState } from './agUiMessagesState';
+import { type ChatMessage, type ChatMessageSubAgentMeta } from './types';
+import { type ToolCall } from '@ag-ui/core';
+import { upsertMessage } from './agUiMessageMutations';
+import { upsertToolResult } from './agUiToolAndCustomEventReducers';
 
 export function reduceStructuredMessageContent(
   current: AgUiThreadMessageState,
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const messageId =
-    nonEmptyString(value?.messageId) ?? `${envelope.runId}:content`;
+  const messageId = nonEmptyString(value?.messageId) ?? `${envelope.runId}:content`;
   const role =
-    value?.role === "thought"
-      ? "reasoning"
-      : value?.role === "user"
-        ? "user"
-        : "assistant";
+    value?.role === 'thought' ? 'reasoning' : value?.role === 'user' ? 'user' : 'assistant';
   const existing = findMessage(current, messageId);
   const parts = appendOrderedPart(existing?.parts ?? [], value?.content);
   const text = renderOrderedParts(parts);
   const base: ChatMessage =
-    role === "reasoning"
+    role === 'reasoning'
       ? {
           id: messageId,
-          role: "reasoning",
+          role: 'reasoning',
           content: text,
           createdAt: timestampIso(envelope.event.timestamp),
           parts,
         }
-      : role === "user"
+      : role === 'user'
         ? {
             id: messageId,
-            role: "user",
+            role: 'user',
             content: text,
             createdAt: timestampIso(envelope.event.timestamp),
             parts,
           }
         : {
             id: messageId,
-            role: "assistant",
+            role: 'assistant',
             content: text,
             createdAt: timestampIso(envelope.event.timestamp),
             parts,
@@ -64,12 +56,9 @@ export function reduceStructuredMessageContent(
  * not already cover. Returns what was appended so the next revision can strip it
  * again.
  */
-function appendToolText(
-  text: string,
-  structured: string,
-): { text: string; appended: string } {
+function appendToolText(text: string, structured: string): { text: string; appended: string } {
   const appended = structuredTextRemainder(text, structured);
-  return { text: [text, appended].filter(Boolean).join("\n"), appended };
+  return { text: [text, appended].filter(Boolean).join('\n'), appended };
 }
 
 export function reduceToolText(
@@ -80,13 +69,11 @@ export function reduceToolText(
   const toolCallId = nonEmptyString(value?.toolCallId);
   if (toolCallId && current.subagentToolCallIds[toolCallId]) return current;
   const revision = nonEmptyString(value?.revision);
-  const content = typeof value?.content === "string" ? value.content : null;
+  const content = typeof value?.content === 'string' ? value.content : null;
   if (!toolCallId || !revision || content === null) return current;
   if (current.toolTextRevisionByCallId[toolCallId] === revision) return current;
-  const messageId =
-    current.toolResultMessageIdByCallId[toolCallId] ??
-    `tool-result:${toolCallId}`;
-  const structured = current.structuredTextByCallId[toolCallId] ?? "";
+  const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
+  const structured = current.structuredTextByCallId[toolCallId] ?? '';
   const joined = appendToolText(content, structured);
   const next = upsertToolResult(
     current,
@@ -114,24 +101,21 @@ export function reduceToolContent(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const toolCallId = nonEmptyString(value?.toolCallId) ?? "unknown";
+  const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
   if (current.subagentToolCallIds[toolCallId]) return current;
   const revision = nonEmptyString(value?.revision) ?? JSON.stringify(value);
-  if (current.structuredRevisionByCallId[toolCallId] === revision)
-    return current;
+  if (current.structuredRevisionByCallId[toolCallId] === revision) return current;
   const structured =
     Array.isArray(value?.content) &&
     value.content.length === 0 &&
     Array.isArray(value?.locations) &&
     value.locations.length === 0
-      ? ""
+      ? ''
       : renderAgUiCustomContent(value);
-  const messageId =
-    current.toolResultMessageIdByCallId[toolCallId] ??
-    `tool-result:${toolCallId}`;
+  const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const existing = findMessage(current, messageId);
-  const existingText = existing?.role === "tool" ? existing.content : "";
-  const previousStructured = current.structuredTextByCallId[toolCallId] ?? "";
+  const existingText = existing?.role === 'tool' ? existing.content : '';
+  const previousStructured = current.structuredTextByCallId[toolCallId] ?? '';
   const base =
     previousStructured && existingText.endsWith(previousStructured)
       ? existingText.slice(0, -previousStructured.length).trimEnd()
@@ -163,16 +147,14 @@ export function reduceSubagentActivity(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const toolCallId = nonEmptyString(value?.toolCallId) ?? "unknown";
+  const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
   const receiverThreadIds = Array.isArray(value?.receiverThreadIds)
-    ? value.receiverThreadIds
-        .map(nonEmptyString)
-        .filter((id): id is string => Boolean(id))
+    ? value.receiverThreadIds.map(nonEmptyString).filter((id): id is string => Boolean(id))
     : [];
   if (receiverThreadIds.length === 0) return current;
   const meta: ChatMessageSubAgentMeta = {
     toolCallId,
-    tool: nonEmptyString(value?.tool) ?? "spawnAgent",
+    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
     senderThreadId: nonEmptyString(value?.senderThreadId) ?? envelope.threadId,
     receiverThreadIds: Array.from(new Set(receiverThreadIds)),
     agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
@@ -180,15 +162,13 @@ export function reduceSubagentActivity(
   };
   const resultPreview = nonEmptyString(value?.resultPreview);
   const text = [
-    meta.agentStatus === "completed"
-      ? "• Spawned sub-agent"
-      : "• Spawning sub-agent",
+    meta.agentStatus === 'completed' ? '• Spawned sub-agent' : '• Spawning sub-agent',
     `  Thread: ${receiverThreadIds[0]}`,
     meta.agentStatus ? `  Status: ${meta.agentStatus}` : null,
     resultPreview ? `  Result: ${resultPreview}` : null,
   ]
     .filter(Boolean)
-    .join("\n");
+    .join('\n');
   const messages = current.messages.filter(
     (message) =>
       !(
@@ -238,9 +218,7 @@ export function markRunTerminal(
   if (ids.length === 0) return current;
   return {
     ...current,
-    terminalMessageIds: Array.from(
-      new Set([...current.terminalMessageIds, ...ids]),
-    ),
+    terminalMessageIds: Array.from(new Set([...current.terminalMessageIds, ...ids])),
   };
 }
 
@@ -248,22 +226,22 @@ export function updateEncryptedValue(
   current: AgUiThreadMessageState,
   entityId: string,
   encryptedValue: string,
-  subtype: "tool-call" | "message",
+  subtype: 'tool-call' | 'message',
 ): AgUiThreadMessageState {
-  if (subtype === "message") {
+  if (subtype === 'message') {
     const message = findMessage(current, entityId);
     return message
       ? upsertMessage(
           current,
           { ...message, encryptedValue } as ChatMessage,
-          current.runByMessageId[entityId] ?? "",
+          current.runByMessageId[entityId] ?? '',
           undefined,
         )
       : current;
   }
   const messageId = current.toolCallMessageIdByCallId[entityId];
   const message = messageId ? findMessage(current, messageId) : undefined;
-  if (!message || message.role !== "assistant") return current;
+  if (!message || message.role !== 'assistant') return current;
   return upsertMessage(
     current,
     {
@@ -272,18 +250,15 @@ export function updateEncryptedValue(
         call.id === entityId ? { ...call, encryptedValue } : call,
       ),
     },
-    current.runByMessageId[message.id] ?? "",
+    current.runByMessageId[message.id] ?? '',
     undefined,
   );
 }
 
-export function findMessage(
-  current: AgUiThreadMessageState,
-  id: string,
-): ChatMessage | undefined {
+export function findMessage(current: AgUiThreadMessageState, id: string): ChatMessage | undefined {
   return current.messages.find((message) => message.id === id);
 }
 
 export function toolCall(id: string, name: string, args: string): ToolCall {
-  return { id, type: "function", function: { name, arguments: args } };
+  return { id, type: 'function', function: { name, arguments: args } };
 }

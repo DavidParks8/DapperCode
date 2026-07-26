@@ -8,10 +8,7 @@ import type { WorkspaceChatLimit } from '../appSettings';
 import { getAgentLabel } from '../agents';
 import { isSubAgentSource } from '../api/clientChatListInternals';
 import { buildChatWorkspaceSections } from './chatThreadTree';
-import {
-  isDrawerChatRunning,
-  type DrawerRunIndicatorMap,
-} from './drawerRuntimeIndicators';
+import { isDrawerChatRunning, type DrawerRunIndicatorMap } from './drawerRuntimeIndicators';
 
 export type DrawerAttentionLane = 'attention' | 'working' | 'recent';
 export type DrawerAttentionReason = 'approval' | 'input' | 'error' | null;
@@ -84,10 +81,7 @@ export function buildDrawerAttentionModel({
   workspaceChatLimit,
 }: BuildDrawerAttentionModelOptions): DrawerAttentionModel {
   const workspaceSections = buildChatWorkspaceSections(chats);
-  const workspaceByChatId = new Map<
-    string,
-    { key: string; label: string; indentLevel: number }
-  >();
+  const workspaceByChatId = new Map<string, { key: string; label: string; indentLevel: number }>();
   for (const section of workspaceSections) {
     for (const row of section.data) {
       workspaceByChatId.set(row.chat.id, {
@@ -113,9 +107,7 @@ export function buildDrawerAttentionModel({
   ];
   const selectedFolder = folderOptions.find((option) => option.key === selectedFolderKey);
   const folderPickerLabels = getDrawerFolderPickerLabels(folderOptions);
-  const selectedFolderIndex = selectedFolder
-    ? folderOptions.indexOf(selectedFolder)
-    : 0;
+  const selectedFolderIndex = selectedFolder ? folderOptions.indexOf(selectedFolder) : 0;
   const resolvedFolderKey = selectedFolder?.key ?? null;
   const pendingByThread = buildPendingInteractionMap(pendingApprovals, pendingUserInputs);
   const visibleChatIds = buildVisibleChatIdSet(
@@ -123,7 +115,7 @@ export function buildDrawerAttentionModel({
     resolvedFolderKey,
     workspaceChatLimit,
     pendingByThread,
-    runIndicatorsByThread
+    runIndicatorsByThread,
   );
 
   const rowsByLane: Record<DrawerAttentionLane, DrawerAttentionRow[]> = {
@@ -141,14 +133,13 @@ export function buildDrawerAttentionModel({
     }
     const pending = pendingByThread.get(chat.id);
     const running = isDrawerChatRunning(chat, runIndicatorsByThread);
-    const lane: DrawerAttentionLane =
-      pending
-        ? 'attention'
-        : running
-          ? 'working'
-          : chat.status === 'error'
-            ? 'attention'
-            : 'recent';
+    const lane: DrawerAttentionLane = pending
+      ? 'attention'
+      : running
+        ? 'working'
+        : chat.status === 'error'
+          ? 'attention'
+          : 'recent';
     // Sub-agents belong to their parent session and are reported inside its
     // transcript, so they only earn a row of their own when they need the user.
     if (lane !== 'attention' && isSubAgentSource(chat.sourceKind)) {
@@ -177,7 +168,7 @@ export function buildDrawerAttentionModel({
       const leftPendingAt = pendingByThread.get(left.chat.id)?.latestRequestedAt;
       const rightPendingAt = pendingByThread.get(right.chat.id)?.latestRequestedAt;
       return (rightPendingAt ?? right.chat.updatedAt).localeCompare(
-        leftPendingAt ?? left.chat.updatedAt
+        leftPendingAt ?? left.chat.updatedAt,
       );
     });
   }
@@ -206,9 +197,7 @@ export function buildDrawerAttentionModel({
   };
 }
 
-export function getDrawerFolderPickerLabels(
-  options: DrawerFolderOption[]
-): string[] {
+export function getDrawerFolderPickerLabels(options: DrawerFolderOption[]): string[] {
   const labelCounts = new Map<string, number>();
   for (const option of options) {
     if (option.key) {
@@ -235,7 +224,7 @@ export function getDrawerFolderPickerLabels(
 
 function buildPendingInteractionMap(
   approvals: PendingApproval[],
-  userInputs: PendingUserInputRequest[]
+  userInputs: PendingUserInputRequest[],
 ): Map<string, PendingInteractionSummary> {
   const pendingByThread = new Map<string, PendingInteractionSummary>();
   for (const approval of approvals) {
@@ -262,7 +251,7 @@ function buildVisibleChatIdSet(
   selectedFolderKey: string | null,
   workspaceChatLimit: WorkspaceChatLimit,
   pendingByThread: Map<string, PendingInteractionSummary>,
-  runIndicatorsByThread: DrawerRunIndicatorMap
+  runIndicatorsByThread: DrawerRunIndicatorMap,
 ): Set<string> {
   const visible = new Set<string>();
   for (const section of workspaceSections) {
@@ -272,8 +261,7 @@ function buildVisibleChatIdSet(
     // Sub-agents without a pending interaction are never rendered, so they must
     // not consume the per-workspace budget and push real sessions out of view.
     const listable = section.data.filter(
-      (row) =>
-        !isSubAgentSource(row.chat.sourceKind) || pendingByThread.has(row.chat.id)
+      (row) => !isSubAgentSource(row.chat.sourceKind) || pendingByThread.has(row.chat.id),
     );
     const rows =
       selectedFolderKey || workspaceChatLimit === null
@@ -283,8 +271,7 @@ function buildVisibleChatIdSet(
       visible.add(row.chat.id);
     }
     for (const row of section.data) {
-      const needsUser =
-        pendingByThread.has(row.chat.id) || row.chat.status === 'error';
+      const needsUser = pendingByThread.has(row.chat.id) || row.chat.status === 'error';
       if (
         needsUser ||
         (!isSubAgentSource(row.chat.sourceKind) &&
@@ -300,7 +287,7 @@ function buildVisibleChatIdSet(
 function getStateLabel(
   chat: ChatSummary,
   pending: PendingInteractionSummary | undefined,
-  running: boolean
+  running: boolean,
 ): string {
   if (pending) {
     const requestCount = pending.approvalCount + pending.inputCount;

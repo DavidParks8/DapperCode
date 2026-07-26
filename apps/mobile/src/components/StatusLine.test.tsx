@@ -1,10 +1,6 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { RunEvent } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
@@ -62,7 +58,13 @@ describe('StatusLine', () => {
       { eventType: 'run.failed', detail: 'Exit 1' },
       { eventType: 'run.paused', detail: '' },
     ] as RunEvent[];
-    const tree = render(<>{events.map((event) => <StatusLine key={event.eventType} event={event} />)}</>);
+    const tree = render(
+      <>
+        {events.map((event) => (
+          <StatusLine key={event.eventType} event={event} />
+        ))}
+      </>,
+    );
     const content = textContent(queryRoot(tree));
     expect(content).toContain('Run started');
     expect(content).toContain('Run completed — All checks passed');

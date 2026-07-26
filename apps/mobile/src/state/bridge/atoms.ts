@@ -7,7 +7,7 @@ import { env } from '../../config';
 import { bridgeProfileStoreAtom } from '../appState/atoms';
 
 export const activeBridgeProfileAtom = atom((get) =>
-  getActiveBridgeProfile(get(bridgeProfileStoreAtom))
+  getActiveBridgeProfile(get(bridgeProfileStoreAtom)),
 );
 
 export const bridgeUrlAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeUrl ?? null);
@@ -38,7 +38,7 @@ export const wsClientAtom = atom(
   },
   (get, set, client: HostBridgeWsClient | null) => {
     set(wsClientOverrideAtom, client);
-  }
+  },
 );
 
 export const apiClientAtom = atom(
@@ -60,7 +60,7 @@ export const apiClientAtom = atom(
   },
   (get, set, client: HostBridgeApiClient | null) => {
     set(apiClientOverrideAtom, client);
-  }
+  },
 );
 
 /** Connection status published by the active WebSocket client. */

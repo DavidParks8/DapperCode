@@ -147,7 +147,10 @@ export function formatRelativeTime(value: string): string {
 
   const valueInUnit = Math.round(deltaSeconds / chosen.seconds);
   try {
-    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(valueInUnit, chosen.unit);
+    return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(
+      valueInUnit,
+      chosen.unit,
+    );
   } catch {
     const label = Math.abs(valueInUnit) === 1 ? chosen.unit : `${chosen.unit}s`;
     return valueInUnit < 0 ? `${Math.abs(valueInUnit)} ${label} ago` : `in ${valueInUnit} ${label}`;
@@ -174,15 +177,15 @@ export function formatStatusCode(code: string): string {
 }
 
 export function getDiffFileLookupKeys(file: UnifiedDiffFile): string[] {
-  const keys = [file.displayPath, file.oldPath, file.newPath].filter(
-    (value): value is string => Boolean(value)
+  const keys = [file.displayPath, file.oldPath, file.newPath].filter((value): value is string =>
+    Boolean(value),
   );
   return Array.from(new Set(keys));
 }
 
 export function findDiffFileIdForEntry(
   entry: Pick<ChangedFileEntry, 'path' | 'stagePath'>,
-  files: UnifiedDiffFile[]
+  files: UnifiedDiffFile[],
 ): string | null {
   if (files.length === 0) {
     return null;

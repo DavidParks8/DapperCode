@@ -7,11 +7,7 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
-import {
-  WebView,
-  type WebViewMessageEvent,
-  type WebViewNavigation,
-} from 'react-native-webview';
+import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 
 import type { AppTheme } from '../../theme';
 import { createBrowserScreenStyles } from './browserScreenStyles';
@@ -164,7 +160,7 @@ export function BrowserPreviewSurface({
                 }
                 onHttpError={(event) =>
                   setCapabilitiesError(
-                    `Preview returned HTTP ${String(event.nativeEvent.statusCode)}.`
+                    `Preview returned HTTP ${String(event.nativeEvent.statusCode)}.`,
                   )
                 }
                 style={styles.webView}
@@ -231,7 +227,9 @@ export function BrowserPreviewSurface({
                     setCapabilitiesError(event.nativeEvent.description || 'Could not load preview.')
                   }
                   onHttpError={(event) =>
-                    setCapabilitiesError(`Preview returned HTTP ${String(event.nativeEvent.statusCode)}.`)
+                    setCapabilitiesError(
+                      `Preview returned HTTP ${String(event.nativeEvent.statusCode)}.`,
+                    )
                   }
                   style={[
                     styles.desktopNativeWebView,
@@ -284,7 +282,8 @@ export function BrowserPreviewSurface({
           />
         </View>
       )}
-      {loadingPreview || (desktopOverviewEnabled && !nativeOverviewShellEnabled && !overviewReady) ? (
+      {loadingPreview ||
+      (desktopOverviewEnabled && !nativeOverviewShellEnabled && !overviewReady) ? (
         <View
           style={styles.loadingOverlay}
           accessibilityRole="progressbar"

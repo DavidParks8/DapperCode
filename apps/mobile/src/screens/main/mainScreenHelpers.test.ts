@@ -29,8 +29,8 @@ describe('mainScreenHelpers', () => {
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(__dirname, '../../../../../contracts/bridge-rpc/v2/manifest.json'),
-        'utf8'
-      )
+        'utf8',
+      ),
     ) as ContractManifest;
     expect(manifest.protocolVersion).toBe(2);
 
@@ -45,13 +45,15 @@ describe('mainScreenHelpers', () => {
     expect(userInput).toMatchObject({
       requestId: 'input-1',
       message: 'Deployment settings',
-      questions: [{
-        id: 'environment',
-        fieldType: 'string',
-        required: true,
-        isSecret: true,
-        options: [{ value: 'production', label: 'Production' }],
-      }],
+      questions: [
+        {
+          id: 'environment',
+          fieldType: 'string',
+          required: true,
+          isSecret: true,
+          options: [{ value: 'production', label: 'Production' }],
+        },
+      ],
     });
   });
 
@@ -92,7 +94,7 @@ describe('mainScreenHelpers', () => {
         stdout: '',
         stderr: '',
         cloned: true,
-      })
+      }),
     ).toBeNull();
   });
 
@@ -103,7 +105,7 @@ describe('mainScreenHelpers', () => {
         stdout: '',
         stderr: 'fatal: repository not found',
         cloned: false,
-      })
+      }),
     ).toBe('fatal: repository not found');
   });
 
@@ -116,8 +118,8 @@ describe('mainScreenHelpers', () => {
           stderr: '',
           cloned: false,
         },
-        'DavidParks8/launchkit'
-      )
+        'DavidParks8/launchkit',
+      ),
     ).toBe('Git clone failed for DavidParks8/launchkit.');
   });
 
@@ -146,7 +148,7 @@ describe('mainScreenHelpers', () => {
           },
         ],
         actions: [{ id: 'dismiss', label: 'Dismiss', style: 'secondary' }],
-      })
+      }),
     ).toMatchObject({
       id: 'goal-1',
       threadId: 'thread-1',
@@ -199,7 +201,7 @@ describe('mainScreenHelpers', () => {
             },
           ],
         },
-      })
+      }),
     );
 
     expect(result).toMatchObject({
@@ -224,8 +226,8 @@ describe('mainScreenHelpers', () => {
       helpers.buildOptimisticGoalBridgeUiSurface(
         'agent-alpha:thread-1',
         'Now verify the PR',
-        '2026-05-17T03:00:00.000Z'
-      )
+        '2026-05-17T03:00:00.000Z',
+      ),
     ).toMatchObject({
       id: 'goal-agent-alpha:thread-1',
       threadId: 'agent-alpha:thread-1',
@@ -247,7 +249,7 @@ function message(
   id: string,
   role: 'user' | 'assistant' | 'system' | 'reasoning',
   content: string,
-  createdAt = '2026-07-18T12:00:00.000Z'
+  createdAt = '2026-07-18T12:00:00.000Z',
 ): ChatMessage {
   return { id, role, content, createdAt } as ChatMessage;
 }
@@ -349,7 +351,7 @@ describe('mainScreenHelpers branch behavior', () => {
         lastTokens: 3,
         modelContextWindow: null,
         updatedAtMs: 2,
-      })
+      }),
     ).toEqual({ totalTokens: 10, lastTokens: 3, modelContextWindow: 100, updatedAtMs: 2 });
     expect(
       helpers.mergeThreadContextUsage(null, {
@@ -357,7 +359,7 @@ describe('mainScreenHelpers branch behavior', () => {
         lastTokens: null,
         modelContextWindow: null,
         updatedAtMs: 3,
-      })
+      }),
     ).toEqual({ totalTokens: null, lastTokens: null, modelContextWindow: null, updatedAtMs: 3 });
 
     expect(helpers.compactPlanDelta('  one\n\n two ')).toBe('one\ntwo');
@@ -378,7 +380,7 @@ describe('mainScreenHelpers branch behavior', () => {
         turnId: 'turn-1',
         explanation: null,
         plan: [],
-      }).deltaText
+      }).deltaText,
     ).toBe('delta');
     expect(
       helpers.buildNextPlanStateFromUpdate(plan, {
@@ -386,7 +388,7 @@ describe('mainScreenHelpers branch behavior', () => {
         turnId: 'turn-1',
         explanation: null,
         plan: [],
-      }).deltaText
+      }).deltaText,
     ).toBe('');
     expect(helpers.renderPlanStatusGlyph('completed')).toBe('✔');
     expect(helpers.renderPlanStatusGlyph('inProgress')).toBe('□');
@@ -398,11 +400,20 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.toTurnPlanUpdate({ turnId: 't' })).toBeNull();
     expect(helpers.toTurnPlanUpdate({ threadId: 'x' })).toBeNull();
     expect(
-      helpers.toTurnPlanUpdate({
-        turnId: 't',
-        explanation: 3,
-        plan: [null, {}, { step: '', status: 'pending' }, { step: 'bad', status: 'bad' }, { step: 'ok', status: 'completed' }],
-      }, 'fallback')
+      helpers.toTurnPlanUpdate(
+        {
+          turnId: 't',
+          explanation: 3,
+          plan: [
+            null,
+            {},
+            { step: '', status: 'pending' },
+            { step: 'bad', status: 'bad' },
+            { step: 'ok', status: 'completed' },
+          ],
+        },
+        'fallback',
+      ),
     ).toEqual({
       threadId: 'fallback',
       turnId: 't',
@@ -416,8 +427,13 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.toPendingUserInputRequest({ id: 'x' })).toBeNull();
     expect(
       helpers.toPendingUserInputRequest({
-        id: 'req', threadId: 'thread', turnId: 'turn', itemId: 'item', requestedAt: 'now', questions: [null, {}],
-      })
+        id: 'req',
+        threadId: 'thread',
+        turnId: 'turn',
+        itemId: 'item',
+        requestedAt: 'now',
+        questions: [null, {}],
+      }),
     ).toBeNull();
 
     const request = helpers.toPendingUserInputRequest({
@@ -466,7 +482,9 @@ describe('mainScreenHelpers branch behavior', () => {
   it('parses every bridge UI block and rejects malformed surfaces', () => {
     expect(helpers.toBridgeUiSurface(null)).toBeNull();
     expect(helpers.toBridgeUiSurface({ id: 'x' })).toBeNull();
-    expect(helpers.toBridgeUiSurface({ id: 'x', threadId: 't', title: 'T', presentation: 'other' })).toBeNull();
+    expect(
+      helpers.toBridgeUiSurface({ id: 'x', threadId: 't', title: 'T', presentation: 'other' }),
+    ).toBeNull();
     const surface = helpers.toBridgeUiSurface({
       id: 'surface',
       threadId: 'thread',
@@ -480,7 +498,15 @@ describe('mainScreenHelpers branch behavior', () => {
         { type: 'text', text: '' },
         { type: 'markdown', markdown: '**Markdown**' },
         { type: 'markdown', markdown: 2 },
-        { type: 'checklist', items: [null, {}, { label: 'One', status: 'completed', detail: 'done' }, { label: 'Two', status: 'bad' }] },
+        {
+          type: 'checklist',
+          items: [
+            null,
+            {},
+            { label: 'One', status: 'completed', detail: 'done' },
+            { label: 'Two', status: 'bad' },
+          ],
+        },
         { type: 'checklist', items: [] },
         { type: 'keyValue', items: [null, { label: 'L', value: 'V' }, { label: '', value: 'V' }] },
         { type: 'keyValue', items: 'bad' },
@@ -490,7 +516,12 @@ describe('mainScreenHelpers branch behavior', () => {
         { type: 'progress', label: 'Bad', value: 1, max: 0 },
         { type: 'unknown' },
       ],
-      actions: [null, {}, { id: 'ok', label: 'OK', style: 'primary', dismissesSurface: false }, { id: 'odd', label: 'Odd', style: 'odd' }],
+      actions: [
+        null,
+        {},
+        { id: 'ok', label: 'OK', style: 'primary', dismissesSurface: false },
+        { id: 'odd', label: 'Odd', style: 'odd' },
+      ],
     });
     expect(surface).toMatchObject({
       tone: undefined,
@@ -508,7 +539,15 @@ describe('mainScreenHelpers branch behavior', () => {
         { id: 'odd', style: undefined, dismissesSurface: true },
       ],
     });
-    expect(helpers.toBridgeUiSurface({ id: 'x', threadId: 't', title: 'T', presentation: 'banner', blocks: 'bad' })?.blocks).toEqual([]);
+    expect(
+      helpers.toBridgeUiSurface({
+        id: 'x',
+        threadId: 't',
+        title: 'T',
+        presentation: 'banner',
+        blocks: 'bad',
+      })?.blocks,
+    ).toEqual([]);
     expect(helpers.buildOptimisticGoalBridgeUiSurface('', 'goal', 'now')).toBeNull();
     expect(helpers.buildOptimisticGoalBridgeUiSurface('thread', ' ', 'now')).toBeNull();
   });
@@ -524,19 +563,37 @@ describe('mainScreenHelpers branch behavior', () => {
   });
 
   it('normalizes answers and parses inline choices with continuations', () => {
-    expect(helpers.normalizeQuestionAnswers(' one, two\n\nthree ')).toEqual(['one', 'two', 'three']);
+    expect(helpers.normalizeQuestionAnswers(' one, two\n\nthree ')).toEqual([
+      'one',
+      'two',
+      'three',
+    ]);
     expect(helpers.stripOptionText(' **A   value** ')).toBe('A value');
     expect(helpers.splitOptionLine('')).toEqual({ label: '', description: '' });
-    expect(helpers.splitOptionLine('• **Fast** — quick')).toEqual({ label: 'Fast', description: 'quick' });
-    expect(helpers.splitOptionLine('Name: detail')).toEqual({ label: 'Name', description: 'detail' });
-    expect(helpers.splitOptionLine('No separator')).toEqual({ label: 'No separator', description: '' });
+    expect(helpers.splitOptionLine('• **Fast** — quick')).toEqual({
+      label: 'Fast',
+      description: 'quick',
+    });
+    expect(helpers.splitOptionLine('Name: detail')).toEqual({
+      label: 'Name',
+      description: 'detail',
+    });
+    expect(helpers.splitOptionLine('No separator')).toEqual({
+      label: 'No separator',
+      description: '',
+    });
     expect(helpers.isLikelyOptionContinuationLine('')).toBe(false);
     expect(helpers.isLikelyOptionContinuationLine('- more')).toBe(true);
     expect(helpers.isLikelyOptionContinuationLine('Trade-off: slower')).toBe(true);
     expect(helpers.isLikelyOptionContinuationLine('ordinary')).toBe(false);
     expect(helpers.parseInlineOptionsFromQuestionText('')).toEqual({ question: '', options: null });
-    expect(helpers.parseInlineOptionsFromQuestionText('Question\n1. Only one')).toEqual({ question: 'Question\n1. Only one', options: null });
-    expect(helpers.parseInlineOptionsFromQuestionText('1. Alpha\n- benefit: fast\n2. Beta')).toEqual({
+    expect(helpers.parseInlineOptionsFromQuestionText('Question\n1. Only one')).toEqual({
+      question: 'Question\n1. Only one',
+      options: null,
+    });
+    expect(
+      helpers.parseInlineOptionsFromQuestionText('1. Alpha\n- benefit: fast\n2. Beta'),
+    ).toEqual({
       question: 'Select one option.',
       options: [
         { label: 'Alpha', description: 'benefit: fast' },
@@ -550,11 +607,20 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.findInlineChoiceSet([message('u', 'user', 'Choose:\n1. A\n2. B')])).toBeNull();
     expect(helpers.findInlineChoiceSet([message('a', 'assistant', 'x'.repeat(1201))])).toBeNull();
     expect(helpers.findInlineChoiceSet([message('a', 'assistant', 'List\n1. A\n2. B')])).toBeNull();
-    expect(helpers.findInlineChoiceSet([message('a', 'assistant', 'Which one?\n1. A\n2. B')])).toEqual({
+    expect(
+      helpers.findInlineChoiceSet([message('a', 'assistant', 'Which one?\n1. A\n2. B')]),
+    ).toEqual({
       messageId: 'a',
-      options: [{ label: 'A', description: '' }, { label: 'B', description: '' }],
+      options: [
+        { label: 'A', description: '' },
+        { label: 'B', description: '' },
+      ],
     });
-    expect(helpers.findInlineChoiceSet([message('a', 'assistant', 'Choose one\n1. A\n2. B\n3. C\n4. D\n5. E\n6. F')])).toBeNull();
+    expect(
+      helpers.findInlineChoiceSet([
+        message('a', 'assistant', 'Choose one\n1. A\n2. B\n3. C\n4. D\n5. E\n6. F'),
+      ]),
+    ).toBeNull();
   });
 
   it('normalizes workspace, clone, and mention paths', () => {
@@ -589,39 +655,73 @@ describe('mainScreenHelpers branch behavior', () => {
 
   it('builds and reconciles optimistic transcript content', () => {
     expect(helpers.toOptimisticUserContent('hello', [], [])).toBe('hello');
-    expect(helpers.toOptimisticUserContent('hello', [{ path: '/a', name: 'a' }], [{ path: '/i' }])).toBe('hello\n[file: /a]\n[local image: /i]');
-    const messages = [message('u1', 'user', 'one'), message('a', 'assistant', 'ok'), message('u2', 'user', 'two')];
+    expect(
+      helpers.toOptimisticUserContent('hello', [{ path: '/a', name: 'a' }], [{ path: '/i' }]),
+    ).toBe('hello\n[file: /a]\n[local image: /i]');
+    const messages = [
+      message('u1', 'user', 'one'),
+      message('a', 'assistant', 'ok'),
+      message('u2', 'user', 'two'),
+    ];
     expect(helpers.countUserMessages(messages)).toBe(2);
     expect(helpers.isSyntheticUserAttachmentLine('[file: /a]')).toBe(true);
     expect(helpers.isSyntheticUserAttachmentLine('[local image: /i]')).toBe(true);
     expect(helpers.isSyntheticUserAttachmentLine('[image: /i]')).toBe(true);
     expect(helpers.isSyntheticUserAttachmentLine('text')).toBe(false);
-    expect(helpers.normalizeChatMessageMatchContent(' hello \r\n[file: /a]\n world ')).toBe('hello\nworld');
+    expect(helpers.normalizeChatMessageMatchContent(' hello \r\n[file: /a]\n world ')).toBe(
+      'hello\nworld',
+    );
 
-    const base = chat({ messages: [message('server', 'user', 'hello\n[file: /a]')], lastMessagePreview: 'server' });
+    const base = chat({
+      messages: [message('server', 'user', 'hello\n[file: /a]')],
+      lastMessagePreview: 'server',
+    });
     const matching = [{ message: message('pending', 'user', 'hello'), userOrdinal: 1 }];
-    expect(helpers.reconcileChatWithPendingOptimisticMessages(base, [])).toEqual({ chat: base, remainingPendingMessages: [] });
-    expect(helpers.reconcileChatWithPendingOptimisticMessages(base, matching)).toEqual({ chat: base, remainingPendingMessages: [] });
+    expect(helpers.reconcileChatWithPendingOptimisticMessages(base, [])).toEqual({
+      chat: base,
+      remainingPendingMessages: [],
+    });
+    expect(helpers.reconcileChatWithPendingOptimisticMessages(base, matching)).toEqual({
+      chat: base,
+      remainingPendingMessages: [],
+    });
     const pending = [{ message: message('pending', 'user', 'new\n[image: /i]'), userOrdinal: 2 }];
     const reconciled = helpers.reconcileChatWithPendingOptimisticMessages(base, pending);
     expect(reconciled.chat.messages).toHaveLength(2);
     expect(reconciled.chat.lastMessagePreview).toBe('new');
-    expect(helpers.reconcileChatWithPendingOptimisticMessages({ ...base, lastMessagePreview: 'fallback' }, [{ message: message('empty', 'user', '[file: /a]'), userOrdinal: 2 }]).chat.lastMessagePreview).toBe('fallback');
+    expect(
+      helpers.reconcileChatWithPendingOptimisticMessages(
+        { ...base, lastMessagePreview: 'fallback' },
+        [{ message: message('empty', 'user', '[file: /a]'), userOrdinal: 2 }],
+      ).chat.lastMessagePreview,
+    ).toBe('fallback');
   });
 
   it('ranks attachment suggestions and edits active mentions', () => {
     expect(helpers.toPathBasename('')).toBe('image');
     expect(helpers.toPathBasename('a\\b.ts')).toBe('b.ts');
     expect(helpers.toAttachmentPathSuggestions([], 'a', [])).toEqual([]);
-    expect(helpers.toAttachmentPathSuggestions(['', 'a.ts', 'src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts'], 'apple', ['a.ts'])).toEqual([
-      'src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts',
-    ]);
-    expect(helpers.toAttachmentPathSuggestions(Array.from({ length: 10 }, (_, index) => `f${index}`), '', [])).toHaveLength(8);
+    expect(
+      helpers.toAttachmentPathSuggestions(
+        ['', 'a.ts', 'src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts'],
+        'apple',
+        ['a.ts'],
+      ),
+    ).toEqual(['src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts']);
+    expect(
+      helpers.toAttachmentPathSuggestions(
+        Array.from({ length: 10 }, (_, index) => `f${index}`),
+        '',
+        [],
+      ),
+    ).toHaveLength(8);
     expect(helpers.parseMentionQuery('hello')).toBeNull();
     expect(helpers.parseMentionQuery('hello (@src')).toBe('src');
     expect(helpers.parseMentionQuery('@')).toBe('');
     expect(helpers.replaceActiveMentionQueryWithSelection('hello @src', ' ')).toBe('hello @src');
-    expect(helpers.replaceActiveMentionQueryWithSelection('hello  @src', 'file.ts')).toBe('hello @file.ts ');
+    expect(helpers.replaceActiveMentionQueryWithSelection('hello  @src', 'file.ts')).toBe(
+      'hello @file.ts ',
+    );
     expect(helpers.escapeRegex('a+b')).toBe('a\\+b');
     expect(helpers.draftContainsMentionLabel('hello', '')).toBe(false);
     expect(helpers.draftContainsMentionLabel('use @a+b now', 'a+b')).toBe(true);
@@ -651,31 +751,48 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.parseWorkspaceFavoritePaths('')).toEqual([]);
     expect(helpers.parseWorkspaceFavoritePaths('{')).toEqual([]);
     expect(helpers.parseWorkspaceFavoritePaths('{}')).toEqual([]);
-    expect(helpers.parseWorkspaceFavoritePaths(JSON.stringify({ version: 1, paths: 'bad' }))).toEqual([]);
-    expect(helpers.parseWorkspaceFavoritePaths(JSON.stringify({ version: 1, paths: [' ', '/a', '/a', '/b', '/c', '/d', '/e'] }))).toEqual(['/a', '/b', '/c', '/d']);
+    expect(
+      helpers.parseWorkspaceFavoritePaths(JSON.stringify({ version: 1, paths: 'bad' })),
+    ).toEqual([]);
+    expect(
+      helpers.parseWorkspaceFavoritePaths(
+        JSON.stringify({ version: 1, paths: [' ', '/a', '/a', '/b', '/c', '/d', '/e'] }),
+      ),
+    ).toEqual(['/a', '/b', '/c', '/d']);
 
     expect(helpers.parseChatDrafts('')).toEqual({});
     expect(helpers.parseChatDrafts('{')).toEqual({});
     expect(helpers.parseChatDrafts('{}')).toEqual({});
     expect(helpers.parseChatDrafts(JSON.stringify({ version: 2, entries: null }))).toEqual({});
-    expect(helpers.parseChatDrafts(JSON.stringify({ version: 2, entries: { ' ': 'x', good: 'a\r\nb', empty: '', bad: 3 } }))).toEqual({ good: 'a\nb' });
+    expect(
+      helpers.parseChatDrafts(
+        JSON.stringify({ version: 2, entries: { ' ': 'x', good: 'a\r\nb', empty: '', bad: 3 } }),
+      ),
+    ).toEqual({ good: 'a\nb' });
   });
 
   it('parses bridge queue state and errors', () => {
     expect(helpers.parseBridgeThreadQueueState(null)).toBeNull();
     expect(helpers.parseBridgeThreadQueueState({ threadId: ' ' })).toBeNull();
     expect(helpers.parseBridgeThreadQueueState({ threadId: 'thread', items: 'bad' })).toEqual({
-      threadId: 'thread', items: [], pendingSteers: [], pendingSteerCount: 0,
-      waitingForToolCalls: false, steeringInFlight: false, lastError: null,
+      threadId: 'thread',
+      items: [],
+      pendingSteers: [],
+      pendingSteerCount: 0,
+      waitingForToolCalls: false,
+      steeringInFlight: false,
+      lastError: null,
     });
-    expect(helpers.parseBridgeThreadQueueState({
-      threadId: ' thread ',
-      items: [null, {}, { id: ' i ', createdAt: ' now ', content: 'a\r\nb' }],
-      pendingSteers: [{ id: ' s ', createdAt: ' later ', content: 'steer' }],
-      pendingSteerCount: 1,
-      waitingForToolCalls: true,
-      lastError: { message: ' failed ', operation: ' send ', at: ' then ', itemId: ' item ' },
-    })).toEqual({
+    expect(
+      helpers.parseBridgeThreadQueueState({
+        threadId: ' thread ',
+        items: [null, {}, { id: ' i ', createdAt: ' now ', content: 'a\r\nb' }],
+        pendingSteers: [{ id: ' s ', createdAt: ' later ', content: 'steer' }],
+        pendingSteerCount: 1,
+        waitingForToolCalls: true,
+        lastError: { message: ' failed ', operation: ' send ', at: ' then ', itemId: ' item ' },
+      }),
+    ).toEqual({
       threadId: 'thread',
       items: [{ id: 'i', createdAt: 'now', content: 'a\nb' }],
       pendingSteers: [{ id: 's', createdAt: 'later', content: 'steer' }],
@@ -715,10 +832,10 @@ describe('mainScreenHelpers branch behavior', () => {
     };
     expect(helpers.queuedMessageStatusLabel(base)).toBe('Waiting to steer');
     expect(helpers.queuedMessageStatusLabel({ ...base, waitingForToolCalls: true })).toBe(
-      'Will steer after the current tool finishes'
+      'Will steer after the current tool finishes',
     );
     expect(helpers.queuedMessageStatusLabel({ ...base, steeringInFlight: true })).toBe(
-      'Steering turn'
+      'Steering turn',
     );
   });
 
@@ -726,48 +843,89 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.parseChatModelPreferences('')).toEqual({});
     expect(helpers.parseChatModelPreferences('{')).toEqual({});
     expect(helpers.parseChatModelPreferences('{}')).toEqual({});
-    expect(helpers.parseChatModelPreferences(JSON.stringify({ version: 1, entries: null }))).toEqual({});
-    const preferences = helpers.parseChatModelPreferences(JSON.stringify({
-      version: 1,
-      entries: { ' ': {}, invalid: null, thread: { modelId: ' model ', effort: 'HIGH', serviceTier: 'fast' } },
-    }));
-    expect(preferences.thread).toMatchObject({ modelId: 'model', effort: 'high', serviceTier: 'fast' });
+    expect(
+      helpers.parseChatModelPreferences(JSON.stringify({ version: 1, entries: null })),
+    ).toEqual({});
+    const preferences = helpers.parseChatModelPreferences(
+      JSON.stringify({
+        version: 1,
+        entries: {
+          ' ': {},
+          invalid: null,
+          thread: { modelId: ' model ', effort: 'HIGH', serviceTier: 'fast' },
+        },
+      }),
+    );
+    expect(preferences.thread).toMatchObject({
+      modelId: 'model',
+      effort: 'high',
+      serviceTier: 'fast',
+    });
     expect(preferences.thread.updatedAt).toBe(new Date(0).toISOString());
 
     expect(helpers.parseChatPlanSnapshots('')).toEqual({});
     expect(helpers.parseChatPlanSnapshots('{')).toEqual({});
     expect(helpers.parseChatPlanSnapshots('{}')).toEqual({});
-    expect(helpers.parseChatPlanSnapshots(JSON.stringify({ version: 1, entries: null }))).toEqual({});
-    const snapshots = helpers.parseChatPlanSnapshots(JSON.stringify({
-      version: 1,
-      entries: {
-        invalid: null,
-        ' ': { turnId: 't' },
-        missing: {},
-        thread: { turnId: 'turn', steps: [null, {}, { step: 'bad', status: 'bad' }, { step: 'ok', status: 'inProgress' }] },
-      },
-    }));
-    expect(snapshots.thread).toMatchObject({ threadId: 'thread', turnId: 'turn', explanation: null, steps: [{ step: 'ok', status: 'inProgress' }], deltaText: '' });
+    expect(helpers.parseChatPlanSnapshots(JSON.stringify({ version: 1, entries: null }))).toEqual(
+      {},
+    );
+    const snapshots = helpers.parseChatPlanSnapshots(
+      JSON.stringify({
+        version: 1,
+        entries: {
+          invalid: null,
+          ' ': { turnId: 't' },
+          missing: {},
+          thread: {
+            turnId: 'turn',
+            steps: [null, {}, { step: 'bad', status: 'bad' }, { step: 'ok', status: 'inProgress' }],
+          },
+        },
+      }),
+    );
+    expect(snapshots.thread).toMatchObject({
+      threadId: 'thread',
+      turnId: 'turn',
+      explanation: null,
+      steps: [{ step: 'ok', status: 'inProgress' }],
+      deltaText: '',
+    });
   });
 
   it('resolves and writes last-used model preferences per agent', () => {
     const preferences = {
-      older: { modelId: 'old', effort: null, serviceTier: null, updatedAt: '2026-07-20T00:00:00.000Z' },
-      newer: { modelId: 'new', effort: 'high' as const, serviceTier: null, updatedAt: '2026-07-22T00:00:00.000Z' },
+      older: {
+        modelId: 'old',
+        effort: null,
+        serviceTier: null,
+        updatedAt: '2026-07-20T00:00:00.000Z',
+      },
+      newer: {
+        modelId: 'new',
+        effort: 'high' as const,
+        serviceTier: null,
+        updatedAt: '2026-07-22T00:00:00.000Z',
+      },
       [agentModelPreferenceKey('other')]: {
-        modelId: 'other-model', effort: null, serviceTier: null,
+        modelId: 'other-model',
+        effort: null,
+        serviceTier: null,
         updatedAt: '2026-07-23T00:00:00.000Z',
       },
     };
     expect(lastUsedModelPreference(preferences, 'opencode')).toMatchObject({
-      modelId: 'new', effort: 'high',
+      modelId: 'new',
+      effort: 'high',
     });
 
     const updated = withLastUsedModelPreference(preferences, 'opencode', {
-      modelId: 'gpt-5.4', effort: 'max', serviceTier: null,
+      modelId: 'gpt-5.4',
+      effort: 'max',
+      serviceTier: null,
     });
     expect(lastUsedModelPreference(updated, 'opencode')).toMatchObject({
-      modelId: 'gpt-5.4', effort: 'max',
+      modelId: 'gpt-5.4',
+      effort: 'max',
     });
     expect(lastUsedModelPreference(updated, 'other')).toMatchObject({
       modelId: 'other-model',
@@ -778,8 +936,14 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.parseChatBridgeUiSurfaces('')).toEqual({});
     expect(helpers.parseChatBridgeUiSurfaces('{')).toEqual({});
     expect(helpers.parseChatBridgeUiSurfaces('{}')).toEqual({});
-    expect(helpers.parseChatBridgeUiSurfaces(JSON.stringify({ version: 1, entries: null }))).toEqual({});
-    expect(helpers.parseChatBridgeUiSurfaces(JSON.stringify({ version: 1, entries: { ' ': [], thread: 'bad', empty: [null] } }))).toEqual({});
+    expect(
+      helpers.parseChatBridgeUiSurfaces(JSON.stringify({ version: 1, entries: null })),
+    ).toEqual({});
+    expect(
+      helpers.parseChatBridgeUiSurfaces(
+        JSON.stringify({ version: 1, entries: { ' ': [], thread: 'bad', empty: [null] } }),
+      ),
+    ).toEqual({});
   });
 
   it('formats collaboration and bridge recovery states', () => {
@@ -790,7 +954,13 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.isBridgeConnectionErrorMessage('other')).toBe(false);
     expect(helpers.isBridgeRecoveryActivity(null)).toBe(false);
     expect(helpers.isBridgeRecoveryActivity({ tone: 'idle', title: 'Disconnected' })).toBe(true);
-    expect(helpers.isBridgeRecoveryActivity({ tone: 'idle', title: 'Other', detail: 'Unable to connect to bridge websocket' })).toBe(true);
+    expect(
+      helpers.isBridgeRecoveryActivity({
+        tone: 'idle',
+        title: 'Other',
+        detail: 'Unable to connect to bridge websocket',
+      }),
+    ).toBe(true);
     expect(helpers.isBridgeRecoveryActivity({ tone: 'idle', title: 'Other' })).toBe(false);
   });
 
@@ -798,18 +968,34 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.getInitialVisibleMessageStartIndex(120)).toBe(0);
     expect(helpers.getInitialVisibleMessageStartIndex(150)).toBe(70);
     expect(helpers.resolveSnapshotCollaborationMode(null)).toBe('default');
-    expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, pendingUserInputRequest: {} as PendingUserInputRequest })).toBe('plan');
-    expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activeTurnId: 'turn' })).toBe('plan');
-    expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activity: { tone: 'running', title: 'Planning' } })).toBe('plan');
+    expect(
+      helpers.resolveSnapshotCollaborationMode({
+        updatedAtMs: 1,
+        pendingUserInputRequest: {} as PendingUserInputRequest,
+      }),
+    ).toBe('plan');
+    expect(
+      helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activeTurnId: 'turn' }),
+    ).toBe('plan');
+    expect(
+      helpers.resolveSnapshotCollaborationMode({
+        updatedAtMs: 1,
+        plan,
+        activity: { tone: 'running', title: 'Planning' },
+      }),
+    ).toBe('plan');
     expect(helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan })).toBe('default');
     expect(
-      helpers.resolveSnapshotCollaborationMode({ updatedAtMs: 1, plan, activeTurnId: 'turn' }, false)
+      helpers.resolveSnapshotCollaborationMode(
+        { updatedAtMs: 1, plan, activeTurnId: 'turn' },
+        false,
+      ),
     ).toBe('default');
     expect(
       helpers.resolveSnapshotCollaborationMode(
         { updatedAtMs: 1, pendingUserInputRequest: {} as PendingUserInputRequest },
-        false
-      )
+        false,
+      ),
     ).toBe('plan');
   });
 
@@ -817,13 +1003,28 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.resolveDisplayedThreadPlan(plan, null, null)).toBe(plan);
     expect(helpers.resolveDisplayedThreadPlan(null, plan, null)).toBe(plan);
     const sparse = { ...plan, explanation: null, steps: [], updatedAt: '2026-07-18T11:00:00.000Z' };
-    expect(helpers.resolveDisplayedThreadPlan(sparse, plan, null)).toEqual({ ...sparse, explanation: 'Explain', steps: plan.steps, updatedAt: plan.updatedAt });
+    expect(helpers.resolveDisplayedThreadPlan(sparse, plan, null)).toEqual({
+      ...sparse,
+      explanation: 'Explain',
+      steps: plan.steps,
+      updatedAt: plan.updatedAt,
+    });
     const other = { ...plan, turnId: 'turn-2' };
     expect(helpers.resolveDisplayedThreadPlan(other, plan, { updatedAtMs: 1 })).toBe(plan);
-    expect(helpers.resolveDisplayedThreadPlan(other, plan, { updatedAtMs: 1, activeTurnId: 'turn-2' })).toBe(other);
-    expect(helpers.resolveDisplayedThreadPlan(other, plan, { updatedAtMs: 1, activity: { tone: 'running', title: 'Planning' } })).toBe(other);
+    expect(
+      helpers.resolveDisplayedThreadPlan(other, plan, { updatedAtMs: 1, activeTurnId: 'turn-2' }),
+    ).toBe(other);
+    expect(
+      helpers.resolveDisplayedThreadPlan(other, plan, {
+        updatedAtMs: 1,
+        activity: { tone: 'running', title: 'Planning' },
+      }),
+    ).toBe(other);
     expect(helpers.toPersistedActivePlanState(null, null)).toBeNull();
-    expect(helpers.toPersistedActivePlanState(plan, null)).toMatchObject({ deltaText: '', updatedAt: new Date(0).toISOString() });
+    expect(helpers.toPersistedActivePlanState(plan, null)).toMatchObject({
+      deltaText: '',
+      updatedAt: new Date(0).toISOString(),
+    });
   });
 
   it('resolves plan implementation prompts and statuses', () => {
@@ -834,8 +1035,16 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.resolvePersistedPlanImplementationPrompt(null, null)).toBeNull();
     const withPlan = chat({ latestTurnPlan: plan, latestTurnStatus: 'Completed' });
     expect(helpers.resolvePersistedPlanImplementationPrompt(withPlan, 'turn-1')).toBeNull();
-    expect(helpers.resolvePersistedPlanImplementationPrompt(withPlan, null)).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
-    expect(helpers.resolvePersistedPlanImplementationPrompt({ ...withPlan, latestTurnStatus: 'running' }, null)).toBeNull();
+    expect(helpers.resolvePersistedPlanImplementationPrompt(withPlan, null)).toEqual({
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+    expect(
+      helpers.resolvePersistedPlanImplementationPrompt(
+        { ...withPlan, latestTurnStatus: 'running' },
+        null,
+      ),
+    ).toBeNull();
     expect(helpers.normalizePlanTurnStatus(null)).toBeNull();
     expect(helpers.normalizePlanTurnStatus(' -- ')).toBeNull();
     expect(helpers.normalizePlanTurnStatus(' In Progress ')).toBe('inprogress');
@@ -852,21 +1061,51 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.formatReasoningEffort('minimal')).toBe('Minimal');
     expect(helpers.formatReasoningEffort('high')).toBe('High');
     expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ latestTurnPlan: plan }))).toBe(true);
-    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('u', 'user', 'x')] }))).toBe(false);
-    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'request_user_input is unavailable in default mode')] }))).toBe(true);
-    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'request_user_input cannot run in default mode; switch to plan mode because it is unavailable')] }))).toBe(true);
-    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('a', 'assistant', 'normal')] }))).toBe(false);
-    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ latestTurnPlan: plan }), false)).toBe(false);
+    expect(
+      helpers.shouldAutoEnablePlanModeFromChat(chat({ messages: [message('u', 'user', 'x')] })),
+    ).toBe(false);
+    expect(
+      helpers.shouldAutoEnablePlanModeFromChat(
+        chat({
+          messages: [
+            message('a', 'assistant', 'request_user_input is unavailable in default mode'),
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      helpers.shouldAutoEnablePlanModeFromChat(
+        chat({
+          messages: [
+            message(
+              'a',
+              'assistant',
+              'request_user_input cannot run in default mode; switch to plan mode because it is unavailable',
+            ),
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      helpers.shouldAutoEnablePlanModeFromChat(
+        chat({ messages: [message('a', 'assistant', 'normal')] }),
+      ),
+    ).toBe(false);
+    expect(helpers.shouldAutoEnablePlanModeFromChat(chat({ latestTurnPlan: plan }), false)).toBe(
+      false,
+    );
   });
 
   it('holds a specific running status and drops it once the turn is terminal', () => {
     // Regression: the held status was only cleared on a timeout, so it reappeared
     // after the turn had already finished.
+    expect(helpers.resolveHeldActivity({ tone: 'running', title: 'Reading src/math.ts' })).toEqual({
+      tone: 'running',
+      title: 'Reading src/math.ts',
+      detail: undefined,
+    });
     expect(
-      helpers.resolveHeldActivity({ tone: 'running', title: 'Reading src/math.ts' })
-    ).toEqual({ tone: 'running', title: 'Reading src/math.ts', detail: undefined });
-    expect(
-      helpers.resolveHeldActivity({ tone: 'running', title: 'Working', detail: 'npm test' })
+      helpers.resolveHeldActivity({ tone: 'running', title: 'Working', detail: 'npm test' }),
     ).toEqual({ tone: 'running', title: 'Working', detail: 'npm test' });
 
     // Generic running titles are not worth holding.
@@ -896,32 +1135,85 @@ describe('mainScreenHelpers branch behavior', () => {
       { name: ' ', summary: 'empty', mobileSupported: true },
       { name: 'Two', summary: 'Second', mobileSupported: true },
     ];
-    expect(helpers.dedupeSlashCommandsByName(commands).map((item) => item.name)).toEqual(['One', 'Two']);
+    expect(helpers.dedupeSlashCommandsByName(commands).map((item) => item.name)).toEqual([
+      'One',
+      'Two',
+    ]);
     expect(helpers.filterSlashCommands('', commands)).toHaveLength(2);
-    expect(helpers.filterSlashCommands('first', commands).map((item) => item.name)).toEqual(['One']);
+    expect(helpers.filterSlashCommands('first', commands).map((item) => item.name)).toEqual([
+      'One',
+    ]);
     expect(helpers.filterSlashCommands('uno', commands).map((item) => item.name)).toEqual(['One']);
     expect(helpers.filterSlashCommands('two', commands).map((item) => item.name)).toEqual(['Two']);
-    const all = { hasOpenChat: true, supportsGoal: true, supportsPlanMode: true, supportsReview: true };
-    expect(helpers.isSlashCommandAvailable({ name: 'x', summary: '', mobileSupported: false }, all)).toBe(false);
-    expect(helpers.isSlashCommandAvailable({ name: 'x', summary: '', mobileSupported: true, requiresOpenChat: true }, { ...all, hasOpenChat: false })).toBe(false);
+    const all = {
+      hasOpenChat: true,
+      supportsGoal: true,
+      supportsPlanMode: true,
+      supportsReview: true,
+    };
+    expect(
+      helpers.isSlashCommandAvailable({ name: 'x', summary: '', mobileSupported: false }, all),
+    ).toBe(false);
+    expect(
+      helpers.isSlashCommandAvailable(
+        { name: 'x', summary: '', mobileSupported: true, requiresOpenChat: true },
+        { ...all, hasOpenChat: false },
+      ),
+    ).toBe(false);
     for (const name of ['goal', 'plan', 'review']) {
-      const key = `supports${name === 'goal' ? 'Goal' : name === 'plan' ? 'PlanMode' : 'Review'}` as keyof typeof all;
-      expect(helpers.isSlashCommandAvailable({ name, summary: '', mobileSupported: true }, { ...all, [key]: false })).toBe(false);
+      const key =
+        `supports${name === 'goal' ? 'Goal' : name === 'plan' ? 'PlanMode' : 'Review'}` as keyof typeof all;
+      expect(
+        helpers.isSlashCommandAvailable(
+          { name, summary: '', mobileSupported: true },
+          { ...all, [key]: false },
+        ),
+      ).toBe(false);
     }
-    expect(helpers.isSlashCommandAvailable({ name: 'status', summary: '', mobileSupported: true }, all)).toBe(true);
+    expect(
+      helpers.isSlashCommandAvailable({ name: 'status', summary: '', mobileSupported: true }, all),
+    ).toBe(true);
   });
 
   it('formats agent thread options and icons', () => {
-    expect(helpers.formatAgentThreadOptionTitle(summary({ title: ' Root ' }), 'thread-1', null)).toBe('Root');
-    expect(helpers.formatAgentThreadOptionTitle(summary({ title: ' ' }), 'thread-1', null)).toBe('Main thread');
-    expect(helpers.formatAgentThreadOptionTitle(summary({ id: 'child', agentNickname: ' Atlas ' }), 'thread-1', 1)).toBe('Atlas');
-    expect(helpers.formatAgentThreadOptionTitle(summary({ id: 'child' }), 'thread-1', 2)).toBe('Sub-agent 2');
-    expect(helpers.formatAgentThreadOptionTitle(summary({ id: 'child' }), null, null)).toBe('Sub-agent');
+    expect(
+      helpers.formatAgentThreadOptionTitle(summary({ title: ' Root ' }), 'thread-1', null),
+    ).toBe('Root');
+    expect(helpers.formatAgentThreadOptionTitle(summary({ title: ' ' }), 'thread-1', null)).toBe(
+      'Main thread',
+    );
+    expect(
+      helpers.formatAgentThreadOptionTitle(
+        summary({ id: 'child', agentNickname: ' Atlas ' }),
+        'thread-1',
+        1,
+      ),
+    ).toBe('Atlas');
+    expect(helpers.formatAgentThreadOptionTitle(summary({ id: 'child' }), 'thread-1', 2)).toBe(
+      'Sub-agent 2',
+    );
+    expect(helpers.formatAgentThreadOptionTitle(summary({ id: 'child' }), null, null)).toBe(
+      'Sub-agent',
+    );
     expect(helpers.iconForAgentThread(summary(), 'thread-1')).toBe('chatbubble-ellipses-outline');
-    expect(helpers.iconForAgentThread(summary({ id: 'review', sourceKind: 'subAgentReview' }), 'thread-1')).toBe('shield-checkmark-outline');
-    expect(helpers.iconForAgentThread(summary({ id: 'compact', sourceKind: 'subAgentCompact' }), 'thread-1')).toBe('layers-outline');
-    expect(helpers.iconForAgentThread(summary({ id: 'child', status: 'running' }), 'thread-1')).toBe('sparkles-outline');
-    expect(helpers.iconForAgentThread(summary({ id: 'child' }), 'thread-1')).toBe('git-branch-outline');
+    expect(
+      helpers.iconForAgentThread(
+        summary({ id: 'review', sourceKind: 'subAgentReview' }),
+        'thread-1',
+      ),
+    ).toBe('shield-checkmark-outline');
+    expect(
+      helpers.iconForAgentThread(
+        summary({ id: 'compact', sourceKind: 'subAgentCompact' }),
+        'thread-1',
+      ),
+    ).toBe('layers-outline');
+    expect(
+      helpers.iconForAgentThread(summary({ id: 'child', status: 'running' }), 'thread-1'),
+    ).toBe('sparkles-outline');
+    expect(helpers.iconForAgentThread(summary({ id: 'child' }), 'thread-1')).toBe(
+      'git-branch-outline',
+    );
   });
 
   it('formats snippets, streaming deltas, and reasoning messages', () => {
@@ -941,43 +1233,97 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.mergeStreamingDelta('abc', 'xyz')).toBe('abcxyz');
     expect(helpers.formatLiveReasoningMessage(' ')).toBe('• Reasoning');
     expect(helpers.formatLiveReasoningMessage('\n\n')).toBe('• Reasoning');
-    expect(helpers.formatLiveReasoningMessage('First\n\nSecond')).toBe('• Reasoning\n  └ First\n    Second');
+    expect(helpers.formatLiveReasoningMessage('First\n\nSecond')).toBe(
+      '• Reasoning\n  └ First\n    Second',
+    );
   });
 
   it('formats timeline messages without agent-name filtering', () => {
     expect(helpers.formatTimelineSystemMessage('Title', [])).toBe('Title');
-    expect(helpers.formatTimelineSystemMessage('Title', ['one\n', '', 'two'])).toBe('Title\n  └ one\n    two');
+    expect(helpers.formatTimelineSystemMessage('Title', ['one\n', '', 'two'])).toBe(
+      'Title\n  └ one\n    two',
+    );
     const messages = [message('r', 'reasoning', 'reason'), message('a', 'assistant', 'answer')];
     expect(helpers.filterReasoningMessages(messages)).toBe(messages);
   });
 
   it('describes started and completed tool events', () => {
     expect(helpers.describeStartedToolEvent(null)).toBeNull();
-    expect(helpers.describeStartedToolEvent({ type: 'commandExecution' })).toEqual({ eventType: 'command.running', detail: 'Command | running' });
-    expect(helpers.describeStartedToolEvent({ type: 'fileChange' })?.eventType).toBe('file_change.running');
-    expect(helpers.describeStartedToolEvent({ type: 'mcpToolCall', server: 's', tool: 't' })?.detail).toBe('s / t | running');
-    expect(helpers.describeStartedToolEvent({ type: 'mcpToolCall' })?.detail).toBe('Tool call | running');
-    expect(helpers.describeStartedToolEvent({ type: 'toolCall', name: 'n' })?.detail).toBe('n | running');
+    expect(helpers.describeStartedToolEvent({ type: 'commandExecution' })).toEqual({
+      eventType: 'command.running',
+      detail: 'Command | running',
+    });
+    expect(helpers.describeStartedToolEvent({ type: 'fileChange' })?.eventType).toBe(
+      'file_change.running',
+    );
+    expect(
+      helpers.describeStartedToolEvent({ type: 'mcpToolCall', server: 's', tool: 't' })?.detail,
+    ).toBe('s / t | running');
+    expect(helpers.describeStartedToolEvent({ type: 'mcpToolCall' })?.detail).toBe(
+      'Tool call | running',
+    );
+    expect(helpers.describeStartedToolEvent({ type: 'toolCall', name: 'n' })?.detail).toBe(
+      'n | running',
+    );
     expect(helpers.describeCompletedToolEvent(null)).toBeNull();
-    expect(helpers.describeCompletedToolEvent({ type: 'commandExecution', command: 'npm test', status: 'failed' })?.detail).toBe('npm test | error');
-    expect(helpers.describeCompletedToolEvent({ type: 'fileChange', changes: [] })?.detail).toBe('File changes | complete');
-    expect(helpers.describeCompletedToolEvent({ type: 'fileChange', changes: ['/a.ts'] })?.detail).toBe('File changes: a.ts | complete');
-    expect(helpers.describeCompletedToolEvent({ type: 'fileChange', changes: ['/a.ts', '/b.ts'] })?.detail).toBe('File changes: a.ts +1 | complete');
-    expect(helpers.describeCompletedToolEvent({ type: 'mcpToolCall' })?.eventType).toBe('tool.completed');
-    expect(helpers.describeCompletedToolEvent({ type: 'toolCall', tool: 't', status: 'error' })?.detail).toBe('t | error');
+    expect(
+      helpers.describeCompletedToolEvent({
+        type: 'commandExecution',
+        command: 'npm test',
+        status: 'failed',
+      })?.detail,
+    ).toBe('npm test | error');
+    expect(helpers.describeCompletedToolEvent({ type: 'fileChange', changes: [] })?.detail).toBe(
+      'File changes | complete',
+    );
+    expect(
+      helpers.describeCompletedToolEvent({ type: 'fileChange', changes: ['/a.ts'] })?.detail,
+    ).toBe('File changes: a.ts | complete');
+    expect(
+      helpers.describeCompletedToolEvent({ type: 'fileChange', changes: ['/a.ts', '/b.ts'] })
+        ?.detail,
+    ).toBe('File changes: a.ts +1 | complete');
+    expect(helpers.describeCompletedToolEvent({ type: 'mcpToolCall' })?.eventType).toBe(
+      'tool.completed',
+    );
+    expect(
+      helpers.describeCompletedToolEvent({ type: 'toolCall', tool: 't', status: 'error' })?.detail,
+    ).toBe('t | error');
     expect(helpers.describeWebSearchToolEvent(null)?.detail).toBe('Web search | running');
-    expect(helpers.describeWebSearchToolEvent({ query: 'cats' })?.detail).toBe('Web search: cats | running');
+    expect(helpers.describeWebSearchToolEvent({ query: 'cats' })?.detail).toBe(
+      'Web search: cats | running',
+    );
   });
 
   it('reads changed paths and appends bounded run history', () => {
     expect(helpers.readCompletedFileChangePaths(null)).toEqual([]);
-    expect(helpers.readCompletedFileChangePaths({ changes: [null, '', 'a\\b.ts', { path: 'a/b.ts' }, { filePath: '/c' }, { file_path: '/d' }, {}] })).toEqual(['a/b.ts', '/c', '/d']);
+    expect(
+      helpers.readCompletedFileChangePaths({
+        changes: [
+          null,
+          '',
+          'a\\b.ts',
+          { path: 'a/b.ts' },
+          { filePath: '/c' },
+          { file_path: '/d' },
+          {},
+        ],
+      }),
+    ).toEqual(['a/b.ts', '/c', '/d']);
     expect(helpers.toFileChangeTargetLabel(' ')).toBe('file');
     expect(helpers.toFileChangeTargetLabel('/a/b.ts')).toBe('b.ts');
     const existing = [{ id: '1', threadId: 't', eventType: 'x', at: 'now', detail: 'same' }];
     expect(helpers.appendRunEventHistory(existing, 't', 'x', 'same')).toBe(existing);
-    const many = Array.from({ length: helpers.MAX_ACTIVE_COMMANDS }, (_, index) => ({ id: String(index), threadId: 't', eventType: 'x', at: 'now', detail: String(index) }));
-    expect(helpers.appendRunEventHistory(many, 't', 'y', 'new')).toHaveLength(helpers.MAX_ACTIVE_COMMANDS);
+    const many = Array.from({ length: helpers.MAX_ACTIVE_COMMANDS }, (_, index) => ({
+      id: String(index),
+      threadId: 't',
+      eventType: 'x',
+      at: 'now',
+      detail: String(index),
+    }));
+    expect(helpers.appendRunEventHistory(many, 't', 'y', 'new')).toHaveLength(
+      helpers.MAX_ACTIVE_COMMANDS,
+    );
   });
 
   it('extracts thread and parent ids from common notification shapes', () => {
@@ -987,12 +1333,28 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.extractNotificationThreadId({ threadId: 'direct' })).toBe('direct');
     expect(helpers.extractNotificationThreadId({ thread: { id: 'nested' } })).toBe('nested');
     expect(helpers.extractNotificationThreadId({ turn: { threadId: 'turn' } })).toBe('turn');
-    expect(helpers.extractNotificationThreadId({ source: { conversation_id: 'source' } })).toBe('source');
-    expect(helpers.extractNotificationThreadId({ source: { subagent: { thread_spawn: { parent_thread_id: 'parent' } } } })).toBe('parent');
-    expect(helpers.extractNotificationThreadId({ thread: { source: { subAgent: { thread_spawn: { parentThreadId: 'thread-parent' } } } } })).toBe('thread-parent');
+    expect(helpers.extractNotificationThreadId({ source: { conversation_id: 'source' } })).toBe(
+      'source',
+    );
+    expect(
+      helpers.extractNotificationThreadId({
+        source: { subagent: { thread_spawn: { parent_thread_id: 'parent' } } },
+      }),
+    ).toBe('parent');
+    expect(
+      helpers.extractNotificationThreadId({
+        thread: { source: { subAgent: { thread_spawn: { parentThreadId: 'thread-parent' } } } },
+      }),
+    ).toBe('thread-parent');
     expect(helpers.extractNotificationParentThreadId(null)).toBeNull();
-    expect(helpers.extractNotificationParentThreadId({ source: { parentThreadId: 'parent' } })).toBe('parent');
-    expect(helpers.extractNotificationParentThreadId({ thread: { source: { parent_thread_id: 'nested-parent' } } })).toBe('nested-parent');
+    expect(
+      helpers.extractNotificationParentThreadId({ source: { parentThreadId: 'parent' } }),
+    ).toBe('parent');
+    expect(
+      helpers.extractNotificationParentThreadId({
+        thread: { source: { parent_thread_id: 'nested-parent' } },
+      }),
+    ).toBe('nested-parent');
   });
 
   it('extracts direct, typed, and nested external statuses', () => {
@@ -1004,7 +1366,9 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.extractExternalStatusHint({ status: { type: 'Complete' } })).toBe('complete');
     expect(helpers.extractExternalStatusHint({ state: { phase: 'Queued' } })).toBe('queued');
     expect(helpers.extractExternalStatusHint({ other: true })).toBeNull();
-    expect(helpers.extractExternalStatusHint({ thread: { lifecycle: { status: 'Failed' } } })).toBe('failed');
+    expect(helpers.extractExternalStatusHint({ thread: { lifecycle: { status: 'Failed' } } })).toBe(
+      'failed',
+    );
   });
 
   it('treats a parent as working whenever any sub-agent beneath it is working', () => {
@@ -1053,17 +1417,59 @@ describe('mainScreenHelpers branch behavior', () => {
     }
     const unknownStatus = 'unknown' as ChatStatus;
     expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [] }))).toBe(false);
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('a', 'assistant', 'x')] }))).toBe(false);
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x', 'bad')] }))).toBe(false);
+    expect(
+      helpers.isChatLikelyRunning(
+        chat({ status: unknownStatus, messages: [message('a', 'assistant', 'x')] }),
+      ),
+    ).toBe(false);
+    expect(
+      helpers.isChatLikelyRunning(
+        chat({ status: unknownStatus, messages: [message('u', 'user', 'x', 'bad')] }),
+      ),
+    ).toBe(false);
     // Anchored to when the prompt was sent, not to `updatedAt`: a reload refreshes `updatedAt`,
     // and trusting it reopened long-finished threads as "Working" forever.
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x')], updatedAt: new Date(now - 1000).toISOString() }))).toBe(false);
-    expect(helpers.isChatLikelyRunning(chat({ status: unknownStatus, messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString())] }))).toBe(true);
+    expect(
+      helpers.isChatLikelyRunning(
+        chat({
+          status: unknownStatus,
+          messages: [message('u', 'user', 'x')],
+          updatedAt: new Date(now - 1000).toISOString(),
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      helpers.isChatLikelyRunning(
+        chat({
+          status: unknownStatus,
+          messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString())],
+        }),
+      ),
+    ).toBe(true);
     expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [] }))).toBe(false);
-    expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', 'bad')] }))).toBe(false);
-    expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString()), message('a', 'assistant', 'done')] }))).toBe(false);
-    expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString())] }))).toBe(true);
-    expect(helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', new Date(now - 100000).toISOString())] }))).toBe(false);
+    expect(
+      helpers.hasRecentUnansweredUserTurn(chat({ messages: [message('u', 'user', 'x', 'bad')] })),
+    ).toBe(false);
+    expect(
+      helpers.hasRecentUnansweredUserTurn(
+        chat({
+          messages: [
+            message('u', 'user', 'x', new Date(now - 1000).toISOString()),
+            message('a', 'assistant', 'done'),
+          ],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      helpers.hasRecentUnansweredUserTurn(
+        chat({ messages: [message('u', 'user', 'x', new Date(now - 1000).toISOString())] }),
+      ),
+    ).toBe(true);
+    expect(
+      helpers.hasRecentUnansweredUserTurn(
+        chat({ messages: [message('u', 'user', 'x', new Date(now - 100000).toISOString())] }),
+      ),
+    ).toBe(false);
     jest.restoreAllMocks();
   });
 
@@ -1072,12 +1478,34 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.didAssistantMessageProgress(null, previous)).toBe(false);
     expect(helpers.didAssistantMessageProgress({ ...previous, id: 'other' }, previous)).toBe(false);
     expect(helpers.didAssistantMessageProgress(previous, previous)).toBe(false);
-    const firstAssistant = chat({ messages: [...previous.messages, message('a', 'assistant', 'answer')] });
+    const firstAssistant = chat({
+      messages: [...previous.messages, message('a', 'assistant', 'answer')],
+    });
     expect(helpers.didAssistantMessageProgress(previous, firstAssistant)).toBe(true);
-    expect(helpers.didAssistantMessageProgress(previous, chat({ messages: [...previous.messages, message('a', 'assistant', ' ')] }))).toBe(false);
-    expect(helpers.didAssistantMessageProgress(firstAssistant, chat({ messages: [...previous.messages, message('a', 'assistant', 'answer more')] }))).toBe(true);
-    expect(helpers.didAssistantMessageProgress(firstAssistant, chat({ messages: [...previous.messages, message('b', 'assistant', 'new')] }))).toBe(false);
-    expect(helpers.didAssistantMessageProgress(firstAssistant, chat({ messages: [...firstAssistant.messages, message('b', 'assistant', 'new')] }))).toBe(true);
+    expect(
+      helpers.didAssistantMessageProgress(
+        previous,
+        chat({ messages: [...previous.messages, message('a', 'assistant', ' ')] }),
+      ),
+    ).toBe(false);
+    expect(
+      helpers.didAssistantMessageProgress(
+        firstAssistant,
+        chat({ messages: [...previous.messages, message('a', 'assistant', 'answer more')] }),
+      ),
+    ).toBe(true);
+    expect(
+      helpers.didAssistantMessageProgress(
+        firstAssistant,
+        chat({ messages: [...previous.messages, message('b', 'assistant', 'new')] }),
+      ),
+    ).toBe(false);
+    expect(
+      helpers.didAssistantMessageProgress(
+        firstAssistant,
+        chat({ messages: [...firstAssistant.messages, message('b', 'assistant', 'new')] }),
+      ),
+    ).toBe(true);
     expect(helpers.latestAssistantMessage(previous.messages)).toBeNull();
     expect(helpers.latestAssistantMessage(firstAssistant.messages)?.id).toBe('a');
   });
@@ -1096,13 +1524,46 @@ describe('mainScreenHelpers branch behavior', () => {
   it('parses approvals and rejects incomplete or unknown kinds', () => {
     expect(helpers.toPendingApproval(null)).toBeNull();
     expect(helpers.toPendingApproval({ id: 'x' })).toBeNull();
-    expect(helpers.toPendingApproval({ id: 'i', kind: 'other', threadId: 't', turnId: 'turn', itemId: 'item', requestedAt: 'now' })).toBeNull();
-    expect(helpers.toPendingApproval({
-      id: 'i', kind: 'commandExecution', threadId: 't', turnId: 'turn', itemId: 'item', requestedAt: 'now',
-      reason: 'why', command: 'npm test', cwd: '/repo', grantRoot: '/repo', proposedExecpolicyAmendment: ['a', 2],
-    })).toMatchObject({
-      requestId: 'i', kind: 'commandExecution', reason: 'why', command: 'npm test', proposedExecpolicyAmendment: ['a'],
+    expect(
+      helpers.toPendingApproval({
+        id: 'i',
+        kind: 'other',
+        threadId: 't',
+        turnId: 'turn',
+        itemId: 'item',
+        requestedAt: 'now',
+      }),
+    ).toBeNull();
+    expect(
+      helpers.toPendingApproval({
+        id: 'i',
+        kind: 'commandExecution',
+        threadId: 't',
+        turnId: 'turn',
+        itemId: 'item',
+        requestedAt: 'now',
+        reason: 'why',
+        command: 'npm test',
+        cwd: '/repo',
+        grantRoot: '/repo',
+        proposedExecpolicyAmendment: ['a', 2],
+      }),
+    ).toMatchObject({
+      requestId: 'i',
+      kind: 'commandExecution',
+      reason: 'why',
+      command: 'npm test',
+      proposedExecpolicyAmendment: ['a'],
     });
-    expect(helpers.toPendingApproval({ id: 'i', kind: 'fileChange', threadId: 't', turnId: 'turn', itemId: 'item', requestedAt: 'now' })?.kind).toBe('fileChange');
+    expect(
+      helpers.toPendingApproval({
+        id: 'i',
+        kind: 'fileChange',
+        threadId: 't',
+        turnId: 'turn',
+        itemId: 'item',
+        requestedAt: 'now',
+      })?.kind,
+    ).toBe('fileChange');
   });
 });

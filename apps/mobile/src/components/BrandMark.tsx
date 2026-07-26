@@ -21,11 +21,7 @@ export function BrandMark({ size = 18 }: BrandMarkProps) {
         },
       ]}
     >
-      <Image
-        source={brandMarkPng}
-        resizeMode="contain"
-        style={styles.image}
-      />
+      <Image source={brandMarkPng} resizeMode="contain" style={styles.image} />
     </View>
   );
 }

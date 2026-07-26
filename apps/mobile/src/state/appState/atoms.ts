@@ -28,7 +28,7 @@ export const appStateLoadedAtom = atom((get) => get(appStateSnapshotAtom).loaded
 export const appStateDataAtom = atom((get) => get(appStateSnapshotAtom).data);
 
 export const appStatePersistenceErrorAtom = atom(
-  (get) => get(appStateSnapshotAtom).persistenceError
+  (get) => get(appStateSnapshotAtom).persistenceError,
 );
 
 export const appSettingsAtom = atom((get) => get(appStateDataAtom).settings);

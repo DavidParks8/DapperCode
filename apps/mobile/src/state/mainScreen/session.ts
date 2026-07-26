@@ -4,12 +4,14 @@ import { screenAtom } from './registry';
 
 export const selectedChatAtom = screenAtom<Chat | null>(null);
 
-export const transcriptContinuationStateAtom = screenAtom<TranscriptContinuationState>((): TranscriptContinuationState => ({
-  loading: false,
-  error: null,
-  exhausted: true,
-  unavailableCount: 0,
-}));
+export const transcriptContinuationStateAtom = screenAtom<TranscriptContinuationState>(
+  (): TranscriptContinuationState => ({
+    loading: false,
+    error: null,
+    exhausted: true,
+    unavailableCount: 0,
+  }),
+);
 
 export const selectedParentChatAtom = screenAtom<Chat | null>(null);
 

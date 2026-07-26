@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  PendingApproval,
-  PendingUserInputRequest,
-  RpcNotification,
-} from '../api/types';
+import type { PendingApproval, PendingUserInputRequest, RpcNotification } from '../api/types';
 import type { HostBridgeApiClient } from '../api/client';
 import type { HostBridgeWsClient } from '../api/ws';
 
@@ -18,7 +14,7 @@ const ATTENTION_REQUEST_EVENT_METHODS = new Set([
 export function useDrawerAttentionRequests(
   api: HostBridgeApiClient,
   ws: HostBridgeWsClient,
-  active: boolean
+  active: boolean,
 ) {
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [pendingUserInputs, setPendingUserInputs] = useState<PendingUserInputRequest[]>([]);

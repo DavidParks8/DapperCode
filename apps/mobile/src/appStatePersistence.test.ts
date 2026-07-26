@@ -15,7 +15,7 @@ describe('appStatePersistence', () => {
 
   it('stores the canonical document and imports legacy profile storage on web', async () => {
     const getItem = jest.fn((key: string) =>
-      key === 'dappercode.bridge-profiles.v1' ? '{"profiles":[]}' : null
+      key === 'dappercode.bridge-profiles.v1' ? '{"profiles":[]}' : null,
     );
     const setItem = jest.fn();
     Object.defineProperty(globalThis, 'localStorage', {
@@ -69,7 +69,7 @@ describe('appStatePersistence', () => {
     expect(secureStore.setItemAsync).toHaveBeenCalledWith(
       'dappercode.app-state.v1',
       '{"version":1}',
-      { keychainAccessible: 'after-first-unlock' }
+      { keychainAccessible: 'after-first-unlock' },
     );
   });
 

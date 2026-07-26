@@ -15,10 +15,7 @@ export function simpleReply(
 }
 
 /** A multi-chunk streaming reply. */
-export function streamingReply(
-  threadId = 'thread',
-  runId = 'run-1',
-): EventSequenceEntry[] {
+export function streamingReply(threadId = 'thread', runId = 'run-1'): EventSequenceEntry[] {
   const mid = `${threadId}::msg-1`;
   return sequence(threadId, runId)
     .runStarted()
@@ -32,10 +29,7 @@ export function streamingReply(
 }
 
 /** A tool call followed by a text response. */
-export function toolCallThenReply(
-  threadId = 'thread',
-  runId = 'run-1',
-): EventSequenceEntry[] {
+export function toolCallThenReply(threadId = 'thread', runId = 'run-1'): EventSequenceEntry[] {
   const mid = `${threadId}::msg-1`;
   const tcid = `${threadId}::tc-1`;
   return sequence(threadId, runId)
@@ -136,10 +130,7 @@ export function subAgentSpawn(
 }
 
 /** Two messages with a snapshot in between. */
-export function snapshotMidStream(
-  threadId = 'thread',
-  runId = 'run-1',
-): EventSequenceEntry[] {
+export function snapshotMidStream(threadId = 'thread', runId = 'run-1'): EventSequenceEntry[] {
   const mid1 = `${threadId}::msg-1`;
   const mid2 = `${threadId}::msg-2`;
   return [

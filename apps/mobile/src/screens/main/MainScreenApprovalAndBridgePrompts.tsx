@@ -3,7 +3,7 @@ import {
   pendingUserInputRequestAtom,
   resolvingUserInputAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import { useAtomValue } from 'jotai';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
@@ -11,10 +11,10 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { AppSheet } from '../../components/AppSheet';
 import { BridgeUiModal } from '../../components/BridgeUiSurface';
 import { controlAccessibilityState } from '../../accessibility';
-import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
-
-
-
+import type {
+  MainScreenPanelCollapseCoordinatorContext,
+  MainScreenPanelCollapseCoordinatorResult,
+} from './mainScreenPanelCollapseCoordinator';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
@@ -51,8 +51,7 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
         >
           {(pendingUserInputRequest?.questions ?? []).map((question, questionIndex) => {
             const answer = userInputDrafts[question.id] ?? '';
-            const hasPresetOptions =
-              Array.isArray(question.options) && question.options.length > 0;
+            const hasPresetOptions = Array.isArray(question.options) && question.options.length > 0;
             const needsFreeformInput = !hasPresetOptions || question.isOther;
             return (
               <View
@@ -79,9 +78,7 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
                         accessibilityHint={option.description || undefined}
                       >
                         <View style={styles.userInputOptionHeaderRow}>
-                          <Text style={styles.userInputOptionIndex}>
-                            {`${String(index + 1)}.`}
-                          </Text>
+                          <Text style={styles.userInputOptionIndex}>{`${String(index + 1)}.`}</Text>
                           <Text style={styles.userInputOptionLabel}>{option.label}</Text>
                         </View>
                         {option.description.trim() ? (
@@ -99,9 +96,7 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
                     onChangeText={(value) => setUserInputDraft(question.id, value)}
                     keyboardAppearance={theme.keyboardAppearance}
                     placeholder={
-                      question.isOther
-                        ? 'Or enter a custom answer…'
-                        : 'Type your answer…'
+                      question.isOther ? 'Or enter a custom answer…' : 'Type your answer…'
                     }
                     placeholderTextColor={theme.colors.textMuted}
                     secureTextEntry={question.isSecret}
@@ -126,12 +121,21 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
           })}
         </ScrollView>
         {userInputError ? (
-          <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.userInputErrorText}>{userInputError}</Text>
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+            style={styles.userInputErrorText}
+          >
+            {userInputError}
+          </Text>
         ) : null}
         <View style={styles.userInputModalActions}>
           <Pressable
             onPress={() => void dismissUserInputRequest('cancel')}
-            style={({ pressed }) => [styles.userInputSecondaryButton, pressed && styles.userInputSubmitButtonPressed]}
+            style={({ pressed }) => [
+              styles.userInputSecondaryButton,
+              pressed && styles.userInputSubmitButtonPressed,
+            ]}
             disabled={resolvingUserInput}
             accessibilityRole="button"
             accessibilityLabel="Cancel request"
@@ -140,7 +144,10 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
           </Pressable>
           <Pressable
             onPress={() => void dismissUserInputRequest('decline')}
-            style={({ pressed }) => [styles.userInputSecondaryButton, pressed && styles.userInputSubmitButtonPressed]}
+            style={({ pressed }) => [
+              styles.userInputSecondaryButton,
+              pressed && styles.userInputSubmitButtonPressed,
+            ]}
             disabled={resolvingUserInput}
             accessibilityRole="button"
             accessibilityLabel="Decline request"
@@ -156,7 +163,10 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
             ]}
             disabled={resolvingUserInput}
             accessibilityRole="button"
-            accessibilityState={controlAccessibilityState({ disabled: resolvingUserInput, busy: resolvingUserInput })}
+            accessibilityState={controlAccessibilityState({
+              disabled: resolvingUserInput,
+              busy: resolvingUserInput,
+            })}
           >
             <Text style={styles.userInputSubmitButtonText}>
               {resolvingUserInput ? 'Submitting…' : 'Submit answers'}
@@ -165,16 +175,16 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
         </View>
       </AppSheet>
       {modalBridgeUiSurface ? (
-                <BridgeUiModal
-                  surface={modalBridgeUiSurface}
-                  onAction={(nextSurface, action) => {
-                    void handleBridgeUiAction(nextSurface, action);
-                  }}
-                  onDismiss={(surface) => {
-                    void dismissBridgeUiSurface(surface);
-                  }}
-                />
-              ) : null}
+        <BridgeUiModal
+          surface={modalBridgeUiSurface}
+          onAction={(nextSurface, action) => {
+            void handleBridgeUiAction(nextSurface, action);
+          }}
+          onDismiss={(surface) => {
+            void dismissBridgeUiSurface(surface);
+          }}
+        />
+      ) : null}
     </>
   );
 }

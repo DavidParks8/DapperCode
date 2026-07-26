@@ -30,10 +30,16 @@ import { SettingsScreen } from './SettingsScreen';
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('../../pushNotifications', () => ({ requestPushRegistration: jest.fn() }));
 jest.mock('../../chatSnapshotCache', () => ({
-  loadChatSnapshotCache: jest.fn().mockResolvedValue({ profileId: 'profile-2', selectedChatId: null, entries: [] }),
+  loadChatSnapshotCache: jest
+    .fn()
+    .mockResolvedValue({ profileId: 'profile-2', selectedChatId: null, entries: [] }),
   deleteChatSnapshotCache: jest.fn().mockResolvedValue(undefined),
   saveChatSnapshotCache: jest.fn().mockResolvedValue(undefined),
-  createEmptyChatSnapshotCache: (profileId: string) => ({ profileId, selectedChatId: null, entries: [] }),
+  createEmptyChatSnapshotCache: (profileId: string) => ({
+    profileId,
+    selectedChatId: null,
+    entries: [],
+  }),
   updateChatSnapshotCache: (cache: unknown) => cache,
 }));
 
@@ -49,10 +55,26 @@ type PressCallback = () => void;
 type ToggleCallback = (value: boolean) => void;
 
 const theme = createAppTheme('dark');
-const requestRegistration = requestPushRegistration as jest.MockedFunction<typeof requestPushRegistration>;
+const requestRegistration = requestPushRegistration as jest.MockedFunction<
+  typeof requestPushRegistration
+>;
 const profiles: BridgeProfile[] = [
-  { id: 'profile-1', name: 'Primary', bridgeUrl: 'http://127.0.0.1:3001', bridgeToken: 'one', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'profile-2', name: 'Secondary', bridgeUrl: 'http://127.0.0.1:3002', bridgeToken: 'two', createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+  {
+    id: 'profile-1',
+    name: 'Primary',
+    bridgeUrl: 'http://127.0.0.1:3001',
+    bridgeToken: 'one',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'profile-2',
+    name: 'Secondary',
+    bridgeUrl: 'http://127.0.0.1:3002',
+    bridgeToken: 'two',
+    createdAt: '2026-01-02T00:00:00.000Z',
+    updatedAt: '2026-01-02T00:00:00.000Z',
+  },
 ];
 const capabilities: BridgeCapabilities = {
   protocolVersion: 2,
@@ -61,19 +83,30 @@ const capabilities: BridgeCapabilities = {
   activeAgentId: 'codex',
   agents: [
     {
-      agentId: 'codex', displayName: 'Codex', version: '1.2.3', provenance: 'managed',
-      lifecycle: 'ready', lastError: null,
+      agentId: 'codex',
+      displayName: 'Codex',
+      version: '1.2.3',
+      provenance: 'managed',
+      lifecycle: 'ready',
+      lastError: null,
     },
     {
-      agentId: 'offline', displayName: 'Offline agent', version: '0.1.0', provenance: 'local',
-      lifecycle: 'unavailable', lastError: 'secret detail',
+      agentId: 'offline',
+      displayName: 'Offline agent',
+      version: '0.1.0',
+      provenance: 'local',
+      lifecycle: 'unavailable',
+      lastError: 'secret detail',
     },
   ],
   supportsByAgent: {},
   agUiEvents: true,
   supports: {
-    reviewStart: true, turnSteer: true, commandOutputDelta: true,
-    browserPreview: true, genericUiSurface: true,
+    reviewStart: true,
+    turnSteer: true,
+    commandOutputDelta: true,
+    browserPreview: true,
+    genericUiSurface: true,
   },
 };
 
@@ -120,7 +153,8 @@ function hasText(root: Queryable, text: string): boolean {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') current = current.parent as Queryable | null;
+  while (current && typeof current.props.onPress !== 'function')
+    current = current.parent as Queryable | null;
   if (!current) throw new Error(`Missing pressable: ${text}`);
   return current;
 }
@@ -129,7 +163,9 @@ function findToggle(root: Queryable, label: string): Queryable {
   const labelNode = root.findAll((node) => node.children.map(String).join('') === label)[0];
   let current: Queryable | null = labelNode ?? null;
   while (current) {
-    const toggle = current.findAll((node) => node.type === Switch || typeof node.props.onValueChange === 'function')[0];
+    const toggle = current.findAll(
+      (node) => node.type === Switch || typeof node.props.onValueChange === 'function',
+    )[0];
     if (toggle) return toggle;
     current = current.parent as Queryable | null;
   }
@@ -164,12 +200,14 @@ async function changeToggle(node: Queryable, value: boolean): Promise<void> {
   });
 }
 
-async function renderSettings(options: {
-  api?: Record<string, jest.Mock>;
-  store?: AppStore;
-  connected?: boolean;
-  drawerToggle?: jest.Mock;
-} = {}): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: AppStore }> {
+async function renderSettings(
+  options: {
+    api?: Record<string, jest.Mock>;
+    store?: AppStore;
+    connected?: boolean;
+    drawerToggle?: jest.Mock;
+  } = {},
+): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: AppStore }> {
   const api = options.api ?? {
     readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
     registerPushDevice: jest.fn().mockResolvedValue(undefined),
@@ -180,7 +218,9 @@ async function renderSettings(options: {
     createSettingsStore({
       push: {
         optedOut: false,
-        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+        registrations: [
+          { profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' },
+        ],
       },
     });
   store.set(apiClientAtom, api as unknown as HostBridgeApiClient);
@@ -194,12 +234,17 @@ async function renderSettings(options: {
     tree = renderer.create(
       withAppStore(
         store,
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
           <AppThemeProvider theme={theme}>
             <SettingsScreen />
           </AppThemeProvider>
-        </SafeAreaProvider>
-      )
+        </SafeAreaProvider>,
+      ),
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -211,7 +256,11 @@ async function renderSettings(options: {
 describe('SettingsScreen behavior', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    requestRegistration.mockResolvedValue({ token: 'new-token', platform: 'ios', deviceName: 'Phone' });
+    requestRegistration.mockResolvedValue({
+      token: 'new-token',
+      platform: 'ios',
+      deviceName: 'Phone',
+    });
   });
 
   it('renders capabilities and drives settings, profile, legal, retry, and drawer actions', async () => {
@@ -246,7 +295,9 @@ describe('SettingsScreen behavior', () => {
     await press(findPressableByText(root, 'Terms of service'));
     expect(store.get(currentScreenAtom)).toBe('Terms');
 
-    const drawer = root.findAll((node) => node.props.accessibilityLabel === 'Open navigation drawer')[0];
+    const drawer = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Open navigation drawer',
+    )[0];
     await press(drawer);
     expect(drawerToggle).toHaveBeenCalled();
     act(() => tree.unmount());
@@ -280,19 +331,25 @@ describe('SettingsScreen behavior', () => {
     const disabledStore = createSettingsStore({
       push: {
         optedOut: true,
-        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+        registrations: [
+          { profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' },
+        ],
       },
     });
     const enabled = await renderSettings({ store: disabledStore });
     await changeToggle(findToggle(enabled.tree.root as Queryable, 'Push notifications'), true);
-    expect(enabled.api.registerPushDevice).toHaveBeenCalledWith(expect.objectContaining({ token: 'new-token' }));
+    expect(enabled.api.registerPushDevice).toHaveBeenCalledWith(
+      expect.objectContaining({ token: 'new-token' }),
+    );
     expect(disabledStore.get(pushSettingsAtom).optedOut).toBe(false);
     act(() => enabled.tree.unmount());
 
     const activeStore = createSettingsStore({
       push: {
         optedOut: false,
-        registrations: [{ profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' }],
+        registrations: [
+          { profileId: 'profile-1', registrationId: 'registration-1', token: 'old-token' },
+        ],
       },
     });
     const active = await renderSettings({ store: activeStore });
@@ -309,26 +366,38 @@ describe('SettingsScreen behavior', () => {
   });
 
   it('shows empty and failed capability states, push errors, and ignores push changes without a profile', async () => {
-    const empty = await renderSettings({ api: {
-      readBridgeCapabilities: jest.fn().mockResolvedValue({ ...capabilities, agents: [] }),
-      registerPushDevice: jest.fn(), unregisterPushDevice: jest.fn(),
-    } });
+    const empty = await renderSettings({
+      api: {
+        readBridgeCapabilities: jest.fn().mockResolvedValue({ ...capabilities, agents: [] }),
+        registerPushDevice: jest.fn(),
+        unregisterPushDevice: jest.fn(),
+      },
+    });
     expect(hasText(empty.tree.root as Queryable, 'No agents reported by this bridge.')).toBe(true);
     act(() => empty.tree.unmount());
 
-    const failed = await renderSettings({ api: {
-      readBridgeCapabilities: jest.fn().mockRejectedValue(new Error('bridge offline')),
-      registerPushDevice: jest.fn(), unregisterPushDevice: jest.fn(),
-    }, connected: false });
+    const failed = await renderSettings({
+      api: {
+        readBridgeCapabilities: jest.fn().mockRejectedValue(new Error('bridge offline')),
+        registerPushDevice: jest.fn(),
+        unregisterPushDevice: jest.fn(),
+      },
+      connected: false,
+    });
     expect(hasText(failed.tree.root as Queryable, 'bridge offline')).toBe(true);
     expect(hasText(failed.tree.root as Queryable, 'Disconnected')).toBe(true);
     act(() => failed.tree.unmount());
 
-    const unknownFailure = await renderSettings({ api: {
-      readBridgeCapabilities: jest.fn().mockRejectedValue('offline'),
-      registerPushDevice: jest.fn(), unregisterPushDevice: jest.fn(),
-    } });
-    expect(hasText(unknownFailure.tree.root as Queryable, 'Could not read bridge capabilities.')).toBe(true);
+    const unknownFailure = await renderSettings({
+      api: {
+        readBridgeCapabilities: jest.fn().mockRejectedValue('offline'),
+        registerPushDevice: jest.fn(),
+        unregisterPushDevice: jest.fn(),
+      },
+    });
+    expect(
+      hasText(unknownFailure.tree.root as Queryable, 'Could not read bridge capabilities.'),
+    ).toBe(true);
     act(() => unknownFailure.tree.unmount());
 
     const errorStore = createSettingsStore({
@@ -337,7 +406,12 @@ describe('SettingsScreen behavior', () => {
     });
     const pushError = await renderSettings({ store: errorStore });
     await changeToggle(findToggle(pushError.tree.root as Queryable, 'Push notifications'), true);
-    expect(hasText(pushError.tree.root as Queryable, 'The app-state change was not saved. Please retry.')).toBe(true);
+    expect(
+      hasText(
+        pushError.tree.root as Queryable,
+        'The app-state change was not saved. Please retry.',
+      ),
+    ).toBe(true);
     act(() => pushError.tree.unmount());
 
     const noProfileStore = createSettingsStore({ activeProfileId: null });

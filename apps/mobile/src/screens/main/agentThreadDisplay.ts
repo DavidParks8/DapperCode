@@ -49,7 +49,7 @@ export interface AgentThreadDisplayState {
 export function buildAgentThreadDisplayState(
   chat: ChatSummary,
   snapshot: AgentThreadRuntimeSnapshotLike | null | undefined,
-  nowMs = Date.now()
+  nowMs = Date.now(),
 ): AgentThreadDisplayState {
   const accentColor = getAgentThreadAccentColor(chat.id);
   const status = resolveAgentRuntimeStatus(chat, snapshot, nowMs);
@@ -72,7 +72,7 @@ export function getAgentThreadAccentColor(threadId: string): string {
 function resolveAgentRuntimeStatus(
   chat: ChatSummary,
   snapshot: AgentThreadRuntimeSnapshotLike | null | undefined,
-  nowMs: number
+  nowMs: number,
 ): Omit<AgentThreadDisplayState, 'accentColor'> {
   const activity = snapshot?.activity;
   const activityTitle = normalizeValue(activity?.title);
@@ -151,10 +151,7 @@ function resolveAgentRuntimeStatus(
     return {
       icon: 'checkmark-circle-outline',
       label: 'Complete',
-      detail:
-        activityDetail ??
-        normalizeCompleteActivityTitle(activityTitle) ??
-        null,
+      detail: activityDetail ?? normalizeCompleteActivityTitle(activityTitle) ?? null,
       tone: 'complete',
       statusColor: COMPLETE_STATUS_COLOR,
       statusSurfaceColor: 'rgba(147, 197, 253, 0.15)',
@@ -232,11 +229,7 @@ function normalizeErrorActivityTitle(activityTitle: string | null): string | nul
   }
 
   const normalized = activityTitle.trim().toLowerCase();
-  if (
-    normalized === 'turn failed' ||
-    normalized === 'turn interrupted' ||
-    normalized === 'error'
-  ) {
+  if (normalized === 'turn failed' || normalized === 'turn interrupted' || normalized === 'error') {
     return null;
   }
 

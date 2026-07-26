@@ -60,7 +60,7 @@ export function deriveCloneDirectoryName(url: string | null | undefined): string
   const splitIndex = Math.max(lastSlash, lastColon);
   const candidate = (splitIndex >= 0 ? trimmed.slice(splitIndex + 1) : trimmed).replace(
     /\.git$/i,
-    ''
+    '',
   );
 
   return normalizeCloneDirectoryName(candidate);
@@ -73,7 +73,7 @@ export function formatGitCloneFailureMessage(
     stderr: string;
     cloned: boolean;
   },
-  fallbackLabel = 'repository'
+  fallbackLabel = 'repository',
 ): string | null {
   if (result.cloned && (result.code === null || result.code === 0)) {
     return null;
@@ -84,8 +84,7 @@ export function formatGitCloneFailureMessage(
 }
 
 export function joinWorkspacePath(parentPath: string, child: string): string {
-  const separator =
-    parentPath.includes('\\') && !parentPath.includes('/') ? '\\' : '/';
+  const separator = parentPath.includes('\\') && !parentPath.includes('/') ? '\\' : '/';
   if (parentPath.endsWith('/') || parentPath.endsWith('\\')) {
     return `${parentPath}${child}`;
   }
@@ -126,7 +125,7 @@ export function toMentionInput(path: string, workspace?: string | null): Mention
 export function toOptimisticUserContent(
   content: string,
   mentions: MentionInput[],
-  localImages: LocalImageInput[]
+  localImages: LocalImageInput[],
 ): string {
   if (mentions.length === 0 && localImages.length === 0) {
     return content;
@@ -167,7 +166,7 @@ export function isSyntheticUserAttachmentLine(value: string): boolean {
 
 export function reconcileChatWithPendingOptimisticMessages(
   chat: Chat,
-  pendingMessages: PendingOptimisticUserMessage[]
+  pendingMessages: PendingOptimisticUserMessage[],
 ): {
   chat: Chat;
   remainingPendingMessages: PendingOptimisticUserMessage[];
@@ -203,12 +202,10 @@ export function reconcileChatWithPendingOptimisticMessages(
     chat: {
       ...chat,
       lastMessagePreview:
-        normalizeChatMessageMatchContent(lastPendingMessage ? getMessageText(lastPendingMessage) : '').slice(0, 120) ||
-        chat.lastMessagePreview,
-      messages: [
-        ...chat.messages,
-        ...remainingPendingMessages.map((entry) => entry.message),
-      ],
+        normalizeChatMessageMatchContent(
+          lastPendingMessage ? getMessageText(lastPendingMessage) : '',
+        ).slice(0, 120) || chat.lastMessagePreview,
+      messages: [...chat.messages, ...remainingPendingMessages.map((entry) => entry.message)],
     },
     remainingPendingMessages,
   };
@@ -227,7 +224,7 @@ export function toPathBasename(path: string): string {
 export function toAttachmentPathSuggestions(
   candidates: string[],
   query: string,
-  pendingMentionPaths: string[]
+  pendingMentionPaths: string[],
 ): string[] {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return [];

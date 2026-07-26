@@ -9,19 +9,25 @@ import {
 } from './rust-bridge-source-inventory.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const manifest = JSON.parse(readFileSync(path.join(root, 'contracts/bridge-rpc/v2/manifest.json'), 'utf8'));
+const manifest = JSON.parse(
+  readFileSync(path.join(root, 'contracts/bridge-rpc/v2/manifest.json'), 'utf8'),
+);
 const rustSources = readRustBridgeProductionSources(root);
 const rust = [...rustSources.values()].join('\n');
-const readMobileApiProductionSources = (directory) => readdirSync(directory, { withFileTypes: true })
-  .flatMap((entry) => {
+const readMobileApiProductionSources = (directory) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) return readMobileApiProductionSources(entryPath);
-    if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) return [];
+    if (!entry.isFile() || !entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts'))
+      return [];
     return [readFileSync(entryPath, 'utf8')];
   });
 const mobileApiSources = readMobileApiProductionSources(path.join(root, 'apps/mobile/src/api'));
 const mobileSource = mobileApiSources.join('\n');
-const attachments = readFileSync(path.join(root, 'services/rust-bridge/src/attachments.rs'), 'utf8');
+const attachments = readFileSync(
+  path.join(root, 'services/rust-bridge/src/attachments.rs'),
+  'utf8',
+);
 
 const fail = (message) => {
   throw new Error(`RPC contract validation failed: ${message}`);
@@ -34,7 +40,9 @@ const assertEqualInventory = (name, actual, expected) => {
   if (JSON.stringify(sortedActual) !== JSON.stringify(sortedExpected)) {
     const missing = sortedExpected.filter((value) => !sortedActual.includes(value));
     const undeclared = sortedActual.filter((value) => !sortedExpected.includes(value));
-    fail(`${name} inventory mismatch (missing: ${missing.join(', ') || 'none'}; undeclared: ${undeclared.join(', ') || 'none'})`);
+    fail(
+      `${name} inventory mismatch (missing: ${missing.join(', ') || 'none'}; undeclared: ${undeclared.join(', ') || 'none'})`,
+    );
   }
 };
 const assertUniqueSortedStrings = (name, values) => {
@@ -52,12 +60,20 @@ if (manifest.fixtureFormatVersion !== 1 || manifest.protocolVersion !== 2) {
 assertUniqueSortedStrings('bridgeMethods', manifest.bridgeMethods);
 assertUniqueSortedStrings('mobileForwardedMethods', manifest.mobileForwardedMethods);
 assertUniqueSortedStrings('notifications', manifest.notifications);
-if (!Array.isArray(manifest.httpEndpoints) || manifest.httpEndpoints.length !== 1) fail('HTTP endpoint inventory');
+if (!Array.isArray(manifest.httpEndpoints) || manifest.httpEndpoints.length !== 1)
+  fail('HTTP endpoint inventory');
 const attachmentEndpoint = manifest.httpEndpoints[0];
-if (attachmentEndpoint.method !== 'POST' || attachmentEndpoint.path !== '/attachments' || attachmentEndpoint.auth !== 'bearer') fail('attachment HTTP endpoint');
+if (
+  attachmentEndpoint.method !== 'POST' ||
+  attachmentEndpoint.path !== '/attachments' ||
+  attachmentEndpoint.auth !== 'bearer'
+)
+  fail('attachment HTTP endpoint');
 const rustHttpRoutes = extractBridgeHttpRoutes(rustSources);
-if (!rustHttpRoutes.includes('/attachments') || !mobileSource.includes('/attachments')) fail('attachment endpoint implementation');
-if (!attachments.includes('ATTACHMENT_MAX_BYTES') || attachmentEndpoint.maxFileBytes !== 20971520) fail('attachment endpoint limit');
+if (!rustHttpRoutes.includes('/attachments') || !mobileSource.includes('/attachments'))
+  fail('attachment endpoint implementation');
+if (!attachments.includes('ATTACHMENT_MAX_BYTES') || attachmentEndpoint.maxFileBytes !== 20971520)
+  fail('attachment endpoint limit');
 
 const rustProtocol = Number(rust.match(/const BRIDGE_PROTOCOL_VERSION: u32 = (\d+);/)?.[1]);
 const mobileProtocol = Number(mobileSource.match(/static readonly PROTOCOL_VERSION = (\d+);/)?.[1]);
@@ -65,7 +81,11 @@ if (rustProtocol !== manifest.protocolVersion || mobileProtocol !== manifest.pro
   fail('protocol version constants do not match the manifest');
 }
 
-assertEqualInventory('native bridge methods', extractNativeBridgeMethods(rustSources), manifest.bridgeMethods);
+assertEqualInventory(
+  'native bridge methods',
+  extractNativeBridgeMethods(rustSources),
+  manifest.bridgeMethods,
+);
 for (const method of manifest.mobileForwardedMethods) {
   if (!mobileSource.includes(`'${method}'`) && !mobileSource.includes(`"${method}"`)) {
     fail(`mobile forwarded method missing: ${method}`);
@@ -73,7 +93,9 @@ for (const method of manifest.mobileForwardedMethods) {
   if (!rust.includes(`"${method}"`)) fail(`Rust forwarded method missing: ${method}`);
 }
 const mobileRequestMethods = uniqueSorted(
-  [...mobileSource.matchAll(/\.request(?:<[^;]*?>)?\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1])
+  [...mobileSource.matchAll(/\.request(?:<[^;]*?>)?\(\s*['"]([^'"]+)['"]/g)].map(
+    (match) => match[1],
+  ),
 );
 const declaredMethods = new Set([...manifest.bridgeMethods, ...manifest.mobileForwardedMethods]);
 for (const method of mobileRequestMethods) {
@@ -90,20 +112,54 @@ for (const { code, name } of manifest.errors) {
 }
 
 const fixtures = manifest.fixtures;
-if (fixtures.capabilities.protocolVersion !== manifest.protocolVersion) fail('capability fixture version');
-if (fixtures.operationalStatus.replay.entries > fixtures.operationalStatus.replay.capacity) fail('operational replay bounds');
-if (!fixtures.operationalStatus.recentErrors.every((error) => error.method && error.backend && error.kind)) fail('operational error fixture');
-if (fixtures.notification.protocolVersion !== manifest.protocolVersion) fail('notification fixture version');
-if (!manifest.notifications.includes(fixtures.notification.method)) fail('notification fixture method');
-if (fixtures.agUiNotification.method !== 'bridge/agui.event' || fixtures.agUiNotification.params.event.type !== 'TEXT_MESSAGE_CONTENT') fail('AG-UI notification fixture');
-if (!manifest.errors.some((entry) => entry.code === fixtures.overloadError.error.code)) fail('error fixture code');
-if (fixtures.resourceLimitError.error.data.actual <= fixtures.resourceLimitError.error.data.limit) fail('resource limit fixture boundary');
-if (!fixtures.browserPreviewSession.expiresAt || !fixtures.browserPreviewSession.bootstrapPath.includes('sid=') || !fixtures.browserPreviewSession.bootstrapPath.includes('st=')) fail('browser preview session fixture');
-if (!fixtures.truncatedGitDiff.truncated || fixtures.truncatedGitDiff.returnedBytes > fixtures.truncatedGitDiff.maxBytes) fail('git truncation fixture');
-if (!fixtures.truncatedFilesystemList.truncated || fixtures.truncatedFilesystemList.totalEntries <= fixtures.truncatedFilesystemList.maxEntries) fail('filesystem truncation fixture');
+if (fixtures.capabilities.protocolVersion !== manifest.protocolVersion)
+  fail('capability fixture version');
+if (fixtures.operationalStatus.replay.entries > fixtures.operationalStatus.replay.capacity)
+  fail('operational replay bounds');
+if (
+  !fixtures.operationalStatus.recentErrors.every(
+    (error) => error.method && error.backend && error.kind,
+  )
+)
+  fail('operational error fixture');
+if (fixtures.notification.protocolVersion !== manifest.protocolVersion)
+  fail('notification fixture version');
+if (!manifest.notifications.includes(fixtures.notification.method))
+  fail('notification fixture method');
+if (
+  fixtures.agUiNotification.method !== 'bridge/agui.event' ||
+  fixtures.agUiNotification.params.event.type !== 'TEXT_MESSAGE_CONTENT'
+)
+  fail('AG-UI notification fixture');
+if (!manifest.errors.some((entry) => entry.code === fixtures.overloadError.error.code))
+  fail('error fixture code');
+if (fixtures.resourceLimitError.error.data.actual <= fixtures.resourceLimitError.error.data.limit)
+  fail('resource limit fixture boundary');
+if (
+  !fixtures.browserPreviewSession.expiresAt ||
+  !fixtures.browserPreviewSession.bootstrapPath.includes('sid=') ||
+  !fixtures.browserPreviewSession.bootstrapPath.includes('st=')
+)
+  fail('browser preview session fixture');
+if (
+  !fixtures.truncatedGitDiff.truncated ||
+  fixtures.truncatedGitDiff.returnedBytes > fixtures.truncatedGitDiff.maxBytes
+)
+  fail('git truncation fixture');
+if (
+  !fixtures.truncatedFilesystemList.truncated ||
+  fixtures.truncatedFilesystemList.totalEntries <= fixtures.truncatedFilesystemList.maxEntries
+)
+  fail('filesystem truncation fixture');
 if (!fixtures.submission.submissionId || !fixtures.submission.threadId) fail('submission fixture');
-if (!fixtures.pushRegistration.profileId || !fixtures.pushRegistration.registrationId) fail('push registration fixture');
-if (!fixtures.pushNotificationData.notificationId || !fixtures.pushNotificationData.profileId || !fixtures.pushNotificationData.registrationId) fail('push notification fixture');
+if (!fixtures.pushRegistration.profileId || !fixtures.pushRegistration.registrationId)
+  fail('push registration fixture');
+if (
+  !fixtures.pushNotificationData.notificationId ||
+  !fixtures.pushNotificationData.profileId ||
+  !fixtures.pushNotificationData.registrationId
+)
+  fail('push notification fixture');
 if (!fixtures.approvalResolution.resolutionId) fail('approval resolution fixture');
 
 process.stdout.write('RPC contract fixtures are valid.\n');

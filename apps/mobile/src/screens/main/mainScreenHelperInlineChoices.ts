@@ -1,9 +1,6 @@
 import type { ChatMessage as ChatTranscriptMessage } from '../../api/types';
 import { getMessageText } from '../../api/messages';
-import {
-  INLINE_CHOICE_CUE_PATTERNS,
-  INLINE_OPTION_LINE_PATTERN,
-} from './mainScreenHelperTypes';
+import { INLINE_CHOICE_CUE_PATTERNS, INLINE_OPTION_LINE_PATTERN } from './mainScreenHelperTypes';
 
 export function normalizeQuestionAnswers(value: string): string[] {
   return value
@@ -76,9 +73,7 @@ export function splitOptionLine(value: string): { label: string; description: st
     }
 
     const label = stripOptionText(normalized.slice(0, separatorIndex));
-    const description = stripOptionText(
-      normalized.slice(separatorIndex + separator.length)
-    );
+    const description = stripOptionText(normalized.slice(separatorIndex + separator.length));
     if (!label) {
       continue;
     }

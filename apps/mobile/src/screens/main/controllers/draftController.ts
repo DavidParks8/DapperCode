@@ -1,11 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import {
-  CHAT_DRAFTS_VERSION,
-  getChatDraftsPath,
-  parseChatDrafts,
-} from '../mainScreenHelpers';
+import { CHAT_DRAFTS_VERSION, getChatDraftsPath, parseChatDrafts } from '../mainScreenHelpers';
 import { submissionScopeKey, type SubmissionDraftSnapshot } from './submissionController';
 
 export interface DraftStorage {
@@ -21,7 +17,7 @@ const fileDraftStorage: DraftStorage = {
 export function updateDraftEntries(
   entries: Readonly<Record<string, string>>,
   ownerKey: string,
-  draft: string
+  draft: string,
 ): Record<string, string> {
   const next = { ...entries };
   if (draft.trim()) {
@@ -46,7 +42,7 @@ export interface DraftController {
 export function useDraftController(
   profileId: string,
   chatId: string | null,
-  storage: DraftStorage = fileDraftStorage
+  storage: DraftStorage = fileDraftStorage,
 ): DraftController {
   const scopeKey = submissionScopeKey({ profileId, threadId: chatId });
   const [draft, setDraftState] = useState('');
@@ -80,7 +76,7 @@ export function useDraftController(
         // Draft persistence is best effort.
       }
     },
-    [storage]
+    [storage],
   );
 
   useEffect(() => {
@@ -133,7 +129,7 @@ export function useDraftController(
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
       void persist(entriesRef.current);
     },
-    [persist]
+    [persist],
   );
 
   return {
@@ -146,7 +142,7 @@ export function useDraftController(
         value: draftRef.current,
         revision: revisionRef.current,
       }),
-      []
+      [],
     ),
   };
 }

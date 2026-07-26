@@ -8,7 +8,7 @@ import {
   sendingAtom,
   stoppingTurnAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
   agentDetailChatAtom,
@@ -18,31 +18,30 @@ import {
   agentDetailStackAtom,
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
-  relatedAgentThreadsAtom
+  relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
 import {
   activityAtom,
   queueActionItemIdAtom,
-  queueActionKindAtom
+  queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../../api/types';
 import { resolveEquivalentChat } from './mainScreenChatState';
 import { OPENING_CHAT_ACTIVITY_TITLE } from './mainScreenHelpers';
-import type { MainScreenChatLoadPipelineContext, MainScreenChatLoadPipelineResult } from './mainScreenChatLoadPipeline';
-import {
-  agentThreadMenuVisibleAtom
-} from '../../state/mainScreen/modals';
+import type {
+  MainScreenChatLoadPipelineContext,
+  MainScreenChatLoadPipelineResult,
+} from './mainScreenChatLoadPipeline';
+import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 
+export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPipelineContext &
+  MainScreenChatLoadPipelineResult;
 
-
-
-
-
-export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPipelineContext & MainScreenChatLoadPipelineResult;
-
-export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenChatNavigationAndAgentDetailContext) {
+export function useMainScreenChatNavigationAndAgentDetail(
+  context: MainScreenChatNavigationAndAgentDetailContext,
+) {
   const {
     agentDetailRequestRef,
     agentThreadsController,
@@ -91,7 +90,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
   const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
-
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
     if (!chat || transcriptContinuationState.loading) return;
@@ -103,7 +101,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       void loadChat(chat.id, { preserveRuntimeState: true });
       return;
     }
-    setSelectedChat((previous) => previous?.id === chat.id ? result.chat : previous);
+    setSelectedChat((previous) => (previous?.id === chat.id ? result.chat : previous));
     api.rememberChat(result.chat);
     setTranscriptContinuationState(result.state);
   }, [api, loadChat, transcriptContinuationController, transcriptContinuationState.loading]);
@@ -111,8 +109,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
   const openChatThread = useCallback(
     (id: string, optimisticChat?: Chat | null) => {
       const isSameChat = chatIdRef.current === id;
-      const providedSnapshot =
-        optimisticChat && optimisticChat.id === id ? optimisticChat : null;
+      const providedSnapshot = optimisticChat && optimisticChat.id === id ? optimisticChat : null;
       const providedHydratedSnapshot =
         providedSnapshot && providedSnapshot.messages.length > 0 ? providedSnapshot : null;
       const cachedChat = providedHydratedSnapshot ?? api.peekChat(id);
@@ -151,7 +148,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       setUserInputDrafts({});
       setUserInputError(null);
       setResolvingUserInput(false);
-    attachmentController.closePathModal();
+      attachmentController.closePathModal();
       setAgentThreadMenuVisible(false);
       setActivePlan(null);
       setActiveTurnId(null);
@@ -182,7 +179,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       loadChat,
       mergeChatWithPendingOptimisticMessages,
       refreshPendingApprovalsForThread,
-    ]
+    ],
   );
 
   const closeAgentDetail = useCallback(() => {
@@ -209,7 +206,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
           return;
         }
         setAgentDetailChat((previous) =>
-          previous?.id === chat.id ? resolveEquivalentChat(previous, chat) : chat
+          previous?.id === chat.id ? resolveEquivalentChat(previous, chat) : chat,
         );
         setAgentDetailParentChat(parent);
         setAgentDetailError(null);
@@ -223,7 +220,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
         }
       }
     },
-    [agentThreadsController]
+    [agentThreadsController],
   );
 
   const showAgentDetail = useCallback(
@@ -235,7 +232,15 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       setAgentDetailError(null);
       void loadAgentDetail(threadId, true);
     },
-    [api, loadAgentDetail, setAgentDetailChat, setAgentDetailError, setAgentDetailParentChat, setAgentDetailThreadId, setAgentThreadMenuVisible]
+    [
+      api,
+      loadAgentDetail,
+      setAgentDetailChat,
+      setAgentDetailError,
+      setAgentDetailParentChat,
+      setAgentDetailThreadId,
+      setAgentThreadMenuVisible,
+    ],
   );
 
   const openAgentDetail = useCallback(
@@ -249,11 +254,11 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
       setAgentDetailStack((previous) =>
         previous[previous.length - 1] === threadId
           ? previous
-          : [...previous.filter((id) => id !== threadId), threadId]
+          : [...previous.filter((id) => id !== threadId), threadId],
       );
       showAgentDetail(threadId);
     },
-    [agentRootThreadId, closeAgentDetail, setAgentDetailStack, showAgentDetail]
+    [agentRootThreadId, closeAgentDetail, setAgentDetailStack, showAgentDetail],
   );
 
   const popAgentDetail = useCallback(() => {
@@ -276,4 +281,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
   };
 }
 
-export type MainScreenChatNavigationAndAgentDetailResult = ReturnType<typeof useMainScreenChatNavigationAndAgentDetail>;
+export type MainScreenChatNavigationAndAgentDetailResult = ReturnType<
+  typeof useMainScreenChatNavigationAndAgentDetail
+>;

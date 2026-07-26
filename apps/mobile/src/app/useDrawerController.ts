@@ -86,7 +86,7 @@ export function useDrawerController({
       store.set(drawerVisibleAtom, isOpen);
       store.set(drawerCapturesTouchesAtom, isOpen);
     },
-    [store]
+    [store],
   );
 
   const toggleTabletSidebar = useCallback(() => {
@@ -116,7 +116,7 @@ export function useDrawerController({
 
   const drawerCommands = useMemo(
     () => ({ closeDrawer, toggleNavigation: handleNavigationToggle }),
-    [closeDrawer, handleNavigationToggle]
+    [closeDrawer, handleNavigationToggle],
   );
 
   useEffect(() => {

@@ -82,11 +82,15 @@ describe('AppScreenRenderer', () => {
     const store = createBridgeTestStore({ api: {} as unknown as HostBridgeApiClient });
     const tree = render(store);
     const underlay = () =>
-      (tree.root as unknown as {
-        findAll(predicate: (node: { props: Record<string, unknown> }) => boolean): {
-          props: Record<string, unknown>;
-        }[];
-      }).findAll((node) => node.props.pointerEvents === 'none' || node.props.pointerEvents === 'auto')[0];
+      (
+        tree.root as unknown as {
+          findAll(predicate: (node: { props: Record<string, unknown> }) => boolean): {
+            props: Record<string, unknown>;
+          }[];
+        }
+      ).findAll(
+        (node) => node.props.pointerEvents === 'none' || node.props.pointerEvents === 'auto',
+      )[0];
 
     expect(underlay().props.pointerEvents).toBe('auto');
     expect(underlay().props.accessibilityElementsHidden).toBe(false);

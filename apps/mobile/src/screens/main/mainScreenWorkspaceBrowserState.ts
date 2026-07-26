@@ -10,9 +10,13 @@ import {
   openWorkspacePickerAtom,
 } from '../../state/mainScreen/workspaceActions';
 import type { WorkspacePickerPurpose } from './mainScreenHelpers';
-import type { MainScreenCapabilityFlagsContext, MainScreenCapabilityFlagsResult } from './mainScreenCapabilityFlags';
+import type {
+  MainScreenCapabilityFlagsContext,
+  MainScreenCapabilityFlagsResult,
+} from './mainScreenCapabilityFlags';
 
-export type MainScreenWorkspaceBrowserStateContext = MainScreenCapabilityFlagsContext & MainScreenCapabilityFlagsResult;
+export type MainScreenWorkspaceBrowserStateContext = MainScreenCapabilityFlagsContext &
+  MainScreenCapabilityFlagsResult;
 
 /**
  * Binds the workspace browsing actions for MainScreen. The behaviour lives in store actions so the
@@ -27,25 +31,33 @@ export function useMainScreenWorkspaceBrowserState() {
   const openCheckoutDestination = useSetAtom(openGitCheckoutDestinationPickerAtom);
 
   const browseWorkspacePath = useCallback(
-    async (path: string | null | undefined) => { await browse(path); },
-    [browse]
+    async (path: string | null | undefined) => {
+      await browse(path);
+    },
+    [browse],
   );
 
   const openWorkspacePicker = useCallback(
     (purpose: WorkspacePickerPurpose, initialPathOverride?: string | null) => {
       openPicker(purpose, initialPathOverride);
     },
-    [openPicker]
+    [openPicker],
   );
 
-  const openWorkspaceModal = useCallback(() => { openWorkspace(); }, [openWorkspace]);
+  const openWorkspaceModal = useCallback(() => {
+    openWorkspace();
+  }, [openWorkspace]);
 
   const openGitCheckoutModal = useCallback(
-    (initialParentPath?: string | null) => { openCheckout(initialParentPath); },
-    [openCheckout]
+    (initialParentPath?: string | null) => {
+      openCheckout(initialParentPath);
+    },
+    [openCheckout],
   );
 
-  const closeGitCheckoutModal = useCallback(() => { closeCheckout(); }, [closeCheckout]);
+  const closeGitCheckoutModal = useCallback(() => {
+    closeCheckout();
+  }, [closeCheckout]);
 
   const openGitCheckoutDestinationPicker = useCallback(() => {
     openCheckoutDestination();
@@ -61,4 +73,6 @@ export function useMainScreenWorkspaceBrowserState() {
   };
 }
 
-export type MainScreenWorkspaceBrowserStateResult = ReturnType<typeof useMainScreenWorkspaceBrowserState>;
+export type MainScreenWorkspaceBrowserStateResult = ReturnType<
+  typeof useMainScreenWorkspaceBrowserState
+>;

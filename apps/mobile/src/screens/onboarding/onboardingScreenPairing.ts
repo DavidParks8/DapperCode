@@ -52,10 +52,13 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
     }
     const bridgeUrl =
       normalizeBridgeUrlInput(
-        parsed.searchParams.get('bridgeUrl') ?? parsed.searchParams.get('url') ?? ''
+        parsed.searchParams.get('bridgeUrl') ?? parsed.searchParams.get('url') ?? '',
       ) ?? undefined;
-    const bridgeToken =
-      (parsed.searchParams.get('bridgeToken') ?? parsed.searchParams.get('token') ?? '').trim();
+    const bridgeToken = (
+      parsed.searchParams.get('bridgeToken') ??
+      parsed.searchParams.get('token') ??
+      ''
+    ).trim();
     if (!bridgeToken) {
       return null;
     }

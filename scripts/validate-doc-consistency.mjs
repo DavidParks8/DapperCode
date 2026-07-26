@@ -13,8 +13,8 @@ const fail = (message) => {
   throw new Error(`Documentation consistency validation failed: ${message}`);
 };
 
-const walkFiles = (directory, extension) => readdirSync(directory, { withFileTypes: true })
-  .flatMap((entry) => {
+const walkFiles = (directory, extension) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) return walkFiles(entryPath, extension);
     return entry.name.endsWith(extension) ? [entryPath] : [];
@@ -41,7 +41,8 @@ const prohibitedPublicReviewGuidance = [
 
 const assertNoPublicReviewGuidance = (relativeFile, content) => {
   for (const pattern of prohibitedPublicReviewGuidance) {
-    if (pattern.test(content)) fail(`${relativeFile} contains prohibited public-bridge review guidance`);
+    if (pattern.test(content))
+      fail(`${relativeFile} contains prohibited public-bridge review guidance`);
   }
 };
 

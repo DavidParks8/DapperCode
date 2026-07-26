@@ -1,5 +1,9 @@
 import { parseUnifiedGitDiff } from './gitDiff';
-import { buildGitReviewPrompt, createGitReviewTarget, type GitReviewComment } from './gitDiffReview';
+import {
+  buildGitReviewPrompt,
+  createGitReviewTarget,
+  type GitReviewComment,
+} from './gitDiffReview';
 
 const DIFF = [
   'diff --git a/src/app.ts b/src/app.ts',
@@ -52,22 +56,24 @@ describe('gitDiffReview', () => {
   it('rejects meta and unnumbered lines', () => {
     const file = parseUnifiedGitDiff(`${DIFF}\n\\ No newline at end of file`).files[0];
     const hunk = file.hunks[0];
-    expect(createGitReviewTarget(file, hunk, hunk.lines[hunk.lines.length - 1], hunk.lines.length - 1)).toBeNull();
+    expect(
+      createGitReviewTarget(file, hunk, hunk.lines[hunk.lines.length - 1], hunk.lines.length - 1),
+    ).toBeNull();
     expect(
       createGitReviewTarget(
         { ...file, newPath: null, oldPath: null },
         hunk,
         { kind: 'add', prefix: '+', content: 'x', oldLineNumber: null, newLineNumber: 4 },
-        0
-      )
+        0,
+      ),
     ).toBeNull();
     expect(
       createGitReviewTarget(
         file,
         hunk,
         { kind: 'context', prefix: ' ', content: 'x', oldLineNumber: 4, newLineNumber: null },
-        0
-      )
+        0,
+      ),
     ).toBeNull();
   });
 

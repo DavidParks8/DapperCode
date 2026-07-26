@@ -33,10 +33,12 @@ export interface DrawerChatLoadingState {
 
 export function drawerEventRequiresRefresh(event: RpcNotification): boolean {
   const agUiEvent = parseAgUiEventNotification(event)?.event;
-  return event.method === 'thread/started' ||
+  return (
+    event.method === 'thread/started' ||
     event.method === 'thread/name/updated' ||
     event.method === 'thread/status/changed' ||
     agUiEvent?.type === 'RUN_STARTED' ||
     agUiEvent?.type === 'RUN_FINISHED' ||
-    agUiEvent?.type === 'RUN_ERROR';
+    agUiEvent?.type === 'RUN_ERROR'
+  );
 }

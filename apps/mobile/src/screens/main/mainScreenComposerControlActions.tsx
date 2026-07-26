@@ -1,16 +1,12 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom,
   selectedModelIdAtom,
-  selectedServiceTierAtom
+  selectedServiceTierAtom,
 } from '../../state/mainScreen/models';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { AgentId, ServiceTier } from '../../api/types';
@@ -18,23 +14,24 @@ import { type SelectionSheetOption } from '../../components/SelectionSheet';
 import { normalizeModelId } from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
 import { ATTACHMENT_MAX_LABEL } from './controllers/attachmentController';
-import type { MainScreenModeConfigurationSessionContext, MainScreenModeConfigurationSessionResult } from './mainScreenModeConfigurationSession';
+import type {
+  MainScreenModeConfigurationSessionContext,
+  MainScreenModeConfigurationSessionResult,
+} from './mainScreenModeConfigurationSession';
 import {
   agentModalVisibleAtom,
   collaborationModeMenuVisibleAtom,
   effortModalVisibleAtom,
   effortPickerModelIdAtom,
-  modelModalVisibleAtom
+  modelModalVisibleAtom,
 } from '../../state/mainScreen/modals';
 
+export type MainScreenComposerControlActionsContext = MainScreenModeConfigurationSessionContext &
+  MainScreenModeConfigurationSessionResult;
 
-
-
-
-
-export type MainScreenComposerControlActionsContext = MainScreenModeConfigurationSessionContext & MainScreenModeConfigurationSessionResult;
-
-export function useMainScreenComposerControlActions(context: MainScreenComposerControlActionsContext) {
+export function useMainScreenComposerControlActions(
+  context: MainScreenComposerControlActionsContext,
+) {
   const {
     activeServiceTier,
     activeAgentId,
@@ -70,7 +67,6 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
-
   const selectModel = useCallback(
     async (modelId: string | null) => {
       const normalizedModelId = normalizeModelId(modelId);
@@ -85,12 +81,7 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
       setModelModalVisible(false);
       setError(null);
       if (selectedChatId) {
-        rememberChatModelPreference(
-          selectedChatId,
-          normalizedModelId,
-          null,
-          activeServiceTier
-        );
+        rememberChatModelPreference(selectedChatId, normalizedModelId, null, activeServiceTier);
       } else if (activeAgentId) {
         const key = agentModelPreferenceKey(activeAgentId);
         const nextPreferences = {
@@ -124,28 +115,31 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
       rememberChatModelPreference,
       saveChatModelPreferences,
       selectedChatId,
-    ]
+    ],
   );
 
-  const selectPendingAgent = useCallback((agentId: AgentId) => {
-    if (selectedChatId) {
-      return;
-    }
+  const selectPendingAgent = useCallback(
+    (agentId: AgentId) => {
+      if (selectedChatId) {
+        return;
+      }
 
-    const rememberedSettings = agentSettings?.[agentId];
-    setPendingAgentId(agentId);
-    setSelectedModelId(null);
-    setSelectedEffort(null);
-    setSelectedServiceTier(undefined);
-    setSelectedAcpModeId(null);
-    setSelectedCollaborationMode(
-      rememberedSettings?.collaborationMode === 'plan'
-        ? rememberedSettings.collaborationMode
-        : 'default'
-    );
-    setAgentModalVisible(false);
-    setError(null);
-  }, [agentSettings, selectedChatId]);
+      const rememberedSettings = agentSettings?.[agentId];
+      setPendingAgentId(agentId);
+      setSelectedModelId(null);
+      setSelectedEffort(null);
+      setSelectedServiceTier(undefined);
+      setSelectedAcpModeId(null);
+      setSelectedCollaborationMode(
+        rememberedSettings?.collaborationMode === 'plan'
+          ? rememberedSettings.collaborationMode
+          : 'default',
+      );
+      setAgentModalVisible(false);
+      setError(null);
+    },
+    [agentSettings, selectedChatId],
+  );
 
   useEffect(() => {
     if (ws.isConnected) {
@@ -169,8 +163,7 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     if (!supportsFastMode) {
       return;
     }
-    const nextServiceTier: ServiceTier | null =
-      activeServiceTier === 'fast' ? null : 'fast';
+    const nextServiceTier: ServiceTier | null = activeServiceTier === 'fast' ? null : 'fast';
     const enablingFastMode = nextServiceTier === 'fast';
     const nextTitle = enablingFastMode ? 'Fast mode enabled' : 'Fast mode disabled';
     setSelectedServiceTier(nextServiceTier);
@@ -242,7 +235,12 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
         },
       },
     ],
-    [attachmentController, attachmentControlsDisabled, hasFailedAttachmentUploads, retryFailedUploads]
+    [
+      attachmentController,
+      attachmentControlsDisabled,
+      hasFailedAttachmentUploads,
+      retryFailedUploads,
+    ],
   );
 
   return {
@@ -255,4 +253,6 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
   };
 }
 
-export type MainScreenComposerControlActionsResult = ReturnType<typeof useMainScreenComposerControlActions>;
+export type MainScreenComposerControlActionsResult = ReturnType<
+  typeof useMainScreenComposerControlActions
+>;

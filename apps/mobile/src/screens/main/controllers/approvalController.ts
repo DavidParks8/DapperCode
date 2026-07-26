@@ -1,9 +1,5 @@
 import type { HostBridgeApiClient } from '../../../api/client';
-import type {
-  PendingApproval,
-  PendingUserInputRequest,
-  UserInputValue,
-} from '../../../api/types';
+import type { PendingApproval, PendingUserInputRequest, UserInputValue } from '../../../api/types';
 import { normalizeQuestionAnswers } from '../mainScreenHelpers';
 
 type ApprovalApi = Pick<
@@ -13,7 +9,7 @@ type ApprovalApi = Pick<
 
 export function buildUserInputAnswers(
   request: PendingUserInputRequest,
-  drafts: Readonly<Record<string, string>>
+  drafts: Readonly<Record<string, string>>,
 ): { answers: Record<string, UserInputValue> } | { error: string } {
   const answers: Record<string, UserInputValue> = {};
   for (const question of request.questions) {
@@ -36,7 +32,8 @@ export function buildUserInputAnswers(
         break;
       }
       case 'boolean':
-        if (draft !== 'true' && draft !== 'false') return { error: `"${question.header}" must be true or false` };
+        if (draft !== 'true' && draft !== 'false')
+          return { error: `"${question.header}" must be true or false` };
         answers[question.id] = draft === 'true';
         break;
       case 'string-array':
@@ -76,7 +73,7 @@ export class ApprovalController {
 
   async resolveUserInput(
     request: PendingUserInputRequest,
-    drafts: Readonly<Record<string, string>>
+    drafts: Readonly<Record<string, string>>,
   ): Promise<string | null> {
     const result = buildUserInputAnswers(request, drafts);
     if ('error' in result) return result.error;
@@ -84,7 +81,10 @@ export class ApprovalController {
     return null;
   }
 
-  async dismissUserInput(request: PendingUserInputRequest, action: 'decline' | 'cancel'): Promise<void> {
+  async dismissUserInput(
+    request: PendingUserInputRequest,
+    action: 'decline' | 'cancel',
+  ): Promise<void> {
     await this.api.resolveUserInput(request.requestId, { answers: {}, action });
   }
 }

@@ -71,10 +71,10 @@ export function ChatInput({
   const updateInputHeight = (height: number) => {
     const nextHeight = Math.max(
       INPUT_TEXT_MIN_HEIGHT,
-      Math.min(INPUT_TEXT_MAX_HEIGHT, Math.ceil(height))
+      Math.min(INPUT_TEXT_MAX_HEIGHT, Math.ceil(height)),
     );
     setInputHeight((previousHeight) =>
-      previousHeight === nextHeight ? previousHeight : nextHeight
+      previousHeight === nextHeight ? previousHeight : nextHeight,
     );
   };
 
@@ -93,7 +93,7 @@ export function ChatInput({
   const composerBottomSpacing = resolveComposerBottomSpacing(
     Platform.OS,
     safeAreaBottomInset,
-    keyboardVisible
+    keyboardVisible,
   );
 
   return (
@@ -117,25 +117,33 @@ export function ChatInput({
               {attachments.map((attachment, index) => (
                 <Pressable
                   key={`${attachment.id}-${String(index)}`}
-                  onPress={
-                    onRemoveAttachment
-                      ? () => onRemoveAttachment(attachment.id)
-                      : undefined
-                  }
+                  onPress={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined}
                   style={({ pressed }) => [
                     styles.attachmentChip,
                     pressed && styles.attachmentChipPressed,
                   ]}
                   accessibilityRole={onRemoveAttachment ? 'button' : undefined}
                   accessibilityLabel={`${attachment.label}${onRemoveAttachment ? ', remove attachment' : ''}`}
-                  accessibilityHint={onRemoveAttachment ? 'Removes this attachment from the message' : undefined}
+                  accessibilityHint={
+                    onRemoveAttachment ? 'Removes this attachment from the message' : undefined
+                  }
                 >
-                  <Ionicons {...decorativeAccessibilityProps} name="attach-outline" size={12} color={colors.textMuted} />
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="attach-outline"
+                    size={12}
+                    color={colors.textMuted}
+                  />
                   <Text style={styles.attachmentChipText} numberOfLines={1}>
                     {attachment.label}
                   </Text>
                   {onRemoveAttachment ? (
-                    <Ionicons {...decorativeAccessibilityProps} name="close-outline" size={12} color={colors.textMuted} />
+                    <Ionicons
+                      {...decorativeAccessibilityProps}
+                      name="close-outline"
+                      size={12}
+                      color={colors.textMuted}
+                    />
                   ) : null}
                 </Pressable>
               ))}
@@ -157,131 +165,138 @@ export function ChatInput({
               accessibilityHint="Opens attachment choices"
               accessibilityState={controlAccessibilityState({ disabled: attachDisabled })}
             >
-              <Ionicons {...decorativeAccessibilityProps} name="add" size={21} color={colors.textPrimary} />
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="add"
+                size={21}
+                color={colors.textPrimary}
+              />
             </Pressable>
 
             <View style={styles.inputWrapper}>
-            <Text
-              pointerEvents="none"
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              style={[
-                styles.inputMeasure,
-                {
-                  width: inputWidth,
-                  lineHeight: INPUT_TEXT_LINE_HEIGHT,
-                  paddingVertical: INPUT_TEXT_VERTICAL_PADDING,
-                },
-              ]}
-              onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) => {
-                if (inputWidth <= 0) {
-                  return;
-                }
-                const lineCount = Math.max(1, event.nativeEvent.lines.length);
-                const measuredHeight =
-                  lineCount * INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
-                updateInputHeight(measuredHeight);
-              }}
-            >
-              {value.length > 0 ? `${value}\u200b` : ' '}
-            </Text>
-            <TextInput
-              style={[styles.input, { height: inputHeight }]}
-              value={value}
-              onChangeText={onChangeText}
-              keyboardAppearance={theme.keyboardAppearance}
-              onLayout={(event) => {
-                const nextWidth = Math.floor(event.nativeEvent.layout.width);
-                setInputWidth((previousWidth) =>
-                  previousWidth === nextWidth ? previousWidth : nextWidth
-                );
-              }}
-              onFocus={onFocus}
-              placeholder={placeholder}
-              placeholderTextColor={colors.textMuted}
-              multiline
-              accessibilityLabel="Message"
-              accessibilityHint="Enter a message for the agent"
-              scrollEnabled={inputScrollEnabled}
-              onKeyPress={(e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
-                const keyEvent = e.nativeEvent as TextInputKeyPressEventData & {
-                  shiftKey?: boolean;
-                };
-                if (
-                  Platform.OS === 'web' &&
-                  keyEvent.key === 'Enter' &&
-                  !keyEvent.shiftKey
-                ) {
-                  e.preventDefault();
-                  if (canSend) onSubmit();
-                }
-              }}
-            />
-            {shouldShowActionButton ? (
-              <View style={styles.actionButtons}>
-                {canStop ? (
-                  <Pressable
-                    onPress={onStop}
-                    style={styles.sendBtn}
-                    disabled={isStopping}
-                    hitSlop={ACTION_BUTTON_HIT_SLOP}
-                    pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-                    accessibilityRole="button"
-                    accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
-                    accessibilityHint="Stops the current turn"
-                    accessibilityState={controlAccessibilityState({ disabled: isStopping, busy: isStopping })}
-                  >
-                    <View style={styles.stopButtonContent}>
-                      <Ionicons {...decorativeAccessibilityProps} name="square" size={10} color={colors.textPrimary} />
-                      <ActivityIndicator
-                        size="small"
-                        color={colors.textMuted}
-                        style={styles.stopButtonSpinner}
-                      />
-                    </View>
-                  </Pressable>
-                ) : null}
-                {showSendButton ? (
-                  <Pressable
-                    onPress={canSend ? onSubmit : undefined}
-                    style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
-                    disabled={!canSend}
-                    hitSlop={ACTION_BUTTON_HIT_SLOP}
-                    pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-                    accessibilityRole="button"
-                    accessibilityLabel={isLoading && !canSend ? 'Agent is responding' : 'Send message'}
-                    accessibilityHint="Sends the current message"
-                    accessibilityState={controlAccessibilityState({ disabled: !canSend, busy: isLoading && !canSend })}
-                  >
-                    {isLoading && !canSend ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={submitUsesPrimaryChrome ? colors.accentText : colors.textMuted}
-                      />
-                    ) : (
-                      <Ionicons
-                        {...decorativeAccessibilityProps}
-                        name="arrow-up"
-                        size={14}
-                        color={submitUsesPrimaryChrome ? colors.accentText : colors.textPrimary}
-                      />
-                    )}
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : null}
+              <Text
+                pointerEvents="none"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={[
+                  styles.inputMeasure,
+                  {
+                    width: inputWidth,
+                    lineHeight: INPUT_TEXT_LINE_HEIGHT,
+                    paddingVertical: INPUT_TEXT_VERTICAL_PADDING,
+                  },
+                ]}
+                onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) => {
+                  if (inputWidth <= 0) {
+                    return;
+                  }
+                  const lineCount = Math.max(1, event.nativeEvent.lines.length);
+                  const measuredHeight =
+                    lineCount * INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
+                  updateInputHeight(measuredHeight);
+                }}
+              >
+                {value.length > 0 ? `${value}\u200b` : ' '}
+              </Text>
+              <TextInput
+                style={[styles.input, { height: inputHeight }]}
+                value={value}
+                onChangeText={onChangeText}
+                keyboardAppearance={theme.keyboardAppearance}
+                onLayout={(event) => {
+                  const nextWidth = Math.floor(event.nativeEvent.layout.width);
+                  setInputWidth((previousWidth) =>
+                    previousWidth === nextWidth ? previousWidth : nextWidth,
+                  );
+                }}
+                onFocus={onFocus}
+                placeholder={placeholder}
+                placeholderTextColor={colors.textMuted}
+                multiline
+                accessibilityLabel="Message"
+                accessibilityHint="Enter a message for the agent"
+                scrollEnabled={inputScrollEnabled}
+                onKeyPress={(e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+                  const keyEvent = e.nativeEvent as TextInputKeyPressEventData & {
+                    shiftKey?: boolean;
+                  };
+                  if (Platform.OS === 'web' && keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
+                    e.preventDefault();
+                    if (canSend) onSubmit();
+                  }
+                }}
+              />
+              {shouldShowActionButton ? (
+                <View style={styles.actionButtons}>
+                  {canStop ? (
+                    <Pressable
+                      onPress={onStop}
+                      style={styles.sendBtn}
+                      disabled={isStopping}
+                      hitSlop={ACTION_BUTTON_HIT_SLOP}
+                      pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+                      accessibilityRole="button"
+                      accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
+                      accessibilityHint="Stops the current turn"
+                      accessibilityState={controlAccessibilityState({
+                        disabled: isStopping,
+                        busy: isStopping,
+                      })}
+                    >
+                      <View style={styles.stopButtonContent}>
+                        <Ionicons
+                          {...decorativeAccessibilityProps}
+                          name="square"
+                          size={10}
+                          color={colors.textPrimary}
+                        />
+                        <ActivityIndicator
+                          size="small"
+                          color={colors.textMuted}
+                          style={styles.stopButtonSpinner}
+                        />
+                      </View>
+                    </Pressable>
+                  ) : null}
+                  {showSendButton ? (
+                    <Pressable
+                      onPress={canSend ? onSubmit : undefined}
+                      style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
+                      disabled={!canSend}
+                      hitSlop={ACTION_BUTTON_HIT_SLOP}
+                      pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isLoading && !canSend ? 'Agent is responding' : 'Send message'
+                      }
+                      accessibilityHint="Sends the current message"
+                      accessibilityState={controlAccessibilityState({
+                        disabled: !canSend,
+                        busy: isLoading && !canSend,
+                      })}
+                    >
+                      {isLoading && !canSend ? (
+                        <ActivityIndicator
+                          size="small"
+                          color={submitUsesPrimaryChrome ? colors.accentText : colors.textMuted}
+                        />
+                      ) : (
+                        <Ionicons
+                          {...decorativeAccessibilityProps}
+                          name="arrow-up"
+                          size={14}
+                          color={submitUsesPrimaryChrome ? colors.accentText : colors.textPrimary}
+                        />
+                      )}
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </View>
         </View>
         {footer || reserveFooterSpace ? (
-          <View
-            style={[
-              styles.footer,
-              !footer && styles.footerPlaceholder,
-            ]}
-          >
-            {footer}
-          </View>
+          <View style={[styles.footer, !footer && styles.footerPlaceholder]}>{footer}</View>
         ) : null}
       </View>
     </View>

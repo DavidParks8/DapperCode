@@ -8,7 +8,10 @@ import {
 } from '../rust-bridge-source-inventory.mjs';
 
 test('extracts grouped native bridge match arms without notification strings', () => {
-  const sources = new Map([['transport.rs', `
+  const sources = new Map([
+    [
+      'transport.rs',
+      `
     async fn handle_bridge_method(method: &str) {
       match method {
         "bridge/one" => notify("bridge/notification"),
@@ -18,7 +21,9 @@ test('extracts grouped native bridge match arms without notification strings', (
     }
 
     async fn next_function() {}
-  `]]);
+  `,
+    ],
+  ]);
 
   assert.deepEqual(extractNativeBridgeMethods(sources), [
     'bridge/one',
@@ -28,7 +33,10 @@ test('extracts grouped native bridge match arms without notification strings', (
 });
 
 test('extracts only routes owned by the bridge router', () => {
-  const sources = new Map([['routes.rs', `
+  const sources = new Map([
+    [
+      'routes.rs',
+      `
     fn build_bridge_router() {
       Router::new()
         .route("/rpc", get(ws))
@@ -41,7 +49,9 @@ test('extracts only routes owned by the bridge router', () => {
     fn build_preview_router() {
       Router::new().route("/", get(preview));
     }
-  `]]);
+  `,
+    ],
+  ]);
 
   assert.deepEqual(extractBridgeHttpRoutes(sources), ['/rpc', '/attachments']);
   assert.equal(findRustFunctionSource(sources, 'build_bridge_router').file, 'routes.rs');

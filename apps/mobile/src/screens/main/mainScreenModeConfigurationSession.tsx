@@ -1,12 +1,10 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   loadingModelsAtom,
   modelOptionsByAgentAtom,
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
-  selectedEffortAtom
+  selectedEffortAtom,
 } from '../../state/mainScreen/models';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useRef } from 'react';
@@ -14,23 +12,24 @@ import type { AcpConfigOption, Chat, ReasoningEffort } from '../../api/types';
 import { normalizeModelId } from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
 import { mergeModelOptions, modelOptionsFromAcpConfig } from './mainScreenChatState';
-import type { MainScreenWorkspaceCheckoutActionsContext, MainScreenWorkspaceCheckoutActionsResult } from './mainScreenWorkspaceCheckoutActions';
+import type {
+  MainScreenWorkspaceCheckoutActionsContext,
+  MainScreenWorkspaceCheckoutActionsResult,
+} from './mainScreenWorkspaceCheckoutActions';
 import { EMPTY_MODEL_OPTIONS } from './mainScreenConstants';
 import {
   agentModalVisibleAtom,
   effortModalVisibleAtom,
   effortPickerModelIdAtom,
-  modelModalVisibleAtom
+  modelModalVisibleAtom,
 } from '../../state/mainScreen/modals';
 
+export type MainScreenModeConfigurationSessionContext = MainScreenWorkspaceCheckoutActionsContext &
+  MainScreenWorkspaceCheckoutActionsResult;
 
-
-
-
-
-export type MainScreenModeConfigurationSessionContext = MainScreenWorkspaceCheckoutActionsContext & MainScreenWorkspaceCheckoutActionsResult;
-
-export function useMainScreenModeConfigurationSession(context: MainScreenModeConfigurationSessionContext) {
+export function useMainScreenModeConfigurationSession(
+  context: MainScreenModeConfigurationSessionContext,
+) {
   const {
     activeAgentId,
     activeApprovalPolicy,
@@ -62,34 +61,36 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
-
-  const refreshModelOptions = useCallback(async (options?: { silent?: boolean }) => {
-    const requestId = modelOptionsRequestRef.current + 1;
-    modelOptionsRequestRef.current = requestId;
-    if (!options?.silent) {
-      setLoadingModels(true);
-    }
-    try {
-      const catalogModels = await api.listModelOptions(activeAgentId);
-      if (modelOptionsRequestRef.current !== requestId) {
-        return;
+  const refreshModelOptions = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const requestId = modelOptionsRequestRef.current + 1;
+      modelOptionsRequestRef.current = requestId;
+      if (!options?.silent) {
+        setLoadingModels(true);
       }
-      if (activeAgentId) {
-        setModelOptionsByAgent((previous) => ({
-          ...previous,
-          [activeAgentId]: Array.isArray(catalogModels) ? catalogModels : EMPTY_MODEL_OPTIONS,
-        }));
+      try {
+        const catalogModels = await api.listModelOptions(activeAgentId);
+        if (modelOptionsRequestRef.current !== requestId) {
+          return;
+        }
+        if (activeAgentId) {
+          setModelOptionsByAgent((previous) => ({
+            ...previous,
+            [activeAgentId]: Array.isArray(catalogModels) ? catalogModels : EMPTY_MODEL_OPTIONS,
+          }));
+        }
+      } catch (err) {
+        if (modelOptionsRequestRef.current === requestId) {
+          setError((err as Error).message);
+        }
+      } finally {
+        if (!options?.silent && modelOptionsRequestRef.current === requestId) {
+          setLoadingModels(false);
+        }
       }
-    } catch (err) {
-      if (modelOptionsRequestRef.current === requestId) {
-        setError((err as Error).message);
-      }
-    } finally {
-      if (!options?.silent && modelOptionsRequestRef.current === requestId) {
-        setLoadingModels(false);
-      }
-    }
-  }, [activeAgentId, api]);
+    },
+    [activeAgentId, api],
+  );
 
   const configurationSessionRef = useRef<Promise<Chat | null> | null>(null);
   const ensureModeConfigurationSession = useCallback(async (): Promise<Chat | null> => {
@@ -99,34 +100,41 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
     if (configurationSessionRef.current) {
       return configurationSessionRef.current;
     }
-    const request = api.createChat({
-      agentId: activeAgentId ?? undefined,
-      cwd: preferredStartCwd ?? undefined,
-      model: activeModelId ?? undefined,
-      effort: selectedEffort ?? undefined,
-      serviceTier: activeServiceTier ?? undefined,
-      approvalPolicy: activeApprovalPolicy,
-      collaborationMode: selectedCollaborationMode,
-      agentMode: selectedAcpModeId,
-    }).then((chat) => {
-      selectedChatIdRef.current = chat.id;
-      selectedChatRef.current = chat;
-      setSelectedChatId(chat.id);
-      setSelectedChat(chat);
-      const models = modelOptionsFromAcpConfig(chat.acpConfig ?? []);
-      if (chat.agentId && models.length > 0) {
-        setModelOptionsByAgent((previous) => ({
-          ...previous,
-          [chat.agentId!]: mergeModelOptions(previous[chat.agentId!] ?? EMPTY_MODEL_OPTIONS, models),
-        }));
-      }
-      return chat;
-    }).catch((err) => {
-      setError((err as Error).message);
-      return null;
-    }).finally(() => {
-      configurationSessionRef.current = null;
-    });
+    const request = api
+      .createChat({
+        agentId: activeAgentId ?? undefined,
+        cwd: preferredStartCwd ?? undefined,
+        model: activeModelId ?? undefined,
+        effort: selectedEffort ?? undefined,
+        serviceTier: activeServiceTier ?? undefined,
+        approvalPolicy: activeApprovalPolicy,
+        collaborationMode: selectedCollaborationMode,
+        agentMode: selectedAcpModeId,
+      })
+      .then((chat) => {
+        selectedChatIdRef.current = chat.id;
+        selectedChatRef.current = chat;
+        setSelectedChatId(chat.id);
+        setSelectedChat(chat);
+        const models = modelOptionsFromAcpConfig(chat.acpConfig ?? []);
+        if (chat.agentId && models.length > 0) {
+          setModelOptionsByAgent((previous) => ({
+            ...previous,
+            [chat.agentId!]: mergeModelOptions(
+              previous[chat.agentId!] ?? EMPTY_MODEL_OPTIONS,
+              models,
+            ),
+          }));
+        }
+        return chat;
+      })
+      .catch((err) => {
+        setError((err as Error).message);
+        return null;
+      })
+      .finally(() => {
+        configurationSessionRef.current = null;
+      });
     configurationSessionRef.current = request;
     return request;
   }, [
@@ -183,7 +191,7 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
       setEffortModalVisible(true);
       setError(null);
     },
-    [activeModelId]
+    [activeModelId],
   );
 
   const closeEffortModal = useCallback(() => {
@@ -205,7 +213,7 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
         return null;
       }
     },
-    [api, selectedChatId]
+    [api, selectedChatId],
   );
 
   const selectEffort = useCallback(
@@ -221,12 +229,7 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
       setEffortModalVisible(false);
       setError(null);
       if (selectedChatId) {
-        rememberChatModelPreference(
-          selectedChatId,
-          activeModelId,
-          effort,
-          activeServiceTier
-        );
+        rememberChatModelPreference(selectedChatId, activeModelId, effort, activeServiceTier);
       } else if (activeAgentId) {
         const key = agentModelPreferenceKey(activeAgentId);
         const previous = chatModelPreferencesRef.current[key];
@@ -254,7 +257,7 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
       rememberChatModelPreference,
       saveChatModelPreferences,
       selectedChatId,
-    ]
+    ],
   );
 
   return {
@@ -272,4 +275,6 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
   };
 }
 
-export type MainScreenModeConfigurationSessionResult = ReturnType<typeof useMainScreenModeConfigurationSession>;
+export type MainScreenModeConfigurationSessionResult = ReturnType<
+  typeof useMainScreenModeConfigurationSession
+>;

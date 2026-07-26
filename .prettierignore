@@ -1,0 +1,9 @@
+node_modules/
+dist/
+target/
+.expo/
+coverage/
+build/
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/local-builds/

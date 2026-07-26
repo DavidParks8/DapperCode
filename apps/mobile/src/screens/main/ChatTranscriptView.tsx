@@ -1,12 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -30,10 +23,7 @@ import {
   getInitialVisibleMessageStartIndex,
 } from './mainScreenHelpers';
 import { createStyles } from './mainScreenStyles';
-import {
-  buildTranscriptDisplayItems,
-  type TranscriptDisplayItem,
-} from './transcriptMessages';
+import { buildTranscriptDisplayItems, type TranscriptDisplayItem } from './transcriptMessages';
 import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { AgUiThreadMessageState } from '../../api/agUiMessages';
 import { decorativeAccessibilityProps } from '../../accessibility';
@@ -105,27 +95,27 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         threadStatuses: agentThreadStatusById,
         liveMessageState,
       }),
-    [agentThreadStatusById, chat, liveMessageState, parentChat, showToolCalls]
+    [agentThreadStatusById, chat, liveMessageState, parentChat, showToolCalls],
   );
   const visibleMessages = transcriptView.messages;
   const [visibleStartIndex, setVisibleStartIndex] = useState(() =>
-    getInitialVisibleMessageStartIndex(visibleMessages.length)
+    getInitialVisibleMessageStartIndex(visibleMessages.length),
   );
   const paginatedMessages = useMemo(
     () => visibleMessages.slice(visibleStartIndex),
-    [visibleMessages, visibleStartIndex]
+    [visibleMessages, visibleStartIndex],
   );
   const paginatedTranscriptItems = useMemo(
     () => buildTranscriptDisplayItems(paginatedMessages),
-    [paginatedMessages]
+    [paginatedMessages],
   );
   const displayMessages = useMemo(
     () => [...paginatedTranscriptItems].reverse(),
-    [paginatedTranscriptItems]
+    [paginatedTranscriptItems],
   );
   const inlineChoiceSet = useMemo(
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
-    [inlineChoicesEnabled, paginatedMessages]
+    [inlineChoicesEnabled, paginatedMessages],
   );
   useEffect(() => {
     visibleMessageCountRef.current = visibleMessages.length;
@@ -143,9 +133,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, [visibleMessages.length]);
 
   const loadOlderMessages = useCallback(() => {
-    setVisibleStartIndex((current) =>
-      Math.max(0, current - CHAT_MESSAGE_PAGE_SIZE)
-    );
+    setVisibleStartIndex((current) => Math.max(0, current - CHAT_MESSAGE_PAGE_SIZE));
   }, []);
 
   const maybeAutoLoadOlderMessages = useCallback(
@@ -184,7 +172,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       autoLoadOlderCheckpointRef.current = visibleStartIndex;
       loadOlderMessages();
     },
-    [continuationState?.exhausted, continuationState?.loading, loadOlderMessages, onLoadEarlier, visibleStartIndex]
+    [
+      continuationState?.exhausted,
+      continuationState?.loading,
+      loadOlderMessages,
+      onLoadEarlier,
+      visibleStartIndex,
+    ],
   );
 
   const historyBoundary = useMemo(() => {
@@ -231,8 +225,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       contentHeightRef.current = contentSize.height;
       viewportHeightRef.current = layoutMeasurement.height;
       scrollOffsetYRef.current = nextOffsetY;
-      scrollingTowardOlderMessagesRef.current =
-        nextOffsetY > previousScrollOffsetYRef.current + 1;
+      scrollingTowardOlderMessagesRef.current = nextOffsetY > previousScrollOffsetYRef.current + 1;
       previousScrollOffsetYRef.current = nextOffsetY;
 
       const distanceFromBottom = contentOffset.y;
@@ -245,7 +238,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       }
       maybeAutoLoadOlderMessages(false);
     },
-    [autoScrollStateRef, maybeAutoLoadOlderMessages, theme.spacing.xl]
+    [autoScrollStateRef, maybeAutoLoadOlderMessages, theme.spacing.xl],
   );
 
   useEffect(() => {
@@ -266,26 +259,27 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       Platform.OS === 'android'
         ? [styles.messageListContent, { paddingTop: bottomInset }]
         : [styles.messageListContent, { paddingBottom: bottomInset }],
-    [bottomInset, styles.messageListContent]
+    [bottomInset, styles.messageListContent],
   );
   const liveTurnActive = chat.status === 'running';
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
-    []
+    [],
   );
   const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
-    ({ item }) => renderChatTranscriptItem({
-      item,
-      styles,
-      bridgeUrl,
-      bridgeToken,
-      liveTurnActive,
-      inlineChoiceSet,
-      onInlineOptionSelect,
-      onOpenLocalPreview,
-      onOpenSubAgentThread,
-    }),
+    ({ item }) =>
+      renderChatTranscriptItem({
+        item,
+        styles,
+        bridgeUrl,
+        bridgeToken,
+        liveTurnActive,
+        inlineChoiceSet,
+        onInlineOptionSelect,
+        onOpenLocalPreview,
+        onOpenSubAgentThread,
+      }),
     [
       bridgeToken,
       bridgeUrl,
@@ -295,7 +289,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onInlineOptionSelect,
       onOpenLocalPreview,
       onOpenSubAgentThread,
-    ]
+    ],
   );
 
   return (

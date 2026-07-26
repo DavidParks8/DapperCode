@@ -1,28 +1,26 @@
-import { isRpcRequestError, type RpcRequestError } from "./ws";
-import { readString, toRecord } from "./chatMapping";
-import { type Chat, type ChatSummary, type ModelOption } from "./types";
+import { isRpcRequestError, type RpcRequestError } from './ws';
+import { readString, toRecord } from './chatMapping';
+import { type Chat, type ChatSummary, type ModelOption } from './types';
 import {
   type TurnInputLocalImage,
   type TurnInputMention,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 
-export function extractUserMessageLocalImages(
-  value: unknown,
-): TurnInputLocalImage[] {
+export function extractUserMessageLocalImages(value: unknown): TurnInputLocalImage[] {
   if (!Array.isArray(value)) {
     return [];
   }
   const images: TurnInputLocalImage[] = [];
   for (const entry of value) {
     const record = toRecord(entry);
-    if (!record || readString(record.type) !== "localImage") {
+    if (!record || readString(record.type) !== 'localImage') {
       continue;
     }
     const path = readString(record.path)?.trim();
     if (!path) {
       continue;
     }
-    images.push({ type: "localImage", path });
+    images.push({ type: 'localImage', path });
   }
   return images;
 }
@@ -34,12 +32,10 @@ export function buildExpectedUserMessageContent(
 ): string {
   const normalized = content.trim();
   const mentionLines = mentions.map((mention) => `[file: ${mention.path}]`);
-  const localImageLines = localImages.map(
-    (image) => `[local image: ${image.path}]`,
-  );
+  const localImageLines = localImages.map((image) => `[local image: ${image.path}]`);
   return [normalized, ...mentionLines, ...localImageLines]
     .filter((part) => part.trim().length > 0)
-    .join("\n");
+    .join('\n');
 }
 
 export function chatShellFromSummary(summary: ChatSummary): Chat {
@@ -77,9 +73,7 @@ export function cloneChat(chat: Chat): Chat {
   };
 }
 
-export function cloneChatPlan<
-  T extends Chat["latestPlan"] | Chat["latestTurnPlan"],
->(plan: T): T {
+export function cloneChatPlan<T extends Chat['latestPlan'] | Chat['latestTurnPlan']>(plan: T): T {
   if (!plan) {
     return plan;
   }
@@ -92,11 +86,7 @@ export function appendSyntheticUserMessage(
   mentions: TurnInputMention[] = [],
   localImages: TurnInputLocalImage[] = [],
 ): Chat {
-  const normalized = buildExpectedUserMessageContent(
-    content.trim(),
-    mentions,
-    localImages,
-  );
+  const normalized = buildExpectedUserMessageContent(content.trim(), mentions, localImages);
   if (!normalized) {
     return chat;
   }
@@ -109,7 +99,7 @@ export function appendSyntheticUserMessage(
       ...chat.messages,
       {
         id: `local-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        role: "user",
+        role: 'user',
         content: normalized,
         createdAt,
       },
@@ -127,8 +117,8 @@ export function isMaterializationGapError(error: unknown): boolean {
   }
   const message = error.message;
   return (
-    message.includes("includeTurns") &&
-    (message.includes("material") || message.includes("materialis"))
+    message.includes('includeTurns') &&
+    (message.includes('material') || message.includes('materialis'))
   );
 }
 
@@ -138,15 +128,13 @@ export function isTransientThreadReadError(error: unknown): boolean {
   }
   const message = error.message.toLowerCase();
   return (
-    message.includes("failed to read thread") &&
-    message.includes("thread-store internal error") &&
-    message.includes("rollout") &&
-    message.includes("is empty")
+    message.includes('failed to read thread') &&
+    message.includes('thread-store internal error') &&
+    message.includes('rollout') &&
+    message.includes('is empty')
   );
 }
 
-export function isRpcInvalidParamsError(
-  error: unknown,
-): error is RpcRequestError {
+export function isRpcInvalidParamsError(error: unknown): error is RpcRequestError {
   return isRpcRequestError(error) && error.code === -32602;
 }

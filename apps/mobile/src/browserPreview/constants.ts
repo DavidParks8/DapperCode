@@ -34,9 +34,7 @@ export const DEFAULT_BROWSER_PREVIEW_VIEWPORT: BrowserPreviewViewportSpec = {
 const MIN_BROWSER_PREVIEW_VIEWPORT_SIZE = 320;
 const MAX_BROWSER_PREVIEW_VIEWPORT_SIZE = 4096;
 
-export function normalizeViewportDimension(
-  value: number | null | undefined
-): number | undefined {
+export function normalizeViewportDimension(value: number | null | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return undefined;
   }
@@ -53,7 +51,7 @@ export function normalizeViewportDimension(
 }
 
 export function normalizeBrowserPreviewViewportSpec(
-  viewport: BrowserPreviewViewportSpec | null | undefined
+  viewport: BrowserPreviewViewportSpec | null | undefined,
 ): BrowserPreviewViewportSpec {
   if (!viewport || viewport.preset !== 'desktop') {
     return DEFAULT_BROWSER_PREVIEW_VIEWPORT;

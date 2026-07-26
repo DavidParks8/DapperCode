@@ -10,10 +10,7 @@ export function stripMarkdownInline(value: string): string {
     .replace(/[_~]/g, '');
 }
 
-export function toTickerSnippet(
-  value: string | null | undefined,
-  maxLength = 72
-): string | null {
+export function toTickerSnippet(value: string | null | undefined, maxLength = 72): string | null {
   if (!value) {
     return null;
   }
@@ -90,13 +87,13 @@ export function formatTimelineSystemMessage(title: string, details: string[]): s
 }
 
 export function filterReasoningMessages(
-  messages: ChatTranscriptMessage[]
+  messages: ChatTranscriptMessage[],
 ): ChatTranscriptMessage[] {
   return messages;
 }
 
 export function describeStartedToolEvent(
-  item: Record<string, unknown> | null
+  item: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
   const itemType = readString(item?.type);
   if (itemType === 'commandExecution') {
@@ -115,9 +112,8 @@ export function describeStartedToolEvent(
   }
 
   if (itemType === 'mcpToolCall') {
-    const detail = [readString(item?.server), readString(item?.tool)]
-      .filter(Boolean)
-      .join(' / ') || 'Tool call';
+    const detail =
+      [readString(item?.server), readString(item?.tool)].filter(Boolean).join(' / ') || 'Tool call';
     return {
       eventType: 'tool.running',
       detail: buildToolEventDetail(detail, 'running'),
@@ -136,7 +132,7 @@ export function describeStartedToolEvent(
 }
 
 export function describeCompletedToolEvent(
-  item: Record<string, unknown> | null
+  item: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
   const itemType = readString(item?.type);
   const rawStatus = readString(item?.status);
@@ -166,9 +162,8 @@ export function describeCompletedToolEvent(
   }
 
   if (itemType === 'mcpToolCall') {
-    const detail = [readString(item?.server), readString(item?.tool)]
-      .filter(Boolean)
-      .join(' / ') || 'Tool call';
+    const detail =
+      [readString(item?.server), readString(item?.tool)].filter(Boolean).join(' / ') || 'Tool call';
     return {
       eventType: 'tool.completed',
       detail: buildToolEventDetail(detail, status),
@@ -187,7 +182,7 @@ export function describeCompletedToolEvent(
 }
 
 export function describeWebSearchToolEvent(
-  msg: Record<string, unknown> | null
+  msg: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
   const query = toTickerSnippet(readString(msg?.query), 80);
   return {
@@ -198,7 +193,7 @@ export function describeWebSearchToolEvent(
 
 export function buildToolEventDetail(
   label: string,
-  status: 'running' | 'complete' | 'error'
+  status: 'running' | 'complete' | 'error',
 ): string {
   return `${label} | ${status}`;
 }
@@ -243,7 +238,7 @@ export function appendRunEventHistory(
   previous: RunEvent[],
   threadId: string,
   eventType: string,
-  detail: string
+  detail: string,
 ): RunEvent[] {
   const last = previous[previous.length - 1];
   if (last && last.eventType === eventType && last.detail === detail) {

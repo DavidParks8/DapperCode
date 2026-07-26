@@ -16,7 +16,7 @@ describe('confirmAction', () => {
         message: 'This cannot be undone.',
         confirmLabel: 'Delete',
         destructive: true,
-      })
+      }),
     ).resolves.toBe(true);
     expect(alert.mock.calls[0]?.[0]).toBe('Delete workspace?');
     expect(alert.mock.calls[0]?.[1]).toBe('This cannot be undone.');
@@ -33,7 +33,7 @@ describe('confirmAction', () => {
 
     await expect(confirmAction({ title: 'Discard draft?' })).resolves.toBe(false);
     expect(alert.mock.calls[0]?.[2]?.[1]).toEqual(
-      expect.objectContaining({ text: 'Confirm', style: 'default' })
+      expect.objectContaining({ text: 'Confirm', style: 'default' }),
     );
   });
 

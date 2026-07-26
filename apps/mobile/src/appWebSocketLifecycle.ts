@@ -6,13 +6,13 @@ interface AppStateSource {
   currentState: AppStateStatus;
   addEventListener(
     type: 'change',
-    listener: (state: AppStateStatus) => void
+    listener: (state: AppStateStatus) => void,
   ): { remove: () => void };
 }
 
 export function bindAppWebSocketLifecycle(
   ws: HostBridgeWsClient,
-  appState: AppStateSource = AppState
+  appState: AppStateSource = AppState,
 ): () => void {
   const syncConnection = (state: AppStateStatus) => {
     if (state === 'active') {

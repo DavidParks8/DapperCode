@@ -1,12 +1,9 @@
-import {
-  pendingApprovalAtom,
-  stoppingTurnAtom
-} from '../../state/mainScreen/turn';
+import { pendingApprovalAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
 import {
   composerHeightAtom,
   keyboardVisibleAtom,
   queueActionItemIdAtom,
-  queueActionKindAtom
+  queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,14 +15,13 @@ import { ChatInput } from '../../components/ChatInput';
 import { decorativeAccessibilityProps } from '../../accessibility';
 import { toPathBasename } from './mainScreenHelpers';
 import { QueuedMessageDock } from './MainScreenWorkflow';
-import type { MainScreenWorkflowQueueStateContext, MainScreenWorkflowQueueStateResult } from './mainScreenWorkflowQueueState';
+import type {
+  MainScreenWorkflowQueueStateContext,
+  MainScreenWorkflowQueueStateResult,
+} from './mainScreenWorkflowQueueState';
 
-
-
-
-
-
-export type MainScreenComposerRendererContext = MainScreenWorkflowQueueStateContext & MainScreenWorkflowQueueStateResult;
+export type MainScreenComposerRendererContext = MainScreenWorkflowQueueStateContext &
+  MainScreenWorkflowQueueStateResult;
 
 export function useMainScreenComposerRenderer(context: MainScreenComposerRendererContext) {
   const {
@@ -100,9 +96,21 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         !overlay && !keyboardVisible ? styles.composerContainerResting : null,
       ]}
     >
-      {visibleError ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>{visibleError}</Text> : null}
+      {visibleError ? (
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+          style={styles.errorText}
+        >
+          {visibleError}
+        </Text>
+      ) : null}
       {showBridgeRecoveryBanner ? (
-        <View style={styles.bridgeRecoveryBanner} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+        <View
+          style={styles.bridgeRecoveryBanner}
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+        >
           <View style={styles.bridgeRecoveryBannerTopRow}>
             <View style={styles.bridgeRecoveryBannerIconWrap}>
               <Ionicons
@@ -113,9 +121,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
               />
             </View>
             <View style={styles.bridgeRecoveryBannerCopy}>
-              <Text style={styles.bridgeRecoveryBannerTitle}>
-                Bridge disconnected
-              </Text>
+              <Text style={styles.bridgeRecoveryBannerTitle}>Bridge disconnected</Text>
               <Text style={styles.bridgeRecoveryBannerBody}>
                 Start the bridge on your computer to continue. The app will reconnect automatically.
               </Text>
@@ -129,9 +135,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
                 pressed && styles.bridgeRecoveryBannerButtonPressed,
               ]}
             >
-              <Text style={styles.bridgeRecoveryBannerButtonText}>
-                How to start bridge
-              </Text>
+              <Text style={styles.bridgeRecoveryBannerButtonText}>How to start bridge</Text>
             </Pressable>
           ) : null}
         </View>
@@ -151,10 +155,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
           ))
         : null}
       {pendingApproval ? (
-        <ApprovalBanner
-          approval={pendingApproval}
-          onResolve={handleResolveApproval}
-        />
+        <ApprovalBanner approval={pendingApproval} onResolve={handleResolveApproval} />
       ) : null}
       {showQueuedMessageDock && oldestQueuedMessage ? (
         <QueuedMessageDock
@@ -163,7 +164,9 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
           pendingSubmission={showingOptimisticQueuedMessage}
           steerEnabled={canSteerQueuedMessage}
           cancelEnabled={canCancelQueuedMessage}
-          steeringActive={queueActionKind === 'steer' && queueActionItemId === oldestQueuedMessage.id}
+          steeringActive={
+            queueActionKind === 'steer' && queueActionItemId === oldestQueuedMessage.id
+          }
           steerPending={oldestQueuedMessageIsPendingSteer}
           waitingForToolCalls={selectedThreadRuntimeSnapshot?.waitingForToolCalls === true}
           steeringInFlight={selectedThreadRuntimeSnapshot?.steeringInFlight === true}
@@ -178,10 +181,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
       ) : null}
       {showSlashSuggestions ? (
         <ScrollView
-          style={[
-            styles.slashSuggestions,
-            { maxHeight: slashSuggestionsMaxHeight },
-          ]}
+          style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
           contentContainerStyle={styles.slashSuggestionsContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -194,16 +194,13 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
                 onPress={() => setDraft(`/${command.name}${command.argsHint ? ' ' : ''}`)}
                 style={({ pressed }) => [
                   styles.slashSuggestionItem,
-                  index === slashSuggestions.length - 1 &&
-                    styles.slashSuggestionItemLast,
+                  index === slashSuggestions.length - 1 && styles.slashSuggestionItemLast,
                   pressed && styles.slashSuggestionItemPressed,
                 ]}
               >
                 <Text style={styles.slashSuggestionTitle}>{`/${command.name}${suffix}`}</Text>
                 <Text style={styles.slashSuggestionSummary} numberOfLines={1}>
-                  {command.mobileSupported
-                    ? command.summary
-                    : `${command.summary} · CLI only`}
+                  {command.mobileSupported ? command.summary : `${command.summary} · CLI only`}
                 </Text>
               </Pressable>
             );
@@ -213,14 +210,13 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
       {!showSlashSuggestions && mentionQuery !== null ? (
         loadingAttachmentFileCandidates && mentionPathSuggestions.length === 0 ? (
           <View style={styles.inlineMentionStatus}>
-            <Text accessibilityLiveRegion="polite" style={styles.workspaceModalLoading}>Indexing files…</Text>
+            <Text accessibilityLiveRegion="polite" style={styles.workspaceModalLoading}>
+              Indexing files…
+            </Text>
           </View>
         ) : mentionPathSuggestions.length > 0 ? (
           <ScrollView
-            style={[
-              styles.slashSuggestions,
-              { maxHeight: slashSuggestionsMaxHeight },
-            ]}
+            style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
             contentContainerStyle={styles.slashSuggestionsContent}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
@@ -231,8 +227,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
                 onPress={() => selectMentionSuggestion(path)}
                 style={({ pressed }) => [
                   styles.slashSuggestionItem,
-                  index === mentionPathSuggestions.length - 1 &&
-                    styles.slashSuggestionItemLast,
+                  index === mentionPathSuggestions.length - 1 && styles.slashSuggestionItemLast,
                   pressed && styles.slashSuggestionItemPressed,
                 ]}
               >

@@ -1,13 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
 import type { AppTheme } from '../../theme';
@@ -78,7 +71,10 @@ export function OnboardingConnectSection({
               <Pressable
                 onPress={onBack}
                 hitSlop={8}
-                style={({ pressed }) => [styles.connectTopButton, pressed && styles.cancelBtnPressed]}
+                style={({ pressed }) => [
+                  styles.connectTopButton,
+                  pressed && styles.cancelBtnPressed,
+                ]}
               >
                 <Ionicons
                   {...decorativeAccessibilityProps}
@@ -207,7 +203,10 @@ export function OnboardingConnectSection({
               </View>
               <Pressable
                 onPress={onToggleTokenHidden}
-                style={({ pressed }) => [styles.tokenRevealBtn, pressed && styles.tokenRevealBtnPressed]}
+                style={({ pressed }) => [
+                  styles.tokenRevealBtn,
+                  pressed && styles.tokenRevealBtnPressed,
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel={tokenHidden ? 'Show bridge token' : 'Hide bridge token'}
                 accessibilityState={controlAccessibilityState({ expanded: !tokenHidden })}

@@ -9,7 +9,6 @@ import type { AppScreen } from '../../app/appConstants';
 import type { WorkspacePickerPurpose } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
-
 export const relatedAgentThreadsAtom = screenAtom<ChatSummary[]>(() => []);
 
 export const agentRootThreadIdAtom = screenAtom<string | null>(null);
@@ -51,7 +50,7 @@ export const workspaceBrowseTruncationAtom = screenAtom<string | null>(null);
 export const favoriteWorkspacePathsAtom = screenAtom<string[]>(() => []);
 
 export const workspaceBrowseCacheAtom = screenAtom<Record<string, FileSystemListResponse>>(
-  () => ({})
+  () => ({}),
 );
 
 export const workspaceBrowseRequestIdAtom = screenAtom(0);

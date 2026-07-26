@@ -20,7 +20,7 @@ const commonJsRoots = new Map(
   COMMONJS_ONLY_PACKAGES.map((name) => [
     name,
     path.dirname(require.resolve(`${name}/package.json`)),
-  ])
+  ]),
 );
 
 function resolveCommonJsEntry(moduleName) {

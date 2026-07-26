@@ -52,9 +52,7 @@ export async function loadAutoStoreReviewState(): Promise<AutoStoreReviewState> 
   }
 }
 
-export async function saveAutoStoreReviewState(
-  state: AutoStoreReviewState
-): Promise<void> {
+export async function saveAutoStoreReviewState(state: AutoStoreReviewState): Promise<void> {
   const path = getAutoStoreReviewStatePath();
   if (!path) {
     return;
@@ -114,9 +112,7 @@ function getAutoStoreReviewStatePath(): string | null {
 }
 
 function normalizeAccumulatedForegroundMs(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function normalizeIsoTimestamp(value: unknown): string | null {

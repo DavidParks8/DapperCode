@@ -86,7 +86,7 @@ describe('pushNotifications', () => {
         type: 'approval_requested',
         threadId: ' thread-1 ',
         approvalId: ' approval-1 ',
-      })
+      }),
     ).toEqual({
       ...identity,
       type: 'approvalRequested',
@@ -104,11 +104,15 @@ describe('pushNotifications', () => {
   it('rejects identity-less and malformed payloads', () => {
     expect(parsePushNavigationTarget({ type: 'turn_completed', threadId: 'thread-1' })).toBeNull();
     expect(parsePushNavigationTarget({ ...identity, type: 'something_else' })).toBeNull();
-    expect(parsePushNavigationTarget({ ...identity, notificationId: ' ', type: 'turn_completed' }))
-      .toBeNull();
-    expect(parsePushNavigationTarget({ ...identity, profileId: 1, type: 'turn_completed' })).toBeNull();
-    expect(parsePushNavigationTarget({ ...identity, registrationId: null, type: 'turn_completed' }))
-      .toBeNull();
+    expect(
+      parsePushNavigationTarget({ ...identity, notificationId: ' ', type: 'turn_completed' }),
+    ).toBeNull();
+    expect(
+      parsePushNavigationTarget({ ...identity, profileId: 1, type: 'turn_completed' }),
+    ).toBeNull();
+    expect(
+      parsePushNavigationTarget({ ...identity, registrationId: null, type: 'turn_completed' }),
+    ).toBeNull();
     expect(parsePushNavigationTarget(null)).toBeNull();
     expect(parsePushNavigationTarget('payload')).toBeNull();
   });
@@ -126,7 +130,7 @@ describe('pushNotifications', () => {
       expect.arrayContaining([
         expect.objectContaining({ identifier: 'approve' }),
         expect.objectContaining({ identifier: 'deny' }),
-      ])
+      ]),
     );
 
     mockNotifications.setNotificationCategoryAsync.mockRejectedValue(new Error('unsupported'));
@@ -145,7 +149,7 @@ describe('pushNotifications', () => {
     });
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
     await expect(handler.handleNotification()).resolves.toEqual(
-      expect.objectContaining({ shouldShowBanner: true, shouldPlaySound: true })
+      expect.objectContaining({ shouldShowBanner: true, shouldPlaySound: true }),
     );
   });
 
@@ -186,7 +190,7 @@ describe('pushNotifications', () => {
     mockConstants.easConfig = { projectId: ' eas-project ' };
     mockDevice.deviceName = null;
     await expect(requestPushRegistration()).resolves.toEqual(
-      expect.objectContaining({ deviceName: 'iPhone' })
+      expect.objectContaining({ deviceName: 'iPhone' }),
     );
     expect(mockNotifications.getExpoPushTokenAsync).toHaveBeenCalledWith({
       projectId: 'eas-project',
@@ -195,7 +199,7 @@ describe('pushNotifications', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     mockConstants.easConfig = { projectId: null };
     await expect(requestPushRegistration()).resolves.toEqual(
-      expect.objectContaining({ platform: 'android', deviceName: 'Android device' })
+      expect.objectContaining({ platform: 'android', deviceName: 'Android device' }),
     );
     expect(mockNotifications.getExpoPushTokenAsync).toHaveBeenLastCalledWith(undefined);
   });
@@ -220,10 +224,12 @@ describe('pushNotifications', () => {
     });
     const handler = jest.fn();
     const subscription = addNotificationResponseListener(handler);
-    listener?.(response({ ...identity, type: 'approval_requested', approvalId: 'approval-1' }, 'deny'));
+    listener?.(
+      response({ ...identity, type: 'approval_requested', approvalId: 'approval-1' }, 'deny'),
+    );
     listener?.(response({ type: 'invalid' }));
     expect(handler).toHaveBeenCalledWith(
-      expect.objectContaining({ actionId: 'notification-1:deny', action: 'deny' })
+      expect.objectContaining({ actionId: 'notification-1:deny', action: 'deny' }),
     );
     expect(handler).toHaveBeenCalledTimes(1);
     subscription.remove();
@@ -232,10 +238,10 @@ describe('pushNotifications', () => {
     mockNotifications.getLastNotificationResponseAsync.mockResolvedValue(null);
     await expect(getInitialNotificationResponse()).resolves.toBeNull();
     mockNotifications.getLastNotificationResponseAsync.mockResolvedValue(
-      response({ ...identity, type: 'turn_completed' })
+      response({ ...identity, type: 'turn_completed' }),
     );
     await expect(getInitialNotificationResponse()).resolves.toEqual(
-      expect.objectContaining({ actionId: 'notification-1:default', action: 'default' })
+      expect.objectContaining({ actionId: 'notification-1:default', action: 'default' }),
     );
   });
 });

@@ -17,14 +17,11 @@ export function extractLocalPreviewUrls(value: string): string[] {
   return dedupeRecentPreviewTargets(
     matches
       .map((match) => normalizePreviewTargetInput(match))
-      .filter((entry): entry is string => typeof entry === 'string')
+      .filter((entry): entry is string => typeof entry === 'string'),
   );
 }
 
-export function pushRecentPreviewTarget(
-  currentValues: string[],
-  nextValue: string
-): string[] {
+export function pushRecentPreviewTarget(currentValues: string[], nextValue: string): string[] {
   const normalized = normalizePreviewTargetInput(nextValue);
   if (!normalized) {
     return dedupeRecentPreviewTargets(currentValues);

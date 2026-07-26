@@ -1,33 +1,34 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   agentRuntimeRevisionAtom,
-  relatedAgentThreadsAtom
+  relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import type { Chat } from '../../api/types';
 import { type SelectionSheetOption } from '../../components/SelectionSheet';
 import { mainScreenCommandsAtom } from '../../state/commands';
-import { describeAgentThreadSource, findMatchingAgentThread, resolveAgentActivitySummary } from './agentThreads';
+import {
+  describeAgentThreadSource,
+  findMatchingAgentThread,
+  resolveAgentActivitySummary,
+} from './agentThreads';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { formatAgentThreadOptionTitle, iconForAgentThread } from './mainScreenHelpers';
-import type { MainScreenChatNavigationAndAgentDetailContext, MainScreenChatNavigationAndAgentDetailResult } from './mainScreenChatNavigationAndAgentDetail';
-import {
-  agentThreadMenuVisibleAtom
-} from '../../state/mainScreen/modals';
+import type {
+  MainScreenChatNavigationAndAgentDetailContext,
+  MainScreenChatNavigationAndAgentDetailResult,
+} from './mainScreenChatNavigationAndAgentDetail';
+import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 
+export type MainScreenAgentThreadSelectorStateContext =
+  MainScreenChatNavigationAndAgentDetailContext & MainScreenChatNavigationAndAgentDetailResult;
 
-
-
-
-
-export type MainScreenAgentThreadSelectorStateContext = MainScreenChatNavigationAndAgentDetailContext & MainScreenChatNavigationAndAgentDetailResult;
-
-export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentThreadSelectorStateContext) {
+export function useMainScreenAgentThreadSelectorState(
+  context: MainScreenAgentThreadSelectorStateContext,
+) {
   const {
     closeAgentDetail,
     onPendingOpenChatHandled,
@@ -48,7 +49,6 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
   const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
-
 
   const openAgentThreadSelector = useCallback(
     async (query?: string | null): Promise<boolean> => {
@@ -87,7 +87,7 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
       }
       return true;
     },
-    [agentRootThreadId, closeAgentDetail, openAgentDetail, refreshAgentThreads]
+    [agentRootThreadId, closeAgentDetail, openAgentDetail, refreshAgentThreads],
   );
   openAgentThreadSelectorRef.current = openAgentThreadSelector;
 
@@ -98,11 +98,7 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
       const isRootThread = Boolean(agentRootThreadId) && chat.id === agentRootThreadId;
       const ordinal = isRootThread ? null : (subAgentOrdinal += 1);
       const snapshot = threadRuntimeSnapshotsRef.current[chat.id] ?? null;
-      const runtime = buildAgentThreadDisplayState(
-        chat,
-        snapshot,
-        runWatchdogNow
-      );
+      const runtime = buildAgentThreadDisplayState(chat, snapshot, runWatchdogNow);
       const latestCommand = snapshot?.latestCommand ?? snapshot?.activeCommands?.at(-1) ?? null;
 
       return {
@@ -132,7 +128,7 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
 
   const selectorAgentCount = useMemo(
     () => agentThreadRows.filter((row) => !row.isRootThread).length,
-    [agentThreadRows]
+    [agentThreadRows],
   );
 
   const agentThreadMenuOptions = useMemo<SelectionSheetOption[]>(() => {
@@ -196,12 +192,7 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
 
     openChatThread(pendingOpenChatId, snapshot);
     onPendingOpenChatHandled?.();
-  }, [
-    onPendingOpenChatHandled,
-    openChatThread,
-    pendingOpenChatId,
-    pendingOpenChatSnapshot,
-  ]);
+  }, [onPendingOpenChatHandled, openChatThread, pendingOpenChatId, pendingOpenChatSnapshot]);
 
   return {
     openAgentThreadSelector,
@@ -211,4 +202,6 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
   };
 }
 
-export type MainScreenAgentThreadSelectorStateResult = ReturnType<typeof useMainScreenAgentThreadSelectorState>;
+export type MainScreenAgentThreadSelectorStateResult = ReturnType<
+  typeof useMainScreenAgentThreadSelectorState
+>;

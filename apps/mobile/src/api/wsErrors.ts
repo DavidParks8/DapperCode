@@ -1,5 +1,5 @@
 export class RpcRequestError extends Error {
-  readonly name = "RpcRequestError";
+  readonly name = 'RpcRequestError';
 
   constructor(
     readonly method: string,
@@ -17,12 +17,10 @@ export function isRpcRequestError(error: unknown): error is RpcRequestError {
 }
 
 export class BridgeProtocolVersionError extends Error {
-  readonly name = "BridgeProtocolVersionError";
+  readonly name = 'BridgeProtocolVersionError';
 
   constructor(readonly receivedVersion: number) {
-    super(
-      `Unsupported bridge protocol version ${String(receivedVersion)}; expected ${String(2)}`,
-    );
+    super(`Unsupported bridge protocol version ${String(receivedVersion)}; expected ${String(2)}`);
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }

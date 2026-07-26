@@ -2,8 +2,7 @@ import { useEffect, type Dispatch, type SetStateAction } from 'react';
 import type { HostBridgeApiClient } from '../api/client';
 import type { ChatSummary } from '../api/types';
 
-const PRIORITY_SESSION_HYDRATION_DIAGNOSTIC =
-  'Some pending request sessions could not be loaded.';
+const PRIORITY_SESSION_HYDRATION_DIAGNOSTIC = 'Some pending request sessions could not be loaded.';
 
 interface DrawerPrioritySessionHydrationOptions {
   active: boolean;
@@ -30,16 +29,14 @@ export function useDrawerPrioritySessionHydration({
     }
     const currentChatIds = new Set(chats.map((chat) => chat.id));
     const missingThreadIds = Array.from(
-      new Set(priorityThreadIds.map((threadId) => threadId.trim()).filter(Boolean))
+      new Set(priorityThreadIds.map((threadId) => threadId.trim()).filter(Boolean)),
     ).filter((threadId) => !currentChatIds.has(threadId));
     const updateDiagnostic = (show: boolean) => {
       setDiagnostics((previous) => {
         const remaining = previous.filter(
-          (message) => message !== PRIORITY_SESSION_HYDRATION_DIAGNOSTIC
+          (message) => message !== PRIORITY_SESSION_HYDRATION_DIAGNOSTIC,
         );
-        return show
-          ? [...remaining, PRIORITY_SESSION_HYDRATION_DIAGNOSTIC]
-          : remaining;
+        return show ? [...remaining, PRIORITY_SESSION_HYDRATION_DIAGNOSTIC] : remaining;
       });
     };
     if (missingThreadIds.length === 0) {
@@ -48,7 +45,8 @@ export function useDrawerPrioritySessionHydration({
     }
 
     let cancelled = false;
-    void api.getChatSummaries(missingThreadIds)
+    void api
+      .getChatSummaries(missingThreadIds)
       .then((summaries) => {
         if (cancelled) {
           return;

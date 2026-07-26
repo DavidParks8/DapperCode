@@ -16,10 +16,7 @@ import {
   type BridgeProfileDraft,
   type BridgeProfileStore,
 } from '../bridgeProfiles';
-import {
-  dedupeRecentPreviewTargets,
-  normalizePreviewTargetInput,
-} from '../browserPreview';
+import { dedupeRecentPreviewTargets, normalizePreviewTargetInput } from '../browserPreview';
 import type { AppearancePreference, DarkUiPalette } from '../theme';
 
 const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
@@ -76,7 +73,7 @@ export class AppStatePersistenceError extends Error {
     code: AppStatePersistenceErrorCode,
     operation: AppStatePersistenceOperation,
     message: string,
-    cause?: unknown
+    cause?: unknown,
   ) {
     super(message);
     this.name = 'AppStatePersistenceError';
@@ -170,7 +167,7 @@ export function normalizeAppStateData(data: {
 
 export function normalizePushSettings(
   value: unknown,
-  profiles: BridgeProfileStore
+  profiles: BridgeProfileStore,
 ): PushSettingsState {
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const events =
@@ -225,11 +222,11 @@ export function updatePushRegistration(
   state: AppStateData,
   profileId: string,
   registrationId: string,
-  token: string
+  token: string,
 ): AppStateData {
   const normalizedToken = normalizeRequiredString(token, 'token');
   const existing = state.push.registrations.find(
-    (registration) => registration.profileId === profileId
+    (registration) => registration.profileId === profileId,
   );
   if (!existing || existing.registrationId !== registrationId) {
     return state;
@@ -241,7 +238,7 @@ export function updatePushRegistration(
       registrations: state.push.registrations.map((registration) =>
         registration.profileId === profileId
           ? { ...registration, token: normalizedToken }
-          : registration
+          : registration,
       ),
     },
   };
@@ -267,7 +264,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       appearancePreference: record.appearancePreference,
       darkUiPalette: record.darkUiPalette,
       recentBrowserTargetUrls: record.recentBrowserTargetUrls,
-    })
+    }),
   );
   return {
     defaultStartCwd: parsed.defaultStartCwd,
@@ -281,7 +278,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     recentBrowserTargetUrls: dedupeRecentPreviewTargets(
       parsed.recentBrowserTargetUrls
         .map(normalizePreviewTargetInput)
-        .filter((target): target is string => target !== null)
+        .filter((target): target is string => target !== null),
     ),
   };
 }
@@ -290,9 +287,7 @@ export function normalizeNullableString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
-export function normalizeCollaborationMode(
-  value: CollaborationMode
-): CollaborationMode {
+export function normalizeCollaborationMode(value: CollaborationMode): CollaborationMode {
   return value === 'plan' ? value : 'default';
 }
 
@@ -300,7 +295,7 @@ export function persistenceError(
   code: AppStatePersistenceErrorCode,
   operation: AppStatePersistenceOperation,
   message: string,
-  cause: unknown
+  cause: unknown,
 ): AppStatePersistenceError {
   return cause instanceof AppStatePersistenceError
     ? cause

@@ -55,7 +55,7 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
   assert.notEqual(stale.status, 0);
   assert.match(
     stale.stderr,
-    /stale exceptions: linkify-it#1121797, linkify-it#1124012, brace-expansion#1124334/
+    /stale exceptions: linkify-it#1121797, linkify-it#1124012, brace-expansion#1124334/,
   );
 
   const fixable = runChecker({
@@ -86,8 +86,5 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
     },
   });
   assert.notEqual(escalated.status, 0);
-  assert.match(
-    escalated.stderr,
-    /critical: linkify-it#1121797, linkify-it#1124012/
-  );
+  assert.match(escalated.stderr, /critical: linkify-it#1121797, linkify-it#1124012/);
 });

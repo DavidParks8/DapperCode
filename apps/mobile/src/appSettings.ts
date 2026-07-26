@@ -1,8 +1,4 @@
-import type {
-  AgentDefaultSettingsMap,
-  AgentId,
-  ApprovalMode,
-} from './api/types';
+import type { AgentDefaultSettingsMap, AgentId, ApprovalMode } from './api/types';
 import { dedupeRecentPreviewTargets, normalizePreviewTargetInput } from './browserPreview';
 import { normalizeBridgeUrlInput } from './bridgeUrl';
 import type { AppearancePreference, DarkUiPalette } from './theme';
@@ -44,11 +40,7 @@ export function parseAppSettings(raw: string): {
   try {
     const parsed = JSON.parse(raw);
     const parsedVersion = (parsed as { version?: unknown }).version;
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      parsedVersion !== APP_SETTINGS_VERSION
-    ) {
+    if (!parsed || typeof parsed !== 'object' || parsedVersion !== APP_SETTINGS_VERSION) {
       return {
         bridgeUrl: null,
         bridgeToken: null,
@@ -59,7 +51,7 @@ export function parseAppSettings(raw: string): {
         showToolCalls: true,
         appearancePreference: 'system',
         darkUiPalette: 'classic',
-          workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
+        workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
       };
     }
@@ -68,16 +60,14 @@ export function parseAppSettings(raw: string): {
       bridgeUrl: normalizeBridgeUrl((parsed as { bridgeUrl?: unknown }).bridgeUrl),
       bridgeToken: normalizeBridgeToken((parsed as { bridgeToken?: unknown }).bridgeToken),
       defaultStartCwd: normalizeDefaultStartCwd(
-        (parsed as { defaultStartCwd?: unknown }).defaultStartCwd
+        (parsed as { defaultStartCwd?: unknown }).defaultStartCwd,
       ),
       preferredAgentId: normalizeAgentId(
-        (parsed as { preferredAgentId?: unknown }).preferredAgentId
+        (parsed as { preferredAgentId?: unknown }).preferredAgentId,
       ),
-      agentSettings: normalizeAgentSettings(
-        (parsed as { agentSettings?: unknown }).agentSettings
-      ),
+      agentSettings: normalizeAgentSettings((parsed as { agentSettings?: unknown }).agentSettings),
       approvalMode: normalizeStoredApprovalMode(
-        (parsed as { approvalMode?: unknown }).approvalMode
+        (parsed as { approvalMode?: unknown }).approvalMode,
       ),
       showToolCalls:
         typeof (parsed as { showToolCalls?: unknown }).showToolCalls === 'undefined'
@@ -85,16 +75,16 @@ export function parseAppSettings(raw: string): {
           : normalizeBoolean((parsed as { showToolCalls?: unknown }).showToolCalls),
       appearancePreference: normalizeStoredAppearancePreference(
         (parsed as { appearancePreference?: unknown }).appearancePreference,
-        'system'
+        'system',
       ),
       darkUiPalette: normalizeStoredDarkUiPalette(
-        (parsed as { darkUiPalette?: unknown }).darkUiPalette
+        (parsed as { darkUiPalette?: unknown }).darkUiPalette,
       ),
       workspaceChatLimit: normalizeWorkspaceChatLimit(
-        (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit
+        (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit,
       ),
       recentBrowserTargetUrls: normalizeBrowserTargetUrls(
-        (parsed as { recentBrowserTargetUrls?: unknown }).recentBrowserTargetUrls
+        (parsed as { recentBrowserTargetUrls?: unknown }).recentBrowserTargetUrls,
       ),
     };
   } catch {
@@ -174,9 +164,8 @@ function normalizeAgentSettings(value: unknown): AgentDefaultSettingsMap {
   if (!record) return normalized;
   for (const [rawAgentId, rawEntry] of Object.entries(record)) {
     const agentId = normalizeAgentId(rawAgentId);
-    const entry = rawEntry && typeof rawEntry === 'object'
-      ? (rawEntry as Record<string, unknown>)
-      : null;
+    const entry =
+      rawEntry && typeof rawEntry === 'object' ? (rawEntry as Record<string, unknown>) : null;
     if (!agentId || !entry) {
       continue;
     }
@@ -206,7 +195,7 @@ function normalizeBrowserTargetUrls(value: unknown): string[] {
   return dedupeRecentPreviewTargets(
     value
       .map((entry) => (typeof entry === 'string' ? normalizePreviewTargetInput(entry) : null))
-      .filter((entry): entry is string => typeof entry === 'string')
+      .filter((entry): entry is string => typeof entry === 'string'),
   );
 }
 
@@ -224,9 +213,7 @@ function normalizeStoredDarkUiPalette(value: unknown): DarkUiPalette {
 
 function normalizeStoredAppearancePreference(
   value: unknown,
-  fallback: AppearancePreference
+  fallback: AppearancePreference,
 ): AppearancePreference {
-  return value === 'light' || value === 'dark' || value === 'system'
-    ? value
-    : fallback;
+  return value === 'light' || value === 'dark' || value === 'system' ? value : fallback;
 }

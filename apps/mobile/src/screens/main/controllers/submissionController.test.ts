@@ -3,20 +3,24 @@ import * as Crypto from 'expo-crypto';
 
 describe('submissionController', () => {
   it('supports its default id factory', () => {
-    expect(new SubmissionController().begin(
-      { scopeKey: 'scope', value: '', revision: 0 },
-      { mentions: [], localImages: [] }
-    ).id).toMatch(/^submission-/);
+    expect(
+      new SubmissionController().begin(
+        { scopeKey: 'scope', value: '', revision: 0 },
+        { mentions: [], localImages: [] },
+      ).id,
+    ).toMatch(/^submission-/);
   });
 
   it('falls back when Expo Crypto randomUUID is unavailable', () => {
     jest.spyOn(Crypto, 'randomUUID').mockImplementationOnce(() => {
       throw new TypeError('randomUUID unavailable');
     });
-    expect(new SubmissionController().begin(
-      { scopeKey: 'scope', value: 'web', revision: 0 },
-      { mentions: [], localImages: [] }
-    ).id).toMatch(/^submission-.+-1$/);
+    expect(
+      new SubmissionController().begin(
+        { scopeKey: 'scope', value: 'web', revision: 0 },
+        { mentions: [], localImages: [] },
+      ).id,
+    ).toMatch(/^submission-.+-1$/);
   });
 
   it('restores only the unchanged draft in the original profile and thread scope', () => {
@@ -24,20 +28,18 @@ describe('submissionController', () => {
     const scopeKey = submissionScopeKey({ profileId: 'profile-a', threadId: 'thread-1' });
     const submission = controller.begin(
       { scopeKey, value: 'hello', revision: 2 },
-      { mentions: ['/repo/a.ts'], localImages: ['/repo/a.png'] }
+      { mentions: ['/repo/a.ts'], localImages: ['/repo/a.png'] },
     );
     controller.markCleared(submission, 3);
 
     expect(controller.fail(submission, { scopeKey, value: '', revision: 3 })).toBe(true);
-    expect(
-      controller.fail(submission, { scopeKey, value: 'newer edit', revision: 4 })
-    ).toBe(false);
+    expect(controller.fail(submission, { scopeKey, value: 'newer edit', revision: 4 })).toBe(false);
     expect(
       controller.fail(submission, {
         scopeKey: submissionScopeKey({ profileId: 'profile-b', threadId: 'thread-1' }),
         value: '',
         revision: 3,
-      })
+      }),
     ).toBe(false);
   });
 
@@ -54,11 +56,11 @@ describe('submissionController', () => {
 
   it('normalizes scopes and generates an id when the injected id is blank', () => {
     expect(submissionScopeKey({ profileId: ' profile ', threadId: '  ' })).toBe(
-      JSON.stringify(['profile', null])
+      JSON.stringify(['profile', null]),
     );
     const submission = new SubmissionController(() => ' ').begin(
       { scopeKey: 'scope', value: 'draft', revision: 0 },
-      { mentions: [], localImages: [] }
+      { mentions: [], localImages: [] },
     );
     expect(submission.id).toMatch(/^submission-.+-1$/);
   });
@@ -80,13 +82,15 @@ describe('submissionController', () => {
     for (let index = 0; index < 34; index += 1) {
       const submission = controller.begin(
         { scopeKey: 'scope', value: `draft-${index}`, revision: index },
-        { mentions: [], localImages: [] }
+        { mentions: [], localImages: [] },
       );
       controller.fail(submission, { scopeKey: 'scope', value: 'changed', revision: index });
     }
-    expect(controller.begin(
-      { scopeKey: 'scope', value: 'draft-0', revision: 0 },
-      { mentions: [], localImages: [] }
-    ).id).not.toBe('id-1');
+    expect(
+      controller.begin(
+        { scopeKey: 'scope', value: 'draft-0', revision: 0 },
+        { mentions: [], localImages: [] },
+      ).id,
+    ).not.toBe('id-1');
   });
 });

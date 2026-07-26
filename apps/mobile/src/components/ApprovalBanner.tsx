@@ -30,11 +30,10 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
     }
   };
 
-  const label = approval.kind === 'commandExecution'
-    ? approval.command ?? 'Run command'
-    : 'File change';
+  const label =
+    approval.kind === 'commandExecution' ? (approval.command ?? 'Run command') : 'File change';
   useAccessibilityAnnouncement(
-    resolving ? `Resolving approval: ${resolving}` : `Approval requested. ${label}`
+    resolving ? `Resolving approval: ${resolving}` : `Approval requested. ${label}`,
   );
 
   return (
@@ -44,7 +43,12 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
       accessibilityLiveRegion="assertive"
     >
       <View style={styles.header}>
-        <Ionicons {...decorativeAccessibilityProps} name="shield-checkmark-outline" size={16} color={colors.accent} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="shield-checkmark-outline"
+          size={16}
+          color={colors.accent}
+        />
         <Text style={styles.title}>Approval requested</Text>
       </View>
 
@@ -53,35 +57,55 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
       </Text>
 
       {approval.reason ? (
-        <Text style={styles.reason} numberOfLines={2}>{approval.reason}</Text>
+        <Text style={styles.reason} numberOfLines={2}>
+          {approval.reason}
+        </Text>
       ) : null}
 
       <View style={styles.actions}>
         {approval.options.map((option) => {
           const destructive = option.kind?.toLowerCase().includes('reject') ?? false;
           return (
-          <Pressable
-            key={option.id}
-            style={({ pressed }) => [
-              styles.btn,
-              destructive ? styles.denyBtn : styles.acceptBtn,
-              pressed && styles.btnPressed,
-            ]}
-            onPress={() => void handleResolve(option.id)}
-            disabled={resolving !== null}
-            accessibilityRole="button"
-            accessibilityLabel={option.label}
-            accessibilityState={controlAccessibilityState({ disabled: resolving !== null, busy: resolving === option.id })}
-          >
-            {resolving === option.id ? (
-              <ActivityIndicator size="small" color={destructive ? colors.error : colors.textPrimary} />
-            ) : (
-              <>
-                <Ionicons {...decorativeAccessibilityProps} name={destructive ? 'close' : 'checkmark'} size={14} color={destructive ? colors.error : colors.textPrimary} />
-                <Text style={[styles.btnText, { color: destructive ? colors.error : colors.textPrimary }]}>{option.label}</Text>
-              </>
-            )}
-          </Pressable>
+            <Pressable
+              key={option.id}
+              style={({ pressed }) => [
+                styles.btn,
+                destructive ? styles.denyBtn : styles.acceptBtn,
+                pressed && styles.btnPressed,
+              ]}
+              onPress={() => void handleResolve(option.id)}
+              disabled={resolving !== null}
+              accessibilityRole="button"
+              accessibilityLabel={option.label}
+              accessibilityState={controlAccessibilityState({
+                disabled: resolving !== null,
+                busy: resolving === option.id,
+              })}
+            >
+              {resolving === option.id ? (
+                <ActivityIndicator
+                  size="small"
+                  color={destructive ? colors.error : colors.textPrimary}
+                />
+              ) : (
+                <>
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name={destructive ? 'close' : 'checkmark'}
+                    size={14}
+                    color={destructive ? colors.error : colors.textPrimary}
+                  />
+                  <Text
+                    style={[
+                      styles.btnText,
+                      { color: destructive ? colors.error : colors.textPrimary },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </>
+              )}
+            </Pressable>
           );
         })}
       </View>
@@ -93,7 +117,7 @@ export async function runApprovalResolution(
   id: string,
   optionId: string,
   resolve: (id: string, optionId: string) => Promise<void>,
-  setResolving: (value: string | null) => void
+  setResolving: (value: string | null) => void,
 ): Promise<void> {
   setResolving(optionId);
   try {

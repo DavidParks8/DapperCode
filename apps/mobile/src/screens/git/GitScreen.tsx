@@ -48,12 +48,17 @@ export function GitScreen({ chat }: GitScreenProps) {
           ? 'Pushing changes'
           : controller.switchingBranch
             ? 'Switching branch'
-            : null
+            : null,
   );
 
   return (
     <SafeAreaView style={styles.container}>
-      <GitScreenHeaderSection controller={controller} styles={styles} theme={theme} onBack={onBack} />
+      <GitScreenHeaderSection
+        controller={controller}
+        styles={styles}
+        theme={theme}
+        onBack={onBack}
+      />
 
       <ScrollView
         style={styles.body}
@@ -80,7 +85,11 @@ export function GitScreen({ chat }: GitScreenProps) {
         )}
 
         {controller.error ? (
-          <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+            style={styles.errorText}
+          >
             {controller.error}
           </Text>
         ) : null}

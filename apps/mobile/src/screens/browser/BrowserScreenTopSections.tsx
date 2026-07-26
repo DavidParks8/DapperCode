@@ -1,26 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
 import { useAppTheme } from '../../theme';
 import { createBrowserScreenStyles } from './browserScreenStyles';
 import { VIEWPORT_MODES, type ViewportPreset } from './browserScreenShared';
 
-export function StatusBanner({
-  tone,
-  message,
-}: {
-  tone: 'warning' | 'error';
-  message: string;
-}) {
+export function StatusBanner({ tone, message }: { tone: 'warning' | 'error'; message: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createBrowserScreenStyles(theme), [theme]);
   const icon = tone === 'warning' ? 'warning-outline' : 'alert-circle-outline';
@@ -110,10 +97,7 @@ export function BrowserTopBar({
           <Pressable
             onPress={() => setInputValue('')}
             hitSlop={6}
-            style={({ pressed }) => [
-              styles.omniboxIconButton,
-              pressed && styles.iconButtonPressed,
-            ]}
+            style={({ pressed }) => [styles.omniboxIconButton, pressed && styles.iconButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Clear preview address"
           >
@@ -233,9 +217,7 @@ export function ViewportTray({
             name="options-outline"
             size={14}
             color={
-              desktopModeEnabled || showViewportMenu
-                ? colors.textPrimary
-                : colors.textSecondary
+              desktopModeEnabled || showViewportMenu ? colors.textPrimary : colors.textSecondary
             }
           />
           <Text

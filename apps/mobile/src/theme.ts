@@ -1,14 +1,5 @@
-import {
-  createContext,
-  createElement,
-  useContext,
-  type PropsWithChildren,
-} from 'react';
-import {
-  Platform,
-  type ColorSchemeName,
-  type TextStyle,
-} from 'react-native';
+import { createContext, createElement, useContext, type PropsWithChildren } from 'react';
+import { Platform, type ColorSchemeName, type TextStyle } from 'react-native';
 
 import { SYSTEM_FONT_FAMILIES, type AppFontFamilies } from './fonts';
 
@@ -81,7 +72,8 @@ export interface AppTheme {
   typography: AppTypography;
   keyboardAppearance: 'light' | 'dark';
   blurTint: 'light' | 'dark';
-  activityBarTint: 'light' | 'dark' | 'systemUltraThinMaterialLight' | 'systemUltraThinMaterialDark';
+  activityBarTint:
+    'light' | 'dark' | 'systemUltraThinMaterialLight' | 'systemUltraThinMaterialDark';
   statusBarStyle: 'dark-content' | 'light-content';
 }
 
@@ -279,7 +271,7 @@ function createTypography(colors: AppColors, fonts: AppFontFamilies): AppTypogra
 
 export function resolveThemeMode(
   preference: AppearancePreference,
-  systemScheme: ColorSchemeName
+  systemScheme: ColorSchemeName,
 ): ThemeMode {
   if (preference === 'light' || preference === 'dark') {
     return preference;
@@ -290,14 +282,10 @@ export function resolveThemeMode(
 
 export function createAppTheme(
   mode: ThemeMode,
-  darkUiPalette: DarkUiPalette = 'classic'
+  darkUiPalette: DarkUiPalette = 'classic',
 ): AppTheme {
   const colors =
-    mode === 'light'
-      ? lightColors
-      : darkUiPalette === 'grey'
-        ? darkGreyColors
-        : darkClassicColors;
+    mode === 'light' ? lightColors : darkUiPalette === 'grey' ? darkGreyColors : darkClassicColors;
   const isDark = mode === 'dark';
   const fonts = SYSTEM_FONT_FAMILIES;
   return {
@@ -311,13 +299,14 @@ export function createAppTheme(
     typography: createTypography(colors, fonts),
     keyboardAppearance: isDark ? 'dark' : 'light',
     blurTint: isDark ? 'dark' : 'light',
-    activityBarTint: Platform.OS === 'ios'
-      ? isDark
-        ? 'systemUltraThinMaterialDark'
-        : 'systemUltraThinMaterialLight'
-      : isDark
-        ? 'dark'
-        : 'light',
+    activityBarTint:
+      Platform.OS === 'ios'
+        ? isDark
+          ? 'systemUltraThinMaterialDark'
+          : 'systemUltraThinMaterialLight'
+        : isDark
+          ? 'dark'
+          : 'light',
     statusBarStyle: isDark ? 'light-content' : 'dark-content',
   };
 }
@@ -328,10 +317,7 @@ export const typography: AppTypography = { ...fallbackTheme.typography };
 
 const AppThemeContext = createContext<AppTheme>(fallbackTheme);
 
-export function AppThemeProvider({
-  theme,
-  children,
-}: PropsWithChildren<{ theme: AppTheme }>) {
+export function AppThemeProvider({ theme, children }: PropsWithChildren<{ theme: AppTheme }>) {
   Object.assign(colors, theme.colors);
   Object.assign(typography, theme.typography);
   return createElement(AppThemeContext.Provider, { value: theme }, children);

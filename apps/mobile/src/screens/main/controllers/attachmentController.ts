@@ -109,7 +109,7 @@ export function useAttachmentController({
       setError(null);
       return true;
     },
-    [setError]
+    [setError],
   );
 
   const addImage = useCallback(
@@ -119,13 +119,13 @@ export function useAttachmentController({
         setError('Image path is invalid');
         return false;
       }
-      setPendingLocalImagePaths((current) =>
-        addUniqueAttachmentPath(current, normalized) ?? current
+      setPendingLocalImagePaths(
+        (current) => addUniqueAttachmentPath(current, normalized) ?? current,
       );
       setError(null);
       return true;
     },
-    [setError]
+    [setError],
   );
 
   const {
@@ -158,7 +158,7 @@ export function useAttachmentController({
         return [];
       }
     },
-    [api]
+    [api],
   );
 
   const loadCandidates = useCallback(
@@ -193,7 +193,7 @@ export function useAttachmentController({
       }
       return lines;
     },
-    [fetchCandidates, workspace]
+    [fetchCandidates, workspace],
   );
 
   const openPathModal = useCallback(() => {
@@ -224,9 +224,7 @@ export function useAttachmentController({
       return;
     }
     setPendingMentionPaths((current) => {
-      const next = current.filter((path) =>
-        draftContainsMentionLabel(draft, toPathBasename(path))
-      );
+      const next = current.filter((path) => draftContainsMentionLabel(draft, toPathBasename(path)));
       return next.length === current.length ? current : next;
     });
   }, [draft]);
@@ -265,18 +263,17 @@ export function useAttachmentController({
   }, []);
 
   const composerAttachments = useMemo(
-    () =>
-      [
-        ...pendingLocalImagePaths.map((path) => ({
-          id: `image:${path}`,
-          label: `image · ${toPathBasename(path)}`,
-        })),
-        ...preparedAttachments.map((attachment) => ({
-          id: `prepared:${attachment.id}`,
-          label: `${attachment.status === 'failed' ? 'retry' : 'uploading'} · ${attachment.fileName ?? toPathBasename(attachment.uri)}`,
-        })),
-      ],
-    [pendingLocalImagePaths, preparedAttachments]
+    () => [
+      ...pendingLocalImagePaths.map((path) => ({
+        id: `image:${path}`,
+        label: `image · ${toPathBasename(path)}`,
+      })),
+      ...preparedAttachments.map((attachment) => ({
+        id: `prepared:${attachment.id}`,
+        label: `${attachment.status === 'failed' ? 'retry' : 'uploading'} · ${attachment.fileName ?? toPathBasename(attachment.uri)}`,
+      })),
+    ],
+    [pendingLocalImagePaths, preparedAttachments],
   );
 
   return {
@@ -295,7 +292,7 @@ export function useAttachmentController({
     pathSuggestions: toAttachmentPathSuggestions(
       fileCandidates,
       attachmentPathDraft,
-      pendingMentionPaths
+      pendingMentionPaths,
     ),
     mentionSuggestions: (query) =>
       toAttachmentPathSuggestions(fileCandidates, query, pendingMentionPaths),
@@ -326,14 +323,14 @@ export function useAttachmentController({
     selectMentionSuggestion: (path) => {
       if (addMention(path)) {
         setDraft((current) =>
-          replaceActiveMentionQueryWithSelection(current, toPathBasename(path))
+          replaceActiveMentionQueryWithSelection(current, toPathBasename(path)),
         );
       }
     },
     removeComposerAttachment: (id) => {
       if (id.startsWith('prepared:')) {
         setPreparedAttachments((current) =>
-          current.filter((entry) => entry.id !== id.slice('prepared:'.length))
+          current.filter((entry) => entry.id !== id.slice('prepared:'.length)),
         );
       } else if (id.startsWith('file:')) {
         setPendingMentionPaths((current) => current.filter((path) => path !== id.slice(5)));

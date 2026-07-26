@@ -19,8 +19,11 @@ export function GitScreenReviewSection({ controller, styles, theme }: GitSection
               <Text style={styles.reviewTraySubtitle}>
                 {String(controller.reviewComments.length)} comment
                 {controller.reviewComments.length === 1 ? '' : 's'} across{' '}
-                {String(new Set(controller.reviewComments.map((comment) => comment.fileId)).size)} file
-                {new Set(controller.reviewComments.map((comment) => comment.fileId)).size === 1 ? '' : 's'}
+                {String(new Set(controller.reviewComments.map((comment) => comment.fileId)).size)}{' '}
+                file
+                {new Set(controller.reviewComments.map((comment) => comment.fileId)).size === 1
+                  ? ''
+                  : 's'}
               </Text>
             </View>
             <Pressable onPress={() => controller.setReviewComments([])} hitSlop={6}>
@@ -34,7 +37,10 @@ export function GitScreenReviewSection({ controller, styles, theme }: GitSection
                 controller.selectDiffFile(comment.fileId);
                 controller.openReviewComment(comment);
               }}
-              style={({ pressed }) => [styles.reviewTrayComment, pressed && styles.reviewTrayCommentPressed]}
+              style={({ pressed }) => [
+                styles.reviewTrayComment,
+                pressed && styles.reviewTrayCommentPressed,
+              ]}
             >
               <Text style={styles.reviewTrayCommentAnchor} numberOfLines={1}>
                 {comment.path} · {comment.side} {String(comment.line)}
@@ -72,7 +78,11 @@ export function GitScreenReviewSection({ controller, styles, theme }: GitSection
       >
         <View style={styles.reviewModalHeader}>
           <View style={styles.reviewModalTitleBlock}>
-            <Text ref={reviewModalFocusRef} accessibilityRole="header" style={styles.reviewModalEyebrow}>
+            <Text
+              ref={reviewModalFocusRef}
+              accessibilityRole="header"
+              style={styles.reviewModalEyebrow}
+            >
               Inline comment
             </Text>
             <Text style={styles.reviewModalTitle} numberOfLines={2}>

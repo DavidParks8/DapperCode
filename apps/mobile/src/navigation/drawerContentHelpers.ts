@@ -18,7 +18,7 @@ export function dedupeChatsById(chats: ChatSummary[]): ChatSummary[] {
 
 export function mergeDrawerChatBatch(
   previous: ChatSummary[],
-  incoming: ChatSummary[]
+  incoming: ChatSummary[],
 ): ChatSummary[] {
   if (previous.length === 0) return sortChats(incoming);
   const byId = new Map(previous.map((chat) => [chat.id, chat]));
@@ -31,10 +31,7 @@ export function mergeDrawerChatBatch(
   return sortChats(Array.from(byId.values()));
 }
 
-function shouldReplaceChatSummary(
-  existing: ChatSummary,
-  incoming: ChatSummary
-): boolean {
+function shouldReplaceChatSummary(existing: ChatSummary, incoming: ChatSummary): boolean {
   const updatedAtDiff = incoming.updatedAt.localeCompare(existing.updatedAt);
   if (updatedAtDiff !== 0) {
     return updatedAtDiff > 0;
@@ -44,18 +41,25 @@ function shouldReplaceChatSummary(
 
 export function areDrawerChatListsEquivalent(
   previous: ChatSummary[],
-  next: ChatSummary[]
+  next: ChatSummary[],
 ): boolean {
   if (previous === next) return true;
   if (previous.length !== next.length) return false;
   return previous.every((left, index) => {
     const right = next[index];
-    return left.id === right.id && left.title === right.title &&
-      left.status === right.status && left.updatedAt === right.updatedAt &&
-      left.lastMessagePreview === right.lastMessagePreview && left.cwd === right.cwd &&
-      left.agentId === right.agentId && left.sourceKind === right.sourceKind &&
-      left.parentThreadId === right.parentThreadId && left.subAgentDepth === right.subAgentDepth &&
-      left.lastError === right.lastError;
+    return (
+      left.id === right.id &&
+      left.title === right.title &&
+      left.status === right.status &&
+      left.updatedAt === right.updatedAt &&
+      left.lastMessagePreview === right.lastMessagePreview &&
+      left.cwd === right.cwd &&
+      left.agentId === right.agentId &&
+      left.sourceKind === right.sourceKind &&
+      left.parentThreadId === right.parentThreadId &&
+      left.subAgentDepth === right.subAgentDepth &&
+      left.lastError === right.lastError
+    );
   });
 }
 
@@ -81,7 +85,5 @@ export function formatCompactCount(value: number): string {
 }
 
 export function normalizeWorkspaceChatLimit(value: WorkspaceChatLimit): WorkspaceChatLimit {
-  return value === 10 || value === 25 || value === null
-    ? value
-    : DEFAULT_WORKSPACE_CHAT_LIMIT;
+  return value === 10 || value === 25 || value === null ? value : DEFAULT_WORKSPACE_CHAT_LIMIT;
 }

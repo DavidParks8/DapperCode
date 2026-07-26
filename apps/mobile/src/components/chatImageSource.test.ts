@@ -6,8 +6,8 @@ describe('chatImageSource', () => {
       toMarkdownImageSource(
         'https://example.com/image.png',
         'http://192.168.1.26:8787',
-        'secret-token'
-      )
+        'secret-token',
+      ),
     ).toEqual({
       uri: 'https://example.com/image.png',
     });
@@ -18,8 +18,8 @@ describe('chatImageSource', () => {
       toMarkdownImageSource(
         'data:image/png;base64,abc123',
         'http://192.168.1.26:8787',
-        'secret-token'
-      )
+        'secret-token',
+      ),
     ).toEqual({
       uri: 'data:image/png;base64,abc123',
     });
@@ -27,7 +27,7 @@ describe('chatImageSource', () => {
 
   it('proxies absolute local paths through the bridge', () => {
     expect(
-      toMarkdownImageSource('/tmp/My QR.png', 'http://192.168.1.26:8787', 'secret-token')
+      toMarkdownImageSource('/tmp/My QR.png', 'http://192.168.1.26:8787', 'secret-token'),
     ).toEqual({
       uri: 'http://192.168.1.26:8787/local-image?path=%2Ftmp%2FMy%20QR.png',
       headers: {
@@ -41,8 +41,8 @@ describe('chatImageSource', () => {
       toMarkdownImageSource(
         'file:///Users/davidparks/Desktop/bridge.png',
         'http://192.168.1.26:8787',
-        null
-      )
+        null,
+      ),
     ).toEqual({
       uri: 'http://192.168.1.26:8787/local-image?path=%2FUsers%2Fdavidparks%2FDesktop%2Fbridge.png',
     });
@@ -50,7 +50,7 @@ describe('chatImageSource', () => {
 
   it('returns null for unsupported relative paths', () => {
     expect(
-      toMarkdownImageSource('./relative.png', 'http://192.168.1.26:8787', 'secret-token')
+      toMarkdownImageSource('./relative.png', 'http://192.168.1.26:8787', 'secret-token'),
     ).toBeNull();
   });
 
@@ -62,11 +62,7 @@ describe('chatImageSource', () => {
 
   it('normalizes Windows paths, encoded characters, and bridge slashes', () => {
     expect(
-      toMarkdownImageSource(
-        'C:\\Users\\me\\My%20Image.png',
-        'http://bridge.test/',
-        '  '
-      )
+      toMarkdownImageSource('C:\\Users\\me\\My%20Image.png', 'http://bridge.test/', '  '),
     ).toEqual({
       uri: 'http://bridge.test/local-image?path=%2FC%3A%2FUsers%2Fme%2FMy%20Image.png',
     });

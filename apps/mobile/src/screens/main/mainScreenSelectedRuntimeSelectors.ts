@@ -6,28 +6,32 @@ import {
   pendingUserInputRequestAtom,
   resolvingUserInputAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
   bridgeCapabilitiesAtom,
-  selectedCollaborationModeAtom
+  selectedCollaborationModeAtom,
 } from '../../state/mainScreen/models';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
-import { buildUserInputDrafts, resolveSnapshotCollaborationMode, appendRunEventHistory, upsertBridgeUiSurfaceList } from './mainScreenHelpers';
-import type { MainScreenThreadRuntimeMutationsContext, MainScreenThreadRuntimeMutationsResult } from './mainScreenThreadRuntimeMutations';
+import {
+  buildUserInputDrafts,
+  resolveSnapshotCollaborationMode,
+  appendRunEventHistory,
+  upsertBridgeUiSurfaceList,
+} from './mainScreenHelpers';
+import type {
+  MainScreenThreadRuntimeMutationsContext,
+  MainScreenThreadRuntimeMutationsResult,
+} from './mainScreenThreadRuntimeMutations';
 
+export type MainScreenSelectedRuntimeSelectorsContext = MainScreenThreadRuntimeMutationsContext &
+  MainScreenThreadRuntimeMutationsResult;
 
-
-
-
-
-export type MainScreenSelectedRuntimeSelectorsContext = MainScreenThreadRuntimeMutationsContext & MainScreenThreadRuntimeMutationsResult;
-
-export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelectedRuntimeSelectorsContext) {
+export function useMainScreenSelectedRuntimeSelectors(
+  context: MainScreenSelectedRuntimeSelectorsContext,
+) {
   const {
     api,
     approvalController,
@@ -62,7 +66,6 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
 
-
   // Held in a ref so the snapshot applier keeps a stable identity. The capability
   // is resolved for the thread being applied rather than the last rendered chat,
   // because callers apply a snapshot in the same tick they select the chat.
@@ -78,7 +81,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         ? bridgeCapabilitiesRef.current?.supportsByAgent[agentId]?.planMode === true
         : false;
     },
-    [api]
+    [api],
   );
 
   const applyThreadRuntimeSnapshot = useCallback(
@@ -99,7 +102,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
       }
 
       setSelectedCollaborationMode(
-        resolveSnapshotCollaborationMode(snapshot, supportsPlanModeForThread(threadId))
+        resolveSnapshotCollaborationMode(snapshot, supportsPlanModeForThread(threadId)),
       );
       if (snapshot.activeCommands !== undefined) {
         setActiveCommands(snapshot.activeCommands);
@@ -115,7 +118,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         setUserInputDrafts(
           snapshot.pendingUserInputRequest
             ? buildUserInputDrafts(snapshot.pendingUserInputRequest)
-            : {}
+            : {},
         );
         setUserInputError(null);
         setResolvingUserInput(false);
@@ -137,7 +140,7 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         scheduleRunWatchdogExpiry(snapshot.runWatchdogUntil);
       }
     },
-    [scheduleRunWatchdogExpiry, supportsPlanModeForThread]
+    [scheduleRunWatchdogExpiry, supportsPlanModeForThread],
   );
 
   useEffect(() => {
@@ -164,30 +167,28 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
     let cancelled = false;
 
     const load = async () => {
-        const persisted = await persistenceController.loadBridgeUiSurfaces();
-        if (cancelled) return;
-        const nextSnapshots = { ...persisted };
-        for (const [threadId, surfaces] of Object.entries(
-          bridgeUiSurfaceSnapshotsRef.current
-        )) {
-          nextSnapshots[threadId] = surfaces.reduce(
-            (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
-            nextSnapshots[threadId] ?? []
-          );
-        }
+      const persisted = await persistenceController.loadBridgeUiSurfaces();
+      if (cancelled) return;
+      const nextSnapshots = { ...persisted };
+      for (const [threadId, surfaces] of Object.entries(bridgeUiSurfaceSnapshotsRef.current)) {
+        nextSnapshots[threadId] = surfaces.reduce(
+          (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
+          nextSnapshots[threadId] ?? [],
+        );
+      }
 
-        bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
-        for (const [threadId, surfaces] of Object.entries(nextSnapshots)) {
-          upsertThreadRuntimeSnapshot(threadId, (previous) => ({
-            bridgeUiSurfaces: (previous.bridgeUiSurfaces ?? []).reduce(
-              (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
-              surfaces
-            ),
-          }));
-        }
-        if (chatIdRef.current) {
-          applyThreadRuntimeSnapshot(chatIdRef.current);
-        }
+      bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
+      for (const [threadId, surfaces] of Object.entries(nextSnapshots)) {
+        upsertThreadRuntimeSnapshot(threadId, (previous) => ({
+          bridgeUiSurfaces: (previous.bridgeUiSurfaces ?? []).reduce(
+            (merged, surface) => upsertBridgeUiSurfaceList(merged, surface),
+            surfaces,
+          ),
+        }));
+      }
+      if (chatIdRef.current) {
+        applyThreadRuntimeSnapshot(chatIdRef.current);
+      }
     };
 
     void load();
@@ -215,17 +216,12 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
         // Best effort hydration for externally-started turns.
       }
     },
-    [approvalController, cacheThreadPendingApproval]
+    [approvalController, cacheThreadPendingApproval],
   );
 
-  const pushActiveCommand = useCallback(
-    (threadId: string, eventType: string, detail: string) => {
-      setActiveCommands((prev) =>
-        appendRunEventHistory(prev, threadId, eventType, detail)
-      );
-    },
-    []
-  );
+  const pushActiveCommand = useCallback((threadId: string, eventType: string, detail: string) => {
+    setActiveCommands((prev) => appendRunEventHistory(prev, threadId, eventType, detail));
+  }, []);
 
   useEffect(() => {
     onChatContextChange?.(selectedChat);
@@ -264,4 +260,6 @@ export function useMainScreenSelectedRuntimeSelectors(context: MainScreenSelecte
   };
 }
 
-export type MainScreenSelectedRuntimeSelectorsResult = ReturnType<typeof useMainScreenSelectedRuntimeSelectors>;
+export type MainScreenSelectedRuntimeSelectorsResult = ReturnType<
+  typeof useMainScreenSelectedRuntimeSelectors
+>;

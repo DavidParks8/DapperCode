@@ -13,12 +13,14 @@ export interface ParsedComputerUseTraceEntry {
 
 const COMPUTER_USE_SERVER_KEYS = new Set(['computeruse']);
 
-export function isComputerUseTraceEntry(entry: Pick<ComputerUseTraceSourceEntry, 'title'>): boolean {
+export function isComputerUseTraceEntry(
+  entry: Pick<ComputerUseTraceSourceEntry, 'title'>,
+): boolean {
   return parseComputerUseToolLabel(entry.title) !== null;
 }
 
 export function parseComputerUseTraceEntry(
-  entry: Pick<ComputerUseTraceSourceEntry, 'title' | 'details'>
+  entry: Pick<ComputerUseTraceSourceEntry, 'title' | 'details'>,
 ): ParsedComputerUseTraceEntry | null {
   const toolLabel = parseComputerUseToolLabel(entry.title);
   if (!toolLabel) {
@@ -56,7 +58,9 @@ export function parseComputerUseTraceEntry(
   };
 }
 
-export function computerUseActionIconName(actionKey: string):
+export function computerUseActionIconName(
+  actionKey: string,
+):
   | 'scan-outline'
   | 'radio-button-on-outline'
   | 'swap-vertical-outline'
@@ -89,7 +93,7 @@ export function computerUseActionIconName(actionKey: string):
 }
 
 function parseComputerUseToolLabel(
-  title: string
+  title: string,
 ): { actionKey: string; rawActionName: string } | null {
   const labelMatch = title.match(/`([^`]+)`/);
   const label = labelMatch?.[1]?.trim();
@@ -115,7 +119,7 @@ function parseComputerUseToolLabel(
 }
 
 function parseComputerUseWindowMetadata(
-  detail: string
+  detail: string,
 ): { appName: string | null; windowTitle: string | null } | null {
   const match = detail.match(/^Window:\s*(.+?)(?:,\s*App:\s*([^,]+?))?\.?$/i);
   if (!match) {
@@ -196,7 +200,7 @@ function humanizeToken(value: string): string {
   return normalized
     .split(' ')
     .map((segment) =>
-      segment.length > 0 ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment
+      segment.length > 0 ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment,
     )
     .join(' ');
 }

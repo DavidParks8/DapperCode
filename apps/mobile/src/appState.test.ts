@@ -11,7 +11,7 @@ import {
 import { createAppStateHarness } from './state/testing';
 
 function createPersistence(
-  overrides: Partial<AppStatePersistenceAdapter> = {}
+  overrides: Partial<AppStatePersistenceAdapter> = {},
 ): AppStatePersistenceAdapter {
   return {
     readCurrent: jest.fn().mockResolvedValue(serializeAppState(createDefaultAppStateData())),
@@ -30,10 +30,15 @@ const profileDraft = {
 };
 
 function withProfile() {
-  return appStateReducer(createDefaultAppStateData(), { type: 'profiles/save', draft: profileDraft });
+  return appStateReducer(createDefaultAppStateData(), {
+    type: 'profiles/save',
+    draft: profileDraft,
+  });
 }
 
-function persistence(overrides: Partial<AppStatePersistenceAdapter> = {}): AppStatePersistenceAdapter {
+function persistence(
+  overrides: Partial<AppStatePersistenceAdapter> = {},
+): AppStatePersistenceAdapter {
   return {
     readCurrent: jest.fn().mockResolvedValue(null),
     readLegacy: jest.fn().mockResolvedValue({ settingsRaw: null, bridgeProfilesRaw: null }),
@@ -48,57 +53,139 @@ describe('current appState production behavior', () => {
     const profileId = state.bridgeProfiles.activeProfileId as string;
     state = appStateReducer(state, {
       type: 'settings/update',
-      patch: { defaultStartCwd: ' /workspace ', showToolCalls: false, recentBrowserTargetUrls: ['3000', '3000'] },
+      patch: {
+        defaultStartCwd: ' /workspace ',
+        showToolCalls: false,
+        recentBrowserTargetUrls: ['3000', '3000'],
+      },
     });
-    expect(state.settings).toEqual(expect.objectContaining({ defaultStartCwd: '/workspace', showToolCalls: false }));
+    expect(state.settings).toEqual(
+      expect.objectContaining({ defaultStartCwd: '/workspace', showToolCalls: false }),
+    );
     expect(state.settings.recentBrowserTargetUrls).toEqual(['http://127.0.0.1:3000/']);
-    state = appStateReducer(state, { type: 'settings/remember-thread', agentId: ' codex ', collaborationMode: 'plan' });
+    state = appStateReducer(state, {
+      type: 'settings/remember-thread',
+      agentId: ' codex ',
+      collaborationMode: 'plan',
+    });
     expect(state.settings.preferredAgentId).toBe('codex');
     expect(state.settings.agentSettings.codex.collaborationMode).toBe('plan');
-    expect(appStateReducer(state, { type: 'settings/remember-thread', agentId: ' ', collaborationMode: 'default' })).toBe(state);
-    state = appStateReducer(state, { type: 'push/ensure-registration', profileId, registrationId: ' registration ' });
-    state = appStateReducer(state, { type: 'push/ensure-registration', profileId, registrationId: 'ignored' });
-    expect(state.push.registrations).toEqual([{ profileId, registrationId: 'registration', token: null }]);
-    state = appStateReducer(state, { type: 'push/registered', profileId, registrationId: 'registration', token: ' push-token ' });
+    expect(
+      appStateReducer(state, {
+        type: 'settings/remember-thread',
+        agentId: ' ',
+        collaborationMode: 'default',
+      }),
+    ).toBe(state);
+    state = appStateReducer(state, {
+      type: 'push/ensure-registration',
+      profileId,
+      registrationId: ' registration ',
+    });
+    state = appStateReducer(state, {
+      type: 'push/ensure-registration',
+      profileId,
+      registrationId: 'ignored',
+    });
+    expect(state.push.registrations).toEqual([
+      { profileId, registrationId: 'registration', token: null },
+    ]);
+    state = appStateReducer(state, {
+      type: 'push/registered',
+      profileId,
+      registrationId: 'registration',
+      token: ' push-token ',
+    });
     expect(state.push.registrations[0].token).toBe('push-token');
-    state = appStateReducer(state, { type: 'push/unregistered', profileId, registrationId: 'registration' });
+    state = appStateReducer(state, {
+      type: 'push/unregistered',
+      profileId,
+      registrationId: 'registration',
+    });
     expect(state.push.registrations).toEqual([]);
     state = appStateReducer(state, { type: 'profiles/rename', profileId, name: 'Renamed' });
     state = appStateReducer(state, { type: 'profiles/remove', profileId });
     expect(state.bridgeProfiles.profiles).toEqual([]);
-    expect(appStateReducer(withProfile(), { type: 'profiles/clear' }).bridgeProfiles.activeProfileId).toBeNull();
+    expect(
+      appStateReducer(withProfile(), { type: 'profiles/clear' }).bridgeProfiles.activeProfileId,
+    ).toBeNull();
   });
 
   it('rejects invalid actions and clears registration on identity changes', () => {
     const state = withProfile();
     const profileId = state.bridgeProfiles.activeProfileId as string;
-    expect(() => appStateReducer(state, { type: 'profiles/switch', profileId: 'missing' })).toThrow('no longer exists');
-    expect(appStateReducer(state, { type: 'push/ensure-registration', profileId: 'missing', registrationId: 'id' })).toBe(state);
-    expect(() => appStateReducer(state, { type: 'push/ensure-registration', profileId, registrationId: ' ' })).toThrow('registrationId');
-    expect(() => appStateReducer(state, { type: 'push/registered', profileId, registrationId: 'missing', token: ' ' })).toThrow('token');
-    const registered = appStateReducer(state, { type: 'push/ensure-registration', profileId, registrationId: 'id' });
-    const changed = appStateReducer(registered, { type: 'profiles/save', draft: { ...profileDraft, id: profileId, bridgeUrl: 'http://127.0.0.1:4000' } });
+    expect(() => appStateReducer(state, { type: 'profiles/switch', profileId: 'missing' })).toThrow(
+      'no longer exists',
+    );
+    expect(
+      appStateReducer(state, {
+        type: 'push/ensure-registration',
+        profileId: 'missing',
+        registrationId: 'id',
+      }),
+    ).toBe(state);
+    expect(() =>
+      appStateReducer(state, { type: 'push/ensure-registration', profileId, registrationId: ' ' }),
+    ).toThrow('registrationId');
+    expect(() =>
+      appStateReducer(state, {
+        type: 'push/registered',
+        profileId,
+        registrationId: 'missing',
+        token: ' ',
+      }),
+    ).toThrow('token');
+    const registered = appStateReducer(state, {
+      type: 'push/ensure-registration',
+      profileId,
+      registrationId: 'id',
+    });
+    const changed = appStateReducer(registered, {
+      type: 'profiles/save',
+      draft: { ...profileDraft, id: profileId, bridgeUrl: 'http://127.0.0.1:4000' },
+    });
     expect(changed.push.registrations).toEqual([]);
   });
 
   it('serializes supported versions, normalizes push data, and rejects corrupt state', () => {
     const state = withProfile();
     const profileId = state.bridgeProfiles.activeProfileId as string;
-    const raw = serializeAppState({ ...state, push: { optedOut: true, events: { turnCompleted: false, approvalRequested: true }, registrations: [
-      { profileId, registrationId: 'one', token: 'token' },
-      { profileId, registrationId: 'duplicate-profile', token: null },
-      { profileId: 'missing', registrationId: 'missing', token: null },
-    ] } });
+    const raw = serializeAppState({
+      ...state,
+      push: {
+        optedOut: true,
+        events: { turnCompleted: false, approvalRequested: true },
+        registrations: [
+          { profileId, registrationId: 'one', token: 'token' },
+          { profileId, registrationId: 'duplicate-profile', token: null },
+          { profileId: 'missing', registrationId: 'missing', token: null },
+        ],
+      },
+    });
     expect(parsePersistedAppState(raw).push.registrations).toHaveLength(1);
-    for (const version of [1, 2, 3]) expect(parsePersistedAppState(JSON.stringify({ ...JSON.parse(raw), version })).bridgeProfiles.profiles).toHaveLength(1);
-    for (const rawValue of ['', '{}', '{bad', JSON.stringify({ version: 99 })]) expect(() => parsePersistedAppState(rawValue)).toThrow(AppStatePersistenceError);
+    for (const version of [1, 2, 3])
+      expect(
+        parsePersistedAppState(JSON.stringify({ ...JSON.parse(raw), version })).bridgeProfiles
+          .profiles,
+      ).toHaveLength(1);
+    for (const rawValue of ['', '{}', '{bad', JSON.stringify({ version: 99 })])
+      expect(() => parsePersistedAppState(rawValue)).toThrow(AppStatePersistenceError);
   });
 
   it('imports legacy credentials and initializes current, legacy, and failed stores', async () => {
-    const settingsRaw = JSON.stringify({ version: 13, bridgeUrl: 'http://127.0.0.1:3001', bridgeToken: 'token', defaultStartCwd: '/workspace' });
-    expect(importLegacyAppState({ settingsRaw, bridgeProfilesRaw: null }).bridgeProfiles.profiles).toHaveLength(1);
+    const settingsRaw = JSON.stringify({
+      version: 13,
+      bridgeUrl: 'http://127.0.0.1:3001',
+      bridgeToken: 'token',
+      defaultStartCwd: '/workspace',
+    });
+    expect(
+      importLegacyAppState({ settingsRaw, bridgeProfilesRaw: null }).bridgeProfiles.profiles,
+    ).toHaveLength(1);
     const current = withProfile();
-    const currentStore = createAppStateHarness(persistence({ readCurrent: jest.fn().mockResolvedValue(serializeAppState(current)) }));
+    const currentStore = createAppStateHarness(
+      persistence({ readCurrent: jest.fn().mockResolvedValue(serializeAppState(current)) }),
+    );
     const listener = jest.fn();
     currentStore.subscribe(listener);
     await currentStore.initialize();
@@ -106,7 +193,10 @@ describe('current appState production behavior', () => {
     const legacyPersistence = persistence();
     await createAppStateHarness(legacyPersistence).initialize();
     expect(legacyPersistence.writeCurrent).toHaveBeenCalled();
-    for (const adapter of [persistence({ readCurrent: jest.fn().mockRejectedValue(new Error('read')) }), persistence({ readLegacy: jest.fn().mockRejectedValue(new Error('legacy')) })]) {
+    for (const adapter of [
+      persistence({ readCurrent: jest.fn().mockRejectedValue(new Error('read')) }),
+      persistence({ readLegacy: jest.fn().mockRejectedValue(new Error('legacy')) }),
+    ]) {
       const store = createAppStateHarness(adapter);
       await store.initialize();
       expect(store.getSnapshot().persistenceError).toBeInstanceOf(AppStatePersistenceError);
@@ -128,7 +218,9 @@ describe('current appState production behavior', () => {
     await store.retryPersistence();
     expect(store.getSnapshot().persistenceError).toBeNull();
     (adapter.writeCurrent as jest.Mock).mockRejectedValueOnce(new Error('durable failed'));
-    await expect(store.dispatchDurable({ type: 'profiles/save', draft: profileDraft })).rejects.toBeInstanceOf(AppStatePersistenceError);
+    await expect(
+      store.dispatchDurable({ type: 'profiles/save', draft: profileDraft }),
+    ).rejects.toBeInstanceOf(AppStatePersistenceError);
   });
 });
 
@@ -181,10 +273,10 @@ describe('appStateReducer', () => {
       registrationId: 'registration-1',
     });
     const replacement = appStateReducer(registered, {
-        type: 'push/ensure-registration',
-        profileId: 'profile-1',
-        registrationId: 'registration-2',
-      });
+      type: 'push/ensure-registration',
+      profileId: 'profile-1',
+      registrationId: 'registration-2',
+    });
     expect(replacement.push.registrations[0]?.registrationId).toBe('registration-1');
   });
 
@@ -230,7 +322,7 @@ describe('appStateReducer', () => {
     state = appStateReducer(state, { type: 'profiles/switch', profileId });
     expect(state.bridgeProfiles.activeProfileId).toBe(profileId);
     expect(() => appStateReducer(state, { type: 'profiles/switch', profileId: 'missing' })).toThrow(
-      'no longer exists'
+      'no longer exists',
     );
     state = appStateReducer(state, { type: 'profiles/remove', profileId });
     expect(state.bridgeProfiles.profiles).toEqual([]);
@@ -245,7 +337,9 @@ describe('appStateReducer', () => {
     });
     const profileId = state.bridgeProfiles.profiles[0]!.id;
     state = appStateReducer(state, {
-      type: 'push/ensure-registration', profileId, registrationId: 'registration',
+      type: 'push/ensure-registration',
+      profileId,
+      registrationId: 'registration',
     });
     const edited = appStateReducer(state, {
       type: 'profiles/save',
@@ -275,71 +369,106 @@ describe('appStateReducer', () => {
 
   it('manages push registrations and ignores stale updates', () => {
     let state = appStateReducer(createDefaultAppStateData(), {
-      type: 'push/ensure-registration', profileId: 'missing', registrationId: 'registration',
+      type: 'push/ensure-registration',
+      profileId: 'missing',
+      registrationId: 'registration',
     });
     expect(state).toBe(state);
     state = appStateReducer(state, {
-      type: 'profiles/save', draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
+      type: 'profiles/save',
+      draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
     const profileId = state.bridgeProfiles.profiles[0]!.id;
-    expect(() => appStateReducer(state, {
-      type: 'push/ensure-registration', profileId, registrationId: ' ',
-    })).toThrow('registrationId');
+    expect(() =>
+      appStateReducer(state, {
+        type: 'push/ensure-registration',
+        profileId,
+        registrationId: ' ',
+      }),
+    ).toThrow('registrationId');
     state = appStateReducer(state, {
-      type: 'push/ensure-registration', profileId, registrationId: ' registration ',
+      type: 'push/ensure-registration',
+      profileId,
+      registrationId: ' registration ',
     });
-    expect(appStateReducer(state, {
-      type: 'push/registered', profileId, registrationId: 'stale', token: 'token',
-    })).toBe(state);
-    expect(appStateReducer(state, {
-      type: 'push/registered', profileId: 'missing', registrationId: 'registration', token: 'token',
-    })).toBe(state);
+    expect(
+      appStateReducer(state, {
+        type: 'push/registered',
+        profileId,
+        registrationId: 'stale',
+        token: 'token',
+      }),
+    ).toBe(state);
+    expect(
+      appStateReducer(state, {
+        type: 'push/registered',
+        profileId: 'missing',
+        registrationId: 'registration',
+        token: 'token',
+      }),
+    ).toBe(state);
     state = appStateReducer(state, {
-      type: 'push/registered', profileId, registrationId: 'registration', token: ' push-token ',
+      type: 'push/registered',
+      profileId,
+      registrationId: 'registration',
+      token: ' push-token ',
     });
     expect(state.push.registrations[0]?.token).toBe('push-token');
-    expect(() => appStateReducer(state, {
-      type: 'push/registered', profileId, registrationId: 'registration', token: ' ',
-    })).toThrow('token');
+    expect(() =>
+      appStateReducer(state, {
+        type: 'push/registered',
+        profileId,
+        registrationId: 'registration',
+        token: ' ',
+      }),
+    ).toThrow('token');
     state = appStateReducer(state, {
-      type: 'push/unregistered', profileId: 'other', registrationId: 'registration',
+      type: 'push/unregistered',
+      profileId: 'other',
+      registrationId: 'registration',
     });
     expect(state.push.registrations).toHaveLength(1);
     state = appStateReducer(state, {
-      type: 'push/unregistered', profileId, registrationId: 'registration',
+      type: 'push/unregistered',
+      profileId,
+      registrationId: 'registration',
     });
     expect(state.push.registrations).toEqual([]);
   });
 
   it('normalizes push preferences and malformed registrations', () => {
     const profileState = appStateReducer(createDefaultAppStateData(), {
-      type: 'profiles/save', draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
+      type: 'profiles/save',
+      draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
     const profileId = profileState.bridgeProfiles.profiles[0]!.id;
-    const parsed = parsePersistedAppState(JSON.stringify({
-      version: APP_STATE_VERSION,
-      settings: null,
-      bridgeProfiles: profileState.bridgeProfiles,
-      push: {
-        optedOut: true,
-        events: { turnCompleted: false, approvalRequested: 'yes' },
-        registrations: [
-          null,
-          {},
-          { profileId: 'missing', registrationId: 'a' },
-          { profileId, registrationId: 'one', token: 1 },
-          { profileId, registrationId: 'two', token: 'duplicate-profile' },
-          { profileId: 'missing', registrationId: 'one', token: 'duplicate-registration' },
-        ],
-      },
-    }));
+    const parsed = parsePersistedAppState(
+      JSON.stringify({
+        version: APP_STATE_VERSION,
+        settings: null,
+        bridgeProfiles: profileState.bridgeProfiles,
+        push: {
+          optedOut: true,
+          events: { turnCompleted: false, approvalRequested: 'yes' },
+          registrations: [
+            null,
+            {},
+            { profileId: 'missing', registrationId: 'a' },
+            { profileId, registrationId: 'one', token: 1 },
+            { profileId, registrationId: 'two', token: 'duplicate-profile' },
+            { profileId: 'missing', registrationId: 'one', token: 'duplicate-registration' },
+          ],
+        },
+      }),
+    );
     expect(parsed.push).toEqual({
       optedOut: true,
       events: { turnCompleted: false, approvalRequested: true },
       registrations: [{ profileId, registrationId: 'one', token: null }],
     });
     const updated = appStateReducer(parsed, {
-      type: 'push/update', patch: { optedOut: false, events: { turnCompleted: true, approvalRequested: false } },
+      type: 'push/update',
+      patch: { optedOut: false, events: { turnCompleted: true, approvalRequested: false } },
     });
     expect(updated.push.events.approvalRequested).toBe(false);
   });
@@ -370,9 +499,7 @@ describe('app-state persistence format', () => {
   });
 
   it('rejects unknown versions without falling back and overwriting them', () => {
-    expect(() => parsePersistedAppState('{"version":999}')).toThrow(
-      AppStatePersistenceError
-    );
+    expect(() => parsePersistedAppState('{"version":999}')).toThrow(AppStatePersistenceError);
   });
 
   it('rejects malformed JSON, null values, and missing versions with typed details', () => {
@@ -416,10 +543,12 @@ describe('app-state persistence format', () => {
       }),
     });
     expect(existing.bridgeProfiles.profiles.map((profile) => profile.id)).toEqual(['old']);
-    expect(importLegacyAppState({
-      settingsRaw: JSON.stringify({ version: 12, bridgeUrl: 'http://new' }),
-      bridgeProfilesRaw: null,
-    }).bridgeProfiles.profiles).toEqual([]);
+    expect(
+      importLegacyAppState({
+        settingsRaw: JSON.stringify({ version: 12, bridgeUrl: 'http://new' }),
+        bridgeProfilesRaw: null,
+      }).bridgeProfiles.profiles,
+    ).toEqual([]);
   });
 });
 
@@ -473,7 +602,7 @@ describe('app-state atoms', () => {
     await store.retryPersistence();
     expect(store.getSnapshot().persistenceError).toBeNull();
     expect(parsePersistedAppState(writeCurrent.mock.calls[1]![0]).settings.showToolCalls).toBe(
-      false
+      false,
     );
   });
 
@@ -497,7 +626,7 @@ describe('app-state atoms', () => {
       createPersistence({
         readCurrent: jest.fn().mockResolvedValue(serializeAppState(initial)),
         writeCurrent,
-      })
+      }),
     );
     await store.initialize();
 
@@ -534,10 +663,14 @@ describe('app-state atoms', () => {
 
   it.each([
     ['current read', { readCurrent: jest.fn().mockRejectedValue(new Error('read')) }, 'load'],
-    ['legacy read', {
-      readCurrent: jest.fn().mockResolvedValue(null),
-      readLegacy: jest.fn().mockRejectedValue(new Error('legacy')),
-    }, 'import'],
+    [
+      'legacy read',
+      {
+        readCurrent: jest.fn().mockResolvedValue(null),
+        readLegacy: jest.fn().mockRejectedValue(new Error('legacy')),
+      },
+      'import',
+    ],
     ['invalid current data', { readCurrent: jest.fn().mockResolvedValue('{') }, 'load'],
   ] as const)('exposes %s failures', async (_name, overrides, operation) => {
     const store = createAppStateHarness(createPersistence(overrides));
@@ -549,7 +682,8 @@ describe('app-state atoms', () => {
   });
 
   it('retries initialization after an initial read failure', async () => {
-    const readCurrent = jest.fn()
+    const readCurrent = jest
+      .fn()
       .mockRejectedValueOnce(new Error('read'))
       .mockResolvedValueOnce(serializeAppState(createDefaultAppStateData()));
     const store = createAppStateHarness(createPersistence({ readCurrent }));
@@ -560,13 +694,16 @@ describe('app-state atoms', () => {
   });
 
   it('publishes imported state when its initial write fails and retries it', async () => {
-    const writeCurrent = jest.fn()
+    const writeCurrent = jest
+      .fn()
       .mockRejectedValueOnce(new Error('disk'))
       .mockResolvedValueOnce(undefined);
-    const store = createAppStateHarness(createPersistence({
-      readCurrent: jest.fn().mockResolvedValue(null),
-      writeCurrent,
-    }));
+    const store = createAppStateHarness(
+      createPersistence({
+        readCurrent: jest.fn().mockResolvedValue(null),
+        writeCurrent,
+      }),
+    );
     await store.initialize();
     expect(store.getSnapshot().persistenceError).toMatchObject({ operation: 'import' });
     await store.retryPersistence();
@@ -577,16 +714,20 @@ describe('app-state atoms', () => {
     const writeCurrent = jest.fn().mockRejectedValue(new Error('disk'));
     const store = createAppStateHarness(createPersistence({ writeCurrent }));
     await store.initialize();
-    await expect(store.dispatchDurable({
-      type: 'settings/update', patch: { showToolCalls: false },
-    })).rejects.toMatchObject({ code: 'write_failed', operation: 'write' });
+    await expect(
+      store.dispatchDurable({
+        type: 'settings/update',
+        patch: { showToolCalls: false },
+      }),
+    ).rejects.toMatchObject({ code: 'write_failed', operation: 'write' });
     expect(store.getSnapshot().data.settings.showToolCalls).toBe(true);
   });
 
   it('initializes automatically for a durable action', async () => {
     const store = createAppStateHarness(createPersistence());
     const data = await store.dispatchDurable({
-      type: 'settings/update', patch: { appearancePreference: 'dark' },
+      type: 'settings/update',
+      patch: { appearancePreference: 'dark' },
     });
     expect(data.settings.appearancePreference).toBe('dark');
   });

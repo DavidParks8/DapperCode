@@ -112,14 +112,12 @@ export function setupNotificationHandler(): void {
 }
 
 function resolveProjectId(): string | null {
-  const fromExtra = (
-    Constants.expoConfig?.extra as { eas?: { projectId?: unknown } } | undefined
-  )?.eas?.projectId;
+  const fromExtra = (Constants.expoConfig?.extra as { eas?: { projectId?: unknown } } | undefined)
+    ?.eas?.projectId;
   if (typeof fromExtra === 'string' && fromExtra.trim().length > 0) {
     return fromExtra.trim();
   }
-  const fromEasConfig = (Constants as { easConfig?: { projectId?: unknown } }).easConfig
-    ?.projectId;
+  const fromEasConfig = (Constants as { easConfig?: { projectId?: unknown } }).easConfig?.projectId;
   if (typeof fromEasConfig === 'string' && fromEasConfig.trim().length > 0) {
     return fromEasConfig.trim();
   }
@@ -169,7 +167,7 @@ export async function requestPushRegistration(): Promise<PushRegistrationInfo | 
   const projectId = resolveProjectId();
   try {
     const tokenResponse = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined
+      projectId ? { projectId } : undefined,
     );
     const token = tokenResponse.data;
     if (typeof token !== 'string' || token.trim().length === 0) {
@@ -185,9 +183,9 @@ export async function requestPushRegistration(): Promise<PushRegistrationInfo | 
   }
 }
 
-export function addNotificationResponseListener(
-  handler: (event: PushResponseEvent) => void
-): { remove: () => void } {
+export function addNotificationResponseListener(handler: (event: PushResponseEvent) => void): {
+  remove: () => void;
+} {
   return Notifications.addNotificationResponseReceivedListener((response) => {
     const event = parsePushResponse(response);
     if (event) {
@@ -199,21 +197,15 @@ export function addNotificationResponseListener(
 export async function getInitialNotificationResponse(): Promise<PushResponseEvent | null> {
   // Platforms without a notifications module (or with permissions denied) reject
   // here; a missing cold-start notification must never break app startup.
-  const response = await Notifications.getLastNotificationResponseAsync().catch(
-    () => null
-  );
+  const response = await Notifications.getLastNotificationResponseAsync().catch(() => null);
   if (!response) {
     return null;
   }
   return parsePushResponse(response);
 }
 
-function parsePushResponse(
-  response: Notifications.NotificationResponse
-): PushResponseEvent | null {
-  const target = parsePushNavigationTarget(
-    response.notification.request.content.data as unknown
-  );
+function parsePushResponse(response: Notifications.NotificationResponse): PushResponseEvent | null {
+  const target = parsePushNavigationTarget(response.notification.request.content.data as unknown);
   if (!target) {
     return null;
   }

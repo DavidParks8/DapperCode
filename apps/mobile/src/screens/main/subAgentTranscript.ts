@@ -9,14 +9,14 @@ export interface TrimmedSubAgentTranscript {
 export function trimInheritedParentMessages(
   parentMessages: ChatMessage[],
   childMessages: ChatMessage[],
-  childThreadId?: string | null
+  childThreadId?: string | null,
 ): TrimmedSubAgentTranscript {
   const normalizedChildThreadId = childThreadId?.trim() ?? '';
   if (normalizedChildThreadId) {
     const startIndex = findSpawnPromptStartIndex(
       parentMessages,
       childMessages,
-      normalizedChildThreadId
+      normalizedChildThreadId,
     );
     if (startIndex > 0 && startIndex < childMessages.length) {
       return {
@@ -43,7 +43,7 @@ export function trimInheritedParentMessages(
 function findSpawnPromptStartIndex(
   parentMessages: ChatMessage[],
   childMessages: ChatMessage[],
-  childThreadId: string
+  childThreadId: string,
 ): number {
   const prompt = findSpawnPrompt(parentMessages, childThreadId);
   if (!prompt) {
@@ -77,10 +77,7 @@ function findSpawnPromptStartIndex(
   });
 }
 
-function findSpawnPrompt(
-  parentMessages: ChatMessage[],
-  childThreadId: string
-): string | null {
+function findSpawnPrompt(parentMessages: ChatMessage[], childThreadId: string): string | null {
   let fallbackPrompt: string | null = null;
 
   for (const message of parentMessages) {

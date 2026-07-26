@@ -10,7 +10,7 @@ describe('planCardState', () => {
       hasStructuredPlanCardContent({
         explanation: null,
         steps: [],
-      })
+      }),
     ).toBe(false);
   });
 
@@ -19,7 +19,7 @@ describe('planCardState', () => {
       hasStructuredPlanCardContent({
         explanation: 'Tighten the release flow before implementation.',
         steps: [],
-      })
+      }),
     ).toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe('planCardState', () => {
             status: 'pending',
           },
         ],
-      })
+      }),
     ).toBe(true);
   });
 
@@ -43,7 +43,7 @@ describe('planCardState', () => {
         collaborationMode: 'plan',
         hasStructuredPlan: true,
         hasPlanApprovalPrompt: true,
-      })
+      }),
     ).toBe('approval');
   });
 
@@ -53,7 +53,7 @@ describe('planCardState', () => {
         collaborationMode: 'default',
         hasStructuredPlan: true,
         hasPlanApprovalPrompt: false,
-      })
+      }),
     ).toBe('execution');
   });
 
@@ -63,7 +63,7 @@ describe('planCardState', () => {
         collaborationMode: 'plan',
         hasStructuredPlan: false,
         hasPlanApprovalPrompt: false,
-      })
+      }),
     ).toBeNull();
   });
 
@@ -73,7 +73,7 @@ describe('planCardState', () => {
         collaborationMode: 'default',
         hasStructuredPlan: true,
         hasPlanApprovalPrompt: false,
-      })
+      }),
     ).toBe('execution');
   });
 
@@ -83,7 +83,7 @@ describe('planCardState', () => {
         collaborationMode: 'plan',
         hasStructuredPlan: true,
         hasPlanApprovalPrompt: false,
-      })
+      }),
     ).toBe('plan');
   });
 
@@ -94,7 +94,7 @@ describe('planCardState', () => {
         keyboardVisible: true,
         mode: 'execution',
         threadId: 'thread-1',
-      })
+      }),
     ).toBe(true);
   });
 
@@ -105,7 +105,7 @@ describe('planCardState', () => {
         keyboardVisible: true,
         mode: 'execution',
         threadId: 'thread-1',
-      })
+      }),
     ).toBe(false);
   });
 
@@ -116,7 +116,7 @@ describe('planCardState', () => {
         keyboardVisible: true,
         mode: null,
         threadId: 'thread-1',
-      })
+      }),
     ).toBe(false);
   });
 
@@ -126,7 +126,21 @@ describe('planCardState', () => {
   });
 
   it('requires a thread and visible keyboard before collapsing', () => {
-    expect(shouldCollapseWorkflowCardForKeyboard({ collapsed: false, keyboardVisible: false, mode: 'plan', threadId: 'thread' })).toBe(false);
-    expect(shouldCollapseWorkflowCardForKeyboard({ collapsed: false, keyboardVisible: true, mode: 'plan', threadId: null })).toBe(false);
+    expect(
+      shouldCollapseWorkflowCardForKeyboard({
+        collapsed: false,
+        keyboardVisible: false,
+        mode: 'plan',
+        threadId: 'thread',
+      }),
+    ).toBe(false);
+    expect(
+      shouldCollapseWorkflowCardForKeyboard({
+        collapsed: false,
+        keyboardVisible: true,
+        mode: 'plan',
+        threadId: null,
+      }),
+    ).toBe(false);
   });
 });

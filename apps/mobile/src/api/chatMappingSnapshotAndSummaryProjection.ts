@@ -1,13 +1,10 @@
-import {
-  extractLastError,
-  mapRawStatus,
-} from "./chatMappingStatusAndErrorProjection";
+import { extractLastError, mapRawStatus } from './chatMappingStatusAndErrorProjection';
 import {
   readAgentId,
   readThreadItemText,
   readThreadSourceMetadata,
-} from "./chatMappingChatProjection";
-import { type ChatSummary } from "./types";
+} from './chatMappingChatProjection';
+import { type ChatSummary } from './types';
 import {
   type RawAcpSnapshot,
   type RawSnapshotCollectionMetadata,
@@ -20,7 +17,7 @@ import {
   toPreview,
   toRecord,
   unixSecondsToIso,
-} from "./chatMappingRawTypesAndReaders";
+} from './chatMappingRawTypesAndReaders';
 
 export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
   const snapshot = toRecord(value);
@@ -34,8 +31,8 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? "",
-      role: readString(entry.role) ?? "",
+      id: readString(entry.id) ?? '',
+      role: readString(entry.role) ?? '',
       parts: Array.isArray(entry.parts) ? entry.parts : [],
       truncated: entry.truncated === true,
     }))
@@ -44,15 +41,13 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? "",
+      id: readString(entry.id) ?? '',
       generation: readNumber(entry.generation),
-      kind: readString(entry.kind) ?? "",
-      status: readString(entry.status) ?? "",
-      title: readString(entry.title) ?? "",
-      content: readString(entry.content) ?? "",
-      structuredContent: Array.isArray(entry.structuredContent)
-        ? entry.structuredContent
-        : [],
+      kind: readString(entry.kind) ?? '',
+      status: readString(entry.status) ?? '',
+      title: readString(entry.title) ?? '',
+      content: readString(entry.content) ?? '',
+      structuredContent: Array.isArray(entry.structuredContent) ? entry.structuredContent : [],
       locations: Array.isArray(entry.locations) ? entry.locations : [],
       truncated: entry.truncated === true,
     }))
@@ -63,31 +58,29 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .map((entry) => ({
       sequence: readNumber(entry.sequence) ?? -1,
       kind: readString(entry.kind),
-      canonicalId: readString(entry.canonicalId) ?? "",
+      canonicalId: readString(entry.canonicalId) ?? '',
     }))
     .filter(
-      (entry): entry is NonNullable<RawAcpSnapshot["timeline"]>[number] =>
+      (entry): entry is NonNullable<RawAcpSnapshot['timeline']>[number] =>
         entry.sequence >= 0 &&
-        (entry.kind === "message" ||
-          entry.kind === "reasoning" ||
-          entry.kind === "tool") &&
+        (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool') &&
         Boolean(entry.canonicalId),
     );
   const plan = (Array.isArray(snapshot.plan) ? snapshot.plan : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      content: readString(entry.content) ?? "",
-      priority: readString(entry.priority) ?? "",
-      status: readString(entry.status) ?? "",
+      content: readString(entry.content) ?? '',
+      priority: readString(entry.priority) ?? '',
+      status: readString(entry.status) ?? '',
     }))
     .filter((entry) => entry.content);
   const config = (Array.isArray(snapshot.config) ? snapshot.config : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? "",
-      value: readString(entry.value) ?? "",
+      id: readString(entry.id) ?? '',
+      value: readString(entry.value) ?? '',
       name: readString(entry.name) ?? undefined,
       description: readString(entry.description) ?? undefined,
       category: readString(entry.category) ?? undefined,
@@ -95,8 +88,8 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
         .map(toRecord)
         .filter((option): option is Record<string, unknown> => option !== null)
         .map((option) => ({
-          value: readString(option.value) ?? "",
-          name: readString(option.name) ?? "",
+          value: readString(option.value) ?? '',
+          name: readString(option.name) ?? '',
           description: readString(option.description) ?? undefined,
         }))
         .filter((option) => option.value && option.name),
@@ -106,14 +99,12 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      name: readString(entry.name) ?? "",
-      description: readString(entry.description) ?? "",
+      name: readString(entry.name) ?? '',
+      description: readString(entry.description) ?? '',
     }))
     .filter((entry) => entry.name);
   const usage = toRecord(snapshot.usage) ?? {};
-  const readCollection = (
-    value: unknown,
-  ): RawSnapshotCollectionMetadata | undefined => {
+  const readCollection = (value: unknown): RawSnapshotCollectionMetadata | undefined => {
     const collection = toRecord(value);
     const revision = readNumber(collection?.revision);
     if (!collection || revision === null) return undefined;
@@ -140,19 +131,12 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       continuationRecord && continuationRevision !== null
         ? {
             revision: continuationRevision,
-            unavailableCount:
-              readNumber(continuationRecord.unavailableCount) ?? 0,
-            earliestAvailableSequence: readNumber(
-              continuationRecord.earliestAvailableSequence,
-            ),
-            latestAvailableSequence: readNumber(
-              continuationRecord.latestAvailableSequence,
-            ),
+            unavailableCount: readNumber(continuationRecord.unavailableCount) ?? 0,
+            earliestAvailableSequence: readNumber(continuationRecord.earliestAvailableSequence),
+            latestAvailableSequence: readNumber(continuationRecord.latestAvailableSequence),
             maxPageSize: readNumber(continuationRecord.maxPageSize) ?? 0,
-            maxHistoryEntries:
-              readNumber(continuationRecord.maxHistoryEntries) ?? 0,
-            maxHistoryBytes:
-              readNumber(continuationRecord.maxHistoryBytes) ?? 0,
+            maxHistoryEntries: readNumber(continuationRecord.maxHistoryEntries) ?? 0,
+            maxHistoryBytes: readNumber(continuationRecord.maxHistoryBytes) ?? 0,
           }
         : undefined,
     plan,
@@ -165,8 +149,8 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     config,
     commands,
     session: {
-      agentId: readString(session.agentId) ?? "",
-      threadId: readString(session.threadId) ?? "",
+      agentId: readString(session.agentId) ?? '',
+      threadId: readString(session.threadId) ?? '',
       title: readString(session.title),
       updatedAt: readString(session.updatedAt),
       historyReconstruction: session.historyReconstruction === true,
@@ -188,9 +172,7 @@ export function toRawTurn(value: unknown): RawTurn | null {
   const items = Array.isArray(record.items)
     ? (record.items
         .map((item) => toRecord(item))
-        .filter(
-          (item): item is RawThreadItem => item !== null,
-        ) as RawThreadItem[])
+        .filter((item): item is RawThreadItem => item !== null) as RawThreadItem[])
     : undefined;
   return {
     id: readString(record.id) ?? undefined,
@@ -214,17 +196,15 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
   }
   const fallbackTimestampSeconds = stableThreadTimestampSeconds(raw.id);
   const hasBridgeTimestamps = raw.createdAt != null || raw.updatedAt != null;
-  const createdAtSeconds =
-    raw.createdAt ?? raw.updatedAt ?? fallbackTimestampSeconds;
+  const createdAtSeconds = raw.createdAt ?? raw.updatedAt ?? fallbackTimestampSeconds;
   const updatedAtSeconds = raw.updatedAt ?? raw.createdAt ?? createdAtSeconds;
   const createdAt = unixSecondsToIso(createdAtSeconds);
   const updatedAt = unixSecondsToIso(updatedAtSeconds);
   const turns = Array.isArray(raw.turns) ? raw.turns : [];
   const sourceMetadata = readThreadSourceMetadata(raw.source);
   const lastError = extractLastError(turns);
-  const previewTitle = toPreview(raw.preview || "");
-  const firstUserTitle =
-    firstUserMessagePreview(turns) ?? firstSnapshotUserMessagePreview(raw);
+  const previewTitle = toPreview(raw.preview || '');
+  const firstUserTitle = firstUserMessagePreview(turns) ?? firstSnapshotUserMessagePreview(raw);
   const rawTitle = raw.name?.trim() || null;
   const displayTitle = rawTitle || previewTitle || firstUserTitle;
   const fallbackTitle = raw.acpSnapshot?.session.threadId
@@ -238,7 +218,7 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
     updatedAt,
     statusUpdatedAt: updatedAt,
     timestampsSynthesized: !hasBridgeTimestamps,
-    lastMessagePreview: toPreview(raw.preview || ""),
+    lastMessagePreview: toPreview(raw.preview || ''),
     cwd: readString(raw.cwd) ?? undefined,
     agentId: readAgentId(raw.agentId),
     modelProvider: readString(raw.modelProvider) ?? undefined,
@@ -253,16 +233,16 @@ export function mapChatSummary(raw: RawThread): ChatSummary | null {
 
 export function firstSnapshotUserMessagePreview(raw: RawThread): string | null {
   for (const message of raw.acpSnapshot?.messages ?? []) {
-    if (message.role !== "user") {
+    if (message.role !== 'user') {
       continue;
     }
     const text = message.parts
       .map((part) =>
-        typeof (part as { text?: unknown }).text === "string"
+        typeof (part as { text?: unknown }).text === 'string'
           ? (part as { text: string }).text
-          : "",
+          : '',
       )
-      .join("")
+      .join('')
       .trim();
     const preview = toPreview(text);
     if (preview) {
@@ -273,8 +253,8 @@ export function firstSnapshotUserMessagePreview(raw: RawThread): string | null {
 }
 
 export function shortSessionId(value: string): string {
-  const compact = value.trim().replace(/[^a-zA-Z0-9]/g, "");
-  return compact.slice(-8) || "new";
+  const compact = value.trim().replace(/[^a-zA-Z0-9]/g, '');
+  return compact.slice(-8) || 'new';
 }
 
 export function stableThreadTimestampSeconds(threadId: string): number {
@@ -288,7 +268,7 @@ export function stableThreadTimestampSeconds(threadId: string): number {
 export function firstUserMessagePreview(turns: RawTurn[]): string | null {
   for (const turn of turns) {
     for (const item of turn.items ?? []) {
-      if (item.type !== "userMessage") {
+      if (item.type !== 'userMessage') {
         continue;
       }
       const text = readThreadItemText(item);

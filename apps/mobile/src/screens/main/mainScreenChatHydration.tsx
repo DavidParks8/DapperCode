@@ -2,24 +2,30 @@ import {
   defaultServiceTierAtom,
   selectedEffortAtom,
   selectedModelIdAtom,
-  selectedServiceTierAtom
+  selectedServiceTierAtom,
 } from '../../state/mainScreen/models';
-import {
-  favoriteWorkspacePathsAtom
-} from '../../state/mainScreen/workspace';
+import { favoriteWorkspacePathsAtom } from '../../state/mainScreen/workspace';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiSurface, ReasoningEffort, ServiceTier } from '../../api/types';
-import { type ActivePlanState, WORKSPACE_FAVORITES_LIMIT, type ChatModelPreference, normalizeWorkspacePath, normalizeModelId, normalizeReasoningEffort, normalizeServiceTier, toSelectedServiceTier } from './mainScreenHelpers';
+import {
+  type ActivePlanState,
+  WORKSPACE_FAVORITES_LIMIT,
+  type ChatModelPreference,
+  normalizeWorkspacePath,
+  normalizeModelId,
+  normalizeReasoningEffort,
+  normalizeServiceTier,
+  toSelectedServiceTier,
+} from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
-import type { MainScreenThreadSnapshotStoreContext, MainScreenThreadSnapshotStoreResult } from './mainScreenThreadSnapshotStore';
+import type {
+  MainScreenThreadSnapshotStoreContext,
+  MainScreenThreadSnapshotStoreResult,
+} from './mainScreenThreadSnapshotStore';
 
-
-
-
-
-
-export type MainScreenChatHydrationContext = MainScreenThreadSnapshotStoreContext & MainScreenThreadSnapshotStoreResult;
+export type MainScreenChatHydrationContext = MainScreenThreadSnapshotStoreContext &
+  MainScreenThreadSnapshotStoreResult;
 
 export function useMainScreenChatHydration(context: MainScreenChatHydrationContext) {
   const {
@@ -42,7 +48,6 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setDefaultServiceTier = useSetAtom(defaultServiceTierAtom);
   const setFavoriteWorkspacePaths = useSetAtom(favoriteWorkspacePathsAtom);
-
 
   useEffect(() => {
     let cancelled = false;
@@ -69,15 +74,15 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
         const exists = current.includes(normalizedPath);
         const next = exists
           ? current.filter((entry) => entry !== normalizedPath)
-          : [
-              normalizedPath,
-              ...current.filter((entry) => entry !== normalizedPath),
-            ].slice(0, WORKSPACE_FAVORITES_LIMIT);
+          : [normalizedPath, ...current.filter((entry) => entry !== normalizedPath)].slice(
+              0,
+              WORKSPACE_FAVORITES_LIMIT,
+            );
         void saveWorkspaceFavorites(next);
         return next;
       });
     },
-    [saveWorkspaceFavorites]
+    [saveWorkspaceFavorites],
   );
 
   useEffect(() => {
@@ -118,14 +123,11 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       chatPlanSnapshotsRef.current = nextSnapshots;
       void saveChatPlanSnapshots(nextSnapshots);
     },
-    [saveChatPlanSnapshots]
+    [saveChatPlanSnapshots],
   );
 
   const rememberBridgeUiSurfaceSnapshots = useCallback(
-    (
-      chatId: string,
-      updater: (previous: BridgeUiSurface[]) => BridgeUiSurface[]
-    ) => {
+    (chatId: string, updater: (previous: BridgeUiSurface[]) => BridgeUiSurface[]) => {
       const normalizedChatId = chatId.trim();
       if (!normalizedChatId) {
         return;
@@ -143,7 +145,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
       scheduleBridgeUiSurfaceSnapshotsPersist(nextSnapshots);
     },
-    [scheduleBridgeUiSurfaceSnapshotsPersist]
+    [scheduleBridgeUiSurfaceSnapshotsPersist],
   );
 
   const rememberChatModelPreference = useCallback(
@@ -151,7 +153,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       chatId: string | null | undefined,
       modelId: string | null | undefined,
       effort: ReasoningEffort | null | undefined,
-      serviceTier: ServiceTier | null | undefined
+      serviceTier: ServiceTier | null | undefined,
     ) => {
       const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
       if (!normalizedChatId) {
@@ -160,9 +162,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
 
       const normalizedModelId = normalizeModelId(modelId);
       const normalizedEffort = normalizeReasoningEffort(effort);
-      const normalizedServiceTier = toSelectedServiceTier(
-        normalizeServiceTier(serviceTier)
-      );
+      const normalizedServiceTier = toSelectedServiceTier(normalizeServiceTier(serviceTier));
       const updatedAt = new Date().toISOString();
       const nextPreference: ChatModelPreference = {
         modelId: normalizedModelId,
@@ -170,9 +170,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
         serviceTier: normalizedServiceTier,
         updatedAt,
       };
-      const agentPreferenceKey = activeAgentId
-        ? agentModelPreferenceKey(activeAgentId)
-        : null;
+      const agentPreferenceKey = activeAgentId ? agentModelPreferenceKey(activeAgentId) : null;
       const previous = chatModelPreferencesRef.current[normalizedChatId];
       const previousAgent = agentPreferenceKey
         ? chatModelPreferencesRef.current[agentPreferenceKey]
@@ -182,11 +180,10 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
         previous.modelId === normalizedModelId &&
         previous.effort === normalizedEffort &&
         previous.serviceTier === normalizedServiceTier &&
-        (!agentPreferenceKey || (
-          previousAgent?.modelId === normalizedModelId &&
-          previousAgent?.effort === normalizedEffort &&
-          previousAgent?.serviceTier === normalizedServiceTier
-        ))
+        (!agentPreferenceKey ||
+          (previousAgent?.modelId === normalizedModelId &&
+            previousAgent?.effort === normalizedEffort &&
+            previousAgent?.serviceTier === normalizedServiceTier))
       ) {
         return;
       }
@@ -204,7 +201,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       }
       void saveChatModelPreferences(nextPreferences);
     },
-    [activeAgentId, saveChatModelPreferences]
+    [activeAgentId, saveChatModelPreferences],
   );
 
   useEffect(() => {

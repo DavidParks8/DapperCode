@@ -33,10 +33,12 @@ describe('draftController', () => {
     const firstKey = JSON.stringify(['profile', 'thread-1']);
     const secondKey = JSON.stringify(['profile', 'thread-2']);
     const storage = {
-      read: jest.fn().mockResolvedValue(JSON.stringify({
-        version: 2,
-        entries: { [firstKey]: 'first', [secondKey]: 'second' },
-      })),
+      read: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          version: 2,
+          entries: { [firstKey]: 'first', [secondKey]: 'second' },
+        }),
+      ),
       write: jest.fn().mockResolvedValue(undefined),
     };
     let current: DraftController;
@@ -45,15 +47,21 @@ describe('draftController', () => {
       return null;
     }
     let tree: ReactTestRenderer;
-    await act(async () => { tree = renderer.create(React.createElement(Probe, { chatId: 'thread-1' })); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe, { chatId: 'thread-1' }));
+    });
     expect(current!.draft).toBe('first');
     act(() => current!.setDraft((value) => `${value}!`));
     act(() => current!.setDraft('first!'));
     expect(current!.snapshot()).toMatchObject({ scopeKey: firstKey, value: 'first!' });
-    act(() => { jest.advanceTimersByTime(180); });
+    act(() => {
+      jest.advanceTimersByTime(180);
+    });
     expect(storage.write).toHaveBeenCalledWith('/drafts.json', expect.stringContaining('first!'));
 
-    await act(async () => { tree!.update(React.createElement(Probe, { chatId: 'thread-2' })); });
+    await act(async () => {
+      tree!.update(React.createElement(Probe, { chatId: 'thread-2' }));
+    });
     expect(current!.draft).toBe('second');
     act(() => current!.clearDraft());
     act(() => tree!.unmount());
@@ -73,9 +81,14 @@ describe('draftController', () => {
       return null;
     }
     let tree: ReactTestRenderer;
-    await act(async () => { tree = renderer.create(React.createElement(Probe)); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe));
+    });
     act(() => current!.setDraft('draft'));
-    await act(async () => { jest.advanceTimersByTime(180); await Promise.resolve(); });
+    await act(async () => {
+      jest.advanceTimersByTime(180);
+      await Promise.resolve();
+    });
     act(() => tree!.unmount());
     jest.useRealTimers();
   });
@@ -85,7 +98,12 @@ describe('draftController', () => {
     path.mockReturnValueOnce(null);
     let resolveRead: (value: string) => void = () => undefined;
     const storage = {
-      read: jest.fn(() => new Promise<string>((resolve) => { resolveRead = resolve; })),
+      read: jest.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveRead = resolve;
+          }),
+      ),
       write: jest.fn().mockResolvedValue(undefined),
     };
     function Probe() {
@@ -93,12 +111,18 @@ describe('draftController', () => {
       return null;
     }
     let tree: ReactTestRenderer;
-    await act(async () => { tree = renderer.create(React.createElement(Probe)); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe));
+    });
     expect(storage.read).not.toHaveBeenCalled();
     act(() => tree!.unmount());
 
-    await act(async () => { tree = renderer.create(React.createElement(Probe)); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe));
+    });
     act(() => tree!.unmount());
-    await act(async () => { resolveRead(JSON.stringify({ version: 2, entries: {} })); });
+    await act(async () => {
+      resolveRead(JSON.stringify({ version: 2, entries: {} }));
+    });
   });
 });

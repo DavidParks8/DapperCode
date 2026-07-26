@@ -3,7 +3,7 @@ import { isInsecureRemoteUrl, normalizeBridgeUrlInput, toBridgeHealthUrl } from 
 describe('bridgeUrl', () => {
   it('normalizes supported bridge schemes and strips non-base URL parts', () => {
     expect(normalizeBridgeUrlInput(' ws://example.com:8787/rpc///?token=x#hash ')).toBe(
-      'http://example.com:8787/rpc'
+      'http://example.com:8787/rpc',
     );
     expect(normalizeBridgeUrlInput('wss://example.com/')).toBe('https://example.com');
     expect(normalizeBridgeUrlInput('https://example.com/base/')).toBe('https://example.com/base');

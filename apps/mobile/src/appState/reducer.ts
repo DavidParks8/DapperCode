@@ -55,8 +55,8 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         : null;
       const bridgeIdentityChanged = Boolean(
         existing &&
-          (existing.bridgeUrl !== normalizeBridgeUrlInput(action.draft.bridgeUrl) ||
-            existing.bridgeToken !== action.draft.bridgeToken.trim())
+        (existing.bridgeUrl !== normalizeBridgeUrlInput(action.draft.bridgeUrl) ||
+          existing.bridgeToken !== action.draft.bridgeToken.trim()),
       );
       return {
         ...state,
@@ -65,7 +65,7 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
           ? {
               ...state.push,
               registrations: state.push.registrations.filter(
-                (registration) => registration.profileId !== existing?.id
+                (registration) => registration.profileId !== existing?.id,
               ),
             }
           : state.push,
@@ -83,11 +83,7 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
     case 'profiles/rename':
       return {
         ...state,
-        bridgeProfiles: renameBridgeProfile(
-          state.bridgeProfiles,
-          action.profileId,
-          action.name
-        ),
+        bridgeProfiles: renameBridgeProfile(state.bridgeProfiles, action.profileId, action.name),
       };
     case 'profiles/remove':
       return {
@@ -96,7 +92,7 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         push: {
           ...state.push,
           registrations: state.push.registrations.filter(
-            (registration) => registration.profileId !== action.profileId
+            (registration) => registration.profileId !== action.profileId,
           ),
         },
       };
@@ -116,7 +112,7 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         return state;
       }
       const existing = state.push.registrations.find(
-        (registration) => registration.profileId === action.profileId
+        (registration) => registration.profileId === action.profileId,
       );
       if (existing) {
         return state;
@@ -146,7 +142,7 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
           registrations: state.push.registrations.filter(
             (registration) =>
               registration.profileId !== action.profileId ||
-              registration.registrationId !== action.registrationId
+              registration.registrationId !== action.registrationId,
           ),
         },
       };
@@ -186,7 +182,7 @@ export function parsePersistedAppState(raw: string): AppStateData {
       'invalid_data',
       'load',
       'Saved app state is invalid and was not overwritten.',
-      error
+      error,
     );
   }
 }

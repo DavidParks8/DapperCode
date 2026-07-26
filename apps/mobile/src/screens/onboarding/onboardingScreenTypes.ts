@@ -16,8 +16,6 @@ export interface OnboardingScreenProps {
 }
 
 export type ConnectionCheck =
-  | { kind: 'idle' }
-  | { kind: 'success'; message: string }
-  | { kind: 'error'; message: string };
+  { kind: 'idle' } | { kind: 'success'; message: string } | { kind: 'error'; message: string };
 
 export type OnboardingStep = 'intro' | 'connect';

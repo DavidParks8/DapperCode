@@ -33,7 +33,7 @@ export function confirmAction({
           onPress: () => resolve(true),
         },
       ],
-      { cancelable: true, onDismiss: () => resolve(false) }
+      { cancelable: true, onDismiss: () => resolve(false) },
     );
   });
 }

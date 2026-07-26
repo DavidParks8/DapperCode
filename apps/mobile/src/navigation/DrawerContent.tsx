@@ -1,11 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { AppState } from 'react-native';
 import type { AgentDescriptor } from '../api/types';
@@ -14,10 +7,7 @@ import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
 import { selectedChatIdAtom } from '../state/chat/atoms';
 import { navigateAtom, selectChatAtom, startNewChatAtom } from '../state/navigation/actions';
 import { useAppTheme } from '../theme';
-import {
-  buildDrawerAttentionModel,
-  type DrawerAttentionLane,
-} from './drawerAttention';
+import { buildDrawerAttentionModel, type DrawerAttentionLane } from './drawerAttention';
 import { createDrawerContentStyles } from './drawerContentStyles';
 import type { DrawerContentProps, DrawerScreen } from './drawerContentTypes';
 import { DrawerContentView } from './DrawerContentView';
@@ -53,9 +43,9 @@ export const DrawerContent = memo(function DrawerContentComponent({
         new Set([
           ...pendingApprovals.map((approval) => approval.threadId),
           ...pendingUserInputs.map((request) => request.threadId),
-        ])
+        ]),
       ),
-    [pendingApprovals, pendingUserInputs]
+    [pendingApprovals, pendingUserInputs],
   );
   const {
     chats,
@@ -73,9 +63,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const [agents, setAgents] = useState<AgentDescriptor[]>([]);
   const [agentMetadataError, setAgentMetadataError] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
-  const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(
-    new Set()
-  );
+  const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(new Set());
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
   const mountedRef = useRef(true);
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
@@ -136,7 +124,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
       pendingUserInputs,
       runIndicatorsByThread,
       selectedFolderKey,
-    ]
+    ],
   );
 
   useEffect(() => {
@@ -156,9 +144,9 @@ export const DrawerContent = memo(function DrawerContentComponent({
               ...section,
               data: [],
             }
-          : section
+          : section,
       ),
-    [attentionModel.sections, collapsedLaneKeys]
+    [attentionModel.sections, collapsedLaneKeys],
   );
 
   const toggleAttentionSection = useCallback((lane: DrawerAttentionLane) => {
@@ -183,11 +171,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   }, []);
 
   const refreshDrawer = useCallback(async () => {
-    await Promise.all([
-      loadChats(true, true),
-      refreshAttentionRequests(),
-      refreshAgentMetadata(),
-    ]);
+    await Promise.all([loadChats(true, true), refreshAttentionRequests(), refreshAgentMetadata()]);
   }, [loadChats, refreshAgentMetadata, refreshAttentionRequests]);
 
   useEffect(() => {
@@ -211,7 +195,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
       cancelChatListStream();
       onSelectChat(chatId);
     },
-    [cancelChatListStream, onSelectChat]
+    [cancelChatListStream, onSelectChat],
   );
 
   const handleNewChat = useCallback(() => {
@@ -224,7 +208,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
       cancelChatListStream();
       onNavigate(screen);
     },
-    [cancelChatListStream, onNavigate]
+    [cancelChatListStream, onNavigate],
   );
 
   const resolvedEmptyTitle =

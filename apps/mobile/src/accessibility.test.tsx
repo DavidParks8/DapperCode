@@ -24,8 +24,9 @@ function FocusProbe({ visible, delayMs = 350 }: { visible: boolean; delayMs?: nu
 
 describe('accessibility helpers', () => {
   it('builds explicit control state without inventing optional state', () => {
-    expect(controlAccessibilityState({ disabled: true, selected: false, expanded: true, busy: true }))
-      .toEqual({ disabled: true, selected: false, expanded: true, busy: true });
+    expect(
+      controlAccessibilityState({ disabled: true, selected: false, expanded: true, busy: true }),
+    ).toEqual({ disabled: true, selected: false, expanded: true, busy: true });
     expect(controlAccessibilityState({})).toEqual({ disabled: false });
   });
 

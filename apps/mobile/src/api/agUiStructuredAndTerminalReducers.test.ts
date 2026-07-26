@@ -23,9 +23,7 @@ function createState(overrides: Partial<AgUiThreadMessageState> = {}): AgUiThrea
   };
 }
 
-function createEnvelope(
-  overrides: Partial<AgUiEventEnvelope> = {}
-): AgUiEventEnvelope {
+function createEnvelope(overrides: Partial<AgUiEventEnvelope> = {}): AgUiEventEnvelope {
   return {
     threadId: 'thread-1',
     runId: 'run-1',
@@ -42,21 +40,17 @@ function createEnvelope(
 describe('agUiStructuredAndTerminalReducers', () => {
   it('does not repeat tool text that the structured rendering already covers', () => {
     let state = createState();
-    state = reduceToolText(
-      state,
-      createEnvelope(),
-      { toolCallId: 'tool-1', revision: 'r1', content: 'file 3 body\n' }
-    );
-    state = reduceToolContent(
-      state,
-      createEnvelope(),
-      {
-        toolCallId: 'tool-1',
-        revision: 'r2',
-        content: [{ type: 'content', content: { type: 'text', text: 'file 3 body\n' } }],
-        locations: [],
-      }
-    );
+    state = reduceToolText(state, createEnvelope(), {
+      toolCallId: 'tool-1',
+      revision: 'r1',
+      content: 'file 3 body\n',
+    });
+    state = reduceToolContent(state, createEnvelope(), {
+      toolCallId: 'tool-1',
+      revision: 'r2',
+      content: [{ type: 'content', content: { type: 'text', text: 'file 3 body\n' } }],
+      locations: [],
+    });
 
     const message = findMessage(state, 'tool-result:tool-1');
     const text = message?.role === 'tool' ? message.content : '';
@@ -65,21 +59,17 @@ describe('agUiStructuredAndTerminalReducers', () => {
 
   it('still appends structured lines the plain text does not cover', () => {
     let state = createState();
-    state = reduceToolText(
-      state,
-      createEnvelope(),
-      { toolCallId: 'tool-2', revision: 'r1', content: 'plain output' }
-    );
-    state = reduceToolContent(
-      state,
-      createEnvelope(),
-      {
-        toolCallId: 'tool-2',
-        revision: 'r2',
-        content: [],
-        locations: [{ path: 'src/math.ts' }],
-      }
-    );
+    state = reduceToolText(state, createEnvelope(), {
+      toolCallId: 'tool-2',
+      revision: 'r1',
+      content: 'plain output',
+    });
+    state = reduceToolContent(state, createEnvelope(), {
+      toolCallId: 'tool-2',
+      revision: 'r2',
+      content: [],
+      locations: [{ path: 'src/math.ts' }],
+    });
 
     const message = findMessage(state, 'tool-result:tool-2');
     const text = message?.role === 'tool' ? message.content : '';
@@ -92,7 +82,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
       const next = reduceStructuredMessageContent(
         createState(),
         createEnvelope({ runId: 'run-fallback' }),
-        { content: { type: 'text', text: 'hello' } }
+        { content: { type: 'text', text: 'hello' } },
       );
 
       expect(next.messages).toHaveLength(1);
@@ -105,20 +95,22 @@ describe('agUiStructuredAndTerminalReducers', () => {
 
     it('maps thought to reasoning and appends/merges ordered parts', () => {
       const state = createState({
-        messages: [{
-          id: 'm1',
-          role: 'reasoning',
-          content: 'alpha',
-          createdAt: '2024-01-01T00:00:00.000Z',
-          parts: [{ type: 'text', text: 'alpha' }],
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'm1',
+            role: 'reasoning',
+            content: 'alpha',
+            createdAt: '2024-01-01T00:00:00.000Z',
+            parts: [{ type: 'text', text: 'alpha' }],
+          } as ChatMessage,
+        ],
       });
 
-      const next = reduceStructuredMessageContent(
-        state,
-        createEnvelope(),
-        { messageId: 'm1', role: 'thought', content: { type: 'text', text: ' + beta' } }
-      );
+      const next = reduceStructuredMessageContent(state, createEnvelope(), {
+        messageId: 'm1',
+        role: 'thought',
+        content: { type: 'text', text: ' + beta' },
+      });
 
       expect(next.messages[0]).toMatchObject({
         id: 'm1',
@@ -129,15 +121,11 @@ describe('agUiStructuredAndTerminalReducers', () => {
     });
 
     it('maps user role and preserves non-text structured parts', () => {
-      const next = reduceStructuredMessageContent(
-        createState(),
-        createEnvelope(),
-        {
-          messageId: 'user-1',
-          role: 'user',
-          content: { type: 'resourceLink', uri: 'file:///tmp/a.txt', name: 'a.txt' },
-        }
-      );
+      const next = reduceStructuredMessageContent(createState(), createEnvelope(), {
+        messageId: 'user-1',
+        role: 'user',
+        content: { type: 'resourceLink', uri: 'file:///tmp/a.txt', name: 'a.txt' },
+      });
 
       expect(next.messages[0]).toMatchObject({
         id: 'user-1',
@@ -156,8 +144,12 @@ describe('agUiStructuredAndTerminalReducers', () => {
       const envelope = createEnvelope();
 
       expect(reduceToolText(state, envelope, null)).toBe(state);
-      expect(reduceToolText(state, envelope, { toolCallId: 't1', revision: 'r1', content: 4 })).toBe(state);
-      expect(reduceToolText(state, envelope, { toolCallId: 'sub', revision: 'r1', content: 'x' })).toBe(state);
+      expect(
+        reduceToolText(state, envelope, { toolCallId: 't1', revision: 'r1', content: 4 }),
+      ).toBe(state);
+      expect(
+        reduceToolText(state, envelope, { toolCallId: 'sub', revision: 'r1', content: 'x' }),
+      ).toBe(state);
     });
 
     it('returns unchanged state for duplicate revision', () => {
@@ -193,13 +185,15 @@ describe('agUiStructuredAndTerminalReducers', () => {
 
     it('updates an existing mapped tool-result message', () => {
       const state = createState({
-        messages: [{
-          id: 'msg-tool-1',
-          role: 'tool',
-          toolCallId: 'tc3',
-          content: 'old',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'msg-tool-1',
+            role: 'tool',
+            toolCallId: 'tc3',
+            content: 'old',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         toolResultMessageIdByCallId: { tc3: 'msg-tool-1' },
       });
 
@@ -222,7 +216,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
           toolCallId: 'tcA',
           revision: 'rev-a',
           content: [{ type: 'text', text: 'ignored' }],
-        })
+        }),
       ).toBe(subagentState);
 
       const duplicateState = createState({ structuredRevisionByCallId: { tcB: 'rev-b' } });
@@ -231,7 +225,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
           toolCallId: 'tcB',
           revision: 'rev-b',
           content: [{ type: 'text', text: 'ignored' }],
-        })
+        }),
       ).toBe(duplicateState);
     });
 
@@ -248,19 +242,23 @@ describe('agUiStructuredAndTerminalReducers', () => {
         toolCallId: 'unknown',
         content: '',
       });
-      expect(next.structuredRevisionByCallId.unknown).toBe(JSON.stringify({ content: [], locations: [] }));
+      expect(next.structuredRevisionByCallId.unknown).toBe(
+        JSON.stringify({ content: [], locations: [] }),
+      );
       expect(next.structuredTextByCallId.unknown).toBe('');
     });
 
     it('replaces prior structured suffix when revising structured content', () => {
       const state = createState({
-        messages: [{
-          id: 'tool-result:tc4',
-          role: 'tool',
-          toolCallId: 'tc4',
-          content: 'base line\nold structured',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'tool-result:tc4',
+            role: 'tool',
+            toolCallId: 'tc4',
+            content: 'base line\nold structured',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         toolResultMessageIdByCallId: { tc4: 'tool-result:tc4' },
         structuredTextByCallId: { tc4: 'old structured' },
       });
@@ -278,13 +276,15 @@ describe('agUiStructuredAndTerminalReducers', () => {
 
     it('keeps existing text unchanged when previous structured suffix does not match', () => {
       const state = createState({
-        messages: [{
-          id: 'tool-result:tc5',
-          role: 'tool',
-          toolCallId: 'tc5',
-          content: 'existing text',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'tool-result:tc5',
+            role: 'tool',
+            toolCallId: 'tc5',
+            content: 'existing text',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         toolResultMessageIdByCallId: { tc5: 'tool-result:tc5' },
         structuredTextByCallId: { tc5: 'different previous structured' },
       });
@@ -357,7 +357,8 @@ describe('agUiStructuredAndTerminalReducers', () => {
       expect(content).toContain('Result: done');
       expect(next.subagentToolCallIds['tc-sub-2']).toBe(true);
 
-      const meta = next.messages[0]?.role === 'activity' ? next.messages[0].content.subAgent : undefined;
+      const meta =
+        next.messages[0]?.role === 'activity' ? next.messages[0].content.subAgent : undefined;
       expect(meta).toMatchObject({
         senderThreadId: 'sender-1',
         receiverThreadIds: ['receiver-1', 'receiver-2'],
@@ -402,12 +403,14 @@ describe('agUiStructuredAndTerminalReducers', () => {
   describe('updateEncryptedValue', () => {
     it('updates message encryptedValue for existing messages and no-ops when missing', () => {
       const state = createState({
-        messages: [{
-          id: 'msg-enc',
-          role: 'assistant',
-          content: 'hi',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'msg-enc',
+            role: 'assistant',
+            content: 'hi',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         runByMessageId: { 'msg-enc': 'run-enc' },
       });
 
@@ -418,16 +421,15 @@ describe('agUiStructuredAndTerminalReducers', () => {
 
     it('updates matching tool call encryptedValue and no-ops on missing or non-assistant container', () => {
       const assistantState = createState({
-        messages: [{
-          id: 'assistant-1',
-          role: 'assistant',
-          content: '',
-          toolCalls: [
-            toolCall('tool-1', 'search', '{}'),
-            toolCall('tool-2', 'open', '{}'),
-          ],
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: '',
+            toolCalls: [toolCall('tool-1', 'search', '{}'), toolCall('tool-2', 'open', '{}')],
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         toolCallMessageIdByCallId: { 'tool-1': 'assistant-1' },
         runByMessageId: { 'assistant-1': 'run-a' },
       });
@@ -437,31 +439,39 @@ describe('agUiStructuredAndTerminalReducers', () => {
       expect(calls?.find((call) => call.id === 'tool-1')?.encryptedValue).toBe('enc-tool-1');
       expect(calls?.find((call) => call.id === 'tool-2')?.encryptedValue).toBeUndefined();
 
-      expect(updateEncryptedValue(assistantState, 'missing', 'x', 'tool-call')).toBe(assistantState);
+      expect(updateEncryptedValue(assistantState, 'missing', 'x', 'tool-call')).toBe(
+        assistantState,
+      );
 
       const nonAssistantState = createState({
-        messages: [{
-          id: 'tool-container',
-          role: 'tool',
-          toolCallId: 'tool-9',
-          content: '',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'tool-container',
+            role: 'tool',
+            toolCallId: 'tool-9',
+            content: '',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
         toolCallMessageIdByCallId: { 'tool-9': 'tool-container' },
       });
-      expect(updateEncryptedValue(nonAssistantState, 'tool-9', 'enc-tool-9', 'tool-call')).toBe(nonAssistantState);
+      expect(updateEncryptedValue(nonAssistantState, 'tool-9', 'enc-tool-9', 'tool-call')).toBe(
+        nonAssistantState,
+      );
     });
   });
 
   describe('findMessage and toolCall', () => {
     it('finds existing messages and returns undefined for misses', () => {
       const state = createState({
-        messages: [{
-          id: 'find-me',
-          role: 'assistant',
-          content: 'hello',
-          createdAt: '2024-01-01T00:00:00.000Z',
-        } as ChatMessage],
+        messages: [
+          {
+            id: 'find-me',
+            role: 'assistant',
+            content: 'hello',
+            createdAt: '2024-01-01T00:00:00.000Z',
+          } as ChatMessage,
+        ],
       });
 
       expect(findMessage(state, 'find-me')?.id).toBe('find-me');

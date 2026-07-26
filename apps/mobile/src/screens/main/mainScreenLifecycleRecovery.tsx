@@ -1,29 +1,27 @@
-import {
-  agentRuntimeRevisionAtom
-} from '../../state/mainScreen/workspace';
+import { agentRuntimeRevisionAtom } from '../../state/mainScreen/workspace';
 import {
   activityAtom,
   bridgeRecoveryBannerVisibleAtom,
   heldActivityAtom,
-  showDelayedGenericRunningActivityAtom
+  showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import type { AppStateStatus } from 'react-native';
-import { type AutoScrollState, APP_FOCUS_DISCONNECT_GRACE_MS, STREAMING_SCROLL_THROTTLE_MS } from './mainScreenHelpers';
-import type { MainScreenCoreBootstrapContext, MainScreenCoreBootstrapResult } from './mainScreenCoreBootstrap';
-
-
-
-
-
+import {
+  type AutoScrollState,
+  APP_FOCUS_DISCONNECT_GRACE_MS,
+  STREAMING_SCROLL_THROTTLE_MS,
+} from './mainScreenHelpers';
+import type {
+  MainScreenCoreBootstrapContext,
+  MainScreenCoreBootstrapResult,
+} from './mainScreenCoreBootstrap';
 
 export type MainScreenLifecycleRecoveryContext = MainScreenCoreBootstrapContext &
   MainScreenCoreBootstrapResult & {
     appStateRef?: MutableRefObject<AppStateStatus>;
-    deferredDisconnectActivityTimeoutRef?: MutableRefObject<
-      ReturnType<typeof setTimeout> | null
-    >;
+    deferredDisconnectActivityTimeoutRef?: MutableRefObject<ReturnType<typeof setTimeout> | null>;
     lastAppForegroundedAtRef?: MutableRefObject<number>;
   };
 
@@ -59,15 +57,14 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   const replayRecoveryAbortControllerRef = useRef<AbortController | null>(null);
   const replayRecoveryEpochResetPendingRef = useRef(false);
   const openAgentThreadSelectorRef = useRef<(query?: string | null) => Promise<boolean>>(
-    async () => false
+    async () => false,
   );
   const bumpAgentRuntimeRevision = useCallback(() => {
     setAgentRuntimeRevision((previous) => previous + 1);
   }, []);
 
   const clearDeferredDisconnectActivity = useCallback(() => {
-    const deferredDisconnectActivityTimeoutRef =
-      context.deferredDisconnectActivityTimeoutRef;
+    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
     if (!deferredDisconnectActivityTimeoutRef) {
       return;
     }
@@ -101,14 +98,9 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   const scheduleDisconnectActivity = useCallback(() => {
     clearDeferredDisconnectActivity();
     const appStateRef = context.appStateRef;
-    const deferredDisconnectActivityTimeoutRef =
-      context.deferredDisconnectActivityTimeoutRef;
+    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
     const lastAppForegroundedAtRef = context.lastAppForegroundedAtRef;
-    if (
-      !appStateRef ||
-      !deferredDisconnectActivityTimeoutRef ||
-      !lastAppForegroundedAtRef
-    ) {
+    if (!appStateRef || !deferredDisconnectActivityTimeoutRef || !lastAppForegroundedAtRef) {
       return;
     }
 
@@ -163,10 +155,10 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
               animated: index === 0 ? animated : false,
             });
           });
-        }, delay)
+        }, delay),
       );
     },
-    [clearPendingScrollRetries]
+    [clearPendingScrollRetries],
   );
 
   const scrollToBottomIfPinned = useCallback(
@@ -181,7 +173,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       }
       scrollToBottomReliable(animated);
     },
-    [scrollToBottomReliable]
+    [scrollToBottomReliable],
   );
 
   const handleJumpToLatest = useCallback(() => {
@@ -217,7 +209,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
         scrollToBottomReliable(animated);
       }, STREAMING_SCROLL_THROTTLE_MS - elapsed);
     },
-    [scrollToBottomReliable]
+    [scrollToBottomReliable],
   );
 
   useEffect(() => {

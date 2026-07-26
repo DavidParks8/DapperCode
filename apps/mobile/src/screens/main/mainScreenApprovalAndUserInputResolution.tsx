@@ -8,27 +8,26 @@ import {
   sendingAtom,
   stoppingTurnAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../../api/types';
 import { buildUserInputAnswers } from './controllers/approvalController';
 import { type ChatSyncAssessment, useChatSynchronization } from './controllers/chatSyncController';
 import { resolveEquivalentChat } from './mainScreenChatState';
-import type { MainScreenWsEventRouterContext, MainScreenWsEventRouterResult } from './mainScreenWsEventRouter';
+import type {
+  MainScreenWsEventRouterContext,
+  MainScreenWsEventRouterResult,
+} from './mainScreenWsEventRouter';
 
+export type MainScreenApprovalAndUserInputResolutionContext = MainScreenWsEventRouterContext &
+  MainScreenWsEventRouterResult;
 
-
-
-
-
-export type MainScreenApprovalAndUserInputResolutionContext = MainScreenWsEventRouterContext & MainScreenWsEventRouterResult;
-
-export function useMainScreenApprovalAndUserInputResolution(context: MainScreenApprovalAndUserInputResolutionContext) {
+export function useMainScreenApprovalAndUserInputResolution(
+  context: MainScreenApprovalAndUserInputResolutionContext,
+) {
   const {
     activeTurnIdRef,
     appStateRef,
@@ -66,81 +65,80 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
 
+  const applySynchronizedChat = useCallback(
+    (latest: Chat, assessment: ChatSyncAssessment) => {
+      const targetChatId = latest.id;
+      if (selectedChatIdRef.current !== targetChatId) return;
+      const hasPendingApproval = Boolean(pendingApproval?.requestId);
+      const hasPendingUserInput = Boolean(pendingUserInputRequest?.requestId);
+      const resolvedLatest = mergeChatWithPendingOptimisticMessages(latest);
+      setSelectedChat((prev) => {
+        if (!prev || prev.id !== resolvedLatest.id) return resolvedLatest;
+        return resolveEquivalentChat(prev, resolvedLatest);
+      });
+      const shouldShowRunning = assessment.shouldShowRunning;
+      const shouldRefreshWatchdog = assessment.shouldRefreshWatchdog;
+      const watchdogDurationMs = assessment.watchdogDurationMs;
 
-  const applySynchronizedChat = useCallback((latest: Chat, assessment: ChatSyncAssessment) => {
-    const targetChatId = latest.id;
-    if (selectedChatIdRef.current !== targetChatId) return;
-    const hasPendingApproval = Boolean(pendingApproval?.requestId);
-    const hasPendingUserInput = Boolean(pendingUserInputRequest?.requestId);
-    const resolvedLatest = mergeChatWithPendingOptimisticMessages(latest);
-    setSelectedChat((prev) => {
-      if (!prev || prev.id !== resolvedLatest.id) return resolvedLatest;
-      return resolveEquivalentChat(prev, resolvedLatest);
-    });
-        const shouldShowRunning = assessment.shouldShowRunning;
-        const shouldRefreshWatchdog = assessment.shouldRefreshWatchdog;
-        const watchdogDurationMs = assessment.watchdogDurationMs;
+      if (shouldShowRunning && !hasPendingApproval && !hasPendingUserInput) {
+        setActivity((prev) => {
+          // Only guard against watchdog-only bumps overriding a fresh
+          // completion. When the server explicitly reports running, trust it
+          // (handles externally-started turns like CLI).
+          if (!shouldRefreshWatchdog && (prev.tone === 'complete' || prev.tone === 'error')) {
+            return prev;
+          }
+          if (shouldRefreshWatchdog) {
+            bumpRunWatchdog(watchdogDurationMs);
+          }
+          return prev.tone === 'running' ? prev : { tone: 'running', title: 'Working' };
+        });
+      } else if (!hasPendingApproval && !hasPendingUserInput) {
+        clearRunWatchdog();
+        setActiveCommands([]);
+        setStreamingText(null);
+        setActiveTurnId(null);
+        setStoppingTurn(false);
+        reasoningSummaryRef.current = {};
+        reasoningBufferRef.current = '';
+        hadCommandRef.current = false;
+        setActivity((prev) => {
+          if (resolvedLatest.status === 'complete') {
+            return prev.tone === 'running'
+              ? {
+                  tone: 'complete',
+                  title: 'Turn completed',
+                }
+              : {
+                  tone: 'idle',
+                  title: 'Ready',
+                };
+          }
 
-        if (shouldShowRunning && !hasPendingApproval && !hasPendingUserInput) {
-          setActivity((prev) => {
-            // Only guard against watchdog-only bumps overriding a fresh
-            // completion. When the server explicitly reports running, trust it
-            // (handles externally-started turns like CLI).
-            if (
-              !shouldRefreshWatchdog &&
-              (prev.tone === 'complete' || prev.tone === 'error')
-            ) {
-              return prev;
-            }
-            if (shouldRefreshWatchdog) {
-              bumpRunWatchdog(watchdogDurationMs);
-            }
-            return prev.tone === 'running' ? prev : { tone: 'running', title: 'Working' };
-          });
-        } else if (!hasPendingApproval && !hasPendingUserInput) {
-          clearRunWatchdog();
-          setActiveCommands([]);
-          setStreamingText(null);
-          setActiveTurnId(null);
-          setStoppingTurn(false);
-          reasoningSummaryRef.current = {};
-          reasoningBufferRef.current = '';
-          hadCommandRef.current = false;
-          setActivity((prev) => {
-            if (resolvedLatest.status === 'complete') {
-              return prev.tone === 'running'
-                ? {
-                    tone: 'complete',
-                    title: 'Turn completed',
-                  }
-                : {
-                    tone: 'idle',
-                    title: 'Ready',
-                  };
-            }
-
-            if (resolvedLatest.status === 'error') {
-              const failureDetail = resolvedLatest.lastError?.trim() || prev.detail;
-              return {
-                tone: 'error',
-                title: prev.tone === 'error' && prev.title ? prev.title : 'Turn failed',
-                detail: failureDetail || undefined,
-              };
-            }
-
+          if (resolvedLatest.status === 'error') {
+            const failureDetail = resolvedLatest.lastError?.trim() || prev.detail;
             return {
-              tone: 'idle',
-              title: 'Ready',
+              tone: 'error',
+              title: prev.tone === 'error' && prev.title ? prev.title : 'Turn failed',
+              detail: failureDetail || undefined,
             };
-          });
-        }
-  }, [
-    pendingApproval?.requestId,
-    pendingUserInputRequest?.requestId,
-    bumpRunWatchdog,
-    clearRunWatchdog,
-    mergeChatWithPendingOptimisticMessages,
-  ]);
+          }
+
+          return {
+            tone: 'idle',
+            title: 'Ready',
+          };
+        });
+      }
+    },
+    [
+      pendingApproval?.requestId,
+      pendingUserInputRequest?.requestId,
+      bumpRunWatchdog,
+      clearRunWatchdog,
+      mergeChatWithPendingOptimisticMessages,
+    ],
+  );
 
   useChatSynchronization({
     controller: chatSyncController,
@@ -168,7 +166,7 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
         throw err;
       }
     },
-    [approvalController, cacheThreadPendingApproval, selectedChatId]
+    [approvalController, cacheThreadPendingApproval, selectedChatId],
   );
 
   const setUserInputDraft = useCallback((questionId: string, value: string) => {
@@ -194,7 +192,7 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
     try {
       const resolutionError = await approvalController.resolveUserInput(
         pendingUserInputRequest,
-        userInputDrafts
+        userInputDrafts,
       );
       if (resolutionError) {
         setUserInputError(resolutionError);
@@ -231,4 +229,6 @@ export function useMainScreenApprovalAndUserInputResolution(context: MainScreenA
   };
 }
 
-export type MainScreenApprovalAndUserInputResolutionResult = ReturnType<typeof useMainScreenApprovalAndUserInputResolution>;
+export type MainScreenApprovalAndUserInputResolutionResult = ReturnType<
+  typeof useMainScreenApprovalAndUserInputResolution
+>;

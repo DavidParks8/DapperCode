@@ -49,7 +49,12 @@ export function ChatHeader({
             accessibilityRole="button"
             accessibilityLabel="Open navigation drawer"
           >
-            <Ionicons {...decorativeAccessibilityProps} name="menu" size={20} color={colors.textPrimary} />
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="menu"
+              size={20}
+              color={colors.textPrimary}
+            />
           </Pressable>
           {onOpenTitleMenu ? (
             <Pressable
@@ -62,7 +67,12 @@ export function ChatHeader({
             >
               <ScrollableTitle title={titleDisplay} />
               <AgentIcon agent={agent} size={18} />
-              <Ionicons {...decorativeAccessibilityProps} name="chevron-down" size={12} color={colors.textMuted} />
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="chevron-down"
+                size={12}
+                color={colors.textMuted}
+              />
             </Pressable>
           ) : (
             <View style={styles.modelNameRow}>
@@ -80,10 +90,20 @@ export function ChatHeader({
                 accessibilityRole="button"
                 accessibilityLabel="Open Git"
               >
-                <Ionicons {...decorativeAccessibilityProps} name={rightIconName} size={18} color={colors.textMuted} />
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name={rightIconName}
+                  size={18}
+                  color={colors.textMuted}
+                />
               </Pressable>
             ) : (
-              <Ionicons {...decorativeAccessibilityProps} name={rightIconName} size={18} color={colors.textMuted} />
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name={rightIconName}
+                size={18}
+                color={colors.textMuted}
+              />
             )
           ) : null}
         </View>

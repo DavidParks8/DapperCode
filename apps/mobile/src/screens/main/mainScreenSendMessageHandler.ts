@@ -1,20 +1,19 @@
 import {
   activeBridgeUiSurfacesAtom,
   pendingApprovalAtom,
-  pendingUserInputRequestAtom
+  pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
-import {
-  selectedCollaborationModeAtom
-} from '../../state/mainScreen/models';
+import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
-import type { MainScreenChatCreationFlowContext, MainScreenChatCreationFlowResult } from './mainScreenChatCreationFlow';
+import type {
+  MainScreenChatCreationFlowContext,
+  MainScreenChatCreationFlowResult,
+} from './mainScreenChatCreationFlow';
 import { executeSendMessage, type SendMessageOptions } from './mainScreenSendMessage';
 
-
-
-
-export type MainScreenSendMessageHandlerContext = MainScreenChatCreationFlowContext & MainScreenChatCreationFlowResult;
+export type MainScreenSendMessageHandlerContext = MainScreenChatCreationFlowContext &
+  MainScreenChatCreationFlowResult;
 
 export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHandlerContext) {
   const {
@@ -52,12 +51,9 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
   const activeBridgeUiSurfaces = useAtomValue(activeBridgeUiSurfacesAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
 
-
   const sendMessageContent = useCallback(
-    (
-      rawContent: string,
-      options?: SendMessageOptions
-    ) => executeSendMessage(context, rawContent, options),
+    (rawContent: string, options?: SendMessageOptions) =>
+      executeSendMessage(context, rawContent, options),
     [
       activeAgentId,
       activeEffort,
@@ -91,7 +87,7 @@ export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHa
       rememberChatModelPreference,
       scrollToBottomReliable,
       submissionController,
-    ]
+    ],
   );
 
   return {

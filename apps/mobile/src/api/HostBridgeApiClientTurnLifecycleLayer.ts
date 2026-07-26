@@ -1,23 +1,23 @@
-import { HostBridgeApiClientWorkspaceAndChatReadLayer } from "./HostBridgeApiClientWorkspaceAndChatReadLayer";
+import { HostBridgeApiClientWorkspaceAndChatReadLayer } from './HostBridgeApiClientWorkspaceAndChatReadLayer';
 import {
   ACTIVE_TURN_STATUSES,
   type ChatSummariesReadOptions,
   normalizeConcurrency,
   normalizeCwd,
   normalizeUniqueThreadIds,
-} from "./clientChatListInternals";
+} from './clientChatListInternals';
 import {
   buildTurnInput,
   normalizeLocalImages,
   normalizeMentions,
   readThreadRuntimeSettings,
-} from "./clientTurnInputInternals";
+} from './clientTurnInputInternals';
 import {
   normalizeApprovalPolicy,
   normalizeModel,
   normalizeTurnStatus,
-} from "./clientBridgeResponseNormalization";
-import { readString } from "./chatMapping";
+} from './clientBridgeResponseNormalization';
+import { readString } from './chatMapping';
 import {
   type AppServerThreadRuntimeSettings,
   type AppServerTurnResponse,
@@ -29,7 +29,7 @@ import {
   type PrepareTurnRequestOptions,
   type SendChatMessageOptions,
   type SendOrQueueChatMessageResult,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 import {
   type ApprovalPolicy,
   type BridgeThreadQueueSendResponse,
@@ -38,7 +38,7 @@ import {
   type ChatSummary,
   type SendChatMessageRequest,
   type SteerChatTurnRequest,
-} from "./types";
+} from './types';
 
 export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeApiClientWorkspaceAndChatReadLayer {
   async getChatSummaries(
@@ -54,33 +54,26 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       DEFAULT_CHAT_SUMMARY_HYDRATION_CONCURRENCY,
       MAX_CHAT_SUMMARY_HYDRATION_CONCURRENCY,
     );
-    const results: Array<ChatSummary | null> = Array(uniqueIds.length).fill(
-      null,
-    );
+    const results: Array<ChatSummary | null> = Array(uniqueIds.length).fill(null);
     let nextIndex = 0;
-    const workers = Array.from(
-      { length: Math.min(concurrency, uniqueIds.length) },
-      async () => {
-        while (nextIndex < uniqueIds.length) {
-          const index = nextIndex;
-          nextIndex += 1;
-          try {
-            results[index] = await this.getChatSummary(uniqueIds[index]);
-          } catch {
-            results[index] = null;
-          }
+    const workers = Array.from({ length: Math.min(concurrency, uniqueIds.length) }, async () => {
+      while (nextIndex < uniqueIds.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        try {
+          results[index] = await this.getChatSummary(uniqueIds[index]);
+        } catch {
+          results[index] = null;
         }
-      },
-    );
+      }
+    });
     await Promise.all(workers);
-    return results.filter(
-      (summary): summary is ChatSummary => summary !== null,
-    );
+    return results.filter((summary): summary is ChatSummary => summary !== null);
   }
   async setChatWorkspace(id: string, cwd: string): Promise<Chat> {
     const normalizedCwd = normalizeCwd(cwd);
     if (!normalizedCwd) {
-      throw new Error("Workspace path cannot be empty");
+      throw new Error('Workspace path cannot be empty');
     }
     await this.resumeThread(id, { cwd: normalizedCwd });
     const updated = await this.getChat(id);
@@ -99,16 +92,13 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
   ): Promise<AppServerThreadRuntimeSettings> {
     const threadId = id.trim();
     if (!threadId) {
-      throw new Error("thread id is required");
+      throw new Error('thread id is required');
     }
     const requestedCwd = normalizeCwd(options?.cwd);
     if (!requestedCwd) {
-      throw new Error(
-        "Cannot resume thread without its canonical workspace path",
-      );
+      throw new Error('Cannot resume thread without its canonical workspace path');
     }
-    const requestedApprovalPolicy =
-      normalizeApprovalPolicy(options?.approvalPolicy) ?? "untrusted";
+    const requestedApprovalPolicy = normalizeApprovalPolicy(options?.approvalPolicy) ?? 'untrusted';
     const request = {
       threadId,
       history: null,
@@ -125,10 +115,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       experimentalRawEvents: true,
       persistExtendedHistory: true,
     };
-    const response = await this.ws.request<Record<string, unknown>>(
-      "thread/resume",
-      request,
-    );
+    const response = await this.ws.request<Record<string, unknown>>('thread/resume', request);
     return readThreadRuntimeSettings(response);
   }
   async sendChatMessage(
@@ -141,12 +128,12 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       return this.getChat(id);
     }
     const turnStart = await this.ws.request<AppServerTurnResponse>(
-      "turn/start",
+      'turn/start',
       prepared.turnStartParams,
     );
     const turnId = turnStart.turn?.id;
     if (!turnId) {
-      throw new Error("turn/start did not return turn id");
+      throw new Error('turn/start did not return turn id');
     }
     options?.onTurnStarted?.(turnId);
     return this.getChatWithUserMessage(
@@ -161,12 +148,12 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     id: string,
     body: SendChatMessageRequest,
     submissionId: string,
-    options?: Pick<SendChatMessageOptions, "onTurnStarted">,
+    options?: Pick<SendChatMessageOptions, 'onTurnStarted'>,
   ): Promise<Chat> {
     const result = await this.sendOrQueueChatMessage(id, body, {
       submissionId,
     });
-    if (result.disposition === "queued") {
+    if (result.disposition === 'queued') {
       return this.getChat(id);
     }
     options?.onTurnStarted?.(result.turnId);
@@ -180,14 +167,14 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     const prepared = await this.prepareTurnRequest(id, body, options);
     if (!prepared.content) {
       return {
-        disposition: "sent",
+        disposition: 'sent',
         queue: await this.readThreadQueue(id),
-        turnId: "",
+        turnId: '',
         chat: await this.getChat(id),
       };
     }
     const response = await this.ws.request<BridgeThreadQueueSendResponse>(
-      "bridge/thread/queue/send",
+      'bridge/thread/queue/send',
       {
         threadId: id,
         submissionId: options?.submissionId?.trim() || createSubmissionId(),
@@ -195,9 +182,9 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
         turnStart: prepared.turnStartParams,
       },
     );
-    if (response.disposition === "queued") {
+    if (response.disposition === 'queued') {
       return {
-        disposition: "queued",
+        disposition: 'queued',
         queue: response.queue,
         turnId: null,
         chat: null,
@@ -205,9 +192,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     }
     const turnId = response.turnId?.trim();
     if (!turnId) {
-      throw new Error(
-        "bridge/thread/queue/send did not return turn id for sent message",
-      );
+      throw new Error('bridge/thread/queue/send did not return turn id for sent message');
     }
     const chat = await this.getChatWithUserMessage(
       id,
@@ -216,7 +201,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       prepared.mentions,
       prepared.localImages,
     );
-    return { disposition: "sent", queue: response.queue, turnId, chat };
+    return { disposition: 'sent', queue: response.queue, turnId, chat };
   }
   async steerChatTurn(
     threadId: string,
@@ -231,7 +216,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     }
     const normalizedMentions = normalizeMentions(body.mentions);
     const normalizedLocalImages = normalizeLocalImages(body.localImages);
-    await this.ws.request<Record<string, never>>("turn/steer", {
+    await this.ws.request<Record<string, never>>('turn/steer', {
       threadId: normalizedThreadId,
       expectedTurnId: normalizedExpectedTurnId,
       input: buildTurnInput(content, normalizedMentions, normalizedLocalImages),
@@ -241,9 +226,9 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     const normalizedThreadId = threadId.trim();
     const normalizedTurnId = turnId.trim();
     if (!normalizedThreadId || !normalizedTurnId) {
-      throw new Error("threadId and turnId are required to interrupt a turn");
+      throw new Error('threadId and turnId are required to interrupt a turn');
     }
-    await this.ws.request<Record<string, never>>("turn/interrupt", {
+    await this.ws.request<Record<string, never>>('turn/interrupt', {
       threadId: normalizedThreadId,
       turnId: normalizedTurnId,
     });
@@ -251,12 +236,10 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
   async interruptLatestTurn(threadId: string): Promise<string | null> {
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) {
-      throw new Error("threadId is required to interrupt the active turn");
+      throw new Error('threadId is required to interrupt the active turn');
     }
     const snapshot = await this.readChatSnapshot(normalizedThreadId);
-    const turns = Array.isArray(snapshot.rawThread.turns)
-      ? snapshot.rawThread.turns
-      : [];
+    const turns = Array.isArray(snapshot.rawThread.turns) ? snapshot.rawThread.turns : [];
     for (let i = turns.length - 1; i >= 0; i -= 1) {
       const turn = turns[i];
       const turnId = readString(turn.id);
@@ -273,7 +256,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) {
       return Promise.resolve({
-        threadId: "",
+        threadId: '',
         items: [],
         pendingSteers: [],
         pendingSteerCount: 0,
@@ -282,7 +265,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
         lastError: null,
       });
     }
-    return this.ws.request<BridgeThreadQueueState>("bridge/thread/queue/read", {
+    return this.ws.request<BridgeThreadQueueState>('bridge/thread/queue/read', {
       threadId: normalizedThreadId,
     });
   }

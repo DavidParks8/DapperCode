@@ -7,14 +7,15 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '../../a
 import { hasStructuredPlanCardContent } from './planCardState';
 import { useAppTheme } from '../../theme';
 import { createStyles, createWorkflowMarkdownStyles } from './mainScreenStyles';
-import { type ActivePlanState, PLAN_IMPLEMENTATION_TITLE, PLAN_IMPLEMENTATION_YES, PLAN_IMPLEMENTATION_NO, renderPlanStatusGlyph, queuedMessageStatusLabel, stripMarkdownInline } from './mainScreenHelpers';
-
-
-
-
-
-
-
+import {
+  type ActivePlanState,
+  PLAN_IMPLEMENTATION_TITLE,
+  PLAN_IMPLEMENTATION_YES,
+  PLAN_IMPLEMENTATION_NO,
+  renderPlanStatusGlyph,
+  queuedMessageStatusLabel,
+  stripMarkdownInline,
+} from './mainScreenHelpers';
 
 export function WorkflowCard({
   mode,
@@ -41,12 +42,10 @@ export function WorkflowCard({
   const hasStructuredPlan = hasStructuredPlanCardContent(plan);
   const hasSteps = (plan?.steps.length ?? 0) > 0;
   const totalStepCount = plan?.steps.length ?? 0;
-  const completedStepCount =
-    plan?.steps.filter((step) => step.status === 'completed').length ?? 0;
+  const completedStepCount = plan?.steps.filter((step) => step.status === 'completed').length ?? 0;
   const inProgressStepCount =
     plan?.steps.filter((step) => step.status === 'inProgress').length ?? 0;
-  const pendingStepCount =
-    plan?.steps.filter((step) => step.status === 'pending').length ?? 0;
+  const pendingStepCount = plan?.steps.filter((step) => step.status === 'pending').length ?? 0;
   const activeStep = plan
     ? (plan.steps.find((step) => step.status === 'inProgress') ??
       plan.steps.find((step) => step.status === 'pending') ??
@@ -55,25 +54,19 @@ export function WorkflowCard({
     : null;
   const collapsedSummaryRaw =
     mode === 'approval'
-      ? activeStep?.step ??
+      ? (activeStep?.step ??
         plan?.explanation?.trim() ??
-        'Start coding now or keep refining the plan.'
+        'Start coding now or keep refining the plan.')
       : mode === 'execution'
-        ? activeStep?.step ??
-          plan?.explanation?.trim() ??
-          '(no execution details yet)'
-        : activeStep?.step ?? plan?.explanation?.trim() ?? '(no steps provided)';
+        ? (activeStep?.step ?? plan?.explanation?.trim() ?? '(no execution details yet)')
+        : (activeStep?.step ?? plan?.explanation?.trim() ?? '(no steps provided)');
   const collapsedSummary = stripMarkdownInline(collapsedSummaryRaw)
     .replace(/\s*#{1,6}\s*/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const isCollapsible = hasStructuredPlan || mode === 'approval';
   const title =
-    mode === 'approval'
-      ? PLAN_IMPLEMENTATION_TITLE
-      : mode === 'execution'
-        ? 'Execution'
-        : 'Plan';
+    mode === 'approval' ? PLAN_IMPLEMENTATION_TITLE : mode === 'execution' ? 'Execution' : 'Plan';
   const iconName =
     mode === 'approval'
       ? 'rocket-outline'
@@ -112,11 +105,7 @@ export function WorkflowCard({
             {renderPlanStatusGlyph(step.status)}
           </Text>
           <View style={styles.planStepMarkdownWrap}>
-            <Markdown
-              style={workflowMarkdownStyles}
-            >
-              {step.step}
-            </Markdown>
+            <Markdown style={workflowMarkdownStyles}>{step.step}</Markdown>
           </View>
         </View>
       ))}
@@ -166,7 +155,12 @@ export function WorkflowCard({
       accessibilityLabel={`${title}, ${collapsedSummary}`}
       accessibilityState={controlAccessibilityState({ expanded: !collapsed })}
     >
-      <Ionicons {...decorativeAccessibilityProps} name={iconName} size={14} color={theme.colors.textPrimary} />
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name={iconName}
+        size={14}
+        color={theme.colors.textPrimary}
+      />
       <View style={styles.planCardHeaderText}>
         <Text style={styles.planCardTitle}>{title}</Text>
         {collapsed ? (
@@ -184,7 +178,12 @@ export function WorkflowCard({
     </Pressable>
   ) : (
     <View style={styles.planCardHeader}>
-      <Ionicons {...decorativeAccessibilityProps} name={iconName} size={14} color={theme.colors.textPrimary} />
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name={iconName}
+        size={14}
+        color={theme.colors.textPrimary}
+      />
       <View style={styles.planCardHeaderText}>
         <Text style={styles.planCardTitle}>{title}</Text>
         <Text style={styles.planCardSummary} numberOfLines={2}>
@@ -278,7 +277,6 @@ export function WorkflowCard({
   );
 }
 
-
 export function QueuedMessageDock({
   queuedMessage,
   remainingQueuedMessagesCount,
@@ -353,28 +351,35 @@ export function QueuedMessageDock({
                 Cancel
               </Text>
             </Pressable>
-            {!steerPending ? <Pressable
-              onPress={onSteerQueuedMessage}
-              disabled={!steerEnabled}
-              style={({ pressed }) => [
-                styles.queuedMessageActionButton,
-                !steerEnabled && styles.queuedMessageActionButtonDisabled,
-                pressed && steerEnabled && styles.queuedMessageActionButtonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={steeringActive ? 'Steering queued message' : 'Steer queued message'}
-              accessibilityHint={steerDisabledReason ?? undefined}
-              accessibilityState={controlAccessibilityState({ disabled: !steerEnabled, busy: steeringActive })}
-            >
-              <Text
-                style={[
-                  styles.queuedMessageActionLabel,
-                  !steerEnabled && styles.queuedMessageActionLabelDisabled,
+            {!steerPending ? (
+              <Pressable
+                onPress={onSteerQueuedMessage}
+                disabled={!steerEnabled}
+                style={({ pressed }) => [
+                  styles.queuedMessageActionButton,
+                  !steerEnabled && styles.queuedMessageActionButtonDisabled,
+                  pressed && steerEnabled && styles.queuedMessageActionButtonPressed,
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  steeringActive ? 'Steering queued message' : 'Steer queued message'
+                }
+                accessibilityHint={steerDisabledReason ?? undefined}
+                accessibilityState={controlAccessibilityState({
+                  disabled: !steerEnabled,
+                  busy: steeringActive,
+                })}
               >
-                {steeringActive ? 'Steering…' : 'Steer'}
-              </Text>
-            </Pressable> : null}
+                <Text
+                  style={[
+                    styles.queuedMessageActionLabel,
+                    !steerEnabled && styles.queuedMessageActionLabelDisabled,
+                  ]}
+                >
+                  {steeringActive ? 'Steering…' : 'Steer'}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
         <Text numberOfLines={3} style={styles.queuedMessageBody}>

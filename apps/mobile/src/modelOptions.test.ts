@@ -13,7 +13,7 @@ describe('model option formatting', () => {
   it('formats default, provider-qualified, and plain labels', () => {
     expect(formatModelOptionLabel(null)).toBe('Default model');
     expect(formatModelOptionLabel(model({ providerName: ' Provider ' }))).toBe(
-      'Provider · Model Name'
+      'Provider · Model Name',
     );
     expect(formatModelOptionLabel(model({ providerName: ' ' }))).toBe('Model Name');
   });
@@ -31,9 +31,7 @@ describe('model option formatting', () => {
     [9_900_000, '9.9M'],
     [10_000_000, '10M'],
   ])('formats a %i-token context window as %s', (contextWindow, expected) => {
-    expect(formatModelOptionDescription(model({ contextWindow }))).toBe(
-      `${expected} context`
-    );
+    expect(formatModelOptionDescription(model({ contextWindow }))).toBe(`${expected} context`);
   });
 
   it('joins trimmed provider, description, and context metadata', () => {
@@ -43,8 +41,8 @@ describe('model option formatting', () => {
           providerName: ' Provider ',
           description: ' Description ',
           contextWindow: 128_000,
-        })
-      )
+        }),
+      ),
     ).toBe('Provider · Description · 128K context');
   });
 });

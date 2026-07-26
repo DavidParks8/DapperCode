@@ -1,11 +1,9 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom,
-  selectedModelIdAtom
+  selectedModelIdAtom,
 } from '../../state/mainScreen/models';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
@@ -13,17 +11,14 @@ import type { CollaborationMode } from '../../api/types';
 import { type SelectionSheetOption } from '../../components/SelectionSheet';
 import { formatModelOptionDescription, formatModelOptionLabel } from '../../modelOptions';
 import { formatReasoningEffort } from './mainScreenHelpers';
-import type { MainScreenComposerControlActionsContext, MainScreenComposerControlActionsResult } from './mainScreenComposerControlActions';
-import {
-  collaborationModeMenuVisibleAtom
-} from '../../state/mainScreen/modals';
+import type {
+  MainScreenComposerControlActionsContext,
+  MainScreenComposerControlActionsResult,
+} from './mainScreenComposerControlActions';
+import { collaborationModeMenuVisibleAtom } from '../../state/mainScreen/modals';
 
-
-
-
-
-
-export type MainScreenPickerOptionBuildersContext = MainScreenComposerControlActionsContext & MainScreenComposerControlActionsResult;
+export type MainScreenPickerOptionBuildersContext = MainScreenComposerControlActionsContext &
+  MainScreenComposerControlActionsResult;
 
 export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptionBuildersContext) {
   const {
@@ -50,64 +45,69 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
 
-
-  const collaborationModeOptions = useMemo<SelectionSheetOption[]>(
-    () => {
-      const setMode = async (mode: CollaborationMode, acpMode: string) => {
-        if (modeConfig) {
-          const updated = await applyAcpConfigOption(modeConfig, acpMode);
-          if (!updated) {
-            return;
-          }
+  const collaborationModeOptions = useMemo<SelectionSheetOption[]>(() => {
+    const setMode = async (mode: CollaborationMode, acpMode: string) => {
+      if (modeConfig) {
+        const updated = await applyAcpConfigOption(modeConfig, acpMode);
+        if (!updated) {
+          return;
         }
-        setSelectedAcpModeId(acpMode);
-        setSelectedCollaborationMode(mode);
-        setCollaborationModeMenuVisible(false);
-        setError(null);
-      };
+      }
+      setSelectedAcpModeId(acpMode);
+      setSelectedCollaborationMode(mode);
+      setCollaborationModeMenuVisible(false);
+      setError(null);
+    };
 
-      const advertisedModes = modeConfig?.options ?? [];
-      if (advertisedModes.length > 0) {
-        return advertisedModes.map((option) => {
-          const mode: CollaborationMode = option.value === 'plan' ? 'plan' : 'default';
-          return {
-            key: option.value,
-            title: option.name,
-            description: option.description ?? (
-              mode === 'plan'
-                ? 'Plan the work before execution.'
-                : 'Use this primary OpenCode agent mode for the next turn.'
-            ),
-            icon: mode === 'plan' ? 'git-branch-outline' as const : 'chatbubble-ellipses-outline' as const,
-            selected: modeConfig?.value === option.value,
-            onPress: () => { void setMode(mode, option.value); },
-          } satisfies SelectionSheetOption;
-        });
-      }
-      if (selectedChatId) {
-        return [];
-      }
-      return [
-        {
-          key: 'default',
-          title: 'Default mode',
-          description: 'Answer directly and keep the turn moving.',
-          icon: 'chatbubble-ellipses-outline' as const,
-          selected: selectedCollaborationMode === 'default',
-          onPress: () => { void setMode('default', 'build'); },
+    const advertisedModes = modeConfig?.options ?? [];
+    if (advertisedModes.length > 0) {
+      return advertisedModes.map((option) => {
+        const mode: CollaborationMode = option.value === 'plan' ? 'plan' : 'default';
+        return {
+          key: option.value,
+          title: option.name,
+          description:
+            option.description ??
+            (mode === 'plan'
+              ? 'Plan the work before execution.'
+              : 'Use this primary OpenCode agent mode for the next turn.'),
+          icon:
+            mode === 'plan'
+              ? ('git-branch-outline' as const)
+              : ('chatbubble-ellipses-outline' as const),
+          selected: modeConfig?.value === option.value,
+          onPress: () => {
+            void setMode(mode, option.value);
+          },
+        } satisfies SelectionSheetOption;
+      });
+    }
+    if (selectedChatId) {
+      return [];
+    }
+    return [
+      {
+        key: 'default',
+        title: 'Default mode',
+        description: 'Answer directly and keep the turn moving.',
+        icon: 'chatbubble-ellipses-outline' as const,
+        selected: selectedCollaborationMode === 'default',
+        onPress: () => {
+          void setMode('default', 'build');
         },
-        {
-          key: 'plan',
-          title: 'Plan mode',
-          description: 'Pause to ask structured follow-up questions before execution.',
-          icon: 'git-branch-outline' as const,
-          selected: selectedCollaborationMode === 'plan',
-          onPress: () => { void setMode('plan', 'plan'); },
+      },
+      {
+        key: 'plan',
+        title: 'Plan mode',
+        description: 'Pause to ask structured follow-up questions before execution.',
+        icon: 'git-branch-outline' as const,
+        selected: selectedCollaborationMode === 'plan',
+        onPress: () => {
+          void setMode('plan', 'plan');
         },
-      ];
-    },
-    [applyAcpConfigOption, modeConfig, selectedCollaborationMode]
-  );
+      },
+    ];
+  }, [applyAcpConfigOption, modeConfig, selectedCollaborationMode]);
 
   const agentPickerOptions = useMemo<SelectionSheetOption[]>(
     () =>
@@ -119,7 +119,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         selected: activeAgentId === agent.agentId,
         onPress: () => selectPendingAgent(agent.agentId),
       })),
-    [activeAgentId, readyAgents, selectPendingAgent]
+    [activeAgentId, readyAgents, selectPendingAgent],
   );
 
   const modelPickerOptions = useMemo<SelectionSheetOption[]>(
@@ -133,7 +133,9 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         icon: 'sparkles-outline',
         badge: 'Auto',
         selected: selectedModelId === null || selectedModel === null,
-        onPress: () => { void selectModel(null); },
+        onPress: () => {
+          void selectModel(null);
+        },
       },
       ...modelOptions.map((model) => ({
         key: model.id,
@@ -145,10 +147,12 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
           ? formatReasoningEffort(model.defaultReasoningEffort)
           : undefined,
         selected: model.id === selectedModelId,
-        onPress: () => { void selectModel(model.id); },
+        onPress: () => {
+          void selectModel(model.id);
+        },
       })),
     ],
-    [modelOptions, selectModel, selectedModel, selectedModelId, serverDefaultModel]
+    [modelOptions, selectModel, selectedModel, selectedModelId, serverDefaultModel],
   );
 
   const effortPickerSheetOptions = useMemo<SelectionSheetOption[]>(
@@ -164,26 +168,23 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         icon: 'sparkles-outline',
         badge: 'Auto',
         selected: selectedEffort === null,
-        onPress: () => { void selectEffort(null); },
+        onPress: () => {
+          void selectEffort(null);
+        },
       },
       ...effortPickerOptions.map((option) => ({
         key: option.effort,
         title: formatReasoningEffort(option.effort),
         description:
-          option.description?.trim() ||
-          'Override the model default for the next response.',
+          option.description?.trim() || 'Override the model default for the next response.',
         icon: 'pulse-outline' as const,
         selected: option.effort === selectedEffort,
-        onPress: () => { void selectEffort(option.effort); },
+        onPress: () => {
+          void selectEffort(option.effort);
+        },
       })),
     ],
-    [
-      effortPickerDefault,
-      effortPickerModel,
-      effortPickerOptions,
-      selectEffort,
-      selectedEffort,
-    ]
+    [effortPickerDefault, effortPickerModel, effortPickerOptions, selectEffort, selectedEffort],
   );
 
   return {
@@ -194,4 +195,6 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
   };
 }
 
-export type MainScreenPickerOptionBuildersResult = ReturnType<typeof useMainScreenPickerOptionBuilders>;
+export type MainScreenPickerOptionBuildersResult = ReturnType<
+  typeof useMainScreenPickerOptionBuilders
+>;

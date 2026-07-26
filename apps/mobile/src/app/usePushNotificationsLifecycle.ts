@@ -56,7 +56,7 @@ export function usePushNotificationsLifecycle(): void {
             api,
             ws,
           }
-        : null
+        : null,
     );
   }, [activeBridgeProfileId, api, registrations, ws]);
 }

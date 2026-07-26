@@ -11,7 +11,9 @@ function coordinatorFor(get: Getter): AppStatePersistenceCoordinator {
   return getAppStateCoordinator(requireAppStore(get(appStoreRefAtom)));
 }
 
-export const initializeAppStateAtom = atom(null, (get): Promise<void> => coordinatorFor(get).initialize());
+export const initializeAppStateAtom = atom(null, (get): Promise<void> =>
+  coordinatorFor(get).initialize(),
+);
 
 export const dispatchAppStateAtom = atom(null, (get, set, action: AppStateAction): void => {
   coordinatorFor(get).dispatch(action);
@@ -20,13 +22,13 @@ export const dispatchAppStateAtom = atom(null, (get, set, action: AppStateAction
 export const dispatchDurableAppStateAtom = atom(
   null,
   (get, set, action: AppStateAction): Promise<AppStateData> =>
-    coordinatorFor(get).dispatchDurable(action)
+    coordinatorFor(get).dispatchDurable(action),
 );
 
 export const retryPersistenceAtom = atom(null, (get): Promise<void> =>
-  coordinatorFor(get).retryPersistence()
+  coordinatorFor(get).retryPersistence(),
 );
 
 export const flushPersistenceAtom = atom(null, (get): Promise<void> =>
-  coordinatorFor(get).flushPersistence()
+  coordinatorFor(get).flushPersistence(),
 );

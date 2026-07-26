@@ -273,9 +273,7 @@ export function parseChatModelPreferences(raw: string): Record<string, ChatModel
       result[normalizedChatId] = {
         modelId: normalizeModelId(readString(entry.modelId)),
         effort: normalizeReasoningEffort(readString(entry.effort)),
-        serviceTier: toSelectedServiceTier(
-          normalizeServiceTier(readString(entry.serviceTier))
-        ),
+        serviceTier: toSelectedServiceTier(normalizeServiceTier(readString(entry.serviceTier))),
         updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
       };
     }
@@ -385,7 +383,7 @@ export function parseChatBridgeUiSurfaces(raw: string): Record<string, BridgeUiS
         .map(toBridgeUiSurface)
         .filter(
           (surface): surface is BridgeUiSurface =>
-            surface !== null && surface.threadId === normalizedChatId
+            surface !== null && surface.threadId === normalizedChatId,
         );
       if (surfaces.length > 0) {
         result[normalizedChatId] = surfaces;

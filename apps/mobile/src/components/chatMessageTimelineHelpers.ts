@@ -36,7 +36,7 @@ function normalizeTimelineDetail(line: string): string | null {
 }
 
 export function entriesAreComputerUseTimeline(
-  entries: Array<Pick<ToolGroupEntry, 'title'>>
+  entries: Array<Pick<ToolGroupEntry, 'title'>>,
 ): boolean {
   return entries.length > 0 && entries.every((entry) => isComputerUseTraceEntry(entry));
 }
@@ -50,23 +50,36 @@ export function formatCompactionLabel(content: string): string {
 }
 
 export function summarizeReasoningPreview(details: string[]): string | null {
-  const preview = details.map((line) => line.trim()).filter(Boolean).join(' ');
+  const preview = details
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ');
   return preview || null;
 }
 
 function stripLeadingTimelineBullet(title: string): string {
-  return title.trim().replace(/^[•\u2022]\s*/, '').trim();
+  return title
+    .trim()
+    .replace(/^[•\u2022]\s*/, '')
+    .trim();
 }
 
 export function summarizeToolGroup(titles: string[]): string {
   const normalized = titles.map((title) => stripLeadingTimelineBullet(title).toLowerCase());
-  if (normalized.every((title) => title.startsWith('ran '))) return `${String(titles.length)} command${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('called tool'))) return `${String(titles.length)} tool call${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('searched web'))) return `${String(titles.length)} web search${titles.length === 1 ? '' : 'es'}`;
-  if (normalized.every((title) => title.startsWith('applied file changes'))) return `${String(titles.length)} file change${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('reading'))) return `${String(titles.length)} file read${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('listing'))) return `${String(titles.length)} folder listing${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('explored'))) return `${String(titles.length)} exploration${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('ran ')))
+    return `${String(titles.length)} command${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('called tool')))
+    return `${String(titles.length)} tool call${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('searched web')))
+    return `${String(titles.length)} web search${titles.length === 1 ? '' : 'es'}`;
+  if (normalized.every((title) => title.startsWith('applied file changes')))
+    return `${String(titles.length)} file change${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('reading')))
+    return `${String(titles.length)} file read${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('listing')))
+    return `${String(titles.length)} folder listing${titles.length === 1 ? '' : 's'}`;
+  if (normalized.every((title) => title.startsWith('explored')))
+    return `${String(titles.length)} exploration${titles.length === 1 ? '' : 's'}`;
   return `${String(titles.length)} tool step${titles.length === 1 ? '' : 's'}`;
 }
 
@@ -76,15 +89,23 @@ export function toTimelineVisual(title: string): {
   isError: boolean;
 } {
   const normalized = stripLeadingTimelineBullet(title).toLowerCase();
-  const isError = normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
+  const isError =
+    normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
   if (isError) return { icon: 'alert-circle-outline', useMonospaceTitle: false, isError: true };
-  if (normalized.startsWith('ran ')) return { icon: 'play-outline', useMonospaceTitle: true, isError: false };
-  if (normalized.startsWith('explored')) return { icon: 'search', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('called tool')) return { icon: 'construct-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('searched web')) return { icon: 'globe-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('reading')) return { icon: 'eye-outline', useMonospaceTitle: true, isError: false };
-  if (normalized.startsWith('listing')) return { icon: 'folder-open-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('applied file')) return { icon: 'create-outline', useMonospaceTitle: false, isError: false };
+  if (normalized.startsWith('ran '))
+    return { icon: 'play-outline', useMonospaceTitle: true, isError: false };
+  if (normalized.startsWith('explored'))
+    return { icon: 'search', useMonospaceTitle: false, isError: false };
+  if (normalized.startsWith('called tool'))
+    return { icon: 'construct-outline', useMonospaceTitle: false, isError: false };
+  if (normalized.startsWith('searched web'))
+    return { icon: 'globe-outline', useMonospaceTitle: false, isError: false };
+  if (normalized.startsWith('reading'))
+    return { icon: 'eye-outline', useMonospaceTitle: true, isError: false };
+  if (normalized.startsWith('listing'))
+    return { icon: 'folder-open-outline', useMonospaceTitle: false, isError: false };
+  if (normalized.startsWith('applied file'))
+    return { icon: 'create-outline', useMonospaceTitle: false, isError: false };
   return { icon: 'document-text-outline', useMonospaceTitle: false, isError: false };
 }
 
@@ -93,7 +114,8 @@ export function toSubAgentVisual(title: string): {
   isError: boolean;
 } {
   const normalized = title.toLowerCase();
-  const isError = normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
+  const isError =
+    normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
   if (isError) return { icon: 'alert-circle-outline', isError: true };
   if (normalized.includes('waiting')) return { icon: 'pause-circle-outline', isError: false };
   if (normalized.includes('closed')) return { icon: 'checkmark-circle-outline', isError: false };
@@ -103,6 +125,15 @@ export function toSubAgentVisual(title: string): {
 
 export function isTerminalSubAgentStatus(status: string | null | undefined): boolean {
   const normalized = status?.trim().toLowerCase() ?? '';
-  return ['completed', 'complete', 'succeeded', 'failed', 'error', 'aborted',
-    'cancelled', 'canceled', 'closed'].includes(normalized);
+  return [
+    'completed',
+    'complete',
+    'succeeded',
+    'failed',
+    'error',
+    'aborted',
+    'cancelled',
+    'canceled',
+    'closed',
+  ].includes(normalized);
 }

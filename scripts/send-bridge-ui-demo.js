@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-"use strict";
+'use strict';
 
-const fs = require("node:fs");
-const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 function usage() {
   console.log(`Usage:
@@ -20,31 +20,31 @@ Options:
 
 function parseArgs(argv) {
   const options = {
-    threadId: "",
-    presentation: "workflowCard",
-    title: "Goal",
+    threadId: '',
+    presentation: 'workflowCard',
+    title: 'Goal',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--help" || arg === "-h") {
+    if (arg === '--help' || arg === '-h') {
       usage();
       process.exit(0);
     }
-    if (arg === "--thread") {
-      options.threadId = argv[index + 1] || "";
+    if (arg === '--thread') {
+      options.threadId = argv[index + 1] || '';
       index += 1;
       continue;
     }
-    if (arg === "--modal") {
-      options.presentation = "modal";
+    if (arg === '--modal') {
+      options.presentation = 'modal';
       continue;
     }
-    if (arg === "--banner") {
-      options.presentation = "banner";
+    if (arg === '--banner') {
+      options.presentation = 'banner';
       continue;
     }
-    if (arg === "--title") {
+    if (arg === '--title') {
       options.title = argv[index + 1] || options.title;
       index += 1;
       continue;
@@ -62,9 +62,9 @@ function readEnvFile(filePath) {
   }
 
   const env = {};
-  for (const rawLine of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
+  for (const rawLine of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
+    if (!line || line.startsWith('#')) {
       continue;
     }
     const match = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
@@ -86,41 +86,37 @@ function readEnvFile(filePath) {
 
 function buildBridgeBaseUrl(env) {
   if (env.BRIDGE_CONNECT_URL) {
-    return env.BRIDGE_CONNECT_URL.replace(/\/+$/, "");
+    return env.BRIDGE_CONNECT_URL.replace(/\/+$/, '');
   }
 
-  const host = env.BRIDGE_HOST || "127.0.0.1";
-  const port = env.BRIDGE_PORT || "8787";
+  const host = env.BRIDGE_HOST || '127.0.0.1';
+  const port = env.BRIDGE_PORT || '8787';
   return `http://${host}:${port}`;
 }
 
 function parseBridgePort(baseUrl) {
   try {
     const parsed = new URL(baseUrl);
-    return parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    return parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
   } catch {
-    return "";
+    return '';
   }
 }
 
 function readLiveBridgeToken(baseUrl) {
   const port = parseBridgePort(baseUrl);
   if (!port) {
-    return "";
+    return '';
   }
 
-  let lsofOutput = "";
+  let lsofOutput = '';
   try {
-    lsofOutput = execFileSync("lsof", [
-      "-nP",
-      `-iTCP:${port}`,
-      "-sTCP:LISTEN",
-    ], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+    lsofOutput = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
   } catch {
-    return "";
+    return '';
   }
 
   const lines = lsofOutput.trim().split(/\r?\n/).slice(1);
@@ -132,9 +128,9 @@ function readLiveBridgeToken(baseUrl) {
     }
 
     try {
-      const processOutput = execFileSync("ps", ["eww", "-p", pid], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
+      const processOutput = execFileSync('ps', ['eww', '-p', pid], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
       });
       const match = processOutput.match(/\bBRIDGE_AUTH_TOKEN=([^\s]+)/);
       if (match?.[1]) {
@@ -145,7 +141,7 @@ function readLiveBridgeToken(baseUrl) {
     }
   }
 
-  return "";
+  return '';
 }
 
 class BridgeRpcClient {
@@ -173,7 +169,7 @@ class BridgeRpcClient {
           return;
         }
         settled = true;
-        reject(new Error(error?.message || "Failed to connect to bridge websocket"));
+        reject(new Error(error?.message || 'Failed to connect to bridge websocket'));
       };
       socket.onmessage = (event) => this.handleMessage(event.data);
       socket.onclose = (code) => {
@@ -183,7 +179,7 @@ class BridgeRpcClient {
           return;
         }
         for (const { reject: rejectPending } of this.pending.values()) {
-          rejectPending(new Error("Bridge websocket closed"));
+          rejectPending(new Error('Bridge websocket closed'));
         }
         this.pending.clear();
       };
@@ -192,7 +188,7 @@ class BridgeRpcClient {
 
   request(method, params) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("Bridge websocket is not connected");
+      throw new Error('Bridge websocket is not connected');
     }
 
     const id = String(this.nextId);
@@ -234,7 +230,7 @@ class BridgeRpcClient {
     this.pending.delete(message.id);
 
     if (message.error) {
-      pending.reject(new Error(message.error.message || "Bridge RPC failed"));
+      pending.reject(new Error(message.error.message || 'Bridge RPC failed'));
       return;
     }
 
@@ -248,19 +244,19 @@ class BridgeRpcClient {
 
 function resolveWebSocketConstructor() {
   try {
-    return require("ws");
+    return require('ws');
   } catch {
-    if (typeof WebSocket === "function") {
+    if (typeof WebSocket === 'function') {
       return WebSocket;
     }
   }
 
-  throw new Error("No WebSocket client is available for this Node.js runtime.");
+  throw new Error('No WebSocket client is available for this Node.js runtime.');
 }
 
 function createWebSocket(WebSocketCtor, url, token) {
   const isWsPackage =
-    typeof WebSocketCtor === "function" && Boolean(WebSocketCtor.Server || WebSocketCtor.WebSocket);
+    typeof WebSocketCtor === 'function' && Boolean(WebSocketCtor.Server || WebSocketCtor.WebSocket);
   if (isWsPackage) {
     return new WebSocketCtor(url, {
       headers: {
@@ -269,19 +265,19 @@ function createWebSocket(WebSocketCtor, url, token) {
     });
   }
 
-  const separator = url.includes("?") ? "&" : "?";
+  const separator = url.includes('?') ? '&' : '?';
   return new WebSocketCtor(`${url}${separator}token=${encodeURIComponent(token)}`);
 }
 
 async function resolveLatestThreadId(client) {
-  const response = await client.request("thread/list", {
+  const response = await client.request('thread/list', {
     cursor: null,
     limit: 1,
   });
 
   const threadId = response?.data?.[0]?.id;
-  if (typeof threadId !== "string" || !threadId.trim()) {
-    throw new Error("No chat found. Create or open a chat in the mobile app first.");
+  if (typeof threadId !== 'string' || !threadId.trim()) {
+    throw new Error('No chat found. Create or open a chat in the mobile app first.');
   }
 
   return threadId;
@@ -293,38 +289,38 @@ function buildSurface(options, threadId) {
     id: `goal-demo-${Date.now()}`,
     threadId,
     turnId: null,
-    kind: "goal",
+    kind: 'goal',
     presentation: options.presentation,
-    tone: "info",
+    tone: 'info',
     title: options.title,
-    subtitle: "Bridge UI demo",
+    subtitle: 'Bridge UI demo',
     bodyMarkdown:
-      "This came from the bridge through the generic UI surface contract. Future provider updates can use the same path.",
+      'This came from the bridge through the generic UI surface contract. Future provider updates can use the same path.',
     blocks: [
       {
-        type: "checklist",
+        type: 'checklist',
         items: [
-          { label: "Bridge emitted a generic surface", status: "completed" },
-          { label: "Mobile rendered it without provider-specific UI", status: "inProgress" },
-          { label: "Future Codex goal mapper can reuse this contract", status: "pending" },
+          { label: 'Bridge emitted a generic surface', status: 'completed' },
+          { label: 'Mobile rendered it without provider-specific UI', status: 'inProgress' },
+          { label: 'Future Codex goal mapper can reuse this contract', status: 'pending' },
         ],
       },
       {
-        type: "keyValue",
+        type: 'keyValue',
         items: [
-          { label: "Kind", value: "goal" },
-          { label: "Presentation", value: options.presentation },
+          { label: 'Kind', value: 'goal' },
+          { label: 'Presentation', value: options.presentation },
         ],
       },
       {
-        type: "progress",
-        label: "Trial progress",
+        type: 'progress',
+        label: 'Trial progress',
         value: 3,
         max: 10,
-        detail: "Sample progress block",
+        detail: 'Sample progress block',
       },
     ],
-    actions: [{ id: "dismiss", label: "Dismiss", style: "secondary" }],
+    actions: [{ id: 'dismiss', label: 'Dismiss', style: 'secondary' }],
     dismissible: true,
     createdAt: now,
     updatedAt: now,
@@ -333,15 +329,15 @@ function buildSurface(options, threadId) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const root = path.resolve(__dirname, "..");
-  const env = readEnvFile(path.join(root, ".env.secure"));
-  const token = env.BRIDGE_AUTH_TOKEN || "";
+  const root = path.resolve(__dirname, '..');
+  const env = readEnvFile(path.join(root, '.env.secure'));
+  const token = env.BRIDGE_AUTH_TOKEN || '';
   if (!token) {
-    throw new Error("BRIDGE_AUTH_TOKEN is missing in .env.secure.");
+    throw new Error('BRIDGE_AUTH_TOKEN is missing in .env.secure.');
   }
 
   const baseUrl = buildBridgeBaseUrl(env);
-  const wsUrl = `${baseUrl.replace(/^http/, "ws")}/rpc`;
+  const wsUrl = `${baseUrl.replace(/^http/, 'ws')}/rpc`;
   let client = new BridgeRpcClient({ url: wsUrl, token });
 
   try {
@@ -355,19 +351,19 @@ async function main() {
     client.close();
     client = new BridgeRpcClient({ url: wsUrl, token: liveToken });
     await client.connect();
-    console.log("Using token from the live bridge process because .env.secure is stale.");
+    console.log('Using token from the live bridge process because .env.secure is stale.');
   }
 
   try {
     const threadId = options.threadId || (await resolveLatestThreadId(client));
     const surface = buildSurface(options, threadId);
-    await client.request("bridge/ui/present", surface);
+    await client.request('bridge/ui/present', surface);
     console.log(`Sent ${options.presentation} demo surface to thread ${threadId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/unknown bridge method|method not found|not allowed/i.test(message)) {
       throw new Error(
-        `${message}\nThe running bridge does not have bridge/ui support yet. Restart the bridge from this checkout, then run this command again.`
+        `${message}\nThe running bridge does not have bridge/ui support yet. Restart the bridge from this checkout, then run this command again.`,
       );
     }
     throw error;

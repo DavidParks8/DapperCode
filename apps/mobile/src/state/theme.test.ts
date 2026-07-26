@@ -1,4 +1,8 @@
-import { appearancePreferenceAtom, defaultStartCwdAtom, rememberThreadSettingsAtom } from './appState/settings';
+import {
+  appearancePreferenceAtom,
+  defaultStartCwdAtom,
+  rememberThreadSettingsAtom,
+} from './appState/settings';
 import { createTestStore } from './testing';
 import { systemColorSchemeAtom, themeAtom } from './theme';
 

@@ -1,11 +1,6 @@
 import type { Ionicons } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
-import type {
-  Chat,
-  ChatSummary,
-  CollaborationMode,
-  ReasoningEffort,
-} from '../../api/types';
+import type { Chat, ChatSummary, CollaborationMode, ReasoningEffort } from '../../api/types';
 import { getMessageText } from '../../api/messages';
 import type {
   ActivityState,
@@ -66,7 +61,7 @@ export function getInitialVisibleMessageStartIndex(totalMessageCount: number): n
 
 export function resolveSnapshotCollaborationMode(
   snapshot: ThreadRuntimeSnapshot | null | undefined,
-  supportsPlanMode = true
+  supportsPlanMode = true,
 ): CollaborationMode {
   if (!snapshot) {
     return 'default';
@@ -84,7 +79,7 @@ export function resolveSnapshotCollaborationMode(
 export function resolveDisplayedThreadPlan(
   snapshotPlan: ActivePlanState | null,
   persistedPlan: ActivePlanState | null,
-  snapshot: ThreadRuntimeSnapshot | null | undefined
+  snapshot: ThreadRuntimeSnapshot | null | undefined,
 ): ActivePlanState | null {
   if (!persistedPlan) {
     return snapshotPlan;
@@ -113,7 +108,7 @@ export function resolveDisplayedThreadPlan(
 
 export function toPersistedActivePlanState(
   plan: Chat['latestPlan'],
-  fallbackUpdatedAt: string | null | undefined
+  fallbackUpdatedAt: string | null | undefined,
 ): ActivePlanState | null {
   if (!plan) {
     return null;
@@ -131,7 +126,7 @@ export function toPersistedActivePlanState(
 
 export function resolveUndismissedPlanImplementationPrompt(
   prompt: PendingPlanImplementationPrompt | null | undefined,
-  dismissedTurnId: string | null | undefined
+  dismissedTurnId: string | null | undefined,
 ): PendingPlanImplementationPrompt | null {
   if (!prompt) {
     return null;
@@ -142,7 +137,7 @@ export function resolveUndismissedPlanImplementationPrompt(
 
 export function resolvePersistedPlanImplementationPrompt(
   chat: Chat | null | undefined,
-  dismissedTurnId: string | null | undefined
+  dismissedTurnId: string | null | undefined,
 ): PendingPlanImplementationPrompt | null {
   if (!chat?.latestTurnPlan) {
     return null;
@@ -165,7 +160,10 @@ export function normalizePlanTurnStatus(value: string | null | undefined): strin
     return null;
   }
 
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -199,10 +197,7 @@ export function formatReasoningEffort(effort: ReasoningEffort): string {
   return effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
-export function shouldAutoEnablePlanModeFromChat(
-  chat: Chat,
-  supportsPlanMode = true
-): boolean {
+export function shouldAutoEnablePlanModeFromChat(chat: Chat, supportsPlanMode = true): boolean {
   // Agents without a plan mode still publish plan/to-do updates, so the composer
   // must never switch itself into a mode they cannot run.
   if (!supportsPlanMode) {
@@ -281,16 +276,14 @@ export function findSlashCommandDefinition(name: string): SlashCommandDefinition
         return true;
       }
 
-      return (
-        command.aliases?.some((alias) => alias.toLowerCase() === normalized) ?? false
-      );
+      return command.aliases?.some((alias) => alias.toLowerCase() === normalized) ?? false;
     }) ?? null
   );
 }
 
 export function filterSlashCommands(
   query: string,
-  commands: SlashCommandDefinition[] = SLASH_COMMANDS
+  commands: SlashCommandDefinition[] = SLASH_COMMANDS,
 ): SlashCommandDefinition[] {
   const normalized = query.trim().toLowerCase();
   const dedupedCommands = dedupeSlashCommandsByName(commands);
@@ -309,7 +302,7 @@ export function filterSlashCommands(
 
 export function isSlashCommandAvailable(
   command: SlashCommandDefinition,
-  availability: SlashCommandAvailability
+  availability: SlashCommandAvailability,
 ): boolean {
   if (!command.mobileSupported || (command.requiresOpenChat && !availability.hasOpenChat)) {
     return false;
@@ -329,7 +322,7 @@ export function isSlashCommandAvailable(
 }
 
 export function dedupeSlashCommandsByName(
-  commands: SlashCommandDefinition[]
+  commands: SlashCommandDefinition[],
 ): SlashCommandDefinition[] {
   const seen = new Set<string>();
   const result: SlashCommandDefinition[] = [];
@@ -349,7 +342,7 @@ export function dedupeSlashCommandsByName(
 export function formatAgentThreadOptionTitle(
   chat: ChatSummary,
   rootThreadId: string | null,
-  ordinal: number | null
+  ordinal: number | null,
 ): string {
   const trimmedTitle = chat.title.trim();
   if (rootThreadId && chat.id === rootThreadId) {
@@ -367,7 +360,7 @@ export function formatAgentThreadOptionTitle(
 
 export function iconForAgentThread(
   chat: ChatSummary,
-  rootThreadId: string | null
+  rootThreadId: string | null,
 ): ComponentProps<typeof Ionicons>['name'] {
   if (rootThreadId && chat.id === rootThreadId) {
     return 'chatbubble-ellipses-outline';

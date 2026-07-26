@@ -11,7 +11,7 @@ const CONFIG_ENV_KEYS = [
 ] as const;
 
 const originalEnvironment = Object.fromEntries(
-  CONFIG_ENV_KEYS.map((key) => [key, process.env[key]])
+  CONFIG_ENV_KEYS.map((key) => [key, process.env[key]]),
 );
 
 interface ConfigEnvironment {
@@ -25,7 +25,7 @@ interface ConfigEnvironment {
 }
 
 function loadEnvironment(
-  overrides: Partial<Record<(typeof CONFIG_ENV_KEYS)[number], string>>
+  overrides: Partial<Record<(typeof CONFIG_ENV_KEYS)[number], string>>,
 ): ConfigEnvironment {
   for (const key of CONFIG_ENV_KEYS) {
     delete process.env[key];
@@ -59,9 +59,11 @@ describe('mobile environment configuration', () => {
         allowWsQueryTokenAuth: false,
         allowInsecureRemoteBridge: false,
         externalStatusFullSyncDebounceMs: 450,
-        privacyPolicyUrl: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md',
-        termsOfServiceUrl: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/terms-of-service.md',
-      })
+        privacyPolicyUrl:
+          'https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md',
+        termsOfServiceUrl:
+          'https://github.com/DavidParks8/DapperCode/blob/main/docs/terms-of-service.md',
+      }),
     );
   });
 
@@ -75,7 +77,7 @@ describe('mobile environment configuration', () => {
         EXPO_PUBLIC_PRIVACY_POLICY_URL: ' https://example.com/privacy ',
         EXPO_PUBLIC_TERMS_OF_SERVICE_URL: ' https://example.com/terms ',
         EXPO_PUBLIC_EXTERNAL_STATUS_FULL_SYNC_DEBOUNCE_MS: ' 0 ',
-      })
+      }),
     ).toEqual(
       expect.objectContaining({
         legacyHostBridgeUrl: 'http://localhost:8787/rpc',
@@ -85,7 +87,7 @@ describe('mobile environment configuration', () => {
         externalStatusFullSyncDebounceMs: 0,
         privacyPolicyUrl: 'https://example.com/privacy',
         termsOfServiceUrl: 'https://example.com/terms',
-      })
+      }),
     );
   });
 
@@ -93,7 +95,7 @@ describe('mobile environment configuration', () => {
     expect(
       loadEnvironment({
         EXPO_PUBLIC_EXTERNAL_STATUS_FULL_SYNC_DEBOUNCE_MS: value,
-      }).externalStatusFullSyncDebounceMs
+      }).externalStatusFullSyncDebounceMs,
     ).toBe(450);
   });
 

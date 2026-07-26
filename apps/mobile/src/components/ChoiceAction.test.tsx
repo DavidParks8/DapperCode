@@ -1,10 +1,6 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { ChoiceAction } from './ChoiceAction';
@@ -73,16 +69,22 @@ describe('ChoiceAction', () => {
     const onPress = jest.fn();
     const tree = render(
       <>
-        <ChoiceAction title="Primary" meta="Ready" variant="primary" logo="github" onPress={onPress} />
+        <ChoiceAction
+          title="Primary"
+          meta="Ready"
+          variant="primary"
+          logo="github"
+          onPress={onPress}
+        />
         <ChoiceAction title="Brand" logo="dappercode" onPress={onPress} />
         <ChoiceAction title="Icon" iconName="folder-outline" onPress={onPress} />
         <ChoiceAction title="Loading" loading onPress={onPress} />
         <ChoiceAction title="Disabled" disabled onPress={onPress} />
         <ChoiceAction title="Plain" onPress={onPress} />
-      </>
+      </>,
     );
     const buttons = queryRoot(tree).findAll(
-      (node) => typeof node.props.onPress === 'function' && typeof node.props.style === 'function'
+      (node) => typeof node.props.onPress === 'function' && typeof node.props.style === 'function',
     );
     expect(buttons).toHaveLength(6);
     expect(invokeStyle(buttons[0], true)).toBeDefined();

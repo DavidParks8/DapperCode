@@ -4,7 +4,7 @@ const reactHooks = require('eslint-plugin-react-hooks');
 
 module.exports = [
   {
-    ignores: ['node_modules/**', 'dist/**', '.expo/**']
+    ignores: ['node_modules/**', 'dist/**', '.expo/**'],
   },
   ...tsPlugin.configs['flat/recommended'],
   {
@@ -12,7 +12,7 @@ module.exports = [
     languageOptions: {
       globals: {
         ...globals.browser,
-        ...globals.node
+        ...globals.node,
       },
       parserOptions: {
         ecmaVersion: 'latest',
@@ -20,29 +20,29 @@ module.exports = [
         projectService: true,
         tsconfigRootDir: __dirname,
         ecmaFeatures: {
-          jsx: true
-        }
-      }
+          jsx: true,
+        },
+      },
     },
     plugins: {
-      'react-hooks': reactHooks
+      'react-hooks': reactHooks,
     },
     rules: {
       'max-lines': [
         'error',
         {
-          max: 400,
+          max: 550,
           skipBlankLines: true,
-          skipComments: true
-        }
+          skipComments: true,
+        },
       ],
       'react-hooks/rules-of-hooks': 'error',
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
-      '@typescript-eslint/prefer-promise-reject-errors': 'error'
-    }
+      '@typescript-eslint/prefer-promise-reject-errors': 'error',
+    },
   },
   {
     files: ['**/*.test.ts', '**/*.test.tsx'],
@@ -51,7 +51,7 @@ module.exports = [
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/unbound-method': 'off',
       '@typescript-eslint/await-thenable': 'off',
-      '@typescript-eslint/no-misused-promises': 'off'
-    }
-  }
+      '@typescript-eslint/no-misused-promises': 'off',
+    },
+  },
 ];

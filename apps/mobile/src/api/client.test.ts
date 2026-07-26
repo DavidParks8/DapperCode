@@ -1,12 +1,5 @@
-import {
-  HostBridgeApiClient,
-  StaleSnapshotRevisionError,
-  mergeSnapshotPage,
-} from './client';
-import {
-  createActivityMessage,
-  SUBAGENT_ACTIVITY_TYPE,
-} from './messages';
+import { HostBridgeApiClient, StaleSnapshotRevisionError, mergeSnapshotPage } from './client';
+import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { mapChat, mapChatSummary, type RawAcpSnapshot } from './chatMapping';
 import type { Chat, ChatSummary } from './types';
 import { RpcRequestError, type HostBridgeWsClient } from './ws';
@@ -120,7 +113,7 @@ describe('HostBridgeApiClient', () => {
       expect.objectContaining({
         sortKey: 'updated_at',
         sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'unknown'],
-      })
+      }),
     );
     expect(chats).toHaveLength(1);
     expect(chats[0].id).toBe('thr_1');
@@ -160,7 +153,7 @@ describe('HostBridgeApiClient', () => {
       },
       (batch) => {
         batches.push(batch);
-      }
+      },
     );
 
     expect(ws.request).toHaveBeenCalledWith(
@@ -169,7 +162,7 @@ describe('HostBridgeApiClient', () => {
         streamId: controller.streamId,
         limits: [5, 20],
         delayMs: 900,
-      })
+      }),
     );
 
     expect(listenerRef.current).toBeTruthy();
@@ -260,7 +253,7 @@ describe('HostBridgeApiClient', () => {
       expect.objectContaining({
         cursor: null,
         limit: 50,
-      })
+      }),
     );
     expect(ws.request).toHaveBeenNthCalledWith(
       2,
@@ -268,7 +261,7 @@ describe('HostBridgeApiClient', () => {
       expect.objectContaining({
         cursor: 'cursor_page_2',
         limit: 50,
-      })
+      }),
     );
     expect(chats.chats.map((chat) => chat.id)).toEqual(['thr_1', 'thr_2']);
     expect(pageSnapshots).toEqual([['thr_1'], ['thr_1', 'thr_2']]);
@@ -291,30 +284,80 @@ describe('HostBridgeApiClient', () => {
   it('reads and merges typed snapshot pages by monotonic sequence', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({
-      entries: [{
-        sequence: 1,
-        kind: 'message',
-        canonicalId: 'older',
-        message: { id: 'older', role: 'agent', parts: [{ type: 'text', text: 'older' }], truncated: true },
-      }],
-      beforeCursor: 'before', afterCursor: 'after', hasMoreBefore: false, hasMoreAfter: true,
-      unavailableCount: 2, earliestAvailableSequence: 1, latestAvailableSequence: 3, revision: 3,
+      entries: [
+        {
+          sequence: 1,
+          kind: 'message',
+          canonicalId: 'older',
+          message: {
+            id: 'older',
+            role: 'agent',
+            parts: [{ type: 'text', text: 'older' }],
+            truncated: true,
+          },
+        },
+      ],
+      beforeCursor: 'before',
+      afterCursor: 'after',
+      hasMoreBefore: false,
+      hasMoreAfter: true,
+      unavailableCount: 2,
+      earliestAvailableSequence: 1,
+      latestAvailableSequence: 3,
+      revision: 3,
     });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    const page = await client.readSnapshotPage({ threadId: 'thread', beforeCursor: 'cursor', revision: 3, limit: 20 });
-    const merged = mergeSnapshotPage({
-      version: 2,
-      timeline: [{ sequence: 3, kind: 'tool', canonicalId: 'tool' }],
-      messages: [],
-      tools: [{ id: 'tool', kind: 'read', status: 'completed', title: 'Read', content: '', structuredContent: [], locations: [], truncated: false }],
-      messageCollection: { truncated: true, omittedCount: 1, beforeCursor: 'cursor', revision: 3 },
-      continuation: { revision: 3, unavailableCount: 0, maxPageSize: 100, maxHistoryEntries: 1024, maxHistoryBytes: 4194304 },
-      plan: [], usage: {}, config: [], commands: [],
-      session: { agentId: 'agent', threadId: 'thread', historyReconstruction: false },
-      active: { toolIds: [] },
-    }, page);
+    const page = await client.readSnapshotPage({
+      threadId: 'thread',
+      beforeCursor: 'cursor',
+      revision: 3,
+      limit: 20,
+    });
+    const merged = mergeSnapshotPage(
+      {
+        version: 2,
+        timeline: [{ sequence: 3, kind: 'tool', canonicalId: 'tool' }],
+        messages: [],
+        tools: [
+          {
+            id: 'tool',
+            kind: 'read',
+            status: 'completed',
+            title: 'Read',
+            content: '',
+            structuredContent: [],
+            locations: [],
+            truncated: false,
+          },
+        ],
+        messageCollection: {
+          truncated: true,
+          omittedCount: 1,
+          beforeCursor: 'cursor',
+          revision: 3,
+        },
+        continuation: {
+          revision: 3,
+          unavailableCount: 0,
+          maxPageSize: 100,
+          maxHistoryEntries: 1024,
+          maxHistoryBytes: 4194304,
+        },
+        plan: [],
+        usage: {},
+        config: [],
+        commands: [],
+        session: { agentId: 'agent', threadId: 'thread', historyReconstruction: false },
+        active: { toolIds: [] },
+      },
+      page,
+    );
     expect(ws.request).toHaveBeenCalledWith('thread/snapshot/page', {
-      threadId: 'thread', beforeCursor: 'cursor', afterCursor: null, revision: 3, limit: 20,
+      threadId: 'thread',
+      beforeCursor: 'cursor',
+      afterCursor: null,
+      revision: 3,
+      limit: 20,
     });
     expect(merged.timeline?.map((entry) => entry.sequence)).toEqual([1, 3]);
     expect(merged.messages[0]).toMatchObject({ id: 'older', truncated: true });
@@ -345,10 +388,7 @@ describe('HostBridgeApiClient', () => {
 
     await expect(client.listAllChats()).resolves.toEqual({
       chats: [expect.objectContaining({ id: 'thr_1' })],
-      diagnostics: [
-        'native page budget reached',
-        'Chat listing made no progress on a page.',
-      ],
+      diagnostics: ['native page budget reached', 'Chat listing made no progress on a page.'],
       partial: true,
     });
     expect(ws.request).toHaveBeenCalledTimes(2);
@@ -407,7 +447,7 @@ describe('HostBridgeApiClient', () => {
           agentId: 'agent-alpha',
         },
       ],
-      { limit: 5 }
+      { limit: 5 },
     );
 
     expect(client.peekAllChats()?.map((chat) => chat.id)).toEqual(['thr_new', 'thr_old']);
@@ -444,10 +484,7 @@ describe('HostBridgeApiClient', () => {
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     const chat = await client.getChat('thr_cached');
-    expect(chat.messages.map((message) => message.content)).toEqual([
-      'Hello cached',
-      'Hi cached',
-    ]);
+    expect(chat.messages.map((message) => message.content)).toEqual(['Hello cached', 'Hi cached']);
 
     ws.request.mockClear();
     const cached = await client.getChat('thr_cached', { cacheTtlMs: 30_000 });
@@ -469,8 +506,8 @@ describe('HostBridgeApiClient', () => {
           new RpcRequestError(
             'thread/read',
             -32603,
-            'failed to read thread: thread-store internal error: rollout is empty'
-          )
+            'failed to read thread: thread-store internal error: rollout is empty',
+          ),
         )
         .mockResolvedValueOnce({
           thread: {
@@ -873,7 +910,7 @@ describe('HostBridgeApiClient', () => {
     expect(ws.request).toHaveBeenNthCalledWith(
       2,
       'turn/start',
-      expect.objectContaining({ approvalPolicy: 'untrusted' })
+      expect.objectContaining({ approvalPolicy: 'untrusted' }),
     );
     expect(ws.waitForTurnCompletion).not.toHaveBeenCalled();
     expect(chat.id).toBe('thr_1');
@@ -904,13 +941,13 @@ describe('HostBridgeApiClient', () => {
             createdAt: 1700000000,
             updatedAt: 1700000002,
             status: { type: 'idle' },
-              turns: [
-                {
-                  id: 'turn_retry',
-                  items: [
-                    {
-                      type: 'userMessage',
-                      id: 'u_retry',
+            turns: [
+              {
+                id: 'turn_retry',
+                items: [
+                  {
+                    type: 'userMessage',
+                    id: 'u_retry',
                     content: [{ type: 'text', text: 'Hello' }],
                   },
                 ],
@@ -929,12 +966,14 @@ describe('HostBridgeApiClient', () => {
       await jest.advanceTimersByTimeAsync(200);
       const chat = await chatPromise;
 
-      expect(chat.messages.some((message) => message.role === 'user' && message.content === 'Hello')).toBe(true);
+      expect(
+        chat.messages.some((message) => message.role === 'user' && message.content === 'Hello'),
+      ).toBe(true);
       expect(ws.request).toHaveBeenCalledWith(
         'turn/start',
         expect.objectContaining({
           threadId: 'thr_retry',
-        })
+        }),
       );
     } finally {
       jest.useRealTimers();
@@ -988,7 +1027,7 @@ describe('HostBridgeApiClient', () => {
       const chat = await chatPromise;
 
       const repeatedUserMessages = chat.messages.filter(
-        (message) => message.role === 'user' && message.content === 'repeat'
+        (message) => message.role === 'user' && message.content === 'repeat',
       );
       expect(repeatedUserMessages.length).toBeGreaterThanOrEqual(2);
     } finally {
@@ -1027,7 +1066,7 @@ describe('HostBridgeApiClient', () => {
       'thread/start',
       expect.objectContaining({
         model: 'model-alpha',
-      })
+      }),
     );
   });
 
@@ -1035,8 +1074,12 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({
       thread: {
-        id: 'thr_mode', preview: '', createdAt: 1700000000, updatedAt: 1700000000,
-        status: { type: 'idle' }, turns: [],
+        id: 'thr_mode',
+        preview: '',
+        createdAt: 1700000000,
+        updatedAt: 1700000000,
+        status: { type: 'idle' },
+        turns: [],
       },
     });
 
@@ -1045,7 +1088,7 @@ describe('HostBridgeApiClient', () => {
 
     expect(ws.request).toHaveBeenCalledWith(
       'thread/start',
-      expect.objectContaining({ mode: 'plan', effort: 'high' })
+      expect.objectContaining({ mode: 'plan', effort: 'high' }),
     );
   });
 
@@ -1053,8 +1096,12 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({
       thread: {
-        id: 'thr_reviewer', preview: '', createdAt: 1700000000, updatedAt: 1700000000,
-        status: { type: 'idle' }, turns: [],
+        id: 'thr_reviewer',
+        preview: '',
+        createdAt: 1700000000,
+        updatedAt: 1700000000,
+        status: { type: 'idle' },
+        turns: [],
       },
     });
 
@@ -1063,7 +1110,7 @@ describe('HostBridgeApiClient', () => {
 
     expect(ws.request).toHaveBeenCalledWith(
       'thread/start',
-      expect.objectContaining({ mode: 'reviewer' })
+      expect.objectContaining({ mode: 'reviewer' }),
     );
   });
 
@@ -1087,7 +1134,7 @@ describe('HostBridgeApiClient', () => {
       'thread/start',
       expect.objectContaining({
         agentId: 'agent-beta',
-      })
+      }),
     );
   });
 
@@ -1111,7 +1158,7 @@ describe('HostBridgeApiClient', () => {
       'thread/start',
       expect.objectContaining({
         approvalPolicy: 'never',
-      })
+      }),
     );
   });
 
@@ -1119,17 +1166,24 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({
       thread: {
-        id: 'thr_rename', name: 'Manual title', preview: '', createdAt: 1700000000,
-        updatedAt: 1700000001, status: { type: 'idle' }, turns: [],
+        id: 'thr_rename',
+        name: 'Manual title',
+        preview: '',
+        createdAt: 1700000000,
+        updatedAt: 1700000001,
+        status: { type: 'idle' },
+        turns: [],
       },
     });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
     await expect(client.renameChat(' thr_rename ', ' Manual title ')).resolves.toMatchObject({
-      id: 'thr_rename', title: 'Manual title',
+      id: 'thr_rename',
+      title: 'Manual title',
     });
     expect(ws.request).toHaveBeenCalledWith('thread/name/update', {
-      threadId: 'thr_rename', title: 'Manual title',
+      threadId: 'thr_rename',
+      title: 'Manual title',
     });
   });
 
@@ -1151,7 +1205,7 @@ describe('HostBridgeApiClient', () => {
 
     expect(ws.request).toHaveBeenCalledWith(
       'thread/start',
-      expect.objectContaining({ approvalPolicy: 'untrusted' })
+      expect.objectContaining({ approvalPolicy: 'untrusted' }),
     );
   });
 
@@ -1175,7 +1229,7 @@ describe('HostBridgeApiClient', () => {
       'thread/start',
       expect.objectContaining({
         sandbox: 'danger-full-access',
-      })
+      }),
     );
   });
 
@@ -1201,7 +1255,7 @@ describe('HostBridgeApiClient', () => {
         config: {
           service_tier: 'fast',
         },
-      })
+      }),
     );
   });
 
@@ -1252,7 +1306,7 @@ describe('HostBridgeApiClient', () => {
       expect.objectContaining({
         model: 'model-alpha',
         effort: 'high',
-      })
+      }),
     );
   });
 
@@ -1301,7 +1355,7 @@ describe('HostBridgeApiClient', () => {
       'turn/start',
       expect.objectContaining({
         serviceTier: 'fast',
-      })
+      }),
     );
   });
 
@@ -1337,7 +1391,7 @@ describe('HostBridgeApiClient', () => {
             path: '/tmp/screenshot.png',
           },
         ],
-      })
+      }),
     );
   });
 
@@ -1414,7 +1468,7 @@ describe('HostBridgeApiClient', () => {
             },
           ],
         }),
-      })
+      }),
     );
     expect(result).toMatchObject({
       disposition: 'queued',
@@ -1455,7 +1509,7 @@ describe('HostBridgeApiClient', () => {
       },
       {
         skipResume: true,
-      }
+      },
     );
 
     expect(ws.request).toHaveBeenCalledTimes(1);
@@ -1471,7 +1525,7 @@ describe('HostBridgeApiClient', () => {
           model: 'gpt-5.4',
           effort: 'medium',
         }),
-      })
+      }),
     );
     expect(result.disposition).toBe('queued');
   });
@@ -1528,7 +1582,7 @@ describe('HostBridgeApiClient', () => {
       'bridge/thread/queue/send',
       expect.objectContaining({
         threadId: 'thr_sent',
-      })
+      }),
     );
     expect(ws.request).toHaveBeenNthCalledWith(3, 'thread/read', {
       threadId: 'thr_sent',
@@ -1542,8 +1596,14 @@ describe('HostBridgeApiClient', () => {
   it('queued message actions call bridge queue endpoints', async () => {
     const ws = createWsMock();
     ws.request
-      .mockResolvedValueOnce({ ok: true, queue: { threadId: 'thr_queue', items: [], lastError: null } })
-      .mockResolvedValueOnce({ ok: true, queue: { threadId: 'thr_queue', items: [], lastError: null } });
+      .mockResolvedValueOnce({
+        ok: true,
+        queue: { threadId: 'thr_queue', items: [], lastError: null },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        queue: { threadId: 'thr_queue', items: [], lastError: null },
+      });
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     await client.steerQueuedThreadMessage('thr_queue', 'queue_1');
@@ -1598,14 +1658,14 @@ describe('HostBridgeApiClient', () => {
       'thread/resume',
       expect.objectContaining({
         approvalPolicy: 'never',
-      })
+      }),
     );
     expect(ws.request).toHaveBeenNthCalledWith(
       2,
       'turn/start',
       expect.objectContaining({
         approvalPolicy: 'never',
-      })
+      }),
     );
   });
 
@@ -1614,12 +1674,14 @@ describe('HostBridgeApiClient', () => {
     const invalidParamsError = new RpcRequestError(
       'thread/resume',
       -32602,
-      'unknown field `experimentalRawEvents`'
+      'unknown field `experimentalRawEvents`',
     );
     ws.request.mockRejectedValueOnce(invalidParamsError);
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await expect(client.resumeThread('thr_resume', { cwd: '/workspace' })).rejects.toBe(invalidParamsError);
+    await expect(client.resumeThread('thr_resume', { cwd: '/workspace' })).rejects.toBe(
+      invalidParamsError,
+    );
 
     expect(ws.request).toHaveBeenCalledWith(
       'thread/resume',
@@ -1629,19 +1691,16 @@ describe('HostBridgeApiClient', () => {
         experimentalRawEvents: true,
         approvalPolicy: 'untrusted',
         sandbox: 'danger-full-access',
-      })
+      }),
     );
     expect(ws.request).toHaveBeenCalledTimes(1);
   });
 
   it('sendChatMessage() aborts before turn/start when resume fails', async () => {
     const ws = createWsMock();
-    const backendError = new RpcRequestError(
-      'thread/resume',
-      -32603,
-      'app-server unavailable',
-      { backend: 'agent-alpha' }
-    );
+    const backendError = new RpcRequestError('thread/resume', -32603, 'app-server unavailable', {
+      backend: 'agent-alpha',
+    });
     ws.request.mockRejectedValueOnce(backendError);
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -1650,7 +1709,7 @@ describe('HostBridgeApiClient', () => {
         content: 'do not weaken policy',
         cwd: '/workspace',
         approvalPolicy: 'never',
-      })
+      }),
     ).rejects.toBe(backendError);
 
     expect(ws.request).toHaveBeenCalledWith(
@@ -1658,26 +1717,23 @@ describe('HostBridgeApiClient', () => {
       expect.objectContaining({
         threadId: 'thr_resume_failure',
         approvalPolicy: 'never',
-      })
+      }),
     );
     expect(ws.request).toHaveBeenCalledTimes(1);
   });
 
   it('resumeThread() does not retry backend failures as compatibility errors', async () => {
     const ws = createWsMock();
-    const backendError = new RpcRequestError(
-      'thread/resume',
-      -32603,
-      'app-server unavailable',
-      { backend: 'agent-alpha' }
-    );
+    const backendError = new RpcRequestError('thread/resume', -32603, 'app-server unavailable', {
+      backend: 'agent-alpha',
+    });
     ws.request.mockRejectedValueOnce(backendError);
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
-    await expect(
-      client.resumeThread('thr_backend_failure', { cwd: '/workspace' })
-    ).rejects.toBe(backendError);
+    await expect(client.resumeThread('thr_backend_failure', { cwd: '/workspace' })).rejects.toBe(
+      backendError,
+    );
     expect(ws.request).toHaveBeenCalledTimes(1);
   });
 
@@ -1759,13 +1815,15 @@ describe('HostBridgeApiClient', () => {
             path: '.dappercode-attachments/example.png',
           }),
         ]),
-      })
+      }),
     );
   });
 
   it('uploadAttachment() uses authenticated file-backed multipart upload', async () => {
     const ws = createWsMock();
-    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<typeof FileSystem.uploadAsync>;
+    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
+      typeof FileSystem.uploadAsync
+    >;
     uploadAsync.mockResolvedValue({
       status: 201,
       headers: {},
@@ -1791,15 +1849,19 @@ describe('HostBridgeApiClient', () => {
       kind: 'file',
     });
 
-    expect(uploadAsync).toHaveBeenCalledWith('http://bridge:8787/attachments', 'file:///cache/file.txt', {
-      fieldName: 'file',
-      headers: { Authorization: 'Bearer secret' },
-      httpMethod: 'POST',
-      mimeType: 'text/plain',
-      parameters: { fileName: 'file.txt', kind: 'file', mimeType: 'text/plain' },
-      sessionType: 1,
-      uploadType: 1,
-    });
+    expect(uploadAsync).toHaveBeenCalledWith(
+      'http://bridge:8787/attachments',
+      'file:///cache/file.txt',
+      {
+        fieldName: 'file',
+        headers: { Authorization: 'Bearer secret' },
+        httpMethod: 'POST',
+        mimeType: 'text/plain',
+        parameters: { fileName: 'file.txt', kind: 'file', mimeType: 'text/plain' },
+        sessionType: 1,
+        uploadType: 1,
+      },
+    );
     expect(ws.request).not.toHaveBeenCalled();
     expect(uploaded.path).toBe('.dappercode-attachments/file.txt');
   });
@@ -1938,7 +2000,7 @@ describe('HostBridgeApiClient', () => {
             developer_instructions: null,
           },
         },
-      })
+      }),
     );
   });
 
@@ -1993,7 +2055,7 @@ describe('HostBridgeApiClient', () => {
             developer_instructions: null,
           },
         },
-      })
+      }),
     );
   });
 
@@ -2003,7 +2065,14 @@ describe('HostBridgeApiClient', () => {
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
     await client.readBridgeCapabilities();
-    await client.registerPushDevice({ profileId: 'p', registrationId: 'r', token: 't', platform: 'ios', deviceName: 'phone', events: { turnCompleted: true, approvalRequested: false } });
+    await client.registerPushDevice({
+      profileId: 'p',
+      registrationId: 'r',
+      token: 't',
+      platform: 'ios',
+      deviceName: 'phone',
+      events: { turnCompleted: true, approvalRequested: false },
+    });
     await client.unregisterPushDevice({ profileId: 'p', registrationId: 'r' });
     await client.resolveApproval('approval', 'accept', 'resolution');
     await client.resolveUserInput('input', { answers: { question: 'yes' } });
@@ -2031,13 +2100,26 @@ describe('HostBridgeApiClient', () => {
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
     await client.installGitHubAuth({ accessToken: ' token ', repositories: [' a/b ', ''] });
-    await client.installGitHubAuth({ grants: [{ accessToken: ' second ', repositories: undefined }, { accessToken: ' ', repositories: [] }] });
-    expect(ws.request).toHaveBeenNthCalledWith(1, 'bridge/github/auth/install', { grants: [{ accessToken: 'token', repositories: ['a/b'] }] });
-    expect(ws.request).toHaveBeenNthCalledWith(2, 'bridge/github/auth/install', { grants: [{ accessToken: 'second', repositories: [] }] });
+    await client.installGitHubAuth({
+      grants: [
+        { accessToken: ' second ', repositories: undefined },
+        { accessToken: ' ', repositories: [] },
+      ],
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(1, 'bridge/github/auth/install', {
+      grants: [{ accessToken: 'token', repositories: ['a/b'] }],
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(2, 'bridge/github/auth/install', {
+      grants: [{ accessToken: 'second', repositories: [] }],
+    });
 
     await expect(client.installGitHubAuth({ grants: [] })).rejects.toThrow('At least one');
-    await expect(client.gitClone({ url: '', parentPath: '', directoryName: 'repo' })).rejects.toThrow('url must');
-    await expect(client.gitClone({ url: 'url', parentPath: '', directoryName: '' })).rejects.toThrow('directoryName');
+    await expect(
+      client.gitClone({ url: '', parentPath: '', directoryName: 'repo' }),
+    ).rejects.toThrow('url must');
+    await expect(
+      client.gitClone({ url: 'url', parentPath: '', directoryName: '' }),
+    ).rejects.toThrow('directoryName');
     await expect(client.gitStage({ path: ' ', cwd: '' })).rejects.toThrow('path must');
     await expect(client.gitUnstage({ path: '', cwd: '' })).rejects.toThrow('path must');
     await expect(client.gitSwitch({ branch: '', cwd: '' })).rejects.toThrow('branch must');
@@ -2046,7 +2128,11 @@ describe('HostBridgeApiClient', () => {
     await client.gitStage({ path: ' a.ts ', cwd: ' /repo ' });
     await client.gitUnstage({ path: ' a.ts ', cwd: undefined });
     await client.gitSwitch({ branch: ' main ', cwd: '/repo' });
-    expect(ws.request).toHaveBeenCalledWith('bridge/git/clone', { url: 'url', parentPath: '/parent', directoryName: 'repo' });
+    expect(ws.request).toHaveBeenCalledWith('bridge/git/clone', {
+      url: 'url',
+      parentPath: '/parent',
+      directoryName: 'repo',
+    });
   });
 
   it('covers chat cache misses, clones, updates, expiry, and in-flight reads', async () => {
@@ -2060,16 +2146,36 @@ describe('HostBridgeApiClient', () => {
     expect(client.peekChatShell('missing')).toBeNull();
 
     const summary = {
-      id: 'cached', title: 'Cached', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', statusUpdatedAt: '2026-01-01T00:00:00Z', status: 'idle' as const, lastMessagePreview: '', agentId: 'agent-alpha',
+      id: 'cached',
+      title: 'Cached',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      statusUpdatedAt: '2026-01-01T00:00:00Z',
+      status: 'idle' as const,
+      lastMessagePreview: '',
+      agentId: 'agent-alpha',
     };
     client.rememberChats([summary]);
     client.rememberAllChats([summary]);
-    client.rememberChat({ ...summary, title: 'Updated', messages: [], latestPlan: null, latestTurnPlan: null, latestTurnStatus: null, activeTurnId: null });
+    client.rememberChat({
+      ...summary,
+      title: 'Updated',
+      messages: [],
+      latestPlan: null,
+      latestTurnPlan: null,
+      latestTurnStatus: null,
+      activeTurnId: null,
+    });
     expect(client.peekChats()?.[0].title).toBe('Updated');
     expect(client.peekAllChats()?.[0].title).toBe('Updated');
 
     let resolveRead: (value: unknown) => void = () => {};
-    ws.request.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    ws.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRead = resolve;
+        }),
+    );
     const read1 = client.getChat('new');
     const read2 = client.getChat('new');
     expect(ws.request).toHaveBeenCalledTimes(1);
@@ -2081,7 +2187,12 @@ describe('HostBridgeApiClient', () => {
   it('deduplicates list requests and supports forced and cached refreshes', async () => {
     const ws = createWsMock();
     let resolveList: (value: unknown) => void = () => {};
-    ws.request.mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve; }));
+    ws.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }),
+    );
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     const list1 = client.listChats({ limit: 1 });
     const list2 = client.listChats({ limit: 1 });
@@ -2100,22 +2211,43 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     let listener: Parameters<HostBridgeWsClient['onEvent']>[0] = () => {};
     const unsubscribe = jest.fn();
-    ws.onEvent.mockImplementation((next) => { listener = next; return unsubscribe; });
-    ws.request.mockImplementation((method, params) => Promise.resolve(method.endsWith('/start') ? { started: true, streamId: (params as { streamId: string }).streamId } : {}));
+    ws.onEvent.mockImplementation((next) => {
+      listener = next;
+      return unsubscribe;
+    });
+    ws.request.mockImplementation((method, params) =>
+      Promise.resolve(
+        method.endsWith('/start')
+          ? { started: true, streamId: (params as { streamId: string }).streamId }
+          : {},
+      ),
+    );
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     const onBatch = jest.fn();
     const onError = jest.fn();
-    const controller = await client.startChatListStream({ limits: [0, 5, 5, 300], delayMs: Number.NaN }, onBatch, onError);
+    const controller = await client.startChatListStream(
+      { limits: [0, 5, 5, 300], delayMs: Number.NaN },
+      onBatch,
+      onError,
+    );
     listener({ method: 'other', params: { streamId: controller.streamId } });
     listener({ method: 'bridge/thread/list/stream/batch', params: { streamId: 'other' } });
-    listener({ method: 'bridge/thread/list/stream/batch', params: { streamId: controller.streamId, done: true, data: [] } });
+    listener({
+      method: 'bridge/thread/list/stream/batch',
+      params: { streamId: controller.streamId, done: true, data: [] },
+    });
     controller.cancel();
     expect(onBatch).toHaveBeenCalledWith(expect.objectContaining({ done: true }));
     expect(unsubscribe).toHaveBeenCalledTimes(1);
 
     const errorController = await client.startChatListStream({}, jest.fn(), onError);
-    listener({ method: 'bridge/thread/list/stream/error', params: { streamId: errorController.streamId } });
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'thread list stream failed' }));
+    listener({
+      method: 'bridge/thread/list/stream/error',
+      params: { streamId: errorController.streamId },
+    });
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'thread list stream failed' }),
+    );
 
     ws.request.mockResolvedValueOnce({ started: false, streamId: 'wrong' });
     await expect(client.startChatListStream({}, jest.fn())).rejects.toThrow('did not start');
@@ -2125,7 +2257,19 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     ws.request
       .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ sessions: [null, { sessionId: 's', targetUrl: 'url', previewPort: '5', bootstrapPath: '/b', createdAt: 1, expiresAt: 2 }] })
+      .mockResolvedValueOnce({
+        sessions: [
+          null,
+          {
+            sessionId: 's',
+            targetUrl: 'url',
+            previewPort: '5',
+            bootstrapPath: '/b',
+            createdAt: 1,
+            expiresAt: 2,
+          },
+        ],
+      })
       .mockResolvedValueOnce({ closed: false });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     await expect(client.createBrowserPreviewSession('url')).rejects.toThrow('invalid session');
@@ -2139,7 +2283,9 @@ describe('HostBridgeApiClient', () => {
     ws.request.mockResolvedValueOnce({ thread: {} });
     await expect(client.createChat({})).rejects.toThrow('did not return a chat id');
     ws.request.mockResolvedValueOnce({});
-    await expect(client.createChatIdempotent({}, 'submission')).rejects.toThrow('did not return a chat');
+    await expect(client.createChatIdempotent({}, 'submission')).rejects.toThrow(
+      'did not return a chat',
+    );
     await expect(client.setChatWorkspace('thr', ' ')).rejects.toThrow('cannot be empty');
     await expect(client.resumeThread(' ')).rejects.toThrow('thread id is required');
     await expect(client.resumeThread('thr')).rejects.toThrow('canonical workspace path');
@@ -2156,9 +2302,13 @@ describe('HostBridgeApiClient', () => {
     });
 
     ws.request.mockResolvedValueOnce({ thread: { id: 'empty', turns: [] } });
-    await expect(client.sendChatMessage('empty', { content: ' ' })).resolves.toMatchObject({ id: 'empty' });
+    await expect(client.sendChatMessage('empty', { content: ' ' })).resolves.toMatchObject({
+      id: 'empty',
+    });
     await expect(client.steerChatTurn('', '', { content: '' })).resolves.toBeUndefined();
-    await expect(client.sendChatMessage('thr', { content: 'x', role: 'assistant' })).rejects.toThrow('Only user role');
+    await expect(
+      client.sendChatMessage('thr', { content: 'x', role: 'assistant' }),
+    ).rejects.toThrow('Only user role');
   });
 
   it('handles sent-message and upload failures', async () => {
@@ -2166,26 +2316,56 @@ describe('HostBridgeApiClient', () => {
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({ turn: {} });
     await expect(
-      client.sendChatMessage('thr', { content: 'x', cwd: '/workspace' })
+      client.sendChatMessage('thr', { content: 'x', cwd: '/workspace' }),
     ).rejects.toThrow('did not return turn id');
-    ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({ disposition: 'sent', queue: { threadId: 'thr', items: [], lastError: null }, turnId: ' ' });
+    ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({
+      disposition: 'sent',
+      queue: { threadId: 'thr', items: [], lastError: null },
+      turnId: ' ',
+    });
     await expect(
-      client.sendOrQueueChatMessage('thr', { content: 'x', cwd: '/workspace' })
+      client.sendOrQueueChatMessage('thr', { content: 'x', cwd: '/workspace' }),
     ).rejects.toThrow('did not return turn id');
-    await expect(client.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow('Bridge URL is required');
+    await expect(client.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow(
+      'Bridge URL is required',
+    );
 
-    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<typeof FileSystem.uploadAsync>;
-    uploadAsync.mockResolvedValueOnce({ status: 500, headers: {}, mimeType: 'text/plain', body: 'not json' });
-    const uploadClient = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient, bridgeUrl: 'http://bridge' });
-    await expect(uploadClient.uploadAttachment({ uri: 'file://x', kind: 'image', threadId: ' thr ' })).rejects.toThrow('Attachment upload failed (500)');
-    uploadAsync.mockResolvedValueOnce({ status: 400, headers: {}, mimeType: 'application/json', body: JSON.stringify({ message: 'too large' }) });
-    await expect(uploadClient.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow('too large');
+    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
+      typeof FileSystem.uploadAsync
+    >;
+    uploadAsync.mockResolvedValueOnce({
+      status: 500,
+      headers: {},
+      mimeType: 'text/plain',
+      body: 'not json',
+    });
+    const uploadClient = new HostBridgeApiClient({
+      ws: ws as unknown as HostBridgeWsClient,
+      bridgeUrl: 'http://bridge',
+    });
+    await expect(
+      uploadClient.uploadAttachment({ uri: 'file://x', kind: 'image', threadId: ' thr ' }),
+    ).rejects.toThrow('Attachment upload failed (500)');
+    uploadAsync.mockResolvedValueOnce({
+      status: 400,
+      headers: {},
+      mimeType: 'application/json',
+      body: JSON.stringify({ message: 'too large' }),
+    });
+    await expect(uploadClient.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow(
+      'too large',
+    );
   });
 
   it('supports all-chat in-flight deduplication and empty summary hydration', async () => {
     const ws = createWsMock();
     let resolveList: (value: unknown) => void = () => {};
-    ws.request.mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve; }));
+    ws.request.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }),
+    );
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     const first = client.listAllChats();
     const second = client.listAllChats();
@@ -2200,8 +2380,13 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({ data: [null, {}, { id: 'valid', updatedAt: 1, turns: [] }] });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await expect(client.listChats({ limit: Number.NaN })).resolves.toEqual([expect.objectContaining({ id: 'valid' })]);
-    expect(ws.request).toHaveBeenCalledWith('thread/list', expect.objectContaining({ limit: 20, cursor: null }));
+    await expect(client.listChats({ limit: Number.NaN })).resolves.toEqual([
+      expect.objectContaining({ id: 'valid' }),
+    ]);
+    expect(ws.request).toHaveBeenCalledWith(
+      'thread/list',
+      expect.objectContaining({ limit: 20, cursor: null }),
+    );
   });
 
   it('maps filesystem optional fields and filters malformed entries', async () => {
@@ -2209,25 +2394,72 @@ describe('HostBridgeApiClient', () => {
     ws.request.mockResolvedValue({
       bridgeRoot: 1,
       path: '/repo',
-      entries: [null, { name: '', path: '/bad' }, { name: 'file', path: '/repo/file', kind: null, hidden: true, selectable: false, isGitRepo: true }],
+      entries: [
+        null,
+        { name: '', path: '/bad' },
+        {
+          name: 'file',
+          path: '/repo/file',
+          kind: null,
+          hidden: true,
+          selectable: false,
+          isGitRepo: true,
+        },
+      ],
     });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await expect(client.listFilesystemEntries({ includeHidden: true, directoriesOnly: false, includeGitRepo: true })).resolves.toMatchObject({
+    await expect(
+      client.listFilesystemEntries({
+        includeHidden: true,
+        directoriesOnly: false,
+        includeGitRepo: true,
+      }),
+    ).resolves.toMatchObject({
       bridgeRoot: '',
       parentPath: null,
-      entries: [{ name: 'file', path: '/repo/file', kind: 'directory', hidden: true, selectable: false, isGitRepo: true }],
+      entries: [
+        {
+          name: 'file',
+          path: '/repo/file',
+          kind: 'directory',
+          hidden: true,
+          selectable: false,
+          isGitRepo: true,
+        },
+      ],
     });
-    expect(ws.request).toHaveBeenCalledWith('bridge/fs/list', { path: null, includeHidden: true, directoriesOnly: false, includeGitRepo: true });
+    expect(ws.request).toHaveBeenCalledWith('bridge/fs/list', {
+      path: null,
+      includeHidden: true,
+      directoriesOnly: false,
+      includeGitRepo: true,
+    });
   });
 
   it('maps workspace and browser discovery fallback shapes', async () => {
     const ws = createWsMock();
     ws.request
-      .mockResolvedValueOnce({ workspaces: [null, { path: '/repo', chatCount: {}, updatedAt: 'bad' }] })
-      .mockResolvedValueOnce({ suggestions: [null, { targetUrl: '', label: 'bad', port: 1 }, { targetUrl: 'url', label: 'label', port: '7' }], scannedAt: 'bad' });
+      .mockResolvedValueOnce({
+        workspaces: [null, { path: '/repo', chatCount: {}, updatedAt: 'bad' }],
+      })
+      .mockResolvedValueOnce({
+        suggestions: [
+          null,
+          { targetUrl: '', label: 'bad', port: 1 },
+          { targetUrl: 'url', label: 'label', port: '7' },
+        ],
+        scannedAt: 'bad',
+      });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await expect(client.listWorkspaceRoots()).resolves.toMatchObject({ bridgeRoot: '', allowOutsideRootCwd: false, workspaces: [{ path: '/repo', chatCount: 0 }] });
-    await expect(client.discoverBrowserPreviewTargets()).resolves.toEqual({ scannedAt: '1970-01-01T00:00:00.000Z', suggestions: [{ targetUrl: 'url', label: 'label', port: 7 }] });
+    await expect(client.listWorkspaceRoots()).resolves.toMatchObject({
+      bridgeRoot: '',
+      allowOutsideRootCwd: false,
+      workspaces: [{ path: '/repo', chatCount: 0 }],
+    });
+    await expect(client.discoverBrowserPreviewTargets()).resolves.toEqual({
+      scannedAt: '1970-01-01T00:00:00.000Z',
+      suggestions: [{ targetUrl: 'url', label: 'label', port: 7 }],
+    });
   });
 
   it('maps create initial prompts, idempotent responses, summary failures, and workspace updates', async () => {
@@ -2237,16 +2469,35 @@ describe('HostBridgeApiClient', () => {
       .mockResolvedValueOnce({ thread: { id: 'initial' } })
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ turn: { id: 'turn-initial' } })
-      .mockResolvedValueOnce({ thread: { id: 'initial', cwd: '/repo', turns: [{ id: 'turn-initial', items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }] }] } });
-    await expect(client.createChat({ message: ' hello ', cwd: '/repo' })).resolves.toMatchObject({ id: 'initial' });
+      .mockResolvedValueOnce({
+        thread: {
+          id: 'initial',
+          cwd: '/repo',
+          turns: [
+            {
+              id: 'turn-initial',
+              items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }],
+            },
+          ],
+        },
+      });
+    await expect(client.createChat({ message: ' hello ', cwd: '/repo' })).resolves.toMatchObject({
+      id: 'initial',
+    });
 
     ws.request.mockResolvedValueOnce({ thread: { id: 'created', turns: [] } });
-    await expect(client.createChatIdempotent({}, 'submission')).resolves.toMatchObject({ id: 'created' });
+    await expect(client.createChatIdempotent({}, 'submission')).resolves.toMatchObject({
+      id: 'created',
+    });
     ws.request.mockResolvedValueOnce({ thread: {} });
     await expect(client.getChatSummary('bad')).rejects.toThrow('chat id missing');
 
-    ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({ thread: { id: 'workspace', cwd: '/old', turns: [] } });
-    await expect(client.setChatWorkspace('workspace', '/new')).resolves.toMatchObject({ cwd: '/new' });
+    ws.request
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ thread: { id: 'workspace', cwd: '/old', turns: [] } });
+    await expect(client.setChatWorkspace('workspace', '/new')).resolves.toMatchObject({
+      cwd: '/new',
+    });
   });
 
   it('covers queue empty-content and idempotent queued-message paths', async () => {
@@ -2255,18 +2506,21 @@ describe('HostBridgeApiClient', () => {
       .mockResolvedValueOnce({ threadId: 'thr', items: [], lastError: null })
       .mockResolvedValueOnce({ thread: { id: 'thr', turns: [] } });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await expect(client.sendOrQueueChatMessage('thr', { content: ' ' })).resolves.toMatchObject({ disposition: 'sent', turnId: '' });
+    await expect(client.sendOrQueueChatMessage('thr', { content: ' ' })).resolves.toMatchObject({
+      disposition: 'sent',
+      turnId: '',
+    });
 
     ws.request
       .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ disposition: 'queued', queue: { threadId: 'thr', items: [], lastError: null }, turnId: null })
+      .mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: { threadId: 'thr', items: [], lastError: null },
+        turnId: null,
+      })
       .mockResolvedValueOnce({ thread: { id: 'thr', turns: [] } });
     await expect(
-      client.sendChatMessageIdempotent(
-        'thr',
-        { content: 'x', cwd: '/workspace' },
-        'submission'
-      )
+      client.sendChatMessageIdempotent('thr', { content: 'x', cwd: '/workspace' }, 'submission'),
     ).resolves.toMatchObject({ id: 'thr' });
   });
 
@@ -2275,7 +2529,10 @@ describe('HostBridgeApiClient', () => {
     try {
       const ws = createWsMock();
       const stale = { thread: { id: 'attachments', turns: [{ id: 'old', items: [] }] } };
-      ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({ turn: { id: 'new' } }).mockResolvedValue(stale);
+      ws.request
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ turn: { id: 'new' } })
+        .mockResolvedValue(stale);
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       const result = client.sendChatMessage('attachments', {
         content: 'see files',
@@ -2286,7 +2543,9 @@ describe('HostBridgeApiClient', () => {
       await Promise.resolve();
       await jest.advanceTimersByTimeAsync(2_000);
       await expect(result).resolves.toMatchObject({
-        messages: expect.arrayContaining([expect.objectContaining({ content: 'see files\n[file: A.ts]\n[local image: /x.png]' })]),
+        messages: expect.arrayContaining([
+          expect.objectContaining({ content: 'see files\n[file: A.ts]\n[local image: /x.png]' }),
+        ]),
       });
     } finally {
       jest.useRealTimers();
@@ -2297,7 +2556,9 @@ describe('HostBridgeApiClient', () => {
     const ws = createWsMock();
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     ws.request
-      .mockRejectedValueOnce(new RpcRequestError('thread/read', -32602, 'includeTurns cannot materialise'))
+      .mockRejectedValueOnce(
+        new RpcRequestError('thread/read', -32602, 'includeTurns cannot materialise'),
+      )
       .mockResolvedValueOnce({ thread: { id: 'fallback', turns: [] } });
     await expect(client.getChat('fallback')).resolves.toMatchObject({ id: 'fallback' });
 
@@ -2317,7 +2578,11 @@ describe('HostBridgeApiClient', () => {
       expect(client.peekChatSummary('missing')).toBeNull();
       expect(client.peekChatShell('missing')).toBeNull();
 
-      const summary = mapChatSummary({ id: 'thread', preview: 'cached', updatedAt: 2 }) as ChatSummary;
+      const summary = mapChatSummary({
+        id: 'thread',
+        preview: 'cached',
+        updatedAt: 2,
+      }) as ChatSummary;
       client.rememberAllChats([summary]);
       client.rememberChats([summary]);
       expect(client.peekChatSummary('thread')).toEqual(summary);
@@ -2336,15 +2601,28 @@ describe('HostBridgeApiClient', () => {
     it('covers list defaults, cursor variants, diagnostics filtering, and in-flight caching', async () => {
       const ws = createWsMock();
       let resolveList: (value: unknown) => void = () => {};
-      ws.request.mockImplementationOnce(() => new Promise((resolve) => { resolveList = resolve; }));
+      ws.request.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveList = resolve;
+          }),
+      );
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       const first = client.listChats({ cacheTtlMs: -1, limit: Number.NaN });
       const second = client.listChats({ cacheTtlMs: -1, limit: Number.NaN });
-      resolveList({ data: [null, {}, { id: 'thread', updatedAt: 2 }], next_cursor: ' next ', backwards_cursor: ' back ', diagnostics: [null, 'warning'], partial: false });
+      resolveList({
+        data: [null, {}, { id: 'thread', updatedAt: 2 }],
+        next_cursor: ' next ',
+        backwards_cursor: ' back ',
+        diagnostics: [null, 'warning'],
+        partial: false,
+      });
       await expect(first).resolves.toHaveLength(1);
       await expect(second).resolves.toHaveLength(1);
       expect(ws.request).toHaveBeenCalledTimes(1);
-      await expect(client.listChats({ cacheTtlMs: 1000, limit: Number.NaN })).resolves.toHaveLength(1);
+      await expect(client.listChats({ cacheTtlMs: 1000, limit: Number.NaN })).resolves.toHaveLength(
+        1,
+      );
       expect(ws.request).toHaveBeenCalledTimes(1);
 
       ws.request.mockResolvedValueOnce({ data: [], nextCursor: null });
@@ -2359,31 +2637,55 @@ describe('HostBridgeApiClient', () => {
       type Handler = Parameters<HostBridgeWsClient['onEvent']>[0];
       let handler: Handler = () => {};
       const unsubscribe = jest.fn();
-      ws.onEvent.mockImplementation((next) => { handler = next; return unsubscribe; });
+      ws.onEvent.mockImplementation((next) => {
+        handler = next;
+        return unsubscribe;
+      });
       ws.request.mockImplementation((method, params) => {
         if (method === 'bridge/thread/list/stream/start') {
-          return Promise.resolve({ started: true, streamId: (params as { streamId: string }).streamId });
+          return Promise.resolve({
+            started: true,
+            streamId: (params as { streamId: string }).streamId,
+          });
         }
-        if (method === 'bridge/thread/list/stream/cancel') return Promise.reject(new Error('closed'));
+        if (method === 'bridge/thread/list/stream/cancel')
+          return Promise.reject(new Error('closed'));
         return Promise.resolve({});
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       const batches: unknown[] = [];
       const errors: Error[] = [];
-      const controller = await client.startChatListStream({ limits: [], delayMs: Number.NaN }, (batch) => batches.push(batch), (error) => errors.push(error));
+      const controller = await client.startChatListStream(
+        { limits: [], delayMs: Number.NaN },
+        (batch) => batches.push(batch),
+        (error) => errors.push(error),
+      );
       handler({ method: 'other', params: null });
       handler({ method: 'other', params: { streamId: 'other' } });
       handler({ method: 'other', params: { streamId: controller.streamId } });
-      handler({ method: 'bridge/thread/list/stream/batch', params: { streamId: controller.streamId, limit: 'bad', data: 'bad', done: false } });
+      handler({
+        method: 'bridge/thread/list/stream/batch',
+        params: { streamId: controller.streamId, limit: 'bad', data: 'bad', done: false },
+      });
       expect(batches).toHaveLength(1);
-      handler({ method: 'bridge/thread/list/stream/error', params: { streamId: controller.streamId } });
+      handler({
+        method: 'bridge/thread/list/stream/error',
+        params: { streamId: controller.streamId },
+      });
       expect(errors[0]?.message).toBe('thread list stream failed');
       controller.cancel();
 
       const invalidWs = createWsMock();
       invalidWs.request.mockResolvedValue({ started: false, streamId: 'wrong' });
-      const invalidClient = new HostBridgeApiClient({ ws: invalidWs as unknown as HostBridgeWsClient });
-      await expect(invalidClient.startChatListStream({ includeSubAgents: true, limits: [0, 0, 500], delayMs: -2 }, () => {})).rejects.toThrow('did not start');
+      const invalidClient = new HostBridgeApiClient({
+        ws: invalidWs as unknown as HostBridgeWsClient,
+      });
+      await expect(
+        invalidClient.startChatListStream(
+          { includeSubAgents: true, limits: [0, 0, 500], delayMs: -2 },
+          () => {},
+        ),
+      ).rejects.toThrow('did not start');
     });
 
     it('merges snapshot pages across replacement, new kinds, metadata, and revision errors', () => {
@@ -2394,21 +2696,66 @@ describe('HostBridgeApiClient', () => {
         messageCollection: { truncated: true, omittedCount: 2, revision: 4 },
         reasoningCollection: { truncated: true, omittedCount: 1, revision: 4 },
         toolCollection: { truncated: true, omittedCount: 1, revision: 4 },
-        continuation: { revision: 4, unavailableCount: 1, maxPageSize: 50, maxHistoryEntries: 100, maxHistoryBytes: 1000 },
+        continuation: {
+          revision: 4,
+          unavailableCount: 1,
+          maxPageSize: 50,
+          maxHistoryEntries: 100,
+          maxHistoryBytes: 1000,
+        },
       });
-      expect(() => mergeSnapshotPage(snapshot, {
-        entries: [], beforeCursor: null, afterCursor: null, hasMoreBefore: false, hasMoreAfter: false,
-        unavailableCount: 0, earliestAvailableSequence: null, latestAvailableSequence: null, revision: 5,
-      })).toThrow(StaleSnapshotRevisionError);
+      expect(() =>
+        mergeSnapshotPage(snapshot, {
+          entries: [],
+          beforeCursor: null,
+          afterCursor: null,
+          hasMoreBefore: false,
+          hasMoreAfter: false,
+          unavailableCount: 0,
+          earliestAvailableSequence: null,
+          latestAvailableSequence: null,
+          revision: 5,
+        }),
+      ).toThrow(StaleSnapshotRevisionError);
 
       const merged = mergeSnapshotPage(snapshot, {
         entries: [
-          { sequence: 2, kind: 'message', canonicalId: 'new', message: { id: 'new', role: 'agent', parts: [], truncated: false } },
-          { sequence: 1, kind: 'reasoning', canonicalId: 'reason', message: { id: 'reason', role: 'thought', parts: [], truncated: false } },
-          { sequence: 3, kind: 'tool', canonicalId: 'tool', tool: { id: 'tool', kind: 'read', status: 'done', title: '', content: '', structuredContent: [], locations: [], truncated: false } },
+          {
+            sequence: 2,
+            kind: 'message',
+            canonicalId: 'new',
+            message: { id: 'new', role: 'agent', parts: [], truncated: false },
+          },
+          {
+            sequence: 1,
+            kind: 'reasoning',
+            canonicalId: 'reason',
+            message: { id: 'reason', role: 'thought', parts: [], truncated: false },
+          },
+          {
+            sequence: 3,
+            kind: 'tool',
+            canonicalId: 'tool',
+            tool: {
+              id: 'tool',
+              kind: 'read',
+              status: 'done',
+              title: '',
+              content: '',
+              structuredContent: [],
+              locations: [],
+              truncated: false,
+            },
+          },
         ],
-        beforeCursor: 'before', afterCursor: null, hasMoreBefore: true, hasMoreAfter: false,
-        unavailableCount: 2, earliestAvailableSequence: 1, latestAvailableSequence: 3, revision: 4,
+        beforeCursor: 'before',
+        afterCursor: null,
+        hasMoreBefore: true,
+        hasMoreAfter: false,
+        unavailableCount: 2,
+        earliestAvailableSequence: 1,
+        latestAvailableSequence: 3,
+        revision: 4,
       });
       expect(merged.timeline?.map((entry) => entry.sequence)).toEqual([1, 2, 3]);
       expect(merged.reasoningCollection?.omittedCount).toBe(0);
@@ -2424,42 +2771,115 @@ describe('HostBridgeApiClient', () => {
             { sequence: 'bad', kind: 'message', canonicalId: 'bad' },
             { sequence: 1, kind: 'bad', canonicalId: 'bad' },
             { sequence: 2, kind: 'message', canonicalId: ' message ', message: { parts: 'bad' } },
-            { sequence: 3, kind: 'tool', canonicalId: 'tool', tool: { generation: 2, structuredContent: 'bad', locations: 'bad' } },
+            {
+              sequence: 3,
+              kind: 'tool',
+              canonicalId: 'tool',
+              tool: { generation: 2, structuredContent: 'bad', locations: 'bad' },
+            },
           ],
-          beforeCursor: 4, afterCursor: 'after', hasMoreAfter: true, unavailableCount: 'bad', revision: 2,
+          beforeCursor: 4,
+          afterCursor: 'after',
+          hasMoreAfter: true,
+          unavailableCount: 'bad',
+          revision: 2,
         })
         .mockResolvedValueOnce({
-          bridgeRoot: '/repo', allowOutsideRootCwd: true,
-          workspaces: [null, { path: '' }, { path: '/one', chatCount: -2, updatedAt: 1700000000 }, { path: '/two', chatCount: '3', updatedAt: 'bad' }],
+          bridgeRoot: '/repo',
+          allowOutsideRootCwd: true,
+          workspaces: [
+            null,
+            { path: '' },
+            { path: '/one', chatCount: -2, updatedAt: 1700000000 },
+            { path: '/two', chatCount: '3', updatedAt: 'bad' },
+          ],
         })
         .mockResolvedValueOnce({
-          bridgeRoot: '/repo', path: '/repo', parentPath: '', totalEntries: '2', omittedEntries: -1,
-          entries: [null, { path: '', name: '' }, { path: '/repo/a', name: 'a', kind: 3, hidden: true, selectable: false, isGitRepo: true }],
+          bridgeRoot: '/repo',
+          path: '/repo',
+          parentPath: '',
+          totalEntries: '2',
+          omittedEntries: -1,
+          entries: [
+            null,
+            { path: '', name: '' },
+            {
+              path: '/repo/a',
+              name: 'a',
+              kind: 3,
+              hidden: true,
+              selectable: false,
+              isGitRepo: true,
+            },
+          ],
         })
-        .mockResolvedValueOnce({ sessions: [null, {}, {
-          sessionId: 'one', targetUrl: 'http://localhost:3000', previewPort: '3000', previewBaseUrl: '',
-          bootstrapPath: '/preview', createdAt: 1700000000, lastAccessedAt: 'bad', expiresAt: 1700000100,
-        }] })
-        .mockResolvedValueOnce({ scannedAt: 'bad', suggestions: [null, {}, { targetUrl: 'http://localhost:4', label: 'Dev', port: '4' }] });
+        .mockResolvedValueOnce({
+          sessions: [
+            null,
+            {},
+            {
+              sessionId: 'one',
+              targetUrl: 'http://localhost:3000',
+              previewPort: '3000',
+              previewBaseUrl: '',
+              bootstrapPath: '/preview',
+              createdAt: 1700000000,
+              lastAccessedAt: 'bad',
+              expiresAt: 1700000100,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          scannedAt: 'bad',
+          suggestions: [null, {}, { targetUrl: 'http://localhost:4', label: 'Dev', port: '4' }],
+        });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
-      const page = await client.readSnapshotPage({ threadId: 'thread', afterCursor: 'after', limit: 0 });
+      const page = await client.readSnapshotPage({
+        threadId: 'thread',
+        afterCursor: 'after',
+        limit: 0,
+      });
       expect(ws.request).toHaveBeenNthCalledWith(1, 'thread/snapshot/page', {
-        threadId: 'thread', beforeCursor: null, afterCursor: 'after', revision: undefined, limit: 0,
+        threadId: 'thread',
+        beforeCursor: null,
+        afterCursor: 'after',
+        revision: undefined,
+        limit: 0,
       });
       expect(page.entries).toHaveLength(2);
       expect(page.entries[0]?.message).toMatchObject({ id: 'message', role: '', parts: [] });
-      expect(page.entries[1]?.tool).toMatchObject({ id: 'tool', generation: 2, structuredContent: [] });
+      expect(page.entries[1]?.tool).toMatchObject({
+        id: 'tool',
+        generation: 2,
+        structuredContent: [],
+      });
 
       expect((await client.listWorkspaceRoots()).workspaces).toEqual([
         expect.objectContaining({ path: '/one', chatCount: 0 }),
         expect.objectContaining({ path: '/two', chatCount: 3 }),
       ]);
-      expect((await client.listFilesystemEntries({ path: ' /repo ', includeHidden: true, directoriesOnly: false, includeGitRepo: true })).entries[0]).toMatchObject({
-        kind: 'directory', hidden: true, selectable: false, isGitRepo: true,
+      expect(
+        (
+          await client.listFilesystemEntries({
+            path: ' /repo ',
+            includeHidden: true,
+            directoriesOnly: false,
+            includeGitRepo: true,
+          })
+        ).entries[0],
+      ).toMatchObject({
+        kind: 'directory',
+        hidden: true,
+        selectable: false,
+        isGitRepo: true,
       });
       expect(await client.listBrowserPreviewSessions()).toEqual([
-        expect.objectContaining({ sessionId: 'one', previewPort: 3000, lastAccessedAt: '2023-11-14T22:13:20.000Z' }),
+        expect.objectContaining({
+          sessionId: 'one',
+          previewPort: 3000,
+          lastAccessedAt: '2023-11-14T22:13:20.000Z',
+        }),
       ]);
       expect((await client.discoverBrowserPreviewTargets()).suggestions).toEqual([
         { targetUrl: 'http://localhost:4', label: 'Dev', port: 4 },
@@ -2472,9 +2892,26 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValueOnce({ thread: { id: 'created', createdAt: 1700000000 } })
         .mockResolvedValueOnce({ model: ' resumed ', reasoning_effort: 'HIGH' })
         .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ threadId: 'thread', items: [], pendingSteers: [], pendingSteerCount: 0, waitingForToolCalls: false, steeringInFlight: false, lastError: null })
+        .mockResolvedValueOnce({
+          threadId: 'thread',
+          items: [],
+          pendingSteers: [],
+          pendingSteerCount: 0,
+          waitingForToolCalls: false,
+          steeringInFlight: false,
+          lastError: null,
+        })
         .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ thread: { id: 'thread', turns: [{ id: '', status: 'running' }, { id: 'done', status: 'completed' }, { id: 'active', status: 'queued' }] } })
+        .mockResolvedValueOnce({
+          thread: {
+            id: 'thread',
+            turns: [
+              { id: '', status: 'running' },
+              { id: 'done', status: 'completed' },
+              { id: 'active', status: 'queued' },
+            ],
+          },
+        })
         .mockResolvedValueOnce({});
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
@@ -2487,30 +2924,43 @@ describe('HostBridgeApiClient', () => {
         serviceTier: 'FAST' as never,
         approvalPolicy: 'NEVER' as never,
       });
-      expect(ws.request).toHaveBeenNthCalledWith(1, 'thread/start', expect.objectContaining({
-        agentId: 'agent', cwd: '/repo', model: 'model', approvalPolicy: 'never', config: { service_tier: 'fast' },
-      }));
+      expect(ws.request).toHaveBeenNthCalledWith(
+        1,
+        'thread/start',
+        expect.objectContaining({
+          agentId: 'agent',
+          cwd: '/repo',
+          model: 'model',
+          approvalPolicy: 'never',
+          config: { service_tier: 'fast' },
+        }),
+      );
       await expect(
         client.resumeThread(' thread ', {
           model: ' ',
           cwd: ' ',
           approvalPolicy: 'invalid' as never,
-        })
+        }),
       ).rejects.toThrow('canonical workspace path');
       await expect(
         client.resumeThread(' thread ', {
           model: ' ',
           cwd: ' /repo ',
           approvalPolicy: 'invalid' as never,
-        })
+        }),
       ).resolves.toEqual({ model: 'resumed', effort: 'high' });
       await client.steerChatTurn(' thread ', ' turn ', {
         content: ' steer ',
-        mentions: [{ name: ' ', path: ' src/a.ts ' }, { name: 'duplicate', path: 'SRC/A.TS' }, { name: 'bad', path: ' ' }],
+        mentions: [
+          { name: ' ', path: ' src/a.ts ' },
+          { name: 'duplicate', path: 'SRC/A.TS' },
+          { name: 'bad', path: ' ' },
+        ],
         localImages: [{ path: ' /tmp/a.png ' }, { path: '/TMP/A.PNG' }, { path: '' }],
       });
       expect(ws.request).toHaveBeenNthCalledWith(3, 'turn/steer', {
-        threadId: 'thread', expectedTurnId: 'turn',
+        threadId: 'thread',
+        expectedTurnId: 'turn',
         input: [
           { type: 'text', text: 'steer', text_elements: [] },
           { type: 'mention', name: 'a.ts', path: 'src/a.ts' },
@@ -2524,7 +2974,10 @@ describe('HostBridgeApiClient', () => {
       await client.interruptTurn(' thread ', ' turn ');
       await expect(client.interruptLatestTurn(' ')).rejects.toThrow('threadId is required');
       await expect(client.interruptLatestTurn('thread')).resolves.toBe('active');
-      expect(ws.request).toHaveBeenLastCalledWith('turn/interrupt', { threadId: 'thread', turnId: 'active' });
+      expect(ws.request).toHaveBeenLastCalledWith('turn/interrupt', {
+        threadId: 'thread',
+        turnId: 'active',
+      });
     });
 
     it('covers browser validation, close results, create failures, and workspace validation', async () => {
@@ -2535,14 +2988,20 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValueOnce({ thread: {} })
         .mockResolvedValueOnce({ thread: null });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await expect(client.createBrowserPreviewSession('http://localhost')).rejects.toThrow('invalid session');
+      await expect(client.createBrowserPreviewSession('http://localhost')).rejects.toThrow(
+        'invalid session',
+      );
       await expect(client.closeBrowserPreviewSession('session')).resolves.toBe(false);
       await expect(client.createChat({ message: '' })).rejects.toThrow('chat id');
-      await expect(client.createChatIdempotent({ message: '' }, 'submission')).rejects.toThrow('did not return a chat');
+      await expect(client.createChatIdempotent({ message: '' }, 'submission')).rejects.toThrow(
+        'did not return a chat',
+      );
       await expect(client.setChatWorkspace('thread', ' ')).rejects.toThrow('cannot be empty');
       ws.request.mockResolvedValueOnce({});
       ws.request.mockResolvedValueOnce({ thread: { id: 'thread', cwd: '/other' } });
-      await expect(client.setChatWorkspace('thread', ' /repo ')).resolves.toMatchObject({ cwd: '/repo' });
+      await expect(client.setChatWorkspace('thread', ' /repo ')).resolves.toMatchObject({
+        cwd: '/repo',
+      });
     });
 
     it('covers empty sends, role validation, queue failures, and missing turn ids', async () => {
@@ -2551,20 +3010,36 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValueOnce({ thread: { id: 'thread', turns: [] } })
         .mockResolvedValueOnce({ model: null, effort: null })
         .mockResolvedValueOnce({ turn: {} })
-        .mockResolvedValueOnce({ threadId: 'thread', items: [], pendingSteers: [], pendingSteerCount: 0, waitingForToolCalls: false, steeringInFlight: false, lastError: null })
+        .mockResolvedValueOnce({
+          threadId: 'thread',
+          items: [],
+          pendingSteers: [],
+          pendingSteerCount: 0,
+          waitingForToolCalls: false,
+          steeringInFlight: false,
+          lastError: null,
+        })
         .mockResolvedValueOnce({ thread: { id: 'thread', turns: [] } })
         .mockResolvedValueOnce({ model: null, effort: null })
-        .mockResolvedValueOnce({ disposition: 'sent', turnId: ' ', queue: { threadId: 'thread', items: [] } });
+        .mockResolvedValueOnce({
+          disposition: 'sent',
+          turnId: ' ',
+          queue: { threadId: 'thread', items: [] },
+        });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await expect(client.sendChatMessage('thread', { content: ' ' })).resolves.toMatchObject({ id: 'thread' });
-      await expect(client.sendChatMessage('thread', { content: 'x', role: 'assistant' })).rejects.toThrow('Only user role');
+      await expect(client.sendChatMessage('thread', { content: ' ' })).resolves.toMatchObject({
+        id: 'thread',
+      });
       await expect(
-        client.sendChatMessage('thread', { content: 'x', cwd: '/workspace' })
+        client.sendChatMessage('thread', { content: 'x', role: 'assistant' }),
+      ).rejects.toThrow('Only user role');
+      await expect(
+        client.sendChatMessage('thread', { content: 'x', cwd: '/workspace' }),
       ).rejects.toThrow('turn id');
       const empty = await client.sendOrQueueChatMessage('thread', { content: ' ' });
       expect(empty).toMatchObject({ disposition: 'sent', turnId: '' });
       await expect(
-        client.sendOrQueueChatMessage('thread', { content: 'x', cwd: '/workspace' })
+        client.sendOrQueueChatMessage('thread', { content: 'x', cwd: '/workspace' }),
       ).rejects.toThrow('did not return turn id');
     });
 
@@ -2581,14 +3056,29 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValueOnce({ suggestions: 'bad' })
         .mockResolvedValueOnce({ sessions: 'bad' });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await expect(client.readSnapshotPage({ threadId: 'thread' })).resolves.toMatchObject({ entries: [], revision: 0, unavailableCount: 0 });
-      await expect(client.listWorkspaceRoots(3)).resolves.toMatchObject({ bridgeRoot: '', workspaces: [] });
-      await expect(client.listFilesystemEntries()).resolves.toMatchObject({ bridgeRoot: '', path: '', entries: [] });
-      await expect(client.discoverBrowserPreviewTargets()).resolves.toMatchObject({ suggestions: [] });
+      await expect(client.readSnapshotPage({ threadId: 'thread' })).resolves.toMatchObject({
+        entries: [],
+        revision: 0,
+        unavailableCount: 0,
+      });
+      await expect(client.listWorkspaceRoots(3)).resolves.toMatchObject({
+        bridgeRoot: '',
+        workspaces: [],
+      });
+      await expect(client.listFilesystemEntries()).resolves.toMatchObject({
+        bridgeRoot: '',
+        path: '',
+        entries: [],
+      });
+      await expect(client.discoverBrowserPreviewTargets()).resolves.toMatchObject({
+        suggestions: [],
+      });
       await expect(client.listLoadedChatIds()).resolves.toEqual([]);
       await expect(client.listWorkspaceRoots()).resolves.toMatchObject({ workspaces: [] });
       await expect(client.listFilesystemEntries()).resolves.toMatchObject({ entries: [] });
-      await expect(client.discoverBrowserPreviewTargets()).resolves.toMatchObject({ suggestions: [] });
+      await expect(client.discoverBrowserPreviewTargets()).resolves.toMatchObject({
+        suggestions: [],
+      });
       await expect(client.listBrowserPreviewSessions()).resolves.toEqual([]);
     });
 
@@ -2596,9 +3086,16 @@ describe('HostBridgeApiClient', () => {
       const ws = createWsMock();
       type Handler = Parameters<HostBridgeWsClient['onEvent']>[0];
       let handler: Handler = () => {};
-      ws.onEvent.mockImplementation((next) => { handler = next; return jest.fn(); });
+      ws.onEvent.mockImplementation((next) => {
+        handler = next;
+        return jest.fn();
+      });
       ws.request.mockImplementation((method, params) => {
-        if (method === 'bridge/thread/list/stream/start') return Promise.resolve({ started: true, streamId: (params as { streamId: string }).streamId });
+        if (method === 'bridge/thread/list/stream/start')
+          return Promise.resolve({
+            started: true,
+            streamId: (params as { streamId: string }).streamId,
+          });
         return Promise.resolve({ data: [] });
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -2610,7 +3107,10 @@ describe('HostBridgeApiClient', () => {
       expect(other.peekChatSummary('thread')).toEqual(summary);
       await other.listAllChats({ includeSubAgents: true, cacheTtlMs: 1000 });
       const controller = await client.startChatListStream({}, () => {});
-      handler({ method: 'bridge/thread/list/stream/batch', params: { streamId: controller.streamId, data: [], done: true } });
+      handler({
+        method: 'bridge/thread/list/stream/batch',
+        params: { streamId: controller.streamId, data: [], done: true },
+      });
       controller.cancel();
     });
 
@@ -2625,19 +3125,37 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValueOnce({ thread: { id: 'thread' } })
         .mockResolvedValueOnce({ model: null, effort: null })
         .mockResolvedValueOnce({ turn: { id: 'turn' } })
-        .mockResolvedValueOnce({ thread: { id: 'thread', turns: [{ id: 'turn', items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }] }] } });
+        .mockResolvedValueOnce({
+          thread: {
+            id: 'thread',
+            turns: [
+              {
+                id: 'turn',
+                items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }],
+              },
+            ],
+          },
+        });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      client.rememberChat(mapChat({ id: 'thread', name: 'cached', turns: [{ items: [{ type: 'agentMessage', text: 'old' }] }] }));
+      client.rememberChat(
+        mapChat({
+          id: 'thread',
+          name: 'cached',
+          turns: [{ items: [{ type: 'agentMessage', text: 'old' }] }],
+        }),
+      );
       await expect(client.getChatSummary('thread')).resolves.toMatchObject({ title: 'remote' });
-      await expect(client.setChatWorkspace('thread', '/repo')).resolves.toMatchObject({ cwd: '/repo' });
+      await expect(client.setChatWorkspace('thread', '/repo')).resolves.toMatchObject({
+        cwd: '/repo',
+      });
       const callback = jest.fn();
       await expect(
         client.sendChatMessageIdempotent(
           'thread',
           { content: 'queued', cwd: '/repo' },
           'submission',
-          { onTurnStarted: callback }
-        )
+          { onTurnStarted: callback },
+        ),
       ).resolves.toMatchObject({ id: 'thread' });
       expect(callback).not.toHaveBeenCalled();
       await expect(
@@ -2648,7 +3166,7 @@ describe('HostBridgeApiClient', () => {
           model: 'model',
           effort: 'invalid' as never,
           agent: ' ',
-        })
+        }),
       ).resolves.toMatchObject({ id: 'thread' });
     });
 
@@ -2656,17 +3174,41 @@ describe('HostBridgeApiClient', () => {
       const ws = createWsMock();
       ws.onEvent.mockImplementation(() => jest.fn());
       ws.request.mockImplementation((method, params) => {
-        if (method === 'bridge/thread/list/stream/start') return Promise.resolve({ started: true, streamId: (params as { streamId: string }).streamId });
+        if (method === 'bridge/thread/list/stream/start')
+          return Promise.resolve({
+            started: true,
+            streamId: (params as { streamId: string }).streamId,
+          });
         if (method === 'thread/list') return Promise.resolve({ data: 'bad' });
-        if (method === 'thread/read') return Promise.resolve({ thread: { id: 'thread', turns: [{ id: 'turn', items: [{ type: 'userMessage', content: [{ type: 'text', text: 'sent' }] }] }] } });
+        if (method === 'thread/read')
+          return Promise.resolve({
+            thread: {
+              id: 'thread',
+              turns: [
+                {
+                  id: 'turn',
+                  items: [{ type: 'userMessage', content: [{ type: 'text', text: 'sent' }] }],
+                },
+              ],
+            },
+          });
         if (method === 'thread/resume') return Promise.resolve({ model: 'model', effort: 'low' });
-        if (method === 'bridge/thread/queue/send') return Promise.resolve({ disposition: 'sent', turnId: 'turn', queue: { threadId: 'thread', items: [] } });
+        if (method === 'bridge/thread/queue/send')
+          return Promise.resolve({
+            disposition: 'sent',
+            turnId: 'turn',
+            queue: { threadId: 'thread', items: [] },
+          });
         return Promise.resolve({});
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       await client.startChatListStream(undefined as never, () => {});
-      await expect(client.listChats({ includeSubAgents: true, forceRefresh: true })).resolves.toEqual([]);
-      await expect(client.listAllChats({ includeSubAgents: false, forceRefresh: true })).resolves.toMatchObject({ chats: [] });
+      await expect(
+        client.listChats({ includeSubAgents: true, forceRefresh: true }),
+      ).resolves.toEqual([]);
+      await expect(
+        client.listAllChats({ includeSubAgents: false, forceRefresh: true }),
+      ).resolves.toMatchObject({ chats: [] });
 
       const summary = mapChatSummary({ id: 'thread', updatedAt: 1 }) as ChatSummary;
       client.rememberChats([summary]);
@@ -2689,8 +3231,8 @@ describe('HostBridgeApiClient', () => {
           'thread',
           { content: 'sent', cwd: '/workspace', collaborationMode: 'plan', model: 'model' },
           'submission',
-          { onTurnStarted: started }
-        )
+          { onTurnStarted: started },
+        ),
       ).resolves.toMatchObject({ id: 'thread' });
       expect(started).toHaveBeenCalledWith('turn');
     });
@@ -2704,13 +3246,33 @@ describe('HostBridgeApiClient', () => {
         .mockResolvedValue({
           thread: {
             id: 'thread',
-            turns: [{ id: 'turn', items: [
-              null,
-              { type: 'agentMessage' },
-              { type: 'userMessage', content: 'bad' },
-              { type: 'userMessage', content: [null, { type: 'text', text: 3 }, { type: 'mention', path: '' }, { type: 'localImage', path: '' }] },
-              { type: 'userMessage', content: [{ type: 'text', text: 'hello' }, { type: 'mention', path: 'src/a.ts' }, { type: 'localImage', path: '/tmp/a.png' }] },
-            ] }],
+            turns: [
+              {
+                id: 'turn',
+                items: [
+                  null,
+                  { type: 'agentMessage' },
+                  { type: 'userMessage', content: 'bad' },
+                  {
+                    type: 'userMessage',
+                    content: [
+                      null,
+                      { type: 'text', text: 3 },
+                      { type: 'mention', path: '' },
+                      { type: 'localImage', path: '' },
+                    ],
+                  },
+                  {
+                    type: 'userMessage',
+                    content: [
+                      { type: 'text', text: 'hello' },
+                      { type: 'mention', path: 'src/a.ts' },
+                      { type: 'localImage', path: '/tmp/a.png' },
+                    ],
+                  },
+                ],
+              },
+            ],
           },
         });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -2727,19 +3289,37 @@ describe('HostBridgeApiClient', () => {
     });
 
     it('closes remaining client DTO, normalization, cache, and null-cwd branches', async () => {
-      const merged = mergeSnapshotPage(makeSnapshot({ timeline: undefined, continuation: undefined }), {
-        entries: [], beforeCursor: null, afterCursor: null, hasMoreBefore: false, hasMoreAfter: false,
-        unavailableCount: 0, earliestAvailableSequence: null, latestAvailableSequence: null, revision: 1,
-      });
+      const merged = mergeSnapshotPage(
+        makeSnapshot({ timeline: undefined, continuation: undefined }),
+        {
+          entries: [],
+          beforeCursor: null,
+          afterCursor: null,
+          hasMoreBefore: false,
+          hasMoreAfter: false,
+          unavailableCount: 0,
+          earliestAvailableSequence: null,
+          latestAvailableSequence: null,
+          revision: 1,
+        },
+      );
       expect(merged).toMatchObject({ timeline: [], continuation: undefined });
 
       const ws = createWsMock();
       ws.request
         .mockResolvedValueOnce({
-          entries: [{
-            sequence: 1, kind: 'tool', canonicalId: 'tool',
-            tool: { id: 'tool', structuredContent: [{ type: 'text', text: 'ok' }], locations: [{ path: 'a.ts' }] },
-          }],
+          entries: [
+            {
+              sequence: 1,
+              kind: 'tool',
+              canonicalId: 'tool',
+              tool: {
+                id: 'tool',
+                structuredContent: [{ type: 'text', text: 'ok' }],
+                locations: [{ path: 'a.ts' }],
+              },
+            },
+          ],
         })
         .mockResolvedValueOnce({
           workspaces: [
@@ -2749,17 +3329,26 @@ describe('HostBridgeApiClient', () => {
           ],
         })
         .mockResolvedValueOnce({
-          sessions: [{
-            sessionId: 'session', targetUrl: 'https://example.com', bootstrapPath: '/preview',
-            previewPort: 'bad', createdAt: 1700000000, expiresAt: 1700000001,
-          }],
+          sessions: [
+            {
+              sessionId: 'session',
+              targetUrl: 'https://example.com',
+              bootstrapPath: '/preview',
+              previewPort: 'bad',
+              createdAt: 1700000000,
+              expiresAt: 1700000001,
+            },
+          ],
         })
         .mockResolvedValueOnce({
           suggestions: [{ targetUrl: 'https://example.com', label: 'bad', port: 'bad' }],
         });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      expect((await client.readSnapshotPage({ threadId: 'thread' })).entries[0]?.tool).toMatchObject({
-        structuredContent: [{ type: 'text', text: 'ok' }], locations: [{ path: 'a.ts' }],
+      expect(
+        (await client.readSnapshotPage({ threadId: 'thread' })).entries[0]?.tool,
+      ).toMatchObject({
+        structuredContent: [{ type: 'text', text: 'ok' }],
+        locations: [{ path: 'a.ts' }],
       });
       expect((await client.listWorkspaceRoots()).workspaces).toEqual([
         { path: '/blank', chatCount: 0 },
@@ -2779,28 +3368,56 @@ describe('HostBridgeApiClient', () => {
       await client.gitCommit({ message: 'message' });
       await client.gitSwitch({ branch: 'main' });
       expect(ws.request).toHaveBeenCalledWith('bridge/git/stage', { path: 'a.ts', cwd: null });
-      expect(ws.request).toHaveBeenCalledWith('bridge/git/commit', { message: 'message', cwd: null });
+      expect(ws.request).toHaveBeenCalledWith('bridge/git/commit', {
+        message: 'message',
+        cwd: null,
+      });
 
       const cached = mapChat({ id: 'cached', turns: [] });
       client.rememberChat(cached);
-      await expect(client.getChat('cached', { cacheTtlMs: 1000 })).resolves.toMatchObject({ id: 'cached' });
+      await expect(client.getChat('cached', { cacheTtlMs: 1000 })).resolves.toMatchObject({
+        id: 'cached',
+      });
       client.rememberAllChats([cached]);
-      await expect(client.listAllChats({ cacheTtlMs: 1000 })).resolves.toMatchObject({ chats: [expect.objectContaining({ id: 'cached' })] });
-      await expect(client.getChatSummaries([3 as never, ' ', 'one', 'one'], { concurrency: Number.NaN })).resolves.toEqual([]);
+      await expect(client.listAllChats({ cacheTtlMs: 1000 })).resolves.toMatchObject({
+        chats: [expect.objectContaining({ id: 'cached' })],
+      });
+      await expect(
+        client.getChatSummaries([3 as never, ' ', 'one', 'one'], { concurrency: Number.NaN }),
+      ).resolves.toEqual([]);
 
       const createWs = createWsMock();
       createWs.request.mockResolvedValue({ thread: { id: 'created' } });
-      const createClient = new HostBridgeApiClient({ ws: createWs as unknown as HostBridgeWsClient });
+      const createClient = new HostBridgeApiClient({
+        ws: createWs as unknown as HostBridgeWsClient,
+      });
       for (const effort of ['none', 'minimal', 'low', 'medium', 'xhigh', 'max', 'invalid']) {
-        await createClient.createChat({ message: '', effort: effort as never, serviceTier: effort === 'none' ? 'flex' : undefined });
+        await createClient.createChat({
+          message: '',
+          effort: effort as never,
+          serviceTier: effort === 'none' ? 'flex' : undefined,
+        });
       }
-      expect(createWs.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ config: { service_tier: 'flex' } }));
+      expect(createWs.request).toHaveBeenCalledWith(
+        'thread/start',
+        expect.objectContaining({ config: { service_tier: 'flex' } }),
+      );
 
       const sendWs = createWsMock();
       sendWs.request.mockImplementation((method) => {
         if (method === 'thread/resume') return Promise.resolve({ model: null, effort: null });
         if (method === 'turn/start') return Promise.resolve({ turn: { id: 'turn' } });
-        return Promise.resolve({ thread: { id: 'thread', turns: [{ id: 'turn', items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }] }] } });
+        return Promise.resolve({
+          thread: {
+            id: 'thread',
+            turns: [
+              {
+                id: 'turn',
+                items: [{ type: 'userMessage', content: [{ type: 'text', text: 'hello' }] }],
+              },
+            ],
+          },
+        });
       });
       const sendClient = new HostBridgeApiClient({ ws: sendWs as unknown as HostBridgeWsClient });
       for (const collaborationMode of ['invalid', 'ask', 'plan']) {
@@ -2810,7 +3427,10 @@ describe('HostBridgeApiClient', () => {
           collaborationMode: collaborationMode as never,
         });
       }
-      expect(sendWs.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({ collaborationMode: null }));
+      expect(sendWs.request).toHaveBeenCalledWith(
+        'turn/start',
+        expect.objectContaining({ collaborationMode: null }),
+      );
     });
 
     it('covers final cache hits, null session response, malformed interrupt state, and deep clones', async () => {
@@ -2824,17 +3444,31 @@ describe('HostBridgeApiClient', () => {
 
       const chat = mapChat({ id: 'cached', turns: [] });
       chat.messages = [
-        createActivityMessage('with-meta', SUBAGENT_ACTIVITY_TYPE, {
-          text: 'meta', subAgent: { tool: 'spawnAgent', receiverThreadIds: ['child'] },
-        }, chat.createdAt),
-        createActivityMessage('without-receivers', SUBAGENT_ACTIVITY_TYPE, {
-          text: 'meta', subAgent: { tool: 'wait' },
-        }, chat.createdAt),
+        createActivityMessage(
+          'with-meta',
+          SUBAGENT_ACTIVITY_TYPE,
+          {
+            text: 'meta',
+            subAgent: { tool: 'spawnAgent', receiverThreadIds: ['child'] },
+          },
+          chat.createdAt,
+        ),
+        createActivityMessage(
+          'without-receivers',
+          SUBAGENT_ACTIVITY_TYPE,
+          {
+            text: 'meta',
+            subAgent: { tool: 'wait' },
+          },
+          chat.createdAt,
+        ),
         { id: 'plain', role: 'assistant', content: 'plain', createdAt: chat.createdAt },
       ];
       client.rememberChat(chat);
       expect(client.peekChatShell('cached')).toMatchObject({ id: 'cached' });
-      await expect(client.getChat('cached', { cacheTtlMs: 1000 })).resolves.toMatchObject({ id: 'cached' });
+      await expect(client.getChat('cached', { cacheTtlMs: 1000 })).resolves.toMatchObject({
+        id: 'cached',
+      });
       const clone = client.peekChat('cached') as Chat;
       expect(clone.messages[0]?.role).toBe('activity');
       if (!clone.messages[0] || clone.messages[0].role !== 'activity') {
@@ -2881,7 +3515,10 @@ describe('HostBridgeApiClient', () => {
       ws.request.mockResolvedValue({ data: [], nextCursor: null });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       await client.listAllChats({ includeSubAgents: true, forceRefresh: true });
-      expect(ws.request).toHaveBeenCalledWith('thread/list', expect.objectContaining({ limit: 50 }));
+      expect(ws.request).toHaveBeenCalledWith(
+        'thread/list',
+        expect.objectContaining({ limit: 50 }),
+      );
 
       const summary = mapChatSummary({ id: 'cached', updatedAt: 1 }) as ChatSummary;
       client.rememberAllChats([summary]);
@@ -2905,30 +3542,68 @@ describe('HostBridgeApiClient', () => {
       const ws = createWsMock();
       ws.request.mockResolvedValue({ ok: true });
       const withoutUrl = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await expect(withoutUrl.uploadAttachment({ uri: 'file:///a', kind: 'image' })).rejects.toThrow('Bridge URL');
+      await expect(
+        withoutUrl.uploadAttachment({ uri: 'file:///a', kind: 'image' }),
+      ).rejects.toThrow('Bridge URL');
 
-      const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<typeof FileSystem.uploadAsync>;
+      const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
+        typeof FileSystem.uploadAsync
+      >;
       const client = new HostBridgeApiClient({
         ws: ws as unknown as HostBridgeWsClient,
         bridgeUrl: 'https://bridge.example/',
         authToken: ' token ',
       });
-      uploadAsync.mockResolvedValueOnce({ status: 200, body: '{"id":"attachment"}', headers: {} } as never);
-      await expect(client.uploadAttachment({
-        uri: 'file:///a', kind: 'image', fileName: ' a.png ', mimeType: ' image/png ', threadId: ' thread ',
-      })).resolves.toMatchObject({ id: 'attachment' });
-      expect(uploadAsync).toHaveBeenCalledWith('https://bridge.example/attachments', 'file:///a', expect.objectContaining({
-        parameters: { kind: 'image', fileName: 'a.png', mimeType: 'image/png', threadId: 'thread' },
-        headers: { Authorization: 'Bearer token' },
-      }));
+      uploadAsync.mockResolvedValueOnce({
+        status: 200,
+        body: '{"id":"attachment"}',
+        headers: {},
+      } as never);
+      await expect(
+        client.uploadAttachment({
+          uri: 'file:///a',
+          kind: 'image',
+          fileName: ' a.png ',
+          mimeType: ' image/png ',
+          threadId: ' thread ',
+        }),
+      ).resolves.toMatchObject({ id: 'attachment' });
+      expect(uploadAsync).toHaveBeenCalledWith(
+        'https://bridge.example/attachments',
+        'file:///a',
+        expect.objectContaining({
+          parameters: {
+            kind: 'image',
+            fileName: 'a.png',
+            mimeType: 'image/png',
+            threadId: 'thread',
+          },
+          headers: { Authorization: 'Bearer token' },
+        }),
+      );
 
-      uploadAsync.mockResolvedValueOnce({ status: 400, body: '{"message":"too large"}', headers: {} } as never);
-      await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow('too large');
+      uploadAsync.mockResolvedValueOnce({
+        status: 400,
+        body: '{"message":"too large"}',
+        headers: {},
+      } as never);
+      await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow(
+        'too large',
+      );
       uploadAsync.mockResolvedValueOnce({ status: 500, body: 'not json', headers: {} } as never);
-      await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow('Attachment upload failed (500)');
+      await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow(
+        'Attachment upload failed (500)',
+      );
 
       await client.readBridgeCapabilities();
-      await client.registerPushDevice({ profileId: 'p', registrationId: 'r', token: 't', platform: 'ios', deviceName: 'phone', events: { turnCompleted: true, approvalRequested: false } });
+      await client.registerPushDevice({
+        profileId: 'p',
+        registrationId: 'r',
+        token: 't',
+        platform: 'ios',
+        deviceName: 'phone',
+        events: { turnCompleted: true, approvalRequested: false },
+      });
       await client.unregisterPushDevice({ profileId: 'p', registrationId: 'r' });
       await client.listApprovals();
       await client.resolveApproval('a', 'accept', 'resolution');
@@ -2937,7 +3612,10 @@ describe('HostBridgeApiClient', () => {
       await client.dismissBridgeUiSurface('surface');
       await client.execTerminal({ command: 'pwd' });
       expect(ws.request).toHaveBeenCalledWith('bridge/capabilities/read');
-      expect(ws.request).toHaveBeenCalledWith('bridge/ui/dismiss', { id: 'surface', threadId: null });
+      expect(ws.request).toHaveBeenCalledWith('bridge/ui/dismiss', {
+        id: 'surface',
+        threadId: null,
+      });
       expect(ws.request).toHaveBeenCalledWith('bridge/terminal/exec', { command: 'pwd' });
     });
 
@@ -2946,13 +3624,21 @@ describe('HostBridgeApiClient', () => {
       ws.request.mockResolvedValue({ ok: true });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
-      await expect(client.installGitHubAuth({ accessToken: ' ', repositories: [] })).rejects.toThrow('grant');
-      await client.installGitHubAuth({ grants: [
-        { accessToken: ' token ', repositories: [' repo ', ' '] },
-        { accessToken: ' ', repositories: [] },
-      ] });
-      await expect(client.gitClone({ url: ' ', parentPath: '/tmp', directoryName: 'x' })).rejects.toThrow('url');
-      await expect(client.gitClone({ url: 'url', parentPath: '/tmp', directoryName: ' ' })).rejects.toThrow('directoryName');
+      await expect(
+        client.installGitHubAuth({ accessToken: ' ', repositories: [] }),
+      ).rejects.toThrow('grant');
+      await client.installGitHubAuth({
+        grants: [
+          { accessToken: ' token ', repositories: [' repo ', ' '] },
+          { accessToken: ' ', repositories: [] },
+        ],
+      });
+      await expect(
+        client.gitClone({ url: ' ', parentPath: '/tmp', directoryName: 'x' }),
+      ).rejects.toThrow('url');
+      await expect(
+        client.gitClone({ url: 'url', parentPath: '/tmp', directoryName: ' ' }),
+      ).rejects.toThrow('directoryName');
       await client.gitClone({ url: ' url ', parentPath: ' ', directoryName: ' repo ' });
       await expect(client.gitStage({ path: ' ' })).rejects.toThrow('path');
       await expect(client.gitUnstage({ path: ' ' })).rejects.toThrow('path');
@@ -2971,8 +3657,15 @@ describe('HostBridgeApiClient', () => {
       expect(ws.request).toHaveBeenCalledWith('bridge/github/auth/install', {
         grants: [{ accessToken: 'token', repositories: ['repo'] }],
       });
-      expect(ws.request).toHaveBeenCalledWith('bridge/git/clone', { url: 'url', parentPath: null, directoryName: 'repo' });
-      expect(ws.request).toHaveBeenCalledWith('bridge/git/switch', { branch: 'main', cwd: '/repo' });
+      expect(ws.request).toHaveBeenCalledWith('bridge/git/clone', {
+        url: 'url',
+        parentPath: null,
+        directoryName: 'repo',
+      });
+      expect(ws.request).toHaveBeenCalledWith('bridge/git/switch', {
+        branch: 'main',
+        cwd: '/repo',
+      });
     });
   });
 });
@@ -3043,7 +3736,9 @@ describe('HostBridgeApiClient model options', () => {
 
   it('does not cache a failed catalog request', async () => {
     const ws = createWsMock();
-    ws.request.mockRejectedValueOnce(new Error('agent unavailable')).mockResolvedValue(catalogResponse);
+    ws.request
+      .mockRejectedValueOnce(new Error('agent unavailable'))
+      .mockResolvedValue(catalogResponse);
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
     await expect(client.listModelOptions('codex')).rejects.toThrow('agent unavailable');

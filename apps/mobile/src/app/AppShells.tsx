@@ -91,15 +91,15 @@ export function OnboardingShell({ theme, styles }: ShellProps) {
   const mode: OnboardingMode = bridgeUrl ? savedMode : 'initial';
   const shouldUseSavedBridgeCredentials = mode === 'edit' || mode === 'reconnect';
   const initialUrl = shouldUseSavedBridgeCredentials
-    ? activeBridgeProfile?.bridgeUrl ?? ''
+    ? (activeBridgeProfile?.bridgeUrl ?? '')
     : mode === 'add'
       ? ''
-      : env.legacyHostBridgeUrl ?? '';
+      : (env.legacyHostBridgeUrl ?? '');
   const initialToken = shouldUseSavedBridgeCredentials
-    ? activeBridgeProfile?.bridgeToken ?? ''
+    ? (activeBridgeProfile?.bridgeToken ?? '')
     : mode === 'add'
       ? ''
-      : env.hostBridgeToken ?? '';
+      : (env.hostBridgeToken ?? '');
 
   return (
     <AppShellFrame theme={theme} styles={styles}>

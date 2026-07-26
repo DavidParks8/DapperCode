@@ -2,10 +2,7 @@ import type { Chat, ChatMessage } from '../../../api/types';
 import type { AgUiThreadMessageState } from '../../../api/agUiMessages';
 import { getMessageText } from '../../../api/messages';
 import { partsMatchMessageContent } from '../../../api/agUiContent';
-import {
-  filterReasoningMessages,
-  normalizeChatMessageMatchContent,
-} from '../mainScreenHelpers';
+import { filterReasoningMessages, normalizeChatMessageMatchContent } from '../mainScreenHelpers';
 import { trimInheritedParentMessages } from '../subAgentTranscript';
 import {
   buildTranscriptDisplayItems,
@@ -35,27 +32,21 @@ export function projectTranscript({
   liveMessageState?: AgUiThreadMessageState | null;
   now?: () => string;
 }): TranscriptProjection {
-  const child = getVisibleTranscriptMessages(
-    filterReasoningMessages(chat.messages),
-    showToolCalls
-  );
+  const child = getVisibleTranscriptMessages(filterReasoningMessages(chat.messages), showToolCalls);
   const inherited =
     chat.parentThreadId && parentChat
       ? trimInheritedParentMessages(
-          getVisibleTranscriptMessages(
-            filterReasoningMessages(parentChat.messages),
-            showToolCalls
-          ),
+          getVisibleTranscriptMessages(filterReasoningMessages(parentChat.messages), showToolCalls),
           child,
-          chat.id
+          chat.id,
         )
       : { messages: child, hiddenInheritedMessageCount: 0 };
   let messages = dedupeTransientUserMessages(
-    syncVisibleSubAgentStatuses(inherited.messages, threadStatuses)
+    syncVisibleSubAgentStatuses(inherited.messages, threadStatuses),
   );
   const liveMessages = liveMessageState?.messages ?? [];
   const replacedMessageIds = new Set(
-    Object.values(liveMessageState?.replacesMessageIdByMessageId ?? {})
+    Object.values(liveMessageState?.replacesMessageIdByMessageId ?? {}),
   );
   if (liveMessageState?.authoritativeSnapshot) {
     const persistedById = new Map(messages.map((message) => [message.id, message]));
@@ -78,7 +69,7 @@ export function projectTranscript({
     // trailing persisted messages instead of dropping them until the next one.
     const lastCoveredIndex = messages.reduce(
       (last, message, index) => (liveIds.has(message.id) ? index : last),
-      -1
+      -1,
     );
     const trailing =
       lastCoveredIndex >= 0
@@ -91,12 +82,12 @@ export function projectTranscript({
       // the entire transcript erases every earlier turn the moment a follow-up is
       // sent, so the known history is kept ahead of it.
       const snapshotSignatures = new Set(
-        projected.map((message) => `${message.role}\u0000${getMessageText(message).trim()}`)
+        projected.map((message) => `${message.role}\u0000${getMessageText(message).trim()}`),
       );
       const leading = messages.filter(
         (message) =>
           !liveIds.has(message.id) &&
-          !snapshotSignatures.has(`${message.role}\u0000${getMessageText(message).trim()}`)
+          !snapshotSignatures.has(`${message.role}\u0000${getMessageText(message).trim()}`),
       );
       messages = [...leading, ...projected];
     } else {
@@ -111,20 +102,21 @@ export function projectTranscript({
     if (replacedMessageIds.has(liveAssistantMessage.id)) {
       continue;
     }
-    const exactPersistedMessage = messages.find((message) =>
-      message.role === liveAssistantMessage.role &&
-      (message.id === liveAssistantMessage.id ||
-        liveAssistantMessage.id.endsWith(`::item::${message.id}`))
+    const exactPersistedMessage = messages.find(
+      (message) =>
+        message.role === liveAssistantMessage.role &&
+        (message.id === liveAssistantMessage.id ||
+          liveAssistantMessage.id.endsWith(`::item::${message.id}`)),
     );
     const trailingMessage = messages.at(-1);
-    const persistedLiveMessage = exactPersistedMessage ?? (
-      liveAssistantMessage.role === 'user' &&
+    const persistedLiveMessage =
+      exactPersistedMessage ??
+      (liveAssistantMessage.role === 'user' &&
       trailingMessage?.role === 'user' &&
       normalizeChatMessageMatchContent(getMessageText(trailingMessage)) ===
         normalizeChatMessageMatchContent(getMessageText(liveAssistantMessage))
         ? trailingMessage
-        : undefined
-    );
+        : undefined);
     if (persistedLiveMessage) {
       const persistedText = getMessageText(persistedLiveMessage).trim();
       // While a message is still streaming the live copy is the fresher one,
@@ -140,14 +132,14 @@ export function projectTranscript({
       ) {
         messages = messages.map((message) =>
           message === persistedLiveMessage
-            ? {
+            ? ({
                 ...message,
                 ...(message.role === 'activity'
                   ? { content: { ...message.content, text: liveText } }
                   : { content: liveText }),
                 parts: liveAssistantMessage.parts ?? message.parts,
-              } as ChatMessage
-            : message
+              } as ChatMessage)
+            : message,
         );
       }
       continue;
@@ -173,15 +165,18 @@ function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {
     if (!isTransientUserMessage(message)) return true;
     const content = normalizeChatMessageMatchContent(getMessageText(message));
     if (!content) return true;
-    return ![messages[index - 1], messages[index + 1]].some((neighbor) =>
-      neighbor?.role === 'user' &&
-      !isTransientUserMessage(neighbor) &&
-      normalizeChatMessageMatchContent(getMessageText(neighbor)) === content
+    return ![messages[index - 1], messages[index + 1]].some(
+      (neighbor) =>
+        neighbor?.role === 'user' &&
+        !isTransientUserMessage(neighbor) &&
+        normalizeChatMessageMatchContent(getMessageText(neighbor)) === content,
     );
   });
 }
 
 function isTransientUserMessage(message: ChatMessage): boolean {
-  return message.role === 'user' &&
-    (message.id.startsWith('msg-') || message.id.startsWith('local-user-'));
+  return (
+    message.role === 'user' &&
+    (message.id.startsWith('msg-') || message.id.startsWith('local-user-'))
+  );
 }

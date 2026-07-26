@@ -1,9 +1,9 @@
 import {
   buildExpectedUserMessageContent,
   extractUserMessageLocalImages,
-} from "./clientChatCloneAndRetryInternals";
-import { getMessageText } from "./messages";
-import { normalizeEffort, normalizeModel } from "./clientBridgeResponseNormalization";
+} from './clientChatCloneAndRetryInternals';
+import { getMessageText } from './messages';
+import { normalizeEffort, normalizeModel } from './clientBridgeResponseNormalization';
 import {
   type AgentId,
   type Chat,
@@ -11,15 +11,15 @@ import {
   type LocalImageInput,
   type MentionInput,
   type ReasoningEffort,
-} from "./types";
+} from './types';
 import {
   type AppServerCollaborationMode,
   type AppServerThreadRuntimeSettings,
   type TurnInputLocalImage,
   type TurnInputMention,
   type TurnInputText,
-} from "./clientContractsAndSnapshotInternals";
-import { type RawThread, readString, toRecord } from "./chatMapping";
+} from './clientContractsAndSnapshotInternals';
+import { type RawThread, readString, toRecord } from './chatMapping';
 
 export function buildTurnInput(
   content: string,
@@ -27,7 +27,7 @@ export function buildTurnInput(
   localImages: TurnInputLocalImage[],
 ): Array<TurnInputText | TurnInputMention | TurnInputLocalImage> {
   const textInput: TurnInputText = {
-    type: "text",
+    type: 'text',
     text: content,
     text_elements: [],
   };
@@ -37,16 +37,14 @@ export function buildTurnInput(
   return [textInput, ...mentions, ...localImages];
 }
 
-export function normalizeMentions(
-  raw: MentionInput[] | undefined,
-): TurnInputMention[] {
+export function normalizeMentions(raw: MentionInput[] | undefined): TurnInputMention[] {
   if (!Array.isArray(raw)) {
     return [];
   }
   const normalized: TurnInputMention[] = [];
   const seenPaths = new Set<string>();
   for (const entry of raw) {
-    if (!entry || typeof entry.path !== "string") {
+    if (!entry || typeof entry.path !== 'string') {
       continue;
     }
     const path = entry.path.trim();
@@ -59,16 +57,13 @@ export function normalizeMentions(
     }
     seenPaths.add(dedupeKey);
     const name = normalizeMentionName(entry.name, path);
-    normalized.push({ type: "mention", name, path });
+    normalized.push({ type: 'mention', name, path });
   }
   return normalized;
 }
 
-export function normalizeMentionName(
-  name: string | undefined,
-  path: string,
-): string {
-  if (typeof name === "string") {
+export function normalizeMentionName(name: string | undefined, path: string): string {
+  if (typeof name === 'string') {
     const trimmed = name.trim();
     if (trimmed.length > 0) {
       return trimmed;
@@ -76,22 +71,20 @@ export function normalizeMentionName(
   }
   const pathSegments = path.split(/[\\/]/).filter(Boolean);
   const inferred = pathSegments[pathSegments.length - 1];
-  if (typeof inferred === "string" && inferred.trim().length > 0) {
+  if (typeof inferred === 'string' && inferred.trim().length > 0) {
     return inferred.trim();
   }
   return path;
 }
 
-export function normalizeLocalImages(
-  raw: LocalImageInput[] | undefined,
-): TurnInputLocalImage[] {
+export function normalizeLocalImages(raw: LocalImageInput[] | undefined): TurnInputLocalImage[] {
   if (!Array.isArray(raw)) {
     return [];
   }
   const normalized: TurnInputLocalImage[] = [];
   const seenPaths = new Set<string>();
   for (const entry of raw) {
-    if (!entry || typeof entry.path !== "string") {
+    if (!entry || typeof entry.path !== 'string') {
       continue;
     }
     const path = entry.path.trim();
@@ -104,7 +97,7 @@ export function normalizeLocalImages(
     }
     seenPaths.add(dedupeKey);
     normalized.push({
-      type: "localImage",
+      type: 'localImage',
       path,
     });
   }
@@ -116,18 +109,14 @@ export function toTurnCollaborationMode(
   model: string | null,
   effort: ReasoningEffort | null,
 ): AppServerCollaborationMode | null {
-  if (typeof value !== "string") {
+  if (typeof value !== 'string') {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  if (
-    normalized !== "plan" &&
-    normalized !== "default" &&
-    normalized !== "ask"
-  ) {
+  if (normalized !== 'plan' && normalized !== 'default' && normalized !== 'ask') {
     return null;
   }
-  if (normalized === "ask") {
+  if (normalized === 'ask') {
     return null;
   }
   if (!model) {
@@ -142,45 +131,38 @@ export function toTurnCollaborationMode(
 export function normalizeCollaborationMode(
   value: CollaborationMode | string | null | undefined,
 ): CollaborationMode | null {
-  if (typeof value !== "string") {
+  if (typeof value !== 'string') {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  if (normalized === "plan" || normalized === "default") {
+  if (normalized === 'plan' || normalized === 'default') {
     return normalized;
   }
   return null;
 }
 
-export function normalizeAgentName(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
+export function normalizeAgentName(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
     return null;
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function normalizeAgentId(
-  value: string | null | undefined,
-): AgentId | null {
-  if (typeof value !== "string") {
+export function normalizeAgentId(value: string | null | undefined): AgentId | null {
+  if (typeof value !== 'string') {
     return null;
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
 }
 
-export function readThreadRuntimeSettings(
-  value: unknown,
-): AppServerThreadRuntimeSettings {
+export function readThreadRuntimeSettings(value: unknown): AppServerThreadRuntimeSettings {
   const record = toRecord(value);
   return {
     model: normalizeModel(readString(record?.model)),
     effort: normalizeEffort(
-      readString(record?.reasoningEffort) ??
-        readString(record?.reasoning_effort),
+      readString(record?.reasoningEffort) ?? readString(record?.reasoning_effort),
     ),
   };
 }
@@ -192,18 +174,13 @@ export function chatHasRecentUserMessage(
   localImages: TurnInputLocalImage[] = [],
   tailSize = 8,
 ): boolean {
-  const normalized = buildExpectedUserMessageContent(
-    content.trim(),
-    mentions,
-    localImages,
-  );
+  const normalized = buildExpectedUserMessageContent(content.trim(), mentions, localImages);
   if (!normalized) {
     return true;
   }
   const tail = chat.messages.slice(-tailSize);
   return tail.some(
-    (message) =>
-      message.role === "user" && getMessageText(message).trim() === normalized,
+    (message) => message.role === 'user' && getMessageText(message).trim() === normalized,
   );
 }
 
@@ -230,7 +207,7 @@ export function rawThreadHasTurnUserMessage(
   }
   return matchedTurn.items.some((item) => {
     const record = toRecord(item);
-    if (!record || readString(record.type) !== "userMessage") {
+    if (!record || readString(record.type) !== 'userMessage') {
       return false;
     }
     return (
@@ -238,29 +215,28 @@ export function rawThreadHasTurnUserMessage(
         extractUserMessageText(record.content).trim(),
         extractUserMessageMentions(record.content),
         extractUserMessageLocalImages(record.content),
-      ) ===
-      buildExpectedUserMessageContent(normalizedContent, mentions, localImages)
+      ) === buildExpectedUserMessageContent(normalizedContent, mentions, localImages)
     );
   });
 }
 
 export function extractUserMessageText(value: unknown): string {
   if (!Array.isArray(value)) {
-    return "";
+    return '';
   }
   return value
     .map((entry) => {
       const record = toRecord(entry);
       if (!record) {
-        return "";
+        return '';
       }
-      if (readString(record.type) !== "text") {
-        return "";
+      if (readString(record.type) !== 'text') {
+        return '';
       }
-      return readString(record.text) ?? "";
+      return readString(record.text) ?? '';
     })
     .filter((part) => part.length > 0)
-    .join("\n");
+    .join('\n');
 }
 
 export function extractUserMessageMentions(value: unknown): TurnInputMention[] {
@@ -270,7 +246,7 @@ export function extractUserMessageMentions(value: unknown): TurnInputMention[] {
   const mentions: TurnInputMention[] = [];
   for (const entry of value) {
     const record = toRecord(entry);
-    if (!record || readString(record.type) !== "mention") {
+    if (!record || readString(record.type) !== 'mention') {
       continue;
     }
     const path = readString(record.path)?.trim();
@@ -278,7 +254,7 @@ export function extractUserMessageMentions(value: unknown): TurnInputMention[] {
       continue;
     }
     mentions.push({
-      type: "mention",
+      type: 'mention',
       path,
       name: normalizeMentionName(readString(record.name) ?? undefined, path),
     });

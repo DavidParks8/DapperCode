@@ -8,14 +8,12 @@ import { pushSettingsAtom } from './state/appState/atoms';
 import type { AppStore } from './state/types';
 
 export type PushSyncResult =
-  | { status: 'registered'; token: string }
-  | { status: 'optedOut' }
-  | { status: 'unavailable' };
+  { status: 'registered'; token: string } | { status: 'optedOut' } | { status: 'unavailable' };
 
 export async function syncPushRegistration(
   api: HostBridgeApiClient,
   store: AppStore,
-  profileId: string
+  profileId: string,
 ): Promise<PushSyncResult> {
   const initialSettings = store.get(pushSettingsAtom);
   let registration = initialSettings.registrations.find((entry) => entry.profileId === profileId);
@@ -72,7 +70,7 @@ export async function syncPushRegistration(
 export async function enablePush(
   api: HostBridgeApiClient,
   store: AppStore,
-  profileId: string
+  profileId: string,
 ): Promise<PushSyncResult> {
   await store.set(dispatchDurableAppStateAtom, { type: 'push/update', patch: { optedOut: false } });
   return syncPushRegistration(api, store, profileId);
@@ -81,7 +79,7 @@ export async function enablePush(
 export async function disablePush(
   api: HostBridgeApiClient,
   store: AppStore,
-  profileId: string
+  profileId: string,
 ): Promise<void> {
   await store.set(dispatchDurableAppStateAtom, { type: 'push/update', patch: { optedOut: true } });
   await syncPushRegistration(api, store, profileId);
@@ -91,8 +89,11 @@ export async function updatePushEvents(
   api: HostBridgeApiClient,
   store: AppStore,
   profileId: string,
-  events: PushSettingsState['events']
+  events: PushSettingsState['events'],
 ): Promise<void> {
-  const state = await store.set(dispatchDurableAppStateAtom, { type: 'push/update', patch: { events } });
+  const state = await store.set(dispatchDurableAppStateAtom, {
+    type: 'push/update',
+    patch: { events },
+  });
   if (!state.push.optedOut) await syncPushRegistration(api, store, profileId);
 }

@@ -13,9 +13,7 @@ export function getChecklistGlyph(status: string | undefined): string {
   return '○';
 }
 
-export function getSurfaceIconName(
-  surface: BridgeUiSurface
-): keyof typeof Ionicons.glyphMap {
+export function getSurfaceIconName(surface: BridgeUiSurface): keyof typeof Ionicons.glyphMap {
   if (surface.kind === 'goal') {
     return 'flag-outline';
   }

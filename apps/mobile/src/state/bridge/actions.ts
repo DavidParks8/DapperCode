@@ -42,17 +42,18 @@ export const saveBridgeProfileAtom = atom(
 
     const onboardingMode = get(onboardingModeAtom);
     const nextDraft: BridgeProfileDraft = {
-      id: onboardingMode === 'edit' ? get(activeBridgeProfileAtom)?.id ?? null : null,
+      id: onboardingMode === 'edit' ? (get(activeBridgeProfileAtom)?.id ?? null) : null,
       bridgeUrl: normalized,
       bridgeToken: normalizedToken,
       activate: true,
     };
     const editedProfile = nextDraft.id
-      ? get(bridgeProfileStoreAtom).profiles.find((profile) => profile.id === nextDraft.id) ?? null
+      ? (get(bridgeProfileStoreAtom).profiles.find((profile) => profile.id === nextDraft.id) ??
+        null)
       : null;
     const bridgeIdentityChanged = Boolean(
       editedProfile &&
-        (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken)
+      (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken),
     );
     const nextState = await set(dispatchDurableAppStateAtom, {
       type: 'profiles/save',
@@ -69,13 +70,10 @@ export const saveBridgeProfileAtom = atom(
         ? await loadChatSnapshotCache(nextStore.activeProfileId)
         : null;
     set(applyRestoredCacheAtom, nextCache);
-    set(
-      currentScreenAtom,
-      onboardingMode === 'initial' ? 'Main' : get(onboardingReturnScreenAtom)
-    );
+    set(currentScreenAtom, onboardingMode === 'initial' ? 'Main' : get(onboardingReturnScreenAtom));
     set(onboardingModeAtom, 'edit');
     set(closeDrawerAtom);
-  }
+  },
 );
 
 const openOnboardingAtom = atom(
@@ -86,7 +84,7 @@ const openOnboardingAtom = atom(
     set(onboardingReturnScreenAtom, toAppScreen(currentScreen, 'Settings'));
     set(currentScreenAtom, 'Onboarding');
     set(closeDrawerAtom);
-  }
+  },
 );
 
 export const editBridgeProfileAtom = atom(null, (get, set): void => {
@@ -108,7 +106,7 @@ export const switchBridgeProfileAtom = atom(
     await set(dispatchDurableAppStateAtom, { type: 'profiles/switch', profileId });
     set(resetChatSessionStateAtom);
     set(applyRestoredCacheAtom, nextCache);
-  }
+  },
 );
 
 export const renameBridgeProfileAtom = atom(
@@ -119,7 +117,7 @@ export const renameBridgeProfileAtom = atom(
       profileId,
       name: nextName,
     });
-  }
+  },
 );
 
 const resetToOnboardingAtom = atom(null, (get, set): void => {
@@ -151,7 +149,7 @@ export const deleteBridgeProfileAtom = atom(
     if (nextStore.profiles.length === 0) {
       set(resetToOnboardingAtom);
     }
-  }
+  },
 );
 
 export const clearSavedBridgesAtom = atom(null, async (get, set): Promise<void> => {

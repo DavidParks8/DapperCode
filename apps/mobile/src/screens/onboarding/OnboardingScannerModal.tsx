@@ -54,7 +54,10 @@ export function OnboardingScannerModal({
               accessibilityLabel="Close QR scanner"
               onPress={onClose}
               hitSlop={8}
-              style={({ pressed }) => [styles.scannerCloseBtn, pressed && styles.scannerCloseBtnPressed]}
+              style={({ pressed }) => [
+                styles.scannerCloseBtn,
+                pressed && styles.scannerCloseBtnPressed,
+              ]}
             >
               <Ionicons
                 {...decorativeAccessibilityProps}

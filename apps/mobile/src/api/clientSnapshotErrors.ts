@@ -6,6 +6,6 @@ export class StaleSnapshotRevisionError extends Error {
     super(
       `snapshot revision changed from ${String(expectedRevision)} to ${String(receivedRevision)}`,
     );
-    this.name = "StaleSnapshotRevisionError";
+    this.name = 'StaleSnapshotRevisionError';
   }
 }

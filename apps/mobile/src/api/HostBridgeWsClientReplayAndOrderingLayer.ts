@@ -1,19 +1,19 @@
-import { HostBridgeWsClientSocketTransportLayer } from "./HostBridgeWsClientSocketTransportLayer";
-import { HostBridgeWsClientCore } from "./HostBridgeWsClientCore";
-import { BridgeProtocolVersionError, isRpcRequestError } from "./wsErrors";
+import { HostBridgeWsClientSocketTransportLayer } from './HostBridgeWsClientSocketTransportLayer';
+import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
+import { BridgeProtocolVersionError, isRpcRequestError } from './wsErrors';
 import {
   readEventId,
   readNumber,
   readString,
   toAgUiTurnCompletionSnapshot,
   toRecord,
-} from "./wsEventParsingInternals";
+} from './wsEventParsingInternals';
 import {
   type BridgeSnapshotRequiredParams,
   type BridgeSnapshotRequiredReason,
   type RpcNotification,
-} from "./types";
-import { type ReplayEventsResponse } from "./wsTypes";
+} from './types';
+import { type ReplayEventsResponse } from './wsTypes';
 
 export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridgeWsClientSocketTransportLayer {
   protected scheduleReplay(): void {
@@ -59,10 +59,10 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
     while (generation === this.replayGeneration) {
       let response: ReplayEventsResponse;
       try {
-        response = await this.request<ReplayEventsResponse>(
-          "bridge/events/replay",
-          { afterEventId: cursor, limit: 200 },
-        );
+        response = await this.request<ReplayEventsResponse>('bridge/events/replay', {
+          afterEventId: cursor,
+          limit: 200,
+        });
       } catch (error) {
         if (isRpcRequestError(error) && error.code === -32601) {
           this.replaySupported = false;
@@ -77,37 +77,21 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
         readNumber(response.protocolVersion),
         readString(response.streamId),
       );
-      if (identityResult === "unsupported" || identityResult === "changed") {
+      if (identityResult === 'unsupported' || identityResult === 'changed') {
         return;
       }
       const latestEventId = readNumber(response.latestEventId);
       const earliestEventId = readNumber(response.earliestEventId);
       if (latestEventId !== null && latestEventId < cursor) {
-        this.resetDeliveryEpoch(
-          "replayInconsistent",
-          earliestEventId,
-          latestEventId,
-        );
+        this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
         return;
       }
       if (earliestEventId !== null && earliestEventId > cursor + 1) {
-        this.resetDeliveryEpoch(
-          "replayTruncated",
-          earliestEventId,
-          latestEventId,
-        );
+        this.resetDeliveryEpoch('replayTruncated', earliestEventId, latestEventId);
         return;
       }
-      if (
-        earliestEventId === null &&
-        latestEventId !== null &&
-        latestEventId > cursor
-      ) {
-        this.resetDeliveryEpoch(
-          "replayTruncated",
-          earliestEventId,
-          latestEventId,
-        );
+      if (earliestEventId === null && latestEventId !== null && latestEventId > cursor) {
+        this.resetDeliveryEpoch('replayTruncated', earliestEventId, latestEventId);
         return;
       }
       if (targetEventId === null) {
@@ -119,7 +103,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
         if (!record) {
           continue;
         }
-        this.handleNotificationRecord(record, { source: "replay" });
+        this.handleNotificationRecord(record, { source: 'replay' });
       }
       const previousCursor = cursor;
       cursor = this.lastSeenEventId;
@@ -135,19 +119,11 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       }
       const hasMore = response.hasMore === true;
       if (!hasMore) {
-        this.resetDeliveryEpoch(
-          "replayInconsistent",
-          earliestEventId,
-          latestEventId,
-        );
+        this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
         return;
       }
       if (cursor <= previousCursor) {
-        this.resetDeliveryEpoch(
-          "replayInconsistent",
-          earliestEventId,
-          latestEventId,
-        );
+        this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
         return;
       }
     }
@@ -173,7 +149,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
     return !this.pendingEvents.has(this.lastSeenEventId + 1);
   }
   protected emitNumberedEvent(event: RpcNotification): void {
-    if (typeof event.eventId !== "number") {
+    if (typeof event.eventId !== 'number') {
       return;
     }
     this.lastSeenEventId = event.eventId;
@@ -192,7 +168,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
     const lastDeliveredEventId = this.lastSeenEventId;
     const resumeAfterEventId = latestEventId ?? 0;
     this.replayGeneration += 1;
-    if (reason === "streamChanged") {
+    if (reason === 'streamChanged') {
       this.pendingEvents.clear();
     } else {
       for (const eventId of this.pendingEvents.keys()) {
@@ -213,7 +189,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       latestEventId,
     };
     this.emitEvent({
-      method: "bridge/events/snapshotRequired",
+      method: 'bridge/events/snapshotRequired',
       protocolVersion: HostBridgeWsClientCore.PROTOCOL_VERSION,
       streamId: this.streamId ?? undefined,
       params: params as unknown as Record<string, unknown>,
@@ -225,9 +201,9 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
   protected applyStreamIdentity(
     protocolVersion: number | null,
     streamId: string | null,
-  ): "missing" | "initial" | "same" | "changed" | "unsupported" {
+  ): 'missing' | 'initial' | 'same' | 'changed' | 'unsupported' {
     if (protocolVersion === null || !streamId) {
-      return "missing";
+      return 'missing';
     }
     if (protocolVersion !== HostBridgeWsClientCore.PROTOCOL_VERSION) {
       const error = new BridgeProtocolVersionError(protocolVersion);
@@ -236,20 +212,20 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       this.connectGeneration += 1;
       this.rejectAllPending(error);
       this.socket?.close();
-      return "unsupported";
+      return 'unsupported';
     }
     this.protocolError = null;
     if (this.streamId === null) {
       this.streamId = streamId;
-      return "initial";
+      return 'initial';
     }
     if (this.streamId === streamId) {
-      return "same";
+      return 'same';
     }
     const previousStreamId = this.streamId;
     this.streamId = streamId;
-    this.resetDeliveryEpoch("streamChanged", null, null, previousStreamId);
-    return "changed";
+    this.resetDeliveryEpoch('streamChanged', null, null, previousStreamId);
+    return 'changed';
   }
   protected rejectAllPending(error: Error): void {
     for (const [id, pending] of this.pendingRequests.entries()) {

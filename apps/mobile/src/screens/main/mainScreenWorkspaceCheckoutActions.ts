@@ -11,11 +11,17 @@ import {
   submitGitCheckoutAtom,
 } from '../../state/mainScreen/workspaceActions';
 import { scheduleIdleTask, isBridgeConnectionErrorMessage } from './mainScreenHelpers';
-import type { MainScreenAgentThreadsRefreshContext, MainScreenAgentThreadsRefreshResult } from './mainScreenAgentThreadsRefresh';
+import type {
+  MainScreenAgentThreadsRefreshContext,
+  MainScreenAgentThreadsRefreshResult,
+} from './mainScreenAgentThreadsRefresh';
 
-export type MainScreenWorkspaceCheckoutActionsContext = MainScreenAgentThreadsRefreshContext & MainScreenAgentThreadsRefreshResult;
+export type MainScreenWorkspaceCheckoutActionsContext = MainScreenAgentThreadsRefreshContext &
+  MainScreenAgentThreadsRefreshResult;
 
-export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspaceCheckoutActionsContext) {
+export function useMainScreenWorkspaceCheckoutActions(
+  context: MainScreenWorkspaceCheckoutActionsContext,
+) {
   const {
     appStateRef,
     chatIdRef,
@@ -39,9 +45,7 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
       if (connected) {
         clearDeferredDisconnectActivity();
         setBridgeRecoveryBannerVisible(false);
-        setError((previous) =>
-          isBridgeConnectionErrorMessage(previous) ? null : previous
-        );
+        setError((previous) => (isBridgeConnectionErrorMessage(previous) ? null : previous));
         return;
       }
 
@@ -110,21 +114,29 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
   const submitCheckout = useSetAtom(submitGitCheckoutAtom);
 
   const handleWorkspaceSelection = useCallback(
-    (cwd: string | null) => { selectWorkspace(cwd); },
-    [selectWorkspace]
+    (cwd: string | null) => {
+      selectWorkspace(cwd);
+    },
+    [selectWorkspace],
   );
 
   const handleGitCheckoutRepoUrlChange = useCallback(
-    (value: string) => { changeRepoUrl(value); },
-    [changeRepoUrl]
+    (value: string) => {
+      changeRepoUrl(value);
+    },
+    [changeRepoUrl],
   );
 
   const handleGitCheckoutDirectoryNameChange = useCallback(
-    (value: string) => { changeDirectoryName(value); },
-    [changeDirectoryName]
+    (value: string) => {
+      changeDirectoryName(value);
+    },
+    [changeDirectoryName],
   );
 
-  const submitGitCheckout = useCallback(async () => { await submitCheckout(); }, [submitCheckout]);
+  const submitGitCheckout = useCallback(async () => {
+    await submitCheckout();
+  }, [submitCheckout]);
 
   return {
     handleWorkspaceSelection,
@@ -134,4 +146,6 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
   };
 }
 
-export type MainScreenWorkspaceCheckoutActionsResult = ReturnType<typeof useMainScreenWorkspaceCheckoutActions>;
+export type MainScreenWorkspaceCheckoutActionsResult = ReturnType<
+  typeof useMainScreenWorkspaceCheckoutActions
+>;

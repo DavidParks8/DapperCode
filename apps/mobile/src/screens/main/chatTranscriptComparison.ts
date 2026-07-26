@@ -3,7 +3,7 @@ import type { ChatTranscriptViewProps } from './ChatTranscriptView';
 
 export function areChatTranscriptViewPropsEqual(
   previous: ChatTranscriptViewProps,
-  next: ChatTranscriptViewProps
+  next: ChatTranscriptViewProps,
 ): boolean {
   return (
     areChatsEquivalentForTranscript(previous.chat, next.chat) &&
@@ -28,10 +28,7 @@ export function areChatTranscriptViewPropsEqual(
   );
 }
 
-function areChatsEquivalentForTranscript(
-  previous: Chat | null,
-  next: Chat | null
-): boolean {
+function areChatsEquivalentForTranscript(previous: Chat | null, next: Chat | null): boolean {
   if (previous === next) {
     return true;
   }

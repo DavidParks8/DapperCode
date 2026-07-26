@@ -204,7 +204,7 @@ export function useGitScreenController({
         setSwitchingBranch(false);
       }
     },
-    [api, branchDraft, refresh, requestedCwd, switchingBranch]
+    [api, branchDraft, refresh, requestedCwd, switchingBranch],
   );
 
   const stageFile = useCallback(
@@ -231,7 +231,7 @@ export function useGitScreenController({
         setStagingPath((current) => (current === path ? null : current));
       }
     },
-    [api, refresh, requestedCwd]
+    [api, refresh, requestedCwd],
   );
 
   const unstageFile = useCallback(
@@ -258,7 +258,7 @@ export function useGitScreenController({
         setUnstagingPath((current) => (current === path ? null : current));
       }
     },
-    [api, refresh, requestedCwd]
+    [api, refresh, requestedCwd],
   );
 
   const stageAll = useCallback(async () => {

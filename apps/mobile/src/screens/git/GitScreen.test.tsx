@@ -43,9 +43,30 @@ const dirtyStatus: GitStatusResponse = {
   clean: false,
   raw: '## feature/coverage...origin/feature/coverage [ahead 2, behind 1]\nM  staged.ts\n M unstaged.ts\n?? new.ts',
   files: [
-    { path: 'staged.ts', indexStatus: 'M', worktreeStatus: ' ', staged: true, unstaged: false, untracked: false },
-    { path: 'unstaged.ts', indexStatus: ' ', worktreeStatus: 'M', staged: false, unstaged: true, untracked: false },
-    { path: 'new.ts', indexStatus: '?', worktreeStatus: '?', staged: false, unstaged: true, untracked: true },
+    {
+      path: 'staged.ts',
+      indexStatus: 'M',
+      worktreeStatus: ' ',
+      staged: true,
+      unstaged: false,
+      untracked: false,
+    },
+    {
+      path: 'unstaged.ts',
+      indexStatus: ' ',
+      worktreeStatus: 'M',
+      staged: false,
+      unstaged: true,
+      untracked: false,
+    },
+    {
+      path: 'new.ts',
+      indexStatus: '?',
+      worktreeStatus: '?',
+      staged: false,
+      unstaged: true,
+      untracked: true,
+    },
   ],
   cwd: '/workspace',
   truncated: true,
@@ -83,9 +104,11 @@ const unifiedDiff = [
 
 function createApi(status: GitStatusResponse | Error = dirtyStatus): HostBridgeApiClient {
   const methods: Record<string, jest.Mock> = {
-    gitStatus: jest.fn().mockImplementation(() =>
-      status instanceof Error ? Promise.reject(status) : Promise.resolve(status)
-    ),
+    gitStatus: jest
+      .fn()
+      .mockImplementation(() =>
+        status instanceof Error ? Promise.reject(status) : Promise.resolve(status),
+      ),
     gitDiff: jest.fn().mockResolvedValue({
       diff: status === cleanStatus ? '' : unifiedDiff,
       cwd: '/workspace',
@@ -95,15 +118,20 @@ function createApi(status: GitStatusResponse | Error = dirtyStatus): HostBridgeA
       maxBytes: 1024,
     }),
     gitHistory: jest.fn().mockResolvedValue({
-      commits: status === cleanStatus ? [] : [{
-        hash: 'abcdef123456',
-        shortHash: 'abcdef1',
-        subject: 'Test commit',
-        authorName: 'Developer',
-        authoredAt: '2026-07-20T00:00:00.000Z',
-        refNames: ['HEAD -> feature/coverage'],
-        isHead: true,
-      }],
+      commits:
+        status === cleanStatus
+          ? []
+          : [
+              {
+                hash: 'abcdef123456',
+                shortHash: 'abcdef1',
+                subject: 'Test commit',
+                authorName: 'Developer',
+                authoredAt: '2026-07-20T00:00:00.000Z',
+                refNames: ['HEAD -> feature/coverage'],
+                isHead: true,
+              },
+            ],
     }),
     gitBranches: jest.fn().mockResolvedValue({
       current: 'feature/coverage',
@@ -166,18 +194,26 @@ function createGitStore(api: HostBridgeApiClient) {
   return store;
 }
 
-async function renderGit(api: HostBridgeApiClient, activeChat: Chat = chat): Promise<ReactTestRenderer> {
+async function renderGit(
+  api: HostBridgeApiClient,
+  activeChat: Chat = chat,
+): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       withAppStore(
         createGitStore(api),
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
           <AppThemeProvider theme={theme}>
             <GitScreen chat={activeChat} />
           </AppThemeProvider>
-        </SafeAreaProvider>
-      )
+        </SafeAreaProvider>,
+      ),
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -194,7 +230,15 @@ describe('GitScreen behavior', () => {
   });
 
   it.each([
-    { status: dirtyStatus, expected: ['Ready to commit', 'Changed files (3)', 'Test commit', 'Diff preview is limited to 1 KB.'] },
+    {
+      status: dirtyStatus,
+      expected: [
+        'Ready to commit',
+        'Changed files (3)',
+        'Test commit',
+        'Diff preview is limited to 1 KB.',
+      ],
+    },
     { status: cleanStatus, expected: ['Clean', 'No commit history available.'] },
   ])('renders repository state matrices', async ({ status, expected }) => {
     const tree = await renderGit(createApi(status));
@@ -227,7 +271,9 @@ describe('GitScreen behavior', () => {
     act(() => (mainBranch.props.onPress as () => void)());
     await press(root, 'Switch');
 
-    const workspace = root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Git workspace path');
+    const workspace = root
+      .findAllByType(TextInput)
+      .find((node) => node.props.accessibilityLabel === 'Git workspace path');
     if (!workspace) throw new Error('Missing workspace input');
     act(() => {
       workspace.props.onChangeText('/next');
@@ -256,10 +302,17 @@ describe('GitScreen behavior', () => {
       tree = renderer.create(
         withAppStore(
           store,
-          <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
-            <AppThemeProvider theme={theme}><GitScreen chat={chat} /></AppThemeProvider>
-          </SafeAreaProvider>
-        )
+          <SafeAreaProvider
+            initialMetrics={{
+              frame: { x: 0, y: 0, width: 390, height: 844 },
+              insets: { top: 47, left: 0, right: 0, bottom: 34 },
+            }}
+          >
+            <AppThemeProvider theme={theme}>
+              <GitScreen chat={chat} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        ),
       );
       await Promise.resolve();
       await Promise.resolve();
@@ -273,13 +326,20 @@ describe('GitScreen behavior', () => {
     }
     if (!commentButton) throw new Error('Missing review comment action');
     act(() => (commentButton.props.onPress as () => void)());
-    const input = root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Review comment');
+    const input = root
+      .findAllByType(TextInput)
+      .find((node) => node.props.accessibilityLabel === 'Review comment');
     if (!input) throw new Error('Missing review input');
     act(() => input.props.onChangeText('Please preserve this behavior.'));
     await press(root, 'Save comment');
     expect(hasText(root, 'Inline review')).toBe(true);
     await press(root, 'Send review to agent');
-    expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(chat.id, expect.objectContaining({ content: expect.stringContaining('Please preserve this behavior.') }));
+    expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+      chat.id,
+      expect.objectContaining({
+        content: expect.stringContaining('Please preserve this behavior.'),
+      }),
+    );
     expect(store.get(chatTransitionChatIdAtom)).toBe(chat.id);
     act(() => tree?.unmount());
   });
@@ -302,7 +362,14 @@ describe('GitScreen behavior', () => {
       omittedFiles: 0,
     };
     const rawApi = createApi(rawStatus);
-    (rawApi.gitDiff as jest.Mock).mockResolvedValue({ diff: '', cwd: '/workspace', truncated: false, originalBytes: 0, returnedBytes: 0, maxBytes: 1024 });
+    (rawApi.gitDiff as jest.Mock).mockResolvedValue({
+      diff: '',
+      cwd: '/workspace',
+      truncated: false,
+      originalBytes: 0,
+      returnedBytes: 0,
+      maxBytes: 1024,
+    });
     (rawApi.gitBranches as jest.Mock).mockResolvedValue({ current: null, branches: [] });
     const rawTree = await renderGit(rawApi);
     const rawRoot = rawTree.root as Queryable;
@@ -320,7 +387,12 @@ describe('GitScreen behavior', () => {
     ['gitStage', 'Stage', { staged: false, stderr: '' }, 'Failed to stage unstaged.ts.'],
     ['gitUnstage', 'Unstage', { unstaged: false, stderr: '' }, 'Failed to unstage staged.ts.'],
     ['gitStageAll', 'Stage all', { staged: false, stderr: '' }, 'Failed to stage all files.'],
-    ['gitUnstageAll', 'Unstage all', { unstaged: false, stderr: '' }, 'Failed to unstage all files.'],
+    [
+      'gitUnstageAll',
+      'Unstage all',
+      { unstaged: false, stderr: '' },
+      'Failed to unstage all files.',
+    ],
     ['gitCommit', 'Commit', { committed: false, stderr: '' }, 'Commit failed.'],
     ['gitPush', 'Push (2)', { pushed: false, stderr: '' }, 'Push failed.'],
   ])('surfaces unsuccessful %s results', async (method, label, result, message) => {
@@ -342,7 +414,9 @@ describe('GitScreen behavior', () => {
     ['gitPush', 'Push (2)', 'push exploded'],
   ])('surfaces rejected %s actions', async (method, label, message) => {
     const api = createApi();
-    (api[method as keyof HostBridgeApiClient] as jest.Mock).mockRejectedValueOnce(new Error(message));
+    (api[method as keyof HostBridgeApiClient] as jest.Mock).mockRejectedValueOnce(
+      new Error(message),
+    );
     const tree = await renderGit(api);
     await press(tree.root as Queryable, label);
     expect(hasText(tree.root as Queryable, message)).toBe(true);
@@ -359,7 +433,10 @@ describe('GitScreen behavior', () => {
     await invoke(findByLabel(root, 'Git workspace path'), 'onSubmitEditing');
     expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/brokenpath');
 
-    (api.gitBranches as jest.Mock).mockResolvedValueOnce({ current: 'feature/coverage', branches: [] });
+    (api.gitBranches as jest.Mock).mockResolvedValueOnce({
+      current: 'feature/coverage',
+      branches: [],
+    });
     await press(root, 'Change branch');
     await act(async () => Promise.resolve());
     expect(hasText(root, 'No branches found.')).toBe(true);
@@ -389,7 +466,8 @@ describe('GitScreen behavior', () => {
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') commentButton = commentButton.parent as Queryable | null;
+    while (commentButton && typeof commentButton.props.onPress !== 'function')
+      commentButton = commentButton.parent as Queryable | null;
     if (!commentButton) throw new Error('Missing review comment action');
     await invoke(commentButton);
     exercisePressableStyles(root);
@@ -423,7 +501,8 @@ describe('GitScreen behavior', () => {
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') commentButton = commentButton.parent as Queryable | null;
+    while (commentButton && typeof commentButton.props.onPress !== 'function')
+      commentButton = commentButton.parent as Queryable | null;
     if (!commentButton) throw new Error('Missing review comment action');
     await invoke(commentButton);
     act(() => findByLabel(root, 'Review comment').props.onChangeText('Do not regress this.'));
@@ -461,53 +540,106 @@ describe('GitScreen behavior', () => {
       expected: ['origin/zero', 'new-only.ts'],
       authoredAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
     },
-  ])('renders porcelain and history fallback matrix %#', async ({ raw, branch, expected, authoredAt }) => {
-    const status: GitStatusResponse = {
-      ...dirtyStatus,
-      branch,
-      raw,
-      files: [],
-      truncated: false,
-      totalFiles: 2,
-      omittedFiles: 0,
-    };
-    const api = createApi(status);
-    (api.gitHistory as jest.Mock).mockResolvedValue({ commits: [{
-      hash: `hash-${branch}`,
-      shortHash: '1234567',
-      subject: 'Matrix commit',
-      authorName: 'Matrix author',
-      authoredAt,
-      refNames: [],
-      isHead: false,
-    }] });
-    const tree = await renderGit(api, { ...chat, title: '', cwd: undefined });
-    exercisePressableStyles(tree.root as Queryable);
-    for (const text of expected) expect(hasText(tree.root as Queryable, text)).toBe(true);
-    expect(hasText(tree.root as Queryable, 'Untitled chat')).toBe(true);
-    expect(hasText(tree.root as Queryable, 'Using bridge root workspace.')).toBe(true);
-    act(() => tree.unmount());
-  });
+  ])(
+    'renders porcelain and history fallback matrix %#',
+    async ({ raw, branch, expected, authoredAt }) => {
+      const status: GitStatusResponse = {
+        ...dirtyStatus,
+        branch,
+        raw,
+        files: [],
+        truncated: false,
+        totalFiles: 2,
+        omittedFiles: 0,
+      };
+      const api = createApi(status);
+      (api.gitHistory as jest.Mock).mockResolvedValue({
+        commits: [
+          {
+            hash: `hash-${branch}`,
+            shortHash: '1234567',
+            subject: 'Matrix commit',
+            authorName: 'Matrix author',
+            authoredAt,
+            refNames: [],
+            isHead: false,
+          },
+        ],
+      });
+      const tree = await renderGit(api, { ...chat, title: '', cwd: undefined });
+      exercisePressableStyles(tree.root as Queryable);
+      for (const text of expected) expect(hasText(tree.root as Queryable, text)).toBe(true);
+      expect(hasText(tree.root as Queryable, 'Untitled chat')).toBe(true);
+      expect(hasText(tree.root as Queryable, 'Using bridge root workspace.')).toBe(true);
+      act(() => tree.unmount());
+    },
+  );
 
   it('renders structured rename files and relative-time fallback ranges', async () => {
     const status: GitStatusResponse = {
       ...dirtyStatus,
       raw: '## main...origin/main',
       branch: 'main',
-      files: [{ path: 'new-name.ts', originalPath: 'old-name.ts', indexStatus: 'R', worktreeStatus: ' ', staged: true, unstaged: false, untracked: false }],
+      files: [
+        {
+          path: 'new-name.ts',
+          originalPath: 'old-name.ts',
+          indexStatus: 'R',
+          worktreeStatus: ' ',
+          staged: true,
+          unstaged: false,
+          untracked: false,
+        },
+      ],
       totalFiles: 1,
       omittedFiles: 0,
       truncated: false,
     };
     const api = createApi(status);
     const now = Date.now();
-    (api.gitHistory as jest.Mock).mockResolvedValue({ commits: [
-      { hash: 'day', shortHash: 'day', subject: 'Day', authorName: 'A', authoredAt: new Date(now - 2 * 86_400_000).toISOString(), refNames: ['HEAD'], isHead: true },
-      { hash: 'week', shortHash: 'week', subject: 'Week', authorName: 'A', authoredAt: new Date(now - 2 * 7 * 86_400_000).toISOString(), refNames: [], isHead: false },
-      { hash: 'month', shortHash: 'month', subject: 'Month', authorName: 'A', authoredAt: new Date(now - 2 * 30 * 86_400_000).toISOString(), refNames: [], isHead: false },
-      { hash: 'year', shortHash: 'year', subject: 'Year', authorName: 'A', authoredAt: new Date(now - 2 * 365 * 86_400_000).toISOString(), refNames: [], isHead: false },
-    ] });
-    const relativeTime = jest.spyOn(Intl, 'RelativeTimeFormat').mockImplementation(() => { throw new Error('unsupported'); });
+    (api.gitHistory as jest.Mock).mockResolvedValue({
+      commits: [
+        {
+          hash: 'day',
+          shortHash: 'day',
+          subject: 'Day',
+          authorName: 'A',
+          authoredAt: new Date(now - 2 * 86_400_000).toISOString(),
+          refNames: ['HEAD'],
+          isHead: true,
+        },
+        {
+          hash: 'week',
+          shortHash: 'week',
+          subject: 'Week',
+          authorName: 'A',
+          authoredAt: new Date(now - 2 * 7 * 86_400_000).toISOString(),
+          refNames: [],
+          isHead: false,
+        },
+        {
+          hash: 'month',
+          shortHash: 'month',
+          subject: 'Month',
+          authorName: 'A',
+          authoredAt: new Date(now - 2 * 30 * 86_400_000).toISOString(),
+          refNames: [],
+          isHead: false,
+        },
+        {
+          hash: 'year',
+          shortHash: 'year',
+          subject: 'Year',
+          authorName: 'A',
+          authoredAt: new Date(now - 2 * 365 * 86_400_000).toISOString(),
+          refNames: [],
+          isHead: false,
+        },
+      ],
+    });
+    const relativeTime = jest.spyOn(Intl, 'RelativeTimeFormat').mockImplementation(() => {
+      throw new Error('unsupported');
+    });
     const tree = await renderGit(api);
     expect(hasText(tree.root as Queryable, 'old-name.ts -> new-name.ts')).toBe(true);
     expect(hasText(tree.root as Queryable, '2 days ago')).toBe(true);

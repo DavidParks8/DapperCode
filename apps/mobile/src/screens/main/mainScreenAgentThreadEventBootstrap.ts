@@ -1,29 +1,29 @@
 import { useEffect } from 'react';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification } from '../../api/agUi';
-import { toRecord, extractNotificationThreadId, extractNotificationParentThreadId } from './mainScreenHelpers';
-import type { MainScreenAgentThreadSelectorStateContext, MainScreenAgentThreadSelectorStateResult } from './mainScreenAgentThreadSelectorState';
+import {
+  toRecord,
+  extractNotificationThreadId,
+  extractNotificationParentThreadId,
+} from './mainScreenHelpers';
+import type {
+  MainScreenAgentThreadSelectorStateContext,
+  MainScreenAgentThreadSelectorStateResult,
+} from './mainScreenAgentThreadSelectorState';
 
+export type MainScreenAgentThreadEventBootstrapContext = MainScreenAgentThreadSelectorStateContext &
+  MainScreenAgentThreadSelectorStateResult;
 
-
-
-
-
-export type MainScreenAgentThreadEventBootstrapContext = MainScreenAgentThreadSelectorStateContext & MainScreenAgentThreadSelectorStateResult;
-
-export function useMainScreenAgentThreadEventBootstrap(context: MainScreenAgentThreadEventBootstrapContext) {
-  const {
-    agentRootThreadIdRef,
-    chatIdRef,
-    scheduleAgentThreadsRefresh,
-    ws,
-  } = context;
-
+export function useMainScreenAgentThreadEventBootstrap(
+  context: MainScreenAgentThreadEventBootstrapContext,
+) {
+  const { agentRootThreadIdRef, chatIdRef, scheduleAgentThreadsRefresh, ws } = context;
 
   useEffect(() => {
     return ws.onEvent((event: RpcNotification) => {
       const agUi = parseAgUiEventNotification(event);
-      const agUiLifecycle = agUi &&
+      const agUiLifecycle =
+        agUi &&
         (agUi.event.type === 'RUN_STARTED' ||
           agUi.event.type === 'RUN_FINISHED' ||
           agUi.event.type === 'RUN_ERROR');
@@ -62,4 +62,6 @@ export function useMainScreenAgentThreadEventBootstrap(context: MainScreenAgentT
   return {};
 }
 
-export type MainScreenAgentThreadEventBootstrapResult = ReturnType<typeof useMainScreenAgentThreadEventBootstrap>;
+export type MainScreenAgentThreadEventBootstrapResult = ReturnType<
+  typeof useMainScreenAgentThreadEventBootstrap
+>;

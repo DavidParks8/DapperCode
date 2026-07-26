@@ -5,13 +5,22 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import type { WorkspaceSummary } from '../api/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
-import { formatWorkspaceMeta, showWorkspacePinAction, toPathBasename } from './workspacePickerHelpers';
+import {
+  formatWorkspaceMeta,
+  showWorkspacePinAction,
+  toPathBasename,
+} from './workspacePickerHelpers';
 import { createWorkspacePickerStyles } from './workspacePickerStyles';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
 export function WorkspaceTile({
-  workspace, iconName, selected, onPress, isPinned, onPinAction,
+  workspace,
+  iconName,
+  selected,
+  onPress,
+  isPinned,
+  onPinAction,
 }: {
   workspace: WorkspaceSummary;
   iconName: IoniconName;
@@ -35,7 +44,12 @@ export function WorkspaceTile({
       {({ pressed }) => (
         <View style={[styles.workspaceTileContent, pressed && styles.pressed]}>
           <View style={styles.workspaceTileHeader}>
-            <Ionicons {...decorativeAccessibilityProps} name={iconName} size={13} color={theme.colors.textSecondary} />
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={iconName}
+              size={13}
+              color={theme.colors.textSecondary}
+            />
             <Text style={styles.workspaceTileMeta} numberOfLines={1} ellipsizeMode="tail">
               {formatWorkspaceMeta(workspace)}
             </Text>
@@ -68,5 +82,9 @@ export function LoadingRow({ label }: { label: string }) {
 export function EmptyRow({ label }: { label: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
-  return <View style={styles.statusRow}><Text style={styles.statusText}>{label}</Text></View>;
+  return (
+    <View style={styles.statusRow}>
+      <Text style={styles.statusText}>{label}</Text>
+    </View>
+  );
 }

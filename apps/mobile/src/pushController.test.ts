@@ -2,12 +2,7 @@ import * as Crypto from 'expo-crypto';
 
 import type { AppStateAction, AppStateData } from './appState';
 import { createDefaultAppStateData } from './appState';
-import {
-  disablePush,
-  enablePush,
-  syncPushRegistration,
-  updatePushEvents,
-} from './pushController';
+import { disablePush, enablePush, syncPushRegistration, updatePushEvents } from './pushController';
 import { requestPushRegistration } from './pushNotifications';
 import { pushSettingsAtom } from './state/appState/atoms';
 
@@ -38,14 +33,14 @@ function createStore(initial: Partial<AppStateData['push']> = {}) {
         break;
       case 'push/registered': {
         const registration = data.push.registrations.find(
-          (entry) => entry.profileId === action.profileId
+          (entry) => entry.profileId === action.profileId,
         );
         if (registration) registration.token = action.token;
         break;
       }
       case 'push/unregistered': {
         const registration = data.push.registrations.find(
-          (entry) => entry.profileId === action.profileId
+          (entry) => entry.profileId === action.profileId,
         );
         if (registration) registration.token = null;
         break;
@@ -62,7 +57,7 @@ function createStore(initial: Partial<AppStateData['push']> = {}) {
 
 function createStoreFacade(
   readPush: () => AppStateData['push'],
-  dispatchDurable: (action: AppStateAction) => Promise<AppStateData>
+  dispatchDurable: (action: AppStateAction) => Promise<AppStateData>,
 ) {
   return {
     get: (atom: unknown) => (atom === pushSettingsAtom ? readPush() : undefined),
@@ -111,10 +106,10 @@ describe('pushController', () => {
         profileId: 'profile-1',
         registrationId: 'push-generated-id',
         token: 'ExponentPushToken[value]',
-      })
+      }),
     );
     expect(dispatchDurable).toHaveBeenLastCalledWith(
-      expect.objectContaining({ type: 'push/registered', token: 'ExponentPushToken[value]' })
+      expect.objectContaining({ type: 'push/registered', token: 'ExponentPushToken[value]' }),
     );
   });
 
@@ -132,10 +127,10 @@ describe('pushController', () => {
 
     const brokenStore = createStoreFacade(
       () => createDefaultAppStateData().push,
-      jest.fn(async () => createDefaultAppStateData())
+      jest.fn(async () => createDefaultAppStateData()),
     );
     await expect(syncPushRegistration({} as never, brokenStore, 'profile-1')).rejects.toThrow(
-      'Could not create a push registration identity.'
+      'Could not create a push registration identity.',
     );
   });
 
@@ -145,7 +140,10 @@ describe('pushController', () => {
       registrationId: 'registration-1',
       token: 'old-token' as string | null,
     };
-    const { store, dispatchDurable } = createStore({ optedOut: true, registrations: [registration] });
+    const { store, dispatchDurable } = createStore({
+      optedOut: true,
+      registrations: [registration],
+    });
     const api = { unregisterPushDevice: jest.fn().mockResolvedValue(undefined) };
 
     await expect(syncPushRegistration(api as never, store, 'profile-1')).resolves.toEqual({
@@ -156,7 +154,7 @@ describe('pushController', () => {
       registrationId: 'registration-1',
     });
     expect(dispatchDurable).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'push/unregistered' })
+      expect.objectContaining({ type: 'push/unregistered' }),
     );
 
     registration.token = null;
@@ -178,7 +176,11 @@ describe('pushController', () => {
       registerPushDevice: jest.fn().mockResolvedValue(undefined),
       unregisterPushDevice: jest.fn().mockResolvedValue(undefined),
     };
-    requestRegistration.mockResolvedValue({ token: 'new-token', platform: 'ios', deviceName: 'Phone' });
+    requestRegistration.mockResolvedValue({
+      token: 'new-token',
+      platform: 'ios',
+      deviceName: 'Phone',
+    });
 
     await expect(enablePush(api as never, store, 'profile-1')).resolves.toEqual({
       status: 'registered',

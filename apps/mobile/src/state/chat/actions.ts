@@ -43,14 +43,14 @@ export const openChatWithTransitionAtom = atom(
     set,
     id: string,
     snapshot?: Chat | null,
-    options?: OpenChatOptions
+    options?: OpenChatOptions,
   ): Promise<void> => {
     const requestId = get(chatTransitionRequestIdAtom) + 1;
     set(chatTransitionRequestIdAtom, requestId);
     const startedAt = Date.now();
     const api = get(apiClientAtom);
     const nextSnapshot =
-      snapshot && snapshot.id === id ? snapshot : api?.peekChatShell(id) ?? null;
+      snapshot && snapshot.id === id ? snapshot : (api?.peekChatShell(id) ?? null);
     const hasHydratedSnapshot = Boolean(nextSnapshot && nextSnapshot.messages.length > 0);
     const shouldShowTransition = !hasHydratedSnapshot && !options?.immediate;
 
@@ -77,15 +77,12 @@ export const openChatWithTransitionAtom = atom(
     if (hasHydratedSnapshot) {
       set(mainOpeningChatIdAtom, null);
     }
-  }
+  },
 );
 
-export const applyRestoredChatSnapshotAtom = atom(
-  null,
-  (get, set, snapshot: Chat | null): void => {
-    set(selectedChatIdAtom, snapshot?.id ?? null);
-    set(activeChatAtom, snapshot);
-    set(pendingMainChatIdAtom, snapshot?.id ?? null);
-    set(pendingMainChatSnapshotAtom, snapshot);
-  }
-);
+export const applyRestoredChatSnapshotAtom = atom(null, (get, set, snapshot: Chat | null): void => {
+  set(selectedChatIdAtom, snapshot?.id ?? null);
+  set(activeChatAtom, snapshot);
+  set(pendingMainChatIdAtom, snapshot?.id ?? null);
+  set(pendingMainChatSnapshotAtom, snapshot);
+});

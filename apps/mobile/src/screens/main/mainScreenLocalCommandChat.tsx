@@ -1,21 +1,18 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   selectedAcpModeIdAtom,
-  selectedCollaborationModeAtom
+  selectedCollaborationModeAtom,
 } from '../../state/mainScreen/models';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../../api/types';
-import type { MainScreenPickerOptionBuildersContext, MainScreenPickerOptionBuildersResult } from './mainScreenPickerOptionBuilders';
+import type {
+  MainScreenPickerOptionBuildersContext,
+  MainScreenPickerOptionBuildersResult,
+} from './mainScreenPickerOptionBuilders';
 
-
-
-
-
-
-export type MainScreenLocalCommandChatContext = MainScreenPickerOptionBuildersContext & MainScreenPickerOptionBuildersResult;
+export type MainScreenLocalCommandChatContext = MainScreenPickerOptionBuildersContext &
+  MainScreenPickerOptionBuildersResult;
 
 export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandChatContext) {
   const {
@@ -37,7 +34,6 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
 
-
   const appendLocalAssistantMessage = useCallback(
     (content: string, targetChatId?: string | null) => {
       const normalized = content.trim();
@@ -52,11 +48,12 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
 
       const createdAt = new Date().toISOString();
       setSelectedChat((prev) => {
-        const baseChat = prev?.id === chatId
-          ? prev
-          : selectedChatRef.current?.id === chatId
-            ? selectedChatRef.current
-            : null;
+        const baseChat =
+          prev?.id === chatId
+            ? prev
+            : selectedChatRef.current?.id === chatId
+              ? selectedChatRef.current
+              : null;
         if (!baseChat) {
           return prev;
         }
@@ -80,7 +77,7 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       });
       scrollToBottomIfPinned(true);
     },
-    [scrollToBottomIfPinned]
+    [scrollToBottomIfPinned],
   );
 
   const ensureLocalCommandChat = useCallback(
@@ -143,7 +140,7 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       api,
       preferredStartCwd,
       selectedChatId,
-    ]
+    ],
   );
 
   const appendLocalSystemMessage = useCallback(
@@ -176,7 +173,7 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       });
       scrollToBottomIfPinned(true);
     },
-    [scrollToBottomIfPinned, selectedChatId]
+    [scrollToBottomIfPinned, selectedChatId],
   );
 
   return {

@@ -55,9 +55,7 @@ export function WorkspacePickerScreen() {
   return (
     <WorkspacePicker
       selectedPath={
-        isGitCheckoutDestination
-          ? gitCheckoutParentPath
-          : normalizeWorkspacePath(defaultStartCwd)
+        isGitCheckoutDestination ? gitCheckoutParentPath : normalizeWorkspacePath(defaultStartCwd)
       }
       bridgeRoot={bridgeRoot}
       recentWorkspaces={recentWorkspaces}

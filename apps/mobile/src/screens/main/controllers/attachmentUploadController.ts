@@ -34,10 +34,10 @@ export function attachmentSizeError(sizeBytes: number): string | null {
 
 export function retainFailedPreparedAttachment(
   attachments: PreparedAttachment[],
-  id: string
+  id: string,
 ): PreparedAttachment[] {
   return attachments.map((attachment) =>
-    attachment.id === id ? { ...attachment, status: 'failed' } : attachment
+    attachment.id === id ? { ...attachment, status: 'failed' } : attachment,
   );
 }
 
@@ -116,14 +116,12 @@ export function useAttachmentUploadController({
       } catch (error) {
         const failedId = preparedId;
         if (failedId) {
-          setPreparedAttachments((current) =>
-            retainFailedPreparedAttachment(current, failedId)
-          );
+          setPreparedAttachments((current) => retainFailedPreparedAttachment(current, failedId));
         }
         setError((error as Error).message);
       }
     },
-    [addImage, addMention, api, chat?.id, setError]
+    [addImage, addMention, api, chat?.id, setError],
   );
 
   const retryFailedUploads = useCallback(() => {
@@ -153,7 +151,7 @@ export function useAttachmentUploadController({
         setPickerBusy(false);
       }
     },
-    [setError]
+    [setError],
   );
 
   const pickFile = useCallback(
@@ -180,7 +178,7 @@ export function useAttachmentUploadController({
           });
         }
       }),
-    [runPicker, setError, upload]
+    [runPicker, setError, upload],
   );
 
   const pickImage = useCallback(
@@ -201,12 +199,7 @@ export function useAttachmentUploadController({
         });
         const image = result.canceled ? null : result.assets[0];
         if (image) {
-          const prepared = await prepareImage(
-            image.uri,
-            image.width,
-            image.height,
-            image.fileSize
-          );
+          const prepared = await prepareImage(image.uri, image.width, image.height, image.fileSize);
           await upload({
             uri: prepared.uri,
             fileName: toJpegFileName(image.fileName ?? 'image.jpg'),
@@ -215,7 +208,7 @@ export function useAttachmentUploadController({
           });
         }
       }),
-    [runPicker, setError, upload]
+    [runPicker, setError, upload],
   );
 
   const captureImage = useCallback(
@@ -234,12 +227,7 @@ export function useAttachmentUploadController({
         });
         const image = result.canceled ? null : result.assets[0];
         if (image) {
-          const prepared = await prepareImage(
-            image.uri,
-            image.width,
-            image.height,
-            image.fileSize
-          );
+          const prepared = await prepareImage(image.uri, image.width, image.height, image.fileSize);
           await upload({
             uri: prepared.uri,
             fileName: toJpegFileName(image.fileName ?? 'camera-photo.jpg'),
@@ -248,7 +236,7 @@ export function useAttachmentUploadController({
           });
         }
       }),
-    [runPicker, setError, upload]
+    [runPicker, setError, upload],
   );
 
   return {
@@ -264,12 +252,7 @@ export function useAttachmentUploadController({
   };
 }
 
-async function prepareImage(
-  uri: string,
-  width: number,
-  height: number,
-  knownSize?: number
-) {
+async function prepareImage(uri: string, width: number, height: number, knownSize?: number) {
   const sourceInfo = await FileSystem.getInfoAsync(uri);
   if (!sourceInfo.exists || sourceInfo.isDirectory) throw new Error('Unable to read image');
   const sourceSizeError = attachmentSizeError(knownSize ?? sourceInfo.size);
@@ -278,7 +261,7 @@ async function prepareImage(
   const context = ImageManipulator.ImageManipulator.manipulate(uri);
   if (longestSide > IMAGE_MAX_DIMENSION) {
     context.resize(
-      width >= height ? { width: IMAGE_MAX_DIMENSION } : { height: IMAGE_MAX_DIMENSION }
+      width >= height ? { width: IMAGE_MAX_DIMENSION } : { height: IMAGE_MAX_DIMENSION },
     );
   }
   const rendered = await context.renderAsync();
@@ -289,7 +272,8 @@ async function prepareImage(
   const info = await FileSystem.getInfoAsync(result.uri);
   if (!info.exists || info.isDirectory) throw new Error('Unable to prepare image');
   const sizeError = attachmentSizeError(info.size);
-  if (sizeError) throw new Error(`Compressed image still exceeds the ${ATTACHMENT_MAX_LABEL} limit`);
+  if (sizeError)
+    throw new Error(`Compressed image still exceeds the ${ATTACHMENT_MAX_LABEL} limit`);
   return result;
 }
 

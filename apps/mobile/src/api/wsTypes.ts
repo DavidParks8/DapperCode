@@ -1,4 +1,4 @@
-import type { RpcNotification } from "./types";
+import type { RpcNotification } from './types';
 
 export type EventListener = (event: RpcNotification) => void;
 export type StatusListener = (connected: boolean) => void;

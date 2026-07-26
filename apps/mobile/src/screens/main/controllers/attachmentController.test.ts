@@ -62,21 +62,37 @@ function makeHarness(workspace: string | null = '/repo', draft = '') {
   return {
     api,
     setError,
-    get current() { return current!; },
-    get draft() { return draftValue; },
+    get current() {
+      return current!;
+    },
+    get draft() {
+      return draftValue;
+    },
     async mount(props = { workspace, draft }) {
-      await act(async () => { tree = renderer.create(React.createElement(Probe, props)); });
+      await act(async () => {
+        tree = renderer.create(React.createElement(Probe, props));
+      });
     },
     async update(props: { workspace: string | null; draft: string }) {
-      await act(async () => { tree!.update(React.createElement(Probe, props)); });
+      await act(async () => {
+        tree!.update(React.createElement(Probe, props));
+      });
     },
-    unmount() { act(() => tree!.unmount()); },
+    unmount() {
+      act(() => tree!.unmount());
+    },
   };
 }
 
-async function runAction(controller: AttachmentController, action: Parameters<AttachmentController['requestMenuAction']>[0]) {
+async function runAction(
+  controller: AttachmentController,
+  action: Parameters<AttachmentController['requestMenuAction']>[0],
+) {
   act(() => controller.requestMenuAction(action));
-  await act(async () => { jest.advanceTimersByTime(180); await Promise.resolve(); });
+  await act(async () => {
+    jest.advanceTimersByTime(180);
+    await Promise.resolve();
+  });
 }
 
 describe('attachmentController', () => {
@@ -116,9 +132,15 @@ describe('attachmentController', () => {
     jest.useFakeTimers();
     Object.defineProperty(globalThis, 'requestIdleCallback', {
       configurable: true,
-      value: (callback: () => void) => { callback(); return 1; },
+      value: (callback: () => void) => {
+        callback();
+        return 1;
+      },
     });
-    Object.defineProperty(globalThis, 'cancelIdleCallback', { configurable: true, value: jest.fn() });
+    Object.defineProperty(globalThis, 'cancelIdleCallback', {
+      configurable: true,
+      value: jest.fn(),
+    });
     getInfo.mockReset().mockResolvedValue({ exists: true, isDirectory: false, size: 100 });
     documentPicker.mockReset().mockResolvedValue({ canceled: true, assets: [] });
     mediaPermission.mockReset().mockResolvedValue({ granted: true });
@@ -222,25 +244,40 @@ describe('attachmentController', () => {
     expect(harness.current.composerAttachments[0]?.label).toContain('retry');
     harness.api.uploadAttachment.mockResolvedValueOnce({ kind: 'file', path: '/repo/retried.pdf' });
     act(() => harness.current.retryFailedUploads());
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(harness.current.hasFailedUploads).toBe(false);
     harness.unmount();
   });
 
   it('prevents overlapping pickers and menu opening while picker work is active', async () => {
     let resolvePicker: (value: unknown) => void = () => undefined;
-    documentPicker.mockImplementationOnce(() => new Promise((resolve) => { resolvePicker = resolve; }));
+    documentPicker.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePicker = resolve;
+        }),
+    );
     const harness = makeHarness();
     await harness.mount();
     act(() => harness.current.requestMenuAction('phone-file'));
-    act(() => { jest.advanceTimersByTime(180); });
+    act(() => {
+      jest.advanceTimersByTime(180);
+    });
     expect(harness.current.pickerBusy).toBe(true);
     act(() => harness.current.openMenu());
     expect(harness.current.attachmentMenuVisible).toBe(false);
     act(() => harness.current.requestMenuAction('phone-file'));
-    act(() => { jest.advanceTimersByTime(180); });
+    act(() => {
+      jest.advanceTimersByTime(180);
+    });
     expect(documentPicker).toHaveBeenCalledTimes(1);
-    await act(async () => { resolvePicker({ canceled: true, assets: [] }); await Promise.resolve(); });
+    await act(async () => {
+      resolvePicker({ canceled: true, assets: [] });
+      await Promise.resolve();
+    });
     harness.unmount();
   });
 
@@ -279,7 +316,9 @@ describe('attachmentController', () => {
 
     launchLibrary.mockResolvedValueOnce({
       canceled: false,
-      assets: [{ uri: 'file:///wide.png', width: 4000, height: 1000, fileName: '.png', fileSize: 100 }],
+      assets: [
+        { uri: 'file:///wide.png', width: 4000, height: 1000, fileName: '.png', fileSize: 100 },
+      ],
     });
     harness.api.uploadAttachment.mockResolvedValueOnce({ kind: 'image', path: '/repo/wide.jpg' });
     await runAction(harness.current, 'phone-image');
@@ -304,7 +343,9 @@ describe('attachmentController', () => {
     });
     await runAction(harness.current, 'phone-camera');
     expect(manipulate.mock.results.at(-1)?.value.resize).toHaveBeenCalledWith({ height: 2048 });
-    expect(harness.current.composerAttachments.some((entry) => entry.id.startsWith('image:'))).toBe(true);
+    expect(harness.current.composerAttachments.some((entry) => entry.id.startsWith('image:'))).toBe(
+      true,
+    );
     act(() => harness.current.removeComposerAttachment('image:/repo/wide.jpg'));
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
     harness.unmount();
@@ -316,7 +357,11 @@ describe('attachmentController', () => {
     const image = { canceled: false, assets: [{ uri: 'file:///image', width: 10, height: 10 }] };
 
     launchLibrary.mockResolvedValueOnce(image);
-    getInfo.mockResolvedValueOnce({ exists: true, isDirectory: false, size: ATTACHMENT_MAX_BYTES + 1 });
+    getInfo.mockResolvedValueOnce({
+      exists: true,
+      isDirectory: false,
+      size: ATTACHMENT_MAX_BYTES + 1,
+    });
     await runAction(harness.current, 'phone-image');
     expect(harness.setError).toHaveBeenCalledWith(expect.stringContaining('20 MB'));
 
@@ -341,7 +386,8 @@ describe('attachmentController', () => {
     harness.api.uploadAttachment.mockRejectedValueOnce(new Error('failed'));
     await harness.mount();
     documentPicker.mockResolvedValueOnce({
-      canceled: false, assets: [{ uri: 'file:///unnamed.bin', name: undefined, size: 100 }],
+      canceled: false,
+      assets: [{ uri: 'file:///unnamed.bin', name: undefined, size: 100 }],
     });
     await runAction(harness.current, 'phone-file');
     expect(harness.current.composerAttachments[0]?.label).toContain('unnamed.bin');
@@ -367,7 +413,8 @@ describe('attachmentController', () => {
     expect(harness.current.pendingMentionPaths).toEqual([]);
 
     launchLibrary.mockResolvedValueOnce({
-      canceled: false, assets: [{ uri: 'file:///bad.png', width: 10, height: 10 }],
+      canceled: false,
+      assets: [{ uri: 'file:///bad.png', width: 10, height: 10 }],
     });
     getInfo.mockResolvedValueOnce({ exists: false, isDirectory: false, size: 1 });
     await runAction(harness.current, 'phone-image');

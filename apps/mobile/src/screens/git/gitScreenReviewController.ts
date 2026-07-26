@@ -108,7 +108,7 @@ export function useGitScreenReviewController({
     }
 
     const stillExists = derived.parsedDiff.files.some(
-      (file: UnifiedDiffFile) => file.id === selectedDiffFileId
+      (file: UnifiedDiffFile) => file.id === selectedDiffFileId,
     );
     if (!stillExists) {
       setSelectedDiffFileId(derived.parsedDiff.files[0].id);
@@ -116,7 +116,7 @@ export function useGitScreenReviewController({
 
     if (pendingDiffFileId) {
       const pendingStillExists = derived.parsedDiff.files.some(
-        (file: UnifiedDiffFile) => file.id === pendingDiffFileId
+        (file: UnifiedDiffFile) => file.id === pendingDiffFileId,
       );
       if (!pendingStillExists) {
         setPendingDiffFileId(null);
@@ -156,7 +156,7 @@ export function useGitScreenReviewController({
         diffSelectionTimerRef.current = null;
       }, 120);
     },
-    [activeDiffTabId]
+    [activeDiffTabId],
   );
 
   const openReviewComment = useCallback(
@@ -165,7 +165,7 @@ export function useGitScreenReviewController({
       setReviewTarget(target);
       setReviewCommentDraft(existing?.comment ?? '');
     },
-    [reviewComments]
+    [reviewComments],
   );
 
   const closeReviewComment = useCallback(() => {

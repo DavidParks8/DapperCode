@@ -1,9 +1,5 @@
 import type { AgUiLiveAssistantMessages } from '../../api/agUi';
-import type {
-  BridgeUiSurface,
-  PendingApproval,
-  PendingUserInputRequest,
-} from '../../api/types';
+import type { BridgeUiSurface, PendingApproval, PendingUserInputRequest } from '../../api/types';
 import type { ActivePlanState } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
@@ -17,7 +13,9 @@ export const pendingApprovalAtom = screenAtom<PendingApproval | null>(null);
 
 export const pendingUserInputRequestAtom = screenAtom<PendingUserInputRequest | null>(null);
 
-export const userInputDraftsAtom = screenAtom<Record<string, string>>((): Record<string, string> => ({}));
+export const userInputDraftsAtom = screenAtom<Record<string, string>>(
+  (): Record<string, string> => ({}),
+);
 
 export const userInputErrorAtom = screenAtom<string | null>(null);
 

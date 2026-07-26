@@ -1,10 +1,6 @@
 import { Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppSheet } from './AppSheet';
 import { AppThemeProvider, createAppTheme } from '../theme';
@@ -41,8 +37,8 @@ describe('AppSheet', () => {
         wrap(
           <AppSheet visible={false} onClose={onClose} accessibilityLabel="Picker">
             <Text>Sheet body</Text>
-          </AppSheet>
-        )
+          </AppSheet>,
+        ),
       );
     });
     if (!tree) throw new Error('Expected sheet tree');
@@ -53,8 +49,8 @@ describe('AppSheet', () => {
         wrap(
           <AppSheet visible onClose={onClose} accessibilityLabel="Picker">
             <Text>Sheet body</Text>
-          </AppSheet>
-        )
+          </AppSheet>,
+        ),
       );
     });
     expect(textOf(tree)).toContain('Sheet body');
@@ -66,8 +62,8 @@ describe('AppSheet', () => {
         wrap(
           <AppSheet visible={false} onClose={onClose} accessibilityLabel="Picker">
             <Text>Sheet body</Text>
-          </AppSheet>
-        )
+          </AppSheet>,
+        ),
       );
     });
     expect(textOf(tree)).not.toContain('Sheet body');
@@ -83,15 +79,15 @@ describe('AppSheet', () => {
         wrap(
           <AppSheet visible onClose={onClose} scrollable maxDynamicContentSize={400}>
             <Text>Scrollable body</Text>
-          </AppSheet>
-        )
+          </AppSheet>,
+        ),
       );
     });
     if (!tree) throw new Error('Expected sheet tree');
     expect(textOf(tree)).toContain('Scrollable body');
 
     const sheet = (tree.root as unknown as Queryable).findAll(
-      (node) => typeof node.props.onDismiss === 'function'
+      (node) => typeof node.props.onDismiss === 'function',
     )[0];
     act(() => (sheet.props.onDismiss as () => void)());
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -112,8 +108,8 @@ describe('AppSheet', () => {
             contentBottomInset={12}
           >
             <Text>Locked body</Text>
-          </AppSheet>
-        )
+          </AppSheet>,
+        ),
       );
     });
     if (!tree) throw new Error('Expected sheet tree');

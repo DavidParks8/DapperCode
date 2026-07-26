@@ -111,7 +111,12 @@ export function promptAfterSnapshot(
   return {
     events,
     chat: chat(threadId, [
-      { id: firstUser, role: 'user', content: 'first prompt', createdAt: new Date(1).toISOString() },
+      {
+        id: firstUser,
+        role: 'user',
+        content: 'first prompt',
+        createdAt: new Date(1).toISOString(),
+      },
       {
         id: firstAgent,
         role: 'assistant',
@@ -132,9 +137,10 @@ export function promptAfterSnapshot(
  * Three turns replayed as history, each with its own message ids — what the
  * bridge emits when an agent replays a conversation on `session/load`.
  */
-export function multiTurnReplayedHistory(
-  threadId = 'thread',
-): { events: EventSequenceEntry[]; chat: Chat } {
+export function multiTurnReplayedHistory(threadId = 'thread'): {
+  events: EventSequenceEntry[];
+  chat: Chat;
+} {
   const messages: Chat['messages'] = [];
   const snapshot: Array<{ id: string; role: string; content: string }> = [];
   const turns = ['turn one', 'turn two', 'turn three'];
@@ -330,7 +336,8 @@ function turnCards(
       toolCallId: `${parentThreadId}::turn-${String(turnIndex)}-task-${String(step.slot)}`,
       childThreadId: step.childThreadId,
       status: step.status,
-      heading: step.status === 'completed' ? '\u2022 Sub-agent completed' : '\u2022 Sub-agent working',
+      heading:
+        step.status === 'completed' ? '\u2022 Sub-agent completed' : '\u2022 Sub-agent working',
       latest: step.latest,
     }),
   );
@@ -361,13 +368,23 @@ export function parallelSubAgentsInOneTurn(parentThreadId = 'parent'): {
     ],
     // Both report progress out of order, and one finishes while the other works.
     interleaved: [
-      ...cards([{ slot: 2, childThreadId: 'child-b', status: 'running', latest: 'Running npm test' }]),
-      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Checking lockfile' }]),
-      ...cards([{ slot: 2, childThreadId: 'child-b', status: 'completed', latest: '12 tests passed' }]),
-      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Diffing versions' }]),
+      ...cards([
+        { slot: 2, childThreadId: 'child-b', status: 'running', latest: 'Running npm test' },
+      ]),
+      ...cards([
+        { slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Checking lockfile' },
+      ]),
+      ...cards([
+        { slot: 2, childThreadId: 'child-b', status: 'completed', latest: '12 tests passed' },
+      ]),
+      ...cards([
+        { slot: 1, childThreadId: 'child-a', status: 'running', latest: 'Diffing versions' },
+      ]),
     ],
     finish: [
-      ...cards([{ slot: 1, childThreadId: 'child-a', status: 'completed', latest: 'No drift found' }]),
+      ...cards([
+        { slot: 1, childThreadId: 'child-a', status: 'completed', latest: 'No drift found' },
+      ]),
       ...sequence(parentThreadId, runId)
         .textMessage('Both finished.', { messageId: `${parentThreadId}::msg-2` })
         .runFinished()

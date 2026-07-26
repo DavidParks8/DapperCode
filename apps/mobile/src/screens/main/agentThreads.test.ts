@@ -6,10 +6,7 @@ import {
   resolveAgentActivitySummary,
 } from './agentThreads';
 
-function chat(
-  id: string,
-  partial: Partial<ChatSummary> = {}
-): ChatSummary {
+function chat(id: string, partial: Partial<ChatSummary> = {}): ChatSummary {
   return {
     id,
     title: partial.title ?? id,
@@ -38,7 +35,7 @@ describe('agentThreads', () => {
         role: 'Explorer',
         preview: 'Previous output',
         sourceDescription: 'Spawned sub-agent',
-      })
+      }),
     ).toBe('Inspecting API routes');
     expect(
       resolveAgentActivitySummary({
@@ -46,7 +43,7 @@ describe('agentThreads', () => {
         role: 'Explorer',
         preview: 'Previous output',
         sourceDescription: 'Spawned sub-agent',
-      })
+      }),
     ).toBe('npm test | complete');
   });
 
@@ -77,10 +74,7 @@ describe('agentThreads', () => {
       updatedAt: '2026-03-20T00:00:04.000Z',
     });
 
-    const result = collectRelatedAgentThreads(
-      [root, child, grandchild, unrelated],
-      grandchild
-    );
+    const result = collectRelatedAgentThreads([root, child, grandchild, unrelated], grandchild);
 
     expect(result.rootThreadId).toBe('thr_root');
     expect(result.threads.map((entry) => entry.id)).toEqual([
@@ -128,7 +122,7 @@ describe('agentThreads', () => {
 
     const result = collectRelatedAgentThreads(
       [root, recentChild, oldRunningChild, oldFocusedChild, oldCompletedChild],
-      oldFocusedChild
+      oldFocusedChild,
     );
 
     expect(result.threads.map((entry) => entry.id)).toEqual([
@@ -188,9 +182,9 @@ describe('agentThreads', () => {
     const root = chat('root');
     const deep = chat('deep', { parentThreadId: 'root', subAgentDepth: 2 });
     const shallow = chat('shallow', { parentThreadId: 'root', subAgentDepth: 1 });
-    expect(collectRelatedAgentThreads([root, deep, shallow], root).threads.map((entry) => entry.id)).toEqual([
-      'root', 'shallow', 'deep',
-    ]);
+    expect(
+      collectRelatedAgentThreads([root, deep, shallow], root).threads.map((entry) => entry.id),
+    ).toEqual(['root', 'shallow', 'deep']);
   });
 
   it('returns null for empty or unmatched agent searches', () => {
@@ -210,7 +204,14 @@ describe('agentThreads', () => {
 
   it('falls through all activity summary sources and trims values', () => {
     const base = { sourceDescription: 'Agent thread' };
-    expect(resolveAgentActivitySummary({ ...base, runtimeDetail: ' ', latestCommandDetail: ' ', role: ' Explorer ' })).toBe('Explorer');
+    expect(
+      resolveAgentActivitySummary({
+        ...base,
+        runtimeDetail: ' ',
+        latestCommandDetail: ' ',
+        role: ' Explorer ',
+      }),
+    ).toBe('Explorer');
     expect(resolveAgentActivitySummary({ ...base, preview: ' Preview ' })).toBe('Preview');
     expect(resolveAgentActivitySummary(base)).toBe('Agent thread');
   });

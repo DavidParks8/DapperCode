@@ -1,26 +1,25 @@
-import {
-  errorAtom
-} from '../../state/mainScreen/turn';
+import { errorAtom } from '../../state/mainScreen/turn';
 import {
   agentRootThreadIdAtom,
   loadingAgentThreadsAtom,
-  relatedAgentThreadsAtom
+  relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
-import {
-  agentThreadMenuVisibleAtom
-} from '../../state/mainScreen/modals';
+import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
-import { AGENT_THREADS_SYNC_INTERVAL_MS, AGENT_THREADS_IDLE_SYNC_INTERVAL_MS, AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS } from './mainScreenHelpers';
+import {
+  AGENT_THREADS_SYNC_INTERVAL_MS,
+  AGENT_THREADS_IDLE_SYNC_INTERVAL_MS,
+  AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS,
+} from './mainScreenHelpers';
 import { areChatSummaryListsEquivalent } from './mainScreenChatState';
-import type { MainScreenWorkspaceBrowserStateContext, MainScreenWorkspaceBrowserStateResult } from './mainScreenWorkspaceBrowserState';
+import type {
+  MainScreenWorkspaceBrowserStateContext,
+  MainScreenWorkspaceBrowserStateResult,
+} from './mainScreenWorkspaceBrowserState';
 
-
-
-
-
-
-export type MainScreenAgentThreadsRefreshContext = MainScreenWorkspaceBrowserStateContext & MainScreenWorkspaceBrowserStateResult;
+export type MainScreenAgentThreadsRefreshContext = MainScreenWorkspaceBrowserStateContext &
+  MainScreenWorkspaceBrowserStateResult;
 
 export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreadsRefreshContext) {
   const {
@@ -44,12 +43,8 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
   const setLoadingAgentThreads = useSetAtom(loadingAgentThreadsAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
-
   const refreshAgentThreads = useCallback(
-    async (
-      focusChatId?: string | null,
-      options?: { showLoading?: boolean }
-    ) => {
+    async (focusChatId?: string | null, options?: { showLoading?: boolean }) => {
       const activeChatId = focusChatId ?? chatIdRef.current;
       if (!activeChatId) {
         setRelatedAgentThreads([]);
@@ -69,7 +64,7 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
       try {
         const related = await agentThreadsController.loadRelated(
           activeChatId,
-          selectedChatRef.current?.id === activeChatId ? selectedChatRef.current : null
+          selectedChatRef.current?.id === activeChatId ? selectedChatRef.current : null,
         );
 
         if (agentThreadsRequestRef.current !== requestId) {
@@ -77,10 +72,10 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         }
 
         setRelatedAgentThreads((prev) =>
-          areChatSummaryListsEquivalent(prev, related.threads) ? prev : related.threads
+          areChatSummaryListsEquivalent(prev, related.threads) ? prev : related.threads,
         );
         setAgentRootThreadId((prev) =>
-          prev === related.rootThreadId ? prev : related.rootThreadId
+          prev === related.rootThreadId ? prev : related.rootThreadId,
         );
         return related;
       } catch (err) {
@@ -97,7 +92,7 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         }
       }
     },
-    [agentThreadsController]
+    [agentThreadsController],
   );
 
   const scheduleAgentThreadsRefresh = useCallback(
@@ -117,9 +112,8 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         void refreshAgentThreads(activeChatId);
       }, 220);
     },
-    [refreshAgentThreads]
+    [refreshAgentThreads],
   );
-
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -182,7 +176,7 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
       clearDeferredDisconnectActivity();
       clearForegroundAgentRefresh();
     },
-    [clearDeferredDisconnectActivity, clearForegroundAgentRefresh]
+    [clearDeferredDisconnectActivity, clearForegroundAgentRefresh],
   );
 
   return {
@@ -191,4 +185,6 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
   };
 }
 
-export type MainScreenAgentThreadsRefreshResult = ReturnType<typeof useMainScreenAgentThreadsRefresh>;
+export type MainScreenAgentThreadsRefreshResult = ReturnType<
+  typeof useMainScreenAgentThreadsRefresh
+>;

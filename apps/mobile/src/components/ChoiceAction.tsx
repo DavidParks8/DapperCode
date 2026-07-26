@@ -1,13 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import dappercodeMark from '../../assets/brand/mark.png';
 import { useAppTheme, type AppTheme } from '../theme';
@@ -84,9 +77,7 @@ export function ChoiceAction({
 }
 
 const createStyles = (theme: AppTheme) => {
-  const secondaryBackground = theme.isDark
-    ? 'rgba(255,255,255,0.05)'
-    : 'rgba(255,255,255,0.62)';
+  const secondaryBackground = theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.62)';
 
   return StyleSheet.create({
     root: {

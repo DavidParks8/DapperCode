@@ -26,13 +26,11 @@ import { useDraftController } from './controllers/draftController';
 import { SubmissionController } from './controllers/submissionController';
 import { TurnExecutionController } from './controllers/turnExecutionController';
 import { MainScreenPersistenceController } from './controllers/mainScreenPersistenceController';
-import { TranscriptContinuationController, getTranscriptContinuationState } from './controllers/transcriptContinuationController';
+import {
+  TranscriptContinuationController,
+  getTranscriptContinuationState,
+} from './controllers/transcriptContinuationController';
 import type { MainScreenBaseContext } from './useMainScreenBaseContext';
-
-
-
-
-
 
 export type MainScreenCoreBootstrapContext = MainScreenBaseContext;
 
@@ -58,7 +56,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const submissionController = useMemo(() => new SubmissionController(), []);
   const transcriptContinuationController = useMemo(
     () => new TranscriptContinuationController(api),
-    [api]
+    [api],
   );
   const initialPendingSnapshot =
     pendingOpenChatId &&
@@ -75,11 +73,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
       store.set(selectedChatAtom, initialPendingSnapshot);
       store.set(
         transcriptContinuationStateAtom,
-        getTranscriptContinuationState(initialPendingSnapshot)
+        getTranscriptContinuationState(initialPendingSnapshot),
       );
     }
     store.set(selectedChatIdAtom, initialPendingSnapshot?.id ?? pendingOpenChatId ?? null);
-    store.set(openingChatIdAtom, initialPendingSnapshot ? null : pendingOpenChatId ?? null);
+    store.set(openingChatIdAtom, initialPendingSnapshot ? null : (pendingOpenChatId ?? null));
     store.set(pendingAgentIdAtom, preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null);
   }
   const selectedChat = useAtomValue(selectedChatAtom);
@@ -93,28 +91,21 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const openingChatId = useAtomValue(openingChatIdAtom);
   const setOpeningChatId = useSetAtom(openingChatIdAtom);
   const openingChatStartedAtRef = useRef<number>(
-    initialPendingSnapshot || !pendingOpenChatId ? 0 : Date.now()
+    initialPendingSnapshot || !pendingOpenChatId ? 0 : Date.now(),
   );
   const draftController = useDraftController(bridgeProfileId, selectedChatId);
   const { draft, setDraft } = draftController;
   const setActiveCommands = useSetAtom(activeCommandsAtom);
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(
-    (
-      next:
-        | string
-        | null
-        | ((previous: string | null) => string | null)
-    ) => {
+    (next: string | null | ((previous: string | null) => string | null)) => {
       const resolved =
         typeof next === 'function'
-          ? (
-              next as (previous: string | null) => string | null
-            )(streamingTextRef.current)
+          ? (next as (previous: string | null) => string | null)(streamingTextRef.current)
           : next;
       streamingTextRef.current = resolved;
     },
-    []
+    [],
   );
   const setLoadingWorkspaceRoots = useSetAtom(loadingWorkspaceRootsAtom);
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});

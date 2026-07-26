@@ -60,6 +60,7 @@ jobs:
         run: |
           npm run version:check
           npm run payment:check
+          npm run format:check
           npm run lint -w @dappercode/mobile
           npm run duplicates:mobile
           npm run typecheck -w @dappercode/mobile

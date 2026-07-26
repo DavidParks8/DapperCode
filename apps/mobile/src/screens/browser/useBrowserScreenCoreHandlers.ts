@@ -54,10 +54,10 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
   const executeDesktopFrameCommand = useCallback(
     (command: 'goBack' | 'goForward' | 'reload') => {
       model.webViewRef.current?.injectJavaScript(
-        `window.__dappercodeDesktopFrame && window.__dappercodeDesktopFrame.${command} && window.__dappercodeDesktopFrame.${command}(); true;`
+        `window.__dappercodeDesktopFrame && window.__dappercodeDesktopFrame.${command} && window.__dappercodeDesktopFrame.${command}(); true;`,
       );
     },
-    [model.webViewRef]
+    [model.webViewRef],
   );
 
   const handleNavigationStateChange = useCallback(
@@ -70,11 +70,11 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
       model.setCurrentPreviewNavigationUrl(nextUrl);
       const nextDisplayUrl =
         nextUrl && model.activeSession?.targetUrl
-          ? mapBrowserPreviewNavigationUrlToTargetUrl(
+          ? (mapBrowserPreviewNavigationUrlToTargetUrl(
               nextUrl,
               model.previewOrigin,
-              model.activeSession.targetUrl
-            ) ?? nextUrl
+              model.activeSession.targetUrl,
+            ) ?? nextUrl)
           : nextUrl;
       model.setCurrentUrl(nextDisplayUrl);
       if (nextDisplayUrl) {
@@ -85,7 +85,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
       model.setCanGoForward(navigation.canGoForward);
       model.setLoadingPreview(navigation.loading);
     },
-    [model]
+    [model],
   );
 
   const handleDesktopFrameMessage = useCallback(
@@ -97,21 +97,28 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
         return;
       }
 
-      if (!payload || payload.type !== 'dappercodeDesktopFrameState' || !model.activeSession?.targetUrl) {
+      if (
+        !payload ||
+        payload.type !== 'dappercodeDesktopFrameState' ||
+        !model.activeSession?.targetUrl
+      ) {
         return;
       }
-      if (model.currentShellRequestKey && payload.shellRequestKey !== model.currentShellRequestKey) {
+      if (
+        model.currentShellRequestKey &&
+        payload.shellRequestKey !== model.currentShellRequestKey
+      ) {
         return;
       }
 
       const rawUrl = typeof payload.rawUrl === 'string' && payload.rawUrl ? payload.rawUrl : null;
       const nextDisplayUrl =
         rawUrl && model.previewOrigin
-          ? mapBrowserPreviewNavigationUrlToTargetUrl(
+          ? (mapBrowserPreviewNavigationUrlToTargetUrl(
               rawUrl,
               model.previewOrigin,
-              model.activeSession.targetUrl
-            ) ?? rawUrl
+              model.activeSession.targetUrl,
+            ) ?? rawUrl)
           : model.activeSession.targetUrl;
       model.setCurrentPreviewNavigationUrl(rawUrl);
       model.setCurrentUrl(nextDisplayUrl);
@@ -121,7 +128,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
       model.setCanGoForward(Boolean(payload.canGoForward));
       model.setLoadingPreview(false);
     },
-    [model]
+    [model],
   );
 
   const handleShouldStartLoad = useCallback(
@@ -148,7 +155,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
 
       return false;
     },
-    [model]
+    [model],
   );
 
   const handleSubmitInput = useCallback(() => {
@@ -249,7 +256,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
         model.setBottomBarVisible(true);
       }
     },
-    [model]
+    [model],
   );
 
   const handleNativePreviewViewportLayout = useCallback(
@@ -263,10 +270,10 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
       model.setNativePreviewLayout((current) =>
         current.width === nextWidth && current.height === nextHeight
           ? current
-          : { width: nextWidth, height: nextHeight }
+          : { width: nextWidth, height: nextHeight },
       );
     },
-    [model]
+    [model],
   );
 
   return {

@@ -1,11 +1,6 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
-import {
-  Animated as RNAnimated,
-  Platform,
-  type ScrollView,
-  type Text,
-} from 'react-native';
+import { Animated as RNAnimated, Platform, type ScrollView, type Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { WebView } from 'react-native-webview';
 
@@ -84,9 +79,10 @@ export function useBrowserScreenModel(theme: AppTheme) {
   const [showCustomViewportEditor, setShowCustomViewportEditor] = useState(false);
   const [showViewportMenu, setShowViewportMenu] = useState(false);
   const [nativePreviewLayout, setNativePreviewLayout] = useState({ width: 0, height: 0 });
-  const [overviewMetrics, setOverviewMetrics] = useState<{ previewUrl: string; height: number } | null>(
-    null
-  );
+  const [overviewMetrics, setOverviewMetrics] = useState<{
+    previewUrl: string;
+    height: number;
+  } | null>(null);
 
   const submitDisabled = !supportsBrowserPreview || openingPreview;
   const viewportMenuFocusRef = useModalAccessibilityFocus(showViewportMenu);
@@ -99,18 +95,18 @@ export function useBrowserScreenModel(theme: AppTheme) {
         ? getBrowserPreviewOrigin(
             bridgeUrl,
             activeSession.previewPort,
-            activeSession.previewBaseUrl ?? null
+            activeSession.previewBaseUrl ?? null,
           )
         : null,
-    [activeSession, bridgeUrl]
+    [activeSession, bridgeUrl],
   );
   const currentShellRequestKey = useMemo(
     () => getBrowserPreviewShellRequestKey(previewUrl),
-    [previewUrl]
+    [previewUrl],
   );
   const siteLabel = useMemo(
     () => getCompactBrowserLabel(currentUrl ?? activeSession?.targetUrl ?? inputValue),
-    [activeSession?.targetUrl, currentUrl, inputValue]
+    [activeSession?.targetUrl, currentUrl, inputValue],
   );
 
   const desktopModeEnabled = viewportPreset !== 'mobile';
@@ -126,7 +122,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
       display: 'block',
       backgroundColor: theme.colors.bgMain,
     }),
-    [desktopModeEnabled, desktopViewportSize.width, theme.colors.bgMain]
+    [desktopModeEnabled, desktopViewportSize.width, theme.colors.bgMain],
   );
 
   const bottomBarInset =
@@ -156,13 +152,13 @@ export function useBrowserScreenModel(theme: AppTheme) {
             height: desktopViewportSize.height,
           }
         : { preset: 'mobile' },
-    [desktopModeEnabled, desktopViewportSize.height, desktopViewportSize.width]
+    [desktopModeEnabled, desktopViewportSize.height, desktopViewportSize.width],
   );
 
   const desktopViewportLabel = `${desktopViewportSize.width}×${desktopViewportSize.height}`;
   const desktopViewportMatchesPreset = DESKTOP_VIEWPORT_PRESETS.some(
     (preset) =>
-      preset.width === desktopViewportSize.width && preset.height === desktopViewportSize.height
+      preset.width === desktopViewportSize.width && preset.height === desktopViewportSize.height,
   );
   const overviewContentHeight =
     desktopOverviewEnabled &&
@@ -182,7 +178,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
       ? Math.min(
           1,
           nativePreviewLayout.width / desktopViewportSize.width,
-          nativePreviewLayout.height / desktopCanvasHeight
+          nativePreviewLayout.height / desktopCanvasHeight,
         )
       : 1;
 
@@ -193,14 +189,14 @@ export function useBrowserScreenModel(theme: AppTheme) {
         throw new Error('Use a loopback URL like localhost:3000 or just enter a port.');
       }
       const session = await sessionLifecycle.serializeCreate(() =>
-        api.createBrowserPreviewSession(normalizedTarget)
+        api.createBrowserPreviewSession(normalizedTarget),
       );
       const nextPreviewUrl = buildBrowserPreviewBootstrapUrl(
         bridgeUrl,
         session.previewPort,
         session.bootstrapPath,
         viewport,
-        session.previewBaseUrl ?? null
+        session.previewBaseUrl ?? null,
       );
       if (!nextPreviewUrl) {
         sessionLifecycle.discard(session.sessionId);
@@ -208,7 +204,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
       }
       return { normalizedTarget, session, nextPreviewUrl };
     },
-    [api, bridgeUrl, sessionLifecycle]
+    [api, bridgeUrl, sessionLifecycle],
   );
 
   const loadBrowserCapabilities = useCallback(async () => {
@@ -219,7 +215,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
     } catch (error) {
       setSupportsBrowserPreview(true);
       setCapabilitiesError(
-        error instanceof Error ? error.message : 'Could not load bridge capabilities.'
+        error instanceof Error ? error.message : 'Could not load bridge capabilities.',
       );
     }
   }, [api]);
@@ -227,8 +223,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
   const loadSuggestions = useCallback(async () => {
     setSuggestionsLoading(true);
     try {
-      const response: BrowserPreviewDiscoveryResponse =
-        await api.discoverBrowserPreviewTargets();
+      const response: BrowserPreviewDiscoveryResponse = await api.discoverBrowserPreviewTargets();
       setSuggestions(response.suggestions);
     } catch {
       setSuggestions([]);
@@ -247,7 +242,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
       try {
         const { normalizedTarget, session, nextPreviewUrl } = await startPreviewSession(
           rawTarget,
-          browserViewport
+          browserViewport,
         );
         if (previewRequestIdRef.current !== requestId) {
           sessionLifecycle.discard(session.sessionId);
@@ -275,7 +270,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
         }
         setLoadingPreview(false);
         setCapabilitiesError(
-          error instanceof Error ? error.message : 'Could not open local preview.'
+          error instanceof Error ? error.message : 'Could not open local preview.',
         );
       } finally {
         if (previewRequestIdRef.current === requestId) {
@@ -290,7 +285,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
       recentTargetUrls,
       sessionLifecycle,
       startPreviewSession,
-    ]
+    ],
   );
 
   return {

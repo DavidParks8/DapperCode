@@ -30,25 +30,22 @@ export function getMessageText(message: Message | ChatMessage): string {
 }
 
 export function getSubAgentMeta(
-  message: Message | ChatMessage
+  message: Message | ChatMessage,
 ): ChatMessageSubAgentMeta | undefined {
   if (message.role !== 'activity' || message.activityType !== SUBAGENT_ACTIVITY_TYPE) {
     return undefined;
   }
   const value = message.content.subAgent;
-  return value && typeof value === 'object'
-    ? (value as ChatMessageSubAgentMeta)
-    : undefined;
+  return value && typeof value === 'object' ? (value as ChatMessageSubAgentMeta) : undefined;
 }
 
 export function getToolCallDisplayLines(message: Message | ChatMessage): string[] {
   if (message.role !== 'assistant' || !message.toolCalls?.length) return [];
   return message.toolCalls.map((call) => {
     const args = call.function.arguments.trim();
-    return [
-      `• Called tool \`${call.function.name}\``,
-      args && args !== '{}' ? `  ${args}` : null,
-    ].filter(Boolean).join('\n');
+    return [`• Called tool \`${call.function.name}\``, args && args !== '{}' ? `  ${args}` : null]
+      .filter(Boolean)
+      .join('\n');
   });
 }
 
@@ -56,7 +53,7 @@ export function createActivityMessage(
   id: string,
   activityType: string,
   content: DapperCodeActivityContent,
-  createdAt: string
+  createdAt: string,
 ): ChatMessage {
   return {
     id,

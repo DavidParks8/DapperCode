@@ -49,26 +49,23 @@ const DRAWER_HEARTBEAT_METHODS = new Set([
   'turn/plan/updated',
   'turn/diff/updated',
 ]);
-const DRAWER_TERMINAL_METHODS = new Set([
-  'bridge/approval.resolved',
-  'bridge/userInput.resolved',
-]);
+const DRAWER_TERMINAL_METHODS = new Set(['bridge/approval.resolved', 'bridge/userInput.resolved']);
 
 export function countDrawerRunningChats(
   chats: ChatSummary[],
   indicators: DrawerRunIndicatorMap,
-  now = Date.now()
+  now = Date.now(),
 ): number {
   return chats.reduce(
     (count, chat) => count + (isDrawerChatRunning(chat, indicators, now) ? 1 : 0),
-    0
+    0,
   );
 }
 
 export function isDrawerChatRunning(
   chat: ChatSummary,
   indicators: DrawerRunIndicatorMap,
-  now = Date.now()
+  now = Date.now(),
 ): boolean {
   return chat.status === 'running' || isDrawerRunIndicatorActive(indicators[chat.id], now);
 }
@@ -76,7 +73,7 @@ export function isDrawerChatRunning(
 export function isDrawerWorkspaceSectionRunning(
   section: ChatWorkspaceSection,
   indicators: DrawerRunIndicatorMap,
-  now = Date.now()
+  now = Date.now(),
 ): boolean {
   return section.data.some((row) => isDrawerChatRunning(row.chat, indicators, now));
 }
@@ -84,7 +81,7 @@ export function isDrawerWorkspaceSectionRunning(
 export function reconcileDrawerRunIndicatorsWithChats(
   previous: DrawerRunIndicatorMap,
   chats: ChatSummary[],
-  now = Date.now()
+  now = Date.now(),
 ): DrawerRunIndicatorMap {
   let next = pruneStaleDrawerRunIndicators(previous, now);
   let changed = next !== previous;
@@ -92,7 +89,8 @@ export function reconcileDrawerRunIndicatorsWithChats(
   for (const chat of chats) {
     const existing = next[chat.id];
     if (chat.status === 'running') {
-      const nextUpdatedAt = parseTimestamp(chat.statusUpdatedAt) ?? parseTimestamp(chat.updatedAt) ?? now;
+      const nextUpdatedAt =
+        parseTimestamp(chat.statusUpdatedAt) ?? parseTimestamp(chat.updatedAt) ?? now;
       const updated = setRunningIndicator(next, chat.id, 'lifecycle', nextUpdatedAt);
       if (updated !== next) {
         next = updated;
@@ -115,7 +113,7 @@ export function reconcileDrawerRunIndicatorsWithChats(
 
 export function pruneStaleDrawerRunIndicators(
   previous: DrawerRunIndicatorMap,
-  now = Date.now()
+  now = Date.now(),
 ): DrawerRunIndicatorMap {
   let changed = false;
   const next: DrawerRunIndicatorMap = {};
@@ -134,7 +132,7 @@ export function pruneStaleDrawerRunIndicators(
 export function updateDrawerRunIndicatorsForEvent(
   previous: DrawerRunIndicatorMap,
   event: RpcNotification,
-  now = Date.now()
+  now = Date.now(),
 ): DrawerRunIndicatorMap {
   const agUi = parseAgUiEventNotification(event);
   if (agUi) {
@@ -183,7 +181,7 @@ export function updateDrawerRunIndicatorsForEvent(
 
 export function extractDrawerNotificationThreadId(
   params: Record<string, unknown> | null,
-  msgArg?: Record<string, unknown> | null
+  msgArg?: Record<string, unknown> | null,
 ): string | null {
   if (!params && !msgArg) {
     return null;
@@ -199,10 +197,10 @@ export function extractDrawerNotificationThreadId(
   const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
   const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
   const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn
+    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
   );
   const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn
+    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
   );
 
   return (
@@ -249,22 +247,20 @@ export function extractDrawerStatusHint(params: Record<string, unknown> | null):
     toRecord(params.thread_state) ??
     toRecord(msg?.thread);
   const statusRecord =
-    toRecord(params.status) ??
-    toRecord(msg?.status) ??
-    toRecord(threadRecord?.status);
+    toRecord(params.status) ?? toRecord(msg?.status) ?? toRecord(threadRecord?.status);
 
   return normalizeToken(
     readString(params.status) ??
       readString(msg?.status) ??
       readString(statusRecord?.type) ??
       readString(statusRecord?.status) ??
-      readString(threadRecord?.status)
+      readString(threadRecord?.status),
   );
 }
 
 function isDrawerRunIndicatorActive(
   indicator: DrawerRunIndicator | undefined,
-  now: number
+  now: number,
 ): boolean {
   if (!indicator) {
     return false;
@@ -279,7 +275,7 @@ function setRunningIndicator(
   previous: DrawerRunIndicatorMap,
   threadId: string,
   source: DrawerRunIndicator['source'],
-  now: number
+  now: number,
 ): DrawerRunIndicatorMap {
   const existing = previous[threadId];
   const nextSource =
@@ -304,7 +300,7 @@ function setRunningIndicator(
 
 function clearRunningIndicator(
   previous: DrawerRunIndicatorMap,
-  threadId: string
+  threadId: string,
 ): DrawerRunIndicatorMap {
   if (!(threadId in previous)) {
     return previous;
@@ -317,7 +313,7 @@ function clearRunningIndicator(
 
 function shouldChatSnapshotClearIndicator(
   chat: ChatSummary,
-  indicator: DrawerRunIndicator
+  indicator: DrawerRunIndicator,
 ): boolean {
   const snapshotStatusAt = parseTimestamp(chat.statusUpdatedAt) ?? parseTimestamp(chat.updatedAt);
   if (snapshotStatusAt === null) {
@@ -341,14 +337,15 @@ function normalizeToken(value: string | null | undefined): string | null {
     return null;
   }
 
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
   return normalized.length > 0 ? normalized : null;
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
 function readString(value: unknown): string | null {

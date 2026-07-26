@@ -8,7 +8,7 @@ import { darkUiPaletteAtom } from './appState/settings';
 export const systemColorSchemeAtom = atom<ColorSchemeName>('unspecified');
 
 export const themeModeAtom = atom((get) =>
-  resolveThemeMode(get(appSettingsAtom).appearancePreference, get(systemColorSchemeAtom))
+  resolveThemeMode(get(appSettingsAtom).appearancePreference, get(systemColorSchemeAtom)),
 );
 
 /**

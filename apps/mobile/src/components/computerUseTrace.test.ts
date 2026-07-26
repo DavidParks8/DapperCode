@@ -9,17 +9,17 @@ describe('computerUseTrace', () => {
     expect(
       isComputerUseTraceEntry({
         title: 'Called tool `computer-use / click`',
-      })
+      }),
     ).toBe(true);
     expect(
       isComputerUseTraceEntry({
         title: 'Called tool `computer_use / get_app_state`',
-      })
+      }),
     ).toBe(true);
     expect(
       isComputerUseTraceEntry({
         title: 'Called tool `filesystem / read_file`',
-      })
+      }),
     ).toBe(false);
   });
 
@@ -43,17 +43,19 @@ describe('computerUseTrace', () => {
   });
 
   it('maps action keys to stable icons', () => {
-    expect([
-      'getappstate',
-      'click',
-      'scroll',
-      'typetext',
-      'presskey',
-      'drag',
-      'setvalue',
-      'listapps',
-      'unknownaction',
-    ].map(computerUseActionIconName)).toEqual([
+    expect(
+      [
+        'getappstate',
+        'click',
+        'scroll',
+        'typetext',
+        'presskey',
+        'drag',
+        'setvalue',
+        'listapps',
+        'unknownaction',
+      ].map(computerUseActionIconName),
+    ).toEqual([
       'scan-outline',
       'radio-button-on-outline',
       'swap-vertical-outline',
@@ -70,7 +72,7 @@ describe('computerUseTrace', () => {
     expect(parseComputerUseTraceEntry({ title: 'No tool label', details: [] })).toBeNull();
     expect(parseComputerUseTraceEntry({ title: 'Called tool `   `', details: [] })).toBeNull();
     expect(
-      parseComputerUseTraceEntry({ title: 'Called tool `computer-use /   `', details: [] })
+      parseComputerUseTraceEntry({ title: 'Called tool `computer-use /   `', details: [] }),
     ).toBeNull();
   });
 
@@ -89,7 +91,7 @@ describe('computerUseTrace', () => {
       parseComputerUseTraceEntry({
         title: `Called tool \`computer-use / ${action}\``,
         details: [],
-      })?.actionLabel
+      })?.actionLabel,
     ).toBe(expectedLabel);
   });
 
@@ -104,7 +106,7 @@ describe('computerUseTrace', () => {
           'App=Safari',
           'Window: "Second window", App: com.apple.finder.',
         ],
-      })
+      }),
     ).toEqual({
       actionKey: 'click',
       actionLabel: 'Clicked',
@@ -118,7 +120,7 @@ describe('computerUseTrace', () => {
       parseComputerUseTraceEntry({
         title: 'Called tool `computer-use / click`',
         details: ['Window: ""', 'App=com.example.'],
-      })
+      }),
     ).toMatchObject({ appName: 'Example', windowTitle: null });
   });
 });

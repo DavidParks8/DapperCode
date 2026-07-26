@@ -5,7 +5,11 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '../../a
 import { formatRelativeTime, formatStatusCode } from './gitScreenUtils';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 
-export function GitScreenCommitHistorySection({ controller, styles, theme }: GitSectionCommonProps) {
+export function GitScreenCommitHistorySection({
+  controller,
+  styles,
+  theme,
+}: GitSectionCommonProps) {
   const { derived } = controller;
 
   return (
@@ -17,7 +21,9 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
               <View style={styles.reviewIconWrap}>
                 <Ionicons
                   {...decorativeAccessibilityProps}
-                  name={derived.hasStagedFiles ? 'checkmark-done-circle-outline' : 'git-compare-outline'}
+                  name={
+                    derived.hasStagedFiles ? 'checkmark-done-circle-outline' : 'git-compare-outline'
+                  }
                   size={18}
                   color={theme.colors.textPrimary}
                 />
@@ -34,11 +40,15 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
               </View>
               <View style={styles.reviewStat}>
                 <Text style={styles.reviewStatLabel}>Added</Text>
-                <Text style={[styles.reviewStatValue, styles.fileAdded]}>+{derived.parsedDiff.totalAdditions}</Text>
+                <Text style={[styles.reviewStatValue, styles.fileAdded]}>
+                  +{derived.parsedDiff.totalAdditions}
+                </Text>
               </View>
               <View style={styles.reviewStat}>
                 <Text style={styles.reviewStatLabel}>Removed</Text>
-                <Text style={[styles.reviewStatValue, styles.fileRemoved]}>-{derived.parsedDiff.totalDeletions}</Text>
+                <Text style={[styles.reviewStatValue, styles.fileRemoved]}>
+                  -{derived.parsedDiff.totalDeletions}
+                </Text>
               </View>
             </View>
             {derived.reviewHighlights.length > 0 ? (
@@ -150,8 +160,17 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
               busy: controller.committing,
             })}
           >
-            <Text style={[styles.actionBtnText, derived.commitButtonDisabled && styles.actionBtnTextDisabled]}>
-              {controller.committing ? 'Committing...' : derived.hasStagedFiles ? 'Commit' : 'Stage files first'}
+            <Text
+              style={[
+                styles.actionBtnText,
+                derived.commitButtonDisabled && styles.actionBtnTextDisabled,
+              ]}
+            >
+              {controller.committing
+                ? 'Committing...'
+                : derived.hasStagedFiles
+                  ? 'Commit'
+                  : 'Stage files first'}
             </Text>
           </Pressable>
         </>
@@ -173,7 +192,12 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
             busy: controller.pushing,
           })}
         >
-          <Text style={[styles.actionBtnText, derived.pushButtonDisabled && styles.actionBtnTextDisabled]}>
+          <Text
+            style={[
+              styles.actionBtnText,
+              derived.pushButtonDisabled && styles.actionBtnTextDisabled,
+            ]}
+          >
             {derived.pushButtonLabel}
           </Text>
         </Pressable>
@@ -188,7 +212,10 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
             {controller.history.map((commit, index) => (
               <View
                 key={commit.hash}
-                style={[styles.historyEntry, index < controller.history.length - 1 && styles.historyEntryBorder]}
+                style={[
+                  styles.historyEntry,
+                  index < controller.history.length - 1 && styles.historyEntryBorder,
+                ]}
               >
                 <View style={styles.historyEntryHeader}>
                   <Text style={styles.historyEntrySubject}>{commit.subject}</Text>
@@ -208,7 +235,9 @@ export function GitScreenCommitHistorySection({ controller, styles, theme }: Git
                         key={`${commit.hash}:${refName}`}
                         style={[
                           styles.historyRefChip,
-                          commit.isHead && (refName === 'HEAD' || refName.startsWith('HEAD ->')) && styles.historyRefChipHead,
+                          commit.isHead &&
+                            (refName === 'HEAD' || refName.startsWith('HEAD ->')) &&
+                            styles.historyRefChipHead,
                         ]}
                       >
                         <Text style={styles.historyRefChipText}>{refName}</Text>

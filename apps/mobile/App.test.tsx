@@ -71,10 +71,13 @@ jest.mock('react-native-gesture-handler', () => {
   const createGesture = () => {
     const callbacks: Record<string, (...args: unknown[]) => unknown> = {};
     const gesture = new Proxy(callbacks, {
-      get: (target, property: string) => (...args: unknown[]) => {
-        if (property.startsWith('on') && typeof args[0] === 'function') target[property] = args[0] as (...args: unknown[]) => unknown;
-        return gesture;
-      },
+      get:
+        (target, property: string) =>
+        (...args: unknown[]) => {
+          if (property.startsWith('on') && typeof args[0] === 'function')
+            target[property] = args[0] as (...args: unknown[]) => unknown;
+          return gesture;
+        },
     });
     mockGestures.push(callbacks);
     return gesture;
@@ -119,14 +122,23 @@ jest.mock('./src/api/client', () => ({
     }
   },
 }));
-jest.mock('./src/appWebSocketLifecycle', () => ({ bindAppWebSocketLifecycle: jest.fn().mockReturnValue(jest.fn()) }));
+jest.mock('./src/appWebSocketLifecycle', () => ({
+  bindAppWebSocketLifecycle: jest.fn().mockReturnValue(jest.fn()),
+}));
 jest.mock('./src/chatSnapshotCache', () => ({
-  createEmptyChatSnapshotCache: (profileId: string) => ({ version: 1, profileId, selectedChatId: null, entries: [] }),
+  createEmptyChatSnapshotCache: (profileId: string) => ({
+    version: 1,
+    profileId,
+    selectedChatId: null,
+    entries: [],
+  }),
   deleteChatSnapshotCache: (...args: unknown[]) => mockDeleteChatSnapshotCache(...args),
   loadChatSnapshotCache: (...args: unknown[]) => mockLoadChatSnapshotCache(...args),
   saveChatSnapshotCache: (...args: unknown[]) => mockSaveChatSnapshotCache(...args),
   updateChatSnapshotCache: (cache: unknown, selectedChatId: string | null, chat: unknown) => ({
-    ...(cache as object), selectedChatId, entries: chat ? [{ chat }] : [],
+    ...(cache as object),
+    selectedChatId,
+    entries: chat ? [{ chat }] : [],
   }),
 }));
 jest.mock('./src/pushNotifications', () => ({
@@ -136,7 +148,8 @@ jest.mock('./src/pushNotifications', () => ({
     mockNotificationResponseListeners.push(listener);
     return { remove: jest.fn() };
   }),
-  getInitialNotificationResponse: (...args: unknown[]) => mockGetInitialNotificationResponse(...args),
+  getInitialNotificationResponse: (...args: unknown[]) =>
+    mockGetInitialNotificationResponse(...args),
 }));
 jest.mock('./src/pushController', () => ({
   syncPushRegistration: (...args: unknown[]) => mockSyncPushRegistration(...args),
@@ -155,7 +168,10 @@ jest.mock('./src/pushResponseController', () => ({
 }));
 jest.mock('./src/storeReview', () => ({
   AUTO_STORE_REVIEW_THRESHOLD_MS: 600_000,
-  createDefaultAutoStoreReviewState: () => ({ accumulatedForegroundMs: 0, automaticRequestAt: null }),
+  createDefaultAutoStoreReviewState: () => ({
+    accumulatedForegroundMs: 0,
+    automaticRequestAt: null,
+  }),
   isAutoStoreReviewEligible: (...args: unknown[]) => mockIsAutoStoreReviewEligible(...args),
   loadAutoStoreReviewState: (...args: unknown[]) => mockLoadAutoStoreReviewState(...args),
   requestNativeStoreReview: (...args: unknown[]) => mockRequestNativeStoreReview(...args),
@@ -189,7 +205,8 @@ jest.mock('./src/screens/main/MainScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
   const jotai = require('jotai') as typeof import('jotai');
-  const { mainScreenCommandsAtom } = require('./src/state/commands') as typeof import('./src/state/commands');
+  const { mainScreenCommandsAtom } =
+    require('./src/state/commands') as typeof import('./src/state/commands');
   return {
     MainScreen: function MockMainScreen(props: Record<string, unknown>) {
       mockScreenProps.MainScreen = props;
@@ -206,7 +223,8 @@ jest.mock('./src/screens/browser/BrowserScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
   const jotai = require('jotai') as typeof import('jotai');
-  const { browserScreenCommandsAtom } = require('./src/state/commands') as typeof import('./src/state/commands');
+  const { browserScreenCommandsAtom } =
+    require('./src/state/commands') as typeof import('./src/state/commands');
   return {
     BrowserScreen: function MockBrowserScreen(props: Record<string, unknown>) {
       mockScreenProps.BrowserScreen = props;
@@ -294,14 +312,16 @@ const profile = {
   updatedAt: '2026-07-20T00:00:00.000Z',
 };
 
-function snapshot(options: {
-  loaded?: boolean;
-  profiles?: typeof profile[];
-  activeProfileId?: string | null;
-  persistenceError?: AppStateSnapshot['persistenceError'];
-  settings?: Partial<AppStateSnapshot['data']['settings']>;
-  registrations?: AppStateSnapshot['data']['push']['registrations'];
-} = {}): AppStateSnapshot {
+function snapshot(
+  options: {
+    loaded?: boolean;
+    profiles?: (typeof profile)[];
+    activeProfileId?: string | null;
+    persistenceError?: AppStateSnapshot['persistenceError'];
+    settings?: Partial<AppStateSnapshot['data']['settings']>;
+    registrations?: AppStateSnapshot['data']['push']['registrations'];
+  } = {},
+): AppStateSnapshot {
   return {
     loaded: options.loaded ?? true,
     persistenceError: options.persistenceError ?? null,
@@ -319,7 +339,8 @@ function snapshot(options: {
         ...options.settings,
       },
       bridgeProfiles: {
-        activeProfileId: options.activeProfileId === undefined ? profile.id : options.activeProfileId,
+        activeProfileId:
+          options.activeProfileId === undefined ? profile.id : options.activeProfileId,
         profiles: options.profiles ?? [profile],
       },
       push: {
@@ -334,18 +355,20 @@ function snapshot(options: {
 let store: AppStore;
 
 async function renderApp(): Promise<ReactTestRenderer> {
-  store = createAppStore({ persistence: {
-    readCurrent: () => Promise.resolve(null),
-    writeCurrent: () => Promise.resolve(),
-    readLegacy: () => Promise.resolve({ settingsRaw: null, bridgeProfilesRaw: null }),
-  } });
+  store = createAppStore({
+    persistence: {
+      readCurrent: () => Promise.resolve(null),
+      writeCurrent: () => Promise.resolve(),
+      readLegacy: () => Promise.resolve({ settingsRaw: null, bridgeProfilesRaw: null }),
+    },
+  });
   store.set(appStateSnapshotAtom, mockSnapshot);
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       <AppStateProvider store={store}>
         <AppRoot />
-      </AppStateProvider>
+      </AppStateProvider>,
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -394,13 +417,19 @@ describe('App orchestration', () => {
     mockNotificationResponseListeners.length = 0;
     mockGestures.length = 0;
     jest.clearAllMocks();
-    jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1 });
+    jest
+      .spyOn(require('react-native'), 'useWindowDimensions')
+      .mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1 });
     jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, callback) => {
       mockBackHandler = callback;
       return { remove: jest.fn() };
     });
     previousAppState = AppState.currentState;
-    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active', writable: true });
+    Object.defineProperty(AppState, 'currentState', {
+      configurable: true,
+      value: 'active',
+      writable: true,
+    });
     jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
       mockAppStateListeners.push(listener);
       return {
@@ -413,7 +442,11 @@ describe('App orchestration', () => {
   });
 
   afterEach(() => {
-    Object.defineProperty(AppState, 'currentState', { configurable: true, value: previousAppState, writable: true });
+    Object.defineProperty(AppState, 'currentState', {
+      configurable: true,
+      value: previousAppState,
+      writable: true,
+    });
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -421,17 +454,32 @@ describe('App orchestration', () => {
   it('renders state loading and persistence recovery branches', async () => {
     mockSnapshot = snapshot({ loaded: false });
     const loading = await renderApp();
-    expect((loading.root as Queryable).findAll((node) => node.props.accessibilityLabel === 'Loading DapperCode').length).toBeGreaterThan(0);
+    expect(
+      (loading.root as Queryable).findAll(
+        (node) => node.props.accessibilityLabel === 'Loading DapperCode',
+      ).length,
+    ).toBeGreaterThan(0);
     act(() => loading.unmount());
 
     mockSnapshot = snapshot({
-      persistenceError: new AppStatePersistenceError('read_failed', 'load', 'secure storage unavailable'),
+      persistenceError: new AppStatePersistenceError(
+        'read_failed',
+        'load',
+        'secure storage unavailable',
+      ),
     });
     const recovery = await renderApp();
-    expect((recovery.root as Queryable).findAll((node) => node.children.includes('secure storage unavailable'))).toHaveLength(1);
-    const retryText = (recovery.root as Queryable).findAll((node) => node.children.includes('Retry'))[0];
+    expect(
+      (recovery.root as Queryable).findAll((node) =>
+        node.children.includes('secure storage unavailable'),
+      ),
+    ).toHaveLength(1);
+    const retryText = (recovery.root as Queryable).findAll((node) =>
+      node.children.includes('Retry'),
+    )[0];
     let retry = retryText as Queryable | null;
-    while (retry && typeof retry.props.onPress !== 'function') retry = retry.parent as Queryable | null;
+    while (retry && typeof retry.props.onPress !== 'function')
+      retry = retry.parent as Queryable | null;
     await act(async () => (retry?.props.onPress as () => Promise<void>)());
     expect(mockStore.retryPersistence).toHaveBeenCalled();
     act(() => recovery.unmount());
@@ -439,12 +487,20 @@ describe('App orchestration', () => {
 
   it('restores the selected cached chat and persists subsequent context', async () => {
     const cachedChat = {
-      id: 'cached', title: 'Cached', status: 'complete', createdAt: '2026-07-20T00:00:00.000Z',
-      updatedAt: '2026-07-20T00:00:00.000Z', statusUpdatedAt: '2026-07-20T00:00:00.000Z',
-      lastMessagePreview: 'ready', messages: [{ id: 'message-1', role: 'assistant', content: 'ready' }],
+      id: 'cached',
+      title: 'Cached',
+      status: 'complete',
+      createdAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+      lastMessagePreview: 'ready',
+      messages: [{ id: 'message-1', role: 'assistant', content: 'ready' }],
     };
     mockLoadChatSnapshotCache.mockResolvedValueOnce({
-      version: 1, profileId: profile.id, selectedChatId: cachedChat.id, entries: [{ chat: cachedChat }],
+      version: 1,
+      profileId: profile.id,
+      selectedChatId: cachedChat.id,
+      entries: [{ chat: cachedChat }],
     });
     const tree = await renderApp();
     expect(store.get(pendingMainChatIdAtom)).toBe(cachedChat.id);
@@ -456,20 +512,32 @@ describe('App orchestration', () => {
     });
     await dispatch((s) => s.set(chatContextChangedAtom, cachedChat as unknown as Chat));
     await flushTimers(250);
-    expect(mockSaveChatSnapshotCache).toHaveBeenCalledWith(expect.objectContaining({ selectedChatId: cachedChat.id }));
+    expect(mockSaveChatSnapshotCache).toHaveBeenCalledWith(
+      expect.objectContaining({ selectedChatId: cachedChat.id }),
+    );
     act(() => tree.unmount());
   });
 
   it('uses profile and environment tokens in client options', async () => {
     const withProfileToken = await renderApp();
-    expect(mockWsInstances[0].mockOptions).toEqual({ authToken: 'profile-token', allowQueryTokenAuth: false });
-    expect(mockApiInstances[0].mockOptions).toEqual(expect.objectContaining({ authToken: 'profile-token', bridgeUrl: profile.bridgeUrl }));
+    expect(mockWsInstances[0].mockOptions).toEqual({
+      authToken: 'profile-token',
+      allowQueryTokenAuth: false,
+    });
+    expect(mockApiInstances[0].mockOptions).toEqual(
+      expect.objectContaining({ authToken: 'profile-token', bridgeUrl: profile.bridgeUrl }),
+    );
     act(() => withProfileToken.unmount());
 
     mockSnapshot = snapshot({ profiles: [{ ...profile, bridgeToken: null as unknown as string }] });
     const withEnvironmentToken = await renderApp();
-    expect(mockWsInstances.at(-1)?.mockOptions).toEqual({ authToken: 'env-token', allowQueryTokenAuth: false });
-    expect(mockApiInstances.at(-1)?.mockOptions).toEqual(expect.objectContaining({ authToken: 'env-token' }));
+    expect(mockWsInstances.at(-1)?.mockOptions).toEqual({
+      authToken: 'env-token',
+      allowQueryTokenAuth: false,
+    });
+    expect(mockApiInstances.at(-1)?.mockOptions).toEqual(
+      expect.objectContaining({ authToken: 'env-token' }),
+    );
     act(() => withEnvironmentToken.unmount());
   });
 
@@ -510,22 +578,46 @@ describe('App orchestration', () => {
 
   it('routes no-profile state to initial onboarding and saves normalized credentials', async () => {
     mockSnapshot = snapshot({ profiles: [], activeProfileId: null });
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
     const tree = await renderApp();
     expect(mockScreenProps.OnboardingScreen?.mode).toBe('initial');
     expect(mockScreenProps.OnboardingScreen?.initialBridgeUrl).toBe('http://legacy:3001');
-    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: ' http://127.0.0.1:3001 ', bridgeToken: ' token ' }))).resolves.toBeUndefined();
-    expect(mockStore.dispatchDurable).toHaveBeenCalledWith(expect.objectContaining({ type: 'profiles/save' }));
+    await expect(
+      dispatch((s) =>
+        s.set(saveBridgeProfileAtom, {
+          bridgeUrl: ' http://127.0.0.1:3001 ',
+          bridgeToken: ' token ',
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(mockStore.dispatchDurable).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'profiles/save' }),
+    );
     act(() => tree.unmount());
   });
 
   it('rejects incomplete onboarding credentials and adds a profile', async () => {
     mockSnapshot = snapshot({ profiles: [], activeProfileId: null });
     const tree = await renderApp();
-    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: '', bridgeToken: 'token' }))).rejects.toThrow('required');
-    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: ' ' }))).rejects.toThrow('required');
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
+    await expect(
+      dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: '', bridgeToken: 'token' })),
+    ).rejects.toThrow('required');
+    await expect(
+      dispatch((s) =>
+        s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: ' ' }),
+      ),
+    ).rejects.toThrow('required');
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
+    await dispatch((s) =>
+      s.set(saveBridgeProfileAtom, {
+        bridgeUrl: profile.bridgeUrl,
+        bridgeToken: profile.bridgeToken,
+      }),
+    );
     expect(mockLoadChatSnapshotCache).toHaveBeenCalledWith(profile.id);
     expect(store.get(currentScreenAtom)).toBe('Main');
     act(() => tree.unmount());
@@ -536,46 +628,94 @@ describe('App orchestration', () => {
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
     await dispatch((s) => s.set(addBridgeProfileAtom));
     expect(store.get(onboardingModeAtom)).toBe('add');
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
+    await dispatch((s) =>
+      s.set(saveBridgeProfileAtom, {
+        bridgeUrl: profile.bridgeUrl,
+        bridgeToken: profile.bridgeToken,
+      }),
+    );
 
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
     await dispatch((s) => s.set(editBridgeProfileAtom));
     expect(store.get(onboardingModeAtom)).toBe('edit');
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: 'http://changed:3001', bridgeToken: 'changed-token' }));
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
+    await dispatch((s) =>
+      s.set(saveBridgeProfileAtom, {
+        bridgeUrl: 'http://changed:3001',
+        bridgeToken: 'changed-token',
+      }),
+    );
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(profile.id);
 
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
     await dispatch((s) => s.set(editBridgeProfileAtom));
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
+    await dispatch((s) =>
+      s.set(saveBridgeProfileAtom, {
+        bridgeUrl: profile.bridgeUrl,
+        bridgeToken: profile.bridgeToken,
+      }),
+    );
     expect(mockLoadChatSnapshotCache).toHaveBeenCalledWith(profile.id);
     act(() => tree.unmount());
   });
 
   it('switches, renames, deletes, and clears bridge profiles', async () => {
-    const secondProfile = { ...profile, id: 'profile-2', name: 'Remote bridge', bridgeUrl: 'https://bridge.example' };
+    const secondProfile = {
+      ...profile,
+      id: 'profile-2',
+      name: 'Remote bridge',
+      bridgeUrl: 'https://bridge.example',
+    };
     const switchedChat = {
-      id: 'switched', title: 'Switched', status: 'complete', createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt, statusUpdatedAt: profile.updatedAt, lastMessagePreview: '', messages: [],
+      id: 'switched',
+      title: 'Switched',
+      status: 'complete',
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+      statusUpdatedAt: profile.updatedAt,
+      lastMessagePreview: '',
+      messages: [],
     };
     mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
     const tree = await renderApp();
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
     mockLoadChatSnapshotCache.mockResolvedValueOnce({
-      version: 1, profileId: secondProfile.id, selectedChatId: switchedChat.id, entries: [{ chat: switchedChat }],
+      version: 1,
+      profileId: secondProfile.id,
+      selectedChatId: switchedChat.id,
+      entries: [{ chat: switchedChat }],
     });
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] },
+    });
     await dispatch((s) => s.set(switchBridgeProfileAtom, secondProfile.id));
-    expect(mockStore.dispatchDurable).toHaveBeenCalledWith({ type: 'profiles/switch', profileId: secondProfile.id });
+    expect(mockStore.dispatchDurable).toHaveBeenCalledWith({
+      type: 'profiles/switch',
+      profileId: secondProfile.id,
+    });
     await dispatch((s) => s.set(renameBridgeProfileAtom, secondProfile.id, 'Renamed'));
-    expect(mockStore.dispatchDurable).toHaveBeenCalledWith({ type: 'profiles/rename', profileId: secondProfile.id, name: 'Renamed' });
+    expect(mockStore.dispatchDurable).toHaveBeenCalledWith({
+      type: 'profiles/rename',
+      profileId: secondProfile.id,
+      name: 'Renamed',
+    });
 
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] },
+    });
     await dispatch((s) => s.set(deleteBridgeProfileAtom, secondProfile.id));
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(secondProfile.id);
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: null, profiles: [] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: null, profiles: [] },
+    });
     await dispatch((s) => s.set(deleteBridgeProfileAtom, profile.id));
     expect(mockScreenProps.OnboardingScreen?.mode).toBe('initial');
     act(() => tree.unmount());
@@ -583,7 +723,9 @@ describe('App orchestration', () => {
     mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
     const clearTree = await renderApp();
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: null, profiles: [] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: null, profiles: [] },
+    });
     await dispatch((s) => s.set(clearSavedBridgesAtom));
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(profile.id);
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(secondProfile.id);
@@ -617,8 +759,13 @@ describe('App orchestration', () => {
 
   it('selects current, empty, and hydrated chats through the drawer', async () => {
     const hydrated = {
-      id: 'hydrated', title: 'Hydrated', status: 'complete', createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt, statusUpdatedAt: profile.updatedAt, lastMessagePreview: 'hello',
+      id: 'hydrated',
+      title: 'Hydrated',
+      status: 'complete',
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+      statusUpdatedAt: profile.updatedAt,
+      lastMessagePreview: 'hello',
       messages: [{ id: 'm1', role: 'assistant', content: 'hello' }],
     };
     const tree = await renderApp();
@@ -632,7 +779,9 @@ describe('App orchestration', () => {
     await dispatch((s) => s.set(mainOpeningChatIdAtom, null));
     await dispatch((s) => s.set(chatContextChangedAtom, null as unknown as Chat));
     await dispatch((s) => s.set(rememberThreadSettingsAtom, 'codex', 'plan'));
-    expect(mockStore.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/remember-thread' }));
+    expect(mockStore.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'settings/remember-thread' }),
+    );
     act(() => tree.unmount());
   });
 
@@ -682,7 +831,9 @@ describe('App orchestration', () => {
   });
 
   it('toggles the tablet sidebar and suppresses phone drawer animation', async () => {
-    jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ width: 800, height: 1024, scale: 2, fontScale: 1 });
+    jest
+      .spyOn(require('react-native'), 'useWindowDimensions')
+      .mockReturnValue({ width: 800, height: 1024, scale: 2, fontScale: 1 });
     const tree = await renderApp();
     expect(mockScreenProps.DrawerContent?.active).toBe(true);
     await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
@@ -694,9 +845,14 @@ describe('App orchestration', () => {
   it('opens Git, returns to chat, updates settings, and enters recovery onboarding', async () => {
     const tree = await renderApp();
     const chat = {
-      id: 'thread-1', title: 'Thread', status: 'complete', createdAt: '2026-07-20T00:00:00.000Z',
-      updatedAt: '2026-07-20T00:00:00.000Z', statusUpdatedAt: '2026-07-20T00:00:00.000Z',
-      lastMessagePreview: '', messages: [],
+      id: 'thread-1',
+      title: 'Thread',
+      status: 'complete',
+      createdAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+      lastMessagePreview: '',
+      messages: [],
     };
     await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
     expect(store.get(gitChatAtom)).toEqual(chat);
@@ -707,7 +863,9 @@ describe('App orchestration', () => {
     });
     expect(store.get(pendingMainChatIdAtom)).toBe(chat.id);
     await dispatch((s) => s.set(defaultStartCwdAtom, '/workspace'));
-    expect(mockStore.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/update' }));
+    expect(mockStore.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'settings/update' }),
+    );
     await dispatch((s) => s.set(openBridgeRecoveryGuideAtom));
     expect(store.get(onboardingModeAtom)).toBe('reconnect');
     expect(store.get(activeBridgeProfileAtom)).not.toBeNull();
@@ -739,8 +897,14 @@ describe('App orchestration', () => {
     act(() => expect(mockBackHandler?.()).toBe(true));
 
     const chat = {
-      id: 'git-back', title: 'Git', status: 'complete', createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt, statusUpdatedAt: profile.updatedAt, lastMessagePreview: '', messages: [],
+      id: 'git-back',
+      title: 'Git',
+      status: 'complete',
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+      statusUpdatedAt: profile.updatedAt,
+      lastMessagePreview: '',
+      messages: [],
     };
     await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
     act(() => expect(mockBackHandler?.()).toBe(true));
@@ -791,9 +955,12 @@ describe('App orchestration', () => {
     const now = new Date('2026-07-20T12:00:00.000Z');
     jest.setSystemTime(now);
     const tree = await renderApp();
-    expect(mockPushControllers[0].setProfile).toHaveBeenCalledWith(expect.objectContaining({
-      profileId: profile.id, registrationId: 'registration-1',
-    }));
+    expect(mockPushControllers[0].setProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: profile.id,
+        registrationId: 'registration-1',
+      }),
+    );
     expect(mockSyncPushRegistration).toHaveBeenCalledWith(expect.anything(), store, profile.id);
     await act(async () => {
       mockWsStatusListeners.forEach((listener) => listener(false));
@@ -801,7 +968,7 @@ describe('App orchestration', () => {
       await Promise.resolve();
     });
     await flushTimers();
-    expect((mockApiInstances[0].primeChats as jest.Mock)).toHaveBeenCalled();
+    expect(mockApiInstances[0].primeChats as jest.Mock).toHaveBeenCalled();
     await act(async () => {
       mockPushControllers[0].navigate({ target: { threadId: 'push-thread' } });
       await Promise.resolve();
@@ -822,9 +989,13 @@ describe('App orchestration', () => {
   });
 
   it('handles push retries, prefetch failures, and notifications without threads', async () => {
-    mockSyncPushRegistration.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(undefined);
+    mockSyncPushRegistration
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(undefined);
     const tree = await renderApp();
-    (mockApiInstances[0].primeChats as jest.Mock).mockRejectedValueOnce(new Error('prefetch failed'));
+    (mockApiInstances[0].primeChats as jest.Mock).mockRejectedValueOnce(
+      new Error('prefetch failed'),
+    );
     await act(async () => {
       mockPushControllers[0].navigate({ target: {} });
       mockWsStatusListeners.forEach((listener) => listener(false));
@@ -856,12 +1027,19 @@ describe('App orchestration', () => {
     const tree = await renderApp();
     await dispatch((s) => s.set(navigateAtom, 'Settings'));
     mockLoadChatSnapshotCache.mockResolvedValueOnce({
-      version: 1, profileId: secondProfile.id, selectedChatId: 'missing', entries: [],
+      version: 1,
+      profileId: secondProfile.id,
+      selectedChatId: 'missing',
+      entries: [],
     });
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] },
+    });
     await dispatch((s) => s.set(switchBridgeProfileAtom, secondProfile.id));
     mockLoadChatSnapshotCache.mockResolvedValueOnce(null);
-    mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [secondProfile] } });
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [secondProfile] },
+    });
     await dispatch((s) => s.set(deleteBridgeProfileAtom, profile.id));
     expect(store.get(bridgeProfilesAtom)).toHaveLength(2);
     act(() => tree.unmount());
@@ -869,7 +1047,10 @@ describe('App orchestration', () => {
 
   it('handles initial push responses and automatic review success, decline, and failure', async () => {
     mockGetInitialNotificationResponse.mockResolvedValueOnce({ notification: 'cold-start' });
-    mockLoadAutoStoreReviewState.mockResolvedValueOnce({ accumulatedForegroundMs: 600_000, automaticRequestAt: null });
+    mockLoadAutoStoreReviewState.mockResolvedValueOnce({
+      accumulatedForegroundMs: 600_000,
+      automaticRequestAt: null,
+    });
     mockIsAutoStoreReviewEligible.mockReturnValue(true);
     mockRequestNativeStoreReview.mockResolvedValueOnce(true);
     const success = await renderApp();
@@ -878,10 +1059,15 @@ describe('App orchestration', () => {
     await settleEffects();
     expect(mockPushControllers[0].handle).toHaveBeenCalledWith({ notification: 'cold-start' });
     expect(mockRequestNativeStoreReview).toHaveBeenCalled();
-    expect(mockSaveAutoStoreReviewState).toHaveBeenCalledWith(expect.objectContaining({ automaticRequestAt: expect.any(String) }));
+    expect(mockSaveAutoStoreReviewState).toHaveBeenCalledWith(
+      expect.objectContaining({ automaticRequestAt: expect.any(String) }),
+    );
     act(() => success.unmount());
 
-    mockLoadAutoStoreReviewState.mockResolvedValueOnce({ accumulatedForegroundMs: 600_000, automaticRequestAt: null });
+    mockLoadAutoStoreReviewState.mockResolvedValueOnce({
+      accumulatedForegroundMs: 600_000,
+      automaticRequestAt: null,
+    });
     mockRequestNativeStoreReview.mockResolvedValueOnce(false);
     const declined = await renderApp();
     await settleEffects();
@@ -891,7 +1077,10 @@ describe('App orchestration', () => {
     act(() => declined.unmount());
 
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    mockLoadAutoStoreReviewState.mockResolvedValueOnce({ accumulatedForegroundMs: 600_000, automaticRequestAt: null });
+    mockLoadAutoStoreReviewState.mockResolvedValueOnce({
+      accumulatedForegroundMs: 600_000,
+      automaticRequestAt: null,
+    });
     mockRequestNativeStoreReview.mockRejectedValueOnce('native failure');
     const failed = await renderApp();
     await settleEffects();

@@ -11,26 +11,19 @@ interface ToolBlockProps {
   icon?: keyof typeof Ionicons.glyphMap;
 }
 
-export function ToolBlock({
-  command,
-  status,
-  icon = 'terminal-outline',
-}: ToolBlockProps) {
+export function ToolBlock({ command, status, icon = 'terminal-outline' }: ToolBlockProps) {
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const statusIcon: keyof typeof Ionicons.glyphMap | null =
-    status === 'running'
-      ? null
-      : status === 'complete'
-        ? 'checkmark'
-        : 'close';
+    status === 'running' ? null : status === 'complete' ? 'checkmark' : 'close';
 
-  const statusColor = status === 'running'
-    ? colors.statusRunning
-    : status === 'complete'
-      ? colors.statusComplete
-      : colors.statusError;
+  const statusColor =
+    status === 'running'
+      ? colors.statusRunning
+      : status === 'complete'
+        ? colors.statusComplete
+        : colors.statusError;
   const [contentWidth, setContentWidth] = useState(0);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [offsetX, setOffsetX] = useState(0);

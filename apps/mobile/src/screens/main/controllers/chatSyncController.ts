@@ -23,13 +23,12 @@ export interface ChatSyncAssessment {
 export function assessChatSync(
   previous: Chat | null,
   latest: Chat,
-  watchdogActive: boolean
+  watchdogActive: boolean,
 ): ChatSyncAssessment {
   const terminal = latest.status === 'complete' || latest.status === 'error';
   const assistantProgress = !terminal && didAssistantMessageProgress(previous, latest);
   const pendingUserMessage = !terminal && hasRecentUnansweredUserTurn(latest);
-  const runningFromChat =
-    isChatLikelyRunning(latest) || assistantProgress || pendingUserMessage;
+  const runningFromChat = isChatLikelyRunning(latest) || assistantProgress || pendingUserMessage;
   return {
     terminal,
     shouldShowRunning: runningFromChat || (!terminal && watchdogActive),
@@ -109,11 +108,7 @@ export function useChatSynchronization({
         const callbacks = callbacksRef.current;
         callbacks.onSnapshot(
           latest,
-          assessChatSync(
-            callbacks.getPrevious(),
-            latest,
-            callbacks.isWatchdogActive()
-          )
+          assessChatSync(callbacks.getPrevious(), latest, callbacks.isWatchdogActive()),
         );
       } catch {
         // Polling is best effort; keep the current projection on failure.
@@ -123,9 +118,12 @@ export function useChatSynchronization({
     const schedule = () => {
       if (stopped) return;
       const callbacks = callbacksRef.current;
-      timer = setTimeout(() => {
-        void sync().finally(schedule);
-      }, getChatSyncInterval(callbacks.isAppActive(), callbacks.isTurnActive()));
+      timer = setTimeout(
+        () => {
+          void sync().finally(schedule);
+        },
+        getChatSyncInterval(callbacks.isAppActive(), callbacks.isTurnActive()),
+      );
     };
 
     void sync();

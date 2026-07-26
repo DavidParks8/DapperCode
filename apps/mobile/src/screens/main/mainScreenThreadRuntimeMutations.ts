@@ -1,20 +1,25 @@
-import {
-  pendingPlanImplementationPromptsAtom
-} from '../../state/mainScreen/composer';
+import { pendingPlanImplementationPromptsAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { BridgeUiSurface, BridgeThreadQueueState } from '../../api/types';
-import { type ActivePlanState, type ThreadContextUsage, mergeThreadContextUsage, upsertBridgeUiSurfaceList, removeBridgeUiSurfaceFromList } from './mainScreenHelpers';
-import type { MainScreenRuntimeWatchdogSyncContext, MainScreenRuntimeWatchdogSyncResult } from './mainScreenRuntimeWatchdogSync';
+import {
+  type ActivePlanState,
+  type ThreadContextUsage,
+  mergeThreadContextUsage,
+  upsertBridgeUiSurfaceList,
+  removeBridgeUiSurfaceFromList,
+} from './mainScreenHelpers';
+import type {
+  MainScreenRuntimeWatchdogSyncContext,
+  MainScreenRuntimeWatchdogSyncResult,
+} from './mainScreenRuntimeWatchdogSync';
 
+export type MainScreenThreadRuntimeMutationsContext = MainScreenRuntimeWatchdogSyncContext &
+  MainScreenRuntimeWatchdogSyncResult;
 
-
-
-
-
-export type MainScreenThreadRuntimeMutationsContext = MainScreenRuntimeWatchdogSyncContext & MainScreenRuntimeWatchdogSyncResult;
-
-export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRuntimeMutationsContext) {
+export function useMainScreenThreadRuntimeMutations(
+  context: MainScreenThreadRuntimeMutationsContext,
+) {
   const {
     bumpAgentRuntimeRevision,
     rememberBridgeUiSurfaceSnapshots,
@@ -24,21 +29,17 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
   } = context;
   const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);
 
-
   const cacheThreadBridgeUiSurface = useCallback(
     (threadId: string, surface: BridgeUiSurface) => {
       upsertThreadRuntimeSnapshot(threadId, (previous) => ({
-        bridgeUiSurfaces: upsertBridgeUiSurfaceList(
-          previous.bridgeUiSurfaces ?? [],
-          surface
-        ),
+        bridgeUiSurfaces: upsertBridgeUiSurfaceList(previous.bridgeUiSurfaces ?? [], surface),
       }));
       rememberBridgeUiSurfaceSnapshots(threadId, (previous) =>
-        upsertBridgeUiSurfaceList(previous, surface)
+        upsertBridgeUiSurfaceList(previous, surface),
       );
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot],
   );
 
   const removeThreadBridgeUiSurface = useCallback(
@@ -47,15 +48,15 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
         upsertThreadRuntimeSnapshot(threadId, (previous) => ({
           bridgeUiSurfaces: removeBridgeUiSurfaceFromList(
             previous.bridgeUiSurfaces ?? [],
-            surfaceId
+            surfaceId,
           ),
         }));
         rememberBridgeUiSurfaceSnapshots(threadId, (previous) =>
-          removeBridgeUiSurfaceFromList(previous, surfaceId)
+          removeBridgeUiSurfaceFromList(previous, surfaceId),
         );
       } else {
         for (const [snapshotThreadId, snapshot] of Object.entries(
-          threadRuntimeSnapshotsRef.current
+          threadRuntimeSnapshotsRef.current,
         )) {
           if (!snapshot.bridgeUiSurfaces?.some((surface) => surface.id === surfaceId)) {
             continue;
@@ -63,17 +64,17 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
           upsertThreadRuntimeSnapshot(snapshotThreadId, (previous) => ({
             bridgeUiSurfaces: removeBridgeUiSurfaceFromList(
               previous.bridgeUiSurfaces ?? [],
-              surfaceId
+              surfaceId,
             ),
           }));
           rememberBridgeUiSurfaceSnapshots(snapshotThreadId, (previous) =>
-            removeBridgeUiSurfaceFromList(previous, surfaceId)
+            removeBridgeUiSurfaceFromList(previous, surfaceId),
           );
         }
       }
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot],
   );
 
   const replaceThreadBridgeUiSurfaces = useCallback(
@@ -84,15 +85,13 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
       rememberBridgeUiSurfaceSnapshots(threadId, () => surfaces);
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadQueueState = useCallback(
     (threadId: string, queueState: BridgeThreadQueueState | null) => {
       upsertThreadRuntimeSnapshot(threadId, () => ({
-        queuedMessages: queueState
-          ? [...queueState.pendingSteers, ...queueState.items]
-          : [],
+        queuedMessages: queueState ? [...queueState.pendingSteers, ...queueState.items] : [],
         pendingSteerMessageIds: queueState?.pendingSteers.map((item) => item.id) ?? [],
         waitingForToolCalls: queueState?.waitingForToolCalls ?? false,
         steeringInFlight: queueState?.steeringInFlight ?? false,
@@ -100,7 +99,7 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
       }));
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadTurnState = useCallback(
@@ -109,12 +108,12 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
       options: {
         activeTurnId?: string | null;
         runWatchdogUntil?: number;
-      }
+      },
     ) => {
       upsertThreadRuntimeSnapshot(threadId, () => options);
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadContextUsage = useCallback(
@@ -136,31 +135,26 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
         };
       });
     },
-    [upsertThreadRuntimeSnapshot]
+    [upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadPlan = useCallback(
     (
       threadId: string,
       nextPlan:
-        | ActivePlanState
-        | null
-        | ((previous: ActivePlanState | null) => ActivePlanState | null)
+        ActivePlanState | null | ((previous: ActivePlanState | null) => ActivePlanState | null),
     ) => {
       upsertThreadRuntimeSnapshot(threadId, (previous) => ({
         plan:
           typeof nextPlan === 'function'
-            ? (
-                nextPlan as (previous: ActivePlanState | null) => ActivePlanState | null
-              )(previous.plan ?? null)
+            ? (nextPlan as (previous: ActivePlanState | null) => ActivePlanState | null)(
+                previous.plan ?? null,
+              )
             : nextPlan,
       }));
-      rememberChatPlanSnapshot(
-        threadId,
-        threadRuntimeSnapshotsRef.current[threadId]?.plan ?? null
-      );
+      rememberChatPlanSnapshot(threadId, threadRuntimeSnapshotsRef.current[threadId]?.plan ?? null);
     },
-    [rememberChatPlanSnapshot, upsertThreadRuntimeSnapshot]
+    [rememberChatPlanSnapshot, upsertThreadRuntimeSnapshot],
   );
 
   const clearPendingPlanImplementationPrompt = useCallback((threadId: string) => {
@@ -191,4 +185,6 @@ export function useMainScreenThreadRuntimeMutations(context: MainScreenThreadRun
   };
 }
 
-export type MainScreenThreadRuntimeMutationsResult = ReturnType<typeof useMainScreenThreadRuntimeMutations>;
+export type MainScreenThreadRuntimeMutationsResult = ReturnType<
+  typeof useMainScreenThreadRuntimeMutations
+>;

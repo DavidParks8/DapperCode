@@ -1,11 +1,6 @@
-import { HostBridgeApiClientHealthAndCacheLayer } from "./HostBridgeApiClientHealthAndCacheLayer";
-import { cloneChatSummaries } from "./clientChatCloneAndRetryInternals";
-import {
-  mapChatSummary,
-  readString,
-  toRawThread,
-  toRecord,
-} from "./chatMapping";
+import { HostBridgeApiClientHealthAndCacheLayer } from './HostBridgeApiClientHealthAndCacheLayer';
+import { cloneChatSummaries } from './clientChatCloneAndRetryInternals';
+import { mapChatSummary, readString, toRawThread, toRecord } from './chatMapping';
 import {
   type AppServerListResponse,
   CHAT_LIST_SOURCE_KINDS,
@@ -16,7 +11,7 @@ import {
   THREAD_LIST_STREAM_BATCH_METHOD,
   THREAD_LIST_STREAM_ERROR_METHOD,
   type ThreadListStreamStartResponse,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 import {
   type ChatListPage,
   type ChatListResult,
@@ -34,13 +29,11 @@ import {
   normalizeCursor,
   normalizeListLimit,
   readSnapshotPageResponse,
-} from "./clientChatListInternals";
-import { type ChatSummary, type RpcNotification } from "./types";
+} from './clientChatListInternals';
+import { type ChatSummary, type RpcNotification } from './types';
 
 export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiClientHealthAndCacheLayer {
-  async listAllChats(
-    options: ListAllChatsOptions = {},
-  ): Promise<ChatListResult> {
+  async listAllChats(options: ListAllChatsOptions = {}): Promise<ChatListResult> {
     const cacheKey = this.allChatListCacheKey(options);
     const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
     const cached = this.allChatListCache.get(cacheKey);
@@ -68,9 +61,7 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     const includeSubAgents = options.includeSubAgents === true;
     const limits = normalizeChatListStreamLimits(
       options.limits,
-      includeSubAgents
-        ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT
-        : DEFAULT_CHAT_LIST_LIMIT,
+      includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT,
     );
     const streamId = `mobile-thread-list-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let closed = false;
@@ -82,9 +73,7 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
       if (event.method === THREAD_LIST_STREAM_ERROR_METHOD) {
         closed = true;
         unsubscribe();
-        onError?.(
-          new Error(readString(params.error) ?? "thread list stream failed"),
-        );
+        onError?.(new Error(readString(params.error) ?? 'thread list stream failed'));
         return;
       }
       if (event.method !== THREAD_LIST_STREAM_BATCH_METHOD) {
@@ -106,30 +95,24 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
       }
       closed = true;
       unsubscribe();
-      void this.ws
-        .request("bridge/thread/list/stream/cancel", { streamId })
-        .catch(() => {});
+      void this.ws.request('bridge/thread/list/stream/cancel', { streamId }).catch(() => {});
     };
     try {
       const response = await this.ws.request<ThreadListStreamStartResponse>(
-        "bridge/thread/list/stream/start",
+        'bridge/thread/list/stream/start',
         {
           streamId,
           includeSubAgents,
           limits,
           delayMs:
-            typeof options.delayMs === "number" &&
-            Number.isFinite(options.delayMs)
+            typeof options.delayMs === 'number' && Number.isFinite(options.delayMs)
               ? Math.max(0, Math.round(options.delayMs))
               : undefined,
         },
       );
-      if (
-        readString(response.streamId) !== streamId ||
-        response.started === false
-      ) {
+      if (readString(response.streamId) !== streamId || response.started === false) {
         cancel();
-        throw new Error("thread list stream did not start");
+        throw new Error('thread list stream did not start');
       }
     } catch (error) {
       cancel();
@@ -137,22 +120,16 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     }
     return { streamId, cancel };
   }
-  protected async fetchChats(
-    options: ListChatsOptions,
-  ): Promise<ChatSummary[]> {
+  protected async fetchChats(options: ListChatsOptions): Promise<ChatSummary[]> {
     const page = await this.fetchChatPage(options);
     this.rememberChats(page.chats, options);
     return page.chats;
   }
-  protected async fetchAllChats(
-    options: ListAllChatsOptions,
-  ): Promise<ChatListResult> {
+  protected async fetchAllChats(options: ListAllChatsOptions): Promise<ChatListResult> {
     const includeSubAgents = options.includeSubAgents === true;
     const pageLimit = normalizeListLimit(
       options.pageLimit ??
-        (includeSubAgents
-          ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT
-          : DEFAULT_CHAT_LIST_LIMIT),
+        (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT),
     );
     let cursor: string | null = null;
     let chats: ChatSummary[] = [];
@@ -162,13 +139,13 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     let pageCount = 0;
     do {
       if (pageCount >= MAX_CHAT_LIST_PAGES) {
-        diagnostics.add("Chat listing reached the 32-page safety limit.");
+        diagnostics.add('Chat listing reached the 32-page safety limit.');
         partial = true;
         break;
       }
       const requestedCursor = cursor;
       if (requestedCursor && seenCursors.has(requestedCursor)) {
-        diagnostics.add("Chat listing repeated a page cursor.");
+        diagnostics.add('Chat listing repeated a page cursor.');
         partial = true;
         break;
       }
@@ -192,7 +169,7 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
       }
       cursor = page.nextCursor;
       if (cursor && chats.length === previousCount) {
-        diagnostics.add("Chat listing made no progress on a page.");
+        diagnostics.add('Chat listing made no progress on a page.');
         partial = true;
         break;
       }
@@ -208,43 +185,31 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     });
     return result;
   }
-  protected async fetchChatPage(
-    options: ChatListPageOptions,
-  ): Promise<ChatListPage> {
+  protected async fetchChatPage(options: ChatListPageOptions): Promise<ChatListPage> {
     const includeSubAgents = options?.includeSubAgents === true;
     const limit = normalizeListLimit(
       options.limit ??
-        (includeSubAgents
-          ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT
-          : DEFAULT_CHAT_LIST_LIMIT),
+        (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT),
     );
-    const response = await this.ws.request<AppServerListResponse>(
-      "thread/list",
-      {
-        cursor: normalizeCursor(options.cursor),
-        limit,
-        sortKey: "updated_at",
-        modelProviders: null,
-        sourceKinds: includeSubAgents
-          ? CHAT_LIST_SOURCE_KINDS_WITH_SUBAGENTS
-          : CHAT_LIST_SOURCE_KINDS,
-        archived: false,
-        cwd: null,
-        agentId: options.agentId,
-      },
-    );
+    const response = await this.ws.request<AppServerListResponse>('thread/list', {
+      cursor: normalizeCursor(options.cursor),
+      limit,
+      sortKey: 'updated_at',
+      modelProviders: null,
+      sourceKinds: includeSubAgents
+        ? CHAT_LIST_SOURCE_KINDS_WITH_SUBAGENTS
+        : CHAT_LIST_SOURCE_KINDS,
+      archived: false,
+      cwd: null,
+      agentId: options.agentId,
+    });
     const listRaw = Array.isArray(response.data) ? response.data : [];
     const chats = this.mapChatListItems(listRaw, includeSubAgents);
     return {
       chats,
-      nextCursor:
-        readString(response.nextCursor) ??
-        readString(response.next_cursor) ??
-        null,
+      nextCursor: readString(response.nextCursor) ?? readString(response.next_cursor) ?? null,
       backwardsCursor:
-        readString(response.backwardsCursor) ??
-        readString(response.backwards_cursor) ??
-        null,
+        readString(response.backwardsCursor) ?? readString(response.backwards_cursor) ?? null,
       diagnostics: Array.isArray(response.diagnostics)
         ? response.diagnostics
             .map((value) => readString(value))
@@ -252,8 +217,7 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
         : [],
       partial:
         response.partial === true ||
-        (Array.isArray(response.diagnostics) &&
-          response.diagnostics.length > 0),
+        (Array.isArray(response.diagnostics) && response.diagnostics.length > 0),
     };
   }
   async readSnapshotPage(request: {
@@ -263,22 +227,16 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     revision?: number;
     limit?: number;
   }): Promise<SnapshotPageResponse> {
-    const response = await this.ws.request<Record<string, unknown>>(
-      "thread/snapshot/page",
-      {
-        threadId: request.threadId,
-        beforeCursor: request.beforeCursor ?? null,
-        afterCursor: request.afterCursor ?? null,
-        revision: request.revision,
-        limit: request.limit ?? 50,
-      },
-    );
+    const response = await this.ws.request<Record<string, unknown>>('thread/snapshot/page', {
+      threadId: request.threadId,
+      beforeCursor: request.beforeCursor ?? null,
+      afterCursor: request.afterCursor ?? null,
+      revision: request.revision,
+      limit: request.limit ?? 50,
+    });
     return readSnapshotPageResponse(response);
   }
-  protected mapChatListItems(
-    listRaw: unknown[],
-    includeSubAgents: boolean,
-  ): ChatSummary[] {
+  protected mapChatListItems(listRaw: unknown[], includeSubAgents: boolean): ChatSummary[] {
     return listRaw
       .map((item) => {
         const rawThread = toRawThread(item);

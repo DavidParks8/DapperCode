@@ -55,15 +55,15 @@ describe('chatSnapshotCache', () => {
       createEmptyChatSnapshotCache('profile-a'),
       'thread-1',
       typedChat,
-      '2026-07-17T00:00:00.000Z'
+      '2026-07-17T00:00:00.000Z',
     );
 
     expect(
       parseChatSnapshotCache(
         JSON.stringify(updated),
         'profile-a',
-        Date.parse('2026-07-18T00:00:00.000Z')
-      )
+        Date.parse('2026-07-18T00:00:00.000Z'),
+      ),
     ).toEqual(updated);
     expect(updated.entries[0]?.chat.messages[0]?.parts).toEqual(typedChat.messages[0].parts);
     expect(parseChatSnapshotCache(JSON.stringify(updated), 'profile-b').entries).toEqual([]);
@@ -71,7 +71,10 @@ describe('chatSnapshotCache', () => {
 
   it('rejects old schemas and malformed chats', () => {
     expect(
-      parseChatSnapshotCache(JSON.stringify({ version: 0, profileId: 'profile-a', entries: [] }), 'profile-a')
+      parseChatSnapshotCache(
+        JSON.stringify({ version: 0, profileId: 'profile-a', entries: [] }),
+        'profile-a',
+      ),
     ).toEqual(expect.objectContaining({ entries: [], selectedChatId: null }));
     expect(
       parseChatSnapshotCache(
@@ -80,8 +83,8 @@ describe('chatSnapshotCache', () => {
           profileId: 'profile-a',
           entries: [{ chat: { id: 'bad' }, cachedAt: 'bad', lastAccessedAt: 'bad' }],
         }),
-        'profile-a'
-      ).entries
+        'profile-a',
+      ).entries,
     ).toEqual([]);
     expect(parseChatSnapshotCache('{', 'profile-a').entries).toEqual([]);
   });
@@ -93,7 +96,7 @@ describe('chatSnapshotCache', () => {
         cache,
         index === 0 ? 'thread-0' : cache.selectedChatId,
         chat(`thread-${String(index)}`),
-        new Date(Date.UTC(2026, 6, 1, 0, index)).toISOString()
+        new Date(Date.UTC(2026, 6, 1, 0, index)).toISOString(),
       );
     }
 
@@ -106,15 +109,15 @@ describe('chatSnapshotCache', () => {
       createEmptyChatSnapshotCache('profile-a'),
       'thread-old',
       chat('thread-old'),
-      '2026-01-01T00:00:00.000Z'
+      '2026-01-01T00:00:00.000Z',
     );
 
     expect(
       parseChatSnapshotCache(
         JSON.stringify(stored),
         'profile-a',
-        Date.parse('2026-07-17T00:00:00.000Z')
-      ).entries
+        Date.parse('2026-07-17T00:00:00.000Z'),
+      ).entries,
     ).toEqual([]);
   });
 
@@ -130,18 +133,25 @@ describe('chatSnapshotCache', () => {
 
   it('normalizes metadata, selection, and malformed entries', () => {
     const valid = updateChatSnapshotCache(
-      createEmptyChatSnapshotCache('profile-a'), 'one', chat('one'), '2026-07-17T00:00:00.000Z'
+      createEmptyChatSnapshotCache('profile-a'),
+      'one',
+      chat('one'),
+      '2026-07-17T00:00:00.000Z',
     );
-    const parsed = parseChatSnapshotCache(JSON.stringify({
-      ...valid,
-      selectedChatId: 'missing',
-      updatedAt: 'invalid',
-      entries: [
-        null,
-        { chat: chat('bad-role'), cachedAt: 'bad', lastAccessedAt: 'bad' },
-        ...valid.entries,
-      ],
-    }), 'profile-a', Date.parse('2026-07-18T00:00:00.000Z'));
+    const parsed = parseChatSnapshotCache(
+      JSON.stringify({
+        ...valid,
+        selectedChatId: 'missing',
+        updatedAt: 'invalid',
+        entries: [
+          null,
+          { chat: chat('bad-role'), cachedAt: 'bad', lastAccessedAt: 'bad' },
+          ...valid.entries,
+        ],
+      }),
+      'profile-a',
+      Date.parse('2026-07-18T00:00:00.000Z'),
+    );
     expect(parsed.selectedChatId).toBeNull();
     expect(parsed.updatedAt).toBe('2026-07-18T00:00:00.000Z');
     expect(parsed.entries).toHaveLength(1);
@@ -149,7 +159,10 @@ describe('chatSnapshotCache', () => {
 
   it('updates access time without replacing an existing snapshot', () => {
     const initial = updateChatSnapshotCache(
-      createEmptyChatSnapshotCache('profile-a'), 'one', chat('one'), '2026-07-17T00:00:00.000Z'
+      createEmptyChatSnapshotCache('profile-a'),
+      'one',
+      chat('one'),
+      '2026-07-17T00:00:00.000Z',
     );
     const updated = updateChatSnapshotCache(initial, 'one', null, '2026-07-18T00:00:00.000Z');
     expect(updated.entries[0]?.lastAccessedAt).toBe('2026-07-18T00:00:00.000Z');
@@ -179,7 +192,9 @@ describe('chatSnapshotCache', () => {
       version: 1,
       profileId: 'profile-a',
       entries: invalidChats.map((value) => ({
-        chat: value, cachedAt: '2026-07-17T00:00:00.000Z', lastAccessedAt: '2026-07-17T00:00:00.000Z',
+        chat: value,
+        cachedAt: '2026-07-17T00:00:00.000Z',
+        lastAccessedAt: '2026-07-17T00:00:00.000Z',
       })),
     });
     expect(parseChatSnapshotCache(raw, 'profile-a').entries).toEqual([]);
@@ -202,9 +217,15 @@ describe('chatSnapshotCache', () => {
     const mkdir = jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
     const write = jest.spyOn(FileSystem, 'writeAsStringAsync').mockResolvedValue(undefined);
     const remove = jest.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
-    const cache = updateChatSnapshotCache(createEmptyChatSnapshotCache('profile-a'), 'one', chat('one'));
+    const cache = updateChatSnapshotCache(
+      createEmptyChatSnapshotCache('profile-a'),
+      'one',
+      chat('one'),
+    );
     read.mockResolvedValueOnce(JSON.stringify(cache));
-    await expect(loadChatSnapshotCache('profile-a')).resolves.toMatchObject({ selectedChatId: 'one' });
+    await expect(loadChatSnapshotCache('profile-a')).resolves.toMatchObject({
+      selectedChatId: 'one',
+    });
     read.mockRejectedValueOnce(new Error('missing'));
     await expect(loadChatSnapshotCache('profile-a')).resolves.toMatchObject({ entries: [] });
     await Promise.all([saveChatSnapshotCache(cache), saveChatSnapshotCache(cache)]);

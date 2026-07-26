@@ -1,11 +1,7 @@
 import React from 'react';
 import { ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { ChatHeader } from './ChatHeader';
@@ -65,7 +61,7 @@ function textContent(node: QueryableInstance): string {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label
+    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
   if (!match) throw new Error(`Missing pressable: ${label}`);
   return match;
@@ -98,7 +94,7 @@ describe('ChatHeader', () => {
         onOpenTitleMenu={onOpenTitleMenu}
         rightIconName="git-branch-outline"
         onRightActionPress={onRightActionPress}
-      />
+      />,
     );
     const root = queryRoot(tree);
     act(() => invokeProp(findPressable(root, 'Open navigation drawer'), 'onPress'));
@@ -107,7 +103,9 @@ describe('ChatHeader', () => {
     expect(onOpenDrawer).toHaveBeenCalled();
     expect(onOpenTitleMenu).toHaveBeenCalled();
     expect(onRightActionPress).toHaveBeenCalled();
-    expect(invokeStyle(findPressable(root, 'A very long chat title, chat options'), true)).toBeDefined();
+    expect(
+      invokeStyle(findPressable(root, 'A very long chat title, chat options'), true),
+    ).toBeDefined();
 
     const scroll = findType(root, ScrollView);
     act(() => {
@@ -121,7 +119,9 @@ describe('ChatHeader', () => {
     expect(root.findAll((node) => node.type === 'LinearGradient')).toHaveLength(1);
 
     act(() => {
-      tree.update(wrap(<ChatHeader onOpenDrawer={onOpenDrawer} title=" " rightIconName="search" />));
+      tree.update(
+        wrap(<ChatHeader onOpenDrawer={onOpenDrawer} title=" " rightIconName="search" />),
+      );
     });
     expect(textContent(queryRoot(tree))).toContain('New chat');
     act(() => tree.update(wrap(<ChatHeader onOpenDrawer={onOpenDrawer} title="Plain" />)));

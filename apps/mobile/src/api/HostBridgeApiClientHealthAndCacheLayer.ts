@@ -1,17 +1,14 @@
-import { HostBridgeApiClientCore } from "./HostBridgeApiClientCore";
-import {
-  DEFAULT_PREFETCH_CACHE_TTL_MS,
-  type ListAllChatsOptions,
-} from "./clientChatListInternals";
+import { HostBridgeApiClientCore } from './HostBridgeApiClientCore';
+import { DEFAULT_PREFETCH_CACHE_TTL_MS, type ListAllChatsOptions } from './clientChatListInternals';
 import {
   chatShellFromSummary,
   cloneChat,
   cloneChatSummaries,
   cloneModelOptions,
   cloneChatSummary,
-} from "./clientChatCloneAndRetryInternals";
-import { normalizeEffort, readPositiveInteger } from "./clientBridgeResponseNormalization";
-import { readString, toRecord } from "./chatMapping";
+} from './clientChatCloneAndRetryInternals';
+import { normalizeEffort, readPositiveInteger } from './clientBridgeResponseNormalization';
+import { readString, toRecord } from './chatMapping';
 import {
   type AgentId,
   type BridgeCapabilities,
@@ -20,24 +17,24 @@ import {
   type ChatSummary,
   type ModelOption,
   type ReasoningEffort,
-} from "./types";
+} from './types';
 import {
   type AppServerStartResponse,
   type HealthResponse,
   type ListChatsOptions,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 
 export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
   private static readonly MODEL_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 
   health(): Promise<HealthResponse> {
-    return this.ws.request<HealthResponse>("bridge/health/read");
+    return this.ws.request<HealthResponse>('bridge/health/read');
   }
   readBridgeStatus(): Promise<BridgeStatus> {
-    return this.ws.request<BridgeStatus>("bridge/status/read");
+    return this.ws.request<BridgeStatus>('bridge/status/read');
   }
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
-    return this.ws.request<BridgeCapabilities>("bridge/capabilities/read");
+    return this.ws.request<BridgeCapabilities>('bridge/capabilities/read');
   }
   /**
    * The bridge answers `model/list` by shelling out to the agent, which is slow enough that the
@@ -49,8 +46,7 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     const cached = this.modelListCache.get(cacheKey);
     if (
       cached &&
-      Date.now() - cached.loadedAt <
-        HostBridgeApiClientHealthAndCacheLayer.MODEL_LIST_CACHE_TTL_MS
+      Date.now() - cached.loadedAt < HostBridgeApiClientHealthAndCacheLayer.MODEL_LIST_CACHE_TTL_MS
     ) {
       return cloneModelOptions(cached.value);
     }
@@ -80,29 +76,23 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     return cached ? cloneModelOptions(cached.value) : null;
   }
   private modelListCacheKey(agentId?: AgentId | null): string {
-    return agentId ?? "";
+    return agentId ?? '';
   }
-  private async fetchModelOptions(
-    agentId?: AgentId | null,
-  ): Promise<ModelOption[]> {
-    const response = await this.ws.request<Record<string, unknown>>(
-      "model/list",
-      { agentId: agentId ?? null },
-    );
+  private async fetchModelOptions(agentId?: AgentId | null): Promise<ModelOption[]> {
+    const response = await this.ws.request<Record<string, unknown>>('model/list', {
+      agentId: agentId ?? null,
+    });
     const entries = Array.isArray(response.data) ? response.data : [];
     return entries
       .map((entry) => toRecord(entry))
       .filter((entry): entry is Record<string, unknown> => entry !== null)
       .map((entry) => {
-        const id = readString(entry.id)?.trim() ?? "";
+        const id = readString(entry.id)?.trim() ?? '';
         const displayName = readString(entry.displayName)?.trim() ?? id;
         const providerId = readString(entry.providerId)?.trim() || undefined;
-        const providerName =
-          readString(entry.providerName)?.trim() || undefined;
+        const providerName = readString(entry.providerName)?.trim() || undefined;
         const contextWindow = readPositiveInteger(entry.contextWindow);
-        const reasoningEffort = (
-          Array.isArray(entry.reasoningEffort) ? entry.reasoningEffort : []
-        )
+        const reasoningEffort = (Array.isArray(entry.reasoningEffort) ? entry.reasoningEffort : [])
           .map((value) => normalizeEffort(readString(value)))
           .filter((value): value is ReasoningEffort => value !== null)
           .map((effort) => ({ effort }));
@@ -111,10 +101,8 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
           displayName,
           providerId,
           providerName,
-          contextWindow:
-            contextWindow && contextWindow > 0 ? contextWindow : undefined,
-          reasoningEffort:
-            reasoningEffort.length > 0 ? reasoningEffort : undefined,
+          contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
+          reasoningEffort: reasoningEffort.length > 0 ? reasoningEffort : undefined,
         } satisfies ModelOption;
       })
       .filter((entry) => entry.id.length > 0);
@@ -127,14 +115,15 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     const normalizedThreadId = threadId.trim();
     const normalizedConfigId = configId.trim();
     if (!normalizedThreadId || !normalizedConfigId) {
-      throw new Error("thread and config option are required");
+      throw new Error('thread and config option are required');
     }
-    const response = await this.ws.request<AppServerStartResponse>(
-      "thread/config/set",
-      { threadId: normalizedThreadId, configId: normalizedConfigId, value },
-    );
+    const response = await this.ws.request<AppServerStartResponse>('thread/config/set', {
+      threadId: normalizedThreadId,
+      configId: normalizedConfigId,
+      value,
+    });
     if (!response.thread) {
-      throw new Error("thread/config/set did not return a chat");
+      throw new Error('thread/config/set did not return a chat');
     }
     const chat = this.mapChatWithCachedTitle(response.thread);
     this.rememberChat(chat);
@@ -144,14 +133,14 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     const normalizedThreadId = threadId.trim();
     const normalizedTitle = title.trim();
     if (!normalizedThreadId || !normalizedTitle) {
-      throw new Error("thread and title are required");
+      throw new Error('thread and title are required');
     }
-    const response = await this.ws.request<AppServerStartResponse>(
-      "thread/name/update",
-      { threadId: normalizedThreadId, title: normalizedTitle },
-    );
+    const response = await this.ws.request<AppServerStartResponse>('thread/name/update', {
+      threadId: normalizedThreadId,
+      title: normalizedTitle,
+    });
     if (!response.thread) {
-      throw new Error("thread/name/update did not return a chat");
+      throw new Error('thread/name/update did not return a chat');
     }
     const chat = this.mapChatWithCachedTitle(response.thread);
     this.renamedTitles.set(chat.id, normalizedTitle);
@@ -166,19 +155,15 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     deviceName: string;
     events: { turnCompleted: boolean; approvalRequested: boolean };
   }): Promise<{ ok: boolean; deviceCount: number }> {
-    return this.ws.request<{ ok: boolean; deviceCount: number }>(
-      "bridge/push/register",
-      input,
-    );
+    return this.ws.request<{ ok: boolean; deviceCount: number }>('bridge/push/register', input);
   }
   unregisterPushDevice(input: {
     profileId: string;
     registrationId: string;
   }): Promise<{ ok: boolean; removed: boolean }> {
-    return this.ws.request<{ ok: boolean; removed: boolean }>(
-      "bridge/push/unregister",
-      { ...input },
-    );
+    return this.ws.request<{ ok: boolean; removed: boolean }>('bridge/push/unregister', {
+      ...input,
+    });
   }
   peekChats(options: ListChatsOptions = {}): ChatSummary[] | null {
     const cached = this.chatListCache.get(this.chatListCacheKey(options));
@@ -197,10 +182,7 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     const cached = this.allChatListCache.get(this.allChatListCacheKey(options));
     return cached ? cloneChatSummaries(cached.value.chats) : null;
   }
-  rememberAllChats(
-    chats: ChatSummary[],
-    options: ListAllChatsOptions = {},
-  ): void {
+  rememberAllChats(chats: ChatSummary[], options: ListAllChatsOptions = {}): void {
     this.allChatListCache.set(this.allChatListCacheKey(options), {
       value: {
         chats: cloneChatSummaries(chats),
@@ -261,9 +243,7 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
       });
     }
     for (const [key, cachedList] of this.allChatListCache.entries()) {
-      const index = cachedList.value.chats.findIndex(
-        (entry) => entry.id === chat.id,
-      );
+      const index = cachedList.value.chats.findIndex((entry) => entry.id === chat.id);
       if (index < 0) {
         continue;
       }

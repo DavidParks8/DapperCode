@@ -1,37 +1,40 @@
 import {
   activeTurnIdAtom,
   pendingApprovalAtom,
-  pendingUserInputRequestAtom
+  pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
-import {
-  relatedAgentThreadsAtom,
-  workspaceBridgeRootAtom
-} from '../../state/mainScreen/workspace';
+import { relatedAgentThreadsAtom, workspaceBridgeRootAtom } from '../../state/mainScreen/workspace';
 import {
   activityAtom,
   heldActivityAtom,
-  showDelayedGenericRunningActivityAtom
+  showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import type { Chat } from '../../api/types';
-import { GENERIC_RUNNING_ACTIVITY_DELAY_MS, GENERIC_RUNNING_ACTIVITY_TITLES, normalizeCloneDirectoryName, joinWorkspacePath } from './mainScreenHelpers';
+import {
+  GENERIC_RUNNING_ACTIVITY_DELAY_MS,
+  GENERIC_RUNNING_ACTIVITY_TITLES,
+  normalizeCloneDirectoryName,
+  joinWorkspacePath,
+} from './mainScreenHelpers';
 import { areChatStatusMapsEquivalent } from './mainScreenChatState';
 import { resolveDisplayedActivity, resolveVisibleActivity } from './mainScreenActivityIndicator';
-import type { MainScreenUiActionHandlersContext, MainScreenUiActionHandlersResult } from './mainScreenUiActionHandlers';
+import type {
+  MainScreenUiActionHandlersContext,
+  MainScreenUiActionHandlersResult,
+} from './mainScreenUiActionHandlers';
 import {
   gitCheckoutDirectoryNameAtom,
   gitCheckoutParentPathAtom,
 } from '../../state/mainScreen/gitCheckout';
 
+export type MainScreenHeaderActivityViewModelContext = MainScreenUiActionHandlersContext &
+  MainScreenUiActionHandlersResult;
 
-
-
-
-
-export type MainScreenHeaderActivityViewModelContext = MainScreenUiActionHandlersContext & MainScreenUiActionHandlersResult;
-
-export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderActivityViewModelContext) {
+export function useMainScreenHeaderActivityViewModel(
+  context: MainScreenHeaderActivityViewModelContext,
+) {
   const {
     clearGenericRunningActivityDelay,
     genericRunningActivityTimeoutRef,
@@ -129,23 +132,20 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
       (!isGenericRunningActivity || showDelayedGenericRunningActivity)) ||
     Boolean(activityDetail);
   const headerTitle = isOpeningChat ? 'Opening chat' : selectedChat?.title?.trim() || 'New chat';
-  const defaultStartWorkspaceLabel =
-    preferredStartCwd ?? 'Select project';
+  const defaultStartWorkspaceLabel = preferredStartCwd ?? 'Select project';
   const gitCheckoutDestinationLabel =
     gitCheckoutParentPath ?? workspaceBridgeRoot ?? 'Bridge default workspace';
   const gitCheckoutTargetPath =
     gitCheckoutParentPath && normalizeCloneDirectoryName(gitCheckoutDirectoryName)
       ? joinWorkspacePath(
           gitCheckoutParentPath,
-          normalizeCloneDirectoryName(gitCheckoutDirectoryName) ?? ''
+          normalizeCloneDirectoryName(gitCheckoutDirectoryName) ?? '',
         )
       : null;
   const spawnedAgentCount = selectorAgentCount;
   const selectedChatIsSubAgent = Boolean(selectedChat?.parentThreadId);
   const showAgentThreadChip =
-    !isOpeningChat &&
-    Boolean(selectedChat) &&
-    (spawnedAgentCount > 0 || selectedChatIsSubAgent);
+    !isOpeningChat && Boolean(selectedChat) && (spawnedAgentCount > 0 || selectedChatIsSubAgent);
   const agentThreadChipLabel = selectedChatIsSubAgent
     ? spawnedAgentCount > 1
       ? `Sub-agent · ${String(spawnedAgentCount)} threads`
@@ -184,4 +184,6 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
   };
 }
 
-export type MainScreenHeaderActivityViewModelResult = ReturnType<typeof useMainScreenHeaderActivityViewModel>;
+export type MainScreenHeaderActivityViewModelResult = ReturnType<
+  typeof useMainScreenHeaderActivityViewModel
+>;

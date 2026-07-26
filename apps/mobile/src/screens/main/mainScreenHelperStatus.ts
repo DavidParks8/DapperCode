@@ -18,13 +18,16 @@ export function normalizeExternalStatusHint(value: string | null | undefined): s
     return null;
   }
 
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
   return normalized.length > 0 ? normalized : null;
 }
 
 export function extractNotificationThreadId(
   params: Record<string, unknown> | null,
-  msgArg?: Record<string, unknown> | null
+  msgArg?: Record<string, unknown> | null,
 ): string | null {
   if (!params && !msgArg) {
     return null;
@@ -40,10 +43,10 @@ export function extractNotificationThreadId(
   const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
   const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
   const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn
+    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
   );
   const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn
+    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
   );
 
   return (
@@ -80,7 +83,7 @@ export function extractNotificationThreadId(
 
 export function extractNotificationParentThreadId(
   params: Record<string, unknown> | null,
-  msgArg?: Record<string, unknown> | null
+  msgArg?: Record<string, unknown> | null,
 ): string | null {
   if (!params && !msgArg) {
     return null;
@@ -95,10 +98,10 @@ export function extractNotificationParentThreadId(
   const threadSourceRecord = toRecord(threadRecord?.source);
   const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
   const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn
+    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
   );
   const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn
+    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
   );
 
   return (
@@ -114,9 +117,7 @@ export function extractNotificationParentThreadId(
   );
 }
 
-export function extractExternalStatusHint(
-  params: Record<string, unknown> | null
-): string | null {
+export function extractExternalStatusHint(params: Record<string, unknown> | null): string | null {
   if (!params) {
     return null;
   }
@@ -139,7 +140,7 @@ export function extractExternalStatusHint(
       readString(candidateRecord?.type) ??
         readString(candidateRecord?.status) ??
         readString(candidateRecord?.state) ??
-        readString(candidateRecord?.phase)
+        readString(candidateRecord?.phase),
     );
     if (typed) {
       return typed;
@@ -157,7 +158,7 @@ export function extractExternalStatusHint(
       readString(toRecord(threadRecord.status)?.type) ??
       readString(threadRecord.state) ??
       readString(threadRecord.phase) ??
-      readString(toRecord(threadRecord.lifecycle)?.status)
+      readString(toRecord(threadRecord.lifecycle)?.status),
   );
   return nestedThreadStatus;
 }
@@ -181,7 +182,7 @@ export function isChatSummaryLikelyRunning(chat: ChatSummary): boolean {
  */
 export function isThreadOrSubAgentRunning(
   chat: Chat | null,
-  relatedAgentThreads: readonly ChatSummary[]
+  relatedAgentThreads: readonly ChatSummary[],
 ): boolean {
   if (chat && isChatLikelyRunning(chat)) {
     return true;
@@ -196,7 +197,7 @@ export function isThreadOrSubAgentRunning(
 
 function descendantsOf(
   threadId: string,
-  relatedAgentThreads: readonly ChatSummary[]
+  relatedAgentThreads: readonly ChatSummary[],
 ): ChatSummary[] {
   const byParent = new Map<string, ChatSummary[]>();
   for (const thread of relatedAgentThreads) {
@@ -309,7 +310,9 @@ export function didAssistantMessageProgress(previous: Chat | null, next: Chat): 
   }
 
   if (nextLatestAssistant.id === previousLatestAssistant.id) {
-    return getMessageText(nextLatestAssistant).length > getMessageText(previousLatestAssistant).length;
+    return (
+      getMessageText(nextLatestAssistant).length > getMessageText(previousLatestAssistant).length
+    );
   }
 
   return (
@@ -318,7 +321,9 @@ export function didAssistantMessageProgress(previous: Chat | null, next: Chat): 
   );
 }
 
-export function latestAssistantMessage(messages: ChatTranscriptMessage[]): ChatTranscriptMessage | null {
+export function latestAssistantMessage(
+  messages: ChatTranscriptMessage[],
+): ChatTranscriptMessage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role === 'assistant') {
@@ -330,7 +335,7 @@ export function latestAssistantMessage(messages: ChatTranscriptMessage[]): ChatT
 
 export function extractFirstBoldSnippet(
   value: string | null | undefined,
-  maxLength = 56
+  maxLength = 56,
 ): string | null {
   if (!value) {
     return null;
@@ -347,7 +352,7 @@ export function extractFirstBoldSnippet(
 export function toReasoningActivityDetail(
   value: string | null | undefined,
   heading: string | null | undefined,
-  maxLength = 64
+  maxLength = 64,
 ): string | undefined {
   if (!value) {
     return undefined;
@@ -457,10 +462,7 @@ export function resolveSettledActivity(chat: Chat): ActivityState {
  * a running state the header rendered "Working" on a finished thread until something else
  * happened to write it. Nothing else reports on a thread that is not running, so it never did.
  */
-export function retireOpeningChatActivity(
-  current: ActivityState,
-  chat: Chat
-): ActivityState {
+export function retireOpeningChatActivity(current: ActivityState, chat: Chat): ActivityState {
   if (current.tone !== 'running' || current.title !== OPENING_CHAT_ACTIVITY_TITLE) {
     return current;
   }

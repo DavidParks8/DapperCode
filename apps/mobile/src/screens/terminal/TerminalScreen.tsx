@@ -61,14 +61,14 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
     Alert.alert('Run command?', trimmed, [
       {
         text: 'Cancel',
-        style: 'cancel'
+        style: 'cancel',
       },
       {
         text: 'Run',
         onPress: () => {
           void executeCommand();
-        }
-      }
+        },
+      },
     ]);
   }, [command, executeCommand, running]);
   const runDisabled = running || !command.trim();
@@ -79,12 +79,8 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
         const payload = event.params;
         const command = typeof payload?.command === 'string' ? payload.command : 'unknown';
         const code =
-          typeof payload?.code === 'number' || payload?.code === null
-            ? payload.code
-            : null;
-        setOutput((prev) =>
-          `${prev}\n\n[ws] ${command} → ${String(code)}`.trim()
-        );
+          typeof payload?.code === 'number' || payload?.code === null ? payload.code : null;
+        setOutput((prev) => `${prev}\n\n[ws] ${command} → ${String(code)}`.trim());
       }
     });
   }, [ws]);
@@ -159,99 +155,100 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   );
 }
 
-const createStyles = (theme: AppTheme) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.isDark ? '#000000' : theme.colors.bgMain },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    backgroundColor: theme.colors.bgMain,
-  },
-  menuBtn: { padding: theme.spacing.xs },
-  headerTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
-  body: { flex: 1, padding: theme.spacing.md },
-  terminalWindow: {
-    flex: 1,
-    backgroundColor: theme.isDark ? '#1E1E1E' : theme.colors.bgElevated,
-    borderRadius: theme.radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : theme.colors.border,
-    overflow: 'hidden',
-    boxShadow: theme.isDark
-      ? '0px 10px 20px rgba(0, 0, 0, 0.5)'
-      : '0px 10px 20px rgba(15, 23, 42, 0.08)',
-  },
-  windowHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    backgroundColor: theme.isDark ? '#323233' : theme.colors.bgCanvasAccent,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.isDark ? '#111' : theme.colors.border,
-  },
-  trafficLights: {
-    flexDirection: 'row',
-    gap: 6,
-    width: 50,
-  },
-  trafficLightsPlaceholder: {
-    width: 50,
-  },
-  trafficLight: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  windowTitle: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontWeight: '600',
-  },
-  output: { flex: 1 },
-  outputContent: { padding: theme.spacing.md },
-  outputText: {
-    ...theme.typography.mono,
-    color: theme.colors.textPrimary,
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  errorText: {
-    ...theme.typography.caption,
-    color: theme.colors.error,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.xs,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    paddingTop: theme.spacing.md,
-    paddingBottom: Platform.OS === 'ios' ? theme.spacing.xl : theme.spacing.md,
-  },
-  prompt: { ...theme.typography.mono, color: theme.colors.textSecondary, fontWeight: '700' },
-  input: {
-    flex: 1,
-    ...theme.typography.mono,
-    color: theme.colors.textPrimary,
-    backgroundColor: theme.isDark ? '#1E1E1E' : theme.colors.bgInput,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: 10,
-  },
-  runBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: theme.colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  runBtnPressed: { backgroundColor: theme.colors.accentPressed },
-  runBtnDisabled: { backgroundColor: theme.colors.bgItem },
-});
+const createStyles = (theme: AppTheme) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.isDark ? '#000000' : theme.colors.bgMain },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.md,
+      backgroundColor: theme.colors.bgMain,
+    },
+    menuBtn: { padding: theme.spacing.xs },
+    headerTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
+    body: { flex: 1, padding: theme.spacing.md },
+    terminalWindow: {
+      flex: 1,
+      backgroundColor: theme.isDark ? '#1E1E1E' : theme.colors.bgElevated,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : theme.colors.border,
+      overflow: 'hidden',
+      boxShadow: theme.isDark
+        ? '0px 10px 20px rgba(0, 0, 0, 0.5)'
+        : '0px 10px 20px rgba(15, 23, 42, 0.08)',
+    },
+    windowHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+      backgroundColor: theme.isDark ? '#323233' : theme.colors.bgCanvasAccent,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.isDark ? '#111' : theme.colors.border,
+    },
+    trafficLights: {
+      flexDirection: 'row',
+      gap: 6,
+      width: 50,
+    },
+    trafficLightsPlaceholder: {
+      width: 50,
+    },
+    trafficLight: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+    },
+    windowTitle: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      fontWeight: '600',
+    },
+    output: { flex: 1 },
+    outputContent: { padding: theme.spacing.md },
+    outputText: {
+      ...theme.typography.mono,
+      color: theme.colors.textPrimary,
+      fontSize: 13,
+      lineHeight: 20,
+    },
+    errorText: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
+      paddingHorizontal: theme.spacing.lg,
+      paddingBottom: theme.spacing.xs,
+    },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingTop: theme.spacing.md,
+      paddingBottom: Platform.OS === 'ios' ? theme.spacing.xl : theme.spacing.md,
+    },
+    prompt: { ...theme.typography.mono, color: theme.colors.textSecondary, fontWeight: '700' },
+    input: {
+      flex: 1,
+      ...theme.typography.mono,
+      color: theme.colors.textPrimary,
+      backgroundColor: theme.isDark ? '#1E1E1E' : theme.colors.bgInput,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.isDark ? 'rgba(255,255,255,0.1)' : theme.colors.border,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: 10,
+    },
+    runBtn: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: theme.colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    runBtnPressed: { backgroundColor: theme.colors.accentPressed },
+    runBtnDisabled: { backgroundColor: theme.colors.bgItem },
+  });

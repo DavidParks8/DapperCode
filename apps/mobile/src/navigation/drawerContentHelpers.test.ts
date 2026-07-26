@@ -1,14 +1,7 @@
 import type { ChatSummary } from '../api/types';
-import {
-  dedupeChatsById,
-  mergeDrawerChatBatch,
-} from './drawerContentHelpers';
+import { dedupeChatsById, mergeDrawerChatBatch } from './drawerContentHelpers';
 
-function chat(
-  title: string,
-  updatedAt: string,
-  statusUpdatedAt = updatedAt
-): ChatSummary {
+function chat(title: string, updatedAt: string, statusUpdatedAt = updatedAt): ChatSummary {
   return {
     id: 'thread',
     title,
@@ -30,16 +23,8 @@ describe('drawer chat summary merging', () => {
   });
 
   it('uses status time to break equal update-time ties', () => {
-    const current = chat(
-      'Old status',
-      '2026-07-20T00:30:00.000Z',
-      '2026-07-20T00:29:00.000Z'
-    );
-    const incoming = chat(
-      'New status',
-      '2026-07-20T00:30:00.000Z',
-      '2026-07-20T00:30:00.000Z'
-    );
+    const current = chat('Old status', '2026-07-20T00:30:00.000Z', '2026-07-20T00:29:00.000Z');
+    const incoming = chat('New status', '2026-07-20T00:30:00.000Z', '2026-07-20T00:30:00.000Z');
 
     expect(mergeDrawerChatBatch([current], [incoming])).toEqual([incoming]);
   });

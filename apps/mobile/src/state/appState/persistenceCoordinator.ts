@@ -111,7 +111,7 @@ export class AppStatePersistenceCoordinator {
         error instanceof AppStatePersistenceError
           ? error
           : persistenceError('read_failed', 'load', 'Could not load saved app state.', error),
-        true
+        true,
       );
     }
   }
@@ -122,7 +122,7 @@ export class AppStatePersistenceCoordinator {
         'read_failed',
         'import',
         'Could not import the existing app settings.',
-        error
+        error,
       );
     });
     const data = importLegacyAppState(legacy);
@@ -139,9 +139,9 @@ export class AppStatePersistenceCoordinator {
           'write_failed',
           'import',
           'Imported settings could not be saved. Retry before changing connections.',
-          error
+          error,
         ),
-        true
+        true,
       );
     }
   }
@@ -160,7 +160,7 @@ export class AppStatePersistenceCoordinator {
           'write_failed',
           'write',
           'The app-state change was not saved. Please retry.',
-          error
+          error,
         );
         this.publish(this.data, typedError);
         throw typedError;
@@ -214,8 +214,8 @@ export class AppStatePersistenceCoordinator {
                 'write_failed',
                 'write',
                 'Settings could not be saved. Retry to persist the latest changes.',
-                error
-              )
+                error,
+              ),
             );
             return;
           }
@@ -229,7 +229,7 @@ export class AppStatePersistenceCoordinator {
   private publish(
     data: AppStateData,
     error: AppStatePersistenceError | null,
-    loaded = this.store.get(appStateSnapshotAtom).loaded
+    loaded = this.store.get(appStateSnapshotAtom).loaded,
   ): void {
     this.store.set(appStateSnapshotAtom, { loaded, data, persistenceError: error });
   }

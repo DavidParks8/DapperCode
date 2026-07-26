@@ -1,11 +1,5 @@
 import { getSubAgentMeta } from '../../api/messages';
-import type {
-  AcpConfigOption,
-  Chat,
-  ChatMessage,
-  ChatSummary,
-  ModelOption,
-} from '../../api/types';
+import type { AcpConfigOption, Chat, ChatMessage, ChatSummary, ModelOption } from '../../api/types';
 import {
   countUserMessages,
   hasRecentUnansweredUserTurn,
@@ -17,7 +11,7 @@ const EMPTY_MODEL_OPTIONS: ModelOption[] = [];
 
 export function areChatStatusMapsEquivalent(
   previous: ReadonlyMap<string, Chat['status']>,
-  next: ReadonlyMap<string, Chat['status']>
+  next: ReadonlyMap<string, Chat['status']>,
 ): boolean {
   if (previous === next) {
     return true;
@@ -40,10 +34,7 @@ export function resolveEquivalentChat(previous: Chat, next: Chat): Chat {
   return areChatsEquivalent(previous, stabilizedNext) ? previous : stabilizedNext;
 }
 
-export function mergeChatSummaryPreservingMessages(
-  previous: Chat,
-  summary: ChatSummary
-): Chat {
+export function mergeChatSummaryPreservingMessages(previous: Chat, summary: ChatSummary): Chat {
   const next = {
     ...previous,
     ...summary,
@@ -97,7 +88,7 @@ function areChatsEquivalent(previous: Chat | null, next: Chat | null): boolean {
 
 function areChatSummariesEquivalent(
   previous: ChatSummary | null,
-  next: ChatSummary | null
+  next: ChatSummary | null,
 ): boolean {
   if (previous === next) {
     return true;
@@ -131,10 +122,7 @@ function areChatSummariesEquivalent(
   );
 }
 
-function areChatPlansEquivalent(
-  previous: Chat['latestPlan'],
-  next: Chat['latestPlan']
-): boolean {
+function areChatPlansEquivalent(previous: Chat['latestPlan'], next: Chat['latestPlan']): boolean {
   if (previous === next) {
     return true;
   }
@@ -153,10 +141,7 @@ function areChatPlansEquivalent(
   for (let index = 0; index < previous.steps.length; index += 1) {
     const previousStep = previous.steps[index];
     const nextStep = next.steps[index];
-    if (
-      previousStep.step !== nextStep.step ||
-      previousStep.status !== nextStep.status
-    ) {
+    if (previousStep.step !== nextStep.step || previousStep.status !== nextStep.status) {
       return false;
     }
   }
@@ -183,7 +168,7 @@ export function modelOptionsFromAcpConfig(config: AcpConfigOption[]): ModelOptio
   return model.options.map((option) => {
     const [providerId, ...modelParts] = option.value.split('/');
     const displayName = option.name.includes('/')
-      ? option.name.split('/').at(-1) ?? option.name
+      ? (option.name.split('/').at(-1) ?? option.name)
       : option.name;
     return {
       id: option.value,
@@ -200,7 +185,7 @@ export function modelOptionsFromAcpConfig(config: AcpConfigOption[]): ModelOptio
 
 export function mergeModelOptions(
   catalog: ModelOption[] | null | undefined,
-  configured: ModelOption[]
+  configured: ModelOption[],
 ): ModelOption[] {
   const safeCatalog = catalog ?? EMPTY_MODEL_OPTIONS;
   const catalogById = new Map(safeCatalog.map((model) => [model.id, model]));
@@ -214,16 +199,10 @@ export function mergeModelOptions(
     };
   });
   const configuredIds = new Set(configured.map((model) => model.id));
-  return [
-    ...mergedConfigured,
-    ...safeCatalog.filter((model) => !configuredIds.has(model.id)),
-  ];
+  return [...mergedConfigured, ...safeCatalog.filter((model) => !configuredIds.has(model.id))];
 }
 
-function areChatMessagesEquivalent(
-  previous: ChatMessage[],
-  next: ChatMessage[]
-): boolean {
+function areChatMessagesEquivalent(previous: ChatMessage[], next: ChatMessage[]): boolean {
   if (previous === next) {
     return true;
   }
@@ -242,10 +221,7 @@ function areChatMessagesEquivalent(
       (left.role === 'activity' &&
         right.role === 'activity' &&
         left.activityType !== right.activityType) ||
-      !areChatMessageSubAgentMetaEquivalent(
-        getSubAgentMeta(left),
-        getSubAgentMeta(right)
-      )
+      !areChatMessageSubAgentMetaEquivalent(getSubAgentMeta(left), getSubAgentMeta(right))
     ) {
       return false;
     }
@@ -256,7 +232,7 @@ function areChatMessagesEquivalent(
 
 function areChatMessageSubAgentMetaEquivalent(
   previous: ReturnType<typeof getSubAgentMeta>,
-  next: ReturnType<typeof getSubAgentMeta>
+  next: ReturnType<typeof getSubAgentMeta>,
 ): boolean {
   if (previous === next) {
     return true;
@@ -290,7 +266,7 @@ function areChatMessageSubAgentMetaEquivalent(
 
 export function areChatSummaryListsEquivalent(
   previous: ChatSummary[],
-  next: ChatSummary[]
+  next: ChatSummary[],
 ): boolean {
   if (previous === next) {
     return true;

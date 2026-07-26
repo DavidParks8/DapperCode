@@ -12,7 +12,7 @@ describe('BrowserPreviewSessionLifecycle', () => {
         new Promise<string>((resolve) => {
           order.push('first-start');
           releaseFirst = () => resolve('first');
-        })
+        }),
     );
     const second = lifecycle.serializeCreate(async () => {
       order.push('second-start');
@@ -59,7 +59,7 @@ describe('BrowserPreviewSessionLifecycle', () => {
     await expect(second).resolves.toBe('second');
     lifecycle.dispose();
     await expect(lifecycle.serializeCreate(async () => 'late')).rejects.toThrow(
-      'Preview session lifecycle is disposed'
+      'Preview session lifecycle is disposed',
     );
   });
 

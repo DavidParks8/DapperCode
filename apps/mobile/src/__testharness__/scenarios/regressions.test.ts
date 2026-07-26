@@ -112,9 +112,7 @@ describe('Streaming and snapshot sequencing', () => {
       ],
     });
 
-    expect(state.getMessageContents('t1').map((m) => m.content)).toEqual([
-      'The answer is 43',
-    ]);
+    expect(state.getMessageContents('t1').map((m) => m.content)).toEqual(['The answer is 43']);
   });
 
   it('keeps the persisted copy when it is strictly ahead of the live one', () => {
@@ -139,9 +137,7 @@ describe('Streaming and snapshot sequencing', () => {
       ],
     });
 
-    expect(state.getMessageContents('t1').map((m) => m.content)).toEqual([
-      'The answer is 42',
-    ]);
+    expect(state.getMessageContents('t1').map((m) => m.content)).toEqual(['The answer is 42']);
   });
 
   it('keeps earlier turns when a resumed thread snapshots only its newest turn', () => {
@@ -152,8 +148,18 @@ describe('Streaming and snapshot sequencing', () => {
     state.setPersistedChat({
       ...state.buildSyntheticChat('t1'),
       messages: [
-        { id: 't1:h1:User', role: 'user', content: 'old prompt', createdAt: new Date(1).toISOString() },
-        { id: 't1:h2:Agent', role: 'assistant', content: 'old answer', createdAt: new Date(2).toISOString() },
+        {
+          id: 't1:h1:User',
+          role: 'user',
+          content: 'old prompt',
+          createdAt: new Date(1).toISOString(),
+        },
+        {
+          id: 't1:h2:Agent',
+          role: 'assistant',
+          content: 'old answer',
+          createdAt: new Date(2).toISOString(),
+        },
       ],
     });
 
@@ -182,7 +188,12 @@ describe('Streaming and snapshot sequencing', () => {
       ...state.buildSyntheticChat('t1'),
       messages: [
         { id: 'old-1', role: 'user', content: 'old prompt', createdAt: new Date(1).toISOString() },
-        { id: 'old-2', role: 'assistant', content: 'old answer', createdAt: new Date(2).toISOString() },
+        {
+          id: 'old-2',
+          role: 'assistant',
+          content: 'old answer',
+          createdAt: new Date(2).toISOString(),
+        },
       ],
     });
 
@@ -279,49 +290,49 @@ describe('Sub-agent card lifecycle', () => {
   ] as const)(
     'does not let a malformed terminal snapshot replace a live sub-agent card ($expectedStatus)',
     ({ error, expectedStatus }) => {
-    // Regression: the bridge classified the task live, then its terminal snapshot
-    // saw only the tool's newest plain-text update and rendered it as a generic
-    // tool. The mobile projection keeps the already-known card as a final defense.
-    const state = new TestableThreadState();
-    const { classified } = lateClassifiedSubAgent('parent', 'child');
-    state.applySequence(classified);
-    state.applySequence(sequence('parent', 'parent::run-1').runFinished().build());
-    state.applySequence([
-      {
-        threadId: 'parent',
-        runId: 'parent::run-1',
-        event: {
-          type: EventType.MESSAGES_SNAPSHOT,
-          messages: [
-            {
-              id: 'tool-call:parent::task-1',
-              role: 'assistant',
-              content: '',
-              toolCalls: [
-                {
-                  id: 'parent::task-1',
-                  type: 'function',
-                  function: { name: 'Research dependency options', arguments: '{}' },
-                },
-              ],
-            },
-            {
-              id: 'tool-result:parent::task-1',
-              role: 'tool',
-              toolCallId: 'parent::task-1',
-              content: 'raw task result',
-              error,
-            },
-          ],
-        } as unknown as AGUIEvent,
-      },
-    ]);
+      // Regression: the bridge classified the task live, then its terminal snapshot
+      // saw only the tool's newest plain-text update and rendered it as a generic
+      // tool. The mobile projection keeps the already-known card as a final defense.
+      const state = new TestableThreadState();
+      const { classified } = lateClassifiedSubAgent('parent', 'child');
+      state.applySequence(classified);
+      state.applySequence(sequence('parent', 'parent::run-1').runFinished().build());
+      state.applySequence([
+        {
+          threadId: 'parent',
+          runId: 'parent::run-1',
+          event: {
+            type: EventType.MESSAGES_SNAPSHOT,
+            messages: [
+              {
+                id: 'tool-call:parent::task-1',
+                role: 'assistant',
+                content: '',
+                toolCalls: [
+                  {
+                    id: 'parent::task-1',
+                    type: 'function',
+                    function: { name: 'Research dependency options', arguments: '{}' },
+                  },
+                ],
+              },
+              {
+                id: 'tool-result:parent::task-1',
+                role: 'tool',
+                toolCallId: 'parent::task-1',
+                content: 'raw task result',
+                error,
+              },
+            ],
+          } as unknown as AGUIEvent,
+        },
+      ]);
 
-    expect(state).toHaveMessageCount('parent', 1);
-    expect(state).toHaveSubAgentCard('parent', 'child', { status: expectedStatus });
-    expect(JSON.stringify(state.projectTranscript('parent').messages)).not.toContain(
-      'Research dependency options',
-    );
+      expect(state).toHaveMessageCount('parent', 1);
+      expect(state).toHaveSubAgentCard('parent', 'child', { status: expectedStatus });
+      expect(JSON.stringify(state.projectTranscript('parent').messages)).not.toContain(
+        'Research dependency options',
+      );
     },
   );
 
@@ -726,11 +737,12 @@ describe('Sub-agent card lifecycle', () => {
         .build(),
     );
 
-    const parentText = state.getMessageContents('parent').map((m) => m.content).join('\n');
+    const parentText = state
+      .getMessageContents('parent')
+      .map((m) => m.content)
+      .join('\n');
     expect(parentText).not.toContain('child only detail');
-    expect(state.getMessageContents('child').map((m) => m.content)).toContain(
-      'child only detail',
-    );
+    expect(state.getMessageContents('child').map((m) => m.content)).toContain('child only detail');
   });
 });
 
@@ -933,7 +945,7 @@ describe('Sub-agents across turns', () => {
     expect(state).toHaveNoDuplicateContent('parent');
   });
 
-  it('keeps each turn\'s sub-agent card in the middle of its own turn', () => {
+  it("keeps each turn's sub-agent card in the middle of its own turn", () => {
     // Two turns, each spawning a sub-agent between two assistant messages. Turn one
     // is persisted before turn two starts, the way the bridge stores a finished
     // turn, so this exercises the persisted+live merge with cards in the middle.
@@ -969,7 +981,7 @@ describe('Sub-agents across turns', () => {
     expect(state).toHaveNoDuplicateContent('parent');
   });
 
-  it('does not resurrect an earlier turn\'s sub-agent as running', () => {
+  it("does not resurrect an earlier turn's sub-agent as running", () => {
     // A completed card from turn one must stay completed once turn two starts,
     // otherwise the parent reports work that already finished -- and with the
     // parent following its sub-agents, that would spin the header indefinitely.
@@ -1033,7 +1045,7 @@ describe('Settled sub-agents after a bridge restart', () => {
           },
           active: { toolIds: [] },
         },
-      })
+      }),
     );
 
     const message = mapped.messages[0];
@@ -1135,18 +1147,12 @@ describe('Sub-agent activity is scoped to the thread it belongs to', () => {
   });
 
   it('still reports its own live sub-agent, at any depth', () => {
-    const own = [
-      summary('child', 'thread-a', 'idle'),
-      summary('grandchild', 'child', 'running'),
-    ];
+    const own = [summary('child', 'thread-a', 'idle'), summary('grandchild', 'child', 'running')];
     expect(isThreadOrSubAgentRunning(finishedChat('thread-a'), own)).toBe(true);
   });
 
   it('ignores a live sibling of the sub-agent thread being viewed', () => {
-    const tree = [
-      summary('child-a', 'root', 'idle'),
-      summary('child-b', 'root', 'running'),
-    ];
+    const tree = [summary('child-a', 'root', 'idle'), summary('child-b', 'root', 'running')];
     expect(isThreadOrSubAgentRunning(finishedChat('child-a'), tree)).toBe(false);
   });
 });
@@ -1197,11 +1203,7 @@ describe('The "Opening chat" placeholder never outlives a load', () => {
 });
 
 describe('Opening a finished session does not look like a live run', () => {
-  function message(
-    id: string,
-    role: 'user' | 'assistant',
-    text: string
-  ): Chat['messages'][number] {
+  function message(id: string, role: 'user' | 'assistant', text: string): Chat['messages'][number] {
     return {
       id,
       role,
@@ -1259,10 +1261,7 @@ describe('Opening a finished session does not look like a live run', () => {
 
   it('still reports a newly appended assistant message', () => {
     const before = chatWith([message('m1', 'user', 'hello')]);
-    const after = chatWith([
-      message('m1', 'user', 'hello'),
-      message('m2', 'assistant', 'On it.'),
-    ]);
+    const after = chatWith([message('m1', 'user', 'hello'), message('m2', 'assistant', 'On it.')]);
 
     expect(didAssistantMessageProgress(before, after)).toBe(true);
   });

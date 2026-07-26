@@ -51,7 +51,7 @@ describe('bridgeProfiles', () => {
             bridgeToken: 'token-a',
           },
         ],
-      })
+      }),
     );
 
     expect(parsed.activeProfileId).toBeNull();
@@ -71,7 +71,7 @@ describe('bridgeProfiles', () => {
             authMode: 'githubOAuth',
           },
         ],
-      })
+      }),
     );
 
     expect(parsed.activeProfileId).toBe('profile-1');
@@ -97,7 +97,7 @@ describe('bridgeProfiles', () => {
             bridgeToken: 'token-b',
           },
         ],
-      })
+      }),
     );
 
     const switched = setActiveBridgeProfile(base, 'profile-2');
@@ -118,7 +118,7 @@ describe('bridgeProfiles', () => {
             bridgeToken: 'token-a',
           },
         ],
-      })
+      }),
     );
 
     const renamed = renameBridgeProfile(base, 'profile-1', 'Office Bridge');
@@ -146,7 +146,7 @@ describe('bridgeProfiles', () => {
             bridgeToken: 'token-b',
           },
         ],
-      })
+      }),
     );
 
     const next = removeBridgeProfile(base, 'profile-1');
@@ -162,29 +162,31 @@ describe('bridgeProfiles', () => {
     expect(parseBridgeProfileStore('{')).toEqual(createEmptyBridgeProfileStore());
     expect(parseBridgeProfileStore('null')).toEqual(createEmptyBridgeProfileStore());
     expect(parseBridgeProfileStore(JSON.stringify({ profiles: 'invalid' }))).toEqual(
-      createEmptyBridgeProfileStore()
+      createEmptyBridgeProfileStore(),
     );
   });
 
   it('drops malformed profiles and normalizes valid profile fields', () => {
-    const parsed = parseBridgeProfileStore(JSON.stringify({
-      activeProfileId: 1,
-      profiles: [
-        null,
-        {},
-        { id: 'x', bridgeUrl: 1, bridgeToken: 'token' },
-        { id: 'x', bridgeUrl: 'ftp://host', bridgeToken: 'token' },
-        { id: 'x', bridgeUrl: 'http://host', bridgeToken: ' ' },
-        {
-          id: ' valid ',
-          name: ' ',
-          bridgeUrl: 'ws://host:8787/',
-          bridgeToken: ' token ',
-          createdAt: ' ',
-          updatedAt: 1,
-        },
-      ],
-    }));
+    const parsed = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: 1,
+        profiles: [
+          null,
+          {},
+          { id: 'x', bridgeUrl: 1, bridgeToken: 'token' },
+          { id: 'x', bridgeUrl: 'ftp://host', bridgeToken: 'token' },
+          { id: 'x', bridgeUrl: 'http://host', bridgeToken: ' ' },
+          {
+            id: ' valid ',
+            name: ' ',
+            bridgeUrl: 'ws://host:8787/',
+            bridgeToken: ' token ',
+            createdAt: ' ',
+            updatedAt: 1,
+          },
+        ],
+      }),
+    );
     expect(parsed.profiles).toHaveLength(1);
     expect(parsed.profiles[0]).toMatchObject({
       id: 'valid',
@@ -197,22 +199,30 @@ describe('bridgeProfiles', () => {
   it('rejects incomplete drafts and honors activation choices', () => {
     const empty = createEmptyBridgeProfileStore();
     expect(() => upsertBridgeProfile(empty, { bridgeUrl: '', bridgeToken: 'token' })).toThrow();
-    expect(() => upsertBridgeProfile(empty, { bridgeUrl: 'http://host', bridgeToken: ' ' })).toThrow();
+    expect(() =>
+      upsertBridgeProfile(empty, { bridgeUrl: 'http://host', bridgeToken: ' ' }),
+    ).toThrow();
     const first = upsertBridgeProfile(empty, {
-      bridgeUrl: 'http://one', bridgeToken: 'one', activate: true,
+      bridgeUrl: 'http://one',
+      bridgeToken: 'one',
+      activate: true,
     }).store;
     const second = upsertBridgeProfile(first, {
-      bridgeUrl: 'http://two', bridgeToken: 'two', activate: false,
+      bridgeUrl: 'http://two',
+      bridgeToken: 'two',
+      activate: false,
     }).store;
     expect(second.activeProfileId).toBe(first.activeProfileId);
     expect(second.profiles).toHaveLength(2);
   });
 
   it('sanitizes missing profile operations and active lookup', () => {
-    const base = parseBridgeProfileStore(JSON.stringify({
-      activeProfileId: 'one',
-      profiles: [{ id: 'one', bridgeUrl: 'http://one', bridgeToken: 'token' }],
-    }));
+    const base = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: 'one',
+        profiles: [{ id: 'one', bridgeUrl: 'http://one', bridgeToken: 'token' }],
+      }),
+    );
     expect(getActiveBridgeProfile(base)?.id).toBe('one');
     expect(getActiveBridgeProfile({ ...base, activeProfileId: null })).toBeNull();
     expect(getActiveBridgeProfile({ ...base, activeProfileId: 'missing' })).toBeNull();

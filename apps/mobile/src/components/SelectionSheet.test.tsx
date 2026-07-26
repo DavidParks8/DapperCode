@@ -1,10 +1,6 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { SelectionSheet, type SelectionSheetOption } from './SelectionSheet';
@@ -60,7 +56,7 @@ function textContent(node: QueryableInstance): string {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label
+    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
   if (!match) throw new Error(`Missing pressable: ${label}`);
   return match;
@@ -83,24 +79,47 @@ describe('SelectionSheet', () => {
     const optionPresses = [jest.fn(), jest.fn(), jest.fn()];
     const options: SelectionSheetOption[] = [
       {
-        key: 'selected', title: 'Selected', description: 'Current choice', badge: 'Active',
-        meta: 'Default', icon: 'checkmark', selected: true, tone: 'accent',
-        descriptionNumberOfLines: 4, titleColor: '#101010', descriptionColor: '#202020',
-        titleStyle: { fontWeight: '700' }, descriptionStyle: { fontStyle: 'italic' },
-        badgeBackgroundColor: '#303030', badgeTextColor: '#fff', metaColor: '#404040',
-        iconColor: '#505050', onPress: optionPresses[0],
+        key: 'selected',
+        title: 'Selected',
+        description: 'Current choice',
+        badge: 'Active',
+        meta: 'Default',
+        icon: 'checkmark',
+        selected: true,
+        tone: 'accent',
+        descriptionNumberOfLines: 4,
+        titleColor: '#101010',
+        descriptionColor: '#202020',
+        titleStyle: { fontWeight: '700' },
+        descriptionStyle: { fontStyle: 'italic' },
+        badgeBackgroundColor: '#303030',
+        badgeTextColor: '#fff',
+        metaColor: '#404040',
+        iconColor: '#505050',
+        onPress: optionPresses[0],
       },
       {
-        key: 'danger', title: 'Delete', description: 'Cannot be undone', icon: 'trash-outline',
-        tone: 'danger', disabled: true, onPress: optionPresses[1],
+        key: 'danger',
+        title: 'Delete',
+        description: 'Cannot be undone',
+        icon: 'trash-outline',
+        tone: 'danger',
+        disabled: true,
+        onPress: optionPresses[1],
       },
       { key: 'plain', title: 'Plain', onPress: optionPresses[2] },
     ];
     const tree = render(
       <SelectionSheet
-        visible title="Choose one" subtitle="Available choices" eyebrow="Workspace"
-        options={options} onClose={onClose} closeLabel="Done" presentation="expanded"
-      />
+        visible
+        title="Choose one"
+        subtitle="Available choices"
+        eyebrow="Workspace"
+        options={options}
+        onClose={onClose}
+        closeLabel="Done"
+        presentation="expanded"
+      />,
     );
     const root = queryRoot(tree);
     const selected = findPressable(root, 'Selected');
@@ -121,22 +140,30 @@ describe('SelectionSheet', () => {
   it('renders SelectionSheet loading, empty, hidden, and default presentations', () => {
     const onClose = jest.fn();
     const tree = render(
-      <SelectionSheet visible title="Loading sheet" options={[]} onClose={onClose} loading />
+      <SelectionSheet visible title="Loading sheet" options={[]} onClose={onClose} loading />,
     );
     expect(textContent(queryRoot(tree))).toContain('Loading…');
     act(() => {
-      tree.update(wrap(
-        <SelectionSheet
-          visible title="Empty sheet" subtitle="Nothing here" options={[]} onClose={onClose}
-          loadingLabel="Fetching choices" emptyLabel="No choices" presentation="default"
-        />
-      ));
+      tree.update(
+        wrap(
+          <SelectionSheet
+            visible
+            title="Empty sheet"
+            subtitle="Nothing here"
+            options={[]}
+            onClose={onClose}
+            loadingLabel="Fetching choices"
+            emptyLabel="No choices"
+            presentation="default"
+          />,
+        ),
+      );
     });
     expect(textContent(queryRoot(tree))).toContain('No choices');
     act(() => {
-      tree.update(wrap(
-        <SelectionSheet visible={false} title="Hidden" options={[]} onClose={onClose} />
-      ));
+      tree.update(
+        wrap(<SelectionSheet visible={false} title="Hidden" options={[]} onClose={onClose} />),
+      );
     });
     expect(textContent(queryRoot(tree))).not.toContain('Hidden');
     act(() => tree.unmount());

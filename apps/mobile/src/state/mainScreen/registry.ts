@@ -22,9 +22,7 @@ const entries: ScreenAtomEntry[] = [];
  */
 export function screenAtom<Value>(initialValue: Exclude<Value, object>): PrimitiveAtom<Value>;
 export function screenAtom<Value>(createInitialValue: () => Value): PrimitiveAtom<Value>;
-export function screenAtom<Value>(
-  initialValue: Value | (() => Value)
-): PrimitiveAtom<Value> {
+export function screenAtom<Value>(initialValue: Value | (() => Value)): PrimitiveAtom<Value> {
   const createInitialValue = (
     typeof initialValue === 'function' ? initialValue : () => initialValue
   ) as () => Value;
@@ -53,7 +51,7 @@ export const resetMainScreenStateAtom = atom(null, (get, set): void => {
  */
 export function screenSetter<Value>(
   store: AppStore,
-  target: PrimitiveAtom<Value>
+  target: PrimitiveAtom<Value>,
 ): (update: SetStateAction<Value>) => void {
   return (update) => store.set(target, update);
 }
@@ -67,7 +65,7 @@ export function screenSetter<Value>(
  */
 export function screenRefView<Value>(
   store: AppStore,
-  source: Atom<Value>
+  source: Atom<Value>,
 ): { readonly current: Value } {
   return {
     get current(): Value {

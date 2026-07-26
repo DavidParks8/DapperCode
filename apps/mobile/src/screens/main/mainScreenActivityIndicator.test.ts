@@ -33,11 +33,7 @@ describe('activity indicator', () => {
     const steps: Array<[string, Partial<ActivityIndicatorInputs>, ActivityState]> = [
       ['at rest', {}, READY],
       ['opening a chat', { isOpeningChat: true }, { tone: 'running', title: 'Opening chat' }],
-      [
-        'sending',
-        { isLoading: true },
-        { tone: 'running', title: 'Working', detail: undefined },
-      ],
+      ['sending', { isLoading: true }, { tone: 'running', title: 'Working', detail: undefined }],
       [
         'running with a detailed status',
         {
@@ -62,7 +58,9 @@ describe('activity indicator', () => {
     // A sub-agent can keep the turn running after the parent's own activity has
     // settled to "Ready". Showing "Ready" with a spinner reads as a stuck UI.
     for (const settled of [READY, { tone: 'complete', title: 'Turn completed' }] as const) {
-      const result = resolveVisibleActivity(inputs({ activity: settled, isTurnLikelyRunning: true }));
+      const result = resolveVisibleActivity(
+        inputs({ activity: settled, isTurnLikelyRunning: true }),
+      );
       expect(result).toEqual({ tone: 'running', title: 'Working', detail: undefined });
     }
   });

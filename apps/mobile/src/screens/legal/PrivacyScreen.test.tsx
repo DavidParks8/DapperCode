@@ -27,14 +27,16 @@ function hasText(root: Queryable, text: string): boolean {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') current = current.parent as Queryable | null;
+  while (current && typeof current.props.onPress !== 'function')
+    current = current.parent as Queryable | null;
   if (!current) throw new Error(`Missing pressable: ${text}`);
   return current;
 }
 
 function findPressableAncestor(node: Queryable): Queryable {
   let current: Queryable | null = node;
-  while (current && typeof current.props.onPress !== 'function') current = current.parent as Queryable | null;
+  while (current && typeof current.props.onPress !== 'function')
+    current = current.parent as Queryable | null;
   if (!current) throw new Error('Missing pressable ancestor');
   return current;
 }
@@ -45,15 +47,23 @@ function getPressCallback(node: Queryable): PressCallback {
   return callback as PressCallback;
 }
 
-async function renderPrivacy(url: string | null, onOpenDrawer = jest.fn()): Promise<ReactTestRenderer> {
+async function renderPrivacy(
+  url: string | null,
+  onOpenDrawer = jest.fn(),
+): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 47, left: 0, right: 0, bottom: 34 },
+        }}
+      >
         <AppThemeProvider theme={theme}>
           <PrivacyScreen policyUrl={url} onOpenDrawer={onOpenDrawer} />
         </AppThemeProvider>
-      </SafeAreaProvider>
+      </SafeAreaProvider>,
     );
   });
   if (!tree) throw new Error('Expected privacy screen tree');
@@ -112,15 +122,21 @@ describe('PrivacyScreen behavior', () => {
     jest.spyOn(Linking, 'canOpenURL').mockRejectedValueOnce(new Error('native failure'));
     const failedTree = await renderPrivacy(url);
     await press(findPressableByText(failedTree.root as Queryable, button));
-    expect(Alert.alert).toHaveBeenCalledWith('Could not open link', 'Please open the policy URL manually.');
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'Could not open link',
+      'Please open the policy URL manually.',
+    );
     act(() => failedTree.unmount());
   });
 
   it('shows and guards the in-flight opening state', async () => {
     let resolveSupported: ((supported: boolean) => void) | undefined;
-    jest.spyOn(Linking, 'canOpenURL').mockImplementation(() => new Promise((resolve) => {
-      resolveSupported = resolve;
-    }));
+    jest.spyOn(Linking, 'canOpenURL').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSupported = resolve;
+        }),
+    );
     jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
     const tree = await renderPrivacy(url);
     const root = tree.root as Queryable;

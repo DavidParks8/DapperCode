@@ -74,15 +74,11 @@ export function renderChatTranscriptItem({
                 <Text style={styles.inlineChoiceOptionLabel}>{option.label}</Text>
               </View>
               {option.description.trim() ? (
-                <Text style={styles.inlineChoiceOptionDescription}>
-                  {option.description}
-                </Text>
+                <Text style={styles.inlineChoiceOptionDescription}>{option.description}</Text>
               ) : null}
             </Pressable>
           ))}
-          <Text style={styles.inlineChoiceHint}>
-            Tap an option to fill the reply box.
-          </Text>
+          <Text style={styles.inlineChoiceHint}>Tap an option to fill the reply box.</Text>
         </View>
       ) : null}
     </View>

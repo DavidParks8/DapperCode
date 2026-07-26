@@ -40,7 +40,11 @@ export function OnboardingIntroSection({
             <View style={styles.introHeroArt}>
               <View style={styles.introHeroAgentCloud} accessibilityLabel="ACP agents">
                 <View style={styles.introHeroAgentCard}>
-                  <Ionicons name="hardware-chip-outline" size={48} color={theme.colors.textPrimary} />
+                  <Ionicons
+                    name="hardware-chip-outline"
+                    size={48}
+                    color={theme.colors.textPrimary}
+                  />
                 </View>
               </View>
             </View>

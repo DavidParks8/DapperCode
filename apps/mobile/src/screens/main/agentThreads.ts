@@ -15,7 +15,7 @@ export interface AgentActivitySummaryLike {
 
 export function collectRelatedAgentThreads(
   chats: ChatSummary[],
-  focusChat: ChatSummary | null
+  focusChat: ChatSummary | null,
 ): RelatedAgentThreadsResult {
   if (!focusChat) {
     return {
@@ -43,10 +43,7 @@ export function collectRelatedAgentThreads(
   };
 }
 
-export function findMatchingAgentThread(
-  threads: ChatSummary[],
-  query: string
-): ChatSummary | null {
+export function findMatchingAgentThread(threads: ChatSummary[], query: string): ChatSummary | null {
   const normalized = query.trim().toLowerCase();
   if (!normalized) {
     return null;
@@ -78,10 +75,7 @@ export function findMatchingAgentThread(
   );
 }
 
-export function describeAgentThreadSource(
-  chat: ChatSummary,
-  rootThreadId: string | null
-): string {
+export function describeAgentThreadSource(chat: ChatSummary, rootThreadId: string | null): string {
   if (rootThreadId && chat.id === rootThreadId) {
     return 'Main thread';
   }
@@ -111,10 +105,7 @@ export function resolveAgentActivitySummary(input: AgentActivitySummaryLike): st
   );
 }
 
-function resolveRootThreadId(
-  threadId: string,
-  chatMap: Map<string, ChatSummary>
-): string {
+function resolveRootThreadId(threadId: string, chatMap: Map<string, ChatSummary>): string {
   let currentId = threadId;
   const seen = new Set<string>();
 
@@ -137,11 +128,7 @@ function resolveRootThreadId(
   }
 }
 
-function compareAgentThreads(
-  left: ChatSummary,
-  right: ChatSummary,
-  rootThreadId: string
-): number {
+function compareAgentThreads(left: ChatSummary, right: ChatSummary, rootThreadId: string): number {
   if (left.id === rootThreadId && right.id !== rootThreadId) {
     return -1;
   }

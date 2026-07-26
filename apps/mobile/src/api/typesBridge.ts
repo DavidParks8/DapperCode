@@ -263,10 +263,7 @@ export interface RpcNotification {
 }
 
 export type BridgeSnapshotRequiredReason =
-  | 'streamChanged'
-  | 'replayTruncated'
-  | 'replayInconsistent'
-  | 'recoveryOverflow';
+  'streamChanged' | 'replayTruncated' | 'replayInconsistent' | 'recoveryOverflow';
 
 export interface BridgeSnapshotRequiredParams {
   reason: BridgeSnapshotRequiredReason;

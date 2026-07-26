@@ -138,7 +138,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
         return;
       }
     },
-    [model]
+    [model],
   );
 
   const applyViewportSelection = useCallback(
@@ -191,7 +191,8 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
       model.setOpeningPreview(true);
       model.setLoadingPreview(true);
       model.setCapabilitiesError(null);
-      void model.startPreviewSession(normalizedReloadTarget, nextViewport)
+      void model
+        .startPreviewSession(normalizedReloadTarget, nextViewport)
         .then(({ normalizedTarget, session, nextPreviewUrl }) => {
           if (model.previewRequestIdRef.current !== requestId) {
             model.sessionLifecycle.discard(session.sessionId);
@@ -219,7 +220,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
           }
           model.setLoadingPreview(false);
           model.setCapabilitiesError(
-            error instanceof Error ? error.message : 'Could not reload local preview.'
+            error instanceof Error ? error.message : 'Could not reload local preview.',
           );
         })
         .finally(() => {
@@ -228,7 +229,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
           }
         });
     },
-    [model]
+    [model],
   );
 
   const handleSelectDesktopPreset = useCallback(
@@ -244,7 +245,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
         applyViewportSelection(model.viewportPreset, viewport);
       }
     },
-    [applyViewportSelection, model]
+    [applyViewportSelection, model],
   );
 
   const handleOpenViewportMenu = useCallback(() => {

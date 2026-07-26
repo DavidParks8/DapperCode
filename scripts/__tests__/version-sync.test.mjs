@@ -39,10 +39,22 @@ function createFixture(t, { cargoLockName = 'dappercode-bridge' } = {}) {
   }
   mkdirSync(path.join(root, 'services/rust-bridge'), { recursive: true });
   mkdirSync(path.join(root, 'apps/desktop'), { recursive: true });
-  writeFileSync(path.join(root, 'services/rust-bridge/Cargo.toml'), '[package]\nname = "dappercode-bridge"\nversion = "5.2.3"\n\n[dependencies]\n');
-  writeFileSync(path.join(root, 'services/rust-bridge/Cargo.lock'), `version = 4\n\n[[package]]\nname = "${cargoLockName}"\nversion = "5.2.3"\n`);
-  writeFileSync(path.join(root, 'apps/desktop/Cargo.toml'), '[package]\nname = "dappercode-desktop"\nversion = "5.2.3"\n\n[dependencies]\n');
-  writeFileSync(path.join(root, 'apps/desktop/Cargo.lock'), 'version = 4\n\n[[package]]\nname = "dappercode-desktop"\nversion = "5.2.3"\n');
+  writeFileSync(
+    path.join(root, 'services/rust-bridge/Cargo.toml'),
+    '[package]\nname = "dappercode-bridge"\nversion = "5.2.3"\n\n[dependencies]\n',
+  );
+  writeFileSync(
+    path.join(root, 'services/rust-bridge/Cargo.lock'),
+    `version = 4\n\n[[package]]\nname = "${cargoLockName}"\nversion = "5.2.3"\n`,
+  );
+  writeFileSync(
+    path.join(root, 'apps/desktop/Cargo.toml'),
+    '[package]\nname = "dappercode-desktop"\nversion = "5.2.3"\n\n[dependencies]\n',
+  );
+  writeFileSync(
+    path.join(root, 'apps/desktop/Cargo.lock'),
+    'version = 4\n\n[[package]]\nname = "dappercode-desktop"\nversion = "5.2.3"\n',
+  );
   return root;
 }
 
@@ -52,9 +64,18 @@ test('synchronizes package and lock metadata without generated native trees', (t
 
   assert.equal(result.version, '6.0.0-beta.1');
   assert.equal(result.mobileVersion, '6.0.0');
-  assert.equal(JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/package.json'))).version, '6.0.0-beta.1');
-  assert.equal(JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/app.json'))).expo.ios.version, '6.0.0');
-  assert.match(readFileSync(path.join(rootDir, 'services/rust-bridge/Cargo.lock'), 'utf8'), /version = "6\.0\.0-beta\.1"/);
+  assert.equal(
+    JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/package.json'))).version,
+    '6.0.0-beta.1',
+  );
+  assert.equal(
+    JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/app.json'))).expo.ios.version,
+    '6.0.0',
+  );
+  assert.match(
+    readFileSync(path.join(rootDir, 'services/rust-bridge/Cargo.lock'), 'utf8'),
+    /version = "6\.0\.0-beta\.1"/,
+  );
   assert.doesNotThrow(() => syncVersions({ rootDir, check: true }));
 });
 
@@ -63,10 +84,7 @@ test('preflights every target before writing version metadata', (t) => {
   const mobilePackagePath = path.join(rootDir, 'apps/mobile/package.json');
   const before = readFileSync(mobilePackagePath, 'utf8');
 
-  assert.throws(
-    () => syncVersions({ rootDir }),
-    /Expected one dappercode-bridge package/
-  );
+  assert.throws(() => syncVersions({ rootDir }), /Expected one dappercode-bridge package/);
   assert.equal(readFileSync(mobilePackagePath, 'utf8'), before);
 });
 
@@ -78,5 +96,8 @@ test('rejects package build metadata before changing files', (t) => {
   writeFileSync(rootPackagePath, `${JSON.stringify(rootPackage, null, 2)}\n`);
 
   assert.throws(() => syncVersions({ rootDir }), /without build metadata/);
-  assert.equal(JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/package.json'))).version, '5.2.3');
+  assert.equal(
+    JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/package.json'))).version,
+    '5.2.3',
+  );
 });

@@ -44,7 +44,9 @@ const chat: Chat = {
   updatedAt: '2026-07-20T00:00:00.000Z',
   statusUpdatedAt: '2026-07-20T00:00:00.000Z',
   lastMessagePreview: 'latest',
-  messages: [{ id: 'message', role: 'assistant', content: 'latest', createdAt: '2026-07-20T00:00:00.000Z' }],
+  messages: [
+    { id: 'message', role: 'assistant', content: 'latest', createdAt: '2026-07-20T00:00:00.000Z' },
+  ],
 };
 
 function makeMessages(count: number): Chat['messages'] {
@@ -73,7 +75,9 @@ const baseProps: ChatTranscriptViewProps = {
   onPinnedAutoScroll: jest.fn(),
   onJumpToLatest: jest.fn(),
   onScrollInteractionStart: jest.fn(),
-  autoScrollStateRef: { current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false } },
+  autoScrollStateRef: {
+    current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+  },
   bottomInset: 0,
 };
 
@@ -83,7 +87,7 @@ function render(overrides: Partial<ChatTranscriptViewProps> = {}): QueryableRend
     tree = renderer.create(
       <AppThemeProvider theme={theme}>
         <ChatTranscriptView {...baseProps} {...overrides} />
-      </AppThemeProvider>
+      </AppThemeProvider>,
     );
   });
   if (!tree) throw new Error('Expected transcript tree');
@@ -100,27 +104,26 @@ function getList(tree: ReactTestRenderer): Queryable {
   return tree.root.findByType(FlatList) as Queryable;
 }
 
-function scroll(
-  list: Queryable,
-  y: number,
-  contentHeight = 1000,
-  viewportHeight = 200
-): void {
-  act(() => list.props.onScroll({
-    nativeEvent: {
-      contentOffset: { x: 0, y },
-      contentSize: { width: 320, height: contentHeight },
-      layoutMeasurement: { width: 320, height: viewportHeight },
-    },
-  }));
+function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
+  act(() =>
+    list.props.onScroll({
+      nativeEvent: {
+        contentOffset: { x: 0, y },
+        contentSize: { width: 320, height: contentHeight },
+        layoutMeasurement: { width: 320, height: viewportHeight },
+      },
+    }),
+  );
 }
 
 function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewProps>): void {
-  act(() => tree.update(
-    <AppThemeProvider theme={theme}>
-      <ChatTranscriptView {...baseProps} {...overrides} />
-    </AppThemeProvider>
-  ));
+  act(() =>
+    tree.update(
+      <AppThemeProvider theme={theme}>
+        <ChatTranscriptView {...baseProps} {...overrides} />
+      </AppThemeProvider>,
+    ),
+  );
 }
 
 describe('ChatTranscriptView continuation', () => {
@@ -139,39 +142,91 @@ describe('ChatTranscriptView continuation', () => {
     act(() => loadBoundary.props.onPress());
     expect(onLoadEarlier).toHaveBeenCalledTimes(1);
 
-    act(() => tree.update(
-      <AppThemeProvider theme={theme}>
-        <ChatTranscriptView {...baseProps} onLoadEarlier={onLoadEarlier} continuationState={{ loading: true, error: null, exhausted: false, unavailableCount: 0 }} />
-      </AppThemeProvider>
-    ));
+    act(() =>
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <ChatTranscriptView
+            {...baseProps}
+            onLoadEarlier={onLoadEarlier}
+            continuationState={{
+              loading: true,
+              error: null,
+              exhausted: false,
+              unavailableCount: 0,
+            }}
+          />
+        </AppThemeProvider>,
+      ),
+    );
     expect(findText(tree.root as Queryable, 'Loading earlier history...')).toBeTruthy();
 
-    act(() => tree.update(
-      <AppThemeProvider theme={theme}>
-        <ChatTranscriptView {...baseProps} onLoadEarlier={onLoadEarlier} continuationState={{ loading: false, error: 'offline', exhausted: false, unavailableCount: 0 }} />
-      </AppThemeProvider>
-    ));
-    expect(findText(tree.root as Queryable, 'Earlier history failed to load. Tap to retry.')).toBeTruthy();
+    act(() =>
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <ChatTranscriptView
+            {...baseProps}
+            onLoadEarlier={onLoadEarlier}
+            continuationState={{
+              loading: false,
+              error: 'offline',
+              exhausted: false,
+              unavailableCount: 0,
+            }}
+          />
+        </AppThemeProvider>,
+      ),
+    );
+    expect(
+      findText(tree.root as Queryable, 'Earlier history failed to load. Tap to retry.'),
+    ).toBeTruthy();
 
-    act(() => tree.update(
-      <AppThemeProvider theme={theme}>
-        <ChatTranscriptView {...baseProps} onLoadEarlier={onLoadEarlier} continuationState={{ loading: false, error: null, exhausted: true, unavailableCount: 0 }} />
-      </AppThemeProvider>
-    ));
-    expect(tree.root.findAll((node) => node.children.includes('Beginning of history'))).toHaveLength(0);
+    act(() =>
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <ChatTranscriptView
+            {...baseProps}
+            onLoadEarlier={onLoadEarlier}
+            continuationState={{
+              loading: false,
+              error: null,
+              exhausted: true,
+              unavailableCount: 0,
+            }}
+          />
+        </AppThemeProvider>,
+      ),
+    );
+    expect(
+      tree.root.findAll((node) => node.children.includes('Beginning of history')),
+    ).toHaveLength(0);
 
-    act(() => tree.update(
-      <AppThemeProvider theme={theme}>
-        <ChatTranscriptView {...baseProps} onLoadEarlier={onLoadEarlier} continuationState={{ loading: false, error: null, exhausted: true, unavailableCount: 3 }} />
-      </AppThemeProvider>
-    ));
-    expect(findText(tree.root as Queryable, '3 older history entries are no longer available.')).toBeTruthy();
+    act(() =>
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <ChatTranscriptView
+            {...baseProps}
+            onLoadEarlier={onLoadEarlier}
+            continuationState={{
+              loading: false,
+              error: null,
+              exhausted: true,
+              unavailableCount: 3,
+            }}
+          />
+        </AppThemeProvider>,
+      ),
+    );
+    expect(
+      findText(tree.root as Queryable, '3 older history entries are no longer available.'),
+    ).toBeTruthy();
 
     update(tree, {
       continuationState: { loading: false, error: null, exhausted: true, unavailableCount: 1 },
       onLoadEarlier,
     });
-    expect(findText(tree.root as Queryable, '1 older history entry is no longer available.')).toBeTruthy();
+    expect(
+      findText(tree.root as Queryable, '1 older history entry is no longer available.'),
+    ).toBeTruthy();
     act(() => tree.unmount());
   });
 
@@ -207,7 +262,9 @@ describe('ChatTranscriptView continuation', () => {
 
     scroll(list, 100);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
-    const jump = tree.root.findByProps({ accessibilityLabel: 'Jump to latest message' }) as Queryable;
+    const jump = tree.root.findByProps({
+      accessibilityLabel: 'Jump to latest message',
+    }) as Queryable;
     act(() => jump.props.onPress());
     expect(onJumpToLatest).toHaveBeenCalledTimes(1);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
@@ -215,7 +272,9 @@ describe('ChatTranscriptView continuation', () => {
     list = getList(tree);
     scroll(list, -10);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
-    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
     dismiss.mockRestore();
     act(() => tree.unmount());
   });
@@ -272,10 +331,16 @@ describe('ChatTranscriptView continuation', () => {
     scroll(getList(tree), 790, 1000, 200);
     expect(getList(tree).props.data).toHaveLength(220);
 
-    update(tree, { chat: makeChat({ id: 'shrunk', messages: makeMessages(180) }), onPinnedAutoScroll });
+    update(tree, {
+      chat: makeChat({ id: 'shrunk', messages: makeMessages(180) }),
+      onPinnedAutoScroll,
+    });
     act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 200 } } }));
     expect(getList(tree).props.data).toHaveLength(160);
-    update(tree, { chat: makeChat({ id: 'shrunk', messages: makeMessages(20) }), onPinnedAutoScroll });
+    update(tree, {
+      chat: makeChat({ id: 'shrunk', messages: makeMessages(20) }),
+      onPinnedAutoScroll,
+    });
     expect(getList(tree).props.data).toHaveLength(20);
     act(() => tree.unmount());
   });
@@ -338,7 +403,9 @@ describe('ChatTranscriptView continuation', () => {
     const first = makeChat({ id: 'first', messages: makeMessages(180) });
     const tree = render({ chat: first, autoScrollStateRef });
     scroll(getList(tree), 100);
-    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length).toBeGreaterThan(0);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
+    ).toBeGreaterThan(0);
 
     const second = makeChat({ id: 'second', title: '', messages: makeMessages(20) });
     update(tree, { chat: second, autoScrollStateRef });
@@ -395,7 +462,15 @@ describe('ChatTranscriptView continuation', () => {
       { onPinnedAutoScroll: jest.fn() },
       { onJumpToLatest: jest.fn() },
       { onScrollInteractionStart: jest.fn() },
-      { autoScrollStateRef: { current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false } } },
+      {
+        autoScrollStateRef: {
+          current: {
+            shouldStickToBottom: true,
+            isUserInteracting: false,
+            isMomentumScrolling: false,
+          },
+        },
+      },
       { bottomInset: 8 },
       { liveMessageState: createAgUiThreadMessageState() },
       { onOpenSubAgentThread: jest.fn() },
@@ -414,11 +489,15 @@ describe('ChatTranscriptView continuation', () => {
     const onInlineOptionSelect = jest.fn();
     const messages: Chat['messages'] = [
       {
-        id: 'tool', role: 'tool', toolCallId: 'tool', content: '• Ran tests',
+        id: 'tool',
+        role: 'tool',
+        toolCallId: 'tool',
+        content: '• Ran tests',
         createdAt: '2026-07-20T00:00:00.000Z',
       },
       {
-        id: 'choice', role: 'assistant',
+        id: 'choice',
+        role: 'assistant',
         content: 'Which one?\n1. Fast - Quick result\n2. Safe',
         createdAt: '2026-07-20T00:00:01.000Z',
       },
@@ -436,7 +515,9 @@ describe('ChatTranscriptView continuation', () => {
     expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);
 
     const renderedMessage = list.props.renderItem({
-      item: messageItem, index: 0, separators: {},
+      item: messageItem,
+      index: 0,
+      separators: {},
     }) as React.ReactElement<{ children: React.ReactNode[] }>;
     const inlineChoices = renderedMessage.props.children[1] as React.ReactElement<{
       children: React.ReactNode[];
@@ -448,7 +529,11 @@ describe('ChatTranscriptView continuation', () => {
     }>[];
     let toolTree: ReactTestRenderer | undefined;
     act(() => {
-      toolTree = renderer.create(<AppThemeProvider theme={theme}>{list.props.renderItem({ item: toolItem, index: 1, separators: {} })}</AppThemeProvider>);
+      toolTree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          {list.props.renderItem({ item: toolItem, index: 1, separators: {} })}
+        </AppThemeProvider>,
+      );
     });
     if (!toolTree) throw new Error('Expected rendered tool item');
     expect(options).toHaveLength(2);
@@ -466,11 +551,19 @@ describe('ChatTranscriptView continuation', () => {
     const noChoicesList = getList(noChoicesTree);
     let itemTree: ReactTestRenderer | undefined;
     act(() => {
-      itemTree = renderer.create(<AppThemeProvider theme={theme}>{noChoicesList.props.renderItem({
-        item: noChoicesList.props.data[0], index: 0, separators: {},
-      })}</AppThemeProvider>);
+      itemTree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          {noChoicesList.props.renderItem({
+            item: noChoicesList.props.data[0],
+            index: 0,
+            separators: {},
+          })}
+        </AppThemeProvider>,
+      );
     });
-    expect((itemTree as QueryableRenderer | undefined)?.root.findAllByType(Pressable)).toHaveLength(0);
+    expect((itemTree as QueryableRenderer | undefined)?.root.findAllByType(Pressable)).toHaveLength(
+      0,
+    );
     act(() => {
       toolTree?.unmount();
       itemTree?.unmount();

@@ -20,9 +20,9 @@
     "type": "git",
     "url": "git+https://github.com/DavidParks8/DapperCode.git"
   },
-  "dependencies": {},
   "devDependencies": {
     "jscpd": "5.0.12",
+    "prettier": "3.9.6",
     "quicktype-core": "^23.2.6",
     "semver": "^7.8.5",
     "yaml": "^2.9.0",
@@ -61,9 +61,11 @@
     "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",
     "build": "npm run build -w @dappercode/mobile && cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml && cargo build --locked --release --manifest-path apps/desktop/Cargo.toml",
     "typecheck": "npm run typecheck -w @dappercode/mobile && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
-    "lint": "npm run lint -w @dappercode/mobile && npm run duplicates:check && cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml && cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings && cargo fmt --check --manifest-path apps/desktop/Cargo.toml && cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings",
+    "lint": "npm run format:check && npm run lint -w @dappercode/mobile && npm run duplicates:check && cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml && cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings && cargo fmt --check --manifest-path apps/desktop/Cargo.toml && cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings",
     "test": "npm run test:scripts && npm run test -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1 && npm run desktop:test",
     "coverage:check": "npm run test:coverage -w @dappercode/mobile",
-    "coverage:rust": "./scripts/run-rust-coverage.sh"
+    "coverage:rust": "./scripts/run-rust-coverage.sh",
+    "format": "prettier --write \"**/*.{ts,tsx,js,cjs,mjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,mjs}\""
   }
 }

@@ -5,11 +5,7 @@ import { AGENT_THREADS_LIST_LIMIT } from '../mainScreenHelpers';
 
 type AgentThreadsApi = Pick<
   HostBridgeApiClient,
-  | 'listChats'
-  | 'listLoadedChatIds'
-  | 'getChatSummaries'
-  | 'getChat'
-  | 'peekChat'
+  'listChats' | 'listLoadedChatIds' | 'getChatSummaries' | 'getChat' | 'peekChat'
 >;
 
 export interface RelatedAgentThreads {

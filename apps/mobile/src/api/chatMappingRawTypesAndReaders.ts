@@ -17,7 +17,7 @@ export interface RawTurn {
 
 export type RawThreadItem =
   | {
-      type?: "userMessage";
+      type?: 'userMessage';
       id?: string;
       content?: Array<{
         type?: string;
@@ -27,7 +27,7 @@ export type RawThreadItem =
       }>;
     }
   | {
-      type?: "agentMessage";
+      type?: 'agentMessage';
       id?: string;
       text?: string;
       content?: Array<{
@@ -67,7 +67,7 @@ export interface RawAcpSnapshot {
   }>;
   timeline?: Array<{
     sequence: number;
-    kind: "message" | "reasoning" | "tool";
+    kind: 'message' | 'reasoning' | 'tool';
     canonicalId: string;
   }>;
   tools: Array<{
@@ -138,13 +138,11 @@ export interface ThreadSourceMetadata {
 }
 
 export function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
 export function readString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
+  return typeof value === 'string' ? value : null;
 }
 
 export function readStringArray(value: unknown): string[] {
@@ -152,15 +150,15 @@ export function readStringArray(value: unknown): string[] {
     return [];
   }
   return value
-    .map((entry) => readString(entry)?.trim() ?? "")
+    .map((entry) => readString(entry)?.trim() ?? '')
     .filter((entry): entry is string => entry.length > 0);
 }
 
 export function readNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     const numeric = Number(value.trim());
     if (Number.isFinite(numeric)) {
       return numeric;
@@ -182,7 +180,7 @@ export function readFileChangePaths(item: Record<string, unknown>): string[] {
     if (!path) {
       continue;
     }
-    const normalized = path.replace(/\\/g, "/");
+    const normalized = path.replace(/\\/g, '/');
     if (seen.has(normalized)) {
       continue;
     }
@@ -193,7 +191,7 @@ export function readFileChangePaths(item: Record<string, unknown>): string[] {
 }
 
 export function toPreview(value: string): string {
-  const collapsed = value.replace(/\s+/g, " ").trim();
+  const collapsed = value.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= 180) {
     return collapsed;
   }
@@ -217,15 +215,13 @@ export function readTimestampSeconds(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed / 1000 : null;
 }
 
-export function normalizeLifecycleStatus(
-  value: string | null | undefined,
-): string | null {
+export function normalizeLifecycleStatus(value: string | null | undefined): string | null {
   if (!value) {
     return null;
   }
   const normalized = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
+    .replace(/[^a-z0-9]/g, '');
   return normalized.length > 0 ? normalized : null;
 }

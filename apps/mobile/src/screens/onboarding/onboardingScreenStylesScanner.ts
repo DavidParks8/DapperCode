@@ -3,10 +3,7 @@ import { StyleSheet } from 'react-native';
 import type { AppTheme } from '../../theme';
 import type { OnboardingStyleTokens } from './onboardingScreenStyleTokens';
 
-export const createOnboardingScannerStyles = (
-  theme: AppTheme,
-  tokens: OnboardingStyleTokens
-) =>
+export const createOnboardingScannerStyles = (theme: AppTheme, tokens: OnboardingStyleTokens) =>
   StyleSheet.create({
     scannerModalRoot: {
       flex: 1,

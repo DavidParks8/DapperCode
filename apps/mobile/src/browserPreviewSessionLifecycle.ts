@@ -18,7 +18,7 @@ export class BrowserPreviewSessionLifecycle {
     });
     this.createQueue = result.then(
       () => undefined,
-      () => undefined
+      () => undefined,
     );
     return result;
   }

@@ -27,7 +27,7 @@ export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
 export function getVisibleTranscriptMessages(
   messages: ChatMessage[],
-  showToolCalls: boolean
+  showToolCalls: boolean,
 ): ChatMessage[] {
   const filtered = messages.filter((msg) => {
     const text = getMessageText(msg);
@@ -35,7 +35,7 @@ export function getVisibleTranscriptMessages(
     if (
       !showToolCalls &&
       (msg.role === 'tool' ||
-      hasToolCalls ||
+        hasToolCalls ||
         (msg.role === 'system' && isLegacyToolTimelineContent(text)) ||
         (msg.role === 'activity' &&
           msg.activityType !== SUBAGENT_ACTIVITY_TYPE &&
@@ -126,7 +126,7 @@ function isLegacyToolTimelineContent(content: string): boolean {
   }
 
   return !/^(reasoning|thinking|spawned sub-agent|spawning sub-agent|sub-agent|waiting on sub-agent|sent follow-up to sub-agent|closed sub-agent thread|updated sub-agent thread|task|compacted conversation context|conversation compacted)\b/i.test(
-    title
+    title,
   );
 }
 
@@ -144,7 +144,7 @@ function normalizeTranscriptKeyContent(value: string): string {
 
 export function syncVisibleSubAgentStatuses(
   messages: ChatMessage[],
-  threadStatuses: ReadonlyMap<string, ChatStatus>
+  threadStatuses: ReadonlyMap<string, ChatStatus>,
 ): ChatMessage[] {
   if (threadStatuses.size === 0) {
     return messages;
@@ -171,7 +171,7 @@ export function syncVisibleSubAgentStatuses(
 
 function syncSubAgentMessageStatus(
   message: ChatMessage,
-  threadStatuses: ReadonlyMap<string, ChatStatus>
+  threadStatuses: ReadonlyMap<string, ChatStatus>,
 ): ChatMessage {
   const subAgentMeta = getSubAgentMeta(message);
   if (!subAgentMeta) {

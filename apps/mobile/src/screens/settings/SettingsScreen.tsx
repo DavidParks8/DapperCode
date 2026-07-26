@@ -1,14 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { AgentDescriptor, BridgeCapabilities } from '../../api/types';
 import { AgentIcon } from '../../components/AgentIcon';
 import { disablePush, enablePush, updatePushEvents } from '../../pushController';
 import { retryPersistenceAtom } from '../../state/appState/actions';
-import { appStatePersistenceErrorAtom, pushSettingsAtom, bridgeProfilesAtom } from '../../state/appState/atoms';
+import {
+  appStatePersistenceErrorAtom,
+  pushSettingsAtom,
+  bridgeProfilesAtom,
+} from '../../state/appState/atoms';
 import {
   approvalModeAtom,
   showToolCallsAtom,
@@ -70,7 +82,9 @@ export function SettingsScreen() {
       })
       .catch((reason: unknown) => {
         if (!cancelled)
-          setError(reason instanceof Error ? reason.message : 'Could not read bridge capabilities.');
+          setError(
+            reason instanceof Error ? reason.message : 'Could not read bridge capabilities.',
+          );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -165,7 +179,7 @@ export function SettingsScreen() {
                     ? 25
                     : workspaceChatLimit === 25
                       ? null
-                      : 5
+                      : 5,
               )
             }
           />
@@ -199,21 +213,33 @@ export function SettingsScreen() {
   );
 }
 
-function AgentRow({ agent, capabilities }: { agent: AgentDescriptor; capabilities: BridgeCapabilities }) {
+function AgentRow({
+  agent,
+  capabilities,
+}: {
+  agent: AgentDescriptor;
+  capabilities: BridgeCapabilities;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const statuses = [
     agent.agentId === capabilities.preferredAgentId ? 'Preferred' : null,
     agent.agentId === capabilities.activeAgentId ? 'Active' : null,
     agent.lifecycle,
-  ].filter(Boolean).join(' · ');
+  ]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <View style={styles.agentRow}>
       <AgentIcon agent={agent} size={28} />
       <View style={styles.agentText}>
         <Text style={styles.rowLabel}>{agent.displayName}</Text>
-        <Text style={styles.muted}>{statuses} · {agent.version} · {agent.provenance}</Text>
-        {agent.lastError ? <Text style={styles.error}>Agent unavailable (details redacted)</Text> : null}
+        <Text style={styles.muted}>
+          {statuses} · {agent.version} · {agent.provenance}
+        </Text>
+        {agent.lastError ? (
+          <Text style={styles.error}>Agent unavailable (details redacted)</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -222,42 +248,111 @@ function AgentRow({ agent, capabilities }: { agent: AgentDescriptor; capabilitie
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
-  return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
 }
 
 function Row({ label, value, onPress }: { label: string; value?: string; onPress?: () => void }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
-  return <Pressable disabled={!onPress} onPress={onPress} style={styles.row}><Text style={styles.rowLabel}>{label}</Text>{value ? <Text style={styles.muted}>{value}</Text> : null}</Pressable>;
+  return (
+    <Pressable disabled={!onPress} onPress={onPress} style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      {value ? <Text style={styles.muted}>{value}</Text> : null}
+    </Pressable>
+  );
 }
 
-function Toggle({ label, value, disabled, onChange }: { label: string; value: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
+function Toggle({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
-  return <View style={styles.row}><Text style={styles.rowLabel}>{label}</Text><Switch value={value} disabled={disabled} onValueChange={onChange} /></View>;
+  return (
+    <View style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Switch value={value} disabled={disabled} onValueChange={onChange} />
+    </View>
+  );
 }
 
-function Notice({ text, action, onPress }: { text: string; action?: string; onPress?: () => void | Promise<void> }) {
+function Notice({
+  text,
+  action,
+  onPress,
+}: {
+  text: string;
+  action?: string;
+  onPress?: () => void | Promise<void>;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
-  return <View style={styles.notice}><Text style={styles.error}>{text}</Text>{action ? <Pressable onPress={() => void onPress?.()}><Text style={styles.action}>{action}</Text></Pressable> : null}</View>;
+  return (
+    <View style={styles.notice}>
+      <Text style={styles.error}>{text}</Text>
+      {action ? (
+        <Pressable onPress={() => void onPress?.()}>
+          <Text style={styles.action}>{action}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.bgMain },
-    header: { minHeight: 52, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 16 },
+    header: {
+      minHeight: 52,
+      paddingHorizontal: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    },
     title: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
     content: { padding: 18, gap: 24, paddingBottom: 48 },
     section: { gap: 4 },
-    sectionTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6 },
-    row: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
+    sectionTitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      marginBottom: 6,
+    },
+    row: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderLight,
+    },
     rowLabel: { color: colors.textPrimary, fontSize: 15, flexShrink: 1 },
     muted: { color: colors.textMuted, fontSize: 13 },
     error: { color: colors.error, fontSize: 13 },
     action: { color: colors.accent, fontWeight: '700' },
     notice: { padding: 12, borderWidth: 1, borderColor: colors.error, gap: 8 },
-    agentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.borderLight },
+    agentRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderLight,
+    },
     agentText: { flex: 1, gap: 3 },
   });
 }

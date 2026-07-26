@@ -1,10 +1,6 @@
 import { Alert, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { FileSystemEntry } from '../api/types';
 import { createAppTheme, AppThemeProvider } from '../theme';
@@ -33,8 +29,7 @@ jest.mock('@expo/vector-icons', () => {
 
 describe('WorkspacePicker', () => {
   const theme = createAppTheme('dark');
-  const oldSelectionPath =
-    '/Users/davidparks/Documents/github/serious-projects/dappercode';
+  const oldSelectionPath = '/Users/davidparks/Documents/github/serious-projects/dappercode';
   const githubPath = '/Users/davidparks/Documents/github';
   const seriousProjectsPath = '/Users/davidparks/Documents/github/serious-projects';
 
@@ -57,7 +52,7 @@ describe('WorkspacePicker', () => {
           currentPath: githubPath,
           parentPath: '/Users/davidparks/Documents',
           entries: [directoryEntry('serious-projects', seriousProjectsPath)],
-        })
+        }),
       );
     });
 
@@ -76,7 +71,7 @@ describe('WorkspacePicker', () => {
           currentPath: seriousProjectsPath,
           parentPath: githubPath,
           entries: [directoryEntry('dappercode', oldSelectionPath)],
-        })
+        }),
       );
     });
 
@@ -102,16 +97,17 @@ describe('WorkspacePicker', () => {
           currentPath: githubPath,
           parentPath: githubPath,
           entries: [directoryEntry('serious-projects', seriousProjectsPath)],
-        })
+        }),
       );
     });
 
     const root = expectValue(rendered).root as QueryableTestInstance;
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Back').length)
-      .toBeGreaterThan(0);
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Back').length).toBeGreaterThan(
+      0,
+    );
     expect(
       root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0]?.props
-        .accessibilityState
+        .accessibilityState,
     ).toEqual({ disabled: false, selected: false });
     act(() => {
       expectValue(rendered).unmount();
@@ -125,16 +121,22 @@ describe('WorkspacePicker', () => {
     const onClose = jest.fn();
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({ onBrowsePath, onSelectPath, onToggleFavorite, onClose }));
+      rendered = renderer.create(
+        renderPickerMatrix({ onBrowsePath, onSelectPath, onToggleFavorite, onClose }),
+      );
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
     act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
-    const parent = root.findAll((node) => node.props.accessibilityLabel === 'Go to parent folder')[0];
+    const parent = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Go to parent folder',
+    )[0];
     act(() => readOnPress(parent.props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks');
-    const search = root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Search folders');
+    const search = root
+      .findAllByType(TextInput)
+      .find((node) => node.props.accessibilityLabel === 'Search folders');
     if (!search) throw new Error('Missing search');
     act(() => search.props.onChangeText('missing'));
     expect(flattenTreeText(root)).toContain('No folders match this search.');
@@ -144,9 +146,15 @@ describe('WorkspacePicker', () => {
     const unpin = root.findAll((node) => node.props.accessibilityLabel === 'Pin davidparks')[0];
     act(() => readOnPress(unpin.props)());
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks');
-    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props)());
+    act(() =>
+      readOnPress(
+        root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props,
+      )(),
+    );
     expect(onSelectPath).toHaveBeenCalledWith(null);
-    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)());
+    act(() =>
+      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+    );
     expect(onClose).toHaveBeenCalled();
     act(() => tree.unmount());
   });
@@ -155,17 +163,29 @@ describe('WorkspacePicker', () => {
     const onActionPress = jest.fn();
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({
-        entries: [], loadingEntries: true, error: 'Bridge unavailable',
-        truncationMessage: 'Showing the first 100 folders.', actionLabel: 'Clone here', onActionPress,
-      }));
+      rendered = renderer.create(
+        renderPickerMatrix({
+          entries: [],
+          loadingEntries: true,
+          error: 'Bridge unavailable',
+          truncationMessage: 'Showing the first 100 folders.',
+          actionLabel: 'Clone here',
+          onActionPress,
+        }),
+      );
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('Bridge unavailable');
     expect(flattenTreeText(root)).toContain('Showing the first 100 folders.');
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Loading folders...').length).toBeGreaterThan(0);
-    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0].props)());
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading folders...').length,
+    ).toBeGreaterThan(0);
+    act(() =>
+      readOnPress(
+        root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0].props,
+      )(),
+    );
     expect(onActionPress).toHaveBeenCalled();
     act(() => tree.update(renderPickerMatrix({ entries: [], loadingEntries: false })));
     expect(flattenTreeText(root)).toContain('No folders found here.');
@@ -184,15 +204,34 @@ describe('WorkspacePicker', () => {
     act(() => search.props.onChangeText('notes'));
     expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
 
-    act(() => tree.update(renderPickerMatrix({ selectedPath: null, currentPath: null, bridgeRoot: null, parentPath: null, entries: [], onSelectPath })));
+    act(() =>
+      tree.update(
+        renderPickerMatrix({
+          selectedPath: null,
+          currentPath: null,
+          bridgeRoot: null,
+          parentPath: null,
+          entries: [],
+          onSelectPath,
+        }),
+      ),
+    );
     expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
     expect(flattenTreeText(root)).toContain('Default workspace');
-    const use = root.findAll((node) => node.props.accessibilityLabel === 'Use Default workspace workspace')[0];
-    const pin = root.findAll((node) => node.props.accessibilityLabel === 'Pin Default workspace')[0];
+    const use = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Use Default workspace workspace',
+    )[0];
+    const pin = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Pin Default workspace',
+    )[0];
     expect(use.props.accessibilityState).toEqual({ disabled: true });
     expect(pin.props.accessibilityState).toEqual({ disabled: true, selected: false });
 
-    act(() => tree.update(renderPickerMatrix({ selectedPath: '/Users/davidparks/Code/next', onSelectPath })));
+    act(() =>
+      tree.update(
+        renderPickerMatrix({ selectedPath: '/Users/davidparks/Code/next', onSelectPath }),
+      ),
+    );
     expect(flattenTreeText(root)).toContain('next');
     act(() => tree.unmount());
   });
@@ -200,11 +239,19 @@ describe('WorkspacePicker', () => {
   it('preserves a browsed pending path when the external selection changes', () => {
     const onBrowsePath = jest.fn();
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(renderPickerMatrix({ onBrowsePath })); });
+    act(() => {
+      rendered = renderer.create(renderPickerMatrix({ onBrowsePath }));
+    });
     const tree = expectValue(rendered);
     act(() => readOnPress(findPressableContainingText(tree.root, 'notes').props)());
-    act(() => tree.update(renderPickerMatrix({ onBrowsePath, selectedPath: '/Users/davidparks/Code/other' })));
-    expect(flattenTreeText(tree.root as QueryableTestInstance)).toContain('/Users/davidparks/Code/notes');
+    act(() =>
+      tree.update(
+        renderPickerMatrix({ onBrowsePath, selectedPath: '/Users/davidparks/Code/other' }),
+      ),
+    );
+    expect(flattenTreeText(tree.root as QueryableTestInstance)).toContain(
+      '/Users/davidparks/Code/notes',
+    );
     act(() => tree.unmount());
   });
 
@@ -213,10 +260,17 @@ describe('WorkspacePicker', () => {
     const onActionPress = jest.fn();
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({
-        entries: [], loadingEntries: true, parentPath: '/Users/davidparks',
-        actionLabel: 'Clone here', actionDisabled: true, onActionPress, onBrowsePath,
-      }));
+      rendered = renderer.create(
+        renderPickerMatrix({
+          entries: [],
+          loadingEntries: true,
+          parentPath: '/Users/davidparks',
+          actionLabel: 'Clone here',
+          actionDisabled: true,
+          onActionPress,
+          onBrowsePath,
+        }),
+      );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     const up = root.findAll((node) => node.props.accessibilityLabel === 'Go to parent folder')[0];
@@ -231,21 +285,27 @@ describe('WorkspacePicker', () => {
 
   it('confirms pinned and unpinned workspaces through long-press actions', async () => {
     const onToggleFavorite = jest.fn();
-    const alert = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation((_title, _message, buttons) => {
-        buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
-      });
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
+    });
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(renderPickerMatrix({ onToggleFavorite })); });
+    act(() => {
+      rendered = renderer.create(renderPickerMatrix({ onToggleFavorite }));
+    });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    const pinnedTile = root.findAll((node) => node.props.accessibilityLabel === 'Code, 12 chats')[0];
-    const notesRow = root.findAll((node) => node.props.accessibilityLabel === 'Open folder notes')[0];
+    const pinnedTile = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Code, 12 chats',
+    )[0];
+    const notesRow = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Open folder notes',
+    )[0];
     act(() => {
       pinnedTile.props.onLongPress();
       notesRow.props.onLongPress();
     });
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(alert.mock.calls[0]?.[0]).toBe('Unpin this workspace?');
     expect(alert.mock.calls[0]?.[2]?.[1]).toMatchObject({ text: 'Unpin workspace' });
     expect(alert.mock.calls[1]?.[0]).toBe('Pin this workspace?');
@@ -260,13 +320,15 @@ describe('WorkspacePicker', () => {
     jest.setSystemTime(new Date('2026-04-17T12:00:00.000Z'));
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({
-        favoriteWorkspacePaths: ['/work/one', '/work/missing'],
-        recentWorkspaces: [
-          { path: '/work/one', chatCount: 1, updatedAt: '2026-04-17T11:59:55.000Z' },
-          { path: '/work/two', chatCount: 2, updatedAt: 'invalid' },
-        ],
-      }));
+      rendered = renderer.create(
+        renderPickerMatrix({
+          favoriteWorkspacePaths: ['/work/one', '/work/missing'],
+          recentWorkspaces: [
+            { path: '/work/one', chatCount: 1, updatedAt: '2026-04-17T11:59:55.000Z' },
+            { path: '/work/two', chatCount: 2, updatedAt: 'invalid' },
+          ],
+        }),
+      );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('now');
@@ -289,12 +351,16 @@ describe('WorkspacePicker', () => {
     jest.setSystemTime(new Date('2026-04-17T12:00:00.000Z'));
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({
-        favoriteWorkspacePaths: ['/work/time'],
-        recentWorkspaces: [{ path: '/work/time', chatCount: 4, updatedAt }],
-      }));
+      rendered = renderer.create(
+        renderPickerMatrix({
+          favoriteWorkspacePaths: ['/work/time'],
+          recentWorkspaces: [{ path: '/work/time', chatCount: 4, updatedAt }],
+        }),
+      );
     });
-    expect(flattenTreeText(expectValue(rendered).root as QueryableTestInstance)).toContain(expected);
+    expect(flattenTreeText(expectValue(rendered).root as QueryableTestInstance)).toContain(
+      expected,
+    );
     act(() => expectValue(rendered).unmount());
   });
 
@@ -303,12 +369,16 @@ describe('WorkspacePicker', () => {
     const onActionPress = jest.fn();
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({
-        favoriteWorkspacePaths: ['/work/one'],
-        recentWorkspaces: [{ path: '/work/one', chatCount: 1 }],
-        actionLabel: 'Clone here', actionDescription: 'Create a checkout here',
-        onActionPress, onClose,
-      }));
+      rendered = renderer.create(
+        renderPickerMatrix({
+          favoriteWorkspacePaths: ['/work/one'],
+          recentWorkspaces: [{ path: '/work/one', chatCount: 1 }],
+          actionLabel: 'Clone here',
+          actionDescription: 'Create a checkout here',
+          onActionPress,
+          onClose,
+        }),
+      );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('1 chat');
@@ -316,7 +386,9 @@ describe('WorkspacePicker', () => {
     expect(action.props.accessibilityHint).toBe('Create a checkout here');
     act(() => readOnPress(action.props)());
     expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/dappercode');
-    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)());
+    act(() =>
+      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+    );
     expect(onClose).toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
   });
@@ -325,30 +397,60 @@ describe('WorkspacePicker', () => {
     let rendered: ReactTestRenderer | undefined;
     act(() => {
       rendered = renderer.create(
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 0, left: 0, right: 0, bottom: 0 },
+          }}
+        >
           <AppThemeProvider theme={theme}>
-            <WorkspacePicker recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
+            <WorkspacePicker
+              recentWorkspaces={[]}
+              entries={[]}
+              onBrowsePath={jest.fn()}
+              onSelectPath={jest.fn()}
+              onClose={jest.fn()}
+            />
           </AppThemeProvider>
-        </SafeAreaProvider>
+        </SafeAreaProvider>,
       );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     act(() => {
       expectValue(rendered).update(
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 0, left: 0, right: 0, bottom: 0 },
+          }}
+        >
           <AppThemeProvider theme={theme}>
-            <WorkspacePicker recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
+            <WorkspacePicker
+              recentWorkspaces={[]}
+              entries={[]}
+              onBrowsePath={jest.fn()}
+              onSelectPath={jest.fn()}
+              onClose={jest.fn()}
+            />
           </AppThemeProvider>
-        </SafeAreaProvider>
+        </SafeAreaProvider>,
       );
     });
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Pin Default workspace')[0].props.accessibilityState).toEqual({ disabled: true, selected: false });
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Pin Default workspace')[0].props
+        .accessibilityState,
+    ).toEqual({ disabled: true, selected: false });
     act(() => expectValue(rendered).unmount());
   });
 
   function renderPickerMatrix(overrides: Record<string, unknown>) {
     return (
-      <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 47, left: 0, right: 0, bottom: 34 },
+        }}
+      >
         <AppThemeProvider theme={theme}>
           <WorkspacePicker
             selectedPath="/Users/davidparks/Code/dappercode"
@@ -357,7 +459,10 @@ describe('WorkspacePicker', () => {
             favoriteWorkspacePaths={['/Users/davidparks/Code']}
             currentPath="/Users/davidparks/Code"
             parentPath="/Users/davidparks"
-            entries={[directoryEntry('dappercode', '/Users/davidparks/Code/dappercode'), directoryEntry('notes', '/Users/davidparks/Code/notes')]}
+            entries={[
+              directoryEntry('dappercode', '/Users/davidparks/Code/dappercode'),
+              directoryEntry('notes', '/Users/davidparks/Code/notes'),
+            ]}
             onBrowsePath={jest.fn()}
             onSelectPath={jest.fn()}
             onClose={jest.fn()}
@@ -433,12 +538,11 @@ function readOnPress(props: Record<string, unknown>): () => void {
 
 function findPressableContainingText(
   root: ReactTestInstance,
-  expectedText: string
+  expectedText: string,
 ): ReactTestInstance {
   const matches = (root as QueryableTestInstance).findAll(
     (node: QueryableTestInstance) =>
-      typeof node.props.onPress === 'function' &&
-      flattenTreeText(node).includes(expectedText)
+      typeof node.props.onPress === 'function' && flattenTreeText(node).includes(expectedText),
   );
   if (matches.length === 0) {
     throw new Error(`Expected press target containing "${expectedText}"`);
@@ -448,12 +552,11 @@ function findPressableContainingText(
 
 function findPressableWithExactText(
   root: ReactTestInstance,
-  expectedText: string
+  expectedText: string,
 ): ReactTestInstance {
   const matches = (root as QueryableTestInstance).findAll(
     (node: QueryableTestInstance) =>
-      typeof node.props.onPress === 'function' &&
-      flattenTreeText(node) === expectedText
+      typeof node.props.onPress === 'function' && flattenTreeText(node) === expectedText,
   );
   if (matches.length === 0) {
     throw new Error(`Expected press target with text "${expectedText}"`);
@@ -480,7 +583,7 @@ function flattenTreeText(node: QueryableTestInstance): string {
     .map((child) =>
       typeof child === 'string' || typeof child === 'number'
         ? String(child)
-        : flattenTreeText(child as QueryableTestInstance)
+        : flattenTreeText(child as QueryableTestInstance),
     )
     .join('');
 }

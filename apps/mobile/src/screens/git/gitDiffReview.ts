@@ -39,7 +39,7 @@ export function createGitReviewTarget(
   file: UnifiedDiffFile,
   hunk: UnifiedDiffHunk,
   line: UnifiedDiffLine,
-  lineIndex: number
+  lineIndex: number,
 ): GitReviewTarget | null {
   if (line.kind === 'meta') {
     return null;
@@ -47,7 +47,7 @@ export function createGitReviewTarget(
 
   const side: GitReviewSide = line.kind === 'remove' ? 'OLD' : 'NEW';
   const lineNumber = side === 'OLD' ? line.oldLineNumber : line.newLineNumber;
-  const path = side === 'OLD' ? file.oldPath ?? file.newPath : file.newPath ?? file.oldPath;
+  const path = side === 'OLD' ? (file.oldPath ?? file.newPath) : (file.newPath ?? file.oldPath);
   if (lineNumber === null || !path) {
     return null;
   }
@@ -74,24 +74,23 @@ export function createGitReviewTarget(
   };
 }
 
-export function buildGitReviewPrompt(
-  comments: GitReviewComment[],
-  workspace?: string
-): string {
+export function buildGitReviewPrompt(comments: GitReviewComment[], workspace?: string): string {
   const payload = {
     schema: 'dappercode.inline-review-comments.v1',
     workspace: workspace?.trim() || null,
-    comments: comments.map(({ id, path, oldPath, newPath, side, line, hunk, context, comment }) => ({
-      id,
-      path,
-      oldPath,
-      newPath,
-      side,
-      line,
-      hunk,
-      context,
-      comment,
-    })),
+    comments: comments.map(
+      ({ id, path, oldPath, newPath, side, line, hunk, context, comment }) => ({
+        id,
+        path,
+        oldPath,
+        newPath,
+        side,
+        line,
+        hunk,
+        context,
+        comment,
+      }),
+    ),
   };
 
   return [

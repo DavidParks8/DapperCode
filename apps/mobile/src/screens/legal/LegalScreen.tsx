@@ -1,14 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState, type ComponentProps } from 'react';
-import {
-  Alert,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -111,7 +103,7 @@ export function LegalScreen({
               style={({ pressed }) => [
                 styles.openBtn,
                 openDocumentDisabled && styles.openBtnDisabled,
-                pressed && documentUrl && !openingDocument && styles.openBtnPressed
+                pressed && documentUrl && !openingDocument && styles.openBtnPressed,
               ]}
             >
               <Ionicons
@@ -119,7 +111,9 @@ export function LegalScreen({
                 size={16}
                 color={openDocumentDisabled ? colors.textMuted : colors.accentText}
               />
-              <Text style={[styles.openBtnText, openDocumentDisabled && styles.openBtnTextDisabled]}>
+              <Text
+                style={[styles.openBtnText, openDocumentDisabled && styles.openBtnTextDisabled]}
+              >
                 {openingDocument ? 'Opening...' : openButtonLabel}
               </Text>
             </Pressable>

@@ -18,20 +18,18 @@ import { AUTO_STORE_REVIEW_RETRY_MS } from './appConstants';
 export function useAppStoreReview(): void {
   const settingsLoaded = useAtomValue(appStateLoadedAtom);
   const currentScreen = useAtomValue(currentScreenAtom);
-  const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(
-    AppState.currentState
-  );
+  const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(AppState.currentState);
   const [storeReviewStateLoaded, setStoreReviewStateLoaded] = useState(false);
   const [storeReviewState, setStoreReviewState] = useState<AutoStoreReviewState>(
-    createDefaultAutoStoreReviewState
+    createDefaultAutoStoreReviewState,
   );
   const [automaticStoreReviewRetryAt, setAutomaticStoreReviewRetryAt] = useState<number | null>(
-    null
+    null,
   );
 
   const appLifecycleStateRef = useRef(AppState.currentState);
   const activeUsageStartedAtRef = useRef<number | null>(
-    AppState.currentState === 'active' ? Date.now() : null
+    AppState.currentState === 'active' ? Date.now() : null,
   );
   const storeReviewStateRef = useRef<AutoStoreReviewState>(createDefaultAutoStoreReviewState());
   const automaticStoreReviewInFlightRef = useRef(false);
@@ -60,7 +58,7 @@ export function useAppStoreReview(): void {
         return nextState;
       });
     },
-    [persistStoreReviewState]
+    [persistStoreReviewState],
   );
 
   const flushActiveUsageTime = useCallback(
@@ -84,7 +82,7 @@ export function useAppStoreReview(): void {
         accumulatedForegroundMs: previous.accumulatedForegroundMs + elapsedMs,
       }));
     },
-    [updateStoreReviewState]
+    [updateStoreReviewState],
   );
 
   const getEffectiveForegroundUsageMs = useCallback(() => {
@@ -94,7 +92,8 @@ export function useAppStoreReview(): void {
     }
 
     return (
-      currentState.accumulatedForegroundMs + Math.max(0, Date.now() - activeUsageStartedAtRef.current)
+      currentState.accumulatedForegroundMs +
+      Math.max(0, Date.now() - activeUsageStartedAtRef.current)
     );
   }, []);
 
@@ -137,7 +136,7 @@ export function useAppStoreReview(): void {
       console.warn(
         `Automatic store review request failed: ${
           error instanceof Error ? error.message : String(error)
-        }`
+        }`,
       );
     } finally {
       automaticStoreReviewInFlightRef.current = false;

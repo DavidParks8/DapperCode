@@ -1,28 +1,25 @@
-import { HostBridgeWsClientConnectionLayer } from "./HostBridgeWsClientConnectionLayer";
-import { HostBridgeWsClientCore } from "./HostBridgeWsClientCore";
-import { Platform } from "react-native";
-import { RpcRequestError } from "./wsErrors";
+import { HostBridgeWsClientConnectionLayer } from './HostBridgeWsClientConnectionLayer';
+import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
+import { Platform } from 'react-native';
+import { RpcRequestError } from './wsErrors';
 import {
   readEventId,
   readNumber,
   readString,
   toAgUiTurnCompletionSnapshot,
   toRecord,
-} from "./wsEventParsingInternals";
-import { type ReactNativeWebSocketConstructor } from "./wsTypes";
-import { type RpcNotification } from "./types";
+} from './wsEventParsingInternals';
+import { type ReactNativeWebSocketConstructor } from './wsTypes';
+import { type RpcNotification } from './types';
 
 export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeWsClientConnectionLayer {
   protected async openSocket(generation: number): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const WebSocketCtor =
-        globalThis.WebSocket as unknown as ReactNativeWebSocketConstructor;
+      const WebSocketCtor = globalThis.WebSocket as unknown as ReactNativeWebSocketConstructor;
       const socketUrl = this.socketUrl();
       const shouldUseQueryTokenAuth = this.shouldUseQueryTokenAuth();
       const shouldUseHeaderAuth =
-        Boolean(this.authToken) &&
-        Platform.OS !== "web" &&
-        !shouldUseQueryTokenAuth;
+        Boolean(this.authToken) && Platform.OS !== 'web' && !shouldUseQueryTokenAuth;
       const socket = shouldUseHeaderAuth
         ? new WebSocketCtor(socketUrl, undefined, {
             headers: { Authorization: `Bearer ${this.authToken}` },
@@ -39,7 +36,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
           socket.close();
           if (!settled) {
             settled = true;
-            reject(new Error("Bridge websocket open ignored after disconnect"));
+            reject(new Error('Bridge websocket open ignored after disconnect'));
           }
           return;
         }
@@ -57,11 +54,11 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         if (this.socket === socket) {
           this.socket = null;
           this.emitStatus(false);
-          this.rejectAllPending(new Error("Bridge websocket closed"));
+          this.rejectAllPending(new Error('Bridge websocket closed'));
         }
         if (!settled) {
           settled = true;
-          reject(new Error("Bridge websocket closed before open"));
+          reject(new Error('Bridge websocket closed before open'));
           return;
         }
         if (this.shouldReconnect && generation === this.connectGeneration) {
@@ -75,14 +72,14 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
             this.pendingSocket = null;
           }
           socket.close();
-          reject(new Error("Bridge websocket error"));
+          reject(new Error('Bridge websocket error'));
           return;
         }
         if (this.socket === socket) {
           this.socket = null;
           socket.close();
           this.emitStatus(false);
-          this.rejectAllPending(new Error("Bridge websocket error"));
+          this.rejectAllPending(new Error('Bridge websocket error'));
           if (this.shouldReconnect && generation === this.connectGeneration) {
             this.scheduleReconnect();
           }
@@ -134,9 +131,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     if (!record) {
       return;
     }
-    const hasMethod = typeof record.method === "string";
-    const hasId =
-      typeof record.id === "string" || typeof record.id === "number";
+    const hasMethod = typeof record.method === 'string';
+    const hasId = typeof record.id === 'string' || typeof record.id === 'number';
     if (hasId) {
       const pending = this.pendingRequests.get(record.id as string | number);
       if (!pending) {
@@ -145,19 +141,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       clearTimeout(pending.timeout);
       this.pendingRequests.delete(record.id as string | number);
       const error = toRecord(record.error);
-      if (
-        error &&
-        typeof error.code === "number" &&
-        typeof error.message === "string"
-      ) {
-        pending.reject(
-          new RpcRequestError(
-            pending.method,
-            error.code,
-            error.message,
-            error.data,
-          ),
-        );
+      if (error && typeof error.code === 'number' && typeof error.message === 'string') {
+        pending.reject(new RpcRequestError(pending.method, error.code, error.message, error.data));
         return;
       }
       pending.resolve(record.result ?? null);
@@ -169,7 +154,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
   }
   protected handleNotificationRecord(
     record: Record<string, unknown>,
-    options?: { source?: "live" | "replay" },
+    options?: { source?: 'live' | 'replay' },
   ): void {
     const method = readString(record.method);
     if (!method) {
@@ -179,7 +164,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     const protocolVersion = readNumber(record.protocolVersion);
     const streamId = readString(record.streamId);
     const identityResult = this.applyStreamIdentity(protocolVersion, streamId);
-    if (identityResult === "unsupported") {
+    if (identityResult === 'unsupported') {
       return;
     }
     const eventId = readEventId(record);
@@ -200,12 +185,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       }
       this.emitEvent(event);
     } else {
-      if (
-        protocolVersion === null &&
-        eventId === 1 &&
-        this.lastSeenEventId > 1
-      ) {
-        this.resetDeliveryEpoch("streamChanged", null, null);
+      if (protocolVersion === null && eventId === 1 && this.lastSeenEventId > 1) {
+        this.resetDeliveryEpoch('streamChanged', null, null);
       }
       if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) {
         return;
@@ -216,13 +197,12 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         this.pendingEvents.set(eventId, event);
         if (
           this.recoveryWatermark !== null &&
-          this.pendingEvents.size >
-            HostBridgeWsClientCore.MAX_RECOVERY_BUFFERED_EVENTS
+          this.pendingEvents.size > HostBridgeWsClientCore.MAX_RECOVERY_BUFFERED_EVENTS
         ) {
           this.handleRecoveryBufferOverflow();
           return;
         }
-        if (options?.source === "replay") {
+        if (options?.source === 'replay') {
           this.drainPendingEvents();
         } else if (!this.replayInFlight) {
           this.drainPendingEvents();
@@ -233,8 +213,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       }
     }
     if (
-      method === "bridge/connection/state" &&
-      (identityResult === "same" || identityResult === "missing") &&
+      method === 'bridge/connection/state' &&
+      (identityResult === 'same' || identityResult === 'missing') &&
       (this.lastSeenEventId > 0 || this.recoveryWatermark !== null)
     ) {
       this.scheduleReplay();

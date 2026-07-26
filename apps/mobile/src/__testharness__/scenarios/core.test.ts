@@ -205,7 +205,9 @@ describe('Message retention', () => {
     const contents = state.getMessageContents('t1');
     // tool call + tool result + assistant text
     expect(contents.length).toBeGreaterThanOrEqual(1);
-    const assistantMsg = contents.find((m) => m.role === 'assistant' && m.content.includes('file content'));
+    const assistantMsg = contents.find(
+      (m) => m.role === 'assistant' && m.content.includes('file content'),
+    );
     expect(assistantMsg).toBeDefined();
   });
 
@@ -237,7 +239,8 @@ describe('Sub-agent behavior', () => {
     const runningIndex = events.findIndex(
       (e) =>
         e.event.type === ('ACTIVITY_SNAPSHOT' as never) &&
-        (e.event as { content?: { subAgent?: { agentStatus?: string } } }).content?.subAgent?.agentStatus === 'running',
+        (e.event as { content?: { subAgent?: { agentStatus?: string } } }).content?.subAgent
+          ?.agentStatus === 'running',
     );
     state.applySequence(events.slice(0, runningIndex + 1));
     expect(state.getRunningSubAgentCount('parent')).toBe(1);
@@ -246,7 +249,8 @@ describe('Sub-agent behavior', () => {
     const completedIndex = events.findIndex(
       (e) =>
         e.event.type === ('ACTIVITY_SNAPSHOT' as never) &&
-        (e.event as { content?: { subAgent?: { agentStatus?: string } } }).content?.subAgent?.agentStatus === 'completed',
+        (e.event as { content?: { subAgent?: { agentStatus?: string } } }).content?.subAgent
+          ?.agentStatus === 'completed',
     );
     state.applySequence(events.slice(runningIndex + 1, completedIndex + 1));
     expect(state.getRunningSubAgentCount('parent')).toBe(0);

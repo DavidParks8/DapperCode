@@ -8,28 +8,30 @@ import {
   resolvingUserInputAtom,
   sendingAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
-import {
-  relatedAgentThreadsAtom
-} from '../../state/mainScreen/workspace';
+import { relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import {
   activityAtom,
   bridgeRecoveryBannerVisibleAtom,
-  heldActivityAtom
+  heldActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiAction, BridgeUiSurface } from '../../api/types';
-import { ACTIVITY_DETAIL_HOLD_MS, isThreadOrSubAgentRunning, removeBridgeUiSurfaceFromList, resolveHeldActivity } from './mainScreenHelpers';
-import type { MainScreenApprovalAndUserInputResolutionContext, MainScreenApprovalAndUserInputResolutionResult } from './mainScreenApprovalAndUserInputResolution';
+import {
+  ACTIVITY_DETAIL_HOLD_MS,
+  isThreadOrSubAgentRunning,
+  removeBridgeUiSurfaceFromList,
+  resolveHeldActivity,
+} from './mainScreenHelpers';
+import type {
+  MainScreenApprovalAndUserInputResolutionContext,
+  MainScreenApprovalAndUserInputResolutionResult,
+} from './mainScreenApprovalAndUserInputResolution';
 
-
-
-
-
-
-export type MainScreenUiActionHandlersContext = MainScreenApprovalAndUserInputResolutionContext & MainScreenApprovalAndUserInputResolutionResult;
+export type MainScreenUiActionHandlersContext = MainScreenApprovalAndUserInputResolutionContext &
+  MainScreenApprovalAndUserInputResolutionResult;
 
 export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandlersContext) {
   const {
@@ -69,7 +71,6 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
   const setActivity = useSetAtom(activityAtom);
   const setHeldActivity = useSetAtom(heldActivityAtom);
 
-
   const dismissUserInputRequest = useCallback(
     async (action: 'decline' | 'cancel') => {
       if (!pendingUserInputRequest || resolvingUserInput) return;
@@ -91,22 +92,20 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
       cacheThreadPendingUserInputRequest,
       pendingUserInputRequest,
       resolvingUserInput,
-    ]
+    ],
   );
 
   const dismissBridgeUiSurface = useCallback(
     async (surface: BridgeUiSurface) => {
       removeThreadBridgeUiSurface(surface.id, surface.threadId);
-      setActiveBridgeUiSurfaces((previous) =>
-        removeBridgeUiSurfaceFromList(previous, surface.id)
-      );
+      setActiveBridgeUiSurfaces((previous) => removeBridgeUiSurfaceFromList(previous, surface.id));
       try {
         await api.dismissBridgeUiSurface(surface.id, surface.threadId);
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [api, removeThreadBridgeUiSurface]
+    [api, removeThreadBridgeUiSurface],
   );
 
   const handleBridgeUiAction = useCallback(
@@ -120,14 +119,14 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
         if (action.dismissesSurface !== false) {
           removeThreadBridgeUiSurface(surface.id, surface.threadId);
           setActiveBridgeUiSurfaces((previous) =>
-            removeBridgeUiSurfaceFromList(previous, surface.id)
+            removeBridgeUiSurfaceFromList(previous, surface.id),
           );
         }
       } catch (err) {
         setError((err as Error).message);
       }
     },
-    [api, removeThreadBridgeUiSurface]
+    [api, removeThreadBridgeUiSurface],
   );
 
   const handleOpenGit = useCallback(() => {
@@ -184,7 +183,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
         heldActivityTimeoutRef.current = null;
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -231,8 +230,8 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
   const showBridgeRecoveryBanner = bridgeRecoveryBannerVisible && !ws.isConnected;
   const turnFailureDetail =
     error?.trim() ||
-    (selectedChat?.status === 'error' ? selectedChat.lastError?.trim() ?? null : null) ||
-    (activity.tone === 'error' ? activity.detail?.trim() ?? null : null);
+    (selectedChat?.status === 'error' ? (selectedChat.lastError?.trim() ?? null) : null) ||
+    (activity.tone === 'error' ? (activity.detail?.trim() ?? null) : null);
 
   return {
     dismissUserInputRequest,

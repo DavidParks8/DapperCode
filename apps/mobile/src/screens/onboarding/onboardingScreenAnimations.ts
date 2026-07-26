@@ -14,7 +14,10 @@ export interface OnboardingTranslateAnimatedStyle {
   transform: [{ translateY: Animated.AnimatedInterpolation<string | number> }];
 }
 
-export function useOnboardingIntroAnimations(showIntroStep: boolean, mode: 'initial' | 'edit' | 'add' | 'reconnect') {
+export function useOnboardingIntroAnimations(
+  showIntroStep: boolean,
+  mode: 'initial' | 'edit' | 'add' | 'reconnect',
+) {
   const introHeroMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
   const introActionsMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
 
@@ -61,7 +64,7 @@ export function useOnboardingIntroAnimations(showIntroStep: boolean, mode: 'init
         },
       ],
     }),
-    [introHeroMotion]
+    [introHeroMotion],
   );
   const introActionsAnimatedStyle = useMemo<OnboardingTranslateAnimatedStyle>(
     () => ({
@@ -75,7 +78,7 @@ export function useOnboardingIntroAnimations(showIntroStep: boolean, mode: 'init
         },
       ],
     }),
-    [introActionsMotion]
+    [introActionsMotion],
   );
   return {
     introHeroAnimatedStyle,

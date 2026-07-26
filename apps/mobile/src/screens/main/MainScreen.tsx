@@ -52,90 +52,186 @@ export interface MainScreenHandle {
 }
 
 export function MainScreen() {
-    const store = useStore();
-    // MainScreen state lives in atoms that outlive this component, so a fresh mount (a new bridge
-    // profile) has to clear it before any child reads it. A ref guard rather than useMemo: React
-    // may discard a memo cache and recompute it later, which would wipe live state mid-session.
-    const didResetRef = useRef(false);
-    if (!didResetRef.current) {
-      didResetRef.current = true;
-      store.set(resetMainScreenStateAtom);
-    }
-    const mainScreenBaseContext = useMainScreenBaseContext();
-    const coreBootstrapResult = useMainScreenCoreBootstrap(mainScreenBaseContext);
-    const coreBootstrapContext = { ...mainScreenBaseContext, ...coreBootstrapResult };
-    const lifecycleRecoveryResult = useMainScreenLifecycleRecovery(coreBootstrapContext);
-    const lifecycleRecoveryContext = { ...coreBootstrapContext, ...lifecycleRecoveryResult };
-    const chatSessionStateResult = useMainScreenChatSessionState(lifecycleRecoveryContext);
-    const chatSessionStateContext = { ...lifecycleRecoveryContext, ...chatSessionStateResult };
-    const localTranscriptActionsResult = useMainScreenLocalTranscriptActions(chatSessionStateContext);
-    const localTranscriptActionsContext = { ...chatSessionStateContext, ...localTranscriptActionsResult };
-    const threadSnapshotStoreResult = useMainScreenThreadSnapshotStore(localTranscriptActionsContext);
-    const threadSnapshotStoreContext = { ...localTranscriptActionsContext, ...threadSnapshotStoreResult };
-    const chatHydrationResult = useMainScreenChatHydration(threadSnapshotStoreContext);
-    const chatHydrationContext = { ...threadSnapshotStoreContext, ...chatHydrationResult };
-    const runtimeWatchdogSyncResult = useMainScreenRuntimeWatchdogSync(chatHydrationContext);
-    const runtimeWatchdogSyncContext = { ...chatHydrationContext, ...runtimeWatchdogSyncResult };
-    const threadRuntimeMutationsResult = useMainScreenThreadRuntimeMutations(runtimeWatchdogSyncContext);
-    const threadRuntimeMutationsContext = { ...runtimeWatchdogSyncContext, ...threadRuntimeMutationsResult };
-    const selectedRuntimeSelectorsResult = useMainScreenSelectedRuntimeSelectors(threadRuntimeMutationsContext);
-    const selectedRuntimeSelectorsContext = { ...threadRuntimeMutationsContext, ...selectedRuntimeSelectorsResult };
-    const modelCatalogStateResult = useMainScreenModelCatalogState(selectedRuntimeSelectorsContext);
-    const modelCatalogStateContext = { ...selectedRuntimeSelectorsContext, ...modelCatalogStateResult };
-    const capabilityFlagsResult = useMainScreenCapabilityFlags(modelCatalogStateContext);
-    const capabilityFlagsContext = { ...modelCatalogStateContext, ...capabilityFlagsResult };
-    const workspaceBrowserStateResult = useMainScreenWorkspaceBrowserState();
-    const workspaceBrowserStateContext = { ...capabilityFlagsContext, ...workspaceBrowserStateResult };
-    const agentThreadsRefreshResult = useMainScreenAgentThreadsRefresh(workspaceBrowserStateContext);
-    const agentThreadsRefreshContext = { ...workspaceBrowserStateContext, ...agentThreadsRefreshResult };
-    const workspaceCheckoutActionsResult = useMainScreenWorkspaceCheckoutActions(agentThreadsRefreshContext);
-    const workspaceCheckoutActionsContext = { ...agentThreadsRefreshContext, ...workspaceCheckoutActionsResult };
-    const modeConfigurationSessionResult = useMainScreenModeConfigurationSession(workspaceCheckoutActionsContext);
-    const modeConfigurationSessionContext = { ...workspaceCheckoutActionsContext, ...modeConfigurationSessionResult };
-    const composerControlActionsResult = useMainScreenComposerControlActions(modeConfigurationSessionContext);
-    const composerControlActionsContext = { ...modeConfigurationSessionContext, ...composerControlActionsResult };
-    const pickerOptionBuildersResult = useMainScreenPickerOptionBuilders(composerControlActionsContext);
-    const pickerOptionBuildersContext = { ...composerControlActionsContext, ...pickerOptionBuildersResult };
-    const localCommandChatResult = useMainScreenLocalCommandChat(pickerOptionBuildersContext);
-    const localCommandChatContext = { ...pickerOptionBuildersContext, ...localCommandChatResult };
-    const reasoningAndInterruptResult = useMainScreenReasoningAndInterrupt(localCommandChatContext);
-    const reasoningAndInterruptContext = { ...localCommandChatContext, ...reasoningAndInterruptResult };
-    const turnStopControlResult = useMainScreenTurnStopControl(reasoningAndInterruptContext);
-    const turnStopControlContext = { ...reasoningAndInterruptContext, ...turnStopControlResult };
-    const slashCommandHandlerResult = useMainScreenSlashCommandHandler(turnStopControlContext);
-    const slashCommandHandlerContext = { ...turnStopControlContext, ...slashCommandHandlerResult };
-    const chatLoadPipelineResult = useMainScreenChatLoadPipeline(slashCommandHandlerContext);
-    const chatLoadPipelineContext = { ...slashCommandHandlerContext, ...chatLoadPipelineResult };
-    const chatNavigationAndAgentDetailResult = useMainScreenChatNavigationAndAgentDetail(chatLoadPipelineContext);
-    const chatNavigationAndAgentDetailContext = { ...chatLoadPipelineContext, ...chatNavigationAndAgentDetailResult };
-    const agentThreadSelectorStateResult = useMainScreenAgentThreadSelectorState(chatNavigationAndAgentDetailContext);
-    const agentThreadSelectorStateContext = { ...chatNavigationAndAgentDetailContext, ...agentThreadSelectorStateResult };
-    const agentThreadEventBootstrapResult = useMainScreenAgentThreadEventBootstrap(agentThreadSelectorStateContext);
-    const agentThreadEventBootstrapContext = { ...agentThreadSelectorStateContext, ...agentThreadEventBootstrapResult };
-    const chatCreationFlowResult = useMainScreenChatCreationFlow(agentThreadEventBootstrapContext);
-    const chatCreationFlowContext = { ...agentThreadEventBootstrapContext, ...chatCreationFlowResult };
-    const sendMessageHandlerResult = useMainScreenSendMessageHandler(chatCreationFlowContext);
-    const sendMessageHandlerContext = { ...chatCreationFlowContext, ...sendMessageHandlerResult };
-    const composerSubmitActionsResult = useMainScreenComposerSubmitActions(sendMessageHandlerContext);
-    const composerSubmitActionsContext = { ...sendMessageHandlerContext, ...composerSubmitActionsResult };
-    const replayRecoveryEngineResult = useMainScreenReplayRecoveryEngine(composerSubmitActionsContext);
-    const replayRecoveryEngineContext = { ...composerSubmitActionsContext, ...replayRecoveryEngineResult };
-    const wsEventRouterResult = useMainScreenWsEventRouter(replayRecoveryEngineContext);
-    const wsEventRouterContext = { ...replayRecoveryEngineContext, ...wsEventRouterResult };
-    const approvalAndUserInputResolutionResult = useMainScreenApprovalAndUserInputResolution(wsEventRouterContext);
-    const approvalAndUserInputResolutionContext = { ...wsEventRouterContext, ...approvalAndUserInputResolutionResult };
-    const uiActionHandlersResult = useMainScreenUiActionHandlers(approvalAndUserInputResolutionContext);
-    const uiActionHandlersContext = { ...approvalAndUserInputResolutionContext, ...uiActionHandlersResult };
-    const headerActivityViewModelResult = useMainScreenHeaderActivityViewModel(uiActionHandlersContext);
-    const headerActivityViewModelContext = { ...uiActionHandlersContext, ...headerActivityViewModelResult };
-    const workflowQueueStateResult = useMainScreenWorkflowQueueState(headerActivityViewModelContext);
-    const workflowQueueStateContext = { ...headerActivityViewModelContext, ...workflowQueueStateResult };
-    const composerRendererResult = useMainScreenComposerRenderer(workflowQueueStateContext);
-    const composerRendererContext = { ...workflowQueueStateContext, ...composerRendererResult };
-    const planExecutionActionsResult = useMainScreenPlanExecutionActions(composerRendererContext);
-    const planExecutionActionsContext = { ...composerRendererContext, ...planExecutionActionsResult };
-    const panelCollapseCoordinatorResult = useMainScreenPanelCollapseCoordinator(planExecutionActionsContext);
-    const panelCollapseCoordinatorContext = { ...planExecutionActionsContext, ...panelCollapseCoordinatorResult };
-    const mainScreenContext = panelCollapseCoordinatorContext as MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
-    return <MainScreenView context={mainScreenContext} />;
+  const store = useStore();
+  // MainScreen state lives in atoms that outlive this component, so a fresh mount (a new bridge
+  // profile) has to clear it before any child reads it. A ref guard rather than useMemo: React
+  // may discard a memo cache and recompute it later, which would wipe live state mid-session.
+  const didResetRef = useRef(false);
+  if (!didResetRef.current) {
+    didResetRef.current = true;
+    store.set(resetMainScreenStateAtom);
+  }
+  const mainScreenBaseContext = useMainScreenBaseContext();
+  const coreBootstrapResult = useMainScreenCoreBootstrap(mainScreenBaseContext);
+  const coreBootstrapContext = { ...mainScreenBaseContext, ...coreBootstrapResult };
+  const lifecycleRecoveryResult = useMainScreenLifecycleRecovery(coreBootstrapContext);
+  const lifecycleRecoveryContext = { ...coreBootstrapContext, ...lifecycleRecoveryResult };
+  const chatSessionStateResult = useMainScreenChatSessionState(lifecycleRecoveryContext);
+  const chatSessionStateContext = { ...lifecycleRecoveryContext, ...chatSessionStateResult };
+  const localTranscriptActionsResult = useMainScreenLocalTranscriptActions(chatSessionStateContext);
+  const localTranscriptActionsContext = {
+    ...chatSessionStateContext,
+    ...localTranscriptActionsResult,
+  };
+  const threadSnapshotStoreResult = useMainScreenThreadSnapshotStore(localTranscriptActionsContext);
+  const threadSnapshotStoreContext = {
+    ...localTranscriptActionsContext,
+    ...threadSnapshotStoreResult,
+  };
+  const chatHydrationResult = useMainScreenChatHydration(threadSnapshotStoreContext);
+  const chatHydrationContext = { ...threadSnapshotStoreContext, ...chatHydrationResult };
+  const runtimeWatchdogSyncResult = useMainScreenRuntimeWatchdogSync(chatHydrationContext);
+  const runtimeWatchdogSyncContext = { ...chatHydrationContext, ...runtimeWatchdogSyncResult };
+  const threadRuntimeMutationsResult = useMainScreenThreadRuntimeMutations(
+    runtimeWatchdogSyncContext,
+  );
+  const threadRuntimeMutationsContext = {
+    ...runtimeWatchdogSyncContext,
+    ...threadRuntimeMutationsResult,
+  };
+  const selectedRuntimeSelectorsResult = useMainScreenSelectedRuntimeSelectors(
+    threadRuntimeMutationsContext,
+  );
+  const selectedRuntimeSelectorsContext = {
+    ...threadRuntimeMutationsContext,
+    ...selectedRuntimeSelectorsResult,
+  };
+  const modelCatalogStateResult = useMainScreenModelCatalogState(selectedRuntimeSelectorsContext);
+  const modelCatalogStateContext = {
+    ...selectedRuntimeSelectorsContext,
+    ...modelCatalogStateResult,
+  };
+  const capabilityFlagsResult = useMainScreenCapabilityFlags(modelCatalogStateContext);
+  const capabilityFlagsContext = { ...modelCatalogStateContext, ...capabilityFlagsResult };
+  const workspaceBrowserStateResult = useMainScreenWorkspaceBrowserState();
+  const workspaceBrowserStateContext = {
+    ...capabilityFlagsContext,
+    ...workspaceBrowserStateResult,
+  };
+  const agentThreadsRefreshResult = useMainScreenAgentThreadsRefresh(workspaceBrowserStateContext);
+  const agentThreadsRefreshContext = {
+    ...workspaceBrowserStateContext,
+    ...agentThreadsRefreshResult,
+  };
+  const workspaceCheckoutActionsResult = useMainScreenWorkspaceCheckoutActions(
+    agentThreadsRefreshContext,
+  );
+  const workspaceCheckoutActionsContext = {
+    ...agentThreadsRefreshContext,
+    ...workspaceCheckoutActionsResult,
+  };
+  const modeConfigurationSessionResult = useMainScreenModeConfigurationSession(
+    workspaceCheckoutActionsContext,
+  );
+  const modeConfigurationSessionContext = {
+    ...workspaceCheckoutActionsContext,
+    ...modeConfigurationSessionResult,
+  };
+  const composerControlActionsResult = useMainScreenComposerControlActions(
+    modeConfigurationSessionContext,
+  );
+  const composerControlActionsContext = {
+    ...modeConfigurationSessionContext,
+    ...composerControlActionsResult,
+  };
+  const pickerOptionBuildersResult = useMainScreenPickerOptionBuilders(
+    composerControlActionsContext,
+  );
+  const pickerOptionBuildersContext = {
+    ...composerControlActionsContext,
+    ...pickerOptionBuildersResult,
+  };
+  const localCommandChatResult = useMainScreenLocalCommandChat(pickerOptionBuildersContext);
+  const localCommandChatContext = { ...pickerOptionBuildersContext, ...localCommandChatResult };
+  const reasoningAndInterruptResult = useMainScreenReasoningAndInterrupt(localCommandChatContext);
+  const reasoningAndInterruptContext = {
+    ...localCommandChatContext,
+    ...reasoningAndInterruptResult,
+  };
+  const turnStopControlResult = useMainScreenTurnStopControl(reasoningAndInterruptContext);
+  const turnStopControlContext = { ...reasoningAndInterruptContext, ...turnStopControlResult };
+  const slashCommandHandlerResult = useMainScreenSlashCommandHandler(turnStopControlContext);
+  const slashCommandHandlerContext = { ...turnStopControlContext, ...slashCommandHandlerResult };
+  const chatLoadPipelineResult = useMainScreenChatLoadPipeline(slashCommandHandlerContext);
+  const chatLoadPipelineContext = { ...slashCommandHandlerContext, ...chatLoadPipelineResult };
+  const chatNavigationAndAgentDetailResult =
+    useMainScreenChatNavigationAndAgentDetail(chatLoadPipelineContext);
+  const chatNavigationAndAgentDetailContext = {
+    ...chatLoadPipelineContext,
+    ...chatNavigationAndAgentDetailResult,
+  };
+  const agentThreadSelectorStateResult = useMainScreenAgentThreadSelectorState(
+    chatNavigationAndAgentDetailContext,
+  );
+  const agentThreadSelectorStateContext = {
+    ...chatNavigationAndAgentDetailContext,
+    ...agentThreadSelectorStateResult,
+  };
+  const agentThreadEventBootstrapResult = useMainScreenAgentThreadEventBootstrap(
+    agentThreadSelectorStateContext,
+  );
+  const agentThreadEventBootstrapContext = {
+    ...agentThreadSelectorStateContext,
+    ...agentThreadEventBootstrapResult,
+  };
+  const chatCreationFlowResult = useMainScreenChatCreationFlow(agentThreadEventBootstrapContext);
+  const chatCreationFlowContext = {
+    ...agentThreadEventBootstrapContext,
+    ...chatCreationFlowResult,
+  };
+  const sendMessageHandlerResult = useMainScreenSendMessageHandler(chatCreationFlowContext);
+  const sendMessageHandlerContext = { ...chatCreationFlowContext, ...sendMessageHandlerResult };
+  const composerSubmitActionsResult = useMainScreenComposerSubmitActions(sendMessageHandlerContext);
+  const composerSubmitActionsContext = {
+    ...sendMessageHandlerContext,
+    ...composerSubmitActionsResult,
+  };
+  const replayRecoveryEngineResult = useMainScreenReplayRecoveryEngine(
+    composerSubmitActionsContext,
+  );
+  const replayRecoveryEngineContext = {
+    ...composerSubmitActionsContext,
+    ...replayRecoveryEngineResult,
+  };
+  const wsEventRouterResult = useMainScreenWsEventRouter(replayRecoveryEngineContext);
+  const wsEventRouterContext = { ...replayRecoveryEngineContext, ...wsEventRouterResult };
+  const approvalAndUserInputResolutionResult =
+    useMainScreenApprovalAndUserInputResolution(wsEventRouterContext);
+  const approvalAndUserInputResolutionContext = {
+    ...wsEventRouterContext,
+    ...approvalAndUserInputResolutionResult,
+  };
+  const uiActionHandlersResult = useMainScreenUiActionHandlers(
+    approvalAndUserInputResolutionContext,
+  );
+  const uiActionHandlersContext = {
+    ...approvalAndUserInputResolutionContext,
+    ...uiActionHandlersResult,
+  };
+  const headerActivityViewModelResult =
+    useMainScreenHeaderActivityViewModel(uiActionHandlersContext);
+  const headerActivityViewModelContext = {
+    ...uiActionHandlersContext,
+    ...headerActivityViewModelResult,
+  };
+  const workflowQueueStateResult = useMainScreenWorkflowQueueState(headerActivityViewModelContext);
+  const workflowQueueStateContext = {
+    ...headerActivityViewModelContext,
+    ...workflowQueueStateResult,
+  };
+  const composerRendererResult = useMainScreenComposerRenderer(workflowQueueStateContext);
+  const composerRendererContext = { ...workflowQueueStateContext, ...composerRendererResult };
+  const planExecutionActionsResult = useMainScreenPlanExecutionActions(composerRendererContext);
+  const planExecutionActionsContext = { ...composerRendererContext, ...planExecutionActionsResult };
+  const panelCollapseCoordinatorResult = useMainScreenPanelCollapseCoordinator(
+    planExecutionActionsContext,
+  );
+  const panelCollapseCoordinatorContext = {
+    ...planExecutionActionsContext,
+    ...panelCollapseCoordinatorResult,
+  };
+  const mainScreenContext =
+    panelCollapseCoordinatorContext as MainScreenPanelCollapseCoordinatorContext &
+      MainScreenPanelCollapseCoordinatorResult;
+  return <MainScreenView context={mainScreenContext} />;
 }

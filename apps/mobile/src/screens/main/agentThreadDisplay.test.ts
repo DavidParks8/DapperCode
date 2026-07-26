@@ -1,13 +1,7 @@
 import type { ChatSummary } from '../../api/types';
-import {
-  buildAgentThreadDisplayState,
-  getAgentThreadAccentColor,
-} from './agentThreadDisplay';
+import { buildAgentThreadDisplayState, getAgentThreadAccentColor } from './agentThreadDisplay';
 
-function chat(
-  id: string,
-  partial: Partial<ChatSummary> = {}
-): ChatSummary {
+function chat(id: string, partial: Partial<ChatSummary> = {}): ChatSummary {
   return {
     id,
     title: partial.title ?? id,
@@ -37,7 +31,7 @@ describe('agentThreadDisplay', () => {
         },
         runWatchdogUntil: Date.parse('2026-03-20T10:00:30.000Z'),
       },
-      Date.parse('2026-03-20T10:00:00.000Z')
+      Date.parse('2026-03-20T10:00:00.000Z'),
     );
 
     expect(display.label).toBe('Reasoning');
@@ -64,7 +58,7 @@ describe('agentThreadDisplay', () => {
         status: 'error',
         lastError: 'Command exited 1',
       }),
-      null
+      null,
     );
 
     expect(display.label).toBe('Error');
@@ -73,26 +67,24 @@ describe('agentThreadDisplay', () => {
   });
 
   it('assigns stable accent colors per thread id', () => {
-    expect(getAgentThreadAccentColor('thr_worker')).toBe(
-      getAgentThreadAccentColor('thr_worker')
-    );
+    expect(getAgentThreadAccentColor('thr_worker')).toBe(getAgentThreadAccentColor('thr_worker'));
   });
 
   it('prioritizes errors and keeps useful runtime details', () => {
     expect(
       buildAgentThreadDisplayState(chat('error', { status: 'error', lastError: 'fallback' }), {
         activity: { tone: 'error', title: 'Custom failure', detail: ' precise failure ' },
-      })
+      }),
     ).toMatchObject({ label: 'Error', detail: 'precise failure', isActive: false });
     expect(
       buildAgentThreadDisplayState(chat('error', { status: 'error', lastError: 'fallback' }), {
         activity: { tone: 'error', title: 'Custom failure' },
-      }).detail
+      }).detail,
     ).toBe('Custom failure');
     expect(
       buildAgentThreadDisplayState(chat('error', { status: 'error' }), {
         activity: { tone: 'error', title: 'Turn failed' },
-      }).detail
+      }).detail,
     ).toBeNull();
   });
 
@@ -101,13 +93,13 @@ describe('agentThreadDisplay', () => {
       buildAgentThreadDisplayState(chat('input'), {
         pendingUserInputRequest: {},
         activity: { tone: 'running', title: 'Choose a target' },
-      })
+      }),
     ).toMatchObject({ label: 'Needs input', detail: 'Choose a target', isActive: true });
     expect(
       buildAgentThreadDisplayState(chat('approval'), {
         pendingApproval: {},
         activity: { tone: 'running', title: 'Planning', detail: 'Approve changes' },
-      }).detail
+      }).detail,
     ).toBe('Approve changes');
   });
 
@@ -122,7 +114,7 @@ describe('agentThreadDisplay', () => {
     expect(
       buildAgentThreadDisplayState(chat(`running-${title}`), {
         activity: { tone: 'running', title },
-      })
+      }),
     ).toMatchObject({
       label: title === 'Turn started' || title === 'Ready' ? 'Working' : title,
       icon,
@@ -132,26 +124,39 @@ describe('agentThreadDisplay', () => {
   });
 
   it('recognizes every runtime signal and ignores expired watchdogs', () => {
-    expect(buildAgentThreadDisplayState(chat('status', { status: 'running' }), null).isActive).toBe(true);
-    expect(buildAgentThreadDisplayState(chat('turn'), { activeTurnId: 'turn' }).isActive).toBe(true);
-    expect(buildAgentThreadDisplayState(chat('commands'), { activeCommands: [{}] }).isActive).toBe(true);
-    expect(buildAgentThreadDisplayState(chat('watchdog'), { runWatchdogUntil: 11 }, 10).isActive).toBe(true);
-    expect(buildAgentThreadDisplayState(chat('expired'), { runWatchdogUntil: 10 }, 10).label).toBe('Idle');
+    expect(buildAgentThreadDisplayState(chat('status', { status: 'running' }), null).isActive).toBe(
+      true,
+    );
+    expect(buildAgentThreadDisplayState(chat('turn'), { activeTurnId: 'turn' }).isActive).toBe(
+      true,
+    );
+    expect(buildAgentThreadDisplayState(chat('commands'), { activeCommands: [{}] }).isActive).toBe(
+      true,
+    );
+    expect(
+      buildAgentThreadDisplayState(chat('watchdog'), { runWatchdogUntil: 11 }, 10).isActive,
+    ).toBe(true);
+    expect(buildAgentThreadDisplayState(chat('expired'), { runWatchdogUntil: 10 }, 10).label).toBe(
+      'Idle',
+    );
   });
 
   it('formats complete and idle states without generic activity details', () => {
     expect(
       buildAgentThreadDisplayState(chat('complete', { status: 'complete' }), {
         activity: { tone: 'complete', title: 'Published', detail: 'All done' },
-      })
+      }),
     ).toMatchObject({ label: 'Complete', detail: 'All done', isActive: false });
     expect(
       buildAgentThreadDisplayState(chat('complete', { status: 'complete' }), {
         activity: { tone: 'complete', title: 'Turn completed' },
-      }).detail
+      }).detail,
     ).toBeNull();
     expect(buildAgentThreadDisplayState(chat('idle'), undefined)).toMatchObject({
-      label: 'Idle', detail: null, tone: 'idle', isActive: false,
+      label: 'Idle',
+      detail: null,
+      tone: 'idle',
+      isActive: false,
     });
   });
 });

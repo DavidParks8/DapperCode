@@ -1,15 +1,14 @@
-import {
-  selectedCollaborationModeAtom
-} from '../../state/mainScreen/models';
+import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
-import type { MainScreenTurnStopControlContext, MainScreenTurnStopControlResult } from './mainScreenTurnStopControl';
+import type {
+  MainScreenTurnStopControlContext,
+  MainScreenTurnStopControlResult,
+} from './mainScreenTurnStopControl';
 import { executeSlashCommand } from './mainScreenSlashCommand';
 
-
-
-
-export type MainScreenSlashCommandHandlerContext = MainScreenTurnStopControlContext & MainScreenTurnStopControlResult;
+export type MainScreenSlashCommandHandlerContext = MainScreenTurnStopControlContext &
+  MainScreenTurnStopControlResult;
 
 export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommandHandlerContext) {
   const {
@@ -50,7 +49,6 @@ export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommand
   } = context;
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
 
-
   const handleSlashCommand = useCallback(
     (input: string): Promise<boolean> => executeSlashCommand(context, input),
     [
@@ -89,7 +87,7 @@ export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommand
       rememberChatModelPreference,
       scrollToBottomReliable,
       startNewChat,
-    ]
+    ],
   );
 
   return {
@@ -97,4 +95,6 @@ export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommand
   };
 }
 
-export type MainScreenSlashCommandHandlerResult = ReturnType<typeof useMainScreenSlashCommandHandler>;
+export type MainScreenSlashCommandHandlerResult = ReturnType<
+  typeof useMainScreenSlashCommandHandler
+>;

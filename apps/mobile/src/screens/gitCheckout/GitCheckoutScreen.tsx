@@ -1,7 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { decorativeAccessibilityProps } from '../../accessibility';
@@ -139,7 +147,11 @@ export function GitCheckoutScreen() {
             </Text>
           ) : null}
           {error ? (
-            <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>
+            <Text
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+              style={styles.errorText}
+            >
               {error}
             </Text>
           ) : null}
@@ -148,7 +160,11 @@ export function GitCheckoutScreen() {
         <View style={styles.actions}>
           <Pressable
             onPress={() => close()}
-            style={({ pressed }) => [styles.button, styles.buttonSecondary, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.button,
+              styles.buttonSecondary,
+              pressed && styles.pressed,
+            ]}
             disabled={cloning}
             accessibilityRole="button"
             accessibilityLabel="Cancel git checkout"

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const reportPath = path.resolve(
   root,
-  process.argv[2] ?? 'services/rust-bridge/target/llvm-cov/coverage.json'
+  process.argv[2] ?? 'services/rust-bridge/target/llvm-cov/coverage.json',
 );
 const minimum = Number(process.env.MIN_RUST_BRANCH_COVERAGE ?? '86');
 const report = JSON.parse(readFileSync(reportPath, 'utf8'));
@@ -20,7 +20,7 @@ if (totals.count <= 0) {
 
 const percentage = (totals.covered * 100) / totals.count;
 process.stdout.write(
-  `Rust branch coverage: ${percentage.toFixed(2)}% (${String(totals.covered)}/${String(totals.count)}), required ${minimum.toFixed(2)}%\n`
+  `Rust branch coverage: ${percentage.toFixed(2)}% (${String(totals.covered)}/${String(totals.count)}), required ${minimum.toFixed(2)}%\n`,
 );
 if (percentage + Number.EPSILON < minimum) {
   process.exitCode = 1;

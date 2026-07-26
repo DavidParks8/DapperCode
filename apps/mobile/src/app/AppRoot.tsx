@@ -40,7 +40,7 @@ export function AppRoot() {
   const drawerWidth = useMemo(() => getDrawerWidth(screenWidth), [screenWidth]);
   const tabletLayoutTransition = useMemo(
     () => LinearTransition.duration(TABLET_SIDEBAR_ANIMATION_MS).easing(Easing.out(Easing.cubic)),
-    []
+    [],
   );
 
   const handleBackSwipe = useAppBackHandler();

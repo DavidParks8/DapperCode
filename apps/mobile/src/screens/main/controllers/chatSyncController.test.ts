@@ -41,12 +41,8 @@ describe('chatSyncController', () => {
   });
 
   it('detects assistant progress and falls back to a running watchdog', () => {
-    const previous = chat('idle', [
-      { id: 'a', role: 'assistant', content: 'a', createdAt: '' },
-    ]);
-    const latest = chat('idle', [
-      { id: 'a', role: 'assistant', content: 'answer', createdAt: '' },
-    ]);
+    const previous = chat('idle', [{ id: 'a', role: 'assistant', content: 'a', createdAt: '' }]);
+    const latest = chat('idle', [{ id: 'a', role: 'assistant', content: 'answer', createdAt: '' }]);
     expect(assessChatSync(previous, latest, false)).toMatchObject({
       terminal: false,
       shouldShowRunning: true,
@@ -75,9 +71,18 @@ describe('chatSyncController', () => {
   it('polls immediately, schedules follow-up work, tolerates failures, and cleans up', async () => {
     jest.useFakeTimers();
     const snapshot = chat('idle');
-    const poll = jest.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('offline'));
+    const poll = jest
+      .fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockRejectedValueOnce(new Error('offline'));
     const onSnapshot = jest.fn();
-    function Probe({ threadId = 'thread', paused = false }: { threadId?: string | null; paused?: boolean }) {
+    function Probe({
+      threadId = 'thread',
+      paused = false,
+    }: {
+      threadId?: string | null;
+      paused?: boolean;
+    }) {
       useChatSynchronization({
         controller: { poll } as never,
         threadId,
@@ -91,18 +96,29 @@ describe('chatSyncController', () => {
       return null;
     }
     let tree: ReactTestRenderer;
-    await act(async () => { tree = renderer.create(React.createElement(Probe)); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe));
+    });
     expect(onSnapshot).toHaveBeenCalledWith(snapshot, expect.any(Object));
-    await act(async () => { jest.advanceTimersByTime(5_000); await Promise.resolve(); });
+    await act(async () => {
+      jest.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
     expect(poll).toHaveBeenCalledTimes(2);
     act(() => tree!.unmount());
-    act(() => { jest.runOnlyPendingTimers(); });
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
     expect(poll).toHaveBeenCalledTimes(2);
 
-    await act(async () => { tree = renderer.create(React.createElement(Probe, { paused: true })); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe, { paused: true }));
+    });
     expect(poll).toHaveBeenCalledTimes(2);
     act(() => tree!.unmount());
-    await act(async () => { tree = renderer.create(React.createElement(Probe, { threadId: null })); });
+    await act(async () => {
+      tree = renderer.create(React.createElement(Probe, { threadId: null }));
+    });
     act(() => tree!.unmount());
     jest.useRealTimers();
   });

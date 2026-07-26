@@ -7,7 +7,7 @@ type ShowAlert = (title: string, message?: string, buttons?: AlertButton[]) => v
 export function selectApprovalModeWithConfirmation(
   mode: ApprovalMode,
   onChange: (mode: ApprovalMode) => void,
-  showAlert: ShowAlert
+  showAlert: ShowAlert,
 ): void {
   if (mode === 'normal') {
     onChange('normal');
@@ -24,6 +24,6 @@ export function selectApprovalModeWithConfirmation(
         style: 'destructive',
         onPress: () => onChange('yolo'),
       },
-    ]
+    ],
   );
 }

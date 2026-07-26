@@ -1,10 +1,6 @@
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { PendingApproval } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
@@ -58,7 +54,7 @@ function textContent(node: QueryableInstance): string {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label
+    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
   if (!match) throw new Error(`Missing pressable: ${label}`);
   return match;
@@ -91,7 +87,7 @@ describe('ApprovalBanner', () => {
     const resolve = jest.fn().mockRejectedValue(new Error('temporary failure'));
 
     await expect(
-      runApprovalResolution('approval-1', 'accept', resolve, setResolving)
+      runApprovalResolution('approval-1', 'accept', resolve, setResolving),
     ).rejects.toThrow('temporary failure');
     expect(setResolving.mock.calls).toEqual([['accept'], [null]]);
   });
@@ -99,9 +95,10 @@ describe('ApprovalBanner', () => {
   it('resolves command and file approvals across pending, reject, and retry states', async () => {
     let finishResolution: (() => void) | undefined;
     const onResolve = jest.fn(
-      () => new Promise<void>((resolve) => {
-        finishResolution = resolve;
-      })
+      () =>
+        new Promise<void>((resolve) => {
+          finishResolution = resolve;
+        }),
     );
     const commandApproval: PendingApproval = {
       requestId: 'approval-1',
@@ -146,18 +143,27 @@ describe('ApprovalBanner', () => {
 
     const failed = jest.fn().mockRejectedValue(new Error('denied'));
     act(() => {
-      tree.update(wrap(<ApprovalBanner approval={{ ...commandApproval, command: undefined }} onResolve={failed} />));
+      tree.update(
+        wrap(
+          <ApprovalBanner
+            approval={{ ...commandApproval, command: undefined }}
+            onResolve={failed}
+          />,
+        ),
+      );
     });
     await act(async () => invokeProp(findPressable(queryRoot(tree), 'Reject'), 'onPress'));
     expect(failed).toHaveBeenCalledWith('approval-1', 'reject');
 
     act(() => {
-      tree.update(wrap(
-        <ApprovalBanner
-          approval={{ ...commandApproval, kind: 'fileChange', reason: undefined }}
-          onResolve={jest.fn().mockResolvedValue(undefined)}
-        />
-      ));
+      tree.update(
+        wrap(
+          <ApprovalBanner
+            approval={{ ...commandApproval, kind: 'fileChange', reason: undefined }}
+            onResolve={jest.fn().mockResolvedValue(undefined)}
+          />,
+        ),
+      );
     });
     expect(textContent(queryRoot(tree))).toContain('File change');
     act(() => tree.unmount());

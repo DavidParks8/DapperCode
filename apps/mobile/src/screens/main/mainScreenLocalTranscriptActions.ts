@@ -1,16 +1,24 @@
 import { useCallback, useEffect } from 'react';
 import type { Chat, ChatMessage as ChatTranscriptMessage } from '../../api/types';
-import { type PendingOptimisticQueuedMessage, countUserMessages, reconcileChatWithPendingOptimisticMessages, parseMentionQuery, parseSlashQuery, filterSlashCommands } from './mainScreenHelpers';
-import type { MainScreenChatSessionStateContext, MainScreenChatSessionStateResult } from './mainScreenChatSessionState';
+import {
+  type PendingOptimisticQueuedMessage,
+  countUserMessages,
+  reconcileChatWithPendingOptimisticMessages,
+  parseMentionQuery,
+  parseSlashQuery,
+  filterSlashCommands,
+} from './mainScreenHelpers';
+import type {
+  MainScreenChatSessionStateContext,
+  MainScreenChatSessionStateResult,
+} from './mainScreenChatSessionState';
 
+export type MainScreenLocalTranscriptActionsContext = MainScreenChatSessionStateContext &
+  MainScreenChatSessionStateResult;
 
-
-
-
-
-export type MainScreenLocalTranscriptActionsContext = MainScreenChatSessionStateContext & MainScreenChatSessionStateResult;
-
-export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTranscriptActionsContext) {
+export function useMainScreenLocalTranscriptActions(
+  context: MainScreenLocalTranscriptActionsContext,
+) {
   const {
     activeSlashCommands,
     attachmentController,
@@ -26,40 +34,32 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
 
   const slashQuery = parseSlashQuery(draft);
   const slashSuggestions =
-    slashQuery !== null
-      ? filterSlashCommands(
-          slashQuery,
-          activeSlashCommands
-        )
-      : [];
+    slashQuery !== null ? filterSlashCommands(slashQuery, activeSlashCommands) : [];
   const mentionQuery = parseMentionQuery(draft);
   const mentionPathSuggestions =
     mentionQuery !== null ? attachmentController.mentionSuggestions(mentionQuery) : [];
-  const slashSuggestionsMaxHeight = Math.max(
-    148,
-    Math.min(300, Math.floor(windowHeight * 0.34))
-  );
+  const slashSuggestionsMaxHeight = Math.max(148, Math.min(300, Math.floor(windowHeight * 0.34)));
 
   const queueOptimisticUserMessage = useCallback(
     (
       threadId: string,
       message: ChatTranscriptMessage,
-      options?: { baseChat?: Chat | null; userOrdinal?: number }
+      options?: { baseChat?: Chat | null; userOrdinal?: number },
     ) => {
       if (!threadId) {
         return;
       }
 
-      const existingPendingMessages =
-        pendingOptimisticUserMessagesRef.current[threadId] ?? [];
+      const existingPendingMessages = pendingOptimisticUserMessagesRef.current[threadId] ?? [];
       const visibleChat =
         selectedChatRef.current?.id === threadId
           ? selectedChatRef.current
-          : options?.baseChat ?? null;
-      const nextUserOrdinal = options?.userOrdinal ??
+          : (options?.baseChat ?? null);
+      const nextUserOrdinal =
+        options?.userOrdinal ??
         Math.max(
           countUserMessages(visibleChat?.messages ?? []),
-          existingPendingMessages[existingPendingMessages.length - 1]?.userOrdinal ?? 0
+          existingPendingMessages[existingPendingMessages.length - 1]?.userOrdinal ?? 0,
         ) + 1;
 
       pendingOptimisticUserMessagesRef.current[threadId] = [
@@ -70,32 +70,28 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
         },
       ];
     },
-    []
+    [],
   );
 
-  const discardOptimisticUserMessage = useCallback(
-    (threadId: string, messageId: string) => {
-      if (!threadId || !messageId) {
-        return;
-      }
+  const discardOptimisticUserMessage = useCallback((threadId: string, messageId: string) => {
+    if (!threadId || !messageId) {
+      return;
+    }
 
-      const existingPendingMessages =
-        pendingOptimisticUserMessagesRef.current[threadId] ?? [];
-      if (existingPendingMessages.length === 0) {
-        return;
-      }
+    const existingPendingMessages = pendingOptimisticUserMessagesRef.current[threadId] ?? [];
+    if (existingPendingMessages.length === 0) {
+      return;
+    }
 
-      const nextPendingMessages = existingPendingMessages.filter(
-        (entry) => entry.message.id !== messageId
-      );
-      if (nextPendingMessages.length > 0) {
-        pendingOptimisticUserMessagesRef.current[threadId] = nextPendingMessages;
-      } else {
-        delete pendingOptimisticUserMessagesRef.current[threadId];
-      }
-    },
-    []
-  );
+    const nextPendingMessages = existingPendingMessages.filter(
+      (entry) => entry.message.id !== messageId,
+    );
+    if (nextPendingMessages.length > 0) {
+      pendingOptimisticUserMessagesRef.current[threadId] = nextPendingMessages;
+    } else {
+      delete pendingOptimisticUserMessagesRef.current[threadId];
+    }
+  }, []);
 
   const mergeChatWithPendingOptimisticMessages = useCallback((chat: Chat): Chat => {
     const pendingMessages = pendingOptimisticUserMessagesRef.current[chat.id] ?? [];
@@ -103,10 +99,8 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
       return chat;
     }
 
-    const {
-      chat: mergedChat,
-      remainingPendingMessages,
-    } = reconcileChatWithPendingOptimisticMessages(chat, pendingMessages);
+    const { chat: mergedChat, remainingPendingMessages } =
+      reconcileChatWithPendingOptimisticMessages(chat, pendingMessages);
 
     if (remainingPendingMessages.length > 0) {
       pendingOptimisticUserMessagesRef.current[chat.id] = remainingPendingMessages;
@@ -130,8 +124,7 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
         content: normalizedContent,
         createdAt: new Date().toISOString(),
       };
-      const existingMessages =
-        pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] ?? [];
+      const existingMessages = pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] ?? [];
       pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] = [
         ...existingMessages,
         optimisticMessage,
@@ -139,7 +132,7 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
       bumpAgentRuntimeRevision();
       return optimisticMessage;
     },
-    [bumpAgentRuntimeRevision]
+    [bumpAgentRuntimeRevision],
   );
 
   const discardOptimisticQueuedMessage = useCallback(
@@ -150,15 +143,12 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
         return;
       }
 
-      const existingMessages =
-        pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] ?? [];
+      const existingMessages = pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] ?? [];
       if (existingMessages.length === 0) {
         return;
       }
 
-      const nextMessages = existingMessages.filter(
-        (message) => message.id !== normalizedMessageId
-      );
+      const nextMessages = existingMessages.filter((message) => message.id !== normalizedMessageId);
       if (nextMessages.length > 0) {
         pendingOptimisticQueuedMessagesRef.current[normalizedThreadId] = nextMessages;
       } else {
@@ -166,7 +156,7 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
       }
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision]
+    [bumpAgentRuntimeRevision],
   );
 
   useEffect(() => {
@@ -191,4 +181,6 @@ export function useMainScreenLocalTranscriptActions(context: MainScreenLocalTran
   };
 }
 
-export type MainScreenLocalTranscriptActionsResult = ReturnType<typeof useMainScreenLocalTranscriptActions>;
+export type MainScreenLocalTranscriptActionsResult = ReturnType<
+  typeof useMainScreenLocalTranscriptActions
+>;

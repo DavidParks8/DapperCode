@@ -1,5 +1,5 @@
-import { EventType } from "@ag-ui/core";
-import type { ChatMessage } from "./types";
+import { EventType } from '@ag-ui/core';
+import type { ChatMessage } from './types';
 
 export interface AgUiChunkAssembly {
   count: number;
@@ -20,7 +20,7 @@ export interface AgUiThreadMessageState {
   structuredTextByCallId: Record<string, string>;
   chunkAssemblies: Record<string, AgUiChunkAssembly>;
   state: unknown;
-  steps: Record<string, "running" | "finished">;
+  steps: Record<string, 'running' | 'finished'>;
   rawEvents: unknown[];
   customMetadata: Record<string, unknown>;
   customMetadataOrder: string[];

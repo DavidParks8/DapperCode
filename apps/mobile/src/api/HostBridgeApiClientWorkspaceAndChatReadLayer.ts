@@ -1,11 +1,6 @@
-import { HostBridgeApiClientChatListingLayer } from "./HostBridgeApiClientChatListingLayer";
-import { chatShellFromSummary, cloneChat } from "./clientChatCloneAndRetryInternals";
-import {
-  mapChatSummary,
-  readString,
-  toRawThread,
-  toRecord,
-} from "./chatMapping";
+import { HostBridgeApiClientChatListingLayer } from './HostBridgeApiClientChatListingLayer';
+import { chatShellFromSummary, cloneChat } from './clientChatCloneAndRetryInternals';
+import { mapChatSummary, readString, toRawThread, toRecord } from './chatMapping';
 import {
   normalizeAcpMode,
   normalizeApprovalPolicy,
@@ -17,15 +12,15 @@ import {
   readFileSystemListResponse,
   readWorkspaceListResponse,
   toThreadConfig,
-} from "./clientBridgeResponseNormalization";
-import { normalizeAgentId } from "./clientTurnInputInternals";
+} from './clientBridgeResponseNormalization';
+import { normalizeAgentId } from './clientTurnInputInternals';
 import {
   type AppServerLoadedThreadListResponse,
   type AppServerStartResponse,
   type ListChatsOptions,
   MOBILE_DEFAULT_SANDBOX,
   MOBILE_DEVELOPER_INSTRUCTIONS,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 import {
   type BridgeThreadCreateResponse,
   type BrowserPreviewDiscoveryResponse,
@@ -36,7 +31,7 @@ import {
   type FileSystemListRequest,
   type FileSystemListResponse,
   type WorkspaceListResponse,
-} from "./types";
+} from './types';
 import {
   type ChatReadOptions,
   DEFAULT_CHAT_LIST_LIMIT,
@@ -45,21 +40,19 @@ import {
   mergeChatSummariesById,
   normalizeCwd,
   normalizeListLimit,
-} from "./clientChatListInternals";
+} from './clientChatListInternals';
 
 export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostBridgeApiClientChatListingLayer {
   protected chatListCacheKey(options: ListChatsOptions): string {
     const includeSubAgents = options.includeSubAgents === true;
     const limit = normalizeListLimit(
       options.limit ??
-        (includeSubAgents
-          ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT
-          : DEFAULT_CHAT_LIST_LIMIT),
+        (includeSubAgents ? DEFAULT_SUB_AGENT_CHAT_LIST_LIMIT : DEFAULT_CHAT_LIST_LIMIT),
     );
-    return `${includeSubAgents ? "with-subagents" : "default"}:${String(limit)}`;
+    return `${includeSubAgents ? 'with-subagents' : 'default'}:${String(limit)}`;
   }
   protected allChatListCacheKey(options: ListAllChatsOptions): string {
-    return options.includeSubAgents === true ? "with-subagents" : "default";
+    return options.includeSubAgents === true ? 'with-subagents' : 'default';
   }
   protected mergeIntoAllChatListCaches(chats: ChatSummary[]): void {
     for (const [key, cachedList] of this.allChatListCache.entries()) {
@@ -74,24 +67,21 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
   }
   async listLoadedChatIds(): Promise<string[]> {
     const response = await this.ws.request<AppServerLoadedThreadListResponse>(
-      "thread/loaded/list",
+      'thread/loaded/list',
       undefined,
     );
     const ids = Array.isArray(response.data) ? response.data : [];
     return ids
-      .map((value) => readString(value)?.trim() ?? "")
+      .map((value) => readString(value)?.trim() ?? '')
       .filter((value): value is string => value.length > 0);
   }
   async listWorkspaceRoots(limit = 200): Promise<WorkspaceListResponse> {
-    const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/workspaces/list",
-      { limit },
-    );
+    const response = await this.ws.request<Record<string, unknown>>('bridge/workspaces/list', {
+      limit,
+    });
     return readWorkspaceListResponse(response);
   }
-  async listFilesystemEntries(
-    request?: FileSystemListRequest,
-  ): Promise<FileSystemListResponse> {
+  async listFilesystemEntries(request?: FileSystemListRequest): Promise<FileSystemListResponse> {
     const params: Record<string, unknown> = {
       path: normalizeCwd(request?.path) ?? null,
       includeHidden: request?.includeHidden === true,
@@ -100,31 +90,22 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     if (request?.includeGitRepo === true) {
       params.includeGitRepo = true;
     }
-    const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/fs/list",
-      params,
-    );
+    const response = await this.ws.request<Record<string, unknown>>('bridge/fs/list', params);
     return readFileSystemListResponse(response);
   }
-  async createBrowserPreviewSession(
-    targetUrl: string,
-  ): Promise<BrowserPreviewSession> {
+  async createBrowserPreviewSession(targetUrl: string): Promise<BrowserPreviewSession> {
     const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/browser/session/create",
+      'bridge/browser/session/create',
       { targetUrl },
     );
     const session = readBrowserPreviewSession(response);
     if (!session) {
-      throw new Error(
-        "bridge/browser/session/create returned an invalid session payload",
-      );
+      throw new Error('bridge/browser/session/create returned an invalid session payload');
     }
     return session;
   }
   async listBrowserPreviewSessions(): Promise<BrowserPreviewSession[]> {
-    const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/browser/sessions/list",
-    );
+    const response = await this.ws.request<Record<string, unknown>>('bridge/browser/sessions/list');
     const record = toRecord(response) ?? {};
     const rawSessions = Array.isArray(record.sessions) ? record.sessions : [];
     return rawSessions
@@ -133,14 +114,14 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
   }
   async closeBrowserPreviewSession(sessionId: string): Promise<boolean> {
     const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/browser/session/close",
+      'bridge/browser/session/close',
       { sessionId },
     );
     return response.closed === true;
   }
   async discoverBrowserPreviewTargets(): Promise<BrowserPreviewDiscoveryResponse> {
     const response = await this.ws.request<Record<string, unknown>>(
-      "bridge/browser/targets/discover",
+      'bridge/browser/targets/discover',
     );
     return readBrowserPreviewDiscoveryResponse(response);
   }
@@ -150,14 +131,58 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     const requestedModel = normalizeModel(body.model);
     const requestedEffort = normalizeEffort(body.effort);
     const requestedMode =
-      normalizeAcpMode(body.agentMode) ??
-      (body.collaborationMode === "plan" ? "plan" : "build");
+      normalizeAcpMode(body.agentMode) ?? (body.collaborationMode === 'plan' ? 'plan' : 'build');
     const requestedServiceTier = normalizeServiceTier(body.serviceTier);
-    const requestedApprovalPolicy =
-      normalizeApprovalPolicy(body.approvalPolicy) ?? "untrusted";
-    const started = await this.ws.request<AppServerStartResponse>(
-      "thread/start",
-      {
+    const requestedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
+    const started = await this.ws.request<AppServerStartResponse>('thread/start', {
+      agentId: requestedAgentId ?? undefined,
+      model: requestedModel ?? null,
+      effort: requestedEffort ?? null,
+      mode: requestedMode,
+      modelProvider: null,
+      cwd: requestedCwd ?? null,
+      approvalPolicy: requestedApprovalPolicy,
+      sandbox: MOBILE_DEFAULT_SANDBOX,
+      config: toThreadConfig(requestedServiceTier),
+      baseInstructions: null,
+      developerInstructions: MOBILE_DEVELOPER_INSTRUCTIONS,
+      personality: null,
+      ephemeral: null,
+      experimentalRawEvents: true,
+      persistExtendedHistory: true,
+    });
+    const chatId = started.thread?.id;
+    if (!chatId) {
+      throw new Error('thread/start did not return a chat id');
+    }
+    const initialPrompt = body.message?.trim();
+    if (initialPrompt) {
+      return this.sendChatMessage(chatId, {
+        content: initialPrompt,
+        role: 'user',
+        cwd: requestedCwd ?? undefined,
+        model: requestedModel ?? undefined,
+        effort: requestedEffort ?? undefined,
+        approvalPolicy: requestedApprovalPolicy,
+      });
+    }
+    if (started.thread) {
+      return this.mapChatWithCachedTitle(started.thread);
+    }
+    return this.getChat(chatId);
+  }
+  async createChatIdempotent(body: CreateChatRequest, submissionId: string): Promise<Chat> {
+    const requestedAgentId = normalizeAgentId(body.agentId);
+    const requestedCwd = normalizeCwd(body.cwd);
+    const requestedModel = normalizeModel(body.model);
+    const requestedEffort = normalizeEffort(body.effort);
+    const requestedMode =
+      normalizeAcpMode(body.agentMode) ?? (body.collaborationMode === 'plan' ? 'plan' : 'build');
+    const requestedServiceTier = normalizeServiceTier(body.serviceTier);
+    const requestedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
+    const started = await this.ws.request<BridgeThreadCreateResponse>('bridge/thread/create', {
+      submissionId,
+      threadStart: {
         agentId: requestedAgentId ?? undefined,
         model: requestedModel ?? null,
         effort: requestedEffort ?? null,
@@ -174,68 +199,10 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
         experimentalRawEvents: true,
         persistExtendedHistory: true,
       },
-    );
-    const chatId = started.thread?.id;
-    if (!chatId) {
-      throw new Error("thread/start did not return a chat id");
-    }
-    const initialPrompt = body.message?.trim();
-    if (initialPrompt) {
-      return this.sendChatMessage(chatId, {
-        content: initialPrompt,
-        role: "user",
-        cwd: requestedCwd ?? undefined,
-        model: requestedModel ?? undefined,
-        effort: requestedEffort ?? undefined,
-        approvalPolicy: requestedApprovalPolicy,
-      });
-    }
-    if (started.thread) {
-      return this.mapChatWithCachedTitle(started.thread);
-    }
-    return this.getChat(chatId);
-  }
-  async createChatIdempotent(
-    body: CreateChatRequest,
-    submissionId: string,
-  ): Promise<Chat> {
-    const requestedAgentId = normalizeAgentId(body.agentId);
-    const requestedCwd = normalizeCwd(body.cwd);
-    const requestedModel = normalizeModel(body.model);
-    const requestedEffort = normalizeEffort(body.effort);
-    const requestedMode =
-      normalizeAcpMode(body.agentMode) ??
-      (body.collaborationMode === "plan" ? "plan" : "build");
-    const requestedServiceTier = normalizeServiceTier(body.serviceTier);
-    const requestedApprovalPolicy =
-      normalizeApprovalPolicy(body.approvalPolicy) ?? "untrusted";
-    const started = await this.ws.request<BridgeThreadCreateResponse>(
-      "bridge/thread/create",
-      {
-        submissionId,
-        threadStart: {
-          agentId: requestedAgentId ?? undefined,
-          model: requestedModel ?? null,
-          effort: requestedEffort ?? null,
-          mode: requestedMode,
-          modelProvider: null,
-          cwd: requestedCwd ?? null,
-          approvalPolicy: requestedApprovalPolicy,
-          sandbox: MOBILE_DEFAULT_SANDBOX,
-          config: toThreadConfig(requestedServiceTier),
-          baseInstructions: null,
-          developerInstructions: MOBILE_DEVELOPER_INSTRUCTIONS,
-          personality: null,
-          ephemeral: null,
-          experimentalRawEvents: true,
-          persistExtendedHistory: true,
-        },
-      },
-    );
+    });
     const thread = toRecord(started.thread);
     const chatId = readString(thread?.id);
-    if (!chatId || !thread)
-      throw new Error("bridge/thread/create did not return a chat");
+    if (!chatId || !thread) throw new Error('bridge/thread/create did not return a chat');
     return this.mapChatWithCachedTitle(thread);
   }
   async getChat(id: string, options: ChatReadOptions = {}): Promise<Chat> {
@@ -269,7 +236,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     this.rememberRawThreadTitle(rawThread);
     const mapped = mapChatSummary(rawThread);
     if (!mapped) {
-      throw new Error("chat id missing in app-server response");
+      throw new Error('chat id missing in app-server response');
     }
     const summary = this.applyRememberedTitle(mapped);
     const cachedChat = this.peekChat(summary.id);

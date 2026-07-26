@@ -1,10 +1,6 @@
-import {
-  readString,
-  readStringArray,
-  toRecord,
-} from "./chatMappingRawTypesAndReaders";
-import { stringifyStructuredContentEntries } from "./chatMappingStructuredContentPreview";
-import { type ChatMessageSubAgentMeta } from "./types";
+import { readString, readStringArray, toRecord } from './chatMappingRawTypesAndReaders';
+import { stringifyStructuredContentEntries } from './chatMappingStructuredContentPreview';
+import { type ChatMessageSubAgentMeta } from './types';
 
 export function readFunctionToolArguments(
   item: Record<string, unknown>,
@@ -17,9 +13,7 @@ export function readFunctionToolArguments(
   );
 }
 
-export function readFunctionToolInput(
-  item: Record<string, unknown>,
-): string | null {
+export function readFunctionToolInput(item: Record<string, unknown>): string | null {
   return (
     normalizeMultiline(readString(item.input), 1800) ??
     normalizeMultiline(readString(item.arguments), 1800) ??
@@ -27,44 +21,33 @@ export function readFunctionToolInput(
   );
 }
 
-export function readFunctionCommand(
-  args: Record<string, unknown> | null,
-): string | null {
+export function readFunctionCommand(args: Record<string, unknown> | null): string | null {
   if (!args) {
     return null;
   }
   const direct =
-    normalizeInline(readString(args.cmd), 240) ??
-    normalizeInline(readString(args.command), 240);
+    normalizeInline(readString(args.cmd), 240) ?? normalizeInline(readString(args.command), 240);
   if (direct) {
     return direct;
   }
-  const commandParts = readStringArray(args.cmd).concat(
-    readStringArray(args.command),
-  );
-  return commandParts.length > 0
-    ? normalizeInline(commandParts.join(" "), 240)
-    : null;
+  const commandParts = readStringArray(args.cmd).concat(readStringArray(args.command));
+  return commandParts.length > 0 ? normalizeInline(commandParts.join(' '), 240) : null;
 }
 
-export function parseMcpFunctionToolName(
-  name: string,
-): { server: string; tool: string } | null {
-  const segments = name.split("__").filter(Boolean);
-  if (segments.length < 3 || segments[0] !== "mcp") {
+export function parseMcpFunctionToolName(name: string): { server: string; tool: string } | null {
+  const segments = name.split('__').filter(Boolean);
+  if (segments.length < 3 || segments[0] !== 'mcp') {
     return null;
   }
   const [, server, ...toolParts] = segments;
-  const tool = toolParts.join("__");
+  const tool = toolParts.join('__');
   if (!server || !tool) {
     return null;
   }
   return { server, tool };
 }
 
-export function readFunctionSearchQuery(
-  args: Record<string, unknown> | null,
-): string | null {
+export function readFunctionSearchQuery(args: Record<string, unknown> | null): string | null {
   if (!args) {
     return null;
   }
@@ -78,8 +61,7 @@ export function readFunctionSearchQuery(
       ? args.image_query
       : [];
   for (const entry of searchQueries) {
-    const query =
-      readString(toRecord(entry)?.q) ?? readString(toRecord(entry)?.query);
+    const query = readString(toRecord(entry)?.q) ?? readString(toRecord(entry)?.query);
     if (query) {
       return query;
     }
@@ -109,29 +91,17 @@ export function readPatchTargetPaths(input: string): string[] {
   return paths;
 }
 
-export function toSubAgentMeta(
-  item: Record<string, unknown>,
-): ChatMessageSubAgentMeta | undefined {
+export function toSubAgentMeta(item: Record<string, unknown>): ChatMessageSubAgentMeta | undefined {
   const tool = readString(item.tool) ?? undefined;
   const prompt = normalizeInline(readString(item.prompt), 4000) ?? undefined;
   const senderThreadId =
-    normalizeInline(
-      readString(item.senderThreadId) ?? readString(item.sender_thread_id),
-      200,
-    ) ?? undefined;
+    normalizeInline(readString(item.senderThreadId) ?? readString(item.sender_thread_id), 200) ??
+    undefined;
   const agentStatus =
-    normalizeInline(
-      readString(item.agentStatus) ?? readString(item.agent_status),
-      200,
-    ) ?? undefined;
+    normalizeInline(readString(item.agentStatus) ?? readString(item.agent_status), 200) ??
+    undefined;
   const receiverThreadIds = readReceiverThreadIds(item);
-  if (
-    !tool &&
-    !prompt &&
-    !senderThreadId &&
-    receiverThreadIds.length === 0 &&
-    !agentStatus
-  ) {
+  if (!tool && !prompt && !senderThreadId && receiverThreadIds.length === 0 && !agentStatus) {
     return undefined;
   }
   return { tool, prompt, senderThreadId, receiverThreadIds, agentStatus };
@@ -151,21 +121,19 @@ export function readReceiverThreadIds(item: Record<string, unknown>): string[] {
     readString(item.receiverThreadId),
     readString(item.receiver_thread_id),
   ]
-    .map((value) => value?.trim() ?? "")
+    .map((value) => value?.trim() ?? '')
     .filter((value): value is string => value.length > 0);
   return singularIds;
 }
 
-export function reasoningTextFromItem(
-  item: Record<string, unknown>,
-): string | null {
+export function reasoningTextFromItem(item: Record<string, unknown>): string | null {
   const directText = readString(item.text);
   if (directText?.trim()) {
     return directText;
   }
   const content = readStringArray(item.content);
   if (content.length > 0) {
-    return content.join("\n");
+    return content.join('\n');
   }
   if (Array.isArray(item.content)) {
     const structuredContent = stringifyStructuredContentEntries(item.content);
@@ -175,7 +143,7 @@ export function reasoningTextFromItem(
   }
   const summary = readStringArray(item.summary);
   if (summary.length > 0) {
-    return summary.join("\n");
+    return summary.join('\n');
   }
   if (Array.isArray(item.summary)) {
     const structuredSummary = stringifyStructuredContentEntries(item.summary);
@@ -187,12 +155,10 @@ export function reasoningTextFromItem(
 }
 
 export function normalizeType(value: string): string {
-  return value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  return value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
 
-export function parseJsonObject(
-  value: string | null,
-): Record<string, unknown> | null {
+export function parseJsonObject(value: string | null): Record<string, unknown> | null {
   if (!value) {
     return null;
   }
@@ -203,14 +169,11 @@ export function parseJsonObject(
   }
 }
 
-export function normalizeInline(
-  value: string | null,
-  maxChars: number,
-): string | null {
+export function normalizeInline(value: string | null, maxChars: number): string | null {
   if (!value) {
     return null;
   }
-  const cleaned = value.replace(/\s+/g, " ").trim();
+  const cleaned = value.replace(/\s+/g, ' ').trim();
   if (!cleaned) {
     return null;
   }
@@ -221,24 +184,21 @@ export function normalizeInline(
 }
 
 export function toFileChangeTargetLabel(path: string): string {
-  const normalized = path.trim().replace(/\\/g, "/");
+  const normalized = path.trim().replace(/\\/g, '/');
   if (!normalized) {
-    return "file";
+    return 'file';
   }
-  const basename = normalized.split("/").filter(Boolean).pop();
+  const basename = normalized.split('/').filter(Boolean).pop();
   return basename && basename.length > 0 ? basename : normalized;
 }
 
-export function normalizeMultiline(
-  value: string | null,
-  maxChars: number,
-): string | null {
+export function normalizeMultiline(value: string | null, maxChars: number): string | null {
   if (!value) {
     return null;
   }
   const cleaned = value
-    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
-    .replace(/\r\n/g, "\n")
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\r\n/g, '\n')
     .trim();
   if (!cleaned) {
     return null;
@@ -249,22 +209,18 @@ export function normalizeMultiline(
   return `${cleaned.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
-export function toNestedOutput(
-  value: string,
-  maxLines: number,
-  maxChars: number,
-): string | null {
+export function toNestedOutput(value: string, maxLines: number, maxChars: number): string | null {
   const normalized = normalizeMultiline(value, maxChars);
   if (!normalized) {
     return null;
   }
   const lines = normalized
-    .split("\n")
+    .split('\n')
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0);
   if (lines.length === 0) {
     return null;
   }
   const limited = lines.slice(0, maxLines);
-  return limited.join("\n");
+  return limited.join('\n');
 }

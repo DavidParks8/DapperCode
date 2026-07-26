@@ -13,7 +13,7 @@ export const REPLAY_RECOVERY_MAX_LOADED_THREADS = 2_048;
 export class ReplayRecoveryProtocolError extends Error {
   constructor(loadedThreadCount: number) {
     super(
-      `Bridge returned ${loadedThreadCount} loaded threads; protocol maximum is ${REPLAY_RECOVERY_MAX_LOADED_THREADS}`
+      `Bridge returned ${loadedThreadCount} loaded threads; protocol maximum is ${REPLAY_RECOVERY_MAX_LOADED_THREADS}`,
     );
     this.name = 'ReplayRecoveryProtocolError';
   }
@@ -42,7 +42,7 @@ export interface ReplayRecoverySnapshot {
 }
 
 export function collectReplayRecoveryThreadIds(
-  sources: ReadonlyArray<Iterable<string | null | undefined>>
+  sources: ReadonlyArray<Iterable<string | null | undefined>>,
 ): string[] {
   const ids = new Set<string>();
   for (const source of sources) {
@@ -59,14 +59,12 @@ function throwIfReplayRecoveryAborted(signal?: AbortSignal): void {
 }
 
 function replayRecoveryCancellationError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error('Replay recovery cancelled');
+  return signal.reason instanceof Error ? signal.reason : new Error('Replay recovery cancelled');
 }
 
 async function awaitWithReplayRecoveryCancellation<T>(
   value: Promise<T>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<T> {
   if (!signal) return value;
   throwIfReplayRecoveryAborted(signal);
@@ -81,21 +79,18 @@ async function mapWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,
   mapper: (value: T) => Promise<R>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
-  const workers = Array.from(
-    { length: Math.min(concurrency, values.length) },
-    async () => {
-      while (nextIndex < values.length) {
-        throwIfReplayRecoveryAborted(signal);
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await awaitWithReplayRecoveryCancellation(mapper(values[index]), signal);
-      }
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      throwIfReplayRecoveryAborted(signal);
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await awaitWithReplayRecoveryCancellation(mapper(values[index]), signal);
     }
-  );
+  });
   await Promise.all(workers);
   return results;
 }
@@ -103,16 +98,19 @@ async function mapWithConcurrency<T, R>(
 export async function fetchReplayRecoverySnapshot(
   api: ReplayRecoveryApi,
   trackedThreadIds: Iterable<string | null | undefined>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<ReplayRecoverySnapshot> {
   throwIfReplayRecoveryAborted(signal);
   const [loadedThreadIds, approvals, userInputs, capabilities] =
-    await awaitWithReplayRecoveryCancellation(Promise.all([
-      api.listLoadedChatIds(),
-      api.listApprovals(),
-      api.listPendingUserInputs(),
-      api.readBridgeCapabilities(),
-    ]), signal);
+    await awaitWithReplayRecoveryCancellation(
+      Promise.all([
+        api.listLoadedChatIds(),
+        api.listApprovals(),
+        api.listPendingUserInputs(),
+        api.readBridgeCapabilities(),
+      ]),
+      signal,
+    );
   throwIfReplayRecoveryAborted(signal);
   if (loadedThreadIds.length > REPLAY_RECOVERY_MAX_LOADED_THREADS) {
     throw new ReplayRecoveryProtocolError(loadedThreadIds.length);
@@ -134,7 +132,7 @@ export async function fetchReplayRecoverySnapshot(
       ]);
       return { chat, queue };
     },
-    signal
+    signal,
   );
   return { capabilities, approvals, userInputs, threads };
 }

@@ -51,7 +51,7 @@ export function shouldSettleDrawerOpen(
   value: number,
   velocityX: number,
   drawerWidth: number,
-  startOffset: number
+  startOffset: number,
 ): boolean {
   'worklet';
   if (velocityX >= DRAWER_SNAP_VELOCITY) {
@@ -64,12 +64,10 @@ export function shouldSettleDrawerOpen(
 
   const projectedProgress = getDrawerOpenProgress(
     projectDrawerOffset(value, velocityX, drawerWidth),
-    drawerWidth
+    drawerWidth,
   );
   const startedOpen = getDrawerOpenProgress(startOffset, drawerWidth) > 0.5;
-  const settleThreshold = startedOpen
-    ? 1 - DRAWER_SNAP_OPEN_PROGRESS
-    : DRAWER_SNAP_OPEN_PROGRESS;
+  const settleThreshold = startedOpen ? 1 - DRAWER_SNAP_OPEN_PROGRESS : DRAWER_SNAP_OPEN_PROGRESS;
 
   return projectedProgress >= settleThreshold;
 }

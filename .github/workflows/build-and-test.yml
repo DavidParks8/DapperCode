@@ -45,6 +45,7 @@ jobs:
           npm run version:check
           npm run docs:check
           npm run payment:check
+          npm run format:check
           npm run test:scripts
           npm run security:check
           npm run duplicates:native

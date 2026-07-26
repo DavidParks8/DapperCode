@@ -18,7 +18,10 @@ function licenseFiles(packageRoot) {
   const files = [];
   for (const name of readdirSync(packageRoot)) {
     const fullPath = path.join(packageRoot, name);
-    if (statSync(fullPath).isFile() && /^(license|licence|copying|notice|copyright)(\.|$)/i.test(name)) {
+    if (
+      statSync(fullPath).isFile() &&
+      /^(license|licence|copying|notice|copyright)(\.|$)/i.test(name)
+    ) {
       files.push(fullPath);
     }
   }
@@ -35,10 +38,22 @@ function licenseFiles(packageRoot) {
 function collectCargoPackages(rootDir, manifestPath) {
   const host = execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).match(/^host: (.+)$/m)?.[1];
   if (!host) throw new Error('Could not determine Rust host target');
-  const metadata = JSON.parse(execFileSync('cargo', [
-    'metadata', '--locked', '--format-version', '1', '--filter-platform', host,
-    '--manifest-path', path.join(rootDir, manifestPath),
-  ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
+  const metadata = JSON.parse(
+    execFileSync(
+      'cargo',
+      [
+        'metadata',
+        '--locked',
+        '--format-version',
+        '1',
+        '--filter-platform',
+        host,
+        '--manifest-path',
+        path.join(rootDir, manifestPath),
+      ],
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    ),
+  );
   const packageById = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
   const nodeById = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
   const pending = [metadata.resolve.root];
@@ -65,8 +80,16 @@ function generate(rootDir) {
     ...collectCargoPackages(rootDir, 'apps/desktop/Cargo.toml'),
     ...collectCargoPackages(rootDir, 'services/rust-bridge/Cargo.toml'),
   ]
-    .filter((pkg, index, all) => all.findIndex((candidate) => candidate.name === pkg.name && candidate.version === pkg.version) === index)
-    .sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
+    .filter(
+      (pkg, index, all) =>
+        all.findIndex(
+          (candidate) => candidate.name === pkg.name && candidate.version === pkg.version,
+        ) === index,
+    )
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name) || left.version.localeCompare(right.version),
+    );
 
   const groups = new Map();
   for (const pkg of packages) {
@@ -82,13 +105,20 @@ function generate(rootDir) {
   }
 
   const lines = [
-    'DapperCode Desktop Third-Party Notices', '',
-    'The macOS application uses operating-system SwiftUI/AppKit frameworks and bundles only Rust executables.', '',
-    'Bundled Rust packages:', '',
+    'DapperCode Desktop Third-Party Notices',
+    '',
+    'The macOS application uses operating-system SwiftUI/AppKit frameworks and bundles only Rust executables.',
+    '',
+    'Bundled Rust packages:',
+    '',
     ...packages.map((pkg) => `- ${pkg.name} ${pkg.version} (${pkg.license})`),
-    '', 'License Texts', '=============',
+    '',
+    'License Texts',
+    '=============',
   ];
-  for (const group of [...groups.values()].sort((left, right) => left.packages[0].localeCompare(right.packages[0]))) {
+  for (const group of [...groups.values()].sort((left, right) =>
+    left.packages[0].localeCompare(right.packages[0]),
+  )) {
     lines.push('', '------------------------------------------------------------');
     lines.push(`Applies to: ${[...new Set(group.packages)].sort().join(', ')}`);
     lines.push('------------------------------------------------------------', '', group.text);

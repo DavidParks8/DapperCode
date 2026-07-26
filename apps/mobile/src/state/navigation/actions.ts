@@ -54,10 +54,7 @@ export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null):
     set(pendingBrowserTargetUrlAtom, targetUrl.trim());
   }
   const currentScreen = get(currentScreenAtom);
-  set(
-    browserReturnScreenAtom,
-    currentScreen === 'Browser' ? 'Main' : toAppScreen(currentScreen)
-  );
+  set(browserReturnScreenAtom, currentScreen === 'Browser' ? 'Main' : toAppScreen(currentScreen));
   set(cancelChatTransitionAtom);
   set(currentScreenAtom, 'Browser');
   set(closeDrawerAtom);

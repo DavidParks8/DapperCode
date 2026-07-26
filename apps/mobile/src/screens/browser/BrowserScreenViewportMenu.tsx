@@ -28,7 +28,7 @@ export function ViewportMenu({
   desktopViewportMatchesPreset: boolean;
   desktopViewportDraft: { width: string; height: string };
   setDesktopViewportDraft: (
-    updater: (current: { width: string; height: string }) => { width: string; height: string }
+    updater: (current: { width: string; height: string }) => { width: string; height: string },
   ) => void;
   handleSelectDesktopPreset: (viewport: { width: number; height: number }) => void;
   handleShowCustomViewportEditor: () => void;

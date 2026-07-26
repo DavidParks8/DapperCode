@@ -14,9 +14,12 @@ let mockCameraGranted = false;
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('expo-blur', () => ({ BlurView: jest.requireActual('react-native').View }));
-jest.mock('expo-linear-gradient', () => ({ LinearGradient: jest.requireActual('react-native').View }));
+jest.mock('expo-linear-gradient', () => ({
+  LinearGradient: jest.requireActual('react-native').View,
+}));
 jest.mock('expo-camera', () => ({
-  CameraView: (props: Record<string, unknown>) => jest.requireActual('react').createElement('mock-camera-view', props),
+  CameraView: (props: Record<string, unknown>) =>
+    jest.requireActual('react').createElement('mock-camera-view', props),
   useCameraPermissions: () => [{ granted: mockCameraGranted }, mockRequestCameraPermission],
 }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
@@ -73,20 +76,32 @@ async function press(node: Queryable): Promise<void> {
   });
 }
 
-async function renderOnboarding(options: {
-  mode?: OnboardingMode;
-  initialBridgeUrl?: string | null;
-  initialBridgeToken?: string | null;
-  onSave?: jest.Mock;
-  onCancel?: jest.Mock;
-  allowInsecureRemoteBridge?: boolean;
-  allowQueryTokenAuth?: boolean;
-  themeMode?: 'dark' | 'light';
-} = {}): Promise<{ tree: ReactTestRenderer; onSave: jest.Mock; onCancel: jest.Mock; rerender: (next: typeof options) => Promise<void> }> {
+async function renderOnboarding(
+  options: {
+    mode?: OnboardingMode;
+    initialBridgeUrl?: string | null;
+    initialBridgeToken?: string | null;
+    onSave?: jest.Mock;
+    onCancel?: jest.Mock;
+    allowInsecureRemoteBridge?: boolean;
+    allowQueryTokenAuth?: boolean;
+    themeMode?: 'dark' | 'light';
+  } = {},
+): Promise<{
+  tree: ReactTestRenderer;
+  onSave: jest.Mock;
+  onCancel: jest.Mock;
+  rerender: (next: typeof options) => Promise<void>;
+}> {
   const onSave = options.onSave ?? jest.fn().mockResolvedValue(undefined);
   const onCancel = options.onCancel ?? jest.fn();
   const createElement = (props: typeof options) => (
-    <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 47, left: 0, right: 0, bottom: 34 },
+      }}
+    >
       <AppThemeProvider theme={props.themeMode === 'light' ? lightTheme : theme}>
         <OnboardingScreen
           mode={props.mode}
@@ -152,7 +167,11 @@ describe('OnboardingScreen behavior', () => {
     { mode: 'edit' as const, label: 'Save URL' },
     { mode: 'reconnect' as const, label: 'Reconnect' },
   ])('renders direct connection mode controls', async ({ mode, label }) => {
-    const result = await renderOnboarding({ mode, initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const result = await renderOnboarding({
+      mode,
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     const root = result.tree.root as Queryable;
     expect(findByLabel(root, label)).toBeTruthy();
     await press(findByLabel(root, 'Cancel connection setup'));
@@ -191,38 +210,56 @@ describe('OnboardingScreen behavior', () => {
     });
     const root = result.tree.root as Queryable;
     await press(findByLabel(root, 'Save URL'));
-    expect(global.fetch).toHaveBeenCalledWith('http://127.0.0.1:3001/path/health', expect.objectContaining({
-      headers: { Authorization: 'Bearer token' },
-    }));
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/path/health',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer token' },
+      }),
+    );
     expect(mockWsConnect).toHaveBeenCalledTimes(1);
     expect(mockWsConnect.mock.invocationCallOrder[0]).toBeLessThan(
-      mockWsRequest.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER
+      mockWsRequest.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
     expect(mockWsRequest).toHaveBeenCalledWith('bridge/health/read');
     expect(mockWsDisconnect).toHaveBeenCalled();
-    expect(result.onSave).toHaveBeenCalledWith({ bridgeUrl: 'http://127.0.0.1:3001/path', bridgeToken: 'token' });
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:3001/path',
+      bridgeToken: 'token',
+    });
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
     act(() => result.tree.unmount());
   });
 
   it('reports partial health, RPC failure, save failure, and insecure remote warnings', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 503 });
-    const partial = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const partial = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     await press(findPressableByText(partial.tree.root as Queryable, 'Test Connection'));
     expect(hasText(partial.tree.root as Queryable, 'Authenticated RPC verified')).toBe(true);
     act(() => partial.tree.unmount());
 
     mockWsRequest.mockRejectedValueOnce(new Error('offline'));
-    const failed = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const failed = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     await press(findPressableByText(failed.tree.root as Queryable, 'Test Connection'));
     expect(hasText(failed.tree.root as Queryable, 'Connection error.')).toBe(true);
     act(() => failed.tree.unmount());
 
     const saveFailed = await renderOnboarding({
-      mode: 'add', initialBridgeUrl: 'http://example.com', initialBridgeToken: 'token',
+      mode: 'add',
+      initialBridgeUrl: 'http://example.com',
+      initialBridgeToken: 'token',
       onSave: jest.fn().mockRejectedValue(new Error('could not persist')),
     });
-    expect(hasText(saveFailed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(true);
+    expect(hasText(saveFailed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(
+      true,
+    );
     await press(findByLabel(saveFailed.tree.root as Queryable, 'Continue'));
     expect(hasText(saveFailed.tree.root as Queryable, 'could not persist')).toBe(true);
     act(() => saveFailed.tree.unmount());
@@ -243,7 +280,10 @@ describe('OnboardingScreen behavior', () => {
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
     if (!camera) throw new Error('Missing camera');
     await act(async () => {
-      readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({
+      readHandler<(event: { data: string }) => void>(
+        camera,
+        'onBarcodeScanned',
+      )({
         data: JSON.stringify({
           type: 'dappercode-bridge-pair',
           bridgeUrl: 'http://127.0.0.1:3001',
@@ -264,7 +304,10 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
     await act(async () => {
-      readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data: 'not-a-pairing-code' });
+      readHandler<(event: { data: string }) => void>(
+        camera,
+        'onBarcodeScanned',
+      )({ data: 'not-a-pairing-code' });
     });
     expect(hasText(root, 'QR code is not a valid DapperCode bridge pairing code.')).toBe(true);
     act(() => jest.advanceTimersByTime(1200));
@@ -274,10 +317,30 @@ describe('OnboardingScreen behavior', () => {
   });
 
   it.each([
-    ['bridge URL and token aliases', { url: 'ws://127.0.0.1:3001/', token: ' alias-token ' }, 'http://127.0.0.1:3001', 'alias-token'],
-    ['slash pair type', { type: ' DAPPERCODE/BRIDGE-PAIR ', bridgeToken: 'slash-pair' }, '', 'slash-pair'],
-    ['dash token type', { type: 'dappercode-bridge-token', bridgeToken: 'dash-token' }, '', 'dash-token'],
-    ['slash token type', { type: 'dappercode/bridge-token', token: 'slash-token' }, '', 'slash-token'],
+    [
+      'bridge URL and token aliases',
+      { url: 'ws://127.0.0.1:3001/', token: ' alias-token ' },
+      'http://127.0.0.1:3001',
+      'alias-token',
+    ],
+    [
+      'slash pair type',
+      { type: ' DAPPERCODE/BRIDGE-PAIR ', bridgeToken: 'slash-pair' },
+      '',
+      'slash-pair',
+    ],
+    [
+      'dash token type',
+      { type: 'dappercode-bridge-token', bridgeToken: 'dash-token' },
+      '',
+      'dash-token',
+    ],
+    [
+      'slash token type',
+      { type: 'dappercode/bridge-token', token: 'slash-token' },
+      '',
+      'slash-token',
+    ],
     ['missing type', { bridgeToken: 'typeless' }, '', 'typeless'],
   ])('accepts QR JSON payload using %s', async (_name, payload, expectedUrl, expectedToken) => {
     mockCameraGranted = true;
@@ -285,15 +348,28 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data: JSON.stringify(payload) }));
+    await act(async () =>
+      readHandler<(event: { data: string }) => void>(
+        camera,
+        'onBarcodeScanned',
+      )({ data: JSON.stringify(payload) }),
+    );
     expect(findByLabel(root, 'Bridge URL').props.value).toBe(expectedUrl);
     expect(findByLabel(root, 'Bridge token').props.value).toBe(expectedToken);
     act(() => result.tree.unmount());
   });
 
   it.each([
-    ['dappercode://pair?bridgeUrl=http%3A%2F%2F127.0.0.1%3A3001&bridgeToken=uri-token', 'http://127.0.0.1:3001', 'uri-token'],
-    ['dappercode://pair?url=ws%3A%2F%2F127.0.0.1%3A4001&token=alias-uri', 'http://127.0.0.1:4001', 'alias-uri'],
+    [
+      'dappercode://pair?bridgeUrl=http%3A%2F%2F127.0.0.1%3A3001&bridgeToken=uri-token',
+      'http://127.0.0.1:3001',
+      'uri-token',
+    ],
+    [
+      'dappercode://pair?url=ws%3A%2F%2F127.0.0.1%3A4001&token=alias-uri',
+      'http://127.0.0.1:4001',
+      'alias-uri',
+    ],
     ['dappercode://pair?token=token-only', '', 'token-only'],
   ])('accepts pairing URI %s', async (data, expectedUrl, expectedToken) => {
     mockCameraGranted = true;
@@ -301,7 +377,9 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }));
+    await act(async () =>
+      readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }),
+    );
     expect(findByLabel(root, 'Bridge URL').props.value).toBe(expectedUrl);
     expect(findByLabel(root, 'Bridge token').props.value).toBe(expectedToken);
     act(() => result.tree.unmount());
@@ -320,7 +398,9 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }));
+    await act(async () =>
+      readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }),
+    );
     expect(hasText(root, 'QR code is not a valid DapperCode bridge pairing code.')).toBe(true);
     act(() => result.tree.unmount());
   });
@@ -331,11 +411,21 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data: 'invalid' }));
+    await act(async () =>
+      readHandler<(event: { data: string }) => void>(
+        camera,
+        'onBarcodeScanned',
+      )({ data: 'invalid' }),
+    );
     expect(camera.props.onBarcodeScanned).toBeUndefined();
     act(() => jest.advanceTimersByTime(1200));
     const unlockedCamera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    await act(async () => readHandler<(event: { data: string }) => void>(unlockedCamera, 'onBarcodeScanned')({ data: 'dappercode://pair?token=unlocked' }));
+    await act(async () =>
+      readHandler<(event: { data: string }) => void>(
+        unlockedCamera,
+        'onBarcodeScanned',
+      )({ data: 'dappercode://pair?token=unlocked' }),
+    );
     expect(findByLabel(root, 'Bridge token').props.value).toBe('unlocked');
     act(() => result.tree.unmount());
   });
@@ -344,15 +434,24 @@ describe('OnboardingScreen behavior', () => {
     const abort = jest.spyOn(AbortController.prototype, 'abort');
     (global.fetch as jest.Mock).mockImplementation(() => new Promise(() => {}));
     const result = await renderOnboarding({
-      mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token', allowQueryTokenAuth: true,
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+      allowQueryTokenAuth: true,
     });
     const root = result.tree.root as Queryable;
     let checkPromise: Promise<void> | undefined;
     act(() => {
-      checkPromise = (findPressableByText(root, 'Test Connection').props.onPress as () => Promise<void>)();
+      checkPromise = (
+        findPressableByText(root, 'Test Connection').props.onPress as () => Promise<void>
+      )();
     });
-    expect(findPressableByText(root, 'Test Connection').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true, busy: true }));
-    expect(findByLabel(root, 'Continue').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true, busy: true }));
+    expect(findPressableByText(root, 'Test Connection').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true, busy: true }),
+    );
+    expect(findByLabel(root, 'Continue').props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: true, busy: true }),
+    );
     await act(async () => {
       jest.advanceTimersByTime(7000);
       await checkPromise;
@@ -365,25 +464,39 @@ describe('OnboardingScreen behavior', () => {
   it('handles fetch rejection, degraded RPC, unexpected RPC, and fallback save errors', async () => {
     (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('network down'));
     mockWsRequest.mockResolvedValueOnce({ status: 'degraded' });
-    const degraded = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const degraded = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     await press(findPressableByText(degraded.tree.root as Queryable, 'Test Connection'));
     expect(hasText(degraded.tree.root as Queryable, 'Authenticated RPC verified')).toBe(true);
     act(() => degraded.tree.unmount());
 
     mockWsRequest.mockResolvedValueOnce({ status: 'wrong' });
-    const unexpected = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const unexpected = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     await press(findPressableByText(unexpected.tree.root as Queryable, 'Test Connection'));
     expect(hasText(unexpected.tree.root as Queryable, 'Connection error.')).toBe(true);
     act(() => unexpected.tree.unmount());
 
     mockWsRequest.mockRejectedValueOnce(new Error('save probe failed'));
-    const failedSaveProbe = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const failedSaveProbe = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     await press(findByLabel(failedSaveProbe.tree.root as Queryable, 'Continue'));
     expect(failedSaveProbe.onSave).not.toHaveBeenCalled();
     act(() => failedSaveProbe.tree.unmount());
 
     const fallback = await renderOnboarding({
-      mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token',
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
       onSave: jest.fn().mockRejectedValue({ message: '' }),
     });
     await press(findByLabel(fallback.tree.root as Queryable, 'Continue'));
@@ -396,32 +509,64 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Copy'));
-    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('Open the desktop companion on your Mac to set up and start the bundled bridge.');
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith(
+      'Open the desktop companion on your Mac to set up and start the bundled bridge.',
+    );
     expect(hasText(root, 'Copied')).toBe(true);
     act(() => jest.advanceTimersByTime(1400));
     expect(hasText(root, 'Copy')).toBe(true);
 
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     await press(findByLabel(root, 'Share bridge setup guide'));
-    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md' }));
+    expect(share).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        url: 'https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md',
+      }),
+    );
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     share.mockRejectedValueOnce(new Error('cancelled'));
     await press(findByLabel(root, 'Share bridge setup guide'));
-    expect(share).toHaveBeenLastCalledWith(expect.objectContaining({ message: expect.stringContaining('https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md') }));
+    expect(share).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md',
+        ),
+      }),
+    );
     act(() => result.tree.unmount());
   });
 
   it('submits from both inputs and clears prior status when values change', async () => {
-    const result = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://127.0.0.1:3001', initialBridgeToken: 'token' });
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
     const root = result.tree.root as Queryable;
-    await act(async () => readHandler<() => void>(findByLabel(root, 'Bridge URL'), 'onSubmitEditing')());
+    await act(async () =>
+      readHandler<() => void>(findByLabel(root, 'Bridge URL'), 'onSubmitEditing')(),
+    );
     expect(result.onSave).toHaveBeenCalledTimes(1);
-    act(() => readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')('bad'));
+    act(() =>
+      readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')('bad'),
+    );
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
-    act(() => readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')('http://127.0.0.1:3001'));
-    await act(async () => readHandler<() => void>(findByLabel(root, 'Bridge token'), 'onSubmitEditing')());
+    act(() =>
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge URL'),
+        'onChangeText',
+      )('http://127.0.0.1:3001'),
+    );
+    await act(async () =>
+      readHandler<() => void>(findByLabel(root, 'Bridge token'), 'onSubmitEditing')(),
+    );
     expect(result.onSave).toHaveBeenCalledTimes(2);
-    act(() => readHandler<(value: string) => void>(findByLabel(root, 'Bridge token'), 'onChangeText')('next-token'));
+    act(() =>
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge token'),
+        'onChangeText',
+      )('next-token'),
+    );
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
     act(() => result.tree.unmount());
   });
@@ -429,7 +574,11 @@ describe('OnboardingScreen behavior', () => {
   it('reacts to mode and initial credential prop changes', async () => {
     const result = await renderOnboarding();
     expect(hasText(result.tree.root as Queryable, 'Private connection')).toBe(true);
-    await result.rerender({ mode: 'edit', initialBridgeUrl: 'http://127.0.0.1:4999', initialBridgeToken: 'rerender-token' });
+    await result.rerender({
+      mode: 'edit',
+      initialBridgeUrl: 'http://127.0.0.1:4999',
+      initialBridgeToken: 'rerender-token',
+    });
     const root = result.tree.root as Queryable;
     expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:4999');
     expect(findByLabel(root, 'Bridge token').props.value).toBe('rerender-token');
@@ -440,10 +589,23 @@ describe('OnboardingScreen behavior', () => {
   });
 
   it('covers warning visibility permutations', async () => {
-    const allowed = await renderOnboarding({ mode: 'add', initialBridgeUrl: 'http://example.com', allowInsecureRemoteBridge: true });
-    expect(hasText(allowed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(false);
-    act(() => readHandler<(value: string) => void>(findByLabel(allowed.tree.root as Queryable, 'Bridge URL'), 'onChangeText')('https://example.com'));
-    expect(hasText(allowed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(false);
+    const allowed = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://example.com',
+      allowInsecureRemoteBridge: true,
+    });
+    expect(hasText(allowed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(
+      false,
+    );
+    act(() =>
+      readHandler<(value: string) => void>(
+        findByLabel(allowed.tree.root as Queryable, 'Bridge URL'),
+        'onChangeText',
+      )('https://example.com'),
+    );
+    expect(hasText(allowed.tree.root as Queryable, 'plain HTTP over a non-private host')).toBe(
+      false,
+    );
     act(() => allowed.tree.unmount());
   });
 
@@ -481,10 +643,17 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     const sheet = root.findAll((node) => node.props.accessibilityRole === 'none')[0];
     const stopPropagation = jest.fn();
-    act(() => readHandler<(event: { stopPropagation: () => void }) => void>(sheet, 'onPress')({ stopPropagation }));
+    act(() =>
+      readHandler<(event: { stopPropagation: () => void }) => void>(
+        sheet,
+        'onPress',
+      )({ stopPropagation }),
+    );
     expect(stopPropagation).toHaveBeenCalled();
-    const backdrop = root.findAll((node) =>
-      node.props.accessibilityLabel === 'Close QR scanner' && typeof node.props.onPress === 'function'
+    const backdrop = root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Close QR scanner' &&
+        typeof node.props.onPress === 'function',
     )[0];
     await press(backdrop);
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);

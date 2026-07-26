@@ -1,20 +1,23 @@
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { PendingApproval, PendingUserInputRequest } from '../../api/types';
 import { env } from '../../config';
-import { type ActivityState, type ThreadRuntimeSnapshot, mergeStreamingDelta, appendRunEventHistory, isChatLikelyRunning } from './mainScreenHelpers';
+import {
+  type ActivityState,
+  type ThreadRuntimeSnapshot,
+  mergeStreamingDelta,
+  appendRunEventHistory,
+  isChatLikelyRunning,
+} from './mainScreenHelpers';
 import { resolveEquivalentChat } from './mainScreenChatState';
-import type { MainScreenChatHydrationContext, MainScreenChatHydrationResult } from './mainScreenChatHydration';
+import type {
+  MainScreenChatHydrationContext,
+  MainScreenChatHydrationResult,
+} from './mainScreenChatHydration';
 
-
-
-
-
-
-export type MainScreenRuntimeWatchdogSyncContext = MainScreenChatHydrationContext & MainScreenChatHydrationResult;
+export type MainScreenRuntimeWatchdogSyncContext = MainScreenChatHydrationContext &
+  MainScreenChatHydrationResult;
 
 export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatchdogSyncContext) {
   const {
@@ -31,7 +34,6 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     threadRuntimeSnapshotsRef,
   } = context;
   const setActivity = useSetAtom(activityAtom);
-
 
   const clearExternalStatusFullSync = useCallback(() => {
     const timer = externalStatusFullSyncTimerRef.current;
@@ -59,10 +61,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       return;
     }
 
-    const waitMs = Math.max(
-      0,
-      externalStatusFullSyncNextAllowedAtRef.current - Date.now()
-    );
+    const waitMs = Math.max(0, externalStatusFullSyncNextAllowedAtRef.current - Date.now());
     if (waitMs > 0) {
       if (!externalStatusFullSyncTimerRef.current) {
         externalStatusFullSyncTimerRef.current = setTimeout(() => {
@@ -94,7 +93,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
         if (isChatLikelyRunning(resolvedLatest)) {
           bumpRunWatchdog();
           setActivity((prev) =>
-            prev.tone === 'running' ? prev : { tone: 'running', title: 'Working' }
+            prev.tone === 'running' ? prev : { tone: 'running', title: 'Working' },
           );
         }
       })
@@ -113,20 +112,20 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       externalStatusFullSyncQueuedThreadRef.current = threadId;
       drainExternalStatusFullSyncQueue();
     },
-    [drainExternalStatusFullSyncQueue]
+    [drainExternalStatusFullSyncQueue],
   );
 
   useEffect(
     () => () => {
       clearExternalStatusFullSync();
     },
-    [clearExternalStatusFullSync]
+    [clearExternalStatusFullSync],
   );
 
   const upsertThreadRuntimeSnapshot = useCallback(
     (
       threadId: string,
-      updater: (previous: ThreadRuntimeSnapshot) => Partial<ThreadRuntimeSnapshot>
+      updater: (previous: ThreadRuntimeSnapshot) => Partial<ThreadRuntimeSnapshot>,
     ) => {
       if (!threadId) {
         return;
@@ -145,7 +144,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
         updatedAtMs: Date.now(),
       };
     },
-    []
+    [],
   );
 
   const cacheThreadActivity = useCallback(
@@ -153,7 +152,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       upsertThreadRuntimeSnapshot(threadId, () => ({ activity: nextActivity }));
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadStreamingDelta = useCallback(
@@ -169,7 +168,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       });
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadActiveCommand = useCallback(
@@ -179,16 +178,17 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
           previous.activeCommands ?? [],
           threadId,
           eventType,
-          detail
+          detail,
         );
         return {
           activeCommands,
-          latestCommand: activeCommands[activeCommands.length - 1] ?? previous.latestCommand ?? null,
+          latestCommand:
+            activeCommands[activeCommands.length - 1] ?? previous.latestCommand ?? null,
         };
       });
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadPendingApproval = useCallback(
@@ -198,7 +198,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       }));
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadPendingUserInputRequest = useCallback(
@@ -208,7 +208,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       }));
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot]
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
   );
 
   return {
@@ -224,4 +224,6 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
   };
 }
 
-export type MainScreenRuntimeWatchdogSyncResult = ReturnType<typeof useMainScreenRuntimeWatchdogSync>;
+export type MainScreenRuntimeWatchdogSyncResult = ReturnType<
+  typeof useMainScreenRuntimeWatchdogSync
+>;

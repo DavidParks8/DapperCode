@@ -101,7 +101,9 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
       state,
       envelope({ type: EventType.REASONING_MESSAGE_CHUNK, delta: ' +chunk' }),
     );
-    expect(state.messages.find((entry) => entry.id === `${RUN_ID}:reasoning`)?.content).toContain(' +chunk');
+    expect(state.messages.find((entry) => entry.id === `${RUN_ID}:reasoning`)?.content).toContain(
+      ' +chunk',
+    );
 
     state = reduceThreadState(
       state,
@@ -339,8 +341,14 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
 
   it('tracks step lifecycle, raw event cap, and custom metadata', () => {
     let state = createAgUiThreadMessageState();
-    state = reduceThreadState(state, envelope({ type: EventType.STEP_STARTED, stepName: 'compile' }));
-    state = reduceThreadState(state, envelope({ type: EventType.STEP_FINISHED, stepName: 'compile' }));
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.STEP_STARTED, stepName: 'compile' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.STEP_FINISHED, stepName: 'compile' }),
+    );
     expect(state.steps.compile).toBe('finished');
 
     for (let index = 0; index < MAX_RAW_EVENTS_PER_THREAD + 5; index += 1) {
@@ -366,11 +374,17 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
     let state = createAgUiThreadMessageState();
     state = reduceThreadState(
       state,
-      envelope({ type: EventType.TEXT_MESSAGE_START, messageId: 'm1', role: 'assistant' }, 'run-finished'),
+      envelope(
+        { type: EventType.TEXT_MESSAGE_START, messageId: 'm1', role: 'assistant' },
+        'run-finished',
+      ),
     );
     state = reduceThreadState(
       state,
-      envelope({ type: EventType.TEXT_MESSAGE_START, messageId: 'm2', role: 'assistant' }, 'run-error'),
+      envelope(
+        { type: EventType.TEXT_MESSAGE_START, messageId: 'm2', role: 'assistant' },
+        'run-error',
+      ),
     );
 
     state = reduceThreadState(state, envelope({ type: EventType.RUN_FINISHED }, 'run-finished'));

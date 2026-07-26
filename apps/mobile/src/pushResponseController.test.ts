@@ -37,8 +37,8 @@ describe('PushResponseController', () => {
         event({
           actionId: 'notification-2:approve',
           target: { ...event().target, notificationId: 'notification-2', profileId: 'profile-2' },
-        })
-      )
+        }),
+      ),
     ).toBe(false);
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(api.resolveApproval).not.toHaveBeenCalled();
@@ -96,16 +96,14 @@ describe('PushResponseController', () => {
     controller.setProfile(profile);
     controller.setProfile({ ...profile, api: {} as never });
 
-    expect(
-      controller.handle(event({ actionId: 'tap', action: 'default' }))
-    ).toBe(true);
+    expect(controller.handle(event({ actionId: 'tap', action: 'default' }))).toBe(true);
     expect(
       controller.handle(
         event({
           actionId: 'approve-without-id',
           target: { ...event().target, approvalId: null },
-        })
-      )
+        }),
+      ),
     ).toBe(true);
     expect(api.resolveApproval).not.toHaveBeenCalled();
   });

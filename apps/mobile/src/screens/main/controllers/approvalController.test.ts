@@ -81,13 +81,27 @@ describe('approvalController', () => {
       ...request,
       questions: [
         { ...request.questions[0], id: 'count', header: 'Count', fieldType: 'integer' as const },
-        { ...request.questions[0], id: 'enabled', header: 'Enabled', fieldType: 'boolean' as const },
+        {
+          ...request.questions[0],
+          id: 'enabled',
+          header: 'Enabled',
+          fieldType: 'boolean' as const,
+        },
       ],
     };
-    expect(buildUserInputAnswers(typed, { count: '3', enabled: 'true' })).toEqual({ answers: { count: 3, enabled: true } });
-    const api = { listApprovals: jest.fn(), resolveApproval: jest.fn(), resolveUserInput: jest.fn() };
+    expect(buildUserInputAnswers(typed, { count: '3', enabled: 'true' })).toEqual({
+      answers: { count: 3, enabled: true },
+    });
+    const api = {
+      listApprovals: jest.fn(),
+      resolveApproval: jest.fn(),
+      resolveUserInput: jest.fn(),
+    };
     const controller = new ApprovalController(api as never);
     await controller.dismissUserInput(request, 'decline');
-    expect(api.resolveUserInput).toHaveBeenCalledWith('input-1', { answers: {}, action: 'decline' });
+    expect(api.resolveUserInput).toHaveBeenCalledWith('input-1', {
+      answers: {},
+      action: 'decline',
+    });
   });
 });

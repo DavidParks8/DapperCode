@@ -68,11 +68,11 @@ export const toggleWorkspaceFavoriteAtom = atom(
       ? current.filter((entry) => entry !== normalizedPath)
       : [normalizedPath, ...current.filter((entry) => entry !== normalizedPath)].slice(
           0,
-          WORKSPACE_FAVORITES_LIMIT
+          WORKSPACE_FAVORITES_LIMIT,
         );
     set(favoriteWorkspacePathsAtom, next);
     void favoritesPersistence.saveWorkspaceFavorites(next);
-  }
+  },
 );
 
 export const refreshWorkspaceRootsAtom = atom(
@@ -92,7 +92,7 @@ export const refreshWorkspaceRootsAtom = atom(
       set(workspaceBrowseErrorAtom, (err as Error).message);
       return null;
     }
-  }
+  },
 );
 
 export const browseWorkspacePathAtom = atom(
@@ -116,8 +116,9 @@ export const browseWorkspacePathAtom = atom(
         nextCache[getWorkspaceBrowseCacheKey(normalizedPath)] = response;
       }
       set(workspaceBrowseCacheAtom, nextCache);
-      set(workspaceBridgeRootAtom, (current) =>
-        normalizeWorkspacePath(response.bridgeRoot) ?? current
+      set(
+        workspaceBridgeRootAtom,
+        (current) => normalizeWorkspacePath(response.bridgeRoot) ?? current,
       );
       set(workspaceBrowsePathAtom, normalizedPath);
       set(workspaceBrowseParentPathAtom, normalizeWorkspacePath(response.parentPath));
@@ -126,13 +127,14 @@ export const browseWorkspacePathAtom = atom(
         workspaceBrowseTruncationAtom,
         response.truncated
           ? `Showing ${String(response.entries.length)} of ${String(response.totalEntries)} entries.`
-          : null
+          : null,
       );
     };
 
     if (cached) {
-      set(workspaceBridgeRootAtom, (current) =>
-        normalizeWorkspacePath(cached.bridgeRoot) ?? current
+      set(
+        workspaceBridgeRootAtom,
+        (current) => normalizeWorkspacePath(cached.bridgeRoot) ?? current,
       );
       set(workspaceBrowsePathAtom, normalizeWorkspacePath(cached.path));
       set(workspaceBrowseParentPathAtom, normalizeWorkspacePath(cached.parentPath));
@@ -141,7 +143,7 @@ export const browseWorkspacePathAtom = atom(
         workspaceBrowseTruncationAtom,
         cached.truncated
           ? `Showing ${String(cached.entries.length)} of ${String(cached.totalEntries)} entries.`
-          : null
+          : null,
       );
       set(workspaceBrowseErrorAtom, null);
     }
@@ -166,7 +168,7 @@ export const browseWorkspacePathAtom = atom(
       const missingRequestedWorkspace =
         normalizedRequestPath !== null &&
         /workspace directory is invalid or inaccessible|workspace directory must point to a folder/i.test(
-          message
+          message,
         );
 
       if (missingRequestedWorkspace) {
@@ -180,7 +182,7 @@ export const browseWorkspacePathAtom = atom(
           }
           applyResponse(
             rootResponse,
-            getWorkspaceBrowseCacheKey(normalizeWorkspacePath(rootResponse.path))
+            getWorkspaceBrowseCacheKey(normalizeWorkspacePath(rootResponse.path)),
           );
           if (normalizedRequestPath === normalizeWorkspacePath(get(defaultStartCwdAtom))) {
             set(defaultStartCwdAtom, null);
@@ -198,17 +200,12 @@ export const browseWorkspacePathAtom = atom(
         set(loadingWorkspaceBrowseAtom, false);
       }
     }
-  }
+  },
 );
 
 export const openWorkspacePickerAtom = atom(
   null,
-  (
-    get,
-    set,
-    purpose: WorkspacePickerPurpose,
-    initialPathOverride?: string | null
-  ): void => {
+  (get, set, purpose: WorkspacePickerPurpose, initialPathOverride?: string | null): void => {
     const initialPath =
       normalizeWorkspacePath(initialPathOverride) ??
       normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
@@ -224,7 +221,7 @@ export const openWorkspacePickerAtom = atom(
     scheduleIdleTask(() => {
       void set(refreshWorkspaceRootsAtom);
     });
-  }
+  },
 );
 
 export const openWorkspaceModalAtom = atom(null, (get, set): void => {
@@ -282,7 +279,7 @@ export const openGitCheckoutAtom = atom(
         set(gitCheckoutParentPathAtom, (current) => current ?? bridgeRoot);
       }
     });
-  }
+  },
 );
 
 export const closeGitCheckoutAtom = atom(null, (get, set): void => {
@@ -302,7 +299,7 @@ export const openGitCheckoutDestinationPickerAtom = atom(null, (get, set): void 
     get(gitCheckoutParentPathAtom) ??
       normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
       get(workspaceBridgeRootAtom) ??
-      null
+      null,
   );
 });
 

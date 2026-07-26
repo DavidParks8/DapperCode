@@ -1,22 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Keyboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { BrandMark } from '../../components/BrandMark';
 import { decorativeAccessibilityProps } from '../../accessibility';
 import { useAppTheme } from '../../theme';
 import { createStyles } from './mainScreenStyles';
 
-
-
-
-
-
-
-const SUGGESTIONS = [
-  'Explain the current codebase structure',
-  'Write tests for the main module',
-];
-
+const SUGGESTIONS = ['Explain the current codebase structure', 'Write tests for the main module'];
 
 export function ComposeView({
   startWorkspaceLabel,
@@ -97,11 +95,21 @@ export function ComposeView({
         accessibilityRole="button"
         accessibilityLabel={`Workspace, ${startWorkspaceLabel}`}
       >
-        <Ionicons {...decorativeAccessibilityProps} name="folder-open-outline" size={16} color={theme.colors.textMuted} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="folder-open-outline"
+          size={16}
+          color={theme.colors.textMuted}
+        />
         <Text style={[styles.workspaceSelectLabel, styles.workspacePathSelectLabel]}>
           {startWorkspaceLabel}
         </Text>
-        <Ionicons {...decorativeAccessibilityProps} name="chevron-forward" size={14} color={theme.colors.textMuted} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="chevron-forward"
+          size={14}
+          color={theme.colors.textMuted}
+        />
       </Pressable>
       {showAgentPicker ? (
         <Pressable
@@ -113,11 +121,21 @@ export function ComposeView({
           accessibilityRole="button"
           accessibilityLabel={`Agent, ${agentLabel}`}
         >
-          <Ionicons {...decorativeAccessibilityProps} name="layers-outline" size={16} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="layers-outline"
+            size={16}
+            color={theme.colors.textMuted}
+          />
           <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
             {agentLabel}
           </Text>
-          <Ionicons {...decorativeAccessibilityProps} name="chevron-forward" size={14} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-forward"
+            size={14}
+            color={theme.colors.textMuted}
+          />
         </Pressable>
       ) : null}
       {showModelControls ? (
@@ -130,11 +148,21 @@ export function ComposeView({
           accessibilityRole="button"
           accessibilityLabel={`Model, ${modelLabel}`}
         >
-          <Ionicons {...decorativeAccessibilityProps} name="sparkles-outline" size={16} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="sparkles-outline"
+            size={16}
+            color={theme.colors.textMuted}
+          />
           <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
             {modelLabel}
           </Text>
-          <Ionicons {...decorativeAccessibilityProps} name="chevron-forward" size={14} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-forward"
+            size={14}
+            color={theme.colors.textMuted}
+          />
         </Pressable>
       ) : null}
       {showThinkingControls ? (
@@ -147,11 +175,21 @@ export function ComposeView({
           accessibilityRole="button"
           accessibilityLabel={`Thinking level, ${thinkingLabel}`}
         >
-          <Ionicons {...decorativeAccessibilityProps} name="pulse-outline" size={16} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="pulse-outline"
+            size={16}
+            color={theme.colors.textMuted}
+          />
           <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
             {thinkingLabel}
           </Text>
-          <Ionicons {...decorativeAccessibilityProps} name="chevron-forward" size={14} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-forward"
+            size={14}
+            color={theme.colors.textMuted}
+          />
         </Pressable>
       ) : null}
       <Pressable
@@ -163,11 +201,21 @@ export function ComposeView({
         accessibilityRole="button"
         accessibilityLabel={`Agent mode, ${collaborationModeLabel}`}
       >
-        <Ionicons {...decorativeAccessibilityProps} name="map-outline" size={16} color={theme.colors.textMuted} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="map-outline"
+          size={16}
+          color={theme.colors.textMuted}
+        />
         <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
           {collaborationModeLabel}
         </Text>
-        <Ionicons {...decorativeAccessibilityProps} name="chevron-forward" size={14} color={theme.colors.textMuted} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="chevron-forward"
+          size={14}
+          color={theme.colors.textMuted}
+        />
       </Pressable>
       {showFastMode ? (
         <Pressable
@@ -180,7 +228,12 @@ export function ComposeView({
           accessibilityLabel="Fast mode"
           accessibilityState={{ checked: fastModeEnabled }}
         >
-          <Ionicons {...decorativeAccessibilityProps} name="flash-outline" size={16} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="flash-outline"
+            size={16}
+            color={theme.colors.textMuted}
+          />
           <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
             {fastModeLabel}
           </Text>
@@ -212,14 +265,17 @@ export function ComposeView({
   );
 }
 
-
-
 export function ChatOpeningView() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
-    <View style={styles.chatOpeningShell} accessibilityRole="progressbar" accessibilityLabel="Opening chat" accessibilityLiveRegion="polite">
+    <View
+      style={styles.chatOpeningShell}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Opening chat"
+      accessibilityLiveRegion="polite"
+    >
       <View style={styles.chatOpeningCard}>
         <View style={styles.chatOpeningTopRow}>
           <ActivityIndicator size="small" color={theme.colors.textMuted} />

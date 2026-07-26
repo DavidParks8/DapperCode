@@ -27,7 +27,7 @@ describe('turnExecutionController', () => {
       'thread-1',
       { content: 'hello', cwd: '/repo' },
       'submission-1',
-      expect.any(Object)
+      expect.any(Object),
     );
     expect(onTurnStarted).toHaveBeenCalledWith('thread-1', 'turn-1');
   });
@@ -53,15 +53,22 @@ describe('turnExecutionController', () => {
     };
     const controller = new TurnExecutionController(api as never);
     await controller.createAndStart({
-      submissionId: 'submission', create: {}, message: { content: 'hello' },
+      submissionId: 'submission',
+      create: {},
+      message: { content: 'hello' },
     });
     expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
-      'thread-1', { content: 'hello' }, 'submission', expect.any(Object)
+      'thread-1',
+      { content: 'hello' },
+      'submission',
+      expect.any(Object),
     );
     await expect(controller.interrupt('thread-1')).resolves.toBe('latest');
     await controller.sendOrQueue('thread-1', { content: 'next' }, true, 'submission');
     expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
-      'thread-1', { content: 'next' }, { skipResume: true, submissionId: 'submission' }
+      'thread-1',
+      { content: 'next' },
+      { skipResume: true, submissionId: 'submission' },
     );
     await controller.steer('thread-1', 'message-1');
     await controller.cancelQueued('thread-1', 'message-2');
@@ -72,10 +79,15 @@ describe('turnExecutionController', () => {
   it('omits send options when no turn callback is provided', async () => {
     const api = { sendChatMessageIdempotent: jest.fn().mockResolvedValue({}) };
     await new TurnExecutionController(api as never).send(
-      'thread', { content: 'hello' }, 'submission'
+      'thread',
+      { content: 'hello' },
+      'submission',
     );
     expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
-      'thread', { content: 'hello' }, 'submission', undefined
+      'thread',
+      { content: 'hello' },
+      'submission',
+      undefined,
     );
   });
 });

@@ -3,8 +3,13 @@ import { AgentThreadsController } from './agentThreadsController';
 describe('agentThreadsController', () => {
   it('merges loaded-only threads before projecting the related tree', async () => {
     const root = {
-      id: 'root', title: 'Root', status: 'running', createdAt: '', updatedAt: '',
-      statusUpdatedAt: '', lastMessagePreview: '',
+      id: 'root',
+      title: 'Root',
+      status: 'running',
+      createdAt: '',
+      updatedAt: '',
+      statusUpdatedAt: '',
+      lastMessagePreview: '',
     };
     const child = { ...root, id: 'child', title: 'Child', parentThreadId: 'root' };
     const api = {
@@ -20,15 +25,24 @@ describe('agentThreadsController', () => {
 
   it('falls back to the supplied focus and tolerates loaded-id lookup failure', async () => {
     const fallback = {
-      id: 'fallback', title: 'Fallback', status: 'idle', createdAt: '', updatedAt: '',
-      statusUpdatedAt: '', lastMessagePreview: '', messages: [],
+      id: 'fallback',
+      title: 'Fallback',
+      status: 'idle',
+      createdAt: '',
+      updatedAt: '',
+      statusUpdatedAt: '',
+      lastMessagePreview: '',
+      messages: [],
     };
     const api = {
       listChats: jest.fn().mockResolvedValue([]),
       listLoadedChatIds: jest.fn().mockRejectedValue(new Error('offline')),
       getChatSummaries: jest.fn().mockResolvedValue([]),
     };
-    const result = await new AgentThreadsController(api as never).loadRelated('fallback', fallback as never);
+    const result = await new AgentThreadsController(api as never).loadRelated(
+      'fallback',
+      fallback as never,
+    );
     expect(api.getChatSummaries).toHaveBeenCalledWith([]);
     expect(result.rootThreadId).toBe('fallback');
   });

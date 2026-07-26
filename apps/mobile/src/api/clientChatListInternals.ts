@@ -1,10 +1,10 @@
-import { cloneChatSummaries } from "./clientChatCloneAndRetryInternals";
-import { readString, toRecord } from "./chatMapping";
-import { type ChatSummary } from "./types";
+import { cloneChatSummaries } from './clientChatCloneAndRetryInternals';
+import { readString, toRecord } from './chatMapping';
+import { type ChatSummary } from './types';
 import {
   type SnapshotPageEntry,
   type SnapshotPageResponse,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 
 export interface ChatListPage {
   chats: ChatSummary[];
@@ -71,20 +71,20 @@ export const CHAT_LIST_STREAM_INITIAL_LIMIT = 5;
 export const MAX_CHAT_LIST_PAGES = 32;
 
 export const ACTIVE_TURN_STATUSES = new Set([
-  "inprogress",
-  "in_progress",
-  "running",
-  "active",
-  "queued",
-  "pending",
+  'inprogress',
+  'in_progress',
+  'running',
+  'active',
+  'queued',
+  'pending',
 ]);
 
 export function isSubAgentSource(sourceKind: string | undefined): boolean {
-  return typeof sourceKind === "string" && sourceKind.startsWith("subAgent");
+  return typeof sourceKind === 'string' && sourceKind.startsWith('subAgent');
 }
 
 export function normalizeCwd(cwd: string | null | undefined): string | null {
-  if (typeof cwd !== "string") {
+  if (typeof cwd !== 'string') {
     return null;
   }
   const trimmed = cwd.trim();
@@ -92,13 +92,13 @@ export function normalizeCwd(cwd: string | null | undefined): string | null {
 }
 
 export function normalizeListLimit(limit: unknown): number {
-  return typeof limit === "number" && Number.isFinite(limit)
+  return typeof limit === 'number' && Number.isFinite(limit)
     ? Math.max(1, Math.min(200, Math.round(limit)))
     : DEFAULT_CHAT_LIST_LIMIT;
 }
 
 export function normalizeCursor(cursor: unknown): string | null {
-  if (typeof cursor !== "string") {
+  if (typeof cursor !== 'string') {
     return null;
   }
   const trimmed = cursor.trim();
@@ -109,7 +109,7 @@ export function normalizeUniqueThreadIds(ids: readonly string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
   for (const id of ids) {
-    if (typeof id !== "string") {
+    if (typeof id !== 'string') {
       continue;
     }
     const trimmed = id.trim();
@@ -122,20 +122,13 @@ export function normalizeUniqueThreadIds(ids: readonly string[]): string[] {
   return normalized;
 }
 
-export function normalizeConcurrency(
-  value: unknown,
-  fallback: number,
-  max: number,
-): number {
-  return typeof value === "number" && Number.isFinite(value)
+export function normalizeConcurrency(value: unknown, fallback: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(1, Math.min(max, Math.round(value)))
     : fallback;
 }
 
-export function normalizeChatListStreamLimits(
-  limits: unknown,
-  fallbackLimit: number,
-): number[] {
+export function normalizeChatListStreamLimits(limits: unknown, fallbackLimit: number): number[] {
   const rawLimits = Array.isArray(limits)
     ? limits
     : [CHAT_LIST_STREAM_INITIAL_LIMIT, fallbackLimit];
@@ -146,9 +139,7 @@ export function normalizeChatListStreamLimits(
       normalized.push(nextLimit);
     }
   }
-  return normalized.length > 0
-    ? normalized
-    : [normalizeListLimit(fallbackLimit)];
+  return normalized.length > 0 ? normalized : [normalizeListLimit(fallbackLimit)];
 }
 
 export function mergeChatSummariesById(
@@ -162,83 +153,77 @@ export function mergeChatSummariesById(
   for (const chat of incoming) {
     byId.set(chat.id, chat);
   }
-  return [...byId.values()].sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  );
+  return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 export function readTimestampIso(value: unknown): string | null {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     const trimmed = value.trim();
     if (!trimmed) {
       return null;
     }
     const numeric = Number(trimmed);
     if (Number.isFinite(numeric) && numeric > 0) {
-      return new Date(
-        numeric > 1_000_000_000_000 ? numeric : numeric * 1000,
-      ).toISOString();
+      return new Date(numeric > 1_000_000_000_000 ? numeric : numeric * 1000).toISOString();
     }
     const parsedMs = Date.parse(trimmed);
     return Number.isFinite(parsedMs) ? new Date(parsedMs).toISOString() : null;
   }
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return new Date(
-      value > 1_000_000_000_000 ? value : value * 1000,
-    ).toISOString();
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return new Date(value > 1_000_000_000_000 ? value : value * 1000).toISOString();
   }
   return null;
 }
 
 export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
   const record = toRecord(value) ?? {};
-  const entries = (
-    Array.isArray(record.entries) ? record.entries : []
-  ).flatMap<SnapshotPageEntry>((value) => {
-    const entry = toRecord(value);
-    const sequence = readFiniteNumber(entry?.sequence);
-    const kind = readString(entry?.kind);
-    const canonicalId = readString(entry?.canonicalId)?.trim();
-    if (
-      sequence === null ||
-      !canonicalId ||
-      (kind !== "message" && kind !== "reasoning" && kind !== "tool")
-    ) {
-      return [];
-    }
-    const message = toRecord(entry?.message);
-    const tool = toRecord(entry?.tool);
-    return [
-      {
-        sequence,
-        kind,
-        canonicalId,
-        message: message
-          ? {
-              id: readString(message.id) ?? canonicalId,
-              role: readString(message.role) ?? "",
-              parts: Array.isArray(message.parts) ? message.parts : [],
-              truncated: message.truncated === true,
-            }
-          : undefined,
-        tool: tool
-          ? {
-              id: readString(tool.id) ?? canonicalId,
-              generation: readFiniteNumber(tool.generation),
-              kind: readString(tool.kind) ?? "",
-              status: readString(tool.status) ?? "",
-              title: readString(tool.title) ?? "",
-              content: readString(tool.content) ?? "",
-              structuredContent: Array.isArray(tool.structuredContent)
-                ? tool.structuredContent
-                : [],
-              locations: Array.isArray(tool.locations) ? tool.locations : [],
-              truncated: tool.truncated === true,
-            }
-          : undefined,
-      },
-    ];
-  });
+  const entries = (Array.isArray(record.entries) ? record.entries : []).flatMap<SnapshotPageEntry>(
+    (value) => {
+      const entry = toRecord(value);
+      const sequence = readFiniteNumber(entry?.sequence);
+      const kind = readString(entry?.kind);
+      const canonicalId = readString(entry?.canonicalId)?.trim();
+      if (
+        sequence === null ||
+        !canonicalId ||
+        (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool')
+      ) {
+        return [];
+      }
+      const message = toRecord(entry?.message);
+      const tool = toRecord(entry?.tool);
+      return [
+        {
+          sequence,
+          kind,
+          canonicalId,
+          message: message
+            ? {
+                id: readString(message.id) ?? canonicalId,
+                role: readString(message.role) ?? '',
+                parts: Array.isArray(message.parts) ? message.parts : [],
+                truncated: message.truncated === true,
+              }
+            : undefined,
+          tool: tool
+            ? {
+                id: readString(tool.id) ?? canonicalId,
+                generation: readFiniteNumber(tool.generation),
+                kind: readString(tool.kind) ?? '',
+                status: readString(tool.status) ?? '',
+                title: readString(tool.title) ?? '',
+                content: readString(tool.content) ?? '',
+                structuredContent: Array.isArray(tool.structuredContent)
+                  ? tool.structuredContent
+                  : [],
+                locations: Array.isArray(tool.locations) ? tool.locations : [],
+                truncated: tool.truncated === true,
+              }
+            : undefined,
+        },
+      ];
+    },
+  );
   return {
     entries,
     beforeCursor: readString(record.beforeCursor),
@@ -246,16 +231,14 @@ export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
     hasMoreBefore: record.hasMoreBefore === true,
     hasMoreAfter: record.hasMoreAfter === true,
     unavailableCount: readFiniteNumber(record.unavailableCount) ?? 0,
-    earliestAvailableSequence: readFiniteNumber(
-      record.earliestAvailableSequence,
-    ),
+    earliestAvailableSequence: readFiniteNumber(record.earliestAvailableSequence),
     latestAvailableSequence: readFiniteNumber(record.latestAvailableSequence),
     revision: readFiniteNumber(record.revision) ?? 0,
   };
 }
 
 export function readFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 export function cloneChatListResult(result: ChatListResult): ChatListResult {

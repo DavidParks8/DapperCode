@@ -1,18 +1,7 @@
-import {
-  activeTurnIdAtom,
-  errorAtom
-} from '../../state/mainScreen/turn';
-import {
-  bridgeCapabilitiesAtom,
-  modelOptionsByAgentAtom
-} from '../../state/mainScreen/models';
-import {
-  agentRootThreadIdAtom
-} from '../../state/mainScreen/workspace';
-import {
-  androidKeyboardInsetAtom,
-  keyboardVisibleAtom
-} from '../../state/mainScreen/composer';
+import { activeTurnIdAtom, errorAtom } from '../../state/mainScreen/turn';
+import { bridgeCapabilitiesAtom, modelOptionsByAgentAtom } from '../../state/mainScreen/models';
+import { agentRootThreadIdAtom } from '../../state/mainScreen/workspace';
+import { androidKeyboardInsetAtom, keyboardVisibleAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useEffect, useRef } from 'react';
 import {
@@ -25,19 +14,28 @@ import { screenRefView } from '../../state/mainScreen/registry';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../../agents';
 import type { BridgeUiSurface, Chat } from '../../api/types';
-import { type ActivePlanState, type ThreadRuntimeSnapshot, type PendingOptimisticUserMessage, type PendingOptimisticQueuedMessage, type ChatModelPreference, SLASH_COMMANDS, normalizeWorkspacePath, toApprovalPolicyForMode, isSlashCommandAvailable } from './mainScreenHelpers';
+import {
+  type ActivePlanState,
+  type ThreadRuntimeSnapshot,
+  type PendingOptimisticUserMessage,
+  type PendingOptimisticQueuedMessage,
+  type ChatModelPreference,
+  SLASH_COMMANDS,
+  normalizeWorkspacePath,
+  toApprovalPolicyForMode,
+  isSlashCommandAvailable,
+} from './mainScreenHelpers';
 import { useAttachmentController } from './controllers/attachmentController';
 import { mergeModelOptions, modelOptionsFromAcpConfig } from './mainScreenChatState';
 import { lastUsedModelPreference } from './mainScreenHelperPreferences';
-import type { MainScreenLifecycleRecoveryContext, MainScreenLifecycleRecoveryResult } from './mainScreenLifecycleRecovery';
+import type {
+  MainScreenLifecycleRecoveryContext,
+  MainScreenLifecycleRecoveryResult,
+} from './mainScreenLifecycleRecovery';
 import { EMPTY_MODEL_OPTIONS } from './mainScreenConstants';
 
-
-
-
-
-
-export type MainScreenChatSessionStateContext = MainScreenLifecycleRecoveryContext & MainScreenLifecycleRecoveryResult;
+export type MainScreenChatSessionStateContext = MainScreenLifecycleRecoveryContext &
+  MainScreenLifecycleRecoveryResult;
 
 export function useMainScreenChatSessionState(context: MainScreenChatSessionStateContext) {
   const {
@@ -61,7 +59,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const modelOptionsByAgent = useAtomValue(modelOptionsByAgentAtom);
   const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
   const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);
-
 
   useEffect(() => {
     return () => {
@@ -120,12 +117,8 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const stopRequestedRef = useRef(false);
   const stopSystemMessageLoggedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
-  const lastAppForegroundedAtRef = useRef(
-    AppState.currentState === 'active' ? Date.now() : 0
-  );
-  const deferredDisconnectActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const lastAppForegroundedAtRef = useRef(AppState.currentState === 'active' ? Date.now() : 0);
+  const deferredDisconnectActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track whether a command arrived since the last delta — used to
   // know when a new thinking segment starts so we can replace the old one.
@@ -138,17 +131,15 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const runWatchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runWatchdogNow = useAtomValue(runWatchdogNowAtom);
   const setRunWatchdogNow = useSetAtom(runWatchdogNowAtom);
-  const externalStatusFullSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const externalStatusFullSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const externalStatusFullSyncInFlightRef = useRef(false);
   const externalStatusFullSyncQueuedThreadRef = useRef<string | null>(null);
   const externalStatusFullSyncNextAllowedAtRef = useRef(0);
   const threadRuntimeSnapshotsRef = useRef<Record<string, ThreadRuntimeSnapshot>>({});
   const threadReasoningBuffersRef = useRef<Record<string, string>>({});
-  const pendingOptimisticUserMessagesRef = useRef<
-    Record<string, PendingOptimisticUserMessage[]>
-  >({});
+  const pendingOptimisticUserMessagesRef = useRef<Record<string, PendingOptimisticUserMessage[]>>(
+    {},
+  );
   const pendingOptimisticQueuedMessagesRef = useRef<
     Record<string, PendingOptimisticQueuedMessage[]>
   >({});
@@ -158,19 +149,18 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const chatPlanSnapshotsRef = useRef<Record<string, ActivePlanState>>({});
   const bridgeUiSurfaceSnapshotsRef = useRef<Record<string, BridgeUiSurface[]>>({});
   const setChatPlanSnapshotsLoaded = useSetAtom(chatPlanSnapshotsLoadedAtom);
-  const bridgeUiSurfacePersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const bridgeUiSurfacePersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preferredStartCwd = normalizeWorkspacePath(defaultStartCwd);
-  const readyAgents = bridgeCapabilities?.agents.filter((agent) => agent.lifecycle === 'ready') ?? [];
+  const readyAgents =
+    bridgeCapabilities?.agents.filter((agent) => agent.lifecycle === 'ready') ?? [];
   const selectedNewAgentId = bridgeCapabilities
     ? selectAgentId(pendingAgentId ?? preferredAgentId, bridgeCapabilities)
-    : pendingAgentId ?? preferredAgentId ?? null;
+    : (pendingAgentId ?? preferredAgentId ?? null);
   const activeAgentId = selectedChat?.agentId ?? selectedNewAgentId;
   const activeAgent = findAgentDescriptor(bridgeCapabilities?.agents ?? [], activeAgentId);
   const activeAgentLabel = getAgentLabel(bridgeCapabilities?.agents ?? [], activeAgentId);
   const activeAgentSupports = activeAgentId
-    ? bridgeCapabilities?.supportsByAgent[activeAgentId] ?? null
+    ? (bridgeCapabilities?.supportsByAgent[activeAgentId] ?? null)
     : null;
   const supportsFastMode = activeAgentSupports?.fastMode === true;
   const supportsReview = activeAgentSupports?.reviewStart === true;
@@ -183,25 +173,27 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     supportsReview,
   };
   const activeSlashCommands = SLASH_COMMANDS.filter((command) =>
-    isSlashCommandAvailable(command, slashCommandAvailability)
+    isSlashCommandAvailable(command, slashCommandAvailability),
   );
   const activeAcpConfig = selectedChat?.acpConfig ?? [];
   const modelConfig = activeAcpConfig.find((option) => option.category === 'model') ?? null;
-  const effortConfig = activeAcpConfig.find((option) => option.category === 'thought_level') ?? null;
+  const effortConfig =
+    activeAcpConfig.find((option) => option.category === 'thought_level') ?? null;
   const modeConfig = activeAcpConfig.find((option) => option.category === 'mode') ?? null;
   const snapshotModelOptions = modelOptionsFromAcpConfig(activeAcpConfig);
   const catalogModelOptions = activeAgentId
-    ? modelOptionsByAgent[activeAgentId] ?? EMPTY_MODEL_OPTIONS
+    ? (modelOptionsByAgent[activeAgentId] ?? EMPTY_MODEL_OPTIONS)
     : EMPTY_MODEL_OPTIONS;
-  const modelOptions = snapshotModelOptions.length > 0
-    ? mergeModelOptions(catalogModelOptions, snapshotModelOptions)
-    : catalogModelOptions;
+  const modelOptions =
+    snapshotModelOptions.length > 0
+      ? mergeModelOptions(catalogModelOptions, snapshotModelOptions)
+      : catalogModelOptions;
   const pendingAgentDefaults = selectedNewAgentId
-    ? agentSettings?.[selectedNewAgentId] ?? null
+    ? (agentSettings?.[selectedNewAgentId] ?? null)
     : null;
   const preferredAgentModelPreference = lastUsedModelPreference(
     chatModelPreferencesRef.current,
-    selectedNewAgentId
+    selectedNewAgentId,
   );
   const preferredDefaultModelId = preferredAgentModelPreference?.modelId ?? null;
   const preferredDefaultEffort = preferredAgentModelPreference?.effort ?? null;

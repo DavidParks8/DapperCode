@@ -84,19 +84,30 @@ export function SubAgentDetailView({
     liveMessageState ??
     (runtime?.streamingText?.trim()
       ? {
-          messages: [{
-            id: `live-assistant-${chat?.id ?? 'sub-agent'}`,
-            role: 'assistant' as const,
-            content: runtime.streamingText,
-            createdAt: new Date().toISOString(),
-          }],
+          messages: [
+            {
+              id: `live-assistant-${chat?.id ?? 'sub-agent'}`,
+              role: 'assistant' as const,
+              content: runtime.streamingText,
+              createdAt: new Date().toISOString(),
+            },
+          ],
           authoritativeSnapshot: false,
-          runByMessageId: {}, terminalMessageIds: [], replacesMessageIdByMessageId: {},
-          toolCallMessageIdByCallId: {}, toolResultMessageIdByCallId: {},
+          runByMessageId: {},
+          terminalMessageIds: [],
+          replacesMessageIdByMessageId: {},
+          toolCallMessageIdByCallId: {},
+          toolResultMessageIdByCallId: {},
           subagentToolCallIds: {},
-          toolTextRevisionByCallId: {}, structuredRevisionByCallId: {},
-          structuredTextByCallId: {}, chunkAssemblies: {}, state: null, steps: {}, rawEvents: [],
-          customMetadata: {}, customMetadataOrder: [],
+          toolTextRevisionByCallId: {},
+          structuredRevisionByCallId: {},
+          structuredTextByCallId: {},
+          chunkAssemblies: {},
+          state: null,
+          steps: {},
+          rawEvents: [],
+          customMetadata: {},
+          customMetadataOrder: [],
         }
       : null);
 
@@ -112,13 +123,7 @@ export function SubAgentDetailView({
       threadStatuses: agentThreadStatusById,
       liveMessageState: resolvedLiveMessageState,
     }).messages.length;
-  }, [
-    agentThreadStatusById,
-    chat,
-    parentChat,
-    resolvedLiveMessageState,
-    showToolCalls,
-  ]);
+  }, [agentThreadStatusById, chat, parentChat, resolvedLiveMessageState, showToolCalls]);
 
   // A sub-agent that has already stopped is never "starting", even when it left no
   // transcript behind -- otherwise opening a finished agent spins forever.
@@ -127,7 +132,9 @@ export function SubAgentDetailView({
 
   const activityDetail = display?.detail ?? latestCommand?.detail ?? role?.trim() ?? null;
   const modalFocusRef = useModalAccessibilityFocus(visible);
-  useAccessibilityAnnouncement(visible ? error ?? (loading ? 'Loading agent transcript' : null) : null);
+  useAccessibilityAnnouncement(
+    visible ? (error ?? (loading ? 'Loading agent transcript' : null)) : null,
+  );
 
   useEffect(() => {
     if (visible) {
@@ -175,23 +182,47 @@ export function SubAgentDetailView({
       style={[
         styles.page,
         {
-          transform: [{
-            translateX: transition.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, Math.max(viewportWidth, 1)],
-            }),
-          }],
+          transform: [
+            {
+              translateX: transition.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, Math.max(viewportWidth, 1)],
+              }),
+            },
+          ],
         },
       ]}
     >
-      <SafeAreaView accessibilityViewIsModal importantForAccessibility="yes" style={styles.container}>
+      <SafeAreaView
+        accessibilityViewIsModal
+        importantForAccessibility="yes"
+        style={styles.container}
+      >
         <View style={styles.header}>
-          <Pressable onPress={navigateBack} hitSlop={8} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Back from sub-agent transcript">
-            <Ionicons {...decorativeAccessibilityProps} name="chevron-back" size={22} color={theme.colors.textPrimary} />
+          <Pressable
+            onPress={navigateBack}
+            hitSlop={8}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Back from sub-agent transcript"
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="chevron-back"
+              size={22}
+              color={theme.colors.textPrimary}
+            />
           </Pressable>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>Sub-agent</Text>
-            <Text ref={modalFocusRef} accessibilityRole="header" style={styles.title} numberOfLines={1}>{title}</Text>
+            <Text
+              ref={modalFocusRef}
+              accessibilityRole="header"
+              style={styles.title}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
           </View>
           <View style={styles.iconButton} />
         </View>
@@ -219,12 +250,22 @@ export function SubAgentDetailView({
               </Text>
             </View>
             {activityDetail ? (
-              <Text style={styles.activityDetail} numberOfLines={2}>{activityDetail}</Text>
+              <Text style={styles.activityDetail} numberOfLines={2}>
+                {activityDetail}
+              </Text>
             ) : null}
           </View>
         </View>
 
-        {error ? <Text accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+            style={styles.errorText}
+          >
+            {error}
+          </Text>
+        ) : null}
 
         <View style={styles.transcript}>
           {isStarting ? (
@@ -279,7 +320,11 @@ export function SubAgentDetailView({
               liveMessageState={resolvedLiveMessageState}
             />
           ) : (
-            <View style={styles.loadingShell} accessibilityRole="progressbar" accessibilityLabel="Loading agent transcript">
+            <View
+              style={styles.loadingShell}
+              accessibilityRole="progressbar"
+              accessibilityLabel="Loading agent transcript"
+            >
               <ActivityIndicator color={theme.colors.textMuted} />
               <Text style={styles.loadingText}>Loading agent transcript…</Text>
             </View>
@@ -290,102 +335,103 @@ export function SubAgentDetailView({
   );
 }
 
-const createStyles = (theme: AppTheme) => StyleSheet.create({
-  page: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 100,
-    elevation: 24,
-    backgroundColor: theme.colors.bgMain,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.bgMain,
-  },
-  header: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  eyebrow: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    fontSize: 10,
-    lineHeight: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  title: {
-    ...theme.typography.headline,
-    color: theme.colors.textPrimary,
-    fontSize: 17,
-  },
-  statusBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    backgroundColor: theme.colors.bgElevated,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
-  },
-  statusCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  statusTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-  },
-  statusLabel: {
-    ...theme.typography.caption,
-    fontWeight: '700',
-  },
-  activityDetail: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  errorText: {
-    ...theme.typography.caption,
-    color: theme.colors.error,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-  },
-  transcript: {
-    flex: 1,
-  },
-  loadingShell: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing.sm,
-  },
-  loadingText: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-  },
-  startingHint: {
-    ...theme.typography.caption,
-    color: theme.colors.textMuted,
-    textAlign: 'center',
-    maxWidth: 260,
-    paddingHorizontal: theme.spacing.lg,
-  },
-});
+const createStyles = (theme: AppTheme) =>
+  StyleSheet.create({
+    page: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 100,
+      elevation: 24,
+      backgroundColor: theme.colors.bgMain,
+    },
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.bgMain,
+    },
+    header: {
+      minHeight: 56,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.borderLight,
+    },
+    iconButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    eyebrow: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      fontSize: 10,
+      lineHeight: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+    },
+    title: {
+      ...theme.typography.headline,
+      color: theme.colors.textPrimary,
+      fontSize: 17,
+    },
+    statusBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.sm,
+      backgroundColor: theme.colors.bgElevated,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.borderLight,
+    },
+    statusCopy: {
+      flex: 1,
+      minWidth: 0,
+      gap: 3,
+    },
+    statusTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.xs,
+    },
+    statusLabel: {
+      ...theme.typography.caption,
+      fontWeight: '700',
+    },
+    activityDetail: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
+    errorText: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.sm,
+    },
+    transcript: {
+      flex: 1,
+    },
+    loadingShell: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: theme.spacing.sm,
+    },
+    loadingText: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+    },
+    startingHint: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      textAlign: 'center',
+      maxWidth: 260,
+      paddingHorizontal: theme.spacing.lg,
+    },
+  });

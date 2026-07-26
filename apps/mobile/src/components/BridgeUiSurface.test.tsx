@@ -1,8 +1,4 @@
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
@@ -69,13 +65,11 @@ describe('BridgeUiWorkflowCard', () => {
     let rendered: ReactTestRenderer | undefined;
     act(() => {
       rendered = renderer.create(
-        <SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}>
-          <BridgeUiWorkflowCard
-            surface={surface}
-            onAction={onAction}
-            onDismiss={onDismiss}
-          />
-        </AppThemeProvider></SafeAreaProvider>
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={onAction} onDismiss={onDismiss} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
       );
     });
 
@@ -121,17 +115,26 @@ describe('BridgeUiWorkflowCard', () => {
 
   it('renders every block and action style in banner and modal presentations', () => {
     const surface: BridgeUiSurface = {
-      id: 'review-1', threadId: 'thread-1', turnId: 'turn-1', kind: 'review',
-      presentation: 'workflowCard', tone: 'warning', title: 'Review changes', subtitle: '3 checks',
+      id: 'review-1',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      kind: 'review',
+      presentation: 'workflowCard',
+      tone: 'warning',
+      title: 'Review changes',
+      subtitle: '3 checks',
       bodyMarkdown: '**Inspect** the proposed changes.',
       blocks: [
         { type: 'text', text: 'Plain detail' },
         { type: 'markdown', markdown: '`npm test`' },
-        { type: 'checklist', items: [
-          { label: 'Lint', status: 'completed', detail: 'Passed' },
-          { label: 'Tests', status: 'inProgress' },
-          { label: 'Deploy', status: 'pending' },
-        ] },
+        {
+          type: 'checklist',
+          items: [
+            { label: 'Lint', status: 'completed', detail: 'Passed' },
+            { label: 'Tests', status: 'inProgress' },
+            { label: 'Deploy', status: 'pending' },
+          ],
+        },
         { type: 'keyValue', items: [{ label: 'Files', value: '4' }] },
         { type: 'code', language: 'sh', text: 'npm test' },
         { type: 'progress', label: 'Coverage', value: 4.5, max: 10, detail: '45%' },
@@ -146,10 +149,30 @@ describe('BridgeUiWorkflowCard', () => {
     const onAction = jest.fn();
     const onDismiss = jest.fn();
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiBanner surface={surface} onAction={onAction} onDismiss={onDismiss} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    for (const text of ['Plain detail', 'Lint', 'Passed', 'Tests', 'Deploy', 'Files', '4', 'sh', 'Coverage', '4.5 / 10', '45%']) {
+    for (const text of [
+      'Plain detail',
+      'Lint',
+      'Passed',
+      'Tests',
+      'Deploy',
+      'Files',
+      '4',
+      'sh',
+      'Coverage',
+      '4.5 / 10',
+      '45%',
+    ]) {
       expect(findText(root, text)).toBe(true);
     }
     for (const action of surface.actions) {
@@ -159,35 +182,82 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => readOnPress(findPressableByLabel(root, 'Dismiss Review changes').props)());
     expect(onDismiss).toHaveBeenCalledWith(surface);
 
-    act(() => { tree.update(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
+    act(() => {
+      tree.update(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiModal surface={surface} onAction={onAction} onDismiss={onDismiss} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
     act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
     expect(onDismiss).toHaveBeenCalledTimes(2);
     act(() => tree.unmount());
   });
 
-  it.each(['warning', 'error', 'success', 'info'] as const)('renders %s tone and clamps progress', (tone) => {
-    const surface: BridgeUiSurface = {
-      id: tone, threadId: 'thread', turnId: null, kind: 'status', presentation: 'banner', tone,
-      title: `${tone} surface`, subtitle: null, bodyMarkdown: null,
-      blocks: [{ type: 'progress', label: 'Range', value: tone === 'error' ? -4 : 40, max: 10 }],
-      actions: [], dismissible: false,
-    };
-    let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} /></AppThemeProvider></SafeAreaProvider>); });
-    const root = expectValue(rendered).root as QueryableTestInstance;
-    expect(findText(root, `${tone} surface`)).toBe(true);
-    expect(root.findAll((node) => node.props.accessibilityLabel === `Dismiss ${tone} surface`)).toHaveLength(0);
-    act(() => expectValue(rendered).unmount());
-  });
+  it.each(['warning', 'error', 'success', 'info'] as const)(
+    'renders %s tone and clamps progress',
+    (tone) => {
+      const surface: BridgeUiSurface = {
+        id: tone,
+        threadId: 'thread',
+        turnId: null,
+        kind: 'status',
+        presentation: 'banner',
+        tone,
+        title: `${tone} surface`,
+        subtitle: null,
+        bodyMarkdown: null,
+        blocks: [{ type: 'progress', label: 'Range', value: tone === 'error' ? -4 : 40, max: 10 }],
+        actions: [],
+        dismissible: false,
+      };
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={theme}>
+              <BridgeUiBanner surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = expectValue(rendered).root as QueryableTestInstance;
+      expect(findText(root, `${tone} surface`)).toBe(true);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === `Dismiss ${tone} surface`),
+      ).toHaveLength(0);
+      act(() => expectValue(rendered).unmount());
+    },
+  );
 
   it('renders empty details and ignores modal close when not dismissible', () => {
     const surface: BridgeUiSurface = {
-      id: 'empty', threadId: 'thread', turnId: null, kind: 'status', presentation: 'modal', tone: 'info',
-      title: 'Empty', subtitle: null, bodyMarkdown: null, blocks: [], actions: [], dismissible: false,
+      id: 'empty',
+      threadId: 'thread',
+      turnId: null,
+      kind: 'status',
+      presentation: 'modal',
+      tone: 'info',
+      title: 'Empty',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [],
+      dismissible: false,
     };
     const onDismiss = jest.fn();
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={jest.fn()} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiModal surface={surface} onAction={jest.fn()} onDismiss={onDismiss} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
     const tree = expectValue(rendered);
     expect(findText(tree.root as QueryableTestInstance, 'No details provided.')).toBe(true);
     act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
@@ -200,14 +270,9 @@ function findText(root: QueryableTestInstance, text: string): boolean {
   return root.findAll((node) => node.children.includes(text)).length > 0;
 }
 
-function findPressableByLabel(
-  root: QueryableTestInstance,
-  label: string
-): QueryableTestInstance {
+function findPressableByLabel(root: QueryableTestInstance, label: string): QueryableTestInstance {
   const pressable = root.findAll(
-    (node) =>
-      typeof node.props.onPress === 'function' &&
-      node.props.accessibilityLabel === label
+    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
   if (!pressable) {
     throw new Error(`Unable to find pressable with label "${label}"`);
@@ -215,12 +280,9 @@ function findPressableByLabel(
   return pressable;
 }
 
-function findPressableByText(
-  root: QueryableTestInstance,
-  text: string
-): QueryableTestInstance {
+function findPressableByText(root: QueryableTestInstance, text: string): QueryableTestInstance {
   const pressable = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && containsText(node, text)
+    (node) => typeof node.props.onPress === 'function' && containsText(node, text),
   )[0];
   if (!pressable) {
     throw new Error(`Unable to find pressable with text "${text}"`);
@@ -237,7 +299,7 @@ function containsText(node: QueryableTestInstance, text: string): boolean {
       typeof child === 'object' &&
       child !== null &&
       'children' in child &&
-      containsText(child as QueryableTestInstance, text)
+      containsText(child as QueryableTestInstance, text),
   );
 }
 

@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCameraPermissions } from 'expo-camera';
 
-import {
-  isInsecureRemoteUrl,
-  normalizeBridgeUrlInput,
-} from '../../bridgeUrl';
-import {
-  useAccessibilityAnnouncement,
-} from '../../accessibility';
+import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from '../../bridgeUrl';
+import { useAccessibilityAnnouncement } from '../../accessibility';
 import {
   useOnboardingIntroAnimations,
   type OnboardingHeroAnimatedStyle,
@@ -63,7 +58,7 @@ export interface OnboardingController {
 }
 
 export function useOnboardingScreenController(
-  options: OnboardingControllerOptions
+  options: OnboardingControllerOptions,
 ): OnboardingController {
   const {
     mode,
@@ -75,7 +70,7 @@ export function useOnboardingScreenController(
   } = options;
 
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(
-    mode === 'initial' ? 'intro' : 'connect'
+    mode === 'initial' ? 'intro' : 'connect',
   );
   const [urlInput, setUrlInputState] = useState(initialBridgeUrl ?? '');
   const [tokenInput, setTokenInputState] = useState(initialBridgeToken ?? '');
@@ -101,10 +96,10 @@ export function useOnboardingScreenController(
   }, [initialBridgeToken]);
 
   const showIntroStep = mode === 'initial' && onboardingStep === 'intro';
-  const {
-    introHeroAnimatedStyle,
-    introActionsAnimatedStyle,
-  } = useOnboardingIntroAnimations(showIntroStep, mode);
+  const { introHeroAnimatedStyle, introActionsAnimatedStyle } = useOnboardingIntroAnimations(
+    showIntroStep,
+    mode,
+  );
 
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrlInput(urlInput), [urlInput]);
   const insecureRemoteWarning = useMemo(() => {
@@ -188,7 +183,7 @@ export function useOnboardingScreenController(
         setCheckingConnection(false);
       }
     },
-    [allowQueryTokenAuth]
+    [allowQueryTokenAuth],
   );
 
   const handleSave = useCallback(async () => {
@@ -257,17 +252,20 @@ export function useOnboardingScreenController(
     setScannerVisible(true);
   }, [cameraPermission?.granted, requestCameraPermission]);
 
-  const applyPairingPayload = useCallback((pairingData: { bridgeToken: string; bridgeUrl?: string }) => {
-    if (pairingData.bridgeUrl) {
-      setUrlInputState(pairingData.bridgeUrl);
-    }
-    setTokenInputState(pairingData.bridgeToken);
-    setFormError(null);
-    setConnectionCheck({ kind: 'idle' });
-    setScannerError(null);
-    setScannerLocked(false);
-    setScannerVisible(false);
-  }, []);
+  const applyPairingPayload = useCallback(
+    (pairingData: { bridgeToken: string; bridgeUrl?: string }) => {
+      if (pairingData.bridgeUrl) {
+        setUrlInputState(pairingData.bridgeUrl);
+      }
+      setTokenInputState(pairingData.bridgeToken);
+      setFormError(null);
+      setConnectionCheck({ kind: 'idle' });
+      setScannerError(null);
+      setScannerLocked(false);
+      setScannerVisible(false);
+    },
+    [],
+  );
 
   const handleBarcodeScanned = useCallback(
     (data: string) => {
@@ -287,7 +285,7 @@ export function useOnboardingScreenController(
 
       applyPairingPayload(pairing);
     },
-    [applyPairingPayload, scannerLocked]
+    [applyPairingPayload, scannerLocked],
   );
 
   useAccessibilityAnnouncement(formError ?? scannerError);
@@ -296,7 +294,7 @@ export function useOnboardingScreenController(
       ? 'Testing bridge connection'
       : connectionCheck.kind === 'success'
         ? connectionCheck.message
-        : null
+        : null,
   );
 
   return {

@@ -34,7 +34,7 @@ export class SubmissionController {
 
   begin(
     snapshot: SubmissionDraftSnapshot,
-    attachments: { mentions: string[]; localImages: string[] }
+    attachments: { mentions: string[]; localImages: string[] },
   ): ComposerSubmission {
     const retryKey = this.retryKey(snapshot.scopeKey, snapshot.value, attachments);
     const retry = this.failed.get(retryKey);
@@ -47,9 +47,7 @@ export class SubmissionController {
     const generated = this.createId().trim();
     this.counter += 1;
     return {
-      id:
-        generated ||
-        `submission-${createSubmissionNonce()}-${this.counter.toString(36)}`,
+      id: generated || `submission-${createSubmissionNonce()}-${this.counter.toString(36)}`,
       scopeKey: snapshot.scopeKey,
       draft: snapshot.value,
       mentions: [...attachments.mentions],
@@ -86,7 +84,7 @@ export class SubmissionController {
   private retryKey(
     scopeKey: string,
     draft: string,
-    attachments: { mentions: readonly string[]; localImages: readonly string[] }
+    attachments: { mentions: readonly string[]; localImages: readonly string[] },
   ): string {
     return JSON.stringify([scopeKey, draft, attachments.mentions, attachments.localImages]);
   }

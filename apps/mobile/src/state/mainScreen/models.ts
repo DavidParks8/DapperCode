@@ -11,7 +11,9 @@ import { screenAtom } from './registry';
 
 export const bridgeCapabilitiesAtom = screenAtom<BridgeCapabilities | null>(null);
 
-export const modelOptionsByAgentAtom = screenAtom<Record<AgentId, ModelOption[]>>((): Record<AgentId, ModelOption[]> => ({}));
+export const modelOptionsByAgentAtom = screenAtom<Record<AgentId, ModelOption[]>>(
+  (): Record<AgentId, ModelOption[]> => ({}),
+);
 
 export const loadingModelsAtom = screenAtom(false);
 

@@ -2,29 +2,30 @@ import {
   activeTurnIdAtom,
   errorAtom,
   pendingApprovalAtom,
-  stoppingTurnAtom
+  stoppingTurnAtom,
 } from '../../state/mainScreen/turn';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import { sleep, RUN_WATCHDOG_MS, shouldSurfaceChatLoadError, isChatLikelyRunning, resolveSettledActivity, retireOpeningChatActivity } from './mainScreenHelpers';
+import {
+  sleep,
+  RUN_WATCHDOG_MS,
+  shouldSurfaceChatLoadError,
+  isChatLikelyRunning,
+  resolveSettledActivity,
+  retireOpeningChatActivity,
+} from './mainScreenHelpers';
 import { getTranscriptContinuationState } from './controllers/transcriptContinuationController';
 import { resolveEquivalentChat } from './mainScreenChatState';
-import type { MainScreenSlashCommandHandlerContext, MainScreenSlashCommandHandlerResult } from './mainScreenSlashCommandHandler';
+import type {
+  MainScreenSlashCommandHandlerContext,
+  MainScreenSlashCommandHandlerResult,
+} from './mainScreenSlashCommandHandler';
 import { OPEN_CHAT_MIN_LOADING_MS } from './mainScreenConstants';
-import {
-  shouldReleaseOpeningChat,
-  shouldScrollAfterLoad,
-} from './mainScreenOpeningChatState';
+import { shouldReleaseOpeningChat, shouldScrollAfterLoad } from './mainScreenOpeningChatState';
 
-
-
-
-
-
-export type MainScreenChatLoadPipelineContext = MainScreenSlashCommandHandlerContext & MainScreenSlashCommandHandlerResult;
+export type MainScreenChatLoadPipelineContext = MainScreenSlashCommandHandlerContext &
+  MainScreenSlashCommandHandlerResult;
 
 export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelineContext) {
   const {
@@ -61,7 +62,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
 
-
   const loadChat = useCallback(
     async (
       chatId: string,
@@ -69,7 +69,7 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
         forceScroll?: boolean;
         preserveRuntimeState?: boolean;
         revalidate?: boolean;
-      }
+      },
     ): Promise<boolean> => {
       const requestId = loadChatRequestRef.current + 1;
       loadChatRequestRef.current = requestId;
@@ -95,14 +95,14 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
         }
         loadedSuccessfully = true;
         const shouldPreserveRuntimeState = Boolean(
-          options?.preserveRuntimeState && chatId === chatIdRef.current
+          options?.preserveRuntimeState && chatId === chatIdRef.current,
         );
         if (!shouldPreserveRuntimeState) {
           delete autoEnabledPlanTurnIdByThreadRef.current[chatId];
         }
         setSelectedChatId(chatId);
         setSelectedChat((prev) =>
-          prev && prev.id === chat.id ? resolveEquivalentChat(prev, chat) : chat
+          prev && prev.id === chat.id ? resolveEquivalentChat(prev, chat) : chat,
         );
         setTranscriptContinuationState(getTranscriptContinuationState(chat));
         setError(null);
@@ -153,7 +153,7 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
             options?.revalidate,
             cachedChat?.id,
             chatId,
-            cachedChat?.messages.length ?? 0
+            cachedChat?.messages.length ?? 0,
           )
         ) {
           return false;
@@ -204,7 +204,7 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
       refreshPendingApprovalsForThread,
       scrollToBottomIfPinned,
       scrollToBottomReliable,
-    ]
+    ],
   );
 
   return {

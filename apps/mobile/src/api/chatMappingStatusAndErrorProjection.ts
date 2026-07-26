@@ -6,9 +6,9 @@ import {
   readString,
   readTimestampSeconds,
   toRecord,
-} from "./chatMappingRawTypesAndReaders";
-import { toRawAcpSnapshot, toRawTurn } from "./chatMappingSnapshotAndSummaryProjection";
-import { type ChatStatus } from "./types";
+} from './chatMappingRawTypesAndReaders';
+import { toRawAcpSnapshot, toRawTurn } from './chatMappingSnapshotAndSummaryProjection';
+import { type ChatStatus } from './types';
 
 export function readErrorMessage(value: unknown, depth = 0): string | null {
   if (depth > 3) {
@@ -42,72 +42,63 @@ export function readErrorMessage(value: unknown, depth = 0): string | null {
   return null;
 }
 
-export function mapRawStatus(
-  status: unknown,
-  turns: RawTurn[] | undefined,
-): ChatStatus {
+export function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus {
   const statusRecord = toRecord(status);
-  const statusType = normalizeLifecycleStatus(
-    readString(statusRecord?.type) ?? readString(status),
-  );
+  const statusType = normalizeLifecycleStatus(readString(statusRecord?.type) ?? readString(status));
   const hasTurns = Array.isArray(turns) && turns.length > 0;
   const lastTurn = hasTurns ? turns[turns.length - 1] : null;
   const lastTurnStatus = normalizeLifecycleStatus(readString(lastTurn?.status));
-  const isIdleLikeStatus = statusType === "idle" || statusType === "notloaded";
+  const isIdleLikeStatus = statusType === 'idle' || statusType === 'notloaded';
   if (
-    lastTurnStatus === "inprogress" ||
-    lastTurnStatus === "running" ||
-    lastTurnStatus === "active" ||
-    lastTurnStatus === "queued" ||
-    lastTurnStatus === "pending"
+    lastTurnStatus === 'inprogress' ||
+    lastTurnStatus === 'running' ||
+    lastTurnStatus === 'active' ||
+    lastTurnStatus === 'queued' ||
+    lastTurnStatus === 'pending'
   ) {
     // Some thread/read payloads can return stale turn state while the thread // itself is already idle/notLoaded. Prefer the thread lifecycle in that case.
     if (isIdleLikeStatus) {
-      return hasTurns ? "complete" : "idle";
+      return hasTurns ? 'complete' : 'idle';
     }
-    return "running";
+    return 'running';
   }
   if (
-    lastTurnStatus === "failed" ||
-    lastTurnStatus === "interrupted" ||
-    lastTurnStatus === "error" ||
-    lastTurnStatus === "aborted" ||
-    lastTurnStatus === "cancelled" ||
-    lastTurnStatus === "canceled"
+    lastTurnStatus === 'failed' ||
+    lastTurnStatus === 'interrupted' ||
+    lastTurnStatus === 'error' ||
+    lastTurnStatus === 'aborted' ||
+    lastTurnStatus === 'cancelled' ||
+    lastTurnStatus === 'canceled'
   ) {
-    return "error";
+    return 'error';
   }
   if (
-    lastTurnStatus === "completed" ||
-    lastTurnStatus === "complete" ||
-    lastTurnStatus === "success" ||
-    lastTurnStatus === "succeeded"
+    lastTurnStatus === 'completed' ||
+    lastTurnStatus === 'complete' ||
+    lastTurnStatus === 'success' ||
+    lastTurnStatus === 'succeeded'
   ) {
-    return "complete";
+    return 'complete';
+  }
+  if (statusType === 'systemerror' || statusType === 'error' || statusType === 'failed') {
+    return 'error';
   }
   if (
-    statusType === "systemerror" ||
-    statusType === "error" ||
-    statusType === "failed"
+    statusType === 'running' ||
+    statusType === 'inprogress' ||
+    statusType === 'queued' ||
+    statusType === 'pending'
   ) {
-    return "error";
+    return 'running';
   }
-  if (
-    statusType === "running" ||
-    statusType === "inprogress" ||
-    statusType === "queued" ||
-    statusType === "pending"
-  ) {
-    return "running";
-  }
-  if (statusType === "active") {
+  if (statusType === 'active') {
     // Some backends keep a thread "active" while loaded in memory even when no // turn is running. If there is no in-progress turn, avoid false "working" UI.
-    return hasTurns ? "complete" : "idle";
+    return hasTurns ? 'complete' : 'idle';
   }
   if (isIdleLikeStatus) {
-    return hasTurns ? "complete" : "idle";
+    return hasTurns ? 'complete' : 'idle';
   }
-  return "idle";
+  return 'idle';
 }
 
 export function extractLastError(turns: RawTurn[]): string | null {
@@ -115,12 +106,12 @@ export function extractLastError(turns: RawTurn[]): string | null {
     const turn = turns[i];
     const turnStatus = normalizeLifecycleStatus(readString(turn.status));
     if (
-      turnStatus !== "failed" &&
-      turnStatus !== "interrupted" &&
-      turnStatus !== "error" &&
-      turnStatus !== "aborted" &&
-      turnStatus !== "cancelled" &&
-      turnStatus !== "canceled"
+      turnStatus !== 'failed' &&
+      turnStatus !== 'interrupted' &&
+      turnStatus !== 'error' &&
+      turnStatus !== 'aborted' &&
+      turnStatus !== 'cancelled' &&
+      turnStatus !== 'canceled'
     ) {
       continue;
     }
@@ -158,13 +149,8 @@ export function toRawThread(value: unknown): RawThread {
     preview: readString(record.preview) ?? undefined,
     modelProvider: readString(record.modelProvider) ?? undefined,
     agentNickname:
-      readString(record.agentNickname) ??
-      readString(record.agent_nickname) ??
-      undefined,
-    agentRole:
-      readString(record.agentRole) ??
-      readString(record.agent_role) ??
-      undefined,
+      readString(record.agentNickname) ?? readString(record.agent_nickname) ?? undefined,
+    agentRole: readString(record.agentRole) ?? readString(record.agent_role) ?? undefined,
     createdAt: readTimestampSeconds(record.createdAt) ?? undefined,
     updatedAt: readTimestampSeconds(record.updatedAt) ?? undefined,
     status: (record.status as RawThreadStatus) ?? undefined,
@@ -172,9 +158,7 @@ export function toRawThread(value: unknown): RawThread {
     source: record.source,
     acpSnapshot: toRawAcpSnapshot(record.acpSnapshot),
     turns: Array.isArray(record.turns)
-      ? (record.turns
-          .map((turn) => toRawTurn(turn))
-          .filter(Boolean) as RawTurn[])
+      ? (record.turns.map((turn) => toRawTurn(turn)).filter(Boolean) as RawTurn[])
       : undefined,
   };
 }

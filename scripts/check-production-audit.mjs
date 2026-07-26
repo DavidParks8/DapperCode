@@ -56,14 +56,10 @@ for (const vulnerability of Object.values(vulnerabilities)) {
   }
 }
 
-const unexpected = [...found].filter(
-  ([id, name]) => reviewedAdvisories.get(id) !== name
-);
-const stale = [...reviewedAdvisories].filter(
-  ([id, name]) => found.get(id) !== name
-);
+const unexpected = [...found].filter(([id, name]) => reviewedAdvisories.get(id) !== name);
+const stale = [...reviewedAdvisories].filter(([id, name]) => found.get(id) !== name);
 const fixable = [...new Set(found.values())].filter((name) =>
-  hasCompatibleFix(vulnerabilities[name]?.fixAvailable)
+  hasCompatibleFix(vulnerabilities[name]?.fixAvailable),
 );
 
 if (critical.length > 0 || unexpected.length > 0 || stale.length > 0 || fixable.length > 0) {
@@ -83,5 +79,5 @@ if (critical.length > 0 || unexpected.length > 0 || stale.length > 0 || fixable.
 }
 
 process.stdout.write(
-  `Production dependency audit passed with ${found.size} reviewed high-severity advisories and no critical advisories.\n`
+  `Production dependency audit passed with ${found.size} reviewed high-severity advisories and no critical advisories.\n`,
 );

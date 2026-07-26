@@ -9,14 +9,13 @@ const dependencyNames = Object.keys({
   ...mobilePackage.dependencies,
   ...mobilePackage.devDependencies,
 });
-const forbiddenDependencyPatterns = [
-  /^react-native-purchases(?:-ui)?$/,
-  /^@revenuecat\//,
-];
+const forbiddenDependencyPatterns = [/^react-native-purchases(?:-ui)?$/, /^@revenuecat\//];
 
 for (const dependencyName of dependencyNames) {
   if (forbiddenDependencyPatterns.some((pattern) => pattern.test(dependencyName))) {
-    throw new Error(`Payment isolation check failed: forbidden mobile dependency ${dependencyName}`);
+    throw new Error(
+      `Payment isolation check failed: forbidden mobile dependency ${dependencyName}`,
+    );
   }
 }
 
@@ -42,13 +41,15 @@ for (const file of sourceFiles) {
   for (const marker of forbiddenMarkers) {
     if (content.includes(marker.toLowerCase())) {
       throw new Error(
-        `Payment isolation check failed: ${path.relative(root, file)} contains ${marker}`
+        `Payment isolation check failed: ${path.relative(root, file)} contains ${marker}`,
       );
     }
   }
 }
 
-process.stdout.write('Payment isolation is clean: no purchase SDK or provider configuration found.\n');
+process.stdout.write(
+  'Payment isolation is clean: no purchase SDK or provider configuration found.\n',
+);
 
 function walkSourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

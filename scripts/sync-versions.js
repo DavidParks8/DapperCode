@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 
 const defaultRootDir = path.resolve(__dirname, '..');
-const packageVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
+const packageVersionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
 
 function readFile(rootDir, relativePath) {
   return fs.readFileSync(path.join(rootDir, relativePath), 'utf8');
@@ -14,7 +15,9 @@ function parseJson(source, relativePath) {
   try {
     return JSON.parse(source);
   } catch (error) {
-    throw new Error(`Could not parse ${relativePath}: ${error instanceof Error ? error.message : error}`);
+    throw new Error(
+      `Could not parse ${relativePath}: ${error instanceof Error ? error.message : error}`,
+    );
   }
 }
 
@@ -83,12 +86,7 @@ function replaceNamedPackageVersionInCargoLock(source, packageName, version, rel
 }
 
 function replacePackageVersionInCargoLock(source, version, relativePath) {
-  return replaceNamedPackageVersionInCargoLock(
-    source,
-    'dappercode-bridge',
-    version,
-    relativePath
-  );
+  return replaceNamedPackageVersionInCargoLock(source, 'dappercode-bridge', version, relativePath);
 }
 
 function replaceExactly(source, pattern, replacement, relativePath, field) {
@@ -115,9 +113,10 @@ function collectVersionUpdates(rootDir) {
 
   const rootPackagePath = 'package.json';
   const rootPackage = parseJson(load(rootPackagePath), rootPackagePath);
-  const versionMatch = typeof rootPackage.version === 'string'
-    ? rootPackage.version.match(packageVersionPattern)
-    : null;
+  const versionMatch =
+    typeof rootPackage.version === 'string'
+      ? rootPackage.version.match(packageVersionPattern)
+      : null;
   if (!versionMatch) {
     throw new Error('Root package.json version must be valid SemVer without build metadata.');
   }
@@ -131,7 +130,7 @@ function collectVersionUpdates(rootDir) {
   if (fs.existsSync(path.join(rootDir, desktopCargoTomlPath))) {
     updates.set(
       desktopCargoTomlPath,
-      replacePackageVersionInToml(load(desktopCargoTomlPath), version, desktopCargoTomlPath)
+      replacePackageVersionInToml(load(desktopCargoTomlPath), version, desktopCargoTomlPath),
     );
 
     const desktopCargoLockPath = 'apps/desktop/Cargo.lock';
@@ -141,17 +140,22 @@ function collectVersionUpdates(rootDir) {
         load(desktopCargoLockPath),
         'dappercode-desktop',
         version,
-        desktopCargoLockPath
-      )
+        desktopCargoLockPath,
+      ),
     );
-
   }
 
   const cargoTomlPath = 'services/rust-bridge/Cargo.toml';
-  updates.set(cargoTomlPath, replacePackageVersionInToml(load(cargoTomlPath), version, cargoTomlPath));
+  updates.set(
+    cargoTomlPath,
+    replacePackageVersionInToml(load(cargoTomlPath), version, cargoTomlPath),
+  );
 
   const cargoLockPath = 'services/rust-bridge/Cargo.lock';
-  updates.set(cargoLockPath, replacePackageVersionInCargoLock(load(cargoLockPath), version, cargoLockPath));
+  updates.set(
+    cargoLockPath,
+    replacePackageVersionInCargoLock(load(cargoLockPath), version, cargoLockPath),
+  );
 
   updateJson('package-lock.json', (value) => {
     const packageEntries = value.packages;
@@ -180,36 +184,45 @@ function collectVersionUpdates(rootDir) {
   if (fs.existsSync(iosRoot)) {
     const infoPlistPath = 'apps/mobile/ios/DapperCodeMobile/Info.plist';
     const infoPlist = load(infoPlistPath);
-    updates.set(infoPlistPath, replaceExactly(
-      infoPlist,
-      /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<]+)(<\/string>)/g,
-      `$1${mobileVersion}$3`,
+    updates.set(
       infoPlistPath,
-      'CFBundleShortVersionString'
-    ));
+      replaceExactly(
+        infoPlist,
+        /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<]+)(<\/string>)/g,
+        `$1${mobileVersion}$3`,
+        infoPlistPath,
+        'CFBundleShortVersionString',
+      ),
+    );
 
     const xcodeProjectPath = 'apps/mobile/ios/DapperCodeMobile.xcodeproj/project.pbxproj';
     const xcodeProject = load(xcodeProjectPath);
-    updates.set(xcodeProjectPath, replaceExactly(
-      xcodeProject,
-      /MARKETING_VERSION = [^;]+;/g,
-      `MARKETING_VERSION = ${mobileVersion};`,
+    updates.set(
       xcodeProjectPath,
-      'MARKETING_VERSION'
-    ));
+      replaceExactly(
+        xcodeProject,
+        /MARKETING_VERSION = [^;]+;/g,
+        `MARKETING_VERSION = ${mobileVersion};`,
+        xcodeProjectPath,
+        'MARKETING_VERSION',
+      ),
+    );
   }
 
   const androidRoot = path.join(rootDir, 'apps/mobile/android');
   if (fs.existsSync(androidRoot)) {
     const buildGradlePath = 'apps/mobile/android/app/build.gradle';
     const buildGradle = load(buildGradlePath);
-    updates.set(buildGradlePath, replaceExactly(
-      buildGradle,
-      /versionName\s+"[^"]+"/g,
-      `versionName "${mobileVersion}"`,
+    updates.set(
       buildGradlePath,
-      'versionName'
-    ));
+      replaceExactly(
+        buildGradle,
+        /versionName\s+"[^"]+"/g,
+        `versionName "${mobileVersion}"`,
+        buildGradlePath,
+        'versionName',
+      ),
+    );
   }
 
   return { mobileVersion, sources, updates, version };
@@ -222,7 +235,9 @@ function syncVersions({ rootDir = defaultRootDir, check = false } = {}) {
     .map(([relativePath]) => relativePath);
 
   if (check && changedPaths.length > 0) {
-    throw new Error(`Version metadata is out of sync with package.json (${result.version}):\n- ${changedPaths.join('\n- ')}`);
+    throw new Error(
+      `Version metadata is out of sync with package.json (${result.version}):\n- ${changedPaths.join('\n- ')}`,
+    );
   }
 
   if (!check) {
@@ -244,7 +259,7 @@ function syncVersions({ rootDir = defaultRootDir, check = false } = {}) {
       if (rollbackErrors.length > 0) {
         throw new AggregateError(
           [error, ...rollbackErrors],
-          'Version synchronization failed and rollback was incomplete.'
+          'Version synchronization failed and rollback was incomplete.',
         );
       }
       throw error;
@@ -260,7 +275,9 @@ function main() {
   if (check) {
     console.log(`Version metadata is synchronized to ${result.version}.`);
   } else {
-    console.log(`Synchronized package version ${result.version} and mobile version ${result.mobileVersion}.`);
+    console.log(
+      `Synchronized package version ${result.version} and mobile version ${result.mobileVersion}.`,
+    );
   }
 }
 

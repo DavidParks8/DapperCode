@@ -53,7 +53,7 @@ export const BottomSheetModal = forwardRef<MockBottomSheetModalHandle, MockBotto
       return null;
     }
     return <View {...viewProps}>{children}</View>;
-  }
+  },
 );
 
 export const BottomSheet = BottomSheetModal;

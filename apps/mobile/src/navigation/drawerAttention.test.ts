@@ -4,10 +4,7 @@ import type {
   PendingApproval,
   PendingUserInputRequest,
 } from '../api/types';
-import {
-  buildDrawerAttentionModel,
-  getDrawerFolderPickerLabels,
-} from './drawerAttention';
+import { buildDrawerAttentionModel, getDrawerFolderPickerLabels } from './drawerAttention';
 
 const agents: AgentDescriptor[] = [
   {
@@ -26,10 +23,7 @@ const agents: AgentDescriptor[] = [
   },
 ];
 
-function chat(
-  id: string,
-  overrides: Partial<ChatSummary> = {}
-): ChatSummary {
+function chat(id: string, overrides: Partial<ChatSummary> = {}): ChatSummary {
   return {
     id,
     title: `Chat ${id}`,
@@ -44,10 +38,7 @@ function chat(
   };
 }
 
-function approval(
-  threadId: string,
-  requestedAt = '2026-07-20T00:25:00.000Z'
-): PendingApproval {
+function approval(threadId: string, requestedAt = '2026-07-20T00:25:00.000Z'): PendingApproval {
   return {
     requestId: `approval-${threadId}`,
     agentId: 'codex',
@@ -64,7 +55,7 @@ function approval(
 
 function userInput(
   threadId: string,
-  requestedAt = '2026-07-20T00:26:00.000Z'
+  requestedAt = '2026-07-20T00:26:00.000Z',
 ): PendingUserInputRequest {
   return {
     requestId: `input-${threadId}`,
@@ -99,11 +90,7 @@ describe('buildDrawerAttentionModel', () => {
     });
 
     const recent = model.sections.find((section) => section.key === 'recent');
-    expect(recent?.data.map((row) => row.chat.id).sort()).toEqual([
-      'root-1',
-      'root-2',
-      'root-3',
-    ]);
+    expect(recent?.data.map((row) => row.chat.id).sort()).toEqual(['root-1', 'root-2', 'root-3']);
   });
 
   it('keeps idle sub-agents out of the recent list but surfaces ones that need you', () => {
@@ -127,10 +114,7 @@ describe('buildDrawerAttentionModel', () => {
     expect(model.recentCount).toBe(1);
 
     const attention = model.sections.find((section) => section.key === 'attention');
-    expect(attention?.data.map((row) => row.chat.id).sort()).toEqual([
-      'asking-sub',
-      'failed-sub',
-    ]);
+    expect(attention?.data.map((row) => row.chat.id).sort()).toEqual(['asking-sub', 'failed-sub']);
   });
 
   it('groups authoritative requests, failures, running sessions, and recent work', () => {
@@ -169,7 +153,7 @@ describe('buildDrawerAttentionModel', () => {
         stateLabel: 'Input requested',
         agentLabel: 'GitHub Copilot',
         workspaceLabel: 'mobile',
-      })
+      }),
     );
     expect(model.sections[1]?.data[0]?.stateLabel).toBe('Working');
     expect(model.sections[2]?.data[0]?.stateLabel).toBe('Complete');
@@ -216,7 +200,7 @@ describe('buildDrawerAttentionModel', () => {
       expect.objectContaining({
         attentionReason: null,
         stateLabel: 'Working',
-      })
+      }),
     );
   });
 
@@ -248,7 +232,7 @@ describe('buildDrawerAttentionModel', () => {
         stateLabel: 'Input requested',
         workspaceLabel: 'mobile',
         indentLevel: 1,
-      })
+      }),
     );
   });
 
@@ -280,7 +264,7 @@ describe('buildDrawerAttentionModel', () => {
         cwd: '/repo/mobile',
         status: index === 5 ? 'running' : index === 6 ? 'error' : 'complete',
         updatedAt: `2026-07-20T00:${String(29 - index).padStart(2, '0')}:00.000Z`,
-      })
+      }),
     );
     const bridgeChat = chat('bridge', {
       cwd: '/repo/rust-bridge',
@@ -315,9 +299,9 @@ describe('buildDrawerAttentionModel', () => {
     expect(mobileFolder.selectedFolderLabel).toBe('mobile');
     expect(mobileFolder.visibleChatCount).toBe(8);
     expect(
-      mobileFolder.sections.flatMap((section) => section.data).every(
-        (row) => row.workspaceKey === '/repo/mobile'
-      )
+      mobileFolder.sections
+        .flatMap((section) => section.data)
+        .every((row) => row.workspaceKey === '/repo/mobile'),
     ).toBe(true);
   });
 });

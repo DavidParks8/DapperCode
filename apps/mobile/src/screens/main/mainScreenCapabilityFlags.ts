@@ -7,29 +7,32 @@ import {
   resolvingUserInputAtom,
   stoppingTurnAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
   defaultServiceTierAtom,
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
-  selectedServiceTierAtom
+  selectedServiceTierAtom,
 } from '../../state/mainScreen/models';
 import {
   workspaceBridgeRootAtom,
   workspaceBrowseErrorAtom,
-  workspaceRootsAtom
+  workspaceRootsAtom,
 } from '../../state/mainScreen/workspace';
 import {
   activityAtom,
   queueActionItemIdAtom,
-  queueActionKindAtom
+  queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgentId } from '../../api/types';
 import { normalizeWorkspacePath } from './mainScreenHelpers';
-import type { MainScreenModelCatalogStateContext, MainScreenModelCatalogStateResult } from './mainScreenModelCatalogState';
+import type {
+  MainScreenModelCatalogStateContext,
+  MainScreenModelCatalogStateResult,
+} from './mainScreenModelCatalogState';
 import {
   agentThreadMenuVisibleAtom,
   collaborationModeMenuVisibleAtom,
@@ -37,15 +40,11 @@ import {
   modelModalVisibleAtom,
   titleDraftAtom,
   titleModalVisibleAtom,
-  titleSavingAtom
+  titleSavingAtom,
 } from '../../state/mainScreen/modals';
 
-
-
-
-
-
-export type MainScreenCapabilityFlagsContext = MainScreenModelCatalogStateContext & MainScreenModelCatalogStateResult;
+export type MainScreenCapabilityFlagsContext = MainScreenModelCatalogStateContext &
+  MainScreenModelCatalogStateResult;
 
 export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsContext) {
   const {
@@ -100,63 +99,68 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
 
+  const resetComposerState = useCallback(
+    (requestedAgentId?: AgentId) => {
+      const nextAgentId = requestedAgentId ?? selectedNewAgentId;
+      clearExternalStatusFullSync();
+      loadChatRequestRef.current += 1;
+      setSelectedChat(null);
+      setSelectedChatId(null);
+      setPendingAgentId(nextAgentId);
+      const rememberedSettings = nextAgentId ? agentSettings?.[nextAgentId] : null;
+      setSelectedCollaborationMode(
+        rememberedSettings?.collaborationMode === 'plan'
+          ? rememberedSettings.collaborationMode
+          : 'default',
+      );
+      setSelectedAcpModeId(null);
+      openingChatStartedAtRef.current = 0;
+      setOpeningChatId(null);
+      setError(null);
+      setSelectedServiceTier(undefined);
+      setActiveCommands([]);
+      setPendingApproval(null);
+      setPendingUserInputRequest(null);
+      setUserInputDrafts({});
+      setUserInputError(null);
+      setResolvingUserInput(false);
+      setActivePlan(null);
+      setStreamingText(null);
+      attachmentController.clear();
+      setActiveTurnId(null);
+      setStoppingTurn(false);
+      setAgentThreadMenuVisible(false);
+      setModelModalVisible(false);
+      setCollaborationModeMenuVisible(false);
+      setEffortModalVisible(false);
+      setQueueActionItemId(null);
+      setQueueActionKind(null);
+      setActivity({
+        tone: 'idle',
+        title: 'Ready',
+      });
+      stopRequestedRef.current = false;
+      stopSystemMessageLoggedRef.current = false;
+      reasoningSummaryRef.current = {};
+      hadCommandRef.current = false;
+      clearRunWatchdog();
+    },
+    [
+      clearExternalStatusFullSync,
+      clearRunWatchdog,
+      defaultServiceTier,
+      agentSettings,
+      selectedNewAgentId,
+    ],
+  );
 
-  const resetComposerState = useCallback((requestedAgentId?: AgentId) => {
-    const nextAgentId = requestedAgentId ?? selectedNewAgentId;
-    clearExternalStatusFullSync();
-    loadChatRequestRef.current += 1;
-    setSelectedChat(null);
-    setSelectedChatId(null);
-    setPendingAgentId(nextAgentId);
-    const rememberedSettings = nextAgentId ? agentSettings?.[nextAgentId] : null;
-    setSelectedCollaborationMode(
-      rememberedSettings?.collaborationMode === 'plan'
-        ? rememberedSettings.collaborationMode
-        : 'default'
-    );
-    setSelectedAcpModeId(null);
-    openingChatStartedAtRef.current = 0;
-    setOpeningChatId(null);
-    setError(null);
-    setSelectedServiceTier(undefined);
-    setActiveCommands([]);
-    setPendingApproval(null);
-    setPendingUserInputRequest(null);
-    setUserInputDrafts({});
-    setUserInputError(null);
-    setResolvingUserInput(false);
-    setActivePlan(null);
-    setStreamingText(null);
-    attachmentController.clear();
-    setActiveTurnId(null);
-    setStoppingTurn(false);
-    setAgentThreadMenuVisible(false);
-    setModelModalVisible(false);
-    setCollaborationModeMenuVisible(false);
-    setEffortModalVisible(false);
-    setQueueActionItemId(null);
-    setQueueActionKind(null);
-    setActivity({
-      tone: 'idle',
-      title: 'Ready',
-    });
-    stopRequestedRef.current = false;
-    stopSystemMessageLoggedRef.current = false;
-    reasoningSummaryRef.current = {};
-    hadCommandRef.current = false;
-    clearRunWatchdog();
-  }, [
-    clearExternalStatusFullSync,
-    clearRunWatchdog,
-    defaultServiceTier,
-    agentSettings,
-    selectedNewAgentId,
-  ]);
-
-  const startNewChat = useCallback((requestedAgentId?: AgentId) => {
-    // New chat should land on compose/home so user can pick workspace first.
-    resetComposerState(requestedAgentId);
-  }, [resetComposerState]);
+  const startNewChat = useCallback(
+    (requestedAgentId?: AgentId) => {
+      // New chat should land on compose/home so user can pick workspace first.
+      resetComposerState(requestedAgentId);
+    },
+    [resetComposerState],
+  );
 
   const openTitleEditor = useCallback(() => {
     if (!selectedChat) return;

@@ -31,7 +31,7 @@ const writeChains = new Map<string, Promise<void>>();
 
 export function createEmptyChatSnapshotCache(
   profileId: string,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
 ): ChatSnapshotCache {
   return {
     version: CHAT_SNAPSHOT_CACHE_VERSION,
@@ -45,7 +45,7 @@ export function createEmptyChatSnapshotCache(
 export function parseChatSnapshotCache(
   raw: string,
   profileId: string,
-  now = Date.now()
+  now = Date.now(),
 ): ChatSnapshotCache {
   try {
     const parsed = JSON.parse(raw) as Partial<ChatSnapshotCache>;
@@ -87,7 +87,7 @@ export function updateChatSnapshotCache(
   cache: ChatSnapshotCache,
   selectedChatId: string | null,
   chat: Chat | null,
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
 ): ChatSnapshotCache {
   const normalizedSelectedChatId = selectedChatId?.trim() || null;
   const entries = cache.entries
@@ -163,7 +163,7 @@ export async function deleteChatSnapshotCache(profileId: string): Promise<void> 
 
 export function getChatSnapshotCachePath(
   profileId: string,
-  base = FileSystem.documentDirectory
+  base = FileSystem.documentDirectory,
 ): string | null {
   if (typeof base !== 'string' || !base || !profileId.trim()) {
     return null;
@@ -228,7 +228,7 @@ function migrateLegacyChat(value: unknown): unknown {
     messages: chat.messages.map((message) =>
       message && typeof message === 'object'
         ? migrateLegacyMessage(message as Record<string, unknown>)
-        : message
+        : message,
     ),
   };
 }
@@ -257,10 +257,12 @@ function isChatMessage(value: unknown): value is ChatMessage {
     return false;
   }
   const message = value as Record<string, unknown>;
-  return MessageSchema.safeParse(migrateLegacyMessage(message)).success &&
+  return (
+    MessageSchema.safeParse(migrateLegacyMessage(message)).success &&
     typeof message.createdAt === 'string' &&
     (message.parts === undefined ||
-      (Array.isArray(message.parts) && message.parts.every(isChatMessagePart)));
+      (Array.isArray(message.parts) && message.parts.every(isChatMessagePart)))
+  );
 }
 
 function migrateLegacyMessage(value: Record<string, unknown>): unknown {
@@ -283,11 +285,13 @@ function migrateLegacyMessage(value: Record<string, unknown>): unknown {
       systemKind === 'subAgent' ? SUBAGENT_ACTIVITY_TYPE : COMPACTION_ACTIVITY_TYPE,
       {
         text,
-        ...(systemKind === 'subAgent' && value.subAgentMeta && typeof value.subAgentMeta === 'object'
+        ...(systemKind === 'subAgent' &&
+        value.subAgentMeta &&
+        typeof value.subAgentMeta === 'object'
           ? { subAgent: value.subAgentMeta as Record<string, unknown> }
           : {}),
       },
-      String(value.createdAt)
+      String(value.createdAt),
     );
   }
   return value;
@@ -299,10 +303,12 @@ function isChatMessagePart(value: unknown): value is ChatMessagePart {
   if (part.type === 'text') return typeof part.text === 'string';
   if (part.type === 'image' || part.type === 'audio') return true;
   if (part.type === 'resourceLink') return typeof part.uri === 'string';
-  return part.type === 'resource'
-    && typeof part.resource === 'object'
-    && part.resource !== null
-    && !Array.isArray(part.resource);
+  return (
+    part.type === 'resource' &&
+    typeof part.resource === 'object' &&
+    part.resource !== null &&
+    !Array.isArray(part.resource)
+  );
 }
 
 function cloneChat(chat: Chat): Chat {

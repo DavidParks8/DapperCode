@@ -4,10 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { decorativeAccessibilityProps } from '../../accessibility';
 import { AppSheet } from '../../components/AppSheet';
-import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
-
-
-
+import type {
+  MainScreenPanelCollapseCoordinatorContext,
+  MainScreenPanelCollapseCoordinatorResult,
+} from './mainScreenPanelCollapseCoordinator';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
@@ -98,7 +98,12 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
                 accessibilityRole="button"
                 accessibilityLabel={`Remove ${path}`}
               >
-                <Ionicons {...decorativeAccessibilityProps} name="close" size={14} color={theme.colors.textMuted} />
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="close"
+                  size={14}
+                  color={theme.colors.textMuted}
+                />
               </Pressable>
             </View>
           ))}
@@ -122,8 +127,7 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
             styles.renameModalButton,
             styles.renameModalButtonPrimary,
             pressed && styles.renameModalButtonPrimaryPressed,
-            (!attachmentPathDraft.trim() || isLoading) &&
-              styles.renameModalButtonDisabled,
+            (!attachmentPathDraft.trim() || isLoading) && styles.renameModalButtonDisabled,
           ]}
           disabled={!attachmentPathDraft.trim() || isLoading}
         >

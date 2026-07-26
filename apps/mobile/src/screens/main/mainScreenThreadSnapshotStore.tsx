@@ -1,14 +1,20 @@
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiSurface } from '../../api/types';
-import { type ActivePlanState, type ThreadContextUsage, RUN_WATCHDOG_MS, type ChatModelPreference, toRecord, readIntegerLike } from './mainScreenHelpers';
-import type { MainScreenLocalTranscriptActionsContext, MainScreenLocalTranscriptActionsResult } from './mainScreenLocalTranscriptActions';
+import {
+  type ActivePlanState,
+  type ThreadContextUsage,
+  RUN_WATCHDOG_MS,
+  type ChatModelPreference,
+  toRecord,
+  readIntegerLike,
+} from './mainScreenHelpers';
+import type {
+  MainScreenLocalTranscriptActionsContext,
+  MainScreenLocalTranscriptActionsResult,
+} from './mainScreenLocalTranscriptActions';
 
-
-
-
-
-
-export type MainScreenThreadSnapshotStoreContext = MainScreenLocalTranscriptActionsContext & MainScreenLocalTranscriptActionsResult;
+export type MainScreenThreadSnapshotStoreContext = MainScreenLocalTranscriptActionsContext &
+  MainScreenLocalTranscriptActionsResult;
 
 export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapshotStoreContext) {
   const {
@@ -22,7 +28,6 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     setRunWatchdogNow,
     setSelectedParentChat,
   } = context;
-
 
   useEffect(() => {
     const parentThreadId = selectedChat?.parentThreadId?.trim();
@@ -83,7 +88,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
       setRunWatchdogNow(Date.now());
       scheduleRunWatchdogExpiry(deadlineMs);
     },
-    [scheduleRunWatchdogExpiry]
+    [scheduleRunWatchdogExpiry],
   );
 
   const clearRunWatchdog = useCallback(() => {
@@ -106,78 +111,74 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     };
   }, []);
 
-  const readThreadContextUsage = useCallback(
-    (value: unknown): ThreadContextUsage | null => {
-      const record = toRecord(value);
-      if (!record) {
-        return null;
-      }
+  const readThreadContextUsage = useCallback((value: unknown): ThreadContextUsage | null => {
+    const record = toRecord(value);
+    if (!record) {
+      return null;
+    }
 
-      const turnRecord = toRecord(record.turn);
-      const tokenUsageRecord =
-        toRecord(record.tokenUsage) ??
-        toRecord(record.token_usage) ??
-        toRecord(toRecord(record.info)?.tokenUsage) ??
-        toRecord(toRecord(record.info)?.token_usage);
-      const infoRecord = toRecord(record.info);
+    const turnRecord = toRecord(record.turn);
+    const tokenUsageRecord =
+      toRecord(record.tokenUsage) ??
+      toRecord(record.token_usage) ??
+      toRecord(toRecord(record.info)?.tokenUsage) ??
+      toRecord(toRecord(record.info)?.token_usage);
+    const infoRecord = toRecord(record.info);
 
-      const totalRecord =
-        toRecord(tokenUsageRecord?.total) ??
-        toRecord(infoRecord?.total_token_usage) ??
-        toRecord(infoRecord?.totalTokenUsage);
-      const lastRecord =
-        toRecord(tokenUsageRecord?.last) ??
-        toRecord(infoRecord?.last_token_usage) ??
-        toRecord(infoRecord?.lastTokenUsage);
+    const totalRecord =
+      toRecord(tokenUsageRecord?.total) ??
+      toRecord(infoRecord?.total_token_usage) ??
+      toRecord(infoRecord?.totalTokenUsage);
+    const lastRecord =
+      toRecord(tokenUsageRecord?.last) ??
+      toRecord(infoRecord?.last_token_usage) ??
+      toRecord(infoRecord?.lastTokenUsage);
 
-      const totalTokens =
-        readIntegerLike(totalRecord?.totalTokens) ??
-        readIntegerLike(totalRecord?.total_tokens);
+    const totalTokens =
+      readIntegerLike(totalRecord?.totalTokens) ?? readIntegerLike(totalRecord?.total_tokens);
 
-      const lastTokens =
-        readIntegerLike(lastRecord?.totalTokens) ??
-        readIntegerLike(lastRecord?.total_tokens) ??
-        (totalTokens !== null ? 0 : null);
-      const modelContextWindow =
-        readIntegerLike(record.modelContextWindow) ??
-        readIntegerLike(record.model_context_window) ??
-        readIntegerLike(turnRecord?.modelContextWindow) ??
-        readIntegerLike(turnRecord?.model_context_window) ??
-        readIntegerLike(tokenUsageRecord?.modelContextWindow) ??
-        readIntegerLike(tokenUsageRecord?.model_context_window) ??
-        readIntegerLike(infoRecord?.modelContextWindow) ??
-        readIntegerLike(infoRecord?.model_context_window);
+    const lastTokens =
+      readIntegerLike(lastRecord?.totalTokens) ??
+      readIntegerLike(lastRecord?.total_tokens) ??
+      (totalTokens !== null ? 0 : null);
+    const modelContextWindow =
+      readIntegerLike(record.modelContextWindow) ??
+      readIntegerLike(record.model_context_window) ??
+      readIntegerLike(turnRecord?.modelContextWindow) ??
+      readIntegerLike(turnRecord?.model_context_window) ??
+      readIntegerLike(tokenUsageRecord?.modelContextWindow) ??
+      readIntegerLike(tokenUsageRecord?.model_context_window) ??
+      readIntegerLike(infoRecord?.modelContextWindow) ??
+      readIntegerLike(infoRecord?.model_context_window);
 
-      if (totalTokens === null && modelContextWindow === null) {
-        return null;
-      }
+    if (totalTokens === null && modelContextWindow === null) {
+      return null;
+    }
 
-      return {
-        totalTokens,
-        lastTokens,
-        modelContextWindow,
-        updatedAtMs: Date.now(),
-      };
-    },
-    []
-  );
+    return {
+      totalTokens,
+      lastTokens,
+      modelContextWindow,
+      updatedAtMs: Date.now(),
+    };
+  }, []);
 
   const saveChatModelPreferences = useCallback(
     (nextPreferences: Record<string, ChatModelPreference>) =>
       persistenceController.saveModelPreferences(nextPreferences),
-    [persistenceController]
+    [persistenceController],
   );
 
   const saveChatPlanSnapshots = useCallback(
     (nextSnapshots: Record<string, ActivePlanState>) =>
       persistenceController.savePlanSnapshots(nextSnapshots),
-    [persistenceController]
+    [persistenceController],
   );
 
   const saveBridgeUiSurfaceSnapshots = useCallback(
     (nextSnapshots: Record<string, BridgeUiSurface[]>) =>
       persistenceController.saveBridgeUiSurfaces(nextSnapshots),
-    [persistenceController]
+    [persistenceController],
   );
 
   const scheduleBridgeUiSurfaceSnapshotsPersist = useCallback(
@@ -192,12 +193,12 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
         void saveBridgeUiSurfaceSnapshots(nextSnapshots);
       }, 180);
     },
-    [saveBridgeUiSurfaceSnapshots]
+    [saveBridgeUiSurfaceSnapshots],
   );
 
   const saveWorkspaceFavorites = useCallback(
     (paths: string[]) => persistenceController.saveWorkspaceFavorites(paths),
-    [persistenceController]
+    [persistenceController],
   );
 
   return {
@@ -213,4 +214,6 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
   };
 }
 
-export type MainScreenThreadSnapshotStoreResult = ReturnType<typeof useMainScreenThreadSnapshotStore>;
+export type MainScreenThreadSnapshotStoreResult = ReturnType<
+  typeof useMainScreenThreadSnapshotStore
+>;

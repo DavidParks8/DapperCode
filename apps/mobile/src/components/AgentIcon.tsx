@@ -19,7 +19,11 @@ export function AgentIcon({ agent, size = 18, style }: AgentIconProps) {
       style={[styles.frame, { width: size, height: size }, style]}
     >
       {iconUri ? (
-        <Image source={{ uri: iconUri }} resizeMode="contain" style={{ width: size, height: size }} />
+        <Image
+          source={{ uri: iconUri }}
+          resizeMode="contain"
+          style={{ width: size, height: size }}
+        />
       ) : (
         <Ionicons name="hardware-chip-outline" size={size} color="#7f8790" />
       )}

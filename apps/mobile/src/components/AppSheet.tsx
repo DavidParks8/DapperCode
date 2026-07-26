@@ -61,7 +61,7 @@ export function AppSheet({
   const styles = useMemo(() => createAppSheetStyles(theme), [theme]);
   const contentBottomPadding = useMemo(
     () => ({ paddingBottom: insets.bottom + theme.spacing.lg + contentBottomInset }),
-    [contentBottomInset, insets.bottom, theme.spacing.lg]
+    [contentBottomInset, insets.bottom, theme.spacing.lg],
   );
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -82,7 +82,8 @@ export function AppSheet({
     }
   }, [onClose]);
 
-  const renderBackdrop = useCallback(    (backdropProps: BottomSheetBackdropProps) => (
+  const renderBackdrop = useCallback(
+    (backdropProps: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop
         {...backdropProps}
         appearsOnIndex={BACKDROP_APPEARS_AT}
@@ -92,7 +93,7 @@ export function AppSheet({
         accessibilityLabel={accessibilityLabel ? `Close ${accessibilityLabel}` : 'Close sheet'}
       />
     ),
-    [accessibilityLabel, dismissible]
+    [accessibilityLabel, dismissible],
   );
 
   return (

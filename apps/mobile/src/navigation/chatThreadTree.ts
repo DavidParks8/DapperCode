@@ -96,7 +96,7 @@ function appendChatBranch(
   chat: ChatSummary,
   indentLevel: number,
   rootThreadId: string,
-  childrenByParentId: Map<string, ChatSummary[]>
+  childrenByParentId: Map<string, ChatSummary[]>,
 ): void {
   rows.push({
     chat,

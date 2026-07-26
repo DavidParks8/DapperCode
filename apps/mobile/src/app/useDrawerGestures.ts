@@ -2,12 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { useStore } from 'jotai';
 import { Keyboard } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
-import {
-  cancelAnimation,
-  runOnJS,
-  type SharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import { cancelAnimation, runOnJS, type SharedValue, withSpring } from 'react-native-reanimated';
 
 import {
   BACK_SWIPE_DISTANCE,
@@ -101,7 +96,7 @@ export function useDrawerGestures({
           if (finished) {
             runOnJS(handleDrawerSettled)(shouldOpen);
           }
-        }
+        },
       );
     },
     [
@@ -114,7 +109,7 @@ export function useDrawerGestures({
       handleDrawerSettled,
       store,
       usesTabletLayout,
-    ]
+    ],
   );
 
   const openDrawer = useCallback(() => {
@@ -138,35 +133,28 @@ export function useDrawerGestures({
     () =>
       Gesture.Pan()
         .enabled(
-          currentScreen !== 'Main' &&
-            (currentScreen !== 'Settings' || settingsAllowsDrawerGesture)
+          currentScreen !== 'Main' && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture),
         )
         .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
         .activeOffsetX(12)
         .failOffsetY([-18, 18])
         .onEnd((event) => {
-          if (
-            event.translationX > BACK_SWIPE_DISTANCE ||
-            event.velocityX > BACK_SWIPE_VELOCITY
-          ) {
+          if (event.translationX > BACK_SWIPE_DISTANCE || event.velocityX > BACK_SWIPE_VELOCITY) {
             runOnJS(onBackSwipe)();
           }
         }),
-    [currentScreen, onBackSwipe, settingsAllowsDrawerGesture]
+    [currentScreen, onBackSwipe, settingsAllowsDrawerGesture],
   );
 
   const settleDrawerFromGesture = useCallback(
     (translationX: number, velocityX: number) => {
       'worklet';
-      const nextOffset = clampDrawerOffset(
-        drawerDragStartOffset.value + translationX,
-        drawerWidth
-      );
+      const nextOffset = clampDrawerOffset(drawerDragStartOffset.value + translationX, drawerWidth);
       const shouldOpen = shouldSettleDrawerOpen(
         nextOffset,
         velocityX,
         drawerWidth,
-        drawerDragStartOffset.value
+        drawerDragStartOffset.value,
       );
       drawerOffset.value = withSpring(
         shouldOpen ? 0 : -drawerWidth,
@@ -175,10 +163,10 @@ export function useDrawerGestures({
           if (finished) {
             runOnJS(handleDrawerSettled)(shouldOpen);
           }
-        }
+        },
       );
     },
-    [drawerDragStartOffset, drawerOffset, drawerWidth, handleDrawerSettled]
+    [drawerDragStartOffset, drawerOffset, drawerWidth, handleDrawerSettled],
   );
 
   const openDrawerGesture = useMemo(
@@ -197,7 +185,7 @@ export function useDrawerGestures({
         .onUpdate((event) => {
           drawerOffset.value = applyDrawerRubberBand(
             drawerDragStartOffset.value + event.translationX,
-            drawerWidth
+            drawerWidth,
           );
         })
         .onEnd((event) => {
@@ -221,7 +209,7 @@ export function useDrawerGestures({
       drawerWidth,
       settleDrawerFromGesture,
       usesTabletLayout,
-    ]
+    ],
   );
 
   const visibleDrawerGesture = useMemo(
@@ -239,7 +227,7 @@ export function useDrawerGestures({
         .onUpdate((event) => {
           drawerOffset.value = applyDrawerRubberBand(
             drawerDragStartOffset.value + event.translationX,
-            drawerWidth
+            drawerWidth,
           );
         })
         .onEnd((event) => {
@@ -261,7 +249,7 @@ export function useDrawerGestures({
       drawerWidth,
       ensureDrawerCapturesTouches,
       settleDrawerFromGesture,
-    ]
+    ],
   );
 
   const visibleDrawerTapGesture = useMemo(
@@ -274,7 +262,7 @@ export function useDrawerGestures({
             runOnJS(closeDrawer)();
           }
         }),
-    [closeDrawer, drawerVisible]
+    [closeDrawer, drawerVisible],
   );
 
   return {

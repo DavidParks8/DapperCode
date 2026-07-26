@@ -11,7 +11,7 @@ const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 export function toMarkdownImageSource(
   rawSource: string,
   bridgeUrl: string | null | undefined,
-  bridgeToken: string | null | undefined
+  bridgeToken: string | null | undefined,
 ): RemoteImageSource | null {
   const normalizedSource = rawSource.trim();
   if (!normalizedSource) {
@@ -37,7 +37,7 @@ export function toMarkdownImageSource(
 function toBridgeImageSource(
   rawPath: string,
   bridgeUrl: string | null | undefined,
-  bridgeToken: string | null | undefined
+  bridgeToken: string | null | undefined,
 ): RemoteImageSource | null {
   const normalizedBridgeUrl = bridgeUrl?.trim();
   if (!normalizedBridgeUrl) {
@@ -50,7 +50,7 @@ function toBridgeImageSource(
   }
 
   const uri = `${normalizedBridgeUrl.replace(/\/$/, '')}/local-image?path=${encodeURIComponent(
-    normalizedPath
+    normalizedPath,
   )}`;
   const token = bridgeToken?.trim();
 

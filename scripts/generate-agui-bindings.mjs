@@ -59,7 +59,10 @@ const rustText = execFileSync('rustfmt', ['--emit', 'stdout'], {
 });
 
 const check = process.argv.includes('--check');
-for (const [target, expected] of [[schemaPath, schemaText], [rustPath, rustText]]) {
+for (const [target, expected] of [
+  [schemaPath, schemaText],
+  [rustPath, rustText],
+]) {
   if (check) {
     const actual = await readFile(target, 'utf8').catch(() => '');
     if (actual !== expected) {
@@ -70,4 +73,6 @@ for (const [target, expected] of [[schemaPath, schemaText], [rustPath, rustText]
   }
 }
 
-console.log(`AG-UI bindings ${check ? 'match' : 'generated from'} @ag-ui/core@${packageJson.version} (${sourceHash.slice(0, 12)}).`);
+console.log(
+  `AG-UI bindings ${check ? 'match' : 'generated from'} @ag-ui/core@${packageJson.version} (${sourceHash.slice(0, 12)}).`,
+);

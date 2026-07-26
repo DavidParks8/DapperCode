@@ -1,7 +1,4 @@
-import type {
-  GitBranchSummary,
-  GitHistoryCommit,
-} from '../../api/types';
+import type { GitBranchSummary, GitHistoryCommit } from '../../api/types';
 import type { UnifiedDiffDocument } from './gitDiff';
 import type { ChangedFileEntry } from './gitScreenUtils';
 

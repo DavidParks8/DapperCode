@@ -62,16 +62,19 @@ export class MainScreenPersistenceController {
   constructor(
     storage?: MainScreenStorage,
     paths: Partial<MainScreenPersistencePaths> = {},
-    platform: string = Platform.OS
+    platform: string = Platform.OS,
   ) {
     this.storage = storage ?? (platform === 'web' ? webStorage : fileStorage);
     const webPath = (name: string, nativePath: () => string | null) => () =>
       platform === 'web' ? `${WEB_PATH_PREFIX}${name}` : nativePath();
     this.paths = {
-      modelPreferences: paths.modelPreferences ?? webPath('model-preferences.v1', getChatModelPreferencesPath),
+      modelPreferences:
+        paths.modelPreferences ?? webPath('model-preferences.v1', getChatModelPreferencesPath),
       planSnapshots: paths.planSnapshots ?? webPath('plan-snapshots.v1', getChatPlanSnapshotsPath),
-      bridgeUiSurfaces: paths.bridgeUiSurfaces ?? webPath('bridge-ui-surfaces.v1', getChatBridgeUiSurfacesPath),
-      workspaceFavorites: paths.workspaceFavorites ?? webPath('workspace-favorites.v1', getWorkspaceFavoritesPath),
+      bridgeUiSurfaces:
+        paths.bridgeUiSurfaces ?? webPath('bridge-ui-surfaces.v1', getChatBridgeUiSurfacesPath),
+      workspaceFavorites:
+        paths.workspaceFavorites ?? webPath('workspace-favorites.v1', getWorkspaceFavoritesPath),
     };
   }
 
@@ -121,11 +124,7 @@ export class MainScreenPersistenceController {
     });
   }
 
-  private async read<T>(
-    path: string | null,
-    parse: (raw: string) => T,
-    fallback: T
-  ): Promise<T> {
+  private async read<T>(path: string | null, parse: (raw: string) => T, fallback: T): Promise<T> {
     if (!path) return fallback;
     try {
       return parse(await this.storage.read(path));
@@ -146,9 +145,8 @@ export class MainScreenPersistenceController {
 
 function getWebStorage(): WebStorageLike | null {
   if (typeof globalThis !== 'object' || globalThis === null) return null;
-  const storage = (
-    globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> }
-  ).localStorage;
+  const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
+    .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
     ? (storage as WebStorageLike)
     : null;

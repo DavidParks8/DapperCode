@@ -7,29 +7,31 @@ import {
   pendingApprovalAtom,
   pendingUserInputRequestAtom,
   stoppingTurnAtom,
-  userInputDraftsAtom
+  userInputDraftsAtom,
 } from '../../state/mainScreen/turn';
-import {
-  bridgeCapabilitiesAtom
-} from '../../state/mainScreen/models';
-import {
-  agentDetailThreadIdAtom,
-  relatedAgentThreadsAtom
-} from '../../state/mainScreen/workspace';
+import { bridgeCapabilitiesAtom } from '../../state/mainScreen/models';
+import { agentDetailThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import { RUN_WATCHDOG_MS, toPersistedActivePlanState, isChatLikelyRunning } from './mainScreenHelpers';
-import { fetchReplayRecoverySnapshot, ReplayRecoveryProtocolError, type ReplayRecoverySnapshot } from './controllers/replayRecoveryController';
+import {
+  RUN_WATCHDOG_MS,
+  toPersistedActivePlanState,
+  isChatLikelyRunning,
+} from './mainScreenHelpers';
+import {
+  fetchReplayRecoverySnapshot,
+  ReplayRecoveryProtocolError,
+  type ReplayRecoverySnapshot,
+} from './controllers/replayRecoveryController';
 import { getTranscriptContinuationState } from './controllers/transcriptContinuationController';
 import { resolveEquivalentChat } from './mainScreenChatState';
-import type { MainScreenComposerSubmitActionsContext, MainScreenComposerSubmitActionsResult } from './mainScreenComposerSubmitActions';
+import type {
+  MainScreenComposerSubmitActionsContext,
+  MainScreenComposerSubmitActionsResult,
+} from './mainScreenComposerSubmitActions';
 
-
-
-
-
-
-export type MainScreenReplayRecoveryEngineContext = MainScreenComposerSubmitActionsContext & MainScreenComposerSubmitActionsResult;
+export type MainScreenReplayRecoveryEngineContext = MainScreenComposerSubmitActionsContext &
+  MainScreenComposerSubmitActionsResult;
 
 export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecoveryEngineContext) {
   const {
@@ -68,14 +70,13 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
 
-
   const installReplayRecoverySnapshot = useCallback(
     (snapshot: ReplayRecoverySnapshot) => {
       const approvalsByThread = new Map(
-        snapshot.approvals.map((approval) => [approval.threadId, approval] as const)
+        snapshot.approvals.map((approval) => [approval.threadId, approval] as const),
       );
       const userInputsByThread = new Map(
-        snapshot.userInputs.map((request) => [request.threadId, request] as const)
+        snapshot.userInputs.map((request) => [request.threadId, request] as const),
       );
       setBridgeCapabilities(snapshot.capabilities);
       setLiveAssistantByThread({});
@@ -130,7 +131,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       if (selectedSnapshot) {
         const selected = mergeChatWithPendingOptimisticMessages(selectedSnapshot.chat);
         setSelectedChat((previous) =>
-          previous?.id === selected.id ? resolveEquivalentChat(previous, selected) : selected
+          previous?.id === selected.id ? resolveEquivalentChat(previous, selected) : selected,
         );
         setTranscriptContinuationState(getTranscriptContinuationState(selected));
         setStoppingTurn(false);
@@ -154,7 +155,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       bumpAgentRuntimeRevision,
       mergeChatWithPendingOptimisticMessages,
       readThreadContextUsage,
-    ]
+    ],
   );
 
   const recoverReplayGap = useCallback(
@@ -186,7 +187,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
           const snapshot = await fetchReplayRecoverySnapshot(
             api,
             trackedThreadIds(),
-            abortController.signal
+            abortController.signal,
           );
           if (generation !== replayRecoveryGenerationRef.current) return;
           installReplayRecoverySnapshot(snapshot);
@@ -201,7 +202,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             replayRecoveryAbortControllerRef.current = null;
             if (replayRecoveryEpochResetPendingRef.current) {
               setError(
-                'Replay recovery exceeded the bridge protocol limit after reconnect. Reopen the connection after reducing loaded thread history.'
+                'Replay recovery exceeded the bridge protocol limit after reconnect. Reopen the connection after reducing loaded thread history.',
               );
               return;
             }
@@ -217,13 +218,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       };
       void attempt();
     },
-    [
-      agentDetailThreadId,
-      api,
-      installReplayRecoverySnapshot,
-      relatedAgentThreads,
-      ws,
-    ]
+    [agentDetailThreadId, api, installReplayRecoverySnapshot, relatedAgentThreads, ws],
   );
 
   return {
@@ -232,4 +227,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   };
 }
 
-export type MainScreenReplayRecoveryEngineResult = ReturnType<typeof useMainScreenReplayRecoveryEngine>;
+export type MainScreenReplayRecoveryEngineResult = ReturnType<
+  typeof useMainScreenReplayRecoveryEngine
+>;

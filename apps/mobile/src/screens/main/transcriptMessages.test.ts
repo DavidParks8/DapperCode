@@ -19,7 +19,7 @@ function message(
   extras?: {
     systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
     subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
-  } & Record<string, unknown>
+  } & Record<string, unknown>,
 ): ChatMessage {
   const createdAt = '2026-03-19T00:00:00.000Z';
   if (extras?.systemKind === 'tool') {
@@ -29,10 +29,15 @@ function message(
     return { id, role: 'reasoning', content, createdAt };
   }
   if (extras?.systemKind === 'subAgent') {
-    return createActivityMessage(id, SUBAGENT_ACTIVITY_TYPE, {
-      text: content,
-      ...(extras.subAgentMeta ? { subAgent: extras.subAgentMeta } : {}),
-    }, createdAt);
+    return createActivityMessage(
+      id,
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: content,
+        ...(extras.subAgentMeta ? { subAgent: extras.subAgentMeta } : {}),
+      },
+      createdAt,
+    );
   }
   if (extras?.systemKind === 'compaction') {
     return createActivityMessage(id, COMPACTION_ACTIVITY_TYPE, { text: content }, createdAt);
@@ -216,7 +221,9 @@ describe('getVisibleTranscriptMessages', () => {
     expect(syncVisibleSubAgentStatuses(plain, new Map())).toBe(plain);
     expect(syncVisibleSubAgentStatuses(plain, new Map([['child', 'running']]))).toBe(plain);
     const withoutMeta = [message('s', 'system', 'Spawned', { systemKind: 'subAgent' })];
-    expect(syncVisibleSubAgentStatuses(withoutMeta, new Map([['child', 'running']]))).toBe(withoutMeta);
+    expect(syncVisibleSubAgentStatuses(withoutMeta, new Map([['child', 'running']]))).toBe(
+      withoutMeta,
+    );
   });
 
   it('appends missing status lines and preserves already-current messages', () => {
@@ -224,7 +231,10 @@ describe('getVisibleTranscriptMessages', () => {
       systemKind: 'subAgent',
       subAgentMeta: { receiverThreadIds: ['missing', 'child'], agentStatus: 'idle' },
     });
-    const synced = syncVisibleSubAgentStatuses([message('a', 'assistant', 'before'), spawned], new Map([['child', 'running']]));
+    const synced = syncVisibleSubAgentStatuses(
+      [message('a', 'assistant', 'before'), spawned],
+      new Map([['child', 'running']]),
+    );
     expect(synced).not.toBe([message('a', 'assistant', 'before'), spawned]);
     const syncedSpawned = synced[1];
     expect(syncedSpawned?.role).toBe('activity');
@@ -232,8 +242,12 @@ describe('getVisibleTranscriptMessages', () => {
       throw new Error('Expected synced spawned message to be an activity message.');
     }
     expect(syncedSpawned.content.text).toBe('• Spawned sub-agent\n  Status: running');
-    expect(syncVisibleSubAgentStatuses([synced[1]], new Map([['child', 'running']]))[0]).toBe(synced[1]);
-    expect(syncVisibleSubAgentStatuses([spawned], new Map([['other', 'running']]))).toEqual([spawned]);
+    expect(syncVisibleSubAgentStatuses([synced[1]], new Map([['child', 'running']]))[0]).toBe(
+      synced[1],
+    );
+    expect(syncVisibleSubAgentStatuses([spawned], new Map([['other', 'running']]))).toEqual([
+      spawned,
+    ]);
   });
 });
 
@@ -385,12 +399,17 @@ describe('buildTranscriptDisplayItems', () => {
   });
 
   it('chunks very long consecutive tool runs into multiple tool groups', () => {
-    const toolMessages = Array.from({ length: MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP + 3 }, (_, index) =>
-      message(`t${String(index)}`, 'system', `• Tool ${String(index)}`, { systemKind: 'tool' })
+    const toolMessages = Array.from(
+      { length: MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP + 3 },
+      (_, index) =>
+        message(`t${String(index)}`, 'system', `• Tool ${String(index)}`, { systemKind: 'tool' }),
     );
 
     const items = buildTranscriptDisplayItems(toolMessages);
-    const groups = items.filter((item): item is Extract<TranscriptDisplayItem, { kind: 'toolGroup' }> => item.kind === 'toolGroup');
+    const groups = items.filter(
+      (item): item is Extract<TranscriptDisplayItem, { kind: 'toolGroup' }> =>
+        item.kind === 'toolGroup',
+    );
 
     expect(groups.length).toBe(2);
     expect(groups[0]?.messages.length).toBe(MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP);
@@ -436,7 +455,7 @@ describe('buildTranscriptDisplayItems', () => {
     ];
 
     const isUserTranscriptItem = (
-      item: TranscriptDisplayItem
+      item: TranscriptDisplayItem,
     ): item is Extract<TranscriptDisplayItem, { kind: 'message' }> =>
       item.kind === 'message' && item.message.role === 'user';
 
@@ -457,7 +476,9 @@ describe('buildTranscriptDisplayItems', () => {
       message('plain', 'system', 'Ran `pwd`'),
       message('empty', 'system', '\n '),
     ];
-    expect(buildTranscriptDisplayItems(messages).every((item) => item.kind === 'message')).toBe(true);
+    expect(buildTranscriptDisplayItems(messages).every((item) => item.kind === 'message')).toBe(
+      true,
+    );
   });
 
   it.each([

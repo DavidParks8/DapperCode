@@ -4,7 +4,7 @@ export const UNKNOWN_AGENT_LABEL = 'Agent';
 
 export function findAgentDescriptor(
   agents: readonly AgentDescriptor[],
-  agentId: AgentId | null | undefined
+  agentId: AgentId | null | undefined,
 ): AgentDescriptor | null {
   if (!agentId) return null;
   return agents.find((agent) => agent.agentId === agentId) ?? null;
@@ -12,27 +12,31 @@ export function findAgentDescriptor(
 
 export function getAgentLabel(
   agents: readonly AgentDescriptor[],
-  agentId: AgentId | null | undefined
+  agentId: AgentId | null | undefined,
 ): string {
-  return findAgentDescriptor(agents, agentId)?.displayName.trim() ||
+  return (
+    findAgentDescriptor(agents, agentId)?.displayName.trim() ||
     humanizeAgentId(agentId) ||
-    UNKNOWN_AGENT_LABEL;
+    UNKNOWN_AGENT_LABEL
+  );
 }
 
 function humanizeAgentId(agentId: AgentId | null | undefined): string | null {
   const normalized = agentId?.trim();
   if (!normalized) return null;
   if (normalized.toLowerCase() === 'opencode') return 'OpenCode';
-  return normalized
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || null;
+  return (
+    normalized
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ') || null
+  );
 }
 
 export function selectAgentId(
   savedAgentId: AgentId | null | undefined,
-  capabilities: BridgeCapabilities
+  capabilities: BridgeCapabilities,
 ): AgentId | null {
   if (savedAgentId && capabilities.agents.some((agent) => agent.agentId === savedAgentId)) {
     const saved = findAgentDescriptor(capabilities.agents, savedAgentId);
@@ -49,7 +53,13 @@ export function validAgentIconUri(icon: string | null | undefined): string | nul
   if (!icon || new TextEncoder().encode(icon).length > 2_048) return null;
   try {
     const url = new URL(icon);
-    return url.protocol === 'https:' && Boolean(url.hostname) && !url.username && !url.password && !url.hash ? icon : null;
+    return url.protocol === 'https:' &&
+      Boolean(url.hostname) &&
+      !url.username &&
+      !url.password &&
+      !url.hash
+      ? icon
+      : null;
   } catch {
     return null;
   }

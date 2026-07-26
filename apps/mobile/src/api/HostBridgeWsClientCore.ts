@@ -1,12 +1,12 @@
-import type { BridgeSnapshotRequiredReason, RpcNotification } from "./types";
-import type { BridgeProtocolVersionError } from "./wsErrors";
+import type { BridgeSnapshotRequiredReason, RpcNotification } from './types';
+import type { BridgeProtocolVersionError } from './wsErrors';
 import type {
   EventListener,
   HostBridgeWsClientOptions,
   PendingRequest,
   StatusListener,
   TurnCompletionSnapshot,
-} from "./wsTypes";
+} from './wsTypes';
 
 export abstract class HostBridgeWsClientCore {
   static readonly PROTOCOL_VERSION = 2;
@@ -22,14 +22,8 @@ export abstract class HostBridgeWsClientCore {
   protected connectGeneration = 0;
   protected readonly eventListeners = new Set<EventListener>();
   protected readonly statusListeners = new Set<StatusListener>();
-  protected readonly pendingRequests = new Map<
-    string | number,
-    PendingRequest
-  >();
-  protected readonly recentTurnCompletions = new Map<
-    string,
-    TurnCompletionSnapshot
-  >();
+  protected readonly pendingRequests = new Map<string | number, PendingRequest>();
+  protected readonly recentTurnCompletions = new Map<string, TurnCompletionSnapshot>();
   protected readonly pendingEvents = new Map<number, RpcNotification>();
   protected readonly authToken: string | null;
   protected readonly allowQueryTokenAuth: boolean;
@@ -45,7 +39,7 @@ export abstract class HostBridgeWsClientCore {
   protected streamId: string | null = null;
   protected protocolError: BridgeProtocolVersionError | null = null;
   constructor(baseUrl: string, options: HostBridgeWsClientOptions = {}) {
-    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.baseUrl = baseUrl.replace(/\/$/, '');
     this.authToken = options.authToken?.trim() || null;
     this.allowQueryTokenAuth = options.allowQueryTokenAuth ?? false;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 180000;
@@ -71,7 +65,7 @@ export abstract class HostBridgeWsClientCore {
   protected abstract handleIncoming(raw: string): void;
   protected abstract handleNotificationRecord(
     record: Record<string, unknown>,
-    options?: { source?: "live" | "replay" },
+    options?: { source?: 'live' | 'replay' },
   ): void;
   protected abstract scheduleReplay(): void;
   protected abstract replayMissedEvents(generation: number): Promise<void>;
@@ -88,19 +82,15 @@ export abstract class HostBridgeWsClientCore {
   protected abstract applyStreamIdentity(
     protocolVersion: number | null,
     streamId: string | null,
-  ): "missing" | "initial" | "same" | "changed" | "unsupported";
+  ): 'missing' | 'initial' | 'same' | 'changed' | 'unsupported';
   protected abstract rejectAllPending(error: Error): void;
   protected abstract getTurnCompletion(
     threadId: string,
     turnId: string,
   ): TurnCompletionSnapshot | null;
-  protected abstract rememberTurnCompletion(
-    snapshot: TurnCompletionSnapshot,
-  ): void;
+  protected abstract rememberTurnCompletion(snapshot: TurnCompletionSnapshot): void;
   protected abstract pruneTurnCompletions(): void;
-  protected abstract assertTurnSucceeded(
-    snapshot: TurnCompletionSnapshot,
-  ): void;
+  protected abstract assertTurnSucceeded(snapshot: TurnCompletionSnapshot): void;
   protected abstract emitEvent(event: RpcNotification): void;
   protected abstract emitStatus(connected: boolean): void;
   protected abstract socketUrl(): string;

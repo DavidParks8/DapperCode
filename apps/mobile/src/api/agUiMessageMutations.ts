@@ -5,20 +5,13 @@ import {
   renderOrderedParts,
   timestampIso,
   upsertToolCall,
-} from "./agUiReducerUtilities";
-import {
-  createActivityMessage,
-  getMessageText,
-  SUBAGENT_ACTIVITY_TYPE,
-} from "./messages";
-import { findMessage, toolCall } from "./agUiStructuredAndTerminalReducers";
-import {
-  type AgUiThreadMessageState,
-  MAX_MESSAGES_PER_THREAD,
-} from "./agUiMessagesState";
-import { type AssistantMessage } from "@ag-ui/core";
-import { type ChatMessage } from "./types";
-import { upsertToolResult } from "./agUiToolAndCustomEventReducers";
+} from './agUiReducerUtilities';
+import { createActivityMessage, getMessageText, SUBAGENT_ACTIVITY_TYPE } from './messages';
+import { findMessage, toolCall } from './agUiStructuredAndTerminalReducers';
+import { type AgUiThreadMessageState, MAX_MESSAGES_PER_THREAD } from './agUiMessagesState';
+import { type AssistantMessage } from '@ag-ui/core';
+import { type ChatMessage } from './types';
+import { upsertToolResult } from './agUiToolAndCustomEventReducers';
 
 export function rememberReplacement(
   current: AgUiThreadMessageState,
@@ -37,7 +30,7 @@ export function rememberReplacement(
 
 export function textMessage(
   id: string,
-  role: "developer" | "system" | "assistant" | "user",
+  role: 'developer' | 'system' | 'assistant' | 'user',
   content: string,
   name?: string,
 ): ChatMessage {
@@ -48,14 +41,14 @@ export function textMessage(
     ...(name ? { name } : {}),
   };
   switch (role) {
-    case "developer":
-      return { ...base, role: "developer" };
-    case "system":
-      return { ...base, role: "system" };
-    case "user":
-      return { ...base, role: "user" };
+    case 'developer':
+      return { ...base, role: 'developer' };
+    case 'system':
+      return { ...base, role: 'system' };
+    case 'user':
+      return { ...base, role: 'user' };
     default:
-      return { ...base, role: "assistant" };
+      return { ...base, role: 'assistant' };
   }
 }
 
@@ -73,9 +66,7 @@ export function upsertMessage(
   } as ChatMessage;
   const messages =
     index >= 0
-      ? current.messages.map((entry, entryIndex) =>
-          entryIndex === index ? nextMessage : entry,
-        )
+      ? current.messages.map((entry, entryIndex) => (entryIndex === index ? nextMessage : entry))
       : [...current.messages, nextMessage];
   const kept = messages.slice(-MAX_MESSAGES_PER_THREAD);
   const runByMessageId = { ...current.runByMessageId, [message.id]: runId };
@@ -92,21 +83,10 @@ export function upsertMessage(
     ...current,
     messages: kept,
     runByMessageId: withoutMessageIds(runByMessageId, dropped),
-    replacesMessageIdByMessageId: withoutMessageIds(
-      current.replacesMessageIdByMessageId,
-      dropped,
-    ),
-    toolCallMessageIdByCallId: withoutMessageValues(
-      current.toolCallMessageIdByCallId,
-      dropped,
-    ),
-    toolResultMessageIdByCallId: withoutMessageValues(
-      current.toolResultMessageIdByCallId,
-      dropped,
-    ),
-    terminalMessageIds: current.terminalMessageIds.filter(
-      (id) => !dropped.has(id),
-    ),
+    replacesMessageIdByMessageId: withoutMessageIds(current.replacesMessageIdByMessageId, dropped),
+    toolCallMessageIdByCallId: withoutMessageValues(current.toolCallMessageIdByCallId, dropped),
+    toolResultMessageIdByCallId: withoutMessageValues(current.toolResultMessageIdByCallId, dropped),
+    terminalMessageIds: current.terminalMessageIds.filter((id) => !dropped.has(id)),
   };
 }
 
@@ -114,9 +94,7 @@ function withoutMessageIds(
   entries: Record<string, string>,
   dropped: ReadonlySet<string>,
 ): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(entries).filter(([id]) => !dropped.has(id)),
-  );
+  return Object.fromEntries(Object.entries(entries).filter(([id]) => !dropped.has(id)));
 }
 
 function withoutMessageValues(
@@ -134,12 +112,12 @@ export function appendText(
   delta: string,
   runId: string,
   timestamp: number | undefined,
-  defaultRole: "developer" | "system" | "assistant" | "user" | "reasoning",
+  defaultRole: 'developer' | 'system' | 'assistant' | 'user' | 'reasoning',
 ): AgUiThreadMessageState {
   const existing = findMessage(current, messageId);
-  if (defaultRole !== "reasoning" && existing?.role !== "reasoning") {
+  if (defaultRole !== 'reasoning' && existing?.role !== 'reasoning') {
     const parts = appendOrderedPart(existing?.parts ?? [], {
-      type: "text",
+      type: 'text',
       text: delta,
     });
     const content = renderOrderedParts(parts);
@@ -151,21 +129,16 @@ export function appendText(
         } as ChatMessage);
     return upsertMessage(current, message, runId, timestamp);
   }
-  const content = `${existing ? getMessageText(existing) : ""}${delta}`;
+  const content = `${existing ? getMessageText(existing) : ''}${delta}`;
   if (existing) {
-    return upsertMessage(
-      current,
-      withText(existing, content),
-      runId,
-      timestamp,
-    );
+    return upsertMessage(current, withText(existing, content), runId, timestamp);
   }
-  if (defaultRole === "reasoning") {
+  if (defaultRole === 'reasoning') {
     return upsertMessage(
       current,
       {
         id: messageId,
-        role: "reasoning",
+        role: 'reasoning',
         content,
         createdAt: timestampIso(timestamp),
       },
@@ -173,12 +146,7 @@ export function appendText(
       timestamp,
     );
   }
-  return upsertMessage(
-    current,
-    textMessage(messageId, defaultRole, content),
-    runId,
-    timestamp,
-  );
+  return upsertMessage(current, textMessage(messageId, defaultRole, content), runId, timestamp);
 }
 
 export function appendToolResult(
@@ -191,14 +159,12 @@ export function appendToolResult(
 ): AgUiThreadMessageState {
   const previousId = current.toolResultMessageIdByCallId[toolCallId];
   const previous = previousId ? findMessage(current, previousId) : undefined;
-  const previousText = previous?.role === "tool" ? previous.content : "";
+  const previousText = previous?.role === 'tool' ? previous.content : '';
   const withoutPrevious =
     previousId && previousId !== messageId
       ? {
           ...current,
-          messages: current.messages.filter(
-            (message) => message.id !== previousId,
-          ),
+          messages: current.messages.filter((message) => message.id !== previousId),
         }
       : current;
   return upsertToolResult(
@@ -219,8 +185,7 @@ export function reduceActivitySnapshot(
   content: Record<string, unknown>,
   timestamp?: number,
 ): AgUiThreadMessageState {
-  const subAgent =
-    activityType === SUBAGENT_ACTIVITY_TYPE ? record(content.subAgent) : null;
+  const subAgent = activityType === SUBAGENT_ACTIVITY_TYPE ? record(content.subAgent) : null;
   const toolCallId = nonEmptyString(subAgent?.toolCallId);
   const withoutGenericTool = toolCallId
     ? {
@@ -255,13 +220,13 @@ export function reduceActivitySnapshot(
 }
 
 export function withText(message: ChatMessage, content: string): ChatMessage {
-  if (message.role === "activity") {
+  if (message.role === 'activity') {
     return { ...message, content: { ...message.content, text: content } };
   }
-  if (message.role === "assistant") {
+  if (message.role === 'assistant') {
     return { ...message, content };
   }
-  if (message.role === "user") {
+  if (message.role === 'user') {
     return { ...message, content };
   }
   return { ...message, content } as ChatMessage;
@@ -278,21 +243,16 @@ export function startToolCall(
   const messageId = parentMessageId ?? `tool-call:${toolCallId}`;
   const existing = findMessage(current, messageId);
   const assistant: AssistantMessage & { createdAt: string } =
-    existing?.role === "assistant"
+    existing?.role === 'assistant'
       ? {
           ...existing,
-          toolCalls: upsertToolCall(
-            existing.toolCalls ?? [],
-            toolCallId,
-            toolCallName,
-            "",
-          ),
+          toolCalls: upsertToolCall(existing.toolCalls ?? [], toolCallId, toolCallName, ''),
         }
       : {
           id: messageId,
-          role: "assistant",
-          content: "",
-          toolCalls: [toolCall(toolCallId, toolCallName, "")],
+          role: 'assistant',
+          content: '',
+          toolCalls: [toolCall(toolCallId, toolCallName, '')],
           createdAt: timestampIso(timestamp),
         };
   const next = upsertMessage(current, assistant, runId, timestamp);

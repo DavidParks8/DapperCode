@@ -37,13 +37,13 @@ export class TurnExecutionController {
     threadId: string,
     message: SendChatMessageRequest,
     submissionId: string,
-    onTurnStarted?: (turnId: string) => void
+    onTurnStarted?: (turnId: string) => void,
   ): Promise<Chat> {
     return this.api.sendChatMessageIdempotent(
       threadId,
       message,
       submissionId,
-      onTurnStarted ? { onTurnStarted } : undefined
+      onTurnStarted ? { onTurnStarted } : undefined,
     );
   }
 
@@ -53,7 +53,7 @@ export class TurnExecutionController {
     const message =
       typeof request.message === 'function' ? request.message(created) : request.message;
     return this.send(created.id, message, request.submissionId, (turnId) =>
-      request.onTurnStarted?.(created.id, turnId)
+      request.onTurnStarted?.(created.id, turnId),
     );
   }
 
@@ -61,7 +61,7 @@ export class TurnExecutionController {
     threadId: string,
     message: SendChatMessageRequest,
     skipResume: boolean,
-    submissionId: string
+    submissionId: string,
   ): Promise<SendOrQueueChatMessageResult> {
     return this.api.sendOrQueueChatMessage(threadId, message, { skipResume, submissionId });
   }

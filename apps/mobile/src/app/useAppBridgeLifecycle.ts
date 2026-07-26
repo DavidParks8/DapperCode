@@ -153,9 +153,7 @@ export function useAppBridgeLifecycle(): void {
           return;
         }
         const activeProfile = getActiveBridgeProfile(store.get(bridgeProfileStoreAtom));
-        const snapshotCache = activeProfile
-          ? await loadChatSnapshotCache(activeProfile.id)
-          : null;
+        const snapshotCache = activeProfile ? await loadChatSnapshotCache(activeProfile.id) : null;
         if (cancelled) {
           return;
         }

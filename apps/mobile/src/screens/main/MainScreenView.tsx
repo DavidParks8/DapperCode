@@ -5,12 +5,13 @@ import { MainScreenAttachmentModals } from './MainScreenAttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from './MainScreenApprovalAndBridgePrompts';
 import { View } from 'react-native';
 import { useMainScreenStyles } from './useMainScreenStyles';
-import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
+import type {
+  MainScreenPanelCollapseCoordinatorContext,
+  MainScreenPanelCollapseCoordinatorResult,
+} from './mainScreenPanelCollapseCoordinator';
 
-
-
-
-type MainScreenViewContext = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
+type MainScreenViewContext = MainScreenPanelCollapseCoordinatorContext &
+  MainScreenPanelCollapseCoordinatorResult;
 
 export function MainScreenView({ context }: { context: MainScreenViewContext }) {
   const { styles } = useMainScreenStyles();

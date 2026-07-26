@@ -1,8 +1,4 @@
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { Chat } from '../../api/types';
@@ -26,7 +22,7 @@ function chat(messages: Chat['messages'] = []): Chat {
 }
 
 function render(
-  overrides: Partial<React.ComponentProps<typeof SubAgentDetailView>> = {}
+  overrides: Partial<React.ComponentProps<typeof SubAgentDetailView>> = {},
 ): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
@@ -56,7 +52,7 @@ function render(
             {...overrides}
           />
         </AppThemeProvider>
-      </SafeAreaProvider>
+      </SafeAreaProvider>,
     );
   });
   if (!tree) throw new Error('render failed');

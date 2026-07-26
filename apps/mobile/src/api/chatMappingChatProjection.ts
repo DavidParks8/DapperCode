@@ -1,8 +1,8 @@
-import { extractChatPlans } from "./chatMappingPlanExtraction";
-import { getMessageText } from "./messages";
-import { mapChatSummary } from "./chatMappingSnapshotAndSummaryProjection";
-import { mapMessages } from "./chatMappingMessageProjection";
-import { type AgentId, type Chat } from "./types";
+import { extractChatPlans } from './chatMappingPlanExtraction';
+import { getMessageText } from './messages';
+import { mapChatSummary } from './chatMappingSnapshotAndSummaryProjection';
+import { mapMessages } from './chatMappingMessageProjection';
+import { type AgentId, type Chat } from './types';
 import {
   type RawAcpSnapshot,
   type RawThread,
@@ -12,7 +12,7 @@ import {
   type ThreadSourceMetadata,
   toPreview,
   toRecord,
-} from "./chatMappingRawTypesAndReaders";
+} from './chatMappingRawTypesAndReaders';
 
 export function readThreadItemText(item: RawThreadItem): string {
   const record = toRecord(item);
@@ -22,17 +22,17 @@ export function readThreadItemText(item: RawThreadItem): string {
   }
   const content = Array.isArray(record?.content) ? record.content : [];
   if (content.length === 0) {
-    return "";
+    return '';
   }
   return content
     .map((entry) => {
       const contentEntry = toRecord(entry);
-      return readString(contentEntry?.type) === "text"
-        ? (readString(contentEntry?.text) ?? "")
-        : "";
+      return readString(contentEntry?.type) === 'text'
+        ? (readString(contentEntry?.text) ?? '')
+        : '';
     })
     .filter((entry) => entry.length > 0)
-    .join("");
+    .join('');
 }
 
 export function readAgentId(value: unknown): AgentId | null {
@@ -40,10 +40,8 @@ export function readAgentId(value: unknown): AgentId | null {
   return agentId ? agentId : null;
 }
 
-export function readThreadSourceMetadata(
-  source: unknown,
-): ThreadSourceMetadata {
-  if (typeof source === "string") {
+export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata {
+  if (typeof source === 'string') {
     return { kind: source };
   }
   const sourceRecord = toRecord(source);
@@ -69,25 +67,25 @@ export function readThreadSourceMetadata(
   const subAgentValue = sourceRecord.subAgent ?? sourceRecord.subagent;
   if (subAgentValue !== undefined) {
     const subAgent = subAgentValue;
-    if (typeof subAgent === "string") {
+    if (typeof subAgent === 'string') {
       const kind =
-        subAgent === "review"
-          ? "subAgentReview"
-          : subAgent === "compact"
-            ? "subAgentCompact"
-            : subAgent === "memory_consolidation"
-              ? "subAgentOther"
-              : "subAgent";
+        subAgent === 'review'
+          ? 'subAgentReview'
+          : subAgent === 'compact'
+            ? 'subAgentCompact'
+            : subAgent === 'memory_consolidation'
+              ? 'subAgentOther'
+              : 'subAgent';
       return { kind };
     }
     const subAgentRecord = toRecord(subAgent);
     if (!subAgentRecord) {
-      return { kind: "subAgent" };
+      return { kind: 'subAgent' };
     }
     const threadSpawn = toRecord(subAgentRecord.thread_spawn);
     if (threadSpawn) {
       return {
-        kind: "subAgentThreadSpawn",
+        kind: 'subAgentThreadSpawn',
         parentThreadId:
           readString(threadSpawn.parentThreadId) ??
           readString(threadSpawn.parent_thread_id) ??
@@ -101,11 +99,11 @@ export function readThreadSourceMetadata(
     }
     if (readString(subAgentRecord.other)) {
       return {
-        kind: "subAgentOther",
+        kind: 'subAgentOther',
       };
     }
     return {
-      kind: "subAgent",
+      kind: 'subAgent',
       parentThreadId:
         readString(subAgentRecord.parentThreadId) ??
         readString(subAgentRecord.parent_thread_id) ??
@@ -118,7 +116,7 @@ export function readThreadSourceMetadata(
     };
   }
   const typeKind = readString(sourceRecord.type);
-  if (typeKind && typeKind.startsWith("subAgent")) {
+  if (typeKind && typeKind.startsWith('subAgent')) {
     return {
       kind: typeKind,
       parentThreadId:
@@ -138,7 +136,7 @@ export function readThreadSourceMetadata(
 export function mapChat(raw: RawThread): Chat {
   const summary = mapChatSummary(raw);
   if (!summary) {
-    throw new Error("chat id missing in app-server response");
+    throw new Error('chat id missing in app-server response');
   }
   const messages = mapMessages(raw, summary.createdAt);
   const plans = extractChatPlans(raw);
@@ -176,10 +174,7 @@ export function mapChat(raw: RawThread): Chat {
   };
 }
 
-export function applySnapshotToChat(
-  chat: Chat,
-  acpSnapshot: RawAcpSnapshot,
-): Chat {
+export function applySnapshotToChat(chat: Chat, acpSnapshot: RawAcpSnapshot): Chat {
   const mapped = mapChat({
     id: chat.id,
     agentId: chat.agentId,

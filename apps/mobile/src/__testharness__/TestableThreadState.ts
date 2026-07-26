@@ -1,13 +1,7 @@
 import type { AGUIEvent } from '@ag-ui/core';
 import type { Chat, ChatMessage, ChatStatus } from '../api/types';
-import {
-  type AgUiEventEnvelope,
-  updateAgUiLiveAssistantMessages,
-} from '../api/agUi';
-import type {
-  AgUiMessageState,
-  AgUiThreadMessageState,
-} from '../api/agUiMessagesState';
+import { type AgUiEventEnvelope, updateAgUiLiveAssistantMessages } from '../api/agUi';
+import type { AgUiMessageState, AgUiThreadMessageState } from '../api/agUiMessagesState';
 import { projectTranscript } from '../screens/main/controllers/transcriptProjectionController';
 import type { TranscriptDisplayItem } from '../screens/main/transcriptMessages';
 import { getMessageText, getSubAgentMeta } from '../api/messages';

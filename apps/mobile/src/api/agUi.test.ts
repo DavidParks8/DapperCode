@@ -44,12 +44,13 @@ function messages(state: AgUiLiveAssistantMessages, threadId = 'thread') {
 
 function reduceEvents(events: AGUIEvent[]): AgUiLiveAssistantMessages {
   return events.reduce(
-    (state, event) => updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread',
-      runId: 'run',
-      event,
-    }),
-    {} as AgUiLiveAssistantMessages
+    (state, event) =>
+      updateAgUiLiveAssistantMessages(state, {
+        threadId: 'thread',
+        runId: 'run',
+        event,
+      }),
+    {} as AgUiLiveAssistantMessages,
   );
 }
 
@@ -58,8 +59,8 @@ describe('AG-UI bridge notifications', () => {
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(__dirname, '../../../../contracts/bridge-rpc/v2/manifest.json'),
-        'utf8'
-      )
+        'utf8',
+      ),
     ) as ContractManifest;
 
     expect(manifest.fixtures.agUiEvents).toHaveLength(14);
@@ -68,15 +69,16 @@ describe('AG-UI bridge notifications', () => {
     }
 
     const toolRevisionEvents = manifest.fixtures.toolRevisionEvents.map((event) =>
-      EventSchemas.parse(event)
+      EventSchemas.parse(event),
     );
     const toolState = toolRevisionEvents.reduce(
-      (state, event) => updateAgUiLiveAssistantMessages(state, {
-        threadId: 'thread',
-        runId: 'run',
-        event,
-      }),
-      {} as AgUiLiveAssistantMessages
+      (state, event) =>
+        updateAgUiLiveAssistantMessages(state, {
+          threadId: 'thread',
+          runId: 'run',
+          event,
+        }),
+      {} as AgUiLiveAssistantMessages,
     );
 
     const toolMessages = toolState.thread?.messages ?? [];
@@ -87,7 +89,9 @@ describe('AG-UI bridge notifications', () => {
       toolCallId: 'tool-revision',
     });
     expect(toolState.thread?.terminalMessageIds).toContain('tool-call:tool-revision');
-    expect(toolState.thread?.structuredRevisionByCallId['tool-revision']).toBe('sha256:structured-two');
+    expect(toolState.thread?.structuredRevisionByCallId['tool-revision']).toBe(
+      'sha256:structured-two',
+    );
     expect(toolResult?.content).toContain('terminal-2');
     expect(toolResult?.content).not.toContain('firstsecond');
     expect(toolResult?.content).not.toContain('terminal-1');
@@ -101,22 +105,27 @@ describe('AG-UI bridge notifications', () => {
       EventType.THINKING_TEXT_MESSAGE_CONTENT,
       EventType.THINKING_TEXT_MESSAGE_END,
     ]);
-    const current = new Set(Object.values(EventType).filter((eventType) => !deprecated.has(eventType)));
+    const current = new Set(
+      Object.values(EventType).filter((eventType) => !deprecated.has(eventType)),
+    );
     expect(SUPPORTED_AG_UI_EVENT_TYPES).toEqual(current);
     for (const eventType of deprecated) {
       expect(SUPPORTED_AG_UI_EVENT_TYPES.has(eventType)).toBe(false);
-      expect(parseAgUiEventNotification({
-        method: 'bridge/agui.event',
-        params: {
-          threadId: 'thread',
-          runId: 'run',
-          event: eventType === EventType.THINKING_START
-            ? { type: eventType, title: 'legacy' }
-            : eventType === EventType.THINKING_TEXT_MESSAGE_CONTENT
-              ? { type: eventType, delta: 'legacy' }
-              : { type: eventType },
-        },
-      })).toBeNull();
+      expect(
+        parseAgUiEventNotification({
+          method: 'bridge/agui.event',
+          params: {
+            threadId: 'thread',
+            runId: 'run',
+            event:
+              eventType === EventType.THINKING_START
+                ? { type: eventType, title: 'legacy' }
+                : eventType === EventType.THINKING_TEXT_MESSAGE_CONTENT
+                  ? { type: eventType, delta: 'legacy' }
+                  : { type: eventType },
+          },
+        }),
+      ).toBeNull();
     }
   });
   it('parses canonical text events and projects them to the migration reducer', () => {
@@ -124,11 +133,14 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('preserves official user message role across start and chunk events', () => {
-    let state = updateAgUiLiveAssistantMessages({}, {
-      threadId: 'thread',
-      runId: 'run',
-      event: { type: EventType.TEXT_MESSAGE_START, messageId: 'user', role: 'user' },
-    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'thread',
+        runId: 'run',
+        event: { type: EventType.TEXT_MESSAGE_START, messageId: 'user', role: 'user' },
+      },
+    );
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
@@ -145,7 +157,11 @@ describe('AG-UI bridge notifications', () => {
       {
         type: EventType.CUSTOM,
         name: 'dappercode.dev/message-content',
-        value: { messageId: 'message', role: 'agent', content: { type: 'image', url: 'image.png' } },
+        value: {
+          messageId: 'message',
+          role: 'agent',
+          content: { type: 'image', url: 'image.png' },
+        },
       },
       { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'message', delta: 'B' },
       {
@@ -168,10 +184,13 @@ describe('AG-UI bridge notifications', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => updateAgUiLiveAssistantMessages(current, {
-        threadId: 'thread', runId: 'run', event,
-      }),
-      {} as AgUiLiveAssistantMessages
+      (current, event) =>
+        updateAgUiLiveAssistantMessages(current, {
+          threadId: 'thread',
+          runId: 'run',
+          event,
+        }),
+      {} as AgUiLiveAssistantMessages,
     );
     expect(messages(state)[0]?.parts).toEqual([
       { type: 'text', text: 'A' },
@@ -180,7 +199,9 @@ describe('AG-UI bridge notifications', () => {
       { type: 'resource', resource: { uri: 'file:///result', text: 'result' } },
       { type: 'audio', mimeType: 'audio/wav', data: 'YQ==' },
     ]);
-    expect(messages(state)[0]?.content).toMatch(/A[\s\S]*image\.png[\s\S]*B[\s\S]*result[\s\S]*audio\/wav/);
+    expect(messages(state)[0]?.content).toMatch(
+      /A[\s\S]*image\.png[\s\S]*B[\s\S]*result[\s\S]*audio\/wav/,
+    );
   });
 
   it('keeps first-seen canonical order when tools and reasoning receive later updates', () => {
@@ -199,13 +220,20 @@ describe('AG-UI bridge notifications', () => {
       },
     ];
     const state = events.reduce(
-      (current, event) => updateAgUiLiveAssistantMessages(current, {
-        threadId: 'thread', runId: 'run', event,
-      }),
-      {} as AgUiLiveAssistantMessages
+      (current, event) =>
+        updateAgUiLiveAssistantMessages(current, {
+          threadId: 'thread',
+          runId: 'run',
+          event,
+        }),
+      {} as AgUiLiveAssistantMessages,
     );
     expect(messages(state).map((message) => message.id)).toEqual([
-      'message-a', 'tool-call:tool-t', 'message-b', 'reasoning-r', 'tool-result:tool-t',
+      'message-a',
+      'tool-call:tool-t',
+      'message-b',
+      'reasoning-r',
+      'tool-result:tool-t',
     ]);
   });
 
@@ -213,14 +241,16 @@ describe('AG-UI bridge notifications', () => {
     const text = 'a🙂界'.repeat(12_000);
     const textChunks = [text.slice(0, 20_000), text.slice(20_000)];
     for (const delta of textChunks) {
-      expect(parseAgUiEventNotification({
-        method: 'bridge/agui.event',
-        params: {
-          threadId: 'thread',
-          runId: 'run',
-          event: { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'message', delta },
-        },
-      })).not.toBeNull();
+      expect(
+        parseAgUiEventNotification({
+          method: 'bridge/agui.event',
+          params: {
+            threadId: 'thread',
+            runId: 'run',
+            event: { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'message', delta },
+          },
+        }),
+      ).not.toBeNull();
     }
     expect(textChunks.join('')).toBe(text);
 
@@ -260,42 +290,51 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('validates lifecycle routing and accepts official custom events', () => {
-    expect(parseAgUiEventNotification({
-      method: 'bridge/agui.event',
-      params: {
-        threadId: 'thread',
-        runId: 'run',
-        event: { type: EventType.RUN_STARTED, threadId: 'other', runId: 'run' },
-      },
-    })).toBeNull();
-    expect(parseAgUiEventNotification({
-      method: 'bridge/agui.event',
-      params: {
-        threadId: 'thread',
-        runId: 'run',
-        event: { type: EventType.CUSTOM, name: 'dappercode.dev/plan', value: { entries: [] } },
-      },
-    })?.event).toMatchObject({ type: EventType.CUSTOM, name: 'dappercode.dev/plan' });
-    expect(parseAgUiEventNotification({
-      method: 'bridge/agui.event',
-      params: {
-        threadId: 'thread',
-        runId: 'run',
-        event: {
-          type: EventType.CUSTOM,
-          name: 'dappercode.dev/tool-content',
-          value: {
-            toolCallId: 'tool',
-            content: [
-              { type: 'content', content: { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' } },
-              { type: 'diff', path: '/tmp/file', oldText: 'old', newText: 'new' },
-              { type: 'terminal', terminalId: 'terminal-1' },
-            ],
-            locations: [{ path: '/tmp/file', line: 7 }],
+    expect(
+      parseAgUiEventNotification({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: 'thread',
+          runId: 'run',
+          event: { type: EventType.RUN_STARTED, threadId: 'other', runId: 'run' },
+        },
+      }),
+    ).toBeNull();
+    expect(
+      parseAgUiEventNotification({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: 'thread',
+          runId: 'run',
+          event: { type: EventType.CUSTOM, name: 'dappercode.dev/plan', value: { entries: [] } },
+        },
+      })?.event,
+    ).toMatchObject({ type: EventType.CUSTOM, name: 'dappercode.dev/plan' });
+    expect(
+      parseAgUiEventNotification({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: 'thread',
+          runId: 'run',
+          event: {
+            type: EventType.CUSTOM,
+            name: 'dappercode.dev/tool-content',
+            value: {
+              toolCallId: 'tool',
+              content: [
+                {
+                  type: 'content',
+                  content: { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+                },
+                { type: 'diff', path: '/tmp/file', oldText: 'old', newText: 'new' },
+                { type: 'terminal', terminalId: 'terminal-1' },
+              ],
+              locations: [{ path: '/tmp/file', line: 7 }],
+            },
           },
         },
-      },
-    })?.event).toMatchObject({
+      })?.event,
+    ).toMatchObject({
       type: EventType.CUSTOM,
       name: 'dappercode.dev/tool-content',
     });
@@ -309,7 +348,13 @@ describe('AG-UI bridge notifications', () => {
       { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'read' },
       { type: EventType.TOOL_CALL_ARGS, toolCallId: 'tool', delta: '{}' },
       { type: EventType.TOOL_CALL_END, toolCallId: 'tool' },
-      { type: EventType.TOOL_CALL_RESULT, messageId: 'tool-result', toolCallId: 'tool', role: 'tool', content: 'done' },
+      {
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: 'tool-result',
+        toolCallId: 'tool',
+        role: 'tool',
+        content: 'done',
+      },
     ];
     let state: AgUiLiveAssistantMessages = {};
     for (const event of events) {
@@ -326,21 +371,38 @@ describe('AG-UI bridge notifications', () => {
       event: {
         type: EventType.CUSTOM,
         name: 'dappercode.dev/message-content',
-        value: { messageId: 'image', role: 'agent', content: { type: 'image', mimeType: 'image/png', data: 'redacted-fixture' } },
+        value: {
+          messageId: 'image',
+          role: 'agent',
+          content: { type: 'image', mimeType: 'image/png', data: 'redacted-fixture' },
+        },
       },
     });
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
-      event: { type: EventType.CUSTOM, name: 'dappercode.dev/usage', value: { used: 10, size: 100 } },
+      event: {
+        type: EventType.CUSTOM,
+        name: 'dappercode.dev/usage',
+        value: { used: 10, size: 100 },
+      },
     });
-    expect(messages(state)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'reasoning', role: 'reasoning', content: 'thinking' }),
-      expect.objectContaining({ id: 'tool-result', role: 'tool', toolCallId: 'tool', content: expect.stringContaining('done') }),
-      expect.objectContaining({ id: 'image', role: 'assistant' }),
-    ]));
+    expect(messages(state)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'reasoning', role: 'reasoning', content: 'thinking' }),
+        expect.objectContaining({
+          id: 'tool-result',
+          role: 'tool',
+          toolCallId: 'tool',
+          content: expect.stringContaining('done'),
+        }),
+        expect.objectContaining({ id: 'image', role: 'assistant' }),
+      ]),
+    );
     expect(state.thread?.customMetadata['dappercode.dev/usage']).toEqual({ used: 10, size: 100 });
-    expect(state.thread?.terminalMessageIds).toEqual(expect.arrayContaining(['reasoning', 'tool-call:tool']));
+    expect(state.thread?.terminalMessageIds).toEqual(
+      expect.arrayContaining(['reasoning', 'tool-call:tool']),
+    );
 
     for (let index = 0; index < 140; index += 1) {
       state = updateAgUiLiveAssistantMessages(state, {
@@ -354,22 +416,26 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('rejects malformed typed fields', () => {
-    expect(parseAgUiEventNotification({
-      method: 'bridge/agui.event',
-      params: {
-        threadId: 'thread',
-        runId: 'run',
-        event: { type: EventType.TEXT_MESSAGE_START, messageId: 'message', role: 3 },
-      },
-    })).toBeNull();
-    expect(parseAgUiEventNotification({
-      method: 'bridge/agui.event',
-      params: {
-        threadId: 'thread',
-        runId: 'run',
-        event: { type: EventType.RUN_ERROR, message: 'boom', timestamp: 'now' },
-      },
-    })).toBeNull();
+    expect(
+      parseAgUiEventNotification({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: 'thread',
+          runId: 'run',
+          event: { type: EventType.TEXT_MESSAGE_START, messageId: 'message', role: 3 },
+        },
+      }),
+    ).toBeNull();
+    expect(
+      parseAgUiEventNotification({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: 'thread',
+          runId: 'run',
+          event: { type: EventType.RUN_ERROR, message: 'boom', timestamp: 'now' },
+        },
+      }),
+    ).toBeNull();
   });
 
   it('stores duplicate command metadata without rendering transcript rows', () => {
@@ -379,8 +445,16 @@ describe('AG-UI bridge notifications', () => {
       value: { commands: [{ name: 'review', description: 'Review changes' }] },
     };
     let state: AgUiLiveAssistantMessages = {};
-    state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event: commandEvent });
-    state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event: commandEvent });
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: commandEvent,
+    });
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: commandEvent,
+    });
 
     expect(messages(state)).toEqual([]);
     expect(state.thread?.customMetadata['dappercode.dev/commands']).toEqual(commandEvent.value);
@@ -433,10 +507,9 @@ describe('AG-UI bridge notifications', () => {
         delta: 'Second message',
       },
     });
-    expect(messages(secondMessage, 'agent-alpha:thread-1').map((message) => message.content)).toEqual([
-      'Hello there there',
-      'Second message',
-    ]);
+    expect(
+      messages(secondMessage, 'agent-alpha:thread-1').map((message) => message.content),
+    ).toEqual(['Hello there there', 'Second message']);
 
     const completed = updateAgUiLiveAssistantMessages(secondMessage, {
       threadId: first.threadId,
@@ -444,7 +517,7 @@ describe('AG-UI bridge notifications', () => {
       event: { type: EventType.RUN_FINISHED, threadId: first.threadId, runId: first.runId },
     });
     expect(completed['agent-alpha:thread-1']?.terminalMessageIds).toEqual(
-      messages(completed, 'agent-alpha:thread-1').map((message) => message.id)
+      messages(completed, 'agent-alpha:thread-1').map((message) => message.id),
     );
     expect(completed['thread:other']).toBeDefined();
     const nextRun = updateAgUiLiveAssistantMessages(completed, {
@@ -460,28 +533,35 @@ describe('AG-UI bridge notifications', () => {
     const current = {
       'agent-alpha:thread-1': {
         ...createAgUiThreadMessageState(),
-        messages: [{ id: 'message', role: 'assistant' as const, content: 'current', createdAt: 'now' }],
+        messages: [
+          { id: 'message', role: 'assistant' as const, content: 'current', createdAt: 'now' },
+        ],
         runByMessageId: { message: 'new-run' },
       },
     };
-    expect(updateAgUiLiveAssistantMessages(current, {
-      threadId: 'agent-alpha:thread-1',
-      runId: 'old-run',
-      event: { type: EventType.RUN_ERROR, message: 'superseded' },
-    })).toBe(current);
+    expect(
+      updateAgUiLiveAssistantMessages(current, {
+        threadId: 'agent-alpha:thread-1',
+        runId: 'old-run',
+        event: { type: EventType.RUN_ERROR, message: 'superseded' },
+      }),
+    ).toBe(current);
   });
 
   it('records explicit message replacement metadata', () => {
-    const state = updateAgUiLiveAssistantMessages({}, {
-      threadId: 'thread:active',
-      runId: 'run',
-      event: {
-        type: EventType.TEXT_MESSAGE_START,
-        messageId: 'final',
-        role: 'assistant',
-        replacesMessageId: 'draft',
+    const state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'thread:active',
+        runId: 'run',
+        event: {
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: 'final',
+          role: 'assistant',
+          replacesMessageId: 'draft',
+        },
       },
-    });
+    );
 
     expect(messages(state, 'thread:active')[0]).toMatchObject({ id: 'final' });
     expect(state['thread:active']?.replacesMessageIdByMessageId).toEqual({ final: 'draft' });
@@ -506,27 +586,44 @@ describe('AG-UI bridge notifications', () => {
           id: 'tool-call:tool',
           role: 'assistant' as const,
           content: '',
-          toolCalls: [{
-            id: 'tool',
-            type: 'function' as const,
-            function: { name: 'live tool', arguments: '{}' },
-          }],
+          toolCalls: [
+            {
+              id: 'tool',
+              type: 'function' as const,
+              function: { name: 'live tool', arguments: '{}' },
+            },
+          ],
         },
       ],
     };
     const liveEvents = [
-      { type: EventType.REASONING_MESSAGE_START, messageId: 'reasoning', role: 'reasoning' as const },
-      { type: EventType.REASONING_MESSAGE_CONTENT, messageId: 'reasoning', delta: 'live reasoning' },
+      {
+        type: EventType.REASONING_MESSAGE_START,
+        messageId: 'reasoning',
+        role: 'reasoning' as const,
+      },
+      {
+        type: EventType.REASONING_MESSAGE_CONTENT,
+        messageId: 'reasoning',
+        delta: 'live reasoning',
+      },
       { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'live tool' },
     ];
-    const reduce = (events: AGUIEvent[]) => events.reduce(
-      (state, event) => updateAgUiLiveAssistantMessages(state, {
-        threadId: 'thread', runId: 'run', event,
-      }),
-      {} as AgUiLiveAssistantMessages
-    );
+    const reduce = (events: AGUIEvent[]) =>
+      events.reduce(
+        (state, event) =>
+          updateAgUiLiveAssistantMessages(state, {
+            threadId: 'thread',
+            runId: 'run',
+            event,
+          }),
+        {} as AgUiLiveAssistantMessages,
+      );
 
-    for (const events of [[...liveEvents, snapshot], [snapshot, ...liveEvents]]) {
+    for (const events of [
+      [...liveEvents, snapshot],
+      [snapshot, ...liveEvents],
+    ]) {
       const reduced = reduce(events as AGUIEvent[]);
       const reducedMessages = messages(reduced);
       expect(reducedMessages.filter((message) => message.id === 'reasoning')).toHaveLength(1);
@@ -536,11 +633,14 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('upserts repeated structured terminal payloads by revision', () => {
-    let state = updateAgUiLiveAssistantMessages({}, {
-      threadId: 'thread',
-      runId: 'run',
-      event: { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'terminal' },
-    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'thread',
+        runId: 'run',
+        event: { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'terminal' },
+      },
+    );
     const structured = (revision: string, terminalId: string): AGUIEvent => ({
       type: EventType.CUSTOM,
       name: 'dappercode.dev/tool-content',
@@ -552,18 +652,28 @@ describe('AG-UI bridge notifications', () => {
       },
     });
     state = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread', runId: 'run', event: structured('one', 'terminal-1'),
+      threadId: 'thread',
+      runId: 'run',
+      event: structured('one', 'terminal-1'),
     });
     const repeated = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread', runId: 'run', event: structured('one', 'terminal-1'),
+      threadId: 'thread',
+      runId: 'run',
+      event: structured('one', 'terminal-1'),
     });
     expect(repeated).toBe(state);
     const replaced = updateAgUiLiveAssistantMessages(repeated, {
-      threadId: 'thread', runId: 'run', event: structured('two', 'terminal-2'),
+      threadId: 'thread',
+      runId: 'run',
+      event: structured('two', 'terminal-2'),
     });
     expect(messages(replaced)).toHaveLength(2);
-    expect(messages(replaced).find((message) => message.role === 'tool')?.content).toContain('terminal-2');
-    expect(messages(replaced).find((message) => message.role === 'tool')?.content).not.toContain('terminal-1');
+    expect(messages(replaced).find((message) => message.role === 'tool')?.content).toContain(
+      'terminal-2',
+    );
+    expect(messages(replaced).find((message) => message.role === 'tool')?.content).not.toContain(
+      'terminal-1',
+    );
     const cleared = updateAgUiLiveAssistantMessages(replaced, {
       threadId: 'thread',
       runId: 'run',
@@ -573,33 +683,46 @@ describe('AG-UI bridge notifications', () => {
         value: { toolCallId: 'tool', revision: 'empty', content: [], locations: [] },
       },
     });
-    expect(messages(cleared).find((message) => message.role === 'tool')?.content).not.toContain('terminal-2');
+    expect(messages(cleared).find((message) => message.role === 'tool')?.content).not.toContain(
+      'terminal-2',
+    );
     expect(cleared.thread?.structuredTextByCallId.tool).toBe('');
   });
 
   it('replaces revisioned tool text and only appends official suffix deltas', () => {
-    let state = updateAgUiLiveAssistantMessages({}, {
-      threadId: 'thread',
-      runId: 'run',
-      event: { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'terminal' },
-    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'thread',
+        runId: 'run',
+        event: { type: EventType.TOOL_CALL_START, toolCallId: 'tool', toolCallName: 'terminal' },
+      },
+    );
     const replacement = (revision: string, content: string): AGUIEvent => ({
       type: EventType.CUSTOM,
       name: 'dappercode.dev/tool-text',
       value: { toolCallId: 'tool', revision, content },
     });
     state = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread', runId: 'run', event: replacement('one', 'first'),
+      threadId: 'thread',
+      runId: 'run',
+      event: replacement('one', 'first'),
     });
     const duplicate = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread', runId: 'run', event: replacement('one', 'first'),
+      threadId: 'thread',
+      runId: 'run',
+      event: replacement('one', 'first'),
     });
     expect(duplicate).toBe(state);
     state = updateAgUiLiveAssistantMessages(duplicate, {
-      threadId: 'thread', runId: 'run', event: replacement('two', 'second'),
+      threadId: 'thread',
+      runId: 'run',
+      event: replacement('two', 'second'),
     });
     expect(messages(state).find((message) => message.role === 'tool')?.content).toContain('second');
-    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain('first');
+    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain(
+      'first',
+    );
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
@@ -611,20 +734,31 @@ describe('AG-UI bridge notifications', () => {
         content: '!',
       },
     });
-    expect(messages(state).find((message) => message.role === 'tool')?.content).toContain('second!');
-    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain('firstsecond');
+    expect(messages(state).find((message) => message.role === 'tool')?.content).toContain(
+      'second!',
+    );
+    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain(
+      'firstsecond',
+    );
     state = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'thread', runId: 'run', event: replacement('empty', ''),
+      threadId: 'thread',
+      runId: 'run',
+      event: replacement('empty', ''),
     });
-    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain('second!');
+    expect(messages(state).find((message) => message.role === 'tool')?.content).not.toContain(
+      'second!',
+    );
   });
 
   it('replaces a generic task tool row with one typed subagent card', () => {
-    let state = updateAgUiLiveAssistantMessages({}, {
-      threadId: 'parent',
-      runId: 'run',
-      event: { type: EventType.TOOL_CALL_START, toolCallId: 'task-1', toolCallName: 'task' },
-    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'parent',
+        runId: 'run',
+        event: { type: EventType.TOOL_CALL_START, toolCallId: 'task-1', toolCallName: 'task' },
+      },
+    );
     const subagent: AGUIEvent = {
       type: EventType.ACTIVITY_SNAPSHOT,
       messageId: 'subagent:task-1',
@@ -643,7 +777,9 @@ describe('AG-UI bridge notifications', () => {
       },
     };
     state = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'parent', runId: 'run', event: subagent,
+      threadId: 'parent',
+      runId: 'run',
+      event: subagent,
     });
     expect(messages(state, 'parent')).toHaveLength(1);
     const message = messages(state, 'parent')[0]!;
@@ -658,15 +794,17 @@ describe('AG-UI bridge notifications', () => {
     }
     expect(message.content.subAgent).toEqual({
       toolCallId: 'task-1',
-        tool: 'spawnAgent',
-        senderThreadId: 'parent',
-        receiverThreadIds: ['child'],
-        agentStatus: 'running',
-        navigable: false,
+      tool: 'spawnAgent',
+      senderThreadId: 'parent',
+      receiverThreadIds: ['child'],
+      agentStatus: 'running',
+      navigable: false,
     });
     expect(message.content.text).toContain('Result: Inspected README.');
     const repeated = updateAgUiLiveAssistantMessages(state, {
-      threadId: 'parent', runId: 'run', event: subagent,
+      threadId: 'parent',
+      runId: 'run',
+      event: subagent,
     });
     expect(messages(repeated, 'parent')).toHaveLength(1);
 
@@ -692,7 +830,9 @@ describe('AG-UI bridge notifications', () => {
       },
     ] as AGUIEvent[]) {
       state = updateAgUiLiveAssistantMessages(state, {
-        threadId: 'parent', runId: 'run', event,
+        threadId: 'parent',
+        runId: 'run',
+        event,
       });
     }
     expect(messages(state, 'parent')).toHaveLength(1);
@@ -707,16 +847,29 @@ describe('AG-UI bridge notifications', () => {
         { method: 'bridge/agui.event', params: { threadId: '', runId: 'run', event: {} } },
         { method: 'bridge/agui.event', params: { threadId: 'thread', runId: '', event: {} } },
         { method: 'bridge/agui.event', params: { threadId: 'thread', runId: 'run', event: {} } },
-        { method: 'bridge/agui.event', params: { threadId: 'thread', runId: 'run', event: { type: EventType.RUN_FINISHED, threadId: 'thread', runId: 'other' } } },
-      ];
-      invalid.forEach((item) => expect(parseAgUiEventNotification(item as unknown as RpcNotification)).toBeNull());
-      expect(parseAgUiEventNotification({
-        method: 'bridge/agui.event',
-        params: {
-          threadId: 'thread', runId: 'run', sourceTurnId: 'turn',
-          event: { type: EventType.RUN_STARTED, threadId: 'thread', runId: 'run' },
+        {
+          method: 'bridge/agui.event',
+          params: {
+            threadId: 'thread',
+            runId: 'run',
+            event: { type: EventType.RUN_FINISHED, threadId: 'thread', runId: 'other' },
+          },
         },
-      })?.sourceTurnId).toBe('turn');
+      ];
+      invalid.forEach((item) =>
+        expect(parseAgUiEventNotification(item as unknown as RpcNotification)).toBeNull(),
+      );
+      expect(
+        parseAgUiEventNotification({
+          method: 'bridge/agui.event',
+          params: {
+            threadId: 'thread',
+            runId: 'run',
+            sourceTurnId: 'turn',
+            event: { type: EventType.RUN_STARTED, threadId: 'thread', runId: 'run' },
+          },
+        })?.sourceTurnId,
+      ).toBe('turn');
     });
 
     it('covers reducer no-ops, implicit starts, terminal marking, and snapshots', () => {
@@ -727,21 +880,33 @@ describe('AG-UI bridge notifications', () => {
           runByMessageId: { same: 'run' },
         },
       };
-      expect(updateAgUiLiveAssistantMessages({}, {
-        threadId: 'missing', runId: 'run',
-        event: { type: EventType.RUN_STARTED, threadId: 'missing', runId: 'run' },
-      }).missing).toEqual(createAgUiThreadMessageState());
+      expect(
+        updateAgUiLiveAssistantMessages(
+          {},
+          {
+            threadId: 'missing',
+            runId: 'run',
+            event: { type: EventType.RUN_STARTED, threadId: 'missing', runId: 'run' },
+          },
+        ).missing,
+      ).toEqual(createAgUiThreadMessageState());
       const withSystem = updateAgUiLiveAssistantMessages(existing, {
-        threadId: 'thread', runId: 'run',
+        threadId: 'thread',
+        runId: 'run',
         event: { type: EventType.TEXT_MESSAGE_START, messageId: 'bad', role: 'system' },
       });
-      expect(withSystem.thread?.messages).toEqual(expect.arrayContaining([
-        expect.objectContaining({ id: 'bad', role: 'system', content: '' }),
-      ]));
-      expect(updateAgUiLiveAssistantMessages(existing, {
-        threadId: 'thread', runId: 'run',
-        event: { type: EventType.TEXT_MESSAGE_START, messageId: 'same', role: 'assistant' },
-      })).toBe(existing);
+      expect(withSystem.thread?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'bad', role: 'system', content: '' }),
+        ]),
+      );
+      expect(
+        updateAgUiLiveAssistantMessages(existing, {
+          threadId: 'thread',
+          runId: 'run',
+          event: { type: EventType.TEXT_MESSAGE_START, messageId: 'same', role: 'assistant' },
+        }),
+      ).toBe(existing);
 
       const state = reduceEvents([
         { type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'implicit', delta: '' },
@@ -761,13 +926,20 @@ describe('AG-UI bridge notifications', () => {
         } as unknown as AGUIEvent,
         { type: EventType.RUN_ERROR, message: 'done' },
       ]);
-      expect(state.thread?.messages.map((message) => message.id)).toEqual(['implicit', 'reason', 'ignored']);
-      expect(state.thread?.terminalMessageIds).toEqual(expect.arrayContaining(['implicit', 'reason', 'ignored']));
+      expect(state.thread?.messages.map((message) => message.id)).toEqual([
+        'implicit',
+        'reason',
+        'ignored',
+      ]);
+      expect(state.thread?.terminalMessageIds).toEqual(
+        expect.arrayContaining(['implicit', 'reason', 'ignored']),
+      );
     });
 
     it('validates chunk metadata and handles reset, parse failure, and completed assemblies', () => {
       const chunk = (value: Record<string, unknown>): AgUiEventEnvelope => ({
-        threadId: 'thread', runId: 'run',
+        threadId: 'thread',
+        runId: 'run',
         event: { type: EventType.CUSTOM, name: 'dappercode.dev/message-content-chunk', value },
       });
       const previous: AgUiLiveAssistantMessages = {};
@@ -776,50 +948,107 @@ describe('AG-UI bridge notifications', () => {
         { canonicalId: 'message', revision: 'r', index: -1, count: 1, data: '{}' },
         { canonicalId: 'message', revision: 'r', index: 1, count: 1, data: '{}' },
         { canonicalId: 'message', revision: 'r', index: 0, count: 1, data: '' },
-      ].forEach((value) => expect(updateAgUiLiveAssistantMessages(previous, chunk(value))).toBe(previous));
+      ].forEach((value) =>
+        expect(updateAgUiLiveAssistantMessages(previous, chunk(value))).toBe(previous),
+      );
 
-      let state = updateAgUiLiveAssistantMessages({}, chunk({
-        canonicalId: 'message', revision: 'r', index: 0, count: 2, data: '{',
-      }));
-      state = updateAgUiLiveAssistantMessages(state, chunk({
-        canonicalId: 'message', revision: 'r', index: 1, count: 3, data: 'bad',
-      }));
+      let state = updateAgUiLiveAssistantMessages(
+        {},
+        chunk({
+          canonicalId: 'message',
+          revision: 'r',
+          index: 0,
+          count: 2,
+          data: '{',
+        }),
+      );
+      state = updateAgUiLiveAssistantMessages(
+        state,
+        chunk({
+          canonicalId: 'message',
+          revision: 'r',
+          index: 1,
+          count: 3,
+          data: 'bad',
+        }),
+      );
       expect(state.thread?.chunkAssemblies).toBeDefined();
-      const pending = updateAgUiLiveAssistantMessages({}, chunk({
-        canonicalId: 'message', revision: 'bad-json', index: 0, count: 1, data: '{',
-      }));
+      const pending = updateAgUiLiveAssistantMessages(
+        {},
+        chunk({
+          canonicalId: 'message',
+          revision: 'bad-json',
+          index: 0,
+          count: 1,
+          data: '{',
+        }),
+      );
       expect(pending.thread?.chunkAssemblies).toBeDefined();
 
-      const payload = JSON.stringify({ messageId: 'message', role: 'thought', content: { type: 'text', text: 'complete' } });
-      const complete = updateAgUiLiveAssistantMessages({}, chunk({
-        canonicalId: 'message', revision: 'complete', index: 0, count: 1, data: payload,
-      }));
-      expect(complete.thread?.messages[0]).toMatchObject({ content: 'complete', role: 'reasoning' });
+      const payload = JSON.stringify({
+        messageId: 'message',
+        role: 'thought',
+        content: { type: 'text', text: 'complete' },
+      });
+      const complete = updateAgUiLiveAssistantMessages(
+        {},
+        chunk({
+          canonicalId: 'message',
+          revision: 'complete',
+          index: 0,
+          count: 1,
+          data: payload,
+        }),
+      );
+      expect(complete.thread?.messages[0]).toMatchObject({
+        content: 'complete',
+        role: 'reasoning',
+      });
       expect(complete.thread?.chunkAssemblies).toEqual({});
     });
 
     it('covers custom tool fallbacks, duplicate revisions, and generic custom events', () => {
       let state: AgUiLiveAssistantMessages = {};
       const customEvents: AGUIEvent[] = [
-        { type: EventType.CUSTOM, name: 'dappercode.dev/message-content', value: { role: 'other', content: { type: 'resourceLink', uri: 'file:///a' } } },
-        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-content', value: { content: [{ type: 'text', text: 'structured' }], locations: [] } },
+        {
+          type: EventType.CUSTOM,
+          name: 'dappercode.dev/message-content',
+          value: { role: 'other', content: { type: 'resourceLink', uri: 'file:///a' } },
+        },
+        {
+          type: EventType.CUSTOM,
+          name: 'dappercode.dev/tool-content',
+          value: { content: [{ type: 'text', text: 'structured' }], locations: [] },
+        },
         { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: {} },
-        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
-        { type: EventType.CUSTOM, name: 'dappercode.dev/tool-text', value: { toolCallId: 'tool', revision: 'one', content: 'first' } },
+        {
+          type: EventType.CUSTOM,
+          name: 'dappercode.dev/tool-text',
+          value: { toolCallId: 'tool', revision: 'one', content: 'first' },
+        },
+        {
+          type: EventType.CUSTOM,
+          name: 'dappercode.dev/tool-text',
+          value: { toolCallId: 'tool', revision: 'one', content: 'first' },
+        },
         { type: EventType.CUSTOM, name: 'dappercode.dev/plan', value: { entries: [] } },
         { type: EventType.CUSTOM, name: 'dappercode.dev/unknown', value: 'value' },
       ];
       customEvents.forEach((event) => {
         state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event });
       });
-      expect(state.thread?.messages).toEqual(expect.arrayContaining([
-        expect.objectContaining({ id: 'run:content', role: 'assistant' }),
-        expect.objectContaining({ id: 'tool-result:unknown', role: 'tool' }),
-      ]));
-      expect(state.thread?.customMetadata).toEqual(expect.objectContaining({
-        'dappercode.dev/plan': { entries: [] },
-        'dappercode.dev/unknown': 'value',
-      }));
+      expect(state.thread?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'run:content', role: 'assistant' }),
+          expect.objectContaining({ id: 'tool-result:unknown', role: 'tool' }),
+        ]),
+      );
+      expect(state.thread?.customMetadata).toEqual(
+        expect.objectContaining({
+          'dappercode.dev/plan': { entries: [] },
+          'dappercode.dev/unknown': 'value',
+        }),
+      );
     });
 
     it('renders every structured content fallback without copied rendering logic', () => {
@@ -832,7 +1061,10 @@ describe('AG-UI bridge notifications', () => {
         [{ type: 'text', text: '' }, '{"type":"text","text":""}'],
         [{ type: 'image' }, '[image]'],
         [{ type: 'image', image_url: 'image.png' }, '[image: image.png]'],
-        [{ type: 'image', data: 'YQ==', mime_type: 'image/png' }, '[image: data:image/png;base64,YQ==]'],
+        [
+          { type: 'image', data: 'YQ==', mime_type: 'image/png' },
+          '[image: data:image/png;base64,YQ==]',
+        ],
         [{ type: 'audio' }, '[audio]'],
         [{ type: 'audio', mime_type: 'audio/wav' }, '[audio: audio/wav]'],
         [{ type: 'resourceLink', uri: 'file:///a', name: 'A' }, '[file: file:///a] A'],
@@ -846,7 +1078,9 @@ describe('AG-UI bridge notifications', () => {
         [{ path: 'a.ts', line: 2 }, '[location: a.ts:2]'],
       ];
       cases.forEach(([value, expected]) => expect(renderAgUiCustomContent(value)).toBe(expected));
-      expect(renderAgUiCustomContent([[[[[[{ type: 'text', text: 'too deep' }]]]]]])).toBe('[[[[[[{"type":"text","text":"too deep"}]]]]]]');
+      expect(renderAgUiCustomContent([[[[[[{ type: 'text', text: 'too deep' }]]]]]])).toBe(
+        '[[[[[[{"type":"text","text":"too deep"}]]]]]]',
+      );
     });
   });
 });

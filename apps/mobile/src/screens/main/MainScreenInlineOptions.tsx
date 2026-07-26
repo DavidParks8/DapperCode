@@ -6,11 +6,6 @@ import type { SelectionSheetOption } from '../../components/SelectionSheet';
 import { useAppTheme } from '../../theme';
 import { createStyles } from './mainScreenStyles';
 
-
-
-
-
-
 export function InlineOptionsGroup({
   title,
   options,
@@ -27,11 +22,7 @@ export function InlineOptionsGroup({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   return (
-    <View
-      style={styles.inlineOptionsGroup}
-      accessibilityRole="menu"
-      accessibilityLabel={title}
-    >
+    <View style={styles.inlineOptionsGroup} accessibilityRole="menu" accessibilityLabel={title}>
       <View style={styles.inlineOptionsHeader}>
         <Text style={styles.inlineOptionsTitle}>{title}</Text>
         <Pressable
@@ -84,19 +75,13 @@ export function InlineOptionsGroup({
                   {...decorativeAccessibilityProps}
                   name={option.icon}
                   size={15}
-                  color={
-                    option.selected
-                      ? theme.colors.textPrimary
-                      : theme.colors.textMuted
-                  }
+                  color={option.selected ? theme.colors.textPrimary : theme.colors.textMuted}
                 />
               ) : null}
               <View style={styles.inlineOptionCopy}>
                 <Text style={styles.inlineOptionTitle}>{option.title}</Text>
                 {option.description ? (
-                  <Text style={styles.inlineOptionsDescription}>
-                    {option.description}
-                  </Text>
+                  <Text style={styles.inlineOptionsDescription}>{option.description}</Text>
                 ) : null}
               </View>
               {option.selected ? (

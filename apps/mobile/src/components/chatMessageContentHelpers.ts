@@ -13,7 +13,7 @@ import type {
 export function parseMessageBlocks(
   content: string,
   bridgeUrl: string | null,
-  bridgeToken: string | null
+  bridgeToken: string | null,
 ): MessageBlock[] {
   const blocks: MessageBlock[] = [];
   const pendingTextLines: string[] = [];
@@ -28,7 +28,11 @@ export function parseMessageBlocks(
     const inlineImage = toInlineImagePreviewFromMarkerLine(line, bridgeUrl, bridgeToken);
     if (inlineImage) {
       flushTextBlock();
-      blocks.push({ kind: 'image', source: inlineImage.source, accessibilityLabel: inlineImage.accessibilityLabel });
+      blocks.push({
+        kind: 'image',
+        source: inlineImage.source,
+        accessibilityLabel: inlineImage.accessibilityLabel,
+      });
       continue;
     }
     const fileMatch = line.match(/^\[file:\s*(.+?)\]$/i);
@@ -48,12 +52,14 @@ export function parseMessageBlocks(
 export function messagePartToBlocks(
   part: ChatMessagePart,
   bridgeUrl: string | null,
-  bridgeToken: string | null
+  bridgeToken: string | null,
 ): MessageBlock[] {
   if (part.type === 'text') return part.text ? [{ kind: 'text', value: part.text }] : [];
   if (part.type === 'image') {
-    const sourceValue = part.url ?? part.uri ?? (part.data && part.mimeType
-      ? `data:${part.mimeType};base64,${part.data}` : null);
+    const sourceValue =
+      part.url ??
+      part.uri ??
+      (part.data && part.mimeType ? `data:${part.mimeType};base64,${part.data}` : null);
     const source = sourceValue ? toMarkdownImageSource(sourceValue, bridgeUrl, bridgeToken) : null;
     return source
       ? [{ kind: 'image', source, accessibilityLabel: 'Attached image' }]
@@ -74,7 +80,7 @@ export function messagePartToBlocks(
 export function toTimelineDetailPreview(
   entry: TimelineEntry | ToolGroupEntry,
   bridgeUrl: string | null,
-  bridgeToken: string | null
+  bridgeToken: string | null,
 ): TimelineDetailPreview {
   const images: TimelineDetailMediaPreview[] = [];
   const textDetails: string[] = [];
@@ -94,7 +100,7 @@ export function toTimelineDetailPreview(
 function toInlineImagePreviewFromMarkerLine(
   line: string,
   bridgeUrl: string | null,
-  bridgeToken: string | null
+  bridgeToken: string | null,
 ): TimelineDetailMediaPreview | null {
   const match = line.trim().match(/^\[(?:local )?image:\s*(.+?)\]$/i);
   if (!match) return null;
@@ -122,8 +128,13 @@ function textContainsMentionLabel(text: string, label: string): boolean {
 export function toLocalFileReferenceLabel(href: string): string | null {
   let normalizedHref = href.trim();
   if (!normalizedHref) return null;
-  try { normalizedHref = decodeURIComponent(normalizedHref); } catch { /* Keep original href. */ }
-  if (normalizedHref.startsWith('file://')) normalizedHref = normalizedHref.replace(/^file:\/\//, '');
+  try {
+    normalizedHref = decodeURIComponent(normalizedHref);
+  } catch {
+    /* Keep original href. */
+  }
+  if (normalizedHref.startsWith('file://'))
+    normalizedHref = normalizedHref.replace(/^file:\/\//, '');
   if (!normalizedHref.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(normalizedHref)) return null;
   const anchorLineMatch = normalizedHref.match(/#L(\d+)(?:C\d+)?$/i);
   const suffixLineMatch = normalizedHref.match(/:(\d+)(?::\d+)?$/);
@@ -138,7 +149,7 @@ export function toLocalFileReferenceLabel(href: string): string | null {
 export function openMarkdownLink(
   href: string,
   onLinkPress?: (url: string) => boolean,
-  onOpenLocalPreview?: (targetUrl: string) => void
+  onOpenLocalPreview?: (targetUrl: string) => void,
 ): void {
   if (onOpenLocalPreview && extractLocalPreviewUrls(href).length > 0) {
     onOpenLocalPreview(href);

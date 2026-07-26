@@ -1,10 +1,6 @@
-import { readString, toRecord } from "./chatMappingRawTypesAndReaders";
-import { stringifyStructuredContentEntries } from "./chatMappingStructuredContentPreview";
-import {
-  type ChatMessagePart,
-  type ChatPlanSnapshot,
-  type TurnPlanStep,
-} from "./types";
+import { readString, toRecord } from './chatMappingRawTypesAndReaders';
+import { stringifyStructuredContentEntries } from './chatMappingStructuredContentPreview';
+import { type ChatMessagePart, type ChatPlanSnapshot, type TurnPlanStep } from './types';
 
 export function parseSnapshotTaskSubagent(
   content: string,
@@ -16,8 +12,8 @@ export function parseSnapshotTaskSubagent(
   const headers = [...content.matchAll(/<task\s+([^>]+)>/g)].reverse();
   const header = headers.find(
     (candidate) =>
-      /\bid="([^"]{1,1024})"/.test(candidate[1] ?? "") &&
-      /\bstate="([^"]{1,64})"/.test(candidate[1] ?? ""),
+      /\bid="([^"]{1,1024})"/.test(candidate[1] ?? '') &&
+      /\bstate="([^"]{1,64})"/.test(candidate[1] ?? ''),
   );
   const sessionId = header?.[1]?.match(/\bid="([^"]{1,1024})"/)?.[1]?.trim();
   const state = header?.[1]?.match(/\bstate="([^"]{1,64})"/)?.[1]?.trim();
@@ -25,9 +21,7 @@ export function parseSnapshotTaskSubagent(
   if (!sessionId || !state || !normalizedAgentId) {
     return null;
   }
-  const result =
-    content.match(/<task_result>([\s\S]*?)<\/task_result>/)?.[1]?.trim() ||
-    null;
+  const result = content.match(/<task_result>([\s\S]*?)<\/task_result>/)?.[1]?.trim() || null;
   return {
     threadId: `v1.${base64UrlUtf8(normalizedAgentId)}.${base64UrlUtf8(sessionId)}`,
     state,
@@ -35,20 +29,14 @@ export function parseSnapshotTaskSubagent(
   };
 }
 
-const FAILED_SUBAGENT_STATES = new Set([
-  "failed",
-  "error",
-  "aborted",
-  "cancelled",
-  "canceled",
-]);
+const FAILED_SUBAGENT_STATES = new Set(['failed', 'error', 'aborted', 'cancelled', 'canceled']);
 
 const TERMINAL_SUBAGENT_STATES = new Set([
   ...FAILED_SUBAGENT_STATES,
-  "completed",
-  "complete",
-  "succeeded",
-  "closed",
+  'completed',
+  'complete',
+  'succeeded',
+  'closed',
 ]);
 
 export function isFailedSubAgentState(state: string): boolean {
@@ -76,43 +64,36 @@ export function resolveSubAgentState(
   const normalizedTool = toolStatus.trim().toLowerCase();
   const header = headerState?.trim() ? headerState.trim() : null;
   if (isFailedSubAgentState(normalizedTool)) {
-    return header && isFailedSubAgentState(header) ? header : "failed";
+    return header && isFailedSubAgentState(header) ? header : 'failed';
   }
   if (isTerminalSubAgentState(normalizedTool)) {
-    return header && isFailedSubAgentState(header) ? header : "completed";
+    return header && isFailedSubAgentState(header) ? header : 'completed';
   }
-  return header ?? "running";
+  return header ?? 'running';
 }
 
 export function base64UrlUtf8(value: string): string {
   const bytes = new TextEncoder().encode(value);
-  let binary = "";
+  let binary = '';
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);
   }
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 export function isChatMessagePart(value: unknown): value is ChatMessagePart {
   const part = toRecord(value);
-  if (!part || typeof part.type !== "string") return false;
-  if (part.type === "text") return typeof part.text === "string";
-  if (part.type === "image" || part.type === "audio") return true;
-  if (part.type === "resourceLink") return typeof part.uri === "string";
-  return part.type === "resource" && toRecord(part.resource) !== null;
+  if (!part || typeof part.type !== 'string') return false;
+  if (part.type === 'text') return typeof part.text === 'string';
+  if (part.type === 'image' || part.type === 'audio') return true;
+  if (part.type === 'resourceLink') return typeof part.uri === 'string';
+  return part.type === 'resource' && toRecord(part.resource) !== null;
 }
 
-export function stringifyStructuredMessageContent(
-  itemRecord: Record<string, unknown>,
-): string {
-  const contentItems = Array.isArray(itemRecord.content)
-    ? itemRecord.content
-    : [];
+export function stringifyStructuredMessageContent(itemRecord: Record<string, unknown>): string {
+  const contentItems = Array.isArray(itemRecord.content) ? itemRecord.content : [];
   if (contentItems.length === 0) {
-    return "";
+    return '';
   }
   return stringifyStructuredContentEntries(contentItems);
 }
@@ -127,10 +108,7 @@ export function toPlanSnapshot(
   fallbackTurnId?: string | null,
 ): ChatPlanSnapshot | null {
   const turnId =
-    readString(item.turnId) ??
-    readString(item.turn_id) ??
-    fallbackTurnId ??
-    readString(item.id);
+    readString(item.turnId) ?? readString(item.turn_id) ?? fallbackTurnId ?? readString(item.id);
   if (!turnId) {
     return null;
   }
@@ -183,7 +161,7 @@ export function parsePlanTextSnapshot(
     if (!match?.[1]) {
       continue;
     }
-    steps.push({ step: match[1].trim(), status: "pending" });
+    steps.push({ step: match[1].trim(), status: 'pending' });
   }
   if (!hasSummaryHeader && steps.length === 0) {
     return null;
@@ -206,8 +184,7 @@ export function parsePlanTextSnapshot(
     }
     explanationLines.push(line);
   }
-  const explanation =
-    explanationLines.length > 0 ? explanationLines.join(" ").trim() : null;
+  const explanation = explanationLines.length > 0 ? explanationLines.join(' ').trim() : null;
   if (steps.length === 0 && !explanation) {
     return null;
   }
@@ -216,22 +193,22 @@ export function parsePlanTextSnapshot(
 
 export function normalizePlanStepStatus(
   value: string | null | undefined,
-): TurnPlanStep["status"] | null {
+): TurnPlanStep['status'] | null {
   if (!value) {
     return null;
   }
   const normalized = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z]/g, "");
-  if (normalized === "pending") {
-    return "pending";
+    .replace(/[^a-z]/g, '');
+  if (normalized === 'pending') {
+    return 'pending';
   }
-  if (normalized === "inprogress") {
-    return "inProgress";
+  if (normalized === 'inprogress') {
+    return 'inProgress';
   }
-  if (normalized === "completed" || normalized === "complete") {
-    return "completed";
+  if (normalized === 'completed' || normalized === 'complete') {
+    return 'completed';
   }
   return null;
 }

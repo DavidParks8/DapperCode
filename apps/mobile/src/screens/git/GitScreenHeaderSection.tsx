@@ -8,7 +8,12 @@ interface GitScreenHeaderSectionProps extends GitSectionCommonProps {
   onBack: () => void;
 }
 
-export function GitScreenHeaderSection({ controller, styles, theme, onBack }: GitScreenHeaderSectionProps) {
+export function GitScreenHeaderSection({
+  controller,
+  styles,
+  theme,
+  onBack,
+}: GitScreenHeaderSectionProps) {
   return (
     <View style={styles.header}>
       <Pressable

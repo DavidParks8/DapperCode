@@ -47,7 +47,7 @@ export function DrawerContentView() {
         selected: option.key === selectedFolderKey,
         onPress: () => handleSelectFolder(option.key),
       })),
-    [folderOptions, folderPickerLabels, handleSelectFolder, selectedFolderKey]
+    [folderOptions, folderPickerLabels, handleSelectFolder, selectedFolderKey],
   );
 
   return (
@@ -113,10 +113,7 @@ export function DrawerContentView() {
                 expanded: folderPickerVisible,
               })}
               onPress={handleOpenFolderPicker}
-              style={({ pressed }) => [
-                styles.folderFilter,
-                pressed && styles.folderFilterPressed,
-              ]}
+              style={({ pressed }) => [styles.folderFilter, pressed && styles.folderFilterPressed]}
             >
               <Ionicons
                 {...decorativeAccessibilityProps}
@@ -150,9 +147,7 @@ export function DrawerContentView() {
             <View
               style={[
                 styles.connectionDot,
-                wsConnected
-                  ? styles.connectionDotConnected
-                  : styles.connectionDotDisconnected,
+                wsConnected ? styles.connectionDotConnected : styles.connectionDotDisconnected,
               ]}
             />
             <View style={styles.connectionCopy}>

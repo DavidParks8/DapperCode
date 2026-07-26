@@ -20,9 +20,7 @@ export interface ShouldCollapseWorkflowCardForKeyboardArgs {
   threadId: string | null | undefined;
 }
 
-export function hasStructuredPlanCardContent(
-  plan: PlanCardStateLike | null | undefined
-): boolean {
+export function hasStructuredPlanCardContent(plan: PlanCardStateLike | null | undefined): boolean {
   return Boolean(plan && (plan.steps.length > 0 || plan.explanation?.trim()));
 }
 

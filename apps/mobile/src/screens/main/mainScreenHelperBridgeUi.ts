@@ -10,7 +10,7 @@ import { parseInlineOptionsFromQuestionText } from './mainScreenHelperInlineChoi
 import { readBoolean, readNumber, readString, toRecord } from './mainScreenHelperPayloads';
 
 function readUserInputFieldType(
-  value: unknown
+  value: unknown,
 ): PendingUserInputRequest['questions'][number]['fieldType'] {
   return value === 'string' ||
     value === 'integer' ||
@@ -22,7 +22,7 @@ function readUserInputFieldType(
 }
 
 function readUserInputDefaultValue(
-  value: unknown
+  value: unknown,
 ): PendingUserInputRequest['questions'][number]['defaultValue'] {
   if (typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -76,9 +76,7 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
                 readString(optionRecord.value) ??
                 readString(optionRecord.text);
               const description =
-                readString(optionRecord.description) ??
-                readString(optionRecord.detail) ??
-                '';
+                readString(optionRecord.description) ?? readString(optionRecord.detail) ?? '';
               if (!label) {
                 return null;
               }
@@ -89,16 +87,17 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
               };
             })
             .filter(
-              (option): option is { value: string; label: string; description: string } => option !== null
+              (option): option is { value: string; label: string; description: string } =>
+                option !== null,
             )
         : null;
       const options =
         parsedOptions && parsedOptions.length > 0
           ? parsedOptions
-          : parsedInlineOptions.options?.map((option) => ({
+          : (parsedInlineOptions.options?.map((option) => ({
               value: option.label,
               ...option,
-            })) ?? null;
+            })) ?? null);
 
       return {
         id: questionId,
@@ -134,7 +133,11 @@ export function buildUserInputDrafts(request: PendingUserInputRequest): Record<s
   const drafts: Record<string, string> = {};
   for (const question of request.questions) {
     const value = question.defaultValue;
-    drafts[question.id] = Array.isArray(value) ? value.join(', ') : value == null ? '' : String(value);
+    drafts[question.id] = Array.isArray(value)
+      ? value.join(', ')
+      : value == null
+        ? ''
+        : String(value);
   }
   return drafts;
 }
@@ -204,7 +207,7 @@ export function parseGoalSlashObjective(input: string): string | null {
 export function buildOptimisticGoalBridgeUiSurface(
   threadId: string,
   objective: string,
-  updatedAt: string
+  updatedAt: string,
 ): BridgeUiSurface | null {
   const normalizedThreadId = threadId.trim();
   const normalizedObjective = objective.trim();
@@ -252,9 +255,7 @@ function toBridgeUiAction(value: unknown): BridgeUiAction | null {
     id,
     label,
     style:
-      style === 'primary' || style === 'secondary' || style === 'destructive'
-        ? style
-        : undefined,
+      style === 'primary' || style === 'secondary' || style === 'destructive' ? style : undefined,
     dismissesSurface: readBoolean(record.dismissesSurface) ?? true,
   };
 }
@@ -264,9 +265,7 @@ function parseBridgeUiBlocks(value: unknown): BridgeUiBlock[] {
     return [];
   }
 
-  return value
-    .map(toBridgeUiBlock)
-    .filter((block): block is BridgeUiBlock => block !== null);
+  return value.map(toBridgeUiBlock).filter((block): block is BridgeUiBlock => block !== null);
 }
 
 function toBridgeUiBlock(value: unknown): BridgeUiBlock | null {
@@ -363,7 +362,7 @@ function toBridgeUiBlock(value: unknown): BridgeUiBlock | null {
 
 export function upsertBridgeUiSurfaceList(
   surfaces: BridgeUiSurface[],
-  surface: BridgeUiSurface
+  surface: BridgeUiSurface,
 ): BridgeUiSurface[] {
   const existingIndex = surfaces.findIndex((entry) => entry.id === surface.id);
   if (existingIndex === -1) {
@@ -377,7 +376,7 @@ export function upsertBridgeUiSurfaceList(
 
 export function removeBridgeUiSurfaceFromList(
   surfaces: BridgeUiSurface[],
-  surfaceId: string
+  surfaceId: string,
 ): BridgeUiSurface[] {
   return surfaces.filter((surface) => surface.id !== surfaceId);
 }

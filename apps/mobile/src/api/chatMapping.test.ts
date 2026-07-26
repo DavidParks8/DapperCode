@@ -13,10 +13,7 @@ import {
   type RawThreadItem,
 } from './chatMapping';
 import { renderAgUiCustomContent } from './agUi';
-import {
-  COMPACTION_ACTIVITY_TYPE,
-  SUBAGENT_ACTIVITY_TYPE,
-} from './messages';
+import { COMPACTION_ACTIVITY_TYPE, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import type { Chat, ChatSummary } from './types';
 
 function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
@@ -44,15 +41,17 @@ function malformedItems(items: unknown[]): RawThreadItem[] {
 
 describe('chatMapping', () => {
   it('uses bridge session titles and ISO activity timestamps for drawer summaries', () => {
-    const summary = mapChatSummary(toRawThread({
-      id: 'v1.YWdlbnQ.c2Vzc2lvbg',
-      name: 'Fix mobile session controls',
-      createdAt: '2026-07-21T14:03:00.000Z',
-      updatedAt: '2026-07-21T14:17:00.000Z',
-      cwd: '/private/tmp/dappercode-playground-18787',
-      status: { type: 'idle' },
-      turns: [],
-    }));
+    const summary = mapChatSummary(
+      toRawThread({
+        id: 'v1.YWdlbnQ.c2Vzc2lvbg',
+        name: 'Fix mobile session controls',
+        createdAt: '2026-07-21T14:03:00.000Z',
+        updatedAt: '2026-07-21T14:17:00.000Z',
+        cwd: '/private/tmp/dappercode-playground-18787',
+        status: { type: 'idle' },
+        turns: [],
+      }),
+    );
 
     expect(summary).toMatchObject({
       title: 'Fix mobile session controls',
@@ -62,22 +61,42 @@ describe('chatMapping', () => {
   });
 
   it('gives titleless ACP sessions readable distinct fallback labels and times', () => {
-    const first = mapChatSummary(toRawThread({
-      id: 'v1.YWdlbnQ.c2VzX2FscGhh', status: { type: 'idle' }, turns: [],
-      acpSnapshot: {
-        version: 2, messages: [], tools: [], plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'ses_alpha', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
-    const second = mapChatSummary(toRawThread({
-      id: 'v1.YWdlbnQ.c2VzX2JldGE', status: { type: 'idle' }, turns: [],
-      acpSnapshot: {
-        version: 2, messages: [], tools: [], plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'ses_beta', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const first = mapChatSummary(
+      toRawThread({
+        id: 'v1.YWdlbnQ.c2VzX2FscGhh',
+        status: { type: 'idle' },
+        turns: [],
+        acpSnapshot: {
+          version: 2,
+          messages: [],
+          tools: [],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'ses_alpha', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
+    const second = mapChatSummary(
+      toRawThread({
+        id: 'v1.YWdlbnQ.c2VzX2JldGE',
+        status: { type: 'idle' },
+        turns: [],
+        acpSnapshot: {
+          version: 2,
+          messages: [],
+          tools: [],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'ses_beta', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     expect(first?.title).toBe('Session sesalpha');
     expect(second?.title).toBe('Session sesbeta');
@@ -85,95 +104,151 @@ describe('chatMapping', () => {
   });
 
   it('preserves advertised ACP model, effort, and primary mode options', () => {
-    const chat = mapChat(toRawThread({
-      id: 'v1.YWdlbnQ.c2Vzc2lvbg',
-      name: 'Configured OpenCode session',
-      createdAt: '2026-07-21T14:03:00.000Z',
-      updatedAt: '2026-07-21T14:17:00.000Z',
-      status: { type: 'idle' },
-      acpSnapshot: {
-        version: 2,
-        messages: [], tools: [], plan: [], usage: {}, commands: [],
-        config: [
-          {
-            id: 'model', value: 'github-copilot/gpt-5.4', name: 'Model', category: 'model',
-            options: [{ value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' }],
+    const chat = mapChat(
+      toRawThread({
+        id: 'v1.YWdlbnQ.c2Vzc2lvbg',
+        name: 'Configured OpenCode session',
+        createdAt: '2026-07-21T14:03:00.000Z',
+        updatedAt: '2026-07-21T14:17:00.000Z',
+        status: { type: 'idle' },
+        acpSnapshot: {
+          version: 2,
+          messages: [],
+          tools: [],
+          plan: [],
+          usage: {},
+          commands: [],
+          config: [
+            {
+              id: 'model',
+              value: 'github-copilot/gpt-5.4',
+              name: 'Model',
+              category: 'model',
+              options: [{ value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' }],
+            },
+            {
+              id: 'effort',
+              value: 'high',
+              name: 'Effort',
+              category: 'thought_level',
+              options: [
+                { value: 'none', name: 'None' },
+                { value: 'high', name: 'High' },
+              ],
+            },
+            {
+              id: 'mode',
+              value: 'build',
+              name: 'Session Mode',
+              category: 'mode',
+              options: [
+                { value: 'build', name: 'build' },
+                { value: 'plan', name: 'plan' },
+              ],
+            },
+          ],
+          session: {
+            agentId: 'opencode',
+            threadId: 'v1.YWdlbnQ.c2Vzc2lvbg',
+            historyReconstruction: false,
           },
-          {
-            id: 'effort', value: 'high', name: 'Effort', category: 'thought_level',
-            options: [{ value: 'none', name: 'None' }, { value: 'high', name: 'High' }],
-          },
-          {
-            id: 'mode', value: 'build', name: 'Session Mode', category: 'mode',
-            options: [{ value: 'build', name: 'build' }, { value: 'plan', name: 'plan' }],
-          },
-        ],
-        session: { agentId: 'opencode', threadId: 'v1.YWdlbnQ.c2Vzc2lvbg', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-      turns: [],
-    }));
+          active: { toolIds: [] },
+        },
+        turns: [],
+      }),
+    );
 
-    expect(chat.acpConfig).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'model', category: 'model', options: [expect.objectContaining({ value: 'github-copilot/gpt-5.4' })] }),
-      expect.objectContaining({ id: 'effort', category: 'thought_level', value: 'high' }),
-      expect.objectContaining({ id: 'mode', category: 'mode', value: 'build' }),
-    ]));
+    expect(chat.acpConfig).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'model',
+          category: 'model',
+          options: [expect.objectContaining({ value: 'github-copilot/gpt-5.4' })],
+        }),
+        expect.objectContaining({ id: 'effort', category: 'thought_level', value: 'high' }),
+        expect.objectContaining({ id: 'mode', category: 'mode', value: 'build' }),
+      ]),
+    );
   });
 
   it('converges snapshot and live chronology across messages, tools, reasoning, and updates', () => {
-    const snapshot = mapChat(toRawThread({
-      id: 'thread-order',
-      createdAt: 1784419200,
-      acpSnapshot: {
-        version: 2,
-        timeline: [
-          { sequence: 0, kind: 'message', canonicalId: 'message-a' },
-          { sequence: 1, kind: 'tool', canonicalId: 'tool-t' },
-          { sequence: 2, kind: 'message', canonicalId: 'message-b' },
-          { sequence: 3, kind: 'reasoning', canonicalId: 'reasoning-r' },
-        ],
-        messages: [
-          { id: 'message-a', role: 'agent', parts: [{ type: 'text', text: 'A' }] },
-          { id: 'message-b', role: 'agent', parts: [{ type: 'text', text: 'B' }] },
-          { id: 'reasoning-r', role: 'thought', parts: [{ type: 'text', text: 'R' }] },
-        ],
-        tools: [{
-          id: 'tool-t', kind: 'read', status: 'completed', title: 'T', content: 'updated',
-          structuredContent: [], locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'thread-order', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const snapshot = mapChat(
+      toRawThread({
+        id: 'thread-order',
+        createdAt: 1784419200,
+        acpSnapshot: {
+          version: 2,
+          timeline: [
+            { sequence: 0, kind: 'message', canonicalId: 'message-a' },
+            { sequence: 1, kind: 'tool', canonicalId: 'tool-t' },
+            { sequence: 2, kind: 'message', canonicalId: 'message-b' },
+            { sequence: 3, kind: 'reasoning', canonicalId: 'reasoning-r' },
+          ],
+          messages: [
+            { id: 'message-a', role: 'agent', parts: [{ type: 'text', text: 'A' }] },
+            { id: 'message-b', role: 'agent', parts: [{ type: 'text', text: 'B' }] },
+            { id: 'reasoning-r', role: 'thought', parts: [{ type: 'text', text: 'R' }] },
+          ],
+          tools: [
+            {
+              id: 'tool-t',
+              kind: 'read',
+              status: 'completed',
+              title: 'T',
+              content: 'updated',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'thread-order', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     expect(snapshot.messages.map((message) => message.id)).toEqual([
-      'message-a', 'tool:tool-t', 'message-b', 'reasoning-r',
+      'message-a',
+      'tool:tool-t',
+      'message-b',
+      'reasoning-r',
     ]);
   });
 
   it('maps persisted OpenCode task tools to one non-navigable subagent card', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'parent-thread',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-1' }],
-        messages: [],
-        tools: [{
-          id: 'task-1',
-          kind: 'think',
-          status: 'completed',
-          title: 'Inspect workspace',
-          content: '<task id="child-session" state="completed">\n<task_result>Workspace title</task_result>\n</task>',
-          structuredContent: [{ type: 'content', content: { type: 'text', text: 'duplicate' } }],
-          locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'opencode', threadId: 'parent-thread', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-thread',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-1' }],
+          messages: [],
+          tools: [
+            {
+              id: 'task-1',
+              kind: 'think',
+              status: 'completed',
+              title: 'Inspect workspace',
+              content:
+                '<task id="child-session" state="completed">\n<task_result>Workspace title</task_result>\n</task>',
+              structuredContent: [
+                { type: 'content', content: { type: 'text', text: 'duplicate' } },
+              ],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'opencode', threadId: 'parent-thread', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     expect(mapped.messages).toHaveLength(1);
     expect(mapped.messages[0]).toMatchObject({
@@ -187,58 +262,90 @@ describe('chatMapping', () => {
     }
     expect(mapped.messages[0].content.text).toContain('Latest: Workspace title');
     expect(mapped.messages[0].content.subAgent).toEqual({
-        toolCallId: 'task-1',
-        tool: 'spawnAgent',
-        senderThreadId: 'parent-thread',
-        receiverThreadIds: ['v1.b3BlbmNvZGU.Y2hpbGQtc2Vzc2lvbg'],
-        agentStatus: 'completed',
-        navigable: true,
+      toolCallId: 'task-1',
+      tool: 'spawnAgent',
+      senderThreadId: 'parent-thread',
+      receiverThreadIds: ['v1.b3BlbmNvZGU.Y2hpbGQtc2Vzc2lvbg'],
+      agentStatus: 'completed',
+      navigable: true,
     });
   });
 
   it('titles untitled sessions from the first snapshot user message and hides synthesized ages', () => {
-    const summary = mapChatSummary(toRawThread({
-      id: 'v1.YWdlbnQ.c2Vzc2lvbg', status: { type: 'idle' }, turns: [],
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'message', canonicalId: 'user-1' }],
-        messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: 'add a multiply helper' }], truncated: false }],
-        tools: [], plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'session', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const summary = mapChatSummary(
+      toRawThread({
+        id: 'v1.YWdlbnQ.c2Vzc2lvbg',
+        status: { type: 'idle' },
+        turns: [],
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'message', canonicalId: 'user-1' }],
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              parts: [{ type: 'text', text: 'add a multiply helper' }],
+              truncated: false,
+            },
+          ],
+          tools: [],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'session', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     expect(summary?.title).toBe('add a multiply helper');
     expect(summary?.timestampsSynthesized).toBe(true);
   });
 
   it('keeps bridge timestamps unsynthesized when the bridge reports them', () => {
-    const summary = mapChatSummary(toRawThread({
-      id: 'v1.YWdlbnQ.dGltZWQ', status: { type: 'idle' }, turns: [], updatedAt: 1_768_000_000,
-    }));
+    const summary = mapChatSummary(
+      toRawThread({
+        id: 'v1.YWdlbnQ.dGltZWQ',
+        status: { type: 'idle' },
+        turns: [],
+        updatedAt: 1_768_000_000,
+      }),
+    );
 
     expect(summary?.timestampsSynthesized).toBe(false);
   });
 
   it('does not repeat tool text that structured content already covers', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'tool-dedupe',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-read' }],
-        messages: [],
-        tools: [{
-          id: 'call-read', kind: 'read', status: 'completed', title: 'Read src/math.ts',
-          content: 'export function add() {}',
-          structuredContent: [{ type: 'content', content: { type: 'text', text: 'export function add() {}' } }],
-          locations: [{ path: 'src/math.ts' }],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'tool-dedupe', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'tool-dedupe',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-read' }],
+          messages: [],
+          tools: [
+            {
+              id: 'call-read',
+              kind: 'read',
+              status: 'completed',
+              title: 'Read src/math.ts',
+              content: 'export function add() {}',
+              structuredContent: [
+                { type: 'content', content: { type: 'text', text: 'export function add() {}' } },
+              ],
+              locations: [{ path: 'src/math.ts' }],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'tool-dedupe', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     const content = mapped.messages[0].content as string;
     expect(content.match(/export function add\(\) \{\}/g)).toHaveLength(1);
@@ -247,23 +354,34 @@ describe('chatMapping', () => {
   });
 
   it('falls back past incidental task markup in tool output', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'parent-noise',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-noise' }],
-        messages: [],
-        tools: [{
-          id: 'task-noise', kind: 'think', status: 'completed', title: 'Task',
-          content:
-            '<task id="child-session" state="completed">\nAudit\n</task>\nsrc/readme.md:1:<task something-else>',
-          structuredContent: [], locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'opencode', threadId: 'parent-noise', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-noise',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-noise' }],
+          messages: [],
+          tools: [
+            {
+              id: 'task-noise',
+              kind: 'think',
+              status: 'completed',
+              title: 'Task',
+              content:
+                '<task id="child-session" state="completed">\nAudit\n</task>\nsrc/readme.md:1:<task something-else>',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'opencode', threadId: 'parent-noise', historyReconstruction: false },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     const message = mapped.messages[0];
     if (message.role !== 'activity') throw new Error('expected activity message');
@@ -271,43 +389,70 @@ describe('chatMapping', () => {
   });
 
   it('renders pending tools without an empty structured-content placeholder', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'tool-pending',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-danger' }],
-        messages: [],
-        tools: [{
-          id: 'call-danger', kind: 'execute', status: 'pending', title: 'rm -rf build',
-          content: '', structuredContent: [], locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'agent', threadId: 'tool-pending', historyReconstruction: false },
-        active: { toolIds: ['call-danger'] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'tool-pending',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'call-danger' }],
+          messages: [],
+          tools: [
+            {
+              id: 'call-danger',
+              kind: 'execute',
+              status: 'pending',
+              title: 'rm -rf build',
+              content: '',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: { agentId: 'agent', threadId: 'tool-pending', historyReconstruction: false },
+          active: { toolIds: ['call-danger'] },
+        },
+      }),
+    );
 
     expect(mapped.messages[0].content).toBe('rm -rf build');
   });
 
   it('uses the newest appended task header and never shows raw child thread ids', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'parent-appended',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-appended' }],
-        messages: [],
-        tools: [{
-          id: 'task-appended', kind: 'think', status: 'completed', title: 'Task',
-          content:
-            '<task id="child-session" state="running">\nAudit\n</task><task id="child-session" state="completed">\nAudit\n</task>\n<task_result>All clear</task_result>',
-          structuredContent: [], locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'opencode', threadId: 'parent-appended', historyReconstruction: false },
-        active: { toolIds: [] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-appended',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-appended' }],
+          messages: [],
+          tools: [
+            {
+              id: 'task-appended',
+              kind: 'think',
+              status: 'completed',
+              title: 'Task',
+              content:
+                '<task id="child-session" state="running">\nAudit\n</task><task id="child-session" state="completed">\nAudit\n</task>\n<task_result>All clear</task_result>',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: {
+            agentId: 'opencode',
+            threadId: 'parent-appended',
+            historyReconstruction: false,
+          },
+          active: { toolIds: [] },
+        },
+      }),
+    );
 
     const message = mapped.messages[0];
     if (message.role !== 'activity') throw new Error('expected activity message');
@@ -318,25 +463,43 @@ describe('chatMapping', () => {
   });
 
   it('maps an in-progress task snapshot to a running subagent card before child XML', () => {
-    const mapped = mapChat(toRawThread({
-      id: 'parent-running-task',
-      acpSnapshot: {
-        version: 2,
-        timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-running' }],
-        messages: [],
-        tools: [{
-          id: 'task-running', kind: 'other', status: 'in_progress', title: 'task', content: '',
-          structuredContent: [], locations: [],
-        }],
-        plan: [], usage: {}, config: [], commands: [],
-        session: { agentId: 'opencode', threadId: 'parent-running-task', historyReconstruction: false },
-        active: { toolIds: ['task-running'] },
-      },
-    }));
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-running-task',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-running' }],
+          messages: [],
+          tools: [
+            {
+              id: 'task-running',
+              kind: 'other',
+              status: 'in_progress',
+              title: 'task',
+              content: '',
+              structuredContent: [],
+              locations: [],
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: {
+            agentId: 'opencode',
+            threadId: 'parent-running-task',
+            historyReconstruction: false,
+          },
+          active: { toolIds: ['task-running'] },
+        },
+      }),
+    );
 
     expect(mapped.messages).toHaveLength(1);
     expect(mapped.messages[0]).toMatchObject({
-      id: 'subagent:task-running', role: 'activity', activityType: SUBAGENT_ACTIVITY_TYPE,
+      id: 'subagent:task-running',
+      role: 'activity',
+      activityType: SUBAGENT_ACTIVITY_TYPE,
       content: expect.objectContaining({
         subAgent: expect.objectContaining({ toolCallId: 'task-running', agentStatus: 'running' }),
       }),
@@ -347,8 +510,8 @@ describe('chatMapping', () => {
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(__dirname, '../../../../contracts/bridge-rpc/v2/manifest.json'),
-        'utf8'
-      )
+        'utf8',
+      ),
     ) as { fixtures: { threadSnapshot: unknown } };
     const raw = toRawThread(manifest.fixtures.threadSnapshot);
     const chat = mapChat(raw);
@@ -363,16 +526,20 @@ describe('chatMapping', () => {
         expect.objectContaining({
           id: 'message-1',
           role: 'assistant',
-          content: expect.stringMatching(/Snapshot A[\s\S]*\[image: data:image\/png;base64,aW1hZ2U=\][\s\S]*Snapshot B[\s\S]*\[resource: file:\/\/\/tmp\/result.txt\][\s\S]*embedded result[\s\S]*\[audio: audio\/wav\]/),
+          content: expect.stringMatching(
+            /Snapshot A[\s\S]*\[image: data:image\/png;base64,aW1hZ2U=\][\s\S]*Snapshot B[\s\S]*\[resource: file:\/\/\/tmp\/result.txt\][\s\S]*embedded result[\s\S]*\[audio: audio\/wav\]/,
+          ),
         }),
         expect.objectContaining({ id: 'reasoning-1', role: 'reasoning' }),
         expect.objectContaining({
           id: 'tool:tool-1',
           role: 'tool',
           toolCallId: 'tool-1',
-          content: expect.stringMatching(/done[\s\S]*structured[\s\S]*\[diff: src\/file.ts\][\s\S]*\[terminal: terminal-1\][\s\S]*\[location: src\/file.ts:7\]/),
+          content: expect.stringMatching(
+            /done[\s\S]*structured[\s\S]*\[diff: src\/file.ts\][\s\S]*\[terminal: terminal-1\][\s\S]*\[location: src\/file.ts:7\]/,
+          ),
         }),
-      ])
+      ]),
     );
     const snapshotTool = raw.acpSnapshot?.tools[0];
     expect(snapshotTool).toBeDefined();
@@ -380,11 +547,9 @@ describe('chatMapping', () => {
       renderAgUiCustomContent({
         content: snapshotTool?.structuredContent,
         locations: snapshotTool?.locations,
-      })
+      }),
     );
-    expect(chat.latestPlan?.steps).toEqual([
-      { step: 'Inspect state', status: 'completed' },
-    ]);
+    expect(chat.latestPlan?.steps).toEqual([{ step: 'Inspect state', status: 'completed' }]);
     expect(chat.activeTurnId).toBe('turn-7');
     expect(chat).toMatchObject({
       acpUsage: { used: 120, size: 4096, cost: '$0.01' },
@@ -393,18 +558,20 @@ describe('chatMapping', () => {
       acpCommands: [{ name: 'test', description: 'Run tests' }],
       acpActive: { runId: 'run-7', generation: 7, toolIds: ['tool-live'] },
     });
-    expect(raw.acpSnapshot?.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: 'message-1',
-        parts: [
-          { type: 'text', text: 'Snapshot A' },
-          expect.objectContaining({ type: 'image' }),
-          { type: 'text', text: 'Snapshot B' },
-          expect.objectContaining({ type: 'resource' }),
-          expect.objectContaining({ type: 'audio' }),
-        ],
-      }),
-    ]));
+    expect(raw.acpSnapshot?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'message-1',
+          parts: [
+            { type: 'text', text: 'Snapshot A' },
+            expect.objectContaining({ type: 'image' }),
+            { type: 'text', text: 'Snapshot B' },
+            expect.objectContaining({ type: 'resource' }),
+            expect.objectContaining({ type: 'audio' }),
+          ],
+        }),
+      ]),
+    );
     expect(chat.messages[0]?.parts).toEqual(raw.acpSnapshot?.messages[0]?.parts);
     expect(raw.acpSnapshot?.tools[0]).toMatchObject({
       structuredContent: expect.arrayContaining([
@@ -434,15 +601,45 @@ describe('chatMapping', () => {
           { sequence: 6, kind: 'tool', canonicalId: 'tool' },
         ],
         messages: [
-          { id: 'message', role: 'agent', parts: [{ type: 'text', text: 'answer' }], truncated: true },
-          { id: 'reasoning', role: 'thought', parts: [{ type: 'text', text: 'thought' }], truncated: true },
+          {
+            id: 'message',
+            role: 'agent',
+            parts: [{ type: 'text', text: 'answer' }],
+            truncated: true,
+          },
+          {
+            id: 'reasoning',
+            role: 'thought',
+            parts: [{ type: 'text', text: 'thought' }],
+            truncated: true,
+          },
         ],
-        tools: [{ id: 'tool', kind: 'read', status: 'completed', title: 'Read', content: 'result', structuredContent: [], locations: [], truncated: true }],
+        tools: [
+          {
+            id: 'tool',
+            kind: 'read',
+            status: 'completed',
+            title: 'Read',
+            content: 'result',
+            structuredContent: [],
+            locations: [],
+            truncated: true,
+          },
+        ],
         messageCollection: { truncated: true, omittedCount: 2, revision: 7 },
         reasoningCollection: { truncated: true, omittedCount: 1, revision: 7 },
         toolCollection: { truncated: true, omittedCount: 3, revision: 7 },
-        continuation: { revision: 7, unavailableCount: 4, maxPageSize: 100, maxHistoryEntries: 1024, maxHistoryBytes: 4194304 },
-        plan: [], usage: {}, config: [], commands: [],
+        continuation: {
+          revision: 7,
+          unavailableCount: 4,
+          maxPageSize: 100,
+          maxHistoryEntries: 1024,
+          maxHistoryBytes: 4194304,
+        },
+        plan: [],
+        usage: {},
+        config: [],
+        commands: [],
         session: { agentId: 'agent', threadId: 'truncated-thread', historyReconstruction: false },
         active: { toolIds: [] },
       },
@@ -452,8 +649,12 @@ describe('chatMapping', () => {
     expect(raw.acpSnapshot?.tools[0]?.truncated).toBe(true);
     expect(chat.messages[0]?.content).toContain('Snapshot truncated');
     expect(chat.messages[0]?.content).toContain('older history unavailable: 4');
-    expect(chat.messages.find((message) => message.id === 'message')?.content).toContain('[message content truncated]');
-    expect(chat.messages.find((message) => message.id === 'tool:tool')?.content).toContain('[tool content truncated]');
+    expect(chat.messages.find((message) => message.id === 'message')?.content).toContain(
+      '[message content truncated]',
+    );
+    expect(chat.messages.find((message) => message.id === 'tool:tool')?.content).toContain(
+      '[tool content truncated]',
+    );
   });
 
   it('falls back to createdAt for missing updatedAt instead of using the current time', () => {
@@ -464,7 +665,7 @@ describe('chatMapping', () => {
         createdAt: 1700000000,
         status: { type: 'idle' },
         turns: [],
-      })
+      }),
     );
 
     expect(chat.createdAt).toBe('2023-11-14T22:13:20.000Z');
@@ -487,7 +688,7 @@ describe('chatMapping', () => {
             },
           },
         ],
-      })
+      }),
     );
 
     expect(chat.status).toBe('error');
@@ -510,7 +711,7 @@ describe('chatMapping', () => {
             },
           },
         ],
-      })
+      }),
     );
 
     expect(chat.status).toBe('error');
@@ -530,7 +731,7 @@ describe('chatMapping', () => {
             status: 'aborted',
           },
         ],
-      })
+      }),
     );
 
     expect(chat.status).toBe('error');
@@ -550,7 +751,7 @@ describe('chatMapping', () => {
             status: 'cancelled',
           },
         ],
-      })
+      }),
     );
 
     expect(chat.status).toBe('error');
@@ -579,7 +780,8 @@ describe('chatMapping', () => {
                 id: 'cmd1',
                 command: 'git status --short',
                 status: 'completed',
-                aggregatedOutput: ' M apps/mobile/src/api/ws.ts\n M apps/mobile/src/screens/MainScreen.tsx',
+                aggregatedOutput:
+                  ' M apps/mobile/src/api/ws.ts\n M apps/mobile/src/screens/MainScreen.tsx',
                 exitCode: 0,
               },
               {
@@ -590,7 +792,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(3);
@@ -641,7 +843,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     const toolMessages = chat.messages.filter((message) => message.role === 'tool');
@@ -695,13 +897,13 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     const toolMessages = chat.messages.filter((message) => message.role === 'tool');
     expect(toolMessages).toHaveLength(3);
     expect(toolMessages[0].content).toContain(
-      "• Ran `sed -n '1,80p' apps/mobile/src/api/chatMapping.ts`"
+      "• Ran `sed -n '1,80p' apps/mobile/src/api/chatMapping.ts`",
     );
     expect(toolMessages[0].content).toContain('cwd: /repo');
     expect(toolMessages[1].content).toContain('• Tool output `call_read_file`');
@@ -739,14 +941,14 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(2);
     expect(chat.messages[0].content).toContain('• Called tool `computer_use / click`');
     expect(chat.messages[0].content).toContain('Input:');
     expect(chat.messages[1].content).toContain(
-      '• Searched web for "React Native FlatList maintainVisibleContentPosition"'
+      '• Searched web for "React Native FlatList maintainVisibleContentPosition"',
     );
   });
 
@@ -778,14 +980,12 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain(
-      '• Applied file changes to MainScreen.tsx'
-    );
+    expect(chat.messages[0].content).toContain('• Applied file changes to MainScreen.tsx');
     expect(chat.messages[0].content).toContain('apps/mobile/src/screens/MainScreen.tsx');
   });
 
@@ -818,7 +1018,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages[0].content).toContain('OldName.tsx +1 more');
@@ -851,7 +1051,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(2);
@@ -880,12 +1080,14 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('activity');
-    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(COMPACTION_ACTIVITY_TYPE);
+    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(
+      COMPACTION_ACTIVITY_TYPE,
+    );
     if (chat.messages[0].role !== 'activity') {
       throw new Error('expected activity message');
     }
@@ -916,13 +1118,15 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('reasoning');
     expect(chat.messages[0].content).toContain('Checking how the bridge forwards live events.');
-    expect(chat.messages[0].content).toContain('Comparing persisted thread items with live deltas.');
+    expect(chat.messages[0].content).toContain(
+      'Comparing persisted thread items with live deltas.',
+    );
   });
 
   it('maps structured reasoning summary text into visible transcript details', () => {
@@ -950,14 +1154,14 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('reasoning');
     expect(chat.messages[0].content).toContain('• Reasoning');
     expect(chat.messages[0].content).toContain(
-      'Read the transcript mapper and checked tool item shapes.'
+      'Read the transcript mapper and checked tool item shapes.',
     );
   });
 
@@ -984,7 +1188,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1017,7 +1221,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1057,7 +1261,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.latestPlan).toEqual({
@@ -1106,14 +1310,13 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.latestPlan).toEqual({
       threadId: 'thr_plan_text',
       turnId: 'turn_plan_text',
-      explanation:
-        'Tighten the workflow-card transitions without broad MainScreen churn.',
+      explanation: 'Tighten the workflow-card transitions without broad MainScreen churn.',
       steps: [
         {
           step: 'Extract the card state resolver',
@@ -1167,7 +1370,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.latestPlan).toEqual({
@@ -1220,7 +1423,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.sourceKind).toBe('subAgentThreadSpawn');
@@ -1230,7 +1433,9 @@ describe('chatMapping', () => {
     expect(chat.agentRole).toBe('explorer');
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('activity');
-    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(SUBAGENT_ACTIVITY_TYPE);
+    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(
+      SUBAGENT_ACTIVITY_TYPE,
+    );
     if (chat.messages[0].role !== 'activity') {
       throw new Error('expected activity message');
     }
@@ -1270,7 +1475,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1315,7 +1520,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1362,7 +1567,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1408,16 +1613,14 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
     expect(chat.messages[0].role).toBe('tool');
     expect(chat.messages[0].content).toContain('• Called tool `computer-use / get_app_state`');
     expect(chat.messages[0].content).toContain('Computer Use state');
-    expect(chat.messages[0].content).toContain(
-      `[image: data:image/png;base64,${base64Image}]`
-    );
+    expect(chat.messages[0].content).toContain(`[image: data:image/png;base64,${base64Image}]`);
   });
 
   it('keeps imageview as a compact tool event with the viewed filename', () => {
@@ -1440,7 +1643,7 @@ describe('chatMapping', () => {
             ],
           },
         ],
-      })
+      }),
     );
 
     expect(chat.messages).toHaveLength(1);
@@ -1458,21 +1661,25 @@ describe('chatMapping', () => {
     expect(toPreview('  short\n preview ')).toBe('short preview');
     expect(toPreview('x'.repeat(181))).toBe(`${'x'.repeat(177)}...`);
     expect(toRawThread(null)).toEqual(expect.objectContaining({ id: undefined, turns: undefined }));
-    expect(toRawThread({
-      thread_name: 'snake title',
-      createdAt: ' 12 ',
-      updatedAt: 'bad',
-      agent_nickname: 'Atlas',
-      agent_role: 'worker',
-      turns: [null, 'bad', { id: 1, status: 2, items: [null, 'bad', { type: 'agentMessage' }] }],
-    })).toEqual(expect.objectContaining({
-      name: 'snake title',
-      createdAt: 12,
-      updatedAt: undefined,
-      agentNickname: 'Atlas',
-      agentRole: 'worker',
-      turns: [expect.objectContaining({ items: [{ type: 'agentMessage' }] })],
-    }));
+    expect(
+      toRawThread({
+        thread_name: 'snake title',
+        createdAt: ' 12 ',
+        updatedAt: 'bad',
+        agent_nickname: 'Atlas',
+        agent_role: 'worker',
+        turns: [null, 'bad', { id: 1, status: 2, items: [null, 'bad', { type: 'agentMessage' }] }],
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        name: 'snake title',
+        createdAt: 12,
+        updatedAt: undefined,
+        agentNickname: 'Atlas',
+        agentRole: 'worker',
+        turns: [expect.objectContaining({ items: [{ type: 'agentMessage' }] })],
+      }),
+    );
     expect(mapChatSummary({})).toBeNull();
     expect(() => mapChat({})).toThrow('chat id missing');
   });
@@ -1493,43 +1700,81 @@ describe('chatMapping', () => {
 
   it.each([
     ['string source', 'cli', { sourceKind: 'cli' }],
-    ['legacy source', { kind: 'subAgent', parent_thread_id: 'root', agent_depth: '2' }, { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 2 }],
+    [
+      'legacy source',
+      { kind: 'subAgent', parent_thread_id: 'root', agent_depth: '2' },
+      { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 2 },
+    ],
     ['review source', { subAgent: 'review' }, { sourceKind: 'subAgentReview' }],
     ['compact source', { subagent: 'compact' }, { sourceKind: 'subAgentCompact' }],
     ['memory source', { subAgent: 'memory_consolidation' }, { sourceKind: 'subAgentOther' }],
     ['other string source', { subAgent: 'worker' }, { sourceKind: 'subAgent' }],
     ['invalid tagged source', { subAgent: 3 }, { sourceKind: 'subAgent' }],
     ['other object source', { subAgent: { other: 'memory' } }, { sourceKind: 'subAgentOther' }],
-    ['object source', { subAgent: { parentThreadId: 'root', agentDepth: 3 } }, { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 3 }],
-    ['typed source', { type: 'subAgentReview', parentThreadId: 'root', depth: 4 }, { sourceKind: 'subAgentReview', parentThreadId: 'root', subAgentDepth: 4 }],
+    [
+      'object source',
+      { subAgent: { parentThreadId: 'root', agentDepth: 3 } },
+      { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 3 },
+    ],
+    [
+      'typed source',
+      { type: 'subAgentReview', parentThreadId: 'root', depth: 4 },
+      { sourceKind: 'subAgentReview', parentThreadId: 'root', subAgentDepth: 4 },
+    ],
     ['unknown source', { type: 'cli' }, { sourceKind: undefined }],
   ])('maps %s metadata', (_label, source, expected) => {
-    expect(mapChat(toRawThread({ id: 'thr_source', source, turns: [] }))).toEqual(expect.objectContaining(expected));
+    expect(mapChat(toRawThread({ id: 'thr_source', source, turns: [] }))).toEqual(
+      expect.objectContaining(expected),
+    );
   });
 
   it('maps tool failure, running, fallback, and no-detail variants', () => {
-    const chat = mapChat(toRawThread({
-      id: 'thr_tool_matrix',
-      turns: [{
-        status: 'completed',
-        items: [
-          { type: 'commandExecution', command: '', status: 'failed', exit_code: '2' },
-          { type: 'mcpToolCall', status: 'error', error: { message: 'mcp failed' } },
-          { type: 'mcpToolCall', server: 'srv', tool: 'read', status: 'failed', error: 'plain failure' },
-          { type: 'function_call', name: 'functions.exec_command', status: 'running', args: { command: ['npm', '', 'test'] } },
-          { type: 'function_call', name: 'mcp__srv__tool__part', status: 'failed', args: { value: 1 } },
-          { type: 'function_call', name: 'generic', status: 'running', arguments: '{bad json' },
-          { type: 'function_call_output', output: { ok: true } },
-          { type: 'function_call_output', output: null },
-          { type: 'fileChange', status: 'failed', changes: ['a\\b.ts', { filePath: 'a/b.ts' }, { file_path: 'c.ts' }, {}, ''] },
-          { type: 'imageView', path: '' },
-          { type: 'enteredReviewMode' },
-          { type: 'exitedReviewMode' },
-          { type: 'unknown' },
-          {},
+    const chat = mapChat(
+      toRawThread({
+        id: 'thr_tool_matrix',
+        turns: [
+          {
+            status: 'completed',
+            items: [
+              { type: 'commandExecution', command: '', status: 'failed', exit_code: '2' },
+              { type: 'mcpToolCall', status: 'error', error: { message: 'mcp failed' } },
+              {
+                type: 'mcpToolCall',
+                server: 'srv',
+                tool: 'read',
+                status: 'failed',
+                error: 'plain failure',
+              },
+              {
+                type: 'function_call',
+                name: 'functions.exec_command',
+                status: 'running',
+                args: { command: ['npm', '', 'test'] },
+              },
+              {
+                type: 'function_call',
+                name: 'mcp__srv__tool__part',
+                status: 'failed',
+                args: { value: 1 },
+              },
+              { type: 'function_call', name: 'generic', status: 'running', arguments: '{bad json' },
+              { type: 'function_call_output', output: { ok: true } },
+              { type: 'function_call_output', output: null },
+              {
+                type: 'fileChange',
+                status: 'failed',
+                changes: ['a\\b.ts', { filePath: 'a/b.ts' }, { file_path: 'c.ts' }, {}, ''],
+              },
+              { type: 'imageView', path: '' },
+              { type: 'enteredReviewMode' },
+              { type: 'exitedReviewMode' },
+              { type: 'unknown' },
+              {},
+            ],
+          },
         ],
-      }],
-    }));
+      }),
+    );
 
     const text = chat.messages.map((message) => message.content).join('\n');
     expect(text).toContain('Command failed `command`');
@@ -1555,10 +1800,12 @@ describe('chatMapping', () => {
     ['other failure', 'other', 'failed', 'Sub-agent action failed'],
     ['other success', 'other', 'complete', 'Updated sub-agent'],
   ])('maps %s collaboration event', (_label, tool, status, expected) => {
-    const chat = mapChat(toRawThread({
-      id: 'thr_collab_matrix',
-      turns: [{ items: [{ type: 'collabToolCall', tool, status }] }],
-    }));
+    const chat = mapChat(
+      toRawThread({
+        id: 'thr_collab_matrix',
+        turns: [{ items: [{ type: 'collabToolCall', tool, status }] }],
+      }),
+    );
     expect(chat.messages[0].role).toBe('activity');
     if (chat.messages[0].role !== 'activity') {
       throw new Error('expected activity message');
@@ -1568,31 +1815,62 @@ describe('chatMapping', () => {
   });
 
   it('maps web actions and file changes with empty and multiple targets', () => {
-    const chat = mapChat(toRawThread({
-      id: 'thr_web_files',
-      turns: [{ items: [
-        { type: 'webSearch', action: { type: 'open_page', url: 'https://example.com' } },
-        { type: 'webSearch', query: 'needle', action: { type: 'find_in_page', url: 'https://example.com', pattern: 'target' } },
-        { type: 'fileChange', changes: [] },
-        { type: 'fileChange', changes: [{ path: 'one.ts' }, { path: 'two.ts' }] },
-      ] }],
-    }));
-    expect(chat.messages.map((message) => message.content).join('\n')).toContain('https://example.com | pattern: target');
+    const chat = mapChat(
+      toRawThread({
+        id: 'thr_web_files',
+        turns: [
+          {
+            items: [
+              { type: 'webSearch', action: { type: 'open_page', url: 'https://example.com' } },
+              {
+                type: 'webSearch',
+                query: 'needle',
+                action: { type: 'find_in_page', url: 'https://example.com', pattern: 'target' },
+              },
+              { type: 'fileChange', changes: [] },
+              { type: 'fileChange', changes: [{ path: 'one.ts' }, { path: 'two.ts' }] },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(chat.messages.map((message) => message.content).join('\n')).toContain(
+      'https://example.com | pattern: target',
+    );
     expect(chat.messages.map((message) => message.content).join('\n')).toContain('one.ts +1 more');
   });
 
   it('rejects malformed plans and maps alternate steps and statuses', () => {
-    const chat = mapChat(toRawThread({
-      id: 'thr_plan_edges',
-      turns: [
-        { id: 'running', status: 'pending', items: [
-          null,
-          { type: 'plan' },
-          { type: 'plan', turn_id: 'alternate', steps: [null, {}, { step: 'Do it', status: 'complete' }, { step: 'Wait', status: 'pending' }] },
-        ] },
-        { id: 'latest', status: 'completed', items: [{ type: 'plan', id: 'text-plan', text: 'not a plan' }] },
-      ],
-    }));
+    const chat = mapChat(
+      toRawThread({
+        id: 'thr_plan_edges',
+        turns: [
+          {
+            id: 'running',
+            status: 'pending',
+            items: [
+              null,
+              { type: 'plan' },
+              {
+                type: 'plan',
+                turn_id: 'alternate',
+                steps: [
+                  null,
+                  {},
+                  { step: 'Do it', status: 'complete' },
+                  { step: 'Wait', status: 'pending' },
+                ],
+              },
+            ],
+          },
+          {
+            id: 'latest',
+            status: 'completed',
+            items: [{ type: 'plan', id: 'text-plan', text: 'not a plan' }],
+          },
+        ],
+      }),
+    );
     expect(chat.latestPlan?.turnId).toBe('alternate');
     expect(chat.latestPlan?.steps.map((step) => step.status)).toEqual(['completed', 'pending']);
     expect(chat.latestTurnPlan).toBeNull();
@@ -1601,22 +1879,40 @@ describe('chatMapping', () => {
   });
 
   it('maps structured content aliases and ignores malformed entries', () => {
-    const chat = mapChat(toRawThread({
-      id: 'thr_content_edges',
-      turns: [{ items: [
-        { type: 'userMessage', content: [] },
-        { type: 'userMessage', content: [{ type: 'text', data: { text: 'nested text' } }, 4] },
-        { type: 'agentMessage', text: 'fallback text' },
-        { type: 'reasoning', content: [{ type: 'output_text', text: 'structured reasoning' }] },
-        { type: 'reasoning', summary: [{ type: 'summary_text', data: { text: 'nested summary' } }] },
-        { type: 'agentMessage', content: [
-          { type: 'image', data: { data: 'abc', mime_type: 'image/png' } },
-          { type: 'localImage', data: { url: 'https://example.com/image.png' } },
-          { type: 'mention', data: { path: 'nested.ts' } },
-          { type: 'unsupported' },
-        ] },
-      ] }],
-    }));
+    const chat = mapChat(
+      toRawThread({
+        id: 'thr_content_edges',
+        turns: [
+          {
+            items: [
+              { type: 'userMessage', content: [] },
+              {
+                type: 'userMessage',
+                content: [{ type: 'text', data: { text: 'nested text' } }, 4],
+              },
+              { type: 'agentMessage', text: 'fallback text' },
+              {
+                type: 'reasoning',
+                content: [{ type: 'output_text', text: 'structured reasoning' }],
+              },
+              {
+                type: 'reasoning',
+                summary: [{ type: 'summary_text', data: { text: 'nested summary' } }],
+              },
+              {
+                type: 'agentMessage',
+                content: [
+                  { type: 'image', data: { data: 'abc', mime_type: 'image/png' } },
+                  { type: 'localImage', data: { url: 'https://example.com/image.png' } },
+                  { type: 'mention', data: { path: 'nested.ts' } },
+                  { type: 'unsupported' },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
     const text = chat.messages.map((message) => message.content).join('\n');
     expect(text).toContain('nested text');
     expect(text).toContain('fallback text');
@@ -1629,14 +1925,22 @@ describe('chatMapping', () => {
 
   describe('chat mapping fallbacks and normalization', () => {
     it('maps sparse and invalid raw thread payloads through DTO fallbacks', () => {
-      expect(toRawThread(null)).toEqual(expect.objectContaining({
-        id: undefined,
-        turns: undefined,
-        acpSnapshot: undefined,
-      }));
-      expect(toRawThread({ acpSnapshot: { version: 3, session: {}, active: {} } }).acpSnapshot).toBeUndefined();
-      expect(toRawThread({ acpSnapshot: { version: 2, session: null, active: {} } }).acpSnapshot).toBeUndefined();
-      expect(toRawThread({ acpSnapshot: { version: 2, session: {}, active: null } }).acpSnapshot).toBeUndefined();
+      expect(toRawThread(null)).toEqual(
+        expect.objectContaining({
+          id: undefined,
+          turns: undefined,
+          acpSnapshot: undefined,
+        }),
+      );
+      expect(
+        toRawThread({ acpSnapshot: { version: 3, session: {}, active: {} } }).acpSnapshot,
+      ).toBeUndefined();
+      expect(
+        toRawThread({ acpSnapshot: { version: 2, session: null, active: {} } }).acpSnapshot,
+      ).toBeUndefined();
+      expect(
+        toRawThread({ acpSnapshot: { version: 2, session: {}, active: null } }).acpSnapshot,
+      ).toBeUndefined();
 
       const raw = toRawThread({
         id: 'sparse',
@@ -1663,7 +1967,13 @@ describe('chatMapping', () => {
         usage: { used: null, size: null, cost: null },
         config: [],
         commands: [],
-        session: { agentId: '', threadId: '', title: null, updatedAt: null, historyReconstruction: false },
+        session: {
+          agentId: '',
+          threadId: '',
+          title: null,
+          updatedAt: null,
+          historyReconstruction: false,
+        },
         active: { runId: null, sourceTurnId: null, generation: null, toolIds: [] },
       });
       expect(mapChatSummary(raw)).toMatchObject({
@@ -1677,31 +1987,59 @@ describe('chatMapping', () => {
 
     it('covers status aliases, title priorities, and source union fallbacks', () => {
       const statusCases = [
-        ['inProgress', 'running'], ['queued', 'running'], ['pending', 'running'],
-        ['failed', 'error'], ['error', 'error'],
+        ['inProgress', 'running'],
+        ['queued', 'running'],
+        ['pending', 'running'],
+        ['failed', 'error'],
+        ['error', 'error'],
       ] as const;
       statusCases.forEach(([status, expected]) => {
         expect(mapChatSummary({ id: status, status })?.status).toBe(expected);
       });
       const turnCases = [
-        ['running', 'running'], ['active', 'running'], ['queued', 'running'],
-        ['interrupted', 'error'], ['error', 'error'], ['cancelled', 'error'],
-        ['completed', 'complete'], ['success', 'complete'],
+        ['running', 'running'],
+        ['active', 'running'],
+        ['queued', 'running'],
+        ['interrupted', 'error'],
+        ['error', 'error'],
+        ['cancelled', 'error'],
+        ['completed', 'complete'],
+        ['success', 'complete'],
       ] as const;
       turnCases.forEach(([status, expected]) => {
-        expect(mapChatSummary({ id: `turn-${status}`, turns: [{ status }] })?.status).toBe(expected);
+        expect(mapChatSummary({ id: `turn-${status}`, turns: [{ status }] })?.status).toBe(
+          expected,
+        );
       });
-      expect(mapChatSummary({ id: 'preview', preview: 'preview title' })?.title).toBe('preview title');
-      expect(mapChatSummary({
-        id: 'user-title', turns: [{ items: [{ type: 'userMessage', content: [{ type: 'text', text: 'first user' }] }] }],
-      })?.title).toBe('first user');
+      expect(mapChatSummary({ id: 'preview', preview: 'preview title' })?.title).toBe(
+        'preview title',
+      );
+      expect(
+        mapChatSummary({
+          id: 'user-title',
+          turns: [
+            { items: [{ type: 'userMessage', content: [{ type: 'text', text: 'first user' }] }] },
+          ],
+        })?.title,
+      ).toBe('first user');
       expect(mapChatSummary({ id: 'abcdefghijk' })?.title).toBe('Chat abcdefgh');
       expect(mapChatSummary({ id: 'source-invalid', source: 3 })?.sourceKind).toBeUndefined();
-      expect(mapChatSummary({ id: 'source-subagent', source: { subAgent: 4 } })?.sourceKind).toBe('subAgent');
-      expect(mapChatSummary({ id: 'source-object', source: { subAgent: { parent_thread_id: 'p', agentDepth: '4' } } })).toMatchObject({
-        sourceKind: 'subAgent', parentThreadId: 'p', subAgentDepth: 4,
+      expect(mapChatSummary({ id: 'source-subagent', source: { subAgent: 4 } })?.sourceKind).toBe(
+        'subAgent',
+      );
+      expect(
+        mapChatSummary({
+          id: 'source-object',
+          source: { subAgent: { parent_thread_id: 'p', agentDepth: '4' } },
+        }),
+      ).toMatchObject({
+        sourceKind: 'subAgent',
+        parentThreadId: 'p',
+        subAgentDepth: 4,
       });
-      expect(mapChatSummary({ id: 'source-none', source: { type: 'cli' } })?.sourceKind).toBeUndefined();
+      expect(
+        mapChatSummary({ id: 'source-none', source: { type: 'cli' } })?.sourceKind,
+      ).toBeUndefined();
     });
 
     it('maps alternate primitive, timestamp, lifecycle, title, source, and error shapes', () => {
@@ -1720,36 +2058,63 @@ describe('chatMapping', () => {
         { status: 'unknown', turns: [{ status: 'canceled' }], expected: 'error' },
       ];
       cases.forEach(({ status, turns, expected }, index) => {
-        expect(mapChatSummary(toRawThread({
-          id: `status-${index}`,
-          thread_name: index === 0 ? 'alternate title' : undefined,
-          createdAt: index === 0 ? '1700000000' : 1700000000,
-          status,
-          turns,
-        }))?.status).toBe(expected);
+        expect(
+          mapChatSummary(
+            toRawThread({
+              id: `status-${index}`,
+              thread_name: index === 0 ? 'alternate title' : undefined,
+              createdAt: index === 0 ? '1700000000' : 1700000000,
+              status,
+              turns,
+            }),
+          )?.status,
+        ).toBe(expected);
       });
 
       const summaries = [
-        toRawThread({ id: 'legacy', source: { kind: 'subAgentLegacy', parent_thread_id: 'parent', agent_depth: '2' } }),
+        toRawThread({
+          id: 'legacy',
+          source: { kind: 'subAgentLegacy', parent_thread_id: 'parent', agent_depth: '2' },
+        }),
         toRawThread({ id: 'review', source: { subAgent: 'review' } }),
         toRawThread({ id: 'compact', source: { subagent: 'compact' } }),
         toRawThread({ id: 'memory', source: { subAgent: 'memory_consolidation' } }),
-        toRawThread({ id: 'spawn', source: { subAgent: { thread_spawn: { parent_thread_id: 'p', depth: 3 } } } }),
+        toRawThread({
+          id: 'spawn',
+          source: { subAgent: { thread_spawn: { parent_thread_id: 'p', depth: 3 } } },
+        }),
         toRawThread({ id: 'other', source: { subAgent: { other: 'kind' } } }),
         toRawThread({ id: 'typed', source: { type: 'subAgentCustom', parentThreadId: 'p' } }),
         toRawThread({ id: 'plain', source: 'cli' }),
       ].map((raw) => mapChatSummary(raw));
       expect(summaries.map((summary) => summary?.sourceKind)).toEqual([
-        'subAgentLegacy', 'subAgentReview', 'subAgentCompact', 'subAgentOther',
-        'subAgentThreadSpawn', 'subAgentOther', 'subAgentCustom', 'cli',
+        'subAgentLegacy',
+        'subAgentReview',
+        'subAgentCompact',
+        'subAgentOther',
+        'subAgentThreadSpawn',
+        'subAgentOther',
+        'subAgentCustom',
+        'cli',
       ]);
 
-      const errorFields = ['message', 'errorMessage', 'error_message', 'detail', 'details', 'reason', 'description', 'stderr'];
+      const errorFields = [
+        'message',
+        'errorMessage',
+        'error_message',
+        'detail',
+        'details',
+        'reason',
+        'description',
+        'stderr',
+      ];
       errorFields.forEach((field) => {
-        const summary = mapChatSummary(toRawThread({
-          id: `error-${field}`,
-          turns: [{ status: 'failed', [field]: { error: { message: `${field} failure` } } }],
-        }));
+        const summary = mapChatSummary(
+          toRawThread({
+            id: `error-${field}`,
+            turns: [{ status: 'failed', [field]: { error: { message: `${field} failure` } } }],
+          }),
+        );
         expect(summary?.lastError).toBe(`${field} failure`);
       });
     });
@@ -1762,8 +2127,17 @@ describe('chatMapping', () => {
           messages: [
             null,
             { id: '', role: 'agent' },
-            { id: 'user', role: 'user', parts: [{ type: 'text', text: 'question' }, { type: 'bad' }] },
-            { id: 'thought', role: 'thought', parts: [{ type: 'text', text: 'reason' }], truncated: true },
+            {
+              id: 'user',
+              role: 'user',
+              parts: [{ type: 'text', text: 'question' }, { type: 'bad' }],
+            },
+            {
+              id: 'thought',
+              role: 'thought',
+              parts: [{ type: 'text', text: 'reason' }],
+              truncated: true,
+            },
             { id: 'empty', role: 'agent', parts: [] },
           ],
           timeline: [
@@ -1777,11 +2151,27 @@ describe('chatMapping', () => {
           tools: [
             null,
             { id: '' },
-            { id: 'tool', generation: '4', kind: 'read', status: 'complete', title: '', content: '', structuredContent: [], locations: [], truncated: true },
+            {
+              id: 'tool',
+              generation: '4',
+              kind: 'read',
+              status: 'complete',
+              title: '',
+              content: '',
+              structuredContent: [],
+              locations: [],
+              truncated: true,
+            },
           ],
           messageCollection: { truncated: false, omittedCount: '2', revision: '7' },
           reasoningCollection: { revision: 'bad' },
-          continuation: { revision: '7', unavailableCount: '2', maxPageSize: '50', maxHistoryEntries: 100, maxHistoryBytes: 200 },
+          continuation: {
+            revision: '7',
+            unavailableCount: '2',
+            maxPageSize: '50',
+            maxHistoryEntries: 100,
+            maxHistoryBytes: 200,
+          },
           plan: [
             null,
             { content: '', priority: '', status: '' },
@@ -1793,8 +2183,19 @@ describe('chatMapping', () => {
           mode: 2,
           config: [null, { id: '', value: '' }, { id: 'model', value: 'x' }],
           commands: [null, { name: '', description: '' }, { name: 'go', description: 3 }],
-          session: { agentId: 'agent', threadId: 'snapshot', title: 4, updatedAt: null, historyReconstruction: true },
-          active: { runId: '', sourceTurnId: null, generation: '4', toolIds: [' one ', '', 3, 'two'] },
+          session: {
+            agentId: 'agent',
+            threadId: 'snapshot',
+            title: 4,
+            updatedAt: null,
+            historyReconstruction: true,
+          },
+          active: {
+            runId: '',
+            sourceTurnId: null,
+            generation: '4',
+            toolIds: [' one ', '', 3, 'two'],
+          },
         },
       });
       const chat = mapChat(raw);
@@ -1810,7 +2211,9 @@ describe('chatMapping', () => {
         'user',
       ]);
       expect(chat.latestPlan?.steps.map((step) => step.status)).toEqual([
-        'completed', 'inProgress', 'pending',
+        'completed',
+        'inProgress',
+        'pending',
       ]);
       expect(chat.latestTurnStatus).toBe('completed');
 
@@ -1819,67 +2222,149 @@ describe('chatMapping', () => {
         createdAt: 1700000000,
         acpSnapshot: makeSnapshot({
           messages: [
-            { id: 'agent', role: 'agent', parts: [{ type: 'text', text: 'answer' }], truncated: false },
-            { id: 'thought', role: 'thought', parts: [{ type: 'text', text: 'reason' }], truncated: false },
+            {
+              id: 'agent',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'answer' }],
+              truncated: false,
+            },
+            {
+              id: 'thought',
+              role: 'thought',
+              parts: [{ type: 'text', text: 'reason' }],
+              truncated: false,
+            },
           ],
-          tools: [{ id: 'tool', kind: '', status: '', title: '', content: '', structuredContent: [], locations: [], truncated: false }],
+          tools: [
+            {
+              id: 'tool',
+              kind: '',
+              status: '',
+              title: '',
+              content: '',
+              structuredContent: [],
+              locations: [],
+              truncated: false,
+            },
+          ],
           active: { runId: 'run', sourceTurnId: null, toolIds: [] },
         }),
       });
-      expect(withoutTimeline.messages.map((message) => message.id)).toEqual(['agent', 'thought', 'tool:tool']);
+      expect(withoutTimeline.messages.map((message) => message.id)).toEqual([
+        'agent',
+        'thought',
+        'tool:tool',
+      ]);
       expect(withoutTimeline.latestTurnStatus).toBe('running');
     });
 
     it('maps legacy plans, structured messages, and every tool timeline family', () => {
-      const chat = mapChat(toRawThread({
-        id: 'legacy-items',
-        createdAt: 1700000000,
-        turns: [
-          {
-            id: 'turn-active',
-            status: 'in_progress',
-            items: [
-              null,
-              { type: 'userMessage', content: [{ type: 'text', text: '' }] },
-              { type: 'userMessage', content: [{ type: 'text', text: 'hello' }, { type: 'image', imageUrl: 'image.png' }, { type: 'localImage', path: '/tmp/local.png' }, { type: 'mention', path: 'src/a.ts' }] },
-              { type: 'agentMessage', content: [{ type: 'output_text', data: { text: 'answer' } }] },
-              { type: 'plan', id: 'plan', text: 'Implementation Plan\nSummary\nExplain it\n1. First\n2) Second' },
-              { type: 'reasoning', content: [{ type: 'summary_text', text: 'thought' }] },
-              { type: 'commandExecution', command: '', status: 'failed', aggregated_output: '\u001b[31mfailed\u001b[0m', exit_code: 2 },
-              { type: 'mcpToolCall', status: 'failed', error: { message: 'nope' } },
-              { type: 'function_call', name: 'exec_command', status: 'running', args: { command: ['npm', 'test'] } },
-              { type: 'function_call', name: 'mcp__server__tool__part', status: 'running', arguments: { value: true } },
-              { type: 'function_call', name: 'plain', status: 'failed', arguments: '{bad' },
-              { type: 'function_call_output', output: { ok: true } },
-              { type: 'collabToolCall', tool: 'spawnAgent', status: 'completed', receiver_thread_ids: ['child', 'child'], sender_thread_id: 'parent', agent_status: 'done' },
-              { type: 'collabToolCall', tool: 'sendInput', status: 'failed', receiverThreadId: 'child' },
-              { type: 'collabToolCall', tool: 'wait', status: 'failed' },
-              { type: 'collabToolCall', tool: 'closeAgent', status: 'completed' },
-              { type: 'collabToolCall', tool: 'other', status: 'failed' },
-              { type: 'webSearch', action: { type: 'openPage', url: 'https://example.com' } },
-              { type: 'webSearch', action: { type: 'findInPage', url: 'https://example.com', pattern: 'needle' } },
-              { type: 'fileChange', status: 'failed', changes: ['a\\b.ts', { file_path: 'c.ts' }, { filePath: 'c.ts' }] },
-              { type: 'imageView', path: '/tmp/image.png' },
-              { type: 'enteredReviewMode' },
-              { type: 'exitedReviewMode' },
-              { type: 'contextCompaction' },
-            ],
-          },
-        ],
-      }));
+      const chat = mapChat(
+        toRawThread({
+          id: 'legacy-items',
+          createdAt: 1700000000,
+          turns: [
+            {
+              id: 'turn-active',
+              status: 'in_progress',
+              items: [
+                null,
+                { type: 'userMessage', content: [{ type: 'text', text: '' }] },
+                {
+                  type: 'userMessage',
+                  content: [
+                    { type: 'text', text: 'hello' },
+                    { type: 'image', imageUrl: 'image.png' },
+                    { type: 'localImage', path: '/tmp/local.png' },
+                    { type: 'mention', path: 'src/a.ts' },
+                  ],
+                },
+                {
+                  type: 'agentMessage',
+                  content: [{ type: 'output_text', data: { text: 'answer' } }],
+                },
+                {
+                  type: 'plan',
+                  id: 'plan',
+                  text: 'Implementation Plan\nSummary\nExplain it\n1. First\n2) Second',
+                },
+                { type: 'reasoning', content: [{ type: 'summary_text', text: 'thought' }] },
+                {
+                  type: 'commandExecution',
+                  command: '',
+                  status: 'failed',
+                  aggregated_output: '\u001b[31mfailed\u001b[0m',
+                  exit_code: 2,
+                },
+                { type: 'mcpToolCall', status: 'failed', error: { message: 'nope' } },
+                {
+                  type: 'function_call',
+                  name: 'exec_command',
+                  status: 'running',
+                  args: { command: ['npm', 'test'] },
+                },
+                {
+                  type: 'function_call',
+                  name: 'mcp__server__tool__part',
+                  status: 'running',
+                  arguments: { value: true },
+                },
+                { type: 'function_call', name: 'plain', status: 'failed', arguments: '{bad' },
+                { type: 'function_call_output', output: { ok: true } },
+                {
+                  type: 'collabToolCall',
+                  tool: 'spawnAgent',
+                  status: 'completed',
+                  receiver_thread_ids: ['child', 'child'],
+                  sender_thread_id: 'parent',
+                  agent_status: 'done',
+                },
+                {
+                  type: 'collabToolCall',
+                  tool: 'sendInput',
+                  status: 'failed',
+                  receiverThreadId: 'child',
+                },
+                { type: 'collabToolCall', tool: 'wait', status: 'failed' },
+                { type: 'collabToolCall', tool: 'closeAgent', status: 'completed' },
+                { type: 'collabToolCall', tool: 'other', status: 'failed' },
+                { type: 'webSearch', action: { type: 'openPage', url: 'https://example.com' } },
+                {
+                  type: 'webSearch',
+                  action: { type: 'findInPage', url: 'https://example.com', pattern: 'needle' },
+                },
+                {
+                  type: 'fileChange',
+                  status: 'failed',
+                  changes: ['a\\b.ts', { file_path: 'c.ts' }, { filePath: 'c.ts' }],
+                },
+                { type: 'imageView', path: '/tmp/image.png' },
+                { type: 'enteredReviewMode' },
+                { type: 'exitedReviewMode' },
+                { type: 'contextCompaction' },
+              ],
+            },
+          ],
+        }),
+      );
       expect(chat.status).toBe('running');
       expect(chat.activeTurnId).toBe('turn-active');
       expect(chat.latestPlan).toMatchObject({
         explanation: 'Explain it',
-        steps: [{ step: 'First', status: 'pending' }, { step: 'Second', status: 'pending' }],
+        steps: [
+          { step: 'First', status: 'pending' },
+          { step: 'Second', status: 'pending' },
+        ],
       });
-      expect(chat.messages.map((message) => message.role)).toEqual(expect.arrayContaining([
-        'reasoning', 'activity',
-      ]));
-      expect(chat.messages.map((message) => (
-        message.role === 'activity' ? message.content.text : message.content
-      )).join('\n')).toMatch(
-        /Command failed|Tool failed|Running command|Calling tool|Spawned sub-agent|Searched web|Viewed image|Entered review mode|Compacted/
+      expect(chat.messages.map((message) => message.role)).toEqual(
+        expect.arrayContaining(['reasoning', 'activity']),
+      );
+      expect(
+        chat.messages
+          .map((message) => (message.role === 'activity' ? message.content.text : message.content))
+          .join('\n'),
+      ).toMatch(
+        /Command failed|Tool failed|Running command|Calling tool|Spawned sub-agent|Searched web|Viewed image|Entered review mode|Compacted/,
       );
     });
 
@@ -1887,36 +2372,90 @@ describe('chatMapping', () => {
       const chat = mapChat({
         id: 'alternate-tools',
         createdAt: 1700000000,
-        turns: [{
-          id: 'turn', status: 'completed', items: malformedItems([
-            { type: 'plan', turn_id: 'override', explanation: 'explained', steps: [null, { step: '', status: 'pending' }, { step: 'pending', status: 'pending' }, { step: 'doing', status: 'in-progress' }, { step: 'done', status: 'complete' }] },
-            { type: 'reasoning', text: 'direct thought' },
-            { type: 'reasoning', summary: ['summary one', '', 3, 'summary two'] },
-            { type: 'commandExecution', command: 'true', status: 'completed', exitCode: 0 },
-            { type: 'mcpToolCall', server: 'server', tool: 'tool', status: 'completed', result: 'ok' },
-            { type: 'mcpToolCall', server: 'server', tool: 'tool', status: 'error', error: 'failure' },
-            { type: 'function_call', function_name: 'exec_command', status: 'error', input: 'echo bad' },
-            { type: 'function_call', function: 'search_query', args: { q: 'query' } },
-            { type: 'function_call', tool: 'image_query', args: { image_query: [{ query: 'image' }] } },
-            { type: 'custom_tool_call', name: 'apply_patch', input: '*** Add File: a.ts\n*** Delete File: b.ts' },
-            { type: 'custom_tool_call', name: 'tool', arguments: { content: [{ type: 'text', text: 'input' }] } },
-            { type: 'function_call_output', callId: 'call', output: '' },
-            { type: 'collabToolCall', tool: 'spawnAgent', status: 'failed', new_thread_id: 'child' },
-            { type: 'collabToolCall', tool: 'sendInput', status: 'completed', prompt: 'go' },
-            { type: 'collabToolCall', tool: 'wait', status: 'completed' },
-            { type: 'collabToolCall', tool: 'closeAgent', status: 'failed' },
-            { type: 'collabToolCall', tool: 'other', status: 'completed' },
-            { type: 'webSearch' },
-            { type: 'fileChange', status: 'completed', changes: [] },
-            { type: 'fileChange', status: 'completed', changes: [{ path: 'a.ts' }] },
-            { type: 'fileChange', status: 'completed', changes: [{ path: 'a.ts' }, { path: 'b.ts' }] },
-            { type: 'imageView' },
-            { type: 'unknown' },
-          ]),
-        }],
+        turns: [
+          {
+            id: 'turn',
+            status: 'completed',
+            items: malformedItems([
+              {
+                type: 'plan',
+                turn_id: 'override',
+                explanation: 'explained',
+                steps: [
+                  null,
+                  { step: '', status: 'pending' },
+                  { step: 'pending', status: 'pending' },
+                  { step: 'doing', status: 'in-progress' },
+                  { step: 'done', status: 'complete' },
+                ],
+              },
+              { type: 'reasoning', text: 'direct thought' },
+              { type: 'reasoning', summary: ['summary one', '', 3, 'summary two'] },
+              { type: 'commandExecution', command: 'true', status: 'completed', exitCode: 0 },
+              {
+                type: 'mcpToolCall',
+                server: 'server',
+                tool: 'tool',
+                status: 'completed',
+                result: 'ok',
+              },
+              {
+                type: 'mcpToolCall',
+                server: 'server',
+                tool: 'tool',
+                status: 'error',
+                error: 'failure',
+              },
+              {
+                type: 'function_call',
+                function_name: 'exec_command',
+                status: 'error',
+                input: 'echo bad',
+              },
+              { type: 'function_call', function: 'search_query', args: { q: 'query' } },
+              {
+                type: 'function_call',
+                tool: 'image_query',
+                args: { image_query: [{ query: 'image' }] },
+              },
+              {
+                type: 'custom_tool_call',
+                name: 'apply_patch',
+                input: '*** Add File: a.ts\n*** Delete File: b.ts',
+              },
+              {
+                type: 'custom_tool_call',
+                name: 'tool',
+                arguments: { content: [{ type: 'text', text: 'input' }] },
+              },
+              { type: 'function_call_output', callId: 'call', output: '' },
+              {
+                type: 'collabToolCall',
+                tool: 'spawnAgent',
+                status: 'failed',
+                new_thread_id: 'child',
+              },
+              { type: 'collabToolCall', tool: 'sendInput', status: 'completed', prompt: 'go' },
+              { type: 'collabToolCall', tool: 'wait', status: 'completed' },
+              { type: 'collabToolCall', tool: 'closeAgent', status: 'failed' },
+              { type: 'collabToolCall', tool: 'other', status: 'completed' },
+              { type: 'webSearch' },
+              { type: 'fileChange', status: 'completed', changes: [] },
+              { type: 'fileChange', status: 'completed', changes: [{ path: 'a.ts' }] },
+              {
+                type: 'fileChange',
+                status: 'completed',
+                changes: [{ path: 'a.ts' }, { path: 'b.ts' }],
+              },
+              { type: 'imageView' },
+              { type: 'unknown' },
+            ]),
+          },
+        ],
       });
       expect(chat.latestPlan).toMatchObject({
-        turnId: 'override', explanation: 'explained',
+        turnId: 'override',
+        explanation: 'explained',
         steps: [
           { step: 'pending', status: 'pending' },
           { step: 'doing', status: 'inProgress' },
@@ -1924,7 +2463,7 @@ describe('chatMapping', () => {
         ],
       });
       expect(chat.messages.map((message) => message.content).join('\n')).toMatch(
-        /Ran `true`|Called tool|Command failed|Searched web|Applied file changes|Sub-agent spawn failed/
+        /Ran `true`|Called tool|Command failed|Searched web|Applied file changes|Sub-agent spawn failed/,
       );
     });
 
@@ -1951,7 +2490,12 @@ describe('chatMapping', () => {
         tools: [expect.objectContaining({ kind: '', status: '', title: '', content: '' })],
         plan: [],
         messageCollection: expect.objectContaining({ omittedCount: 0 }),
-        continuation: expect.objectContaining({ unavailableCount: 0, maxPageSize: 0, maxHistoryEntries: 0, maxHistoryBytes: 0 }),
+        continuation: expect.objectContaining({
+          unavailableCount: 0,
+          maxPageSize: 0,
+          maxHistoryEntries: 0,
+          maxHistoryBytes: 0,
+        }),
         config: [{ id: 'config', value: '' }],
         commands: [{ name: 'command', description: '' }],
       });
@@ -1960,7 +2504,12 @@ describe('chatMapping', () => {
         { id: 'no-turn', turns: [{ items: [{ type: 'plan', explanation: 'x' }] }] },
         { id: 'blank-plan', turns: [{ id: 'turn', items: [{ type: 'plan', text: '   ' }] }] },
         { id: 'header-only', turns: [{ id: 'turn', items: [{ type: 'plan', text: 'Summary' }] }] },
-        { id: 'proposed', turns: [{ id: 'turn', items: [{ type: 'plan', text: 'Proposed Plan\nSummary\nDetails only' }] }] },
+        {
+          id: 'proposed',
+          turns: [
+            { id: 'turn', items: [{ type: 'plan', text: 'Proposed Plan\nSummary\nDetails only' }] },
+          ],
+        },
         { id: 'number-only', turns: [{ id: 'turn', items: [{ type: 'plan', text: '1. Step' }] }] },
       ];
       const plans = planCases.map((value) => mapChat(value).latestPlan);
@@ -1972,58 +2521,110 @@ describe('chatMapping', () => {
 
       const structured = mapChat({
         id: 'structured',
-        turns: [{ id: 'turn', items: malformedItems([
-          { type: 'userMessage', content: [null, 'plain', { type: 'text', text: 3 }, { type: 'inputImage', data: { data: 'YQ==', mime_type: 'image/png' } }, { type: 'localImage', data: { url: 'remote.png' } }, { type: 'mention', data: { path: 'src/a.ts' } }] },
-          { type: 'agentMessage', text: '' },
-          { type: 'reasoning', content: [{ type: 'text', text: '' }], summary: [{ type: 'summaryText', data: { text: 'summary' } }] },
-          { type: 'custom_tool_call', name: '', input: '' },
-        ]) }],
+        turns: [
+          {
+            id: 'turn',
+            items: malformedItems([
+              {
+                type: 'userMessage',
+                content: [
+                  null,
+                  'plain',
+                  { type: 'text', text: 3 },
+                  { type: 'inputImage', data: { data: 'YQ==', mime_type: 'image/png' } },
+                  { type: 'localImage', data: { url: 'remote.png' } },
+                  { type: 'mention', data: { path: 'src/a.ts' } },
+                ],
+              },
+              { type: 'agentMessage', text: '' },
+              {
+                type: 'reasoning',
+                content: [{ type: 'text', text: '' }],
+                summary: [{ type: 'summaryText', data: { text: 'summary' } }],
+              },
+              { type: 'custom_tool_call', name: '', input: '' },
+            ]),
+          },
+        ],
       });
-      expect(structured.messages.map((message) => message.content).join('\n')).toMatch(/plain|image\/png|remote\.png|src\/a\.ts|summary|Called tool/);
+      expect(structured.messages.map((message) => message.content).join('\n')).toMatch(
+        /plain|image\/png|remote\.png|src\/a\.ts|summary|Called tool/,
+      );
     });
 
     it('covers remaining mapper fallbacks through malformed and alternate timeline items', () => {
       const summary = mapChatSummary({
-        id: 'active-turn', status: 'active', turns: [{ status: 'unknown' }],
+        id: 'active-turn',
+        status: 'active',
+        turns: [{ status: 'unknown' }],
         source: { kind: 'legacy', parentThreadId: 'parent', depth: 2 },
       });
-      expect(summary).toMatchObject({ status: 'complete', parentThreadId: 'parent', subAgentDepth: 2 });
-      expect(mapChatSummary({
-        id: 'typed-source', source: { type: 'subAgentType', parent_thread_id: 'parent', agent_depth: 3 },
-      })).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 3 });
-      expect(mapChatSummary({
-        id: 'spawn-source', source: { subAgent: { thread_spawn: { parentThreadId: 'parent', depth: 1 } } },
-      })).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 1 });
-      expect(mapChatSummary({
-        id: 'object-source', source: { subAgent: { parentThreadId: 'parent', depth: 1 } },
-      })).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 1 });
+      expect(summary).toMatchObject({
+        status: 'complete',
+        parentThreadId: 'parent',
+        subAgentDepth: 2,
+      });
+      expect(
+        mapChatSummary({
+          id: 'typed-source',
+          source: { type: 'subAgentType', parent_thread_id: 'parent', agent_depth: 3 },
+        }),
+      ).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 3 });
+      expect(
+        mapChatSummary({
+          id: 'spawn-source',
+          source: { subAgent: { thread_spawn: { parentThreadId: 'parent', depth: 1 } } },
+        }),
+      ).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 1 });
+      expect(
+        mapChatSummary({
+          id: 'object-source',
+          source: { subAgent: { parentThreadId: 'parent', depth: 1 } },
+        }),
+      ).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 1 });
 
       const chat = mapChat({
         id: 'remaining-items',
-        turns: [{ id: 'turn', status: 'completed', items: malformedItems([
-          3 as never,
-          { type: 'commandExecution', status: undefined, aggregatedOutput: '', exitCode: 7 },
-          { type: 'mcpToolCall', status: undefined, result: { content: [{ type: 'text', text: 'result' }] } },
-          { type: 'mcpToolCall', status: 'failed', result: 'fallback result' },
-          { type: 'collabToolCall', tool: undefined, status: undefined },
-          { type: 'function_call', name: 'exec_command', status: 'failed' },
-          { type: 'function_call', name: 'exec_command', status: 'running' },
-          { type: 'function_call', name: 'exec_command' },
-          { type: 'function_call', name: 'mcp__server__tool' },
-          { type: 'function_call', name: 'search_query', arguments: {} },
-          { type: 'function_call', name: 'image_query', args: { image_query: [{ q: 'image query' }] } },
-          { type: 'custom_tool_call', name: 'apply_patch' },
-          { type: 'custom_tool_call', name: 'apply_patch', input: 'not a patch' },
-          { type: 'function_call', name: 'mcp__broken' },
-          { type: 'function_call', name: 'plain' },
-          { type: 'fileChange', changes: 'bad' },
-          { type: 'fileChange', changes: [{ path: 'a.ts' }, { path: 'a.ts' }, {}] },
-          { type: 'webSearch', action: { type: 'openPage' } },
-          { type: 'webSearch', action: { type: 'findInPage' } },
-          { type: 'reasoning', summary: [{ type: 'text', text: '' }] },
-        ]) }],
+        turns: [
+          {
+            id: 'turn',
+            status: 'completed',
+            items: malformedItems([
+              3 as never,
+              { type: 'commandExecution', status: undefined, aggregatedOutput: '', exitCode: 7 },
+              {
+                type: 'mcpToolCall',
+                status: undefined,
+                result: { content: [{ type: 'text', text: 'result' }] },
+              },
+              { type: 'mcpToolCall', status: 'failed', result: 'fallback result' },
+              { type: 'collabToolCall', tool: undefined, status: undefined },
+              { type: 'function_call', name: 'exec_command', status: 'failed' },
+              { type: 'function_call', name: 'exec_command', status: 'running' },
+              { type: 'function_call', name: 'exec_command' },
+              { type: 'function_call', name: 'mcp__server__tool' },
+              { type: 'function_call', name: 'search_query', arguments: {} },
+              {
+                type: 'function_call',
+                name: 'image_query',
+                args: { image_query: [{ q: 'image query' }] },
+              },
+              { type: 'custom_tool_call', name: 'apply_patch' },
+              { type: 'custom_tool_call', name: 'apply_patch', input: 'not a patch' },
+              { type: 'function_call', name: 'mcp__broken' },
+              { type: 'function_call', name: 'plain' },
+              { type: 'fileChange', changes: 'bad' },
+              { type: 'fileChange', changes: [{ path: 'a.ts' }, { path: 'a.ts' }, {}] },
+              { type: 'webSearch', action: { type: 'openPage' } },
+              { type: 'webSearch', action: { type: 'findInPage' } },
+              { type: 'reasoning', summary: [{ type: 'text', text: '' }] },
+            ]),
+          },
+        ],
       });
-      expect(chat.messages.map((message) => message.content).join('\n')).toMatch(/exit code 7|fallback result|Command failed|Running command|Searched web|Applied file changes/);
+      expect(chat.messages.map((message) => message.content).join('\n')).toMatch(
+        /exit code 7|fallback result|Command failed|Running command|Searched web|Applied file changes/,
+      );
 
       const snapshot = mapChat({
         id: 'empty-snapshot',
@@ -2032,12 +2633,33 @@ describe('chatMapping', () => {
             { sequence: 0, kind: 'message', canonicalId: 'empty' },
             { sequence: 1, kind: 'tool', canonicalId: 'tool' },
           ],
-          messages: [{ id: 'empty', role: 'agent', parts: [null, { type: 'resourceLink' }], truncated: false }],
-          tools: [{ id: 'tool', kind: '', status: '', title: '', content: '', structuredContent: [], locations: [], truncated: true }],
+          messages: [
+            {
+              id: 'empty',
+              role: 'agent',
+              parts: [null, { type: 'resourceLink' }],
+              truncated: false,
+            },
+          ],
+          tools: [
+            {
+              id: 'tool',
+              kind: '',
+              status: '',
+              title: '',
+              content: '',
+              structuredContent: [],
+              locations: [],
+              truncated: true,
+            },
+          ],
           messageCollection: { truncated: true, omittedCount: 0, revision: 1 },
         }),
       });
-      expect(snapshot.messages.map((message) => message.id)).toEqual(['empty-snapshot::snapshot-truncated', 'tool:tool']);
+      expect(snapshot.messages.map((message) => message.id)).toEqual([
+        'empty-snapshot::snapshot-truncated',
+        'tool:tool',
+      ]);
     });
 
     it('applies a snapshot while preserving shell-owned fields', () => {
@@ -2053,9 +2675,19 @@ describe('chatMapping', () => {
         latestTurnStatus: null,
         activeTurnId: null,
       };
-      const updated = applySnapshotToChat(shell, makeSnapshot({
-        messages: [{ id: 'answer', role: 'agent', parts: [{ type: 'text', text: 'done' }], truncated: false }],
-      }));
+      const updated = applySnapshotToChat(
+        shell,
+        makeSnapshot({
+          messages: [
+            {
+              id: 'answer',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'done' }],
+              truncated: false,
+            },
+          ],
+        }),
+      );
       expect(updated).toMatchObject({ title: 'Pinned title', status: 'running' });
       expect(updated.messages[0]?.content).toBe('done');
     });

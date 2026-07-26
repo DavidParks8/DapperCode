@@ -11,7 +11,7 @@ export interface ComposerBottomSpacing {
 export function resolveComposerBottomSpacing(
   platform: string,
   safeAreaBottomInset: number,
-  keyboardVisible: boolean
+  keyboardVisible: boolean,
 ): ComposerBottomSpacing {
   const normalizedInset = Number.isFinite(safeAreaBottomInset)
     ? Math.max(0, safeAreaBottomInset)

@@ -1,24 +1,19 @@
-import {
-  activeTurnIdAtom,
-  errorAtom,
-  stoppingTurnAtom
-} from '../../state/mainScreen/turn';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activeTurnIdAtom, errorAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { mergeStreamingDelta, formatLiveReasoningMessage } from './mainScreenHelpers';
-import type { MainScreenLocalCommandChatContext, MainScreenLocalCommandChatResult } from './mainScreenLocalCommandChat';
+import type {
+  MainScreenLocalCommandChatContext,
+  MainScreenLocalCommandChatResult,
+} from './mainScreenLocalCommandChat';
 
+export type MainScreenReasoningAndInterruptContext = MainScreenLocalCommandChatContext &
+  MainScreenLocalCommandChatResult;
 
-
-
-
-
-export type MainScreenReasoningAndInterruptContext = MainScreenLocalCommandChatContext & MainScreenLocalCommandChatResult;
-
-export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningAndInterruptContext) {
+export function useMainScreenReasoningAndInterrupt(
+  context: MainScreenReasoningAndInterruptContext,
+) {
   const {
     appendLocalSystemMessage,
     chatIdRef,
@@ -35,7 +30,6 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
-
 
   const upsertLiveReasoningMessage = useCallback(
     (threadId: string, delta?: string | null) => {
@@ -58,9 +52,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
         liveReasoningMessageIdsRef.current[threadId] ??
         `local-reasoning-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       liveReasoningMessageIdsRef.current[threadId] = messageId;
-      const content = formatLiveReasoningMessage(
-        liveReasoningBuffersRef.current[threadId] ?? ''
-      );
+      const content = formatLiveReasoningMessage(liveReasoningBuffersRef.current[threadId] ?? '');
 
       setSelectedChat((prev) => {
         if (!prev || prev.id !== threadId) {
@@ -101,7 +93,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
 
       schedulePinnedScrollToBottom(true);
     },
-    [schedulePinnedScrollToBottom]
+    [schedulePinnedScrollToBottom],
   );
 
   const clearLiveReasoningMessage = useCallback((threadId: string | null | undefined) => {
@@ -126,8 +118,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
       const normalizedMessage = message.toLowerCase();
       const interruptedByUser =
         stopRequestedRef.current &&
-        (normalizedMessage.includes('turn aborted') ||
-          normalizedMessage.includes('interrupted'));
+        (normalizedMessage.includes('turn aborted') || normalizedMessage.includes('interrupted'));
 
       if (interruptedByUser) {
         setError(null);
@@ -150,7 +141,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
       stopRequestedRef.current = interruptedByUser;
       clearRunWatchdog();
     },
-    [appendStopSystemMessageIfNeeded, clearRunWatchdog]
+    [appendStopSystemMessageIfNeeded, clearRunWatchdog],
   );
 
   const interruptActiveTurn = useCallback(
@@ -174,7 +165,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController]
+    [turnExecutionController],
   );
 
   const interruptLatestTurn = useCallback(
@@ -209,7 +200,7 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController]
+    [turnExecutionController],
   );
 
   return {
@@ -222,4 +213,6 @@ export function useMainScreenReasoningAndInterrupt(context: MainScreenReasoningA
   };
 }
 
-export type MainScreenReasoningAndInterruptResult = ReturnType<typeof useMainScreenReasoningAndInterrupt>;
+export type MainScreenReasoningAndInterruptResult = ReturnType<
+  typeof useMainScreenReasoningAndInterrupt
+>;

@@ -9,10 +9,11 @@ import { createMainScreenWorkflowStyles } from './mainScreenWorkflowStyles';
 
 export { createWorkflowMarkdownStyles } from './mainScreenWorkflowMarkdownStyles';
 
-export const createStyles = (theme: AppTheme) => StyleSheet.create({
-  ...createMainScreenShellStyles(theme),
-  ...createMainScreenAgentStyles(theme),
-  ...createMainScreenWorkflowStyles(theme),
-  ...createMainScreenModalStyles(theme),
-  ...createMainScreenConversationStyles(theme),
-});
+export const createStyles = (theme: AppTheme) =>
+  StyleSheet.create({
+    ...createMainScreenShellStyles(theme),
+    ...createMainScreenAgentStyles(theme),
+    ...createMainScreenWorkflowStyles(theme),
+    ...createMainScreenModalStyles(theme),
+    ...createMainScreenConversationStyles(theme),
+  });

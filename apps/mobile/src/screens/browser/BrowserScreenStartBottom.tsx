@@ -1,13 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { BrowserPreviewTargetSuggestion } from '../../api/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
@@ -189,7 +182,9 @@ export function BrowserBottomBar({
         ]}
         accessibilityRole="button"
         accessibilityLabel="Back"
-        accessibilityState={controlAccessibilityState({ disabled: Platform.OS === 'web' || !canGoBack })}
+        accessibilityState={controlAccessibilityState({
+          disabled: Platform.OS === 'web' || !canGoBack,
+        })}
       >
         <Ionicons
           {...decorativeAccessibilityProps}
@@ -208,7 +203,9 @@ export function BrowserBottomBar({
         ]}
         accessibilityRole="button"
         accessibilityLabel="Forward"
-        accessibilityState={controlAccessibilityState({ disabled: Platform.OS === 'web' || !canGoForward })}
+        accessibilityState={controlAccessibilityState({
+          disabled: Platform.OS === 'web' || !canGoForward,
+        })}
       >
         <Ionicons
           {...decorativeAccessibilityProps}

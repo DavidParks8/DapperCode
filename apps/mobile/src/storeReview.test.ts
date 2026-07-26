@@ -23,8 +23,8 @@ describe('storeReview helpers', () => {
         JSON.stringify({
           accumulatedForegroundMs: AUTO_STORE_REVIEW_THRESHOLD_MS + 2500.9,
           automaticRequestAt: ' 2026-03-31T12:00:00.000Z ',
-        })
-      )
+        }),
+      ),
     ).toEqual({
       accumulatedForegroundMs: AUTO_STORE_REVIEW_THRESHOLD_MS + 2500,
       automaticRequestAt: '2026-03-31T12:00:00.000Z',
@@ -33,13 +33,16 @@ describe('storeReview helpers', () => {
 
   it('rejects invalid accumulated time and request timestamps', () => {
     for (const accumulatedForegroundMs of [-1, 0, Number.POSITIVE_INFINITY, '100']) {
-      expect(parseAutoStoreReviewState(JSON.stringify({ accumulatedForegroundMs })))
-        .toMatchObject({ accumulatedForegroundMs: 0 });
+      expect(parseAutoStoreReviewState(JSON.stringify({ accumulatedForegroundMs }))).toMatchObject({
+        accumulatedForegroundMs: 0,
+      });
     }
-    expect(parseAutoStoreReviewState(JSON.stringify({ automaticRequestAt: 'not-a-date' })))
-      .toMatchObject({ automaticRequestAt: null });
-    expect(parseAutoStoreReviewState(JSON.stringify({ automaticRequestAt: 1 })))
-      .toMatchObject({ automaticRequestAt: null });
+    expect(
+      parseAutoStoreReviewState(JSON.stringify({ automaticRequestAt: 'not-a-date' })),
+    ).toMatchObject({ automaticRequestAt: null });
+    expect(parseAutoStoreReviewState(JSON.stringify({ automaticRequestAt: 1 }))).toMatchObject({
+      automaticRequestAt: null,
+    });
   });
 
   it('becomes eligible after the active-use threshold until an automatic request is recorded', () => {
@@ -47,21 +50,21 @@ describe('storeReview helpers', () => {
       isAutoStoreReviewEligible({
         accumulatedForegroundMs: AUTO_STORE_REVIEW_THRESHOLD_MS - 1,
         automaticRequestAt: null,
-      })
+      }),
     ).toBe(false);
 
     expect(
       isAutoStoreReviewEligible({
         accumulatedForegroundMs: AUTO_STORE_REVIEW_THRESHOLD_MS,
         automaticRequestAt: null,
-      })
+      }),
     ).toBe(true);
 
     expect(
       isAutoStoreReviewEligible({
         accumulatedForegroundMs: AUTO_STORE_REVIEW_THRESHOLD_MS * 2,
         automaticRequestAt: '2026-03-31T12:00:00.000Z',
-      })
+      }),
     ).toBe(false);
   });
 
@@ -78,18 +81,25 @@ describe('storeReview helpers', () => {
     jest.isolateModules(() => {
       isolated = jest.requireActual('./storeReview') as typeof StoreReviewModule;
     });
-    read.mockResolvedValueOnce(JSON.stringify({ accumulatedForegroundMs: 12, automaticRequestAt: null }));
+    read.mockResolvedValueOnce(
+      JSON.stringify({ accumulatedForegroundMs: 12, automaticRequestAt: null }),
+    );
     await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual({
       accumulatedForegroundMs: 12,
       automaticRequestAt: null,
     });
-    await isolated.saveAutoStoreReviewState({ accumulatedForegroundMs: 20, automaticRequestAt: null });
+    await isolated.saveAutoStoreReviewState({
+      accumulatedForegroundMs: 20,
+      automaticRequestAt: null,
+    });
     expect(write).toHaveBeenCalledWith(
       expect.stringContaining('dappercode-store-review.json'),
-      JSON.stringify({ accumulatedForegroundMs: 20, automaticRequestAt: null })
+      JSON.stringify({ accumulatedForegroundMs: 20, automaticRequestAt: null }),
     );
     read.mockRejectedValueOnce(new Error('missing'));
-    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual(createDefaultAutoStoreReviewState());
+    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual(
+      createDefaultAutoStoreReviewState(),
+    );
   });
 
   it('requests native review only when available on iOS', async () => {

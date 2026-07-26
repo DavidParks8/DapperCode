@@ -15,24 +15,27 @@ export function agentModelPreferenceKey(agentId: AgentId): string {
 
 export function lastUsedModelPreference(
   preferences: Record<string, ChatModelPreference>,
-  agentId: AgentId | null | undefined
+  agentId: AgentId | null | undefined,
 ): ChatModelPreference | null {
   const normalizedAgentId = agentId?.trim() ?? '';
   if (!normalizedAgentId) return null;
   const explicit = preferences[agentModelPreferenceKey(normalizedAgentId)];
   if (explicit) return explicit;
-  return Object.entries(preferences)
-    .filter(([key, preference]) =>
-      !key.startsWith(AGENT_MODEL_PREFERENCE_PREFIX) && Boolean(preference.modelId)
-    )
-    .map(([, preference]) => preference)
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0] ?? null;
+  return (
+    Object.entries(preferences)
+      .filter(
+        ([key, preference]) =>
+          !key.startsWith(AGENT_MODEL_PREFERENCE_PREFIX) && Boolean(preference.modelId),
+      )
+      .map(([, preference]) => preference)
+      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0] ?? null
+  );
 }
 
 export function withLastUsedModelPreference(
   preferences: Record<string, ChatModelPreference>,
   agentId: AgentId,
-  preference: Omit<ChatModelPreference, 'updatedAt'>
+  preference: Omit<ChatModelPreference, 'updatedAt'>,
 ): Record<string, ChatModelPreference> {
   return {
     ...preferences,
@@ -53,7 +56,7 @@ export function normalizeModelId(value: string | null | undefined): string | nul
 }
 
 export function normalizeReasoningEffort(
-  effort: string | null | undefined
+  effort: string | null | undefined,
 ): ReasoningEffort | null {
   if (typeof effort !== 'string') {
     return null;
@@ -75,9 +78,7 @@ export function normalizeReasoningEffort(
   return null;
 }
 
-export function normalizeServiceTier(
-  serviceTier: string | null | undefined
-): ServiceTier | null {
+export function normalizeServiceTier(serviceTier: string | null | undefined): ServiceTier | null {
   if (typeof serviceTier !== 'string') {
     return null;
   }
@@ -91,14 +92,14 @@ export function normalizeServiceTier(
 }
 
 export function toSelectedServiceTier(
-  serviceTier: ServiceTier | null | undefined
+  serviceTier: ServiceTier | null | undefined,
 ): ServiceTier | null {
   return serviceTier === 'fast' ? 'fast' : null;
 }
 
 export function resolveSelectedServiceTier(
   selectedServiceTier: SelectedServiceTier,
-  defaultServiceTier: ServiceTier | null | undefined
+  defaultServiceTier: ServiceTier | null | undefined,
 ): ServiceTier | null {
   if (selectedServiceTier !== undefined) {
     return toSelectedServiceTier(selectedServiceTier);
@@ -115,11 +116,7 @@ export function shouldSurfaceChatLoadError(
   revalidate: boolean | undefined,
   cachedChatId: string | null | undefined,
   requestedChatId: string,
-  cachedMessageCount: number
+  cachedMessageCount: number,
 ): boolean {
-  return !(
-    revalidate === true &&
-    cachedChatId === requestedChatId &&
-    cachedMessageCount > 0
-  );
+  return !(revalidate === true && cachedChatId === requestedChatId && cachedMessageCount > 0);
 }

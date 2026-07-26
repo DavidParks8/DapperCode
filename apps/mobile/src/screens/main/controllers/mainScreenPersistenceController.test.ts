@@ -49,30 +49,40 @@ describe('mainScreenPersistenceController', () => {
   });
 
   it('returns an empty collection when storage cannot be read', async () => {
-    const controller = new MainScreenPersistenceController({
-      read: jest.fn().mockRejectedValue(new Error('missing')),
-      write: jest.fn(),
-    }, {
-      workspaceFavorites: () => '/favorites.json',
-    });
+    const controller = new MainScreenPersistenceController(
+      {
+        read: jest.fn().mockRejectedValue(new Error('missing')),
+        write: jest.fn(),
+      },
+      {
+        workspaceFavorites: () => '/favorites.json',
+      },
+    );
     await expect(controller.loadWorkspaceFavorites()).resolves.toEqual([]);
   });
 
   it('loads and saves every persisted collection', async () => {
     const storage = {
-      read: jest.fn()
-        .mockResolvedValueOnce(JSON.stringify({ version: 1, entries: { thread: { modelId: 'm' } } }))
+      read: jest
+        .fn()
+        .mockResolvedValueOnce(
+          JSON.stringify({ version: 1, entries: { thread: { modelId: 'm' } } }),
+        )
         .mockResolvedValueOnce(JSON.stringify({ version: 1, entries: {} }))
         .mockResolvedValueOnce(JSON.stringify({ version: 1, entries: {} }))
         .mockResolvedValueOnce(JSON.stringify({ version: 1, paths: ['/repo'] })),
       write: jest.fn().mockResolvedValue(undefined),
     };
     const paths = {
-      modelPreferences: () => '/models', planSnapshots: () => '/plans',
-      bridgeUiSurfaces: () => '/surfaces', workspaceFavorites: () => '/favorites',
+      modelPreferences: () => '/models',
+      planSnapshots: () => '/plans',
+      bridgeUiSurfaces: () => '/surfaces',
+      workspaceFavorites: () => '/favorites',
     };
     const controller = new MainScreenPersistenceController(storage, paths);
-    await expect(controller.loadModelPreferences()).resolves.toMatchObject({ thread: { modelId: 'm' } });
+    await expect(controller.loadModelPreferences()).resolves.toMatchObject({
+      thread: { modelId: 'm' },
+    });
     await expect(controller.loadPlanSnapshots()).resolves.toEqual({});
     await expect(controller.loadBridgeUiSurfaces()).resolves.toEqual({});
     await expect(controller.loadWorkspaceFavorites()).resolves.toEqual(['/repo']);

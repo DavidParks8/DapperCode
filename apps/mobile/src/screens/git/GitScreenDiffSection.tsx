@@ -135,7 +135,9 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
         </ScrollView>
       </View>
 
-      {derived.truncationNotice ? <Text style={styles.errorText}>{derived.truncationNotice}</Text> : null}
+      {derived.truncationNotice ? (
+        <Text style={styles.errorText}>{derived.truncationNotice}</Text>
+      ) : null}
 
       {derived.parsedDiff.files.length > 0 ? (
         <>
@@ -147,11 +149,15 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
             </View>
             <View style={styles.diffSummaryPill}>
               <Text style={styles.diffSummaryLabel}>Added</Text>
-              <Text style={[styles.diffSummaryValue, styles.fileAdded]}>+{derived.parsedDiff.totalAdditions}</Text>
+              <Text style={[styles.diffSummaryValue, styles.fileAdded]}>
+                +{derived.parsedDiff.totalAdditions}
+              </Text>
             </View>
             <View style={styles.diffSummaryPill}>
               <Text style={styles.diffSummaryLabel}>Removed</Text>
-              <Text style={[styles.diffSummaryValue, styles.fileRemoved]}>-{derived.parsedDiff.totalDeletions}</Text>
+              <Text style={[styles.diffSummaryValue, styles.fileRemoved]}>
+                -{derived.parsedDiff.totalDeletions}
+              </Text>
             </View>
           </View>
         </>
@@ -179,7 +185,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
               {derived.parsedDiff.files.map((file) => {
                 const selected = file.id === controller.activeDiffTabId;
                 const commentCount = controller.reviewComments.filter(
-                  (comment) => comment.fileId === file.id
+                  (comment) => comment.fileId === file.id,
                 ).length;
                 return (
                   <Pressable
@@ -219,7 +225,9 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                     <Text style={styles.diffLoadingText}>Loading diff…</Text>
                   </View>
                 ) : diffFileForView.hunks.length === 0 ? (
-                  <Text style={styles.emptyFilesText}>No textual hunks available for this file.</Text>
+                  <Text style={styles.emptyFilesText}>
+                    No textual hunks available for this file.
+                  </Text>
                 ) : (
                   <ScrollView
                     style={[styles.diffVerticalScroll, { maxHeight: derived.diffViewerMaxHeight }]}
@@ -251,9 +259,16 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                           >
                             <Text style={styles.hunkHeader}>{hunk.header}</Text>
                             {hunk.lines.map((line, lineIndex) => {
-                              const target = createGitReviewTarget(diffFileForView, hunk, line, lineIndex);
+                              const target = createGitReviewTarget(
+                                diffFileForView,
+                                hunk,
+                                line,
+                                lineIndex,
+                              );
                               const comment = target
-                                ? controller.reviewComments.find((entry) => entry.anchorKey === target.anchorKey)
+                                ? controller.reviewComments.find(
+                                    (entry) => entry.anchorKey === target.anchorKey,
+                                  )
                                 : null;
                               return (
                                 <View key={`${hunk.header}:${lineIndex}`}>
@@ -266,7 +281,14 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                                     ]}
                                   >
                                     <Pressable
-                                      onPress={target ? () => controller.openReviewComment(target as GitReviewTarget) : undefined}
+                                      onPress={
+                                        target
+                                          ? () =>
+                                              controller.openReviewComment(
+                                                target as GitReviewTarget,
+                                              )
+                                          : undefined
+                                      }
                                       disabled={!target}
                                       hitSlop={4}
                                       style={({ pressed }) => [
@@ -279,12 +301,20 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                                         <Ionicons
                                           name={comment ? 'chatbubble' : 'add-circle-outline'}
                                           size={13}
-                                          color={comment ? theme.colors.textPrimary : theme.colors.textMuted}
+                                          color={
+                                            comment
+                                              ? theme.colors.textPrimary
+                                              : theme.colors.textMuted
+                                          }
                                         />
                                       ) : null}
                                     </Pressable>
-                                    <Text style={styles.diffLineNumber}>{formatDiffLineNumber(line.oldLineNumber)}</Text>
-                                    <Text style={styles.diffLineNumber}>{formatDiffLineNumber(line.newLineNumber)}</Text>
+                                    <Text style={styles.diffLineNumber}>
+                                      {formatDiffLineNumber(line.oldLineNumber)}
+                                    </Text>
+                                    <Text style={styles.diffLineNumber}>
+                                      {formatDiffLineNumber(line.newLineNumber)}
+                                    </Text>
                                     <Text
                                       style={[
                                         styles.diffLinePrefix,
@@ -306,15 +336,27 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                                           {comment.side} line {String(comment.line)}
                                         </Text>
                                         <View style={styles.inlineReviewCommentActions}>
-                                          <Pressable onPress={() => controller.openReviewComment(comment)}>
-                                            <Text style={styles.inlineReviewCommentAction}>Edit</Text>
+                                          <Pressable
+                                            onPress={() => controller.openReviewComment(comment)}
+                                          >
+                                            <Text style={styles.inlineReviewCommentAction}>
+                                              Edit
+                                            </Text>
                                           </Pressable>
-                                          <Pressable onPress={() => controller.deleteReviewComment(comment.anchorKey)}>
-                                            <Text style={styles.inlineReviewCommentDelete}>Delete</Text>
+                                          <Pressable
+                                            onPress={() =>
+                                              controller.deleteReviewComment(comment.anchorKey)
+                                            }
+                                          >
+                                            <Text style={styles.inlineReviewCommentDelete}>
+                                              Delete
+                                            </Text>
                                           </Pressable>
                                         </View>
                                       </View>
-                                      <Text style={styles.inlineReviewCommentText}>{comment.comment}</Text>
+                                      <Text style={styles.inlineReviewCommentText}>
+                                        {comment.comment}
+                                      </Text>
                                     </View>
                                   ) : null}
                                 </View>

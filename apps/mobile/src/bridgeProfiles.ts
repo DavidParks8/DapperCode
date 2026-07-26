@@ -66,7 +66,7 @@ export function parseBridgeProfileStore(raw: string | null | undefined): BridgeP
 
 export function upsertBridgeProfile(
   store: BridgeProfileStore,
-  draft: BridgeProfileDraft
+  draft: BridgeProfileDraft,
 ): { profile: BridgeProfile; store: BridgeProfileStore } {
   const normalizedUrl = normalizeBridgeUrlInput(draft.bridgeUrl);
   const normalizedToken = normalizeBridgeToken(draft.bridgeToken);
@@ -75,7 +75,7 @@ export function upsertBridgeProfile(
   }
 
   const existing = draft.id
-    ? store.profiles.find((profile) => profile.id === draft.id) ?? null
+    ? (store.profiles.find((profile) => profile.id === draft.id) ?? null)
     : null;
   const now = new Date().toISOString();
   const profileId = existing?.id ?? createBridgeProfileId();
@@ -110,7 +110,7 @@ export function upsertBridgeProfile(
 
 export function setActiveBridgeProfile(
   store: BridgeProfileStore,
-  profileId: string | null
+  profileId: string | null,
 ): BridgeProfileStore {
   if (profileId === null) {
     return {
@@ -132,7 +132,7 @@ export function setActiveBridgeProfile(
 export function renameBridgeProfile(
   store: BridgeProfileStore,
   profileId: string,
-  nextName: string | null | undefined
+  nextName: string | null | undefined,
 ): BridgeProfileStore {
   const existing = store.profiles.find((profile) => profile.id === profileId);
   if (!existing) {
@@ -149,18 +149,18 @@ export function renameBridgeProfile(
             name: deriveBridgeProfileName(nextName, profile.bridgeUrl),
             updatedAt,
           }
-        : profile
+        : profile,
     ),
   });
 }
 
 export function removeBridgeProfile(
   store: BridgeProfileStore,
-  profileId: string
+  profileId: string,
 ): BridgeProfileStore {
   const nextProfiles = store.profiles.filter((profile) => profile.id !== profileId);
   const nextActiveProfileId =
-    store.activeProfileId === profileId ? nextProfiles[0]?.id ?? null : store.activeProfileId;
+    store.activeProfileId === profileId ? (nextProfiles[0]?.id ?? null) : store.activeProfileId;
 
   return sanitizeBridgeProfileStore({
     activeProfileId: nextActiveProfileId,
@@ -168,9 +168,7 @@ export function removeBridgeProfile(
   });
 }
 
-export function getActiveBridgeProfile(
-  store: BridgeProfileStore
-): BridgeProfile | null {
+export function getActiveBridgeProfile(store: BridgeProfileStore): BridgeProfile | null {
   if (!store.activeProfileId) {
     return null;
   }
@@ -180,7 +178,7 @@ export function getActiveBridgeProfile(
 
 export function deriveBridgeProfileName(
   value: string | null | undefined,
-  bridgeUrl: string
+  bridgeUrl: string,
 ): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (trimmed.length > 0) {
@@ -229,9 +227,7 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
   };
   const id = normalizeNonEmptyString(record.id);
   const bridgeUrl =
-    typeof record.bridgeUrl === 'string'
-      ? normalizeBridgeUrlInput(record.bridgeUrl)
-      : null;
+    typeof record.bridgeUrl === 'string' ? normalizeBridgeUrlInput(record.bridgeUrl) : null;
   const bridgeToken = normalizeBridgeToken(record.bridgeToken);
   if (!id || !bridgeUrl || !bridgeToken) {
     return null;

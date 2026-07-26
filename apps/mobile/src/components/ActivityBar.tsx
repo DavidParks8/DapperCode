@@ -45,10 +45,7 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
       style={styles.container}
     >
       <View
-        style={[
-          styles.content,
-          hasDetail && tone !== 'running' ? styles.contentExpanded : null,
-        ]}
+        style={[styles.content, hasDetail && tone !== 'running' ? styles.contentExpanded : null]}
       >
         <View
           style={[

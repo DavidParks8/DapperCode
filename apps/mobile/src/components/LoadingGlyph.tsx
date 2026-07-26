@@ -21,14 +21,9 @@ interface LoadingGlyphProps {
 const BASE_PHASE = 0.28;
 const PULSE_COUNT = 3;
 
-export function LoadingGlyph({
-  color,
-  variant,
-  size = 'small',
-  style,
-}: LoadingGlyphProps) {
+export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingGlyphProps) {
   const pulseRefs = useRef(
-    Array.from({ length: PULSE_COUNT }, () => new Animated.Value(BASE_PHASE))
+    Array.from({ length: PULSE_COUNT }, () => new Animated.Value(BASE_PHASE)),
   );
   const ringScale = useRef(new Animated.Value(0.86)).current;
   const ringOpacity = useRef(new Animated.Value(0.38)).current;
@@ -81,9 +76,9 @@ export function LoadingGlyph({
               easing: Easing.inOut(Easing.quad),
               useNativeDriver: true,
             }),
-          ])
-        )
-      )
+          ]),
+        ),
+      ),
     );
 
     animation.start();
@@ -129,7 +124,7 @@ export function LoadingGlyph({
             useNativeDriver: true,
           }),
         ]),
-      ])
+      ]),
     );
 
     animation.start();
@@ -149,11 +144,7 @@ export function LoadingGlyph({
   if (variant === 'ring') {
     return (
       <View
-        style={[
-          styles.center,
-          { width: specs.ringSize + 2, height: specs.ringSize + 2 },
-          style,
-        ]}
+        style={[styles.center, { width: specs.ringSize + 2, height: specs.ringSize + 2 }, style]}
       >
         <Animated.View
           style={[

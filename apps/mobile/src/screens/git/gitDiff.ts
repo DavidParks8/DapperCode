@@ -198,7 +198,7 @@ function stripAnsi(value: string): string {
 }
 
 function parseHunkHeader(
-  line: string
+  line: string,
 ): Pick<UnifiedDiffHunk, 'oldStart' | 'oldCount' | 'newStart' | 'newCount'> | null {
   const match = line.match(HUNK_HEADER_PATTERN);
   if (!match) {

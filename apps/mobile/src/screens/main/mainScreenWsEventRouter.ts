@@ -1,10 +1,5 @@
-import {
-  pendingApprovalAtom,
-  pendingUserInputRequestAtom
-} from '../../state/mainScreen/turn';
-import {
-  agentDetailThreadIdAtom
-} from '../../state/mainScreen/workspace';
+import { pendingApprovalAtom, pendingUserInputRequestAtom } from '../../state/mainScreen/turn';
+import { agentDetailThreadIdAtom } from '../../state/mainScreen/workspace';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
 import { processAgUiRunEvents } from './mainScreenAgUiRunEvents';
 import { processThreadStateEvents } from './mainScreenThreadStateEvents';
@@ -16,14 +11,13 @@ import { useEffect } from 'react';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification } from '../../api/agUi';
-import type { MainScreenReplayRecoveryEngineContext, MainScreenReplayRecoveryEngineResult } from './mainScreenReplayRecoveryEngine';
+import type {
+  MainScreenReplayRecoveryEngineContext,
+  MainScreenReplayRecoveryEngineResult,
+} from './mainScreenReplayRecoveryEngine';
 
-
-
-
-
-
-export type MainScreenWsEventRouterContext = MainScreenReplayRecoveryEngineContext & MainScreenReplayRecoveryEngineResult;
+export type MainScreenWsEventRouterContext = MainScreenReplayRecoveryEngineContext &
+  MainScreenReplayRecoveryEngineResult;
 
 export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterContext) {
   const {
@@ -67,7 +61,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setActivity = useSetAtom(activityAtom);
 
-
   useEffect(() => {
     const pendingApprovalId = pendingApproval?.requestId;
     const pendingUserInputRequestId = pendingUserInputRequest?.requestId;
@@ -109,7 +102,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
           event,
           currentId,
           pendingApprovalId,
-          pendingUserInputRequestId
+          pendingUserInputRequestId,
         );
         return;
       }
@@ -123,7 +116,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
           event,
           currentId,
           pendingApprovalId,
-          pendingUserInputRequestId
+          pendingUserInputRequestId,
         );
       }
     });

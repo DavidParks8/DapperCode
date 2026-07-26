@@ -39,20 +39,25 @@ describe('messages', () => {
       'subagent',
       SUBAGENT_ACTIVITY_TYPE,
       { text: 'Spawned reviewer', subAgent },
-      'now'
+      'now',
     );
     const otherActivity = createActivityMessage(
       'other',
       'status',
       { text: 'Working', subAgent },
-      'now'
+      'now',
     );
 
     expect(getSubAgentMeta(activity)).toEqual(subAgent);
     expect(getSubAgentMeta(otherActivity)).toBeUndefined();
-    expect(getSubAgentMeta({
-      id: 'assistant', role: 'assistant', content: 'Answer', createdAt: 'now',
-    })).toBeUndefined();
+    expect(
+      getSubAgentMeta({
+        id: 'assistant',
+        role: 'assistant',
+        content: 'Answer',
+        createdAt: 'now',
+      }),
+    ).toBeUndefined();
   });
 
   it('formats assistant tool calls and omits empty arguments', () => {
@@ -79,8 +84,13 @@ describe('messages', () => {
       '• Called tool `read_file`\n  {"path":"README.md"}',
       '• Called tool `status`',
     ]);
-    expect(getToolCallDisplayLines({
-      id: 'user', role: 'user', content: 'Hello', createdAt: 'now',
-    })).toEqual([]);
+    expect(
+      getToolCallDisplayLines({
+        id: 'user',
+        role: 'user',
+        content: 'Hello',
+        createdAt: 'now',
+      }),
+    ).toEqual([]);
   });
 });

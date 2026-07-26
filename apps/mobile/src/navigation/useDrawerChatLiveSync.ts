@@ -37,9 +37,7 @@ export function useDrawerChatLiveSync({
         return;
       }
 
-      setRunIndicators((previous) =>
-        updateDrawerRunIndicatorsForEvent(previous, event)
-      );
+      setRunIndicators((previous) => updateDrawerRunIndicatorsForEvent(previous, event));
       if (drawerEventRequiresRefresh(event)) {
         scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
       }
@@ -66,9 +64,12 @@ export function useDrawerChatLiveSync({
     if (!active) {
       return;
     }
-    const timer = setInterval(() => {
-      scheduleLoadChats();
-    }, wsConnected ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS);
+    const timer = setInterval(
+      () => {
+        scheduleLoadChats();
+      },
+      wsConnected ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
+    );
     return () => clearInterval(timer);
   }, [active, scheduleLoadChats, wsConnected]);
 }

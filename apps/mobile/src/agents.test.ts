@@ -9,8 +9,31 @@ function capabilities(): BridgeCapabilities {
     preferredAgentId: 'agent-beta',
     activeAgentId: 'agent-beta',
     agents: [
-      { agentId: 'agent-alpha', displayName: 'Alpha', icon: 'invalid', version: '1', provenance: 'local', lifecycle: 'unavailable', lastError: 'redacted', capabilities: null },
-      { agentId: 'agent-beta', displayName: 'Beta', icon: null, version: '2', provenance: 'registry', lifecycle: 'ready', lastError: null, capabilities: { sessionList: true, sessionLoad: true, sessionResume: true, sessionSteer: false } },
+      {
+        agentId: 'agent-alpha',
+        displayName: 'Alpha',
+        icon: 'invalid',
+        version: '1',
+        provenance: 'local',
+        lifecycle: 'unavailable',
+        lastError: 'redacted',
+        capabilities: null,
+      },
+      {
+        agentId: 'agent-beta',
+        displayName: 'Beta',
+        icon: null,
+        version: '2',
+        provenance: 'registry',
+        lifecycle: 'ready',
+        lastError: null,
+        capabilities: {
+          sessionList: true,
+          sessionLoad: true,
+          sessionResume: true,
+          sessionSteer: false,
+        },
+      },
     ],
     agUiEvents: true,
     supports: support(),
@@ -19,7 +42,13 @@ function capabilities(): BridgeCapabilities {
 }
 
 function support() {
-  return { reviewStart: false, turnSteer: false, commandOutputDelta: false, browserPreview: false, genericUiSurface: true };
+  return {
+    reviewStart: false,
+    turnSteer: false,
+    commandOutputDelta: false,
+    browserPreview: false,
+    genericUiSurface: true,
+  };
 }
 
 test('selects saved ready agent, then bridge preferred, then first ready descriptor', () => {
@@ -41,5 +70,7 @@ test('accepts image URIs and rejects invalid descriptor icons', () => {
   for (const policyCase of iconPolicyFixture.cases) {
     expect(validAgentIconUri(policyCase.value)).toBe(policyCase.valid ? policyCase.value : null);
   }
-  expect(validAgentIconUri(`https://example.test/${'x'.repeat(iconPolicyFixture.maximumBytes)}`)).toBeNull();
+  expect(
+    validAgentIconUri(`https://example.test/${'x'.repeat(iconPolicyFixture.maximumBytes)}`),
+  ).toBeNull();
 });

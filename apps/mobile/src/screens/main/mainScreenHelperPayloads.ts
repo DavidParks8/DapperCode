@@ -2,9 +2,7 @@ import type { TurnPlanStep, TurnPlanUpdate } from '../../api/types';
 import type { ActivePlanState, ThreadContextUsage } from './mainScreenHelperTypes';
 
 export function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
 }
 
 export function readString(value: unknown): string | null {
@@ -45,7 +43,7 @@ export function readBoolean(value: unknown): boolean | null {
 
 export function mergeThreadContextUsage(
   previous: ThreadContextUsage | null,
-  next: ThreadContextUsage | null
+  next: ThreadContextUsage | null,
 ): ThreadContextUsage | null {
   if (!next) {
     return previous;
@@ -72,13 +70,10 @@ export function buildNextPlanStateFromDelta(
   previous: ActivePlanState | null,
   threadId: string,
   turnId: string,
-  rawDelta: string
+  rawDelta: string,
 ): ActivePlanState {
-  const sameTurn =
-    previous && previous.threadId === threadId && previous.turnId === turnId;
-  const nextDelta = compactPlanDelta(
-    sameTurn ? `${previous.deltaText}\n${rawDelta}` : rawDelta
-  );
+  const sameTurn = previous && previous.threadId === threadId && previous.turnId === turnId;
+  const nextDelta = compactPlanDelta(sameTurn ? `${previous.deltaText}\n${rawDelta}` : rawDelta);
 
   return {
     threadId,
@@ -97,12 +92,10 @@ export function buildNextPlanStateFromUpdate(
     turnId: string;
     explanation: string | null;
     plan: TurnPlanStep[];
-  }
+  },
 ): ActivePlanState {
   const sameTurn =
-    previous &&
-    previous.threadId === next.threadId &&
-    previous.turnId === next.turnId;
+    previous && previous.threadId === next.threadId && previous.turnId === next.turnId;
 
   return {
     threadId: next.threadId,
@@ -126,7 +119,7 @@ export function renderPlanStatusGlyph(status: TurnPlanStep['status']): string {
 
 export function toTurnPlanUpdate(
   value: unknown,
-  fallbackThreadId: string | null = null
+  fallbackThreadId: string | null = null,
 ): TurnPlanUpdate | null {
   const record = toRecord(value);
   if (!record) {
@@ -149,10 +142,7 @@ export function toTurnPlanUpdate(
 
       const step = readString(itemRecord.step);
       const status = readString(itemRecord.status);
-      if (
-        !step ||
-        (status !== 'pending' && status !== 'inProgress' && status !== 'completed')
-      ) {
+      if (!step || (status !== 'pending' && status !== 'inProgress' && status !== 'completed')) {
         return null;
       }
 

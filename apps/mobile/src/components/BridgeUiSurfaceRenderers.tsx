@@ -3,11 +3,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
-import type {
-  BridgeUiAction,
-  BridgeUiBlock,
-  BridgeUiSurface,
-} from '../api/types';
+import type { BridgeUiAction, BridgeUiBlock, BridgeUiSurface } from '../api/types';
 import {
   formatNumber,
   getChecklistGlyph,
@@ -82,11 +78,7 @@ export function BridgeUiBanner({ surface, onAction, onDismiss }: BridgeUiSurface
   );
 }
 
-export function BridgeUiModal({
-  surface,
-  onAction,
-  onDismiss,
-}: BridgeUiSurfaceProps) {
+export function BridgeUiModal({ surface, onAction, onDismiss }: BridgeUiSurfaceProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
   const modalFocusRef = useModalAccessibilityFocus(true);
@@ -141,7 +133,12 @@ function SurfaceHeader({
   const headerContent = (
     <>
       <View style={styles.headerIcon}>
-        <Ionicons {...decorativeAccessibilityProps} name={iconName} size={15} color={getToneColor(theme, surface)} />
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name={iconName}
+          size={15}
+          color={getToneColor(theme, surface)}
+        />
       </View>
       <View style={styles.headerCopy}>
         <Text style={styles.title}>{surface.title}</Text>
@@ -195,7 +192,12 @@ function SurfaceHeader({
           accessibilityRole="button"
           accessibilityLabel={`Dismiss ${surface.title}`}
         >
-          <Ionicons {...decorativeAccessibilityProps} name="close" size={16} color={theme.colors.textMuted} />
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="close"
+            size={16}
+            color={theme.colors.textMuted}
+          />
         </Pressable>
       )}
     </View>
@@ -283,7 +285,12 @@ function SurfaceBlock({ block, compact }: { block: BridgeUiBlock; compact?: bool
           style={styles.progressBlock}
           accessibilityRole="progressbar"
           accessibilityLabel={block.label}
-          accessibilityValue={{ min: 0, max: block.max, now: block.value, text: block.detail ?? undefined }}
+          accessibilityValue={{
+            min: 0,
+            max: block.max,
+            now: block.value,
+            text: block.detail ?? undefined,
+          }}
           accessibilityLiveRegion="polite"
         >
           <View style={styles.progressHeader}>

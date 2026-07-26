@@ -31,7 +31,7 @@ export interface MemoryPersistence extends AppStatePersistenceAdapter {
 }
 
 export function createMemoryPersistence(
-  options: { current?: string | null; legacy?: LegacyAppStateSource } = {}
+  options: { current?: string | null; legacy?: LegacyAppStateSource } = {},
 ): MemoryPersistence {
   let current = options.current ?? null;
   const writes: string[] = [];
@@ -139,7 +139,10 @@ export function createBridgeTestStore(options: CreateBridgeTestStoreOptions): Ap
   if (options.ws) {
     store.set(wsClientAtom, options.ws);
   }
-  store.set(drawerCommandsAtom, { closeDrawer: () => undefined, toggleNavigation: () => undefined });
+  store.set(drawerCommandsAtom, {
+    closeDrawer: () => undefined,
+    toggleNavigation: () => undefined,
+  });
   store.set(pendingMainChatIdAtom, options.pendingOpenChatId ?? null);
   store.set(pendingMainChatSnapshotAtom, options.pendingOpenChatSnapshot ?? null);
   return store;

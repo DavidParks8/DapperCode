@@ -7,28 +7,30 @@ import {
   resolvingUserInputAtom,
   stoppingTurnAtom,
   userInputDraftsAtom,
-  userInputErrorAtom
+  userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
-  selectedEffortAtom
+  selectedEffortAtom,
 } from '../../state/mainScreen/models';
-import {
-  activityAtom
-} from '../../state/mainScreen/composer';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Chat, ChatMessage as ChatTranscriptMessage } from '../../api/types';
-import { toMentionInput, toOptimisticUserContent, countUserMessages, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
-import type { MainScreenAgentThreadEventBootstrapContext, MainScreenAgentThreadEventBootstrapResult } from './mainScreenAgentThreadEventBootstrap';
+import {
+  toMentionInput,
+  toOptimisticUserContent,
+  countUserMessages,
+  shouldAutoEnablePlanModeFromChat,
+} from './mainScreenHelpers';
+import type {
+  MainScreenAgentThreadEventBootstrapContext,
+  MainScreenAgentThreadEventBootstrapResult,
+} from './mainScreenAgentThreadEventBootstrap';
 
-
-
-
-
-
-export type MainScreenChatCreationFlowContext = MainScreenAgentThreadEventBootstrapContext & MainScreenAgentThreadEventBootstrapResult;
+export type MainScreenChatCreationFlowContext = MainScreenAgentThreadEventBootstrapContext &
+  MainScreenAgentThreadEventBootstrapResult;
 
 export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlowContext) {
   const {
@@ -91,7 +93,6 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     setDraft(restoredDraft);
   }, [selectedChatId, setDraft]);
 
-
   const createChat = useCallback(async () => {
     const draftSnapshot = draftController.snapshot();
     const content = draftSnapshot.value.trim();
@@ -102,9 +103,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       return;
     }
 
-    const turnMentions = pendingMentionPaths.map((path) =>
-      toMentionInput(path, preferredStartCwd)
-    );
+    const turnMentions = pendingMentionPaths.map((path) => toMentionInput(path, preferredStartCwd));
     const turnLocalImages = pendingLocalImagePaths.map((path) => ({ path }));
     const submission = submissionController.begin(draftSnapshot, {
       mentions: pendingMentionPaths,
@@ -191,10 +190,8 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         }),
         onCreated: (created) => {
           createdChatId = created.id;
-          if (activeAgentId) onLastUsedThreadSettingsChange?.(
-            activeAgentId,
-            selectedCollaborationMode
-          );
+          if (activeAgentId)
+            onLastUsedThreadSettingsChange?.(activeAgentId, selectedCollaborationMode);
           queueOptimisticUserMessage(created.id, optimisticMessage, {
             baseChat: created,
             userOrdinal: 1,
@@ -226,10 +223,8 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         },
         onTurnStarted: registerTurnStarted,
       });
-      const resolvedUpdated =
-        mergeChatWithPendingOptimisticMessages(updated);
-      const autoEnabledPlan =
-        shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
+      const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
+      const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
       const isStillVisible = isCreatedChatVisible();
       if (autoEnabledPlan && isStillVisible) {
         setSelectedCollaborationMode('plan');
@@ -238,7 +233,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         createdChatId,
         activeModelId,
         selectedEffort ?? activeEffort,
-        activeServiceTier
+        activeServiceTier,
       );
       submissionController.succeed(submission);
       if (!isStillVisible) {
@@ -276,15 +271,15 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       }
     } catch (err) {
       const currentDraft = draftController.snapshot();
-      const shouldRestoreDraft = !createdChatId || submissionController.fail(
-        submission,
-        currentDraft
-      ) || Boolean(
-        createdChatId &&
-        adoptedCreatedChat &&
-        selectedChatIdRef.current === createdChatId &&
-        currentDraft.value === ''
-      );
+      const shouldRestoreDraft =
+        !createdChatId ||
+        submissionController.fail(submission, currentDraft) ||
+        Boolean(
+          createdChatId &&
+          adoptedCreatedChat &&
+          selectedChatIdRef.current === createdChatId &&
+          currentDraft.value === '',
+        );
       attachmentController.finishSubmission(false, shouldRestoreDraft);
       if (shouldRestoreDraft) {
         pendingRestoredDraftRef.current = submission.draft;

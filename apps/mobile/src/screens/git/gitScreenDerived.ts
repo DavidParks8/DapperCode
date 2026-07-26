@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 
-import type { GitBranchSummary, GitDiffResponse, GitHistoryCommit, GitStatusResponse } from '../../api/types';
+import type {
+  GitBranchSummary,
+  GitDiffResponse,
+  GitHistoryCommit,
+  GitStatusResponse,
+} from '../../api/types';
 import { parseUnifiedGitDiff } from './gitDiff';
 import type { UnifiedDiffFile } from './gitDiff';
 import {
@@ -76,13 +81,15 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
         stats: diffStatsByPath.get(entry.path) ?? null,
         diffFileId: findDiffFileIdForEntry(entry, parsedDiff.files),
       })),
-    [changedFiles, diffStatsByPath, parsedDiff.files]
+    [changedFiles, diffStatsByPath, parsedDiff.files],
   );
 
   const truncationNotice = useMemo(() => {
     const notices: string[] = [];
     if (status?.truncated) {
-      notices.push(`Showing ${String(status.files.length)} of ${String(status.totalFiles)} changed files.`);
+      notices.push(
+        `Showing ${String(status.files.length)} of ${String(status.totalFiles)} changed files.`,
+      );
     }
     if (diff?.truncated) {
       notices.push(`Diff preview is limited to ${String(Math.round(diff.maxBytes / 1024))} KB.`);
@@ -92,14 +99,26 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
 
   const hasChanges = changedFiles.length > 0;
   const hasStagedFiles = useMemo(() => changedFiles.some((entry) => entry.staged), [changedFiles]);
-  const hasUnstagedFiles = useMemo(() => changedFiles.some((entry) => entry.unstaged), [changedFiles]);
+  const hasUnstagedFiles = useMemo(
+    () => changedFiles.some((entry) => entry.unstaged),
+    [changedFiles],
+  );
   const aheadCount = useMemo(() => parseAheadCount(status?.raw ?? ''), [status?.raw]);
   const behindCount = useMemo(() => parseBehindCount(status?.raw ?? ''), [status?.raw]);
   const hasUpstream = useMemo(() => parseHasUpstream(status?.raw ?? ''), [status?.raw]);
   const upstreamBranch = useMemo(() => parseUpstreamBranch(status?.raw ?? ''), [status?.raw]);
-  const stagedCount = useMemo(() => changedFiles.filter((entry) => entry.staged).length, [changedFiles]);
-  const unstagedCount = useMemo(() => changedFiles.filter((entry) => entry.unstaged).length, [changedFiles]);
-  const untrackedCount = useMemo(() => changedFiles.filter((entry) => entry.untracked).length, [changedFiles]);
+  const stagedCount = useMemo(
+    () => changedFiles.filter((entry) => entry.staged).length,
+    [changedFiles],
+  );
+  const unstagedCount = useMemo(
+    () => changedFiles.filter((entry) => entry.unstaged).length,
+    [changedFiles],
+  );
+  const untrackedCount = useMemo(
+    () => changedFiles.filter((entry) => entry.untracked).length,
+    [changedFiles],
+  );
   const latestCommit = history[0] ?? null;
   const canPush = aheadCount > 0;
   const canPublishBranch = !hasUpstream && isPublishableBranch(status?.branch);
@@ -129,9 +148,18 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
       ? 'Publish branch'
       : `Push (${aheadCount})`;
   const branchSwitchDisabled =
-    switchingBranch || loading || !branchDraft.trim() || branchDraft.trim() === (status?.branch ?? '');
-  const filesListMaxHeight = useMemo(() => Math.max(200, Math.min(360, Math.floor(windowHeight * 0.4))), [windowHeight]);
-  const diffViewerMaxHeight = useMemo(() => Math.max(220, Math.min(480, Math.floor(windowHeight * 0.5))), [windowHeight]);
+    switchingBranch ||
+    loading ||
+    !branchDraft.trim() ||
+    branchDraft.trim() === (status?.branch ?? '');
+  const filesListMaxHeight = useMemo(
+    () => Math.max(200, Math.min(360, Math.floor(windowHeight * 0.4))),
+    [windowHeight],
+  );
+  const diffViewerMaxHeight = useMemo(
+    () => Math.max(220, Math.min(480, Math.floor(windowHeight * 0.5))),
+    [windowHeight],
+  );
 
   return {
     hasWorkspace: Boolean(workspaceDraft.trim() || workspaceCwd),
@@ -170,8 +198,8 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
 }
 
 function getDiffFileLookupKeys(file: UnifiedDiffFile): string[] {
-  const keys = [file.displayPath, file.oldPath, file.newPath].filter(
-    (value): value is string => Boolean(value)
+  const keys = [file.displayPath, file.oldPath, file.newPath].filter((value): value is string =>
+    Boolean(value),
   );
   return Array.from(new Set(keys));
 }

@@ -27,8 +27,12 @@ function createApi() {
 
 describe('replay recovery controller', () => {
   it('deduplicates tracked IDs and ignores empty IDs', () => {
-    expect(collectReplayRecoveryThreadIds([[' selected ', null], ['selected', '', 'background']]))
-      .toEqual(['selected', 'background']);
+    expect(
+      collectReplayRecoveryThreadIds([
+        [' selected ', null],
+        ['selected', '', 'background'],
+      ]),
+    ).toEqual(['selected', 'background']);
   });
 
   it('expands through loaded threads and pending interactions before returning one snapshot', async () => {
@@ -36,7 +40,10 @@ describe('replay recovery controller', () => {
     const result = await fetchReplayRecoverySnapshot(api, ['selected', 'background-a']);
 
     expect(result.threads.map(({ chat: value }) => value.id)).toEqual([
-      'selected', 'background-a', 'background-b', 'loaded-new',
+      'selected',
+      'background-a',
+      'background-b',
+      'loaded-new',
     ]);
     expect(result.approvals).toHaveLength(1);
     expect(result.userInputs).toHaveLength(1);
@@ -49,17 +56,25 @@ describe('replay recovery controller', () => {
     const api = createApi();
     api.listApprovals.mockResolvedValue([]);
     api.listPendingUserInputs.mockResolvedValue([]);
-    api.listLoadedChatIds.mockResolvedValue(['thread-0', 'thread-1', 'thread-2', 'thread-3', 'thread-4']);
-    api.getChat.mockImplementation((threadId) => threadId === 'thread-4'
-      ? Promise.reject(new Error('background unavailable'))
-      : Promise.resolve(chat(threadId)));
+    api.listLoadedChatIds.mockResolvedValue([
+      'thread-0',
+      'thread-1',
+      'thread-2',
+      'thread-3',
+      'thread-4',
+    ]);
+    api.getChat.mockImplementation((threadId) =>
+      threadId === 'thread-4'
+        ? Promise.reject(new Error('background unavailable'))
+        : Promise.resolve(chat(threadId)),
+    );
 
-    await expect(fetchReplayRecoverySnapshot(api, []))
-      .rejects.toThrow('background unavailable');
+    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toThrow('background unavailable');
     const failedAttemptCalls = api.getChat.mock.calls.length;
     api.getChat.mockImplementation((threadId) => Promise.resolve(chat(threadId)));
-    await expect(fetchReplayRecoverySnapshot(api, []))
-      .resolves.toMatchObject({ threads: expect.any(Array) });
+    await expect(fetchReplayRecoverySnapshot(api, [])).resolves.toMatchObject({
+      threads: expect.any(Array),
+    });
     expect(api.getChat.mock.calls.length - failedAttemptCalls).toBe(5);
     expect(api.readThreadQueue.mock.calls.length - failedAttemptCalls).toBe(5);
   });
@@ -67,41 +82,47 @@ describe('replay recovery controller', () => {
   it.each([201, REPLAY_RECOVERY_MAX_LOADED_THREADS])(
     'fetches every snapshot and queue for %i loaded threads with concurrency at most four',
     async (threadCount) => {
-    const api = createApi();
-    api.listApprovals.mockResolvedValue([]);
-    api.listPendingUserInputs.mockResolvedValue([]);
-    api.listLoadedChatIds.mockResolvedValue(
-      Array.from({ length: threadCount }, (_, index) => `thread-${index}`)
-    );
-    let active = 0;
-    let maximumActive = 0;
-    api.getChat.mockImplementation(async (threadId) => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      await Promise.resolve();
-      active -= 1;
-      return chat(threadId);
-    });
-    const recovery = await fetchReplayRecoverySnapshot(api, []);
-    expect(recovery.threads).toHaveLength(threadCount);
-    expect(api.getChat).toHaveBeenCalledTimes(threadCount);
-    expect(api.readThreadQueue).toHaveBeenCalledTimes(threadCount);
-    expect(maximumActive).toBeLessThanOrEqual(REPLAY_RECOVERY_CONCURRENCY);
-  });
+      const api = createApi();
+      api.listApprovals.mockResolvedValue([]);
+      api.listPendingUserInputs.mockResolvedValue([]);
+      api.listLoadedChatIds.mockResolvedValue(
+        Array.from({ length: threadCount }, (_, index) => `thread-${index}`),
+      );
+      let active = 0;
+      let maximumActive = 0;
+      api.getChat.mockImplementation(async (threadId) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await Promise.resolve();
+        active -= 1;
+        return chat(threadId);
+      });
+      const recovery = await fetchReplayRecoverySnapshot(api, []);
+      expect(recovery.threads).toHaveLength(threadCount);
+      expect(api.getChat).toHaveBeenCalledTimes(threadCount);
+      expect(api.readThreadQueue).toHaveBeenCalledTimes(threadCount);
+      expect(maximumActive).toBeLessThanOrEqual(REPLAY_RECOVERY_CONCURRENCY);
+    },
+  );
 
   it('fails with a protocol error before thread reads when the bridge loaded list exceeds its maximum', async () => {
     const api = createApi();
     api.listLoadedChatIds.mockResolvedValue(
-      Array.from({ length: REPLAY_RECOVERY_MAX_LOADED_THREADS + 1 }, (_, index) => `thread-${index}`)
+      Array.from(
+        { length: REPLAY_RECOVERY_MAX_LOADED_THREADS + 1 },
+        (_, index) => `thread-${index}`,
+      ),
     );
-    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toBeInstanceOf(ReplayRecoveryProtocolError);
+    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toBeInstanceOf(
+      ReplayRecoveryProtocolError,
+    );
     expect(api.getChat).not.toHaveBeenCalled();
   });
 
   it('aborts a stale recovery promptly without dispatching the remaining threads', async () => {
     const api = createApi();
     api.listLoadedChatIds.mockResolvedValue(
-      Array.from({ length: 201 }, (_, index) => `thread-${index}`)
+      Array.from({ length: 201 }, (_, index) => `thread-${index}`),
     );
     api.getChat.mockImplementation(() => new Promise<Chat>(() => {}));
     const controller = new AbortController();

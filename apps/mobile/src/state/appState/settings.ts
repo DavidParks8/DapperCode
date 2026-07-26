@@ -5,18 +5,15 @@ import type { AppSettingsState } from '../../appState';
 import { appSettingsAtom } from './atoms';
 import { dispatchAppStateAtom } from './actions';
 
-export const updateSettingsAtom = atom(
-  null,
-  (get, set, patch: Partial<AppSettingsState>): void => {
-    set(dispatchAppStateAtom, { type: 'settings/update', patch });
-  }
-);
+export const updateSettingsAtom = atom(null, (get, set, patch: Partial<AppSettingsState>): void => {
+  set(dispatchAppStateAtom, { type: 'settings/update', patch });
+});
 
 export const rememberThreadSettingsAtom = atom(
   null,
   (get, set, agentId: AgentId, collaborationMode: CollaborationMode): void => {
     set(dispatchAppStateAtom, { type: 'settings/remember-thread', agentId, collaborationMode });
-  }
+  },
 );
 
 function settingAtom<Key extends keyof AppSettingsState>(key: Key) {
@@ -24,7 +21,7 @@ function settingAtom<Key extends keyof AppSettingsState>(key: Key) {
     (get) => get(appSettingsAtom)[key],
     (get, set, value: AppSettingsState[Key]) => {
       set(updateSettingsAtom, { [key]: value } as Partial<AppSettingsState>);
-    }
+    },
   );
 }
 

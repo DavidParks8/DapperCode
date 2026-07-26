@@ -1,10 +1,10 @@
-import { HostBridgeApiClientBridgeActionsLayer } from "./HostBridgeApiClientBridgeActionsLayer";
+import { HostBridgeApiClientBridgeActionsLayer } from './HostBridgeApiClientBridgeActionsLayer';
 import {
   appendSyntheticUserMessage,
   isMaterializationGapError,
   isTransientThreadReadError,
   sleep,
-} from "./clientChatCloneAndRetryInternals";
+} from './clientChatCloneAndRetryInternals';
 import {
   buildTurnInput,
   chatHasRecentUserMessage,
@@ -15,15 +15,15 @@ import {
   rawThreadHasTurns,
   rawThreadHasTurnUserMessage,
   toTurnCollaborationMode,
-} from "./clientTurnInputInternals";
-import { mapChat, type RawThread, toRawThread } from "./chatMapping";
+} from './clientTurnInputInternals';
+import { mapChat, type RawThread, toRawThread } from './chatMapping';
 import {
   normalizeApprovalPolicy,
   normalizeEffort,
   normalizeModel,
   normalizeServiceTier,
-} from "./clientBridgeResponseNormalization";
-import { normalizeCwd } from "./clientChatListInternals";
+} from './clientBridgeResponseNormalization';
+import { normalizeCwd } from './clientChatListInternals';
 import {
   type AppServerReadResponse,
   type AppServerThreadRuntimeSettings,
@@ -33,18 +33,18 @@ import {
   TRANSIENT_THREAD_READ_RETRY_DELAYS_MS,
   type TurnInputLocalImage,
   type TurnInputMention,
-} from "./clientContractsAndSnapshotInternals";
+} from './clientContractsAndSnapshotInternals';
 import {
   type Chat,
   type ChatSummary,
   type GitPushResponse,
   type SendChatMessageRequest,
-} from "./types";
+} from './types';
 
 export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridgeApiClientBridgeActionsLayer {
   gitPush(cwd?: string): Promise<GitPushResponse> {
     const normalizedCwd = normalizeCwd(cwd);
-    return this.ws.request<GitPushResponse>("bridge/git/push", {
+    return this.ws.request<GitPushResponse>('bridge/git/push', {
       cwd: normalizedCwd ?? null,
     });
   }
@@ -56,26 +56,23 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
     const content = body.content.trim();
     if (!content) {
       return {
-        content: "",
+        content: '',
         mentions: [],
         localImages: [],
         turnStartParams: { threadId: id, input: [] },
       };
     }
-    if ((body.role ?? "user") !== "user") {
-      throw new Error("Only user role is supported in bridge/chat messaging");
+    if ((body.role ?? 'user') !== 'user') {
+      throw new Error('Only user role is supported in bridge/chat messaging');
     }
     const normalizedCwd = normalizeCwd(body.cwd);
     const normalizedModel = normalizeModel(body.model);
     const normalizedEffort = normalizeEffort(body.effort);
     const normalizedServiceTier = normalizeServiceTier(body.serviceTier);
-    const normalizedApprovalPolicy =
-      normalizeApprovalPolicy(body.approvalPolicy) ?? "untrusted";
+    const normalizedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
     const normalizedMentions = normalizeMentions(body.mentions);
     const normalizedLocalImages = normalizeLocalImages(body.localImages);
-    const requestedCollaborationMode = normalizeCollaborationMode(
-      body.collaborationMode,
-    );
+    const requestedCollaborationMode = normalizeCollaborationMode(body.collaborationMode);
     const requestedAgent = normalizeAgentName(body.agent);
     let resumedThreadSettings: AppServerThreadRuntimeSettings | null = null;
     if (!options?.skipResume) {
@@ -85,8 +82,7 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
         approvalPolicy: normalizedApprovalPolicy,
       });
     }
-    const effectiveModel =
-      normalizedModel ?? resumedThreadSettings?.model ?? null;
+    const effectiveModel = normalizedModel ?? resumedThreadSettings?.model ?? null;
     const effectiveEffort = requestedCollaborationMode
       ? (normalizedEffort ?? resumedThreadSettings?.effort ?? null)
       : normalizedEffort;
@@ -101,18 +97,14 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
       localImages: normalizedLocalImages,
       turnStartParams: {
         threadId: id,
-        input: buildTurnInput(
-          content,
-          normalizedMentions,
-          normalizedLocalImages,
-        ),
+        input: buildTurnInput(content, normalizedMentions, normalizedLocalImages),
         cwd: normalizedCwd ?? null,
         approvalPolicy: normalizedApprovalPolicy,
         sandboxPolicy: null,
         model: effectiveModel ?? null,
         effort: effectiveEffort ?? null,
         serviceTier: normalizedServiceTier ?? null,
-        summary: "auto",
+        summary: 'auto',
         personality: null,
         outputSchema: null,
         collaborationMode: normalizedCollaborationMode,
@@ -162,13 +154,9 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
     includeTurns: boolean,
   ): Promise<AppServerReadResponse> {
     let lastTransientError: unknown = null;
-    for (
-      let attempt = 0;
-      attempt <= TRANSIENT_THREAD_READ_RETRY_DELAYS_MS.length;
-      attempt += 1
-    ) {
+    for (let attempt = 0; attempt <= TRANSIENT_THREAD_READ_RETRY_DELAYS_MS.length; attempt += 1) {
       try {
-        return await this.ws.request<AppServerReadResponse>("thread/read", {
+        return await this.ws.request<AppServerReadResponse>('thread/read', {
           threadId,
           includeTurns,
         });
@@ -208,12 +196,7 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
     );
     const hasFallbackRecentMessage =
       !rawThreadHasTurns(latestSnapshot.rawThread) &&
-      chatHasRecentUserMessage(
-        latest,
-        normalizedContent,
-        mentions,
-        localImages,
-      );
+      chatHasRecentUserMessage(latest, normalizedContent, mentions, localImages);
     if (hasMatchingTurnMessage || hasFallbackRecentMessage) {
       this.rememberChat(latest);
       return latest;
@@ -232,23 +215,13 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
       );
       const matchedByFallback =
         !rawThreadHasTurns(latestSnapshot.rawThread) &&
-        chatHasRecentUserMessage(
-          latest,
-          normalizedContent,
-          mentions,
-          localImages,
-        );
+        chatHasRecentUserMessage(latest, normalizedContent, mentions, localImages);
       if (matchedAfterRetry || matchedByFallback) {
         this.rememberChat(latest);
         return latest;
       }
     }
-    const synthetic = appendSyntheticUserMessage(
-      latest,
-      normalizedContent,
-      mentions,
-      localImages,
-    );
+    const synthetic = appendSyntheticUserMessage(latest, normalizedContent, mentions, localImages);
     this.rememberChat(synthetic);
     return synthetic;
   }

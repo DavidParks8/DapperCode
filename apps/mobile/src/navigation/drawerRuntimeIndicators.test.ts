@@ -45,7 +45,7 @@ function event(method: string, params: RpcNotification['params']): RpcNotificati
 
 function agUiEvent(
   threadId: string,
-  type: 'RUN_STARTED' | 'TEXT_MESSAGE_CONTENT' | 'RUN_FINISHED' | 'RUN_ERROR'
+  type: 'RUN_STARTED' | 'TEXT_MESSAGE_CONTENT' | 'RUN_FINISHED' | 'RUN_ERROR',
 ): RpcNotification {
   const runId = `${threadId}::turn::turn`;
   const canonical =
@@ -72,26 +72,18 @@ function section(chats: ChatSummary[]): ChatWorkspaceSection {
 
 describe('drawerRuntimeIndicators', () => {
   it('keeps turn-start lifecycle indicators beyond the short heartbeat window', () => {
-    const state = updateDrawerRunIndicatorsForEvent(
-      {},
-      agUiEvent('thr_1', 'RUN_STARTED'),
-      1000
-    );
+    const state = updateDrawerRunIndicatorsForEvent({}, agUiEvent('thr_1', 'RUN_STARTED'), 1000);
 
     expect(isDrawerChatRunning(chat('thr_1'), state, 25_000)).toBe(true);
     expect(countDrawerRunningChats([chat('thr_1'), chat('thr_2')], state, 25_000)).toBe(1);
   });
 
   it('clears lifecycle indicators on turn completion', () => {
-    const running = updateDrawerRunIndicatorsForEvent(
-      {},
-      agUiEvent('thr_1', 'RUN_STARTED'),
-      1000
-    );
+    const running = updateDrawerRunIndicatorsForEvent({}, agUiEvent('thr_1', 'RUN_STARTED'), 1000);
     const complete = updateDrawerRunIndicatorsForEvent(
       running,
       agUiEvent('thr_1', 'RUN_FINISHED'),
-      2000
+      2000,
     );
 
     expect(isDrawerChatRunning(chat('thr_1'), complete, 3000)).toBe(false);
@@ -104,14 +96,14 @@ describe('drawerRuntimeIndicators', () => {
     const waiting = updateDrawerRunIndicatorsForEvent(
       {},
       event(requested, { threadId: 'thr_1' }),
-      1000
+      1000,
     );
     expect(isDrawerChatRunning(chat('thr_1'), waiting, 2000)).toBe(true);
 
     const complete = updateDrawerRunIndicatorsForEvent(
       waiting,
       event(resolved, { threadId: 'thr_1' }),
-      3000
+      3000,
     );
     expect(isDrawerChatRunning(chat('thr_1'), complete, 4000)).toBe(false);
   });
@@ -127,7 +119,7 @@ describe('drawerRuntimeIndicators', () => {
           },
         },
       }),
-      1000
+      1000,
     );
     expect(isDrawerChatRunning(chat('thr_1'), running, 25_000)).toBe(true);
 
@@ -141,7 +133,7 @@ describe('drawerRuntimeIndicators', () => {
           },
         },
       }),
-      2000
+      2000,
     );
     expect(isDrawerChatRunning(chat('thr_1'), complete, 3000)).toBe(false);
   });
@@ -150,7 +142,7 @@ describe('drawerRuntimeIndicators', () => {
     const state = updateDrawerRunIndicatorsForEvent(
       {},
       agUiEvent('thr_1', 'RUN_STARTED'),
-      Date.parse('2026-04-01T00:01:00.000Z')
+      Date.parse('2026-04-01T00:01:00.000Z'),
     );
     const reconciled = reconcileDrawerRunIndicatorsWithChats(
       state,
@@ -161,19 +153,19 @@ describe('drawerRuntimeIndicators', () => {
           statusUpdatedAt: '2026-04-01T00:00:00.000Z',
         }),
       ],
-      Date.parse('2026-04-01T00:02:00.000Z')
+      Date.parse('2026-04-01T00:02:00.000Z'),
     );
 
-    expect(isDrawerChatRunning(chat('thr_1'), reconciled, Date.parse('2026-04-01T00:02:00.000Z'))).toBe(
-      true
-    );
+    expect(
+      isDrawerChatRunning(chat('thr_1'), reconciled, Date.parse('2026-04-01T00:02:00.000Z')),
+    ).toBe(true);
   });
 
   it('lets a newer non-running chat snapshot clear stale live state', () => {
     const state = updateDrawerRunIndicatorsForEvent(
       {},
       agUiEvent('thr_1', 'RUN_STARTED'),
-      Date.parse('2026-04-01T00:01:00.000Z')
+      Date.parse('2026-04-01T00:01:00.000Z'),
     );
     const reconciled = reconcileDrawerRunIndicatorsWithChats(
       state,
@@ -184,12 +176,12 @@ describe('drawerRuntimeIndicators', () => {
           statusUpdatedAt: '2026-04-01T00:02:00.000Z',
         }),
       ],
-      Date.parse('2026-04-01T00:03:00.000Z')
+      Date.parse('2026-04-01T00:03:00.000Z'),
     );
 
-    expect(isDrawerChatRunning(chat('thr_1'), reconciled, Date.parse('2026-04-01T00:03:00.000Z'))).toBe(
-      false
-    );
+    expect(
+      isDrawerChatRunning(chat('thr_1'), reconciled, Date.parse('2026-04-01T00:03:00.000Z')),
+    ).toBe(false);
   });
 
   it('extracts nested thread ids and normalized status hints', () => {
@@ -210,14 +202,14 @@ describe('drawerRuntimeIndicators', () => {
     const lifecycle = updateDrawerRunIndicatorsForEvent(
       {},
       agUiEvent('thr_1', 'RUN_STARTED'),
-      1000
+      1000,
     );
     const refreshed = updateDrawerRunIndicatorsForEvent(
       lifecycle,
       event('item/reasoning/textDelta', {
         threadId: 'thr_1',
       }),
-      5000
+      5000,
     );
 
     expect((refreshed as DrawerRunIndicatorMap).thr_1?.source).toBe('lifecycle');
@@ -225,18 +217,12 @@ describe('drawerRuntimeIndicators', () => {
   });
 
   it('marks a workspace section live when any chat inside it is live', () => {
-    const state = updateDrawerRunIndicatorsForEvent(
-      {},
-      agUiEvent('thr_live', 'RUN_STARTED'),
-      1000
-    );
+    const state = updateDrawerRunIndicatorsForEvent({}, agUiEvent('thr_live', 'RUN_STARTED'), 1000);
 
-    expect(isDrawerWorkspaceSectionRunning(section([chat('thr_idle'), chat('thr_live')]), state, 25_000)).toBe(
-      true
-    );
-    expect(isDrawerWorkspaceSectionRunning(section([chat('thr_idle')]), state, 25_000)).toBe(
-      false
-    );
+    expect(
+      isDrawerWorkspaceSectionRunning(section([chat('thr_idle'), chat('thr_live')]), state, 25_000),
+    ).toBe(true);
+    expect(isDrawerWorkspaceSectionRunning(section([chat('thr_idle')]), state, 25_000)).toBe(false);
   });
 
   it('uses chat running status without a live indicator', () => {
@@ -269,7 +255,7 @@ describe('drawerRuntimeIndicators', () => {
         }),
         chat('now-time', { status: 'running', statusUpdatedAt: 'invalid', updatedAt: 'invalid' }),
       ],
-      now
+      now,
     );
 
     expect(reconciled).toEqual({
@@ -285,8 +271,8 @@ describe('drawerRuntimeIndicators', () => {
       reconcileDrawerRunIndicatorsWithChats(
         previous,
         [chat('thread', { statusUpdatedAt: 'invalid', updatedAt: 'invalid' })],
-        2000
-      )
+        2000,
+      ),
     ).toBe(previous);
   });
 
@@ -294,31 +280,35 @@ describe('drawerRuntimeIndicators', () => {
     const initial = updateDrawerRunIndicatorsForEvent(
       {},
       event('item/started', { threadId: 'thread' }),
-      5000
+      5000,
     );
     expect(
       updateDrawerRunIndicatorsForEvent(
         initial,
         event('item/reasoning/textDelta', { threadId: 'thread' }),
-        6000
-      )
+        6000,
+      ),
     ).toBe(initial);
     expect(
       updateDrawerRunIndicatorsForEvent(
         initial,
         event('item/reasoning/textDelta', { threadId: 'thread' }),
-        1000
-      )
+        1000,
+      ),
     ).toBe(initial);
   });
 
   it('ignores events without thread ids and unrelated methods', () => {
     const previous = { thread: { source: 'heartbeat' as const, updatedAt: 1000 } };
     expect(updateDrawerRunIndicatorsForEvent(previous, event('turn/started', {}), 2000)).toBe(
-      previous
+      previous,
     );
     expect(
-      updateDrawerRunIndicatorsForEvent(previous, event('unrelated/event', { threadId: 'thread' }), 2000)
+      updateDrawerRunIndicatorsForEvent(
+        previous,
+        event('unrelated/event', { threadId: 'thread' }),
+        2000,
+      ),
     ).toBe(previous);
   });
 
@@ -326,18 +316,18 @@ describe('drawerRuntimeIndicators', () => {
     const heartbeat = updateDrawerRunIndicatorsForEvent(
       {},
       event('item/commandExecution/outputDelta', { threadId: 'thread' }),
-      1000
+      1000,
     );
     expect(heartbeat).toEqual({ thread: { source: 'heartbeat', updatedAt: 1000 } });
     expect(
       updateDrawerRunIndicatorsForEvent(
         heartbeat,
         event('thread/status/changed', { threadId: 'thread', status: 'mystery' }),
-        2000
-      )
+        2000,
+      ),
     ).toBe(heartbeat);
     expect(
-      updateDrawerRunIndicatorsForEvent({}, event('turn/completed', { threadId: 'absent' }), 2000)
+      updateDrawerRunIndicatorsForEvent({}, event('turn/completed', { threadId: 'absent' }), 2000),
     ).toEqual({});
   });
 
@@ -359,12 +349,29 @@ describe('drawerRuntimeIndicators', () => {
     [{ source: { conversationId: 'source-conversation-camel' } }, 'source-conversation-camel'],
     [{ source: { parent_thread_id: 'source-parent-snake' } }, 'source-parent-snake'],
     [{ source: { parentThreadId: 'source-parent-camel' } }, 'source-parent-camel'],
-    [{ source: { subagent: { thread_spawn: { parent_thread_id: 'spawn-snake' } } } }, 'spawn-snake'],
+    [
+      { source: { subagent: { thread_spawn: { parent_thread_id: 'spawn-snake' } } } },
+      'spawn-snake',
+    ],
     [{ source: { subAgent: { thread_spawn: { parentThreadId: 'spawn-camel' } } } }, 'spawn-camel'],
     [{ thread: { source: { parent_thread_id: 'thread-source-snake' } } }, 'thread-source-snake'],
     [{ thread: { source: { parentThreadId: 'thread-source-camel' } } }, 'thread-source-camel'],
-    [{ thread: { source: { subagent: { thread_spawn: { parent_thread_id: 'thread-spawn-snake' } } } } }, 'thread-spawn-snake'],
-    [{ thread: { source: { subAgent: { thread_spawn: { parentThreadId: 'thread-spawn-camel' } } } } }, 'thread-spawn-camel'],
+    [
+      {
+        thread: {
+          source: { subagent: { thread_spawn: { parent_thread_id: 'thread-spawn-snake' } } },
+        },
+      },
+      'thread-spawn-snake',
+    ],
+    [
+      {
+        thread: {
+          source: { subAgent: { thread_spawn: { parentThreadId: 'thread-spawn-camel' } } },
+        },
+      },
+      'thread-spawn-camel',
+    ],
   ])('extracts a thread id from supported shape %#', (params, expected) => {
     expect(extractDrawerNotificationThreadId(params)).toBe(expected);
   });

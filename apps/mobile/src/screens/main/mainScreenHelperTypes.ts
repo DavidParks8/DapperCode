@@ -61,11 +61,7 @@ export interface PendingPlanImplementationPrompt {
 }
 
 export type AttachmentMenuAction =
-  | 'workspace-path'
-  | 'phone-file'
-  | 'phone-image'
-  | 'phone-camera'
-  | null;
+  'workspace-path' | 'phone-file' | 'phone-image' | 'phone-camera' | null;
 
 export type WorkspacePickerPurpose = 'default-start' | 'git-checkout-destination';
 
@@ -214,17 +210,8 @@ export const EXTERNAL_RUNNING_STATUS_HINTS = new Set([
   'queued',
   'pending',
 ]);
-export const EXTERNAL_COMPLETE_STATUS_HINTS = new Set([
-  'completed',
-  'success',
-  'succeeded',
-]);
-export const EXTERNAL_ERROR_STATUS_HINTS = new Set([
-  'error',
-  'failed',
-  'cancelled',
-  'canceled',
-]);
+export const EXTERNAL_COMPLETE_STATUS_HINTS = new Set(['completed', 'success', 'succeeded']);
+export const EXTERNAL_ERROR_STATUS_HINTS = new Set(['error', 'failed', 'cancelled', 'canceled']);
 
 export interface ChatModelPreference {
   modelId: string | null;

@@ -25,7 +25,7 @@ describe('bindAppWebSocketLifecycle', () => {
         (_type: 'change', nextListener: (state: AppStateStatus) => void) => {
           listener = nextListener;
           return { remove };
-        }
+        },
       ),
     };
     const ws = {

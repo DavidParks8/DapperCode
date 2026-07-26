@@ -1,13 +1,7 @@
 import React from 'react';
-import {
-  Animated,
-  type ViewStyle,
-} from 'react-native';
+import { Animated, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { LoadingGlyph, type LoadingGlyphVariant } from './LoadingGlyph';
@@ -49,11 +43,24 @@ describe('LoadingGlyph', () => {
 
     const variants: LoadingGlyphVariant[] = ['spinner', 'pulse', 'bars', 'ring'];
     const tree = render(
-      <>{variants.map((variant) => <LoadingGlyph key={variant} color="#fff" variant={variant} />)}</>
+      <>
+        {variants.map((variant) => (
+          <LoadingGlyph key={variant} color="#fff" variant={variant} />
+        ))}
+      </>,
     );
     expect(starts).toHaveLength(3);
     act(() => {
-      tree.update(wrap(<LoadingGlyph color="#000" variant="ring" size="medium" style={{ opacity: 0.5 } as ViewStyle} />));
+      tree.update(
+        wrap(
+          <LoadingGlyph
+            color="#000"
+            variant="ring"
+            size="medium"
+            style={{ opacity: 0.5 } as ViewStyle}
+          />,
+        ),
+      );
     });
     act(() => tree.unmount());
     expect(stops.every((stop) => stop.mock.calls.length > 0)).toBe(true);

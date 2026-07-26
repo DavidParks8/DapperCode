@@ -80,7 +80,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
     void Share.share(
       Platform.OS === 'ios'
         ? { title, url: BRIDGE_SETUP_URL }
-        : { title, message: `${title}\n${BRIDGE_SETUP_URL}` }
+        : { title, message: `${title}\n${BRIDGE_SETUP_URL}` },
     ).catch(() => {});
   }, []);
 
@@ -119,10 +119,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
               color={copied ? theme.colors.accentText : theme.colors.textPrimary}
             />
             <Text
-              style={[
-                styles.commandCopyButtonText,
-                copied && styles.commandCopyButtonTextCopied,
-              ]}
+              style={[styles.commandCopyButtonText, copied && styles.commandCopyButtonTextCopied]}
             >
               {copied ? 'Copied' : 'Copy'}
             </Text>
@@ -150,7 +147,11 @@ export function StatusBanner({
   const theme = useAppTheme();
   const styles = useMemo(() => createOnboardingStyles(theme), [theme]);
   const iconColor =
-    tone === 'warning' ? '#F7D27E' : tone === 'success' ? theme.colors.statusComplete : theme.colors.error;
+    tone === 'warning'
+      ? '#F7D27E'
+      : tone === 'success'
+        ? theme.colors.statusComplete
+        : theme.colors.error;
 
   return (
     <View
@@ -165,12 +166,7 @@ export function StatusBanner({
             : styles.statusBannerError,
       ]}
     >
-      <Ionicons
-        {...decorativeAccessibilityProps}
-        name={icon}
-        size={16}
-        color={iconColor}
-      />
+      <Ionicons {...decorativeAccessibilityProps} name={icon} size={16} color={iconColor} />
       <Text
         style={[
           styles.statusBannerText,

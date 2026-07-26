@@ -20,11 +20,7 @@ import {
   showToolCallsAtom,
 } from '../../state/appState/settings';
 import { openBridgeRecoveryGuideAtom } from '../../state/bridge/actions';
-import {
-  activeBridgeProfileAtom,
-  bridgeTokenAtom,
-  bridgeUrlAtom,
-} from '../../state/bridge/atoms';
+import { activeBridgeProfileAtom, bridgeTokenAtom, bridgeUrlAtom } from '../../state/bridge/atoms';
 import { useBridgeApi, useBridgeWs } from '../../state/bridge/hooks';
 import {
   mainOpeningChatIdAtom,
@@ -56,10 +52,7 @@ export interface MainScreenBaseContext {
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
   onDefaultStartCwdChange: (cwd: string | null) => void;
-  onLastUsedThreadSettingsChange: (
-    agentId: AgentId,
-    collaborationMode: CollaborationMode
-  ) => void;
+  onLastUsedThreadSettingsChange: (agentId: AgentId, collaborationMode: CollaborationMode) => void;
   onChatContextChange: (chat: Chat | null) => void;
   onChatOpeningStateChange: (chatId: string | null) => void;
   pendingOpenChatId: string | null;

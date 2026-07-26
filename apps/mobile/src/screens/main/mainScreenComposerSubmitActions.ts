@@ -1,24 +1,22 @@
 import {
   errorAtom,
   pendingApprovalAtom,
-  pendingUserInputRequestAtom
+  pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
-import {
-  queueActionItemIdAtom,
-  queueActionKindAtom
-} from '../../state/mainScreen/composer';
+import { queueActionItemIdAtom, queueActionKindAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
-import type { MainScreenSendMessageHandlerContext, MainScreenSendMessageHandlerResult } from './mainScreenSendMessageHandler';
+import type {
+  MainScreenSendMessageHandlerContext,
+  MainScreenSendMessageHandlerResult,
+} from './mainScreenSendMessageHandler';
 
+export type MainScreenComposerSubmitActionsContext = MainScreenSendMessageHandlerContext &
+  MainScreenSendMessageHandlerResult;
 
-
-
-
-
-export type MainScreenComposerSubmitActionsContext = MainScreenSendMessageHandlerContext & MainScreenSendMessageHandlerResult;
-
-export function useMainScreenComposerSubmitActions(context: MainScreenComposerSubmitActionsContext) {
+export function useMainScreenComposerSubmitActions(
+  context: MainScreenComposerSubmitActionsContext,
+) {
   const {
     bumpRunWatchdog,
     cacheThreadQueueState,
@@ -47,7 +45,6 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
   const setError = useSetAtom(errorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
-
 
   const sendMessageContentRef = useRef(sendMessageContent);
   useEffect(() => {
@@ -96,7 +93,7 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
   const handleSteerQueuedMessage = useCallback(async () => {
     const threadId = selectedChatId?.trim();
     const queuedItems = threadId
-      ? threadRuntimeSnapshotsRef.current[threadId]?.queuedMessages ?? []
+      ? (threadRuntimeSnapshotsRef.current[threadId]?.queuedMessages ?? [])
       : [];
     const nextQueuedMessage = queuedItems[0] ?? null;
     const canSteer =
@@ -120,9 +117,7 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setQueueActionItemId((previous) =>
-        previous === nextQueuedMessage.id ? null : previous
-      );
+      setQueueActionItemId((previous) => (previous === nextQueuedMessage.id ? null : previous));
       setQueueActionKind((previous) => (previous === 'steer' ? null : previous));
     }
   }, [
@@ -135,59 +130,53 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
     selectedChatId,
   ]);
 
-  const handleCancelQueuedMessage = useCallback(async (messageId: string) => {
-    const threadId = selectedChatId?.trim();
-    const normalizedMessageId = messageId.trim();
-    if (!threadId || !normalizedMessageId) {
-      return;
-    }
+  const handleCancelQueuedMessage = useCallback(
+    async (messageId: string) => {
+      const threadId = selectedChatId?.trim();
+      const normalizedMessageId = messageId.trim();
+      if (!threadId || !normalizedMessageId) {
+        return;
+      }
 
-    try {
-      setError(null);
-      setQueueActionItemId(normalizedMessageId);
-      setQueueActionKind('cancel');
-      const response = await turnExecutionController.cancelQueued(threadId, normalizedMessageId);
-      cacheThreadQueueState(threadId, response.queue);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setQueueActionItemId((previous) =>
-        previous === normalizedMessageId ? null : previous
-      );
-      setQueueActionKind((previous) => (previous === 'cancel' ? null : previous));
-    }
-  }, [
-    selectedChatId,
-    turnExecutionController,
-    cacheThreadQueueState,
-  ]);
+      try {
+        setError(null);
+        setQueueActionItemId(normalizedMessageId);
+        setQueueActionKind('cancel');
+        const response = await turnExecutionController.cancelQueued(threadId, normalizedMessageId);
+        cacheThreadQueueState(threadId, response.queue);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setQueueActionItemId((previous) => (previous === normalizedMessageId ? null : previous));
+        setQueueActionKind((previous) => (previous === 'cancel' ? null : previous));
+      }
+    },
+    [selectedChatId, turnExecutionController, cacheThreadQueueState],
+  );
 
   useEffect(() => {
     setQueueActionItemId(null);
     setQueueActionKind(null);
   }, [selectedChat?.id]);
 
-  const handleInlineOptionSelect = useCallback(
-    (value: string) => {
-      const option = value.trim();
-      if (!option) {
-        return;
-      }
+  const handleInlineOptionSelect = useCallback((value: string) => {
+    const option = value.trim();
+    if (!option) {
+      return;
+    }
 
-      const cannotAutoSend =
-        !selectedChatIdRef.current ||
-        sendingRef.current ||
-        creatingRef.current ||
-        stoppingTurnRef.current;
-      if (cannotAutoSend) {
-        setDraft(option);
-        return;
-      }
+    const cannotAutoSend =
+      !selectedChatIdRef.current ||
+      sendingRef.current ||
+      creatingRef.current ||
+      stoppingTurnRef.current;
+    if (cannotAutoSend) {
+      setDraft(option);
+      return;
+    }
 
-      void sendMessageContentRef.current(option, { allowSlashCommands: false });
-    },
-    []
-  );
+    void sendMessageContentRef.current(option, { allowSlashCommands: false });
+  }, []);
 
   return {
     sendMessageContentRef,
@@ -198,4 +187,6 @@ export function useMainScreenComposerSubmitActions(context: MainScreenComposerSu
   };
 }
 
-export type MainScreenComposerSubmitActionsResult = ReturnType<typeof useMainScreenComposerSubmitActions>;
+export type MainScreenComposerSubmitActionsResult = ReturnType<
+  typeof useMainScreenComposerSubmitActions
+>;

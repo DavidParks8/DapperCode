@@ -79,7 +79,10 @@ describe('workspace actions', () => {
   it('publishes roots and reports a failed refresh', async () => {
     const { store, api } = createStore();
     api.listWorkspaceRoots
-      .mockResolvedValueOnce({ bridgeRoot: '/workspace', workspaces: [{ path: '/a', chatCount: 1 }] })
+      .mockResolvedValueOnce({
+        bridgeRoot: '/workspace',
+        workspaces: [{ path: '/a', chatCount: 1 }],
+      })
       .mockRejectedValueOnce(new Error('roots unavailable'));
 
     await store.set(refreshWorkspaceRootsAtom);
@@ -115,7 +118,7 @@ describe('workspace actions', () => {
 
     await store.set(browseWorkspacePathAtom, '/workspace/missing');
     expect(store.get(workspaceBrowseErrorAtom)).toBe(
-      'Saved workspace was not found. Showing start folder.'
+      'Saved workspace was not found. Showing start folder.',
     );
     expect(store.get(defaultStartCwdAtom)).toBeNull();
   });
@@ -127,9 +130,7 @@ describe('workspace actions', () => {
       .mockRejectedValueOnce(new Error('root denied'));
 
     await store.set(browseWorkspacePathAtom, '/workspace/missing');
-    expect(store.get(workspaceBrowseErrorAtom)).toBe(
-      'workspace directory must point to a folder'
-    );
+    expect(store.get(workspaceBrowseErrorAtom)).toBe('workspace directory must point to a folder');
   });
 
   it('reports an unrecoverable browse failure', async () => {

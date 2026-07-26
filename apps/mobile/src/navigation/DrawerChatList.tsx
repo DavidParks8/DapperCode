@@ -32,36 +32,31 @@ export function DrawerChatList() {
     visibleAttentionSections,
   } = useDrawerContentViewModel();
   const retryDrawerData = () => {
-    void Promise.all([
-      retryDeepChatListRef.current(),
-      refreshDrawer(),
-    ]);
+    void Promise.all([retryDeepChatListRef.current(), refreshDrawer()]);
   };
-  const notice = noticeMessages.length > 0 ? (
-    <Pressable
-      accessibilityLabel={`${noticeMessages.join(' ')} Retry`}
-      accessibilityRole="button"
-      onPress={retryDrawerData}
-      style={({ pressed }) => [
-        styles.notice,
-        pressed && styles.noticePressed,
-      ]}
-    >
-      <Ionicons
-        {...decorativeAccessibilityProps}
-        name="alert-circle-outline"
-        size={17}
-        color={theme.colors.textMuted}
-      />
-      <View style={styles.noticeCopy}>
-        <Text style={styles.noticeTitle}>Some drawer data may be stale</Text>
-        <Text style={styles.noticeMessage} numberOfLines={2}>
-          {noticeMessages.join(' ')}
-        </Text>
-      </View>
-      <Text style={styles.noticeAction}>Retry</Text>
-    </Pressable>
-  ) : null;
+  const notice =
+    noticeMessages.length > 0 ? (
+      <Pressable
+        accessibilityLabel={`${noticeMessages.join(' ')} Retry`}
+        accessibilityRole="button"
+        onPress={retryDrawerData}
+        style={({ pressed }) => [styles.notice, pressed && styles.noticePressed]}
+      >
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="alert-circle-outline"
+          size={17}
+          color={theme.colors.textMuted}
+        />
+        <View style={styles.noticeCopy}>
+          <Text style={styles.noticeTitle}>Some drawer data may be stale</Text>
+          <Text style={styles.noticeMessage} numberOfLines={2}>
+            {noticeMessages.join(' ')}
+          </Text>
+        </View>
+        <Text style={styles.noticeAction}>Retry</Text>
+      </Pressable>
+    ) : null;
 
   if (loading) {
     return (
@@ -147,17 +142,11 @@ export function DrawerChatList() {
             accessibilityRole="button"
             accessibilityState={controlAccessibilityState({ expanded: !collapsed })}
             onPress={() => toggleAttentionSection(section.key)}
-            style={({ pressed }) => [
-              styles.laneHeader,
-              pressed && styles.laneHeaderPressed,
-            ]}
+            style={({ pressed }) => [styles.laneHeader, pressed && styles.laneHeaderPressed]}
           >
             <View
               {...decorativeAccessibilityProps}
-              style={[
-                styles.laneDot,
-                laneDotStyle(section.key, styles),
-              ]}
+              style={[styles.laneDot, laneDotStyle(section.key, styles)]}
             />
             <Text style={styles.laneTitle}>{section.title}</Text>
             <Text style={styles.laneCount}>{String(section.itemCount)}</Text>
@@ -200,10 +189,7 @@ export function DrawerChatList() {
               >
                 <View style={styles.chatItemTextBlock}>
                   <Text
-                    style={[
-                      styles.chatTitle,
-                      isSelected && styles.chatTitleSelected,
-                    ]}
+                    style={[styles.chatTitle, isSelected && styles.chatTitleSelected]}
                     numberOfLines={1}
                   >
                     {item.chat.title || 'Untitled'}
@@ -219,10 +205,7 @@ export function DrawerChatList() {
                   <View style={styles.chatState}>
                     <View
                       {...decorativeAccessibilityProps}
-                      style={[
-                        styles.chatStateDot,
-                        rowStateDotStyle(item, styles),
-                      ]}
+                      style={[styles.chatStateDot, rowStateDotStyle(item, styles)]}
                     />
                     <Text
                       style={[
@@ -246,7 +229,7 @@ export function DrawerChatList() {
 
 function laneDotStyle(
   lane: DrawerAttentionLane,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles']
+  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
 ) {
   if (lane === 'attention') {
     return styles.laneDotAttention;
@@ -259,7 +242,7 @@ function laneDotStyle(
 
 function rowStateDotStyle(
   row: DrawerAttentionRow,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles']
+  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
 ) {
   if (row.attentionReason === 'error') {
     return styles.chatStateDotError;

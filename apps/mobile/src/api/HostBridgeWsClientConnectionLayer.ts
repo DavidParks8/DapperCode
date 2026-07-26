@@ -1,14 +1,7 @@
-import { HostBridgeWsClientCore } from "./HostBridgeWsClientCore";
-import type { BridgeProtocolVersionError } from "./wsErrors";
-import {
-  isFailedTurnStatus,
-  toAgUiTurnCompletionSnapshot,
-} from "./wsEventParsingInternals";
-import {
-  type EventListener,
-  type StatusListener,
-  type TurnCompletionSnapshot,
-} from "./wsTypes";
+import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
+import type { BridgeProtocolVersionError } from './wsErrors';
+import { isFailedTurnStatus, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
+import { type EventListener, type StatusListener, type TurnCompletionSnapshot } from './wsTypes';
 
 export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClientCore {
   public get isConnected(): boolean {
@@ -62,12 +55,12 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     }
     socket?.close();
     this.emitStatus(false);
-    this.rejectAllPending(new Error("Bridge websocket recovery epoch reset"));
+    this.rejectAllPending(new Error('Bridge websocket recovery epoch reset'));
     this.emitEvent({
-      method: "bridge/events/snapshotRequired",
+      method: 'bridge/events/snapshotRequired',
       protocolVersion: HostBridgeWsClientCore.PROTOCOL_VERSION,
       params: {
-        reason: "recoveryOverflow",
+        reason: 'recoveryOverflow',
         previousStreamId,
         lastDeliveredEventId,
         resumeAfterEventId: 0,
@@ -133,7 +126,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     }
     socket?.close();
     this.emitStatus(false);
-    this.rejectAllPending(new Error("Bridge websocket disconnected"));
+    this.rejectAllPending(new Error('Bridge websocket disconnected'));
   }
   async request<T>(method: string, params?: unknown): Promise<T> {
     await this.ensureConnected();
@@ -144,7 +137,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     }
     const socket = this.socket;
     if (!socket || socket.readyState !== 1) {
-      throw new Error("Bridge websocket is not connected");
+      throw new Error('Bridge websocket is not connected');
     }
     return await new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -213,7 +206,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
             ok: false,
             error: new Error(
               normalizedCompletion.errorMessage ??
-                `turn ${normalizedCompletion.status ?? "failed"}`,
+                `turn ${normalizedCompletion.status ?? 'failed'}`,
             ),
           });
           return;
@@ -242,7 +235,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
       await this.connectPromise;
     }
     if (!this.connected || this.socket?.readyState !== 1) {
-      throw new Error("Unable to connect to bridge websocket");
+      throw new Error('Unable to connect to bridge websocket');
     }
   }
 }

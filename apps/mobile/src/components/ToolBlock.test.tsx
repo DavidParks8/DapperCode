@@ -1,11 +1,7 @@
 import React from 'react';
 import { ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { ToolBlock } from './ToolBlock';
@@ -86,7 +82,9 @@ describe('ToolBlock', () => {
     expect(queryRoot(tree).findAll((node) => node.type === 'LinearGradient')).toHaveLength(2);
     act(() => invokeProp(scroll, 'onScroll', { nativeEvent: { contentOffset: { x: 140 } } }));
     expect(queryRoot(tree).findAll((node) => node.type === 'LinearGradient')).toHaveLength(1);
-    act(() => tree.update(wrap(<ToolBlock command="done" status="complete" icon="code-outline" />)));
+    act(() =>
+      tree.update(wrap(<ToolBlock command="done" status="complete" icon="code-outline" />)),
+    );
     expect(textContent(queryRoot(tree))).toContain('checkmark');
     act(() => tree.update(wrap(<ToolBlock command="failed" status="error" />)));
     expect(textContent(queryRoot(tree))).toContain('close');

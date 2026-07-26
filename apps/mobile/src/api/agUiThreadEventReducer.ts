@@ -1,4 +1,4 @@
-import { EventType } from "@ag-ui/core";
+import { EventType } from '@ag-ui/core';
 import {
   appendText,
   appendToolResult,
@@ -7,31 +7,26 @@ import {
   startToolCall,
   textMessage,
   upsertMessage,
-} from "./agUiMessageMutations";
+} from './agUiMessageMutations';
 import {
   appendToolArgs,
   applyActivityDelta,
   applyMessagesSnapshot,
   reduceCustomEvent,
-} from "./agUiToolAndCustomEventReducers";
-import {
-  applyJsonPatch,
-  nonEmptyString,
-  record,
-  timestampIso,
-} from "./agUiReducerUtilities";
+} from './agUiToolAndCustomEventReducers';
+import { applyJsonPatch, nonEmptyString, record, timestampIso } from './agUiReducerUtilities';
 import {
   findMessage,
   markRunTerminal,
   markTerminal,
   updateEncryptedValue,
-} from "./agUiStructuredAndTerminalReducers";
-import { type AgUiEventEnvelope } from "./agUi";
+} from './agUiStructuredAndTerminalReducers';
+import { type AgUiEventEnvelope } from './agUi';
 import {
   type AgUiThreadMessageState,
   createAgUiThreadMessageState,
   MAX_RAW_EVENTS_PER_THREAD,
-} from "./agUiMessagesState";
+} from './agUiMessagesState';
 
 export function reduceThreadState(
   current: AgUiThreadMessageState,
@@ -46,7 +41,7 @@ export function reduceThreadState(
         ? current
         : upsertMessage(
             current,
-            textMessage(event.messageId, event.role, "", event.name),
+            textMessage(event.messageId, event.role, '', event.name),
             envelope.runId,
             event.timestamp,
           );
@@ -63,7 +58,7 @@ export function reduceThreadState(
         event.delta,
         envelope.runId,
         event.timestamp,
-        "assistant",
+        'assistant',
       );
     case EventType.TEXT_MESSAGE_END:
       return markTerminal(current, event.messageId);
@@ -73,7 +68,7 @@ export function reduceThreadState(
       if (!findMessage(next, messageId)) {
         next = upsertMessage(
           next,
-          textMessage(messageId, event.role ?? "assistant", "", event.name),
+          textMessage(messageId, event.role ?? 'assistant', '', event.name),
           envelope.runId,
           event.timestamp,
         );
@@ -85,7 +80,7 @@ export function reduceThreadState(
             event.delta,
             envelope.runId,
             event.timestamp,
-            event.role ?? "assistant",
+            event.role ?? 'assistant',
           )
         : next;
     }
@@ -97,8 +92,8 @@ export function reduceThreadState(
             current,
             {
               id: event.messageId,
-              role: "reasoning",
-              content: "",
+              role: 'reasoning',
+              content: '',
               createdAt: timestampIso(event.timestamp),
             },
             envelope.runId,
@@ -111,7 +106,7 @@ export function reduceThreadState(
         event.delta,
         envelope.runId,
         event.timestamp,
-        "reasoning",
+        'reasoning',
       );
     case EventType.REASONING_MESSAGE_CHUNK: {
       const messageId = event.messageId ?? `${envelope.runId}:reasoning`;
@@ -121,34 +116,22 @@ export function reduceThreadState(
             current,
             {
               id: messageId,
-              role: "reasoning",
-              content: "",
+              role: 'reasoning',
+              content: '',
               createdAt: timestampIso(event.timestamp),
             },
             envelope.runId,
             event.timestamp,
           );
       return event.delta
-        ? appendText(
-            next,
-            messageId,
-            event.delta,
-            envelope.runId,
-            event.timestamp,
-            "reasoning",
-          )
+        ? appendText(next, messageId, event.delta, envelope.runId, event.timestamp, 'reasoning')
         : next;
     }
     case EventType.REASONING_MESSAGE_END:
     case EventType.REASONING_END:
       return markTerminal(current, event.messageId);
     case EventType.REASONING_ENCRYPTED_VALUE:
-      return updateEncryptedValue(
-        current,
-        event.entityId,
-        event.encryptedValue,
-        event.subtype,
-      );
+      return updateEncryptedValue(current, event.entityId, event.encryptedValue, event.subtype);
     case EventType.TOOL_CALL_START:
       if (current.subagentToolCallIds[event.toolCallId]) return current;
       return startToolCall(
@@ -182,19 +165,13 @@ export function reduceThreadState(
           next,
           envelope.runId,
           event.toolCallId,
-          event.toolCallName ?? "tool",
+          event.toolCallName ?? 'tool',
           event.parentMessageId,
           event.timestamp,
         );
       }
       return event.delta
-        ? appendToolArgs(
-            next,
-            envelope.runId,
-            event.toolCallId,
-            event.delta,
-            event.timestamp,
-          )
+        ? appendToolArgs(next, envelope.runId, event.toolCallId, event.delta, event.timestamp)
         : next;
     }
     case EventType.TOOL_CALL_RESULT:
@@ -208,12 +185,7 @@ export function reduceThreadState(
         event.timestamp,
       );
     case EventType.MESSAGES_SNAPSHOT:
-      return applyMessagesSnapshot(
-        current,
-        envelope.runId,
-        event.messages,
-        event.timestamp,
-      );
+      return applyMessagesSnapshot(current, envelope.runId, event.messages, event.timestamp);
     case EventType.ACTIVITY_SNAPSHOT:
       return reduceActivitySnapshot(
         current,
@@ -239,20 +211,19 @@ export function reduceThreadState(
     case EventType.STEP_STARTED:
       return {
         ...current,
-        steps: { ...current.steps, [event.stepName]: "running" },
+        steps: { ...current.steps, [event.stepName]: 'running' },
       };
     case EventType.STEP_FINISHED:
       return {
         ...current,
-        steps: { ...current.steps, [event.stepName]: "finished" },
+        steps: { ...current.steps, [event.stepName]: 'finished' },
       };
     case EventType.RAW:
       return {
         ...current,
-        rawEvents: [
-          ...current.rawEvents,
-          { source: event.source, event: event.event },
-        ].slice(-MAX_RAW_EVENTS_PER_THREAD),
+        rawEvents: [...current.rawEvents, { source: event.source, event: event.event }].slice(
+          -MAX_RAW_EVENTS_PER_THREAD,
+        ),
       };
     case EventType.CUSTOM:
       return reduceCustomEvent(current, envelope);

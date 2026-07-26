@@ -5,7 +5,11 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '../../a
 import { formatRelativeTime } from './gitScreenUtils';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 
-export function GitScreenBranchSummarySection({ controller, styles, theme }: GitSectionCommonProps) {
+export function GitScreenBranchSummarySection({
+  controller,
+  styles,
+  theme,
+}: GitSectionCommonProps) {
   const { derived, status, branchDraft, branchPanelOpen, switchingBranch } = controller;
 
   return (
@@ -78,7 +82,11 @@ export function GitScreenBranchSummarySection({ controller, styles, theme }: Git
             >
               {derived.branchRows.map((branch) => {
                 const selected = branchDraft === branch.name;
-                const branchMeta = branch.current ? 'Current branch' : branch.remote ? 'Remote' : 'Local';
+                const branchMeta = branch.current
+                  ? 'Current branch'
+                  : branch.remote
+                    ? 'Remote'
+                    : 'Local';
                 return (
                   <Pressable
                     key={`${branch.remote ? 'remote' : 'local'}:${branch.name}`}

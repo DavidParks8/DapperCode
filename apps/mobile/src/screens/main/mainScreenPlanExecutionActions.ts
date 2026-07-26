@@ -1,21 +1,21 @@
-import {
-  selectedCollaborationModeAtom
-} from '../../state/mainScreen/models';
+import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import {
   pendingPlanImplementationPromptsAtom,
-  planPanelCollapsedByThreadAtom
+  planPanelCollapsedByThreadAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
-import { PLAN_IMPLEMENTATION_CODING_MESSAGE, shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
-import type { MainScreenComposerRendererContext, MainScreenComposerRendererResult } from './mainScreenComposerRenderer';
+import {
+  PLAN_IMPLEMENTATION_CODING_MESSAGE,
+  shouldAutoEnablePlanModeFromChat,
+} from './mainScreenHelpers';
+import type {
+  MainScreenComposerRendererContext,
+  MainScreenComposerRendererResult,
+} from './mainScreenComposerRenderer';
 
-
-
-
-
-
-export type MainScreenPlanExecutionActionsContext = MainScreenComposerRendererContext & MainScreenComposerRendererResult;
+export type MainScreenPlanExecutionActionsContext = MainScreenComposerRendererContext &
+  MainScreenComposerRendererResult;
 
 export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecutionActionsContext) {
   const {
@@ -39,7 +39,6 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
   const setPlanPanelCollapsedByThread = useSetAtom(planPanelCollapsedByThreadAtom);
   const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);
 
-
   useEffect(() => {
     // Agents that cannot run a plan turn still publish plan/to-do updates, so
     // never flip the composer into plan mode on their behalf.
@@ -57,8 +56,7 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     }
 
     if (
-      dismissedPlanImplementationTurnIdByThreadRef.current[selectedChat.id] ===
-      latestPlanTurnId
+      dismissedPlanImplementationTurnIdByThreadRef.current[selectedChat.id] === latestPlanTurnId
     ) {
       return;
     }
@@ -135,11 +133,7 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     }
     setSelectedCollaborationMode('plan');
     clearPendingPlanImplementationPrompt(selectedChatId);
-  }, [
-    clearPendingPlanImplementationPrompt,
-    selectedChatId,
-    selectedPlanImplementationPrompt,
-  ]);
+  }, [clearPendingPlanImplementationPrompt, selectedChatId, selectedPlanImplementationPrompt]);
 
   const implementPlan = useCallback(async () => {
     if (!selectedChatId) {
@@ -212,4 +206,6 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
   };
 }
 
-export type MainScreenPlanExecutionActionsResult = ReturnType<typeof useMainScreenPlanExecutionActions>;
+export type MainScreenPlanExecutionActionsResult = ReturnType<
+  typeof useMainScreenPlanExecutionActions
+>;

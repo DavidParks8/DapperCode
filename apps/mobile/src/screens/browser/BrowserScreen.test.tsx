@@ -78,11 +78,13 @@ const session: BrowserPreviewSession = {
   expiresAt: '2026-07-20T01:00:00.000Z',
 };
 
-function createApi(options: {
-  capabilities?: BridgeCapabilities | Error;
-  discoveryError?: boolean;
-  createError?: Error;
-} = {}): HostBridgeApiClient {
+function createApi(
+  options: {
+    capabilities?: BridgeCapabilities | Error;
+    discoveryError?: boolean;
+    createError?: Error;
+  } = {},
+): HostBridgeApiClient {
   return {
     readBridgeCapabilities: jest.fn().mockImplementation(() => {
       const value = options.capabilities ?? capabilities;
@@ -94,11 +96,13 @@ function createApi(options: {
         : Promise.resolve({
             scannedAt: '2026-07-20T00:00:00.000Z',
             suggestions: [{ targetUrl: 'http://127.0.0.1:5173', port: 5173, label: 'Vite' }],
-          })
+          }),
     ),
-    createBrowserPreviewSession: jest.fn().mockImplementation(() =>
-      options.createError ? Promise.reject(options.createError) : Promise.resolve(session)
-    ),
+    createBrowserPreviewSession: jest
+      .fn()
+      .mockImplementation(() =>
+        options.createError ? Promise.reject(options.createError) : Promise.resolve(session),
+      ),
     closeBrowserPreviewSession: jest.fn().mockResolvedValue(true),
   } as unknown as HostBridgeApiClient;
 }
@@ -143,13 +147,15 @@ async function invoke(node: Queryable, property = 'onPress', value?: unknown): P
   });
 }
 
-async function renderBrowser(options: {
-  api?: HostBridgeApiClient;
-  recentTargetUrls?: string[];
-  pendingTargetUrl?: string | null;
-  handlePendingTarget?: boolean;
-  bottomInset?: number;
-} = {}): Promise<{
+async function renderBrowser(
+  options: {
+    api?: HostBridgeApiClient;
+    recentTargetUrls?: string[];
+    pendingTargetUrl?: string | null;
+    handlePendingTarget?: boolean;
+    bottomInset?: number;
+  } = {},
+): Promise<{
   tree: ReactTestRenderer;
   api: HostBridgeApiClient;
   store: AppStore;
@@ -185,12 +191,17 @@ async function renderBrowser(options: {
     tree = renderer.create(
       withAppStore(
         store,
-        <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 } }}>
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 },
+          }}
+        >
           <AppThemeProvider theme={theme}>
             <BrowserScreen />
           </AppThemeProvider>
-        </SafeAreaProvider>
-      )
+        </SafeAreaProvider>,
+      ),
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -219,15 +230,31 @@ describe('BrowserScreen behavior', () => {
     act(() => populated.tree.unmount());
 
     const unavailable = await renderBrowser({
-      api: createApi({ capabilities: { ...capabilities, supports: { ...capabilities.supports, browserPreview: false } }, discoveryError: true }),
+      api: createApi({
+        capabilities: {
+          ...capabilities,
+          supports: { ...capabilities.supports, browserPreview: false },
+        },
+        discoveryError: true,
+      }),
     });
-    expect(hasText(unavailable.tree.root as Queryable, 'No local web servers responded right now.')).toBe(true);
-    expect(hasText(unavailable.tree.root as Queryable, 'Open one preview and it will appear here.')).toBe(true);
-    expect(hasText(unavailable.tree.root as Queryable, 'did not start its preview server')).toBe(true);
-    expect(findByLabel(unavailable.tree.root as Queryable, 'Open preview').props.disabled).toBe(true);
+    expect(
+      hasText(unavailable.tree.root as Queryable, 'No local web servers responded right now.'),
+    ).toBe(true);
+    expect(
+      hasText(unavailable.tree.root as Queryable, 'Open one preview and it will appear here.'),
+    ).toBe(true);
+    expect(hasText(unavailable.tree.root as Queryable, 'did not start its preview server')).toBe(
+      true,
+    );
+    expect(findByLabel(unavailable.tree.root as Queryable, 'Open preview').props.disabled).toBe(
+      true,
+    );
     act(() => unavailable.tree.unmount());
 
-    const failed = await renderBrowser({ api: createApi({ capabilities: new Error('capabilities offline') }) });
+    const failed = await renderBrowser({
+      api: createApi({ capabilities: new Error('capabilities offline') }),
+    });
     expect(hasText(failed.tree.root as Queryable, 'capabilities offline')).toBe(true);
     act(() => failed.tree.unmount());
   });
@@ -260,7 +287,10 @@ describe('BrowserScreen behavior', () => {
     expect(mockWebViewMethods.goForward).toHaveBeenCalled();
     expect(mockWebViewMethods.reload).toHaveBeenCalled();
 
-    const shouldStartLoad = readHandler<(request: { url: string }) => boolean>(webView, 'onShouldStartLoadWithRequest');
+    const shouldStartLoad = readHandler<(request: { url: string }) => boolean>(
+      webView,
+      'onShouldStartLoadWithRequest',
+    );
     expect(shouldStartLoad({ url: 'about:blank' })).toBe(true);
     expect(shouldStartLoad({ url: 'data:text/plain,ok' })).toBe(true);
     expect(shouldStartLoad({ url: 'https://example.com' })).toBe(false);
@@ -286,7 +316,9 @@ describe('BrowserScreen behavior', () => {
     expect(invalid.api.discoverBrowserPreviewTargets).toHaveBeenCalledTimes(2);
     act(() => invalid.tree.unmount());
 
-    const failed = await renderBrowser({ api: createApi({ createError: new Error('session failed') }) });
+    const failed = await renderBrowser({
+      api: createApi({ createError: new Error('session failed') }),
+    });
     await invoke(findByLabel(failed.tree.root as Queryable, 'Open preview'));
     expect(hasText(failed.tree.root as Queryable, 'session failed')).toBe(true);
     act(() => failed.tree.unmount());
@@ -316,8 +348,14 @@ describe('BrowserScreen behavior', () => {
     await invoke(apply);
     expect(hasText(root, 'between 320 and 4096')).toBe(true);
     act(() => {
-      readHandler<(value: string) => void>(findByLabel(root, 'Viewport width'), 'onChangeText')('1440');
-      readHandler<(value: string) => void>(findByLabel(root, 'Viewport height'), 'onChangeText')('900');
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Viewport width'),
+        'onChangeText',
+      )('1440');
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Viewport height'),
+        'onChangeText',
+      )('900');
     });
     await invoke(apply);
     expect(hasText(root, 'between 320 and 4096')).toBe(false);
@@ -331,12 +369,16 @@ describe('BrowserScreen behavior', () => {
     expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:5173/');
     await invoke(findByLabel(root, 'Show preview start page'));
     await invoke(findByLabel(root, '127.0.0.1:8080, http://127.0.0.1:8080/'));
-    expect(result.api.createBrowserPreviewSession).toHaveBeenLastCalledWith('http://127.0.0.1:8080/');
+    expect(result.api.createBrowserPreviewSession).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:8080/',
+    );
     await invoke(findByLabel(root, 'Show preview start page'));
     const input = findByLabel(root, 'Preview address');
     act(() => readHandler<(value: string) => void>(input, 'onChangeText')('localhost:9000'));
     await invoke(input, 'onSubmitEditing');
-    expect(result.api.createBrowserPreviewSession).toHaveBeenLastCalledWith('http://localhost:9000/');
+    expect(result.api.createBrowserPreviewSession).toHaveBeenLastCalledWith(
+      'http://localhost:9000/',
+    );
     act(() => result.tree.unmount());
   });
 
@@ -347,7 +389,10 @@ describe('BrowserScreen behavior', () => {
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing WebView');
     await act(async () => {
-      const shouldStartLoad = readHandler<(request: { url: string }) => boolean>(webView, 'onShouldStartLoadWithRequest');
+      const shouldStartLoad = readHandler<(request: { url: string }) => boolean>(
+        webView,
+        'onShouldStartLoadWithRequest',
+      );
       expect(shouldStartLoad({ url: 'blob:http://bridge/id' })).toBe(true);
       expect(shouldStartLoad({ url: 'http://bridge:4173/preview/session-1' })).toBe(true);
       expect(shouldStartLoad({ url: 'http://127.0.0.1:5050/page' })).toBe(false);
@@ -355,7 +400,9 @@ describe('BrowserScreen behavior', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:5050/page');
+    expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith(
+      'http://127.0.0.1:5050/page',
+    );
     webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     await invoke(webView, 'onLoadStart');
     expect(hasText(root, 'Loading preview')).toBe(true);
@@ -389,15 +436,41 @@ describe('BrowserScreen behavior', () => {
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing desktop WebView');
     await invoke(webView, 'onMessage', { nativeEvent: { data: 'not-json' } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'other' }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeDesktopFrameState', shellRequestKey: 'wrong', rawUrl: 'http://bridge:4173/preview/session-1/wrong' }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeDesktopFrameState', rawUrl: 'http://bridge:4173/preview/session-1/docs', title: 'Docs', canGoBack: true, canGoForward: true }) } });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'other' }) },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: {
+        data: JSON.stringify({
+          type: 'dappercodeDesktopFrameState',
+          shellRequestKey: 'wrong',
+          rawUrl: 'http://bridge:4173/preview/session-1/wrong',
+        }),
+      },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: {
+        data: JSON.stringify({
+          type: 'dappercodeDesktopFrameState',
+          rawUrl: 'http://bridge:4173/preview/session-1/docs',
+          title: 'Docs',
+          canGoBack: true,
+          canGoForward: true,
+        }),
+      },
+    });
     expect(result.ref.current?.handleHardwareBackPress()).toBe(true);
     await invoke(findByLabel(root, 'Forward'));
     await invoke(findByLabel(root, 'Reload preview'));
-    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(expect.stringContaining('goBack'));
-    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(expect.stringContaining('goForward'));
-    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(expect.stringContaining('reload'));
+    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('goBack'),
+    );
+    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('goForward'),
+    );
+    expect(mockWebViewMethods.injectJavaScript).toHaveBeenCalledWith(
+      expect.stringContaining('reload'),
+    );
     await invoke(webView, 'onContentProcessDidTerminate');
     await invoke(findByLabel(root, 'Viewport size, 1920×1080'));
     exercisePressableStyles(root);
@@ -419,15 +492,27 @@ describe('BrowserScreen behavior', () => {
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 390, height: 700 } } });
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 390, height: 700 } } });
     await invoke(webView, 'onMessage', { nativeEvent: { data: 'bad-json' } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'other', height: 2000 }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 0 }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2400 }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2400 }) } });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2200 }) } });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'other', height: 2000 }) },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 0 }) },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2400 }) },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2400 }) },
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2200 }) },
+    });
     act(() => jest.runOnlyPendingTimers());
     webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     await invoke(webView, 'onContentProcessDidTerminate');
-    (api.createBrowserPreviewSession as jest.Mock).mockRejectedValueOnce(new Error('viewport reload failed'));
+    (api.createBrowserPreviewSession as jest.Mock).mockRejectedValueOnce(
+      new Error('viewport reload failed'),
+    );
     await invoke(findByLabel(root, 'Mobile viewport'));
     expect(hasText(root, 'viewport reload failed')).toBe(true);
     act(() => result.tree.unmount());
@@ -469,7 +554,9 @@ describe('BrowserScreen behavior', () => {
     const capabilityApi = createApi();
     (capabilityApi.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce('offline');
     const capability = await renderBrowser({ api: capabilityApi });
-    expect(hasText(capability.tree.root as Queryable, 'Could not load bridge capabilities.')).toBe(true);
+    expect(hasText(capability.tree.root as Queryable, 'Could not load bridge capabilities.')).toBe(
+      true,
+    );
     act(() => capability.tree.unmount());
 
     const createApiFallback = createApi();
@@ -482,13 +569,22 @@ describe('BrowserScreen behavior', () => {
 
   it('renders a session without optional base URL and empty navigation values', async () => {
     const api = createApi();
-    (api.createBrowserPreviewSession as jest.Mock).mockResolvedValue({ ...session, previewBaseUrl: null });
+    (api.createBrowserPreviewSession as jest.Mock).mockResolvedValue({
+      ...session,
+      previewBaseUrl: null,
+    });
     const result = await renderBrowser({ api });
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing WebView');
-    await invoke(webView, 'onNavigationStateChange', { url: '', title: '', canGoBack: false, canGoForward: false, loading: false });
+    await invoke(webView, 'onNavigationStateChange', {
+      url: '',
+      title: '',
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+    });
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
     webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     await invoke(webView, 'onError', { nativeEvent: { description: '' } });
@@ -504,8 +600,18 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Desktop Full viewport'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing shell WebView');
-    await invoke(webView, 'onNavigationStateChange', { url: 'ignored', title: 'Ignored', canGoBack: true, canGoForward: true, loading: true });
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeDesktopFrameState', rawUrl: '', title: 42 }) } });
+    await invoke(webView, 'onNavigationStateChange', {
+      url: 'ignored',
+      title: 'Ignored',
+      canGoBack: true,
+      canGoForward: true,
+      loading: true,
+    });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: {
+        data: JSON.stringify({ type: 'dappercodeDesktopFrameState', rawUrl: '', title: 42 }),
+      },
+    });
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
     webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     await invoke(webView, 'onHttpError', { nativeEvent: { statusCode: 404 } });
@@ -526,14 +632,24 @@ describe('BrowserScreen behavior', () => {
 
   it('covers Android mobile preview, zero inset, and missing pending callback', async () => {
     setPlatform('android');
-    const result = await renderBrowser({ pendingTargetUrl: '3000', handlePendingTarget: false, bottomInset: 0 });
+    const result = await renderBrowser({
+      pendingTargetUrl: '3000',
+      handlePendingTarget: false,
+      bottomInset: 0,
+    });
     const root = result.tree.root as Queryable;
     exercisePressableStyles(root);
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
     if (!webView) throw new Error('Missing Android WebView');
     expect(webView.props.contentMode).toBe('mobile');
     expect(webView.props.userAgent).toBeUndefined();
-    await invoke(webView, 'onNavigationStateChange', { url: 'https://outside.example/path', title: 'Outside', canGoBack: true, canGoForward: false, loading: false });
+    await invoke(webView, 'onNavigationStateChange', {
+      url: 'https://outside.example/path',
+      title: 'Outside',
+      canGoBack: true,
+      canGoForward: false,
+      loading: false,
+    });
     expect(findByLabel(root, 'Preview address').props.value).toBe('https://outside.example/path');
     act(() => result.tree.unmount());
   });
@@ -545,8 +661,14 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Viewport size, 1920×1080'));
     await invoke(findPressableByText(root, 'Custom'));
     act(() => {
-      readHandler<(value: string) => void>(findByLabel(root, 'Viewport width'), 'onChangeText')('not-a-number');
-      readHandler<(value: string) => void>(findByLabel(root, 'Viewport height'), 'onChangeText')('900');
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Viewport width'),
+        'onChangeText',
+      )('not-a-number');
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Viewport height'),
+        'onChangeText',
+      )('900');
     });
     await invoke(findPressableByText(root, 'Apply'));
     expect(hasText(root, 'between 320 and 4096')).toBe(true);
@@ -554,10 +676,17 @@ describe('BrowserScreen behavior', () => {
     act(() => result.tree.unmount());
 
     const api = createApi();
-    (api.createBrowserPreviewSession as jest.Mock).mockResolvedValue({ ...session, previewPort: 0, previewBaseUrl: '', bootstrapPath: '' });
+    (api.createBrowserPreviewSession as jest.Mock).mockResolvedValue({
+      ...session,
+      previewPort: 0,
+      previewBaseUrl: '',
+      bootstrapPath: '',
+    });
     const missing = await renderBrowser({ api });
     await invoke(findByLabel(missing.tree.root as Queryable, 'Open preview'));
-    expect(hasText(missing.tree.root as Queryable, 'Could not build preview bootstrap URL.')).toBe(true);
+    expect(hasText(missing.tree.root as Queryable, 'Could not build preview bootstrap URL.')).toBe(
+      true,
+    );
     expect(api.closeBrowserPreviewSession).toHaveBeenCalledWith(session.sessionId);
     act(() => missing.tree.unmount());
   });
@@ -576,7 +705,9 @@ describe('BrowserScreen behavior', () => {
     if (!webView) throw new Error('Missing native desktop WebView');
     expect(webView.props.contentMode).toBe('desktop');
     expect(webView.props.userAgent).toContain('Mozilla/5.0');
-    await invoke(webView, 'onMessage', { nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 3000 }) } });
+    await invoke(webView, 'onMessage', {
+      nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 3000 }) },
+    });
     await invoke(webView, 'onContentProcessDidTerminate');
     expect(hasText(root, 'Loading preview')).toBe(true);
     act(() => result.tree.unmount());

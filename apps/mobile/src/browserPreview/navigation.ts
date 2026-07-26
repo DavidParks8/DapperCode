@@ -12,7 +12,7 @@ export function buildBrowserPreviewBootstrapUrl(
   previewPort: number,
   bootstrapPath: string,
   viewport: BrowserPreviewViewportSpec = DEFAULT_BROWSER_PREVIEW_VIEWPORT,
-  previewBaseUrl?: string | null
+  previewBaseUrl?: string | null,
 ): string | null {
   if (typeof bridgeUrl !== 'string' || typeof bootstrapPath !== 'string') {
     return null;
@@ -29,7 +29,7 @@ export function buildBrowserPreviewBootstrapUrl(
     const resolvedPreviewBaseUrl = getBrowserPreviewBaseUrl(
       normalizedBridgeUrl,
       previewPort,
-      previewBaseUrl
+      previewBaseUrl,
     );
     if (!resolvedPreviewBaseUrl) {
       return null;
@@ -38,7 +38,7 @@ export function buildBrowserPreviewBootstrapUrl(
 
     const previewUrl = new URL(
       normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`,
-      base.toString()
+      base.toString(),
     );
     applyViewportParams(previewUrl, normalizedViewport);
     return previewUrl.toString();
@@ -49,7 +49,7 @@ export function buildBrowserPreviewBootstrapUrl(
 
 export function applyBrowserPreviewShellMode(
   rawUrl: string,
-  shellMode: 'desktop' | 'overview' | null
+  shellMode: 'desktop' | 'overview' | null,
 ): string | null {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -71,7 +71,7 @@ export function applyBrowserPreviewShellMode(
 
 export function getNativeBrowserPreviewShellMode(
   platformOs: string,
-  viewportPreset: 'mobile' | 'desktop' | 'desktop2'
+  viewportPreset: 'mobile' | 'desktop' | 'desktop2',
 ): 'desktop' | 'overview' | null {
   if (platformOs !== 'ios' && platformOs !== 'android') {
     return null;
@@ -88,9 +88,7 @@ export function getNativeBrowserPreviewShellMode(
   return null;
 }
 
-export function getBrowserPreviewShellRequestKey(
-  rawUrl: string | null | undefined
-): string | null {
+export function getBrowserPreviewShellRequestKey(rawUrl: string | null | undefined): string | null {
   if (typeof rawUrl !== 'string') {
     return null;
   }
@@ -110,7 +108,7 @@ export function getBrowserPreviewShellRequestKey(
 export function getBrowserPreviewOrigin(
   bridgeUrl: string,
   previewPort: number,
-  previewBaseUrl?: string | null
+  previewBaseUrl?: string | null,
 ): string | null {
   const baseUrl = getBrowserPreviewBaseUrl(bridgeUrl, previewPort, previewBaseUrl);
   if (!baseUrl) {
@@ -125,10 +123,7 @@ export function getBrowserPreviewOrigin(
   }
 }
 
-export function isSameOriginUrl(
-  url: string,
-  origin: string | null | undefined
-): boolean {
+export function isSameOriginUrl(url: string, origin: string | null | undefined): boolean {
   if (!origin) {
     return false;
   }
@@ -142,7 +137,7 @@ export function isSameOriginUrl(
 
 export function applyBrowserPreviewViewportPreset(
   rawUrl: string,
-  viewport: BrowserPreviewViewportSpec
+  viewport: BrowserPreviewViewportSpec,
 ): string | null {
   if (typeof rawUrl !== 'string') {
     return null;
@@ -160,7 +155,7 @@ export function applyBrowserPreviewViewportPreset(
 export function buildBrowserPreviewViewportNavigationUrl(
   rawCurrentUrl: string,
   rawBootstrapUrl: string,
-  viewport: BrowserPreviewViewportSpec
+  viewport: BrowserPreviewViewportSpec,
 ): string | null {
   if (typeof rawCurrentUrl !== 'string' || typeof rawBootstrapUrl !== 'string') {
     return null;
@@ -189,7 +184,7 @@ export function buildBrowserPreviewViewportNavigationUrl(
 export function mapBrowserPreviewNavigationUrlToTargetUrl(
   rawNavigationUrl: string,
   rawPreviewOrigin: string | null | undefined,
-  rawSessionTargetUrl: string | null | undefined
+  rawSessionTargetUrl: string | null | undefined,
 ): string | null {
   if (
     typeof rawNavigationUrl !== 'string' ||
@@ -223,7 +218,7 @@ export function mapBrowserPreviewNavigationUrlToTargetUrl(
 function getBrowserPreviewBaseUrl(
   bridgeUrl: string,
   previewPort: number,
-  previewBaseUrl?: string | null
+  previewBaseUrl?: string | null,
 ): string | null {
   if (typeof bridgeUrl !== 'string') {
     return null;
@@ -279,9 +274,7 @@ function resolvePreviewDisplayUrl(navigationUrl: URL, sessionTargetUrl: URL): UR
   const segments = proxyTail.split('/');
   const targetToken = segments.shift()?.trim() ?? '';
   const decodedOrigin = decodeBrowserPreviewProxyOriginToken(targetToken);
-  const mappedUrl = decodedOrigin
-    ? new URL(decodedOrigin)
-    : new URL(sessionTargetUrl.toString());
+  const mappedUrl = decodedOrigin ? new URL(decodedOrigin) : new URL(sessionTargetUrl.toString());
   const remainderPath = segments.join('/');
   mappedUrl.pathname = remainderPath ? `/${remainderPath}` : '/';
   mappedUrl.search = navigationUrl.search;

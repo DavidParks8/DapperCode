@@ -131,7 +131,9 @@ describe('agUiReducerUtilities', () => {
   describe('applyJsonPatch', () => {
     it('handles root add/replace/remove and undefined root default', () => {
       expect(applyJsonPatch(undefined, [{ op: 'add', path: '/x', value: 1 }])).toEqual({ x: 1 });
-      expect(applyJsonPatch({ a: 1 }, [{ op: 'replace', path: '', value: { b: 2 } }])).toEqual({ b: 2 });
+      expect(applyJsonPatch({ a: 1 }, [{ op: 'replace', path: '', value: { b: 2 } }])).toEqual({
+        b: 2,
+      });
       expect(applyJsonPatch({ a: 1 }, [{ op: 'add', path: '', value: [1, 2] }])).toEqual([1, 2]);
       expect(applyJsonPatch({ a: 1 }, [{ op: 'remove', path: '' }])).toBeNull();
     });

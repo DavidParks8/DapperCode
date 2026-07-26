@@ -56,13 +56,20 @@ function makeIcon() {
   rmSync(iconset, { recursive: true, force: true });
   mkdirSync(iconset, { recursive: true });
   for (const [name, pixels] of [
-    ['icon_16x16.png', 16], ['icon_16x16@2x.png', 32],
-    ['icon_32x32.png', 32], ['icon_32x32@2x.png', 64],
-    ['icon_128x128.png', 128], ['icon_128x128@2x.png', 256],
-    ['icon_256x256.png', 256], ['icon_256x256@2x.png', 512],
-    ['icon_512x512.png', 512], ['icon_512x512@2x.png', 1024],
+    ['icon_16x16.png', 16],
+    ['icon_16x16@2x.png', 32],
+    ['icon_32x32.png', 32],
+    ['icon_32x32@2x.png', 64],
+    ['icon_128x128.png', 128],
+    ['icon_128x128@2x.png', 256],
+    ['icon_256x256.png', 256],
+    ['icon_256x256@2x.png', 512],
+    ['icon_512x512.png', 512],
+    ['icon_512x512@2x.png', 1024],
   ]) {
-    run('sips', ['-z', String(pixels), String(pixels), source, '--out', path.join(iconset, name)], { stdio: 'ignore' });
+    run('sips', ['-z', String(pixels), String(pixels), source, '--out', path.join(iconset, name)], {
+      stdio: 'ignore',
+    });
   }
   run('iconutil', ['-c', 'icns', iconset, '-o', path.join(resourcesDir, 'DapperCode.icns')]);
   rmSync(iconset, { recursive: true, force: true });
@@ -72,10 +79,17 @@ function makeMenuBarIcon() {
   const source = path.join(rootDir, 'apps/mobile/assets/brand/mark.png');
   const cropped = path.join(distDir, 'menu-bar-mark.png');
   run('sips', ['-c', '168', '168', source, '--out', cropped], { stdio: 'ignore' });
-  for (const [name, pixels] of [['MenuBarIcon.png', 18], ['MenuBarIcon@2x.png', 36]]) {
-    run('sips', ['-z', String(pixels), String(pixels), cropped, '--out', path.join(resourcesDir, name)], {
-      stdio: 'ignore',
-    });
+  for (const [name, pixels] of [
+    ['MenuBarIcon.png', 18],
+    ['MenuBarIcon@2x.png', 36],
+  ]) {
+    run(
+      'sips',
+      ['-z', String(pixels), String(pixels), cropped, '--out', path.join(resourcesDir, name)],
+      {
+        stdio: 'ignore',
+      },
+    );
   }
   rmSync(cropped, { force: true });
 }
@@ -93,17 +107,21 @@ function walk(directory) {
 function assertRustNativeBundle() {
   const forbidden = walk(appDir).filter((file) => {
     const relative = path.relative(appDir, file).toLowerCase();
-    return relative.endsWith('.js')
-      || relative.endsWith('package.json')
-      || relative.endsWith('package-lock.json')
-      || relative.includes('node_modules')
-      || path.basename(relative) === 'node'
-      || path.basename(relative) === 'npm'
-      || path.basename(relative) === 'npx'
-      || relative.includes('slint');
+    return (
+      relative.endsWith('.js') ||
+      relative.endsWith('package.json') ||
+      relative.endsWith('package-lock.json') ||
+      relative.includes('node_modules') ||
+      path.basename(relative) === 'node' ||
+      path.basename(relative) === 'npm' ||
+      path.basename(relative) === 'npx' ||
+      relative.includes('slint')
+    );
   });
   if (forbidden.length > 0) {
-    throw new Error(`macOS bundle contains forbidden npm/Slint runtime files:\n${forbidden.join('\n')}`);
+    throw new Error(
+      `macOS bundle contains forbidden npm/Slint runtime files:\n${forbidden.join('\n')}`,
+    );
   }
   const required = [
     path.join(macosDir, 'DapperCode'),
@@ -113,14 +131,22 @@ function assertRustNativeBundle() {
     path.join(resourcesDir, 'MenuBarIcon@2x.png'),
   ];
   for (const file of required) {
-    if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`Missing bundled executable: ${file}`);
+    if (!existsSync(file) || !statSync(file).isFile())
+      throw new Error(`Missing bundled executable: ${file}`);
   }
 }
 
 if (process.platform !== 'darwin') throw new Error('The macOS app must be built on macOS');
-if (!['arm64', 'x64'].includes(process.arch)) throw new Error(`Unsupported architecture: ${process.arch}`);
+if (!['arm64', 'x64'].includes(process.arch))
+  throw new Error(`Unsupported architecture: ${process.arch}`);
 
-run('cargo', ['build', '--locked', '--release', '--manifest-path', 'services/rust-bridge/Cargo.toml']);
+run('cargo', [
+  'build',
+  '--locked',
+  '--release',
+  '--manifest-path',
+  'services/rust-bridge/Cargo.toml',
+]);
 run('cargo', ['build', '--locked', '--release', '--manifest-path', 'apps/desktop/Cargo.toml']);
 
 rmSync(distDir, { recursive: true, force: true });
@@ -131,30 +157,36 @@ const rustOperator = path.join(desktopDir, 'target/release/dappercode');
 const rustBridge = path.join(rootDir, 'services/rust-bridge/target/release/dappercode-bridge');
 const nativeExecutable = path.join(macosDir, 'DapperCode');
 run('xcrun', [
-  'swiftc', '-parse-as-library',
-  '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`,
+  'swiftc',
+  '-parse-as-library',
+  '-target',
+  `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`,
   'apps/desktop/macos/DapperCodeApp.swift',
-  '-o', nativeExecutable,
-  '-framework', 'SwiftUI',
-  '-framework', 'AppKit',
-  '-framework', 'CoreImage',
-  '-framework', 'ServiceManagement',
+  '-o',
+  nativeExecutable,
+  '-framework',
+  'SwiftUI',
+  '-framework',
+  'AppKit',
+  '-framework',
+  'CoreImage',
+  '-framework',
+  'ServiceManagement',
 ]);
 copyExecutable(rustOperator, path.join(binDir, 'dappercode'));
 copyExecutable(rustBridge, path.join(binDir, 'dappercode-bridge'));
 copyFileSync(path.join(rootDir, 'LICENSE'), path.join(resourcesDir, 'LICENSE'));
 
 const noticesPath = path.join(resourcesDir, 'THIRD_PARTY_NOTICES.txt');
-run('node', [
-  'scripts/generate-desktop-notices.mjs',
-  '--output', noticesPath,
-]);
+run('node', ['scripts/generate-desktop-notices.mjs', '--output', noticesPath]);
 
 makeIcon();
 makeMenuBarIcon();
 const version = packageVersion();
 const bundleVersion = version.split('-', 1)[0];
-writeFileSync(path.join(contentsDir, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+writeFileSync(
+  path.join(contentsDir, 'Info.plist'),
+  `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleDisplayName</key><string>DapperCode</string>
@@ -170,7 +202,8 @@ writeFileSync(path.join(contentsDir, 'Info.plist'), `<?xml version="1.0" encodin
   <key>LSMultipleInstancesProhibited</key><true/>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
-</dict></plist>\n`);
+</dict></plist>\n`,
+);
 writeFileSync(path.join(contentsDir, 'PkgInfo'), 'APPL????');
 assertRustNativeBundle();
 run('plutil', ['-lint', path.join(contentsDir, 'Info.plist')]);

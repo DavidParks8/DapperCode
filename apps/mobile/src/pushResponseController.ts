@@ -23,7 +23,7 @@ export class PushResponseController {
 
   constructor(
     private readonly onNavigate: (event: PushResponseEvent) => void,
-    private readonly maxHandled = 256
+    private readonly maxHandled = 256,
   ) {}
 
   setProfile(profile: PushResponseProfileClient | null): void {

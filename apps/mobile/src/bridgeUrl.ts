@@ -59,28 +59,17 @@ export function toBridgeHealthUrl(baseUrl: string): string {
 function isLikelyPrivateHost(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase();
   const host =
-    normalized.startsWith('[') && normalized.endsWith(']')
-      ? normalized.slice(1, -1)
-      : normalized;
+    normalized.startsWith('[') && normalized.endsWith(']') ? normalized.slice(1, -1) : normalized;
   if (!host) {
     return false;
   }
 
-  if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host.endsWith('.local')
-  ) {
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) {
     return true;
   }
 
   if (host.includes(':')) {
-    return (
-      host.startsWith('fc') ||
-      host.startsWith('fd') ||
-      host.startsWith('fe80:')
-    );
+    return host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:');
   }
 
   const octets = host.split('.');

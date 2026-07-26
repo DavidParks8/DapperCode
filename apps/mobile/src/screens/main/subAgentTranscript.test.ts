@@ -9,13 +9,18 @@ function message(
   options?: {
     systemKind?: 'subAgent';
     subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
-  }
+  },
 ): ChatMessage {
   if (options?.systemKind === 'subAgent') {
-    return createActivityMessage(id, SUBAGENT_ACTIVITY_TYPE, {
-      text: content,
-      ...(options.subAgentMeta ? { subAgent: options.subAgentMeta } : {}),
-    }, '2026-03-20T00:00:00.000Z');
+    return createActivityMessage(
+      id,
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: content,
+        ...(options.subAgentMeta ? { subAgent: options.subAgentMeta } : {}),
+      },
+      '2026-03-20T00:00:00.000Z',
+    );
   }
   return {
     id,
@@ -68,7 +73,7 @@ describe('trimInheritedParentMessages', () => {
       message(
         'c2',
         'user',
-        'Review the websocket implementation\n[file: apps/mobile/src/api/ws.ts]'
+        'Review the websocket implementation\n[file: apps/mobile/src/api/ws.ts]',
       ),
       message('c3', 'assistant', 'Here is the websocket review.'),
     ];
@@ -107,7 +112,9 @@ describe('trimInheritedParentMessages', () => {
 
   it('keeps transcripts unchanged when no messages are shared', () => {
     const childMessages = [message('child', 'assistant', 'Child answer')];
-    expect(trimInheritedParentMessages([message('parent', 'user', 'Parent')], childMessages, ' ')).toEqual({
+    expect(
+      trimInheritedParentMessages([message('parent', 'user', 'Parent')], childMessages, ' '),
+    ).toEqual({
       messages: childMessages,
       hiddenInheritedMessageCount: 0,
     });
@@ -123,7 +130,11 @@ describe('trimInheritedParentMessages', () => {
       }),
       message('fallback', 'system', 'spawn', {
         systemKind: 'subAgent',
-        subAgentMeta: { tool: 'other_tool', prompt: 'Inspect settings', receiverThreadIds: ['child'] },
+        subAgentMeta: {
+          tool: 'other_tool',
+          prompt: 'Inspect settings',
+          receiverThreadIds: ['child'],
+        },
       }),
     ];
     const childMessages = [
@@ -149,7 +160,11 @@ describe('trimInheritedParentMessages', () => {
       }),
       message('spawn', 'system', 'spawn', {
         systemKind: 'subAgent',
-        subAgentMeta: { tool: 'spawnagent', prompt: 'Missing prompt', receiverThreadIds: ['child'] },
+        subAgentMeta: {
+          tool: 'spawnagent',
+          prompt: 'Missing prompt',
+          receiverThreadIds: ['child'],
+        },
       }),
     ];
     const childMessages = [shared, message('child', 'user', 'Different prompt')];

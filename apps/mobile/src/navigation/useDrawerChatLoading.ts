@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HostBridgeApiClient } from '../api/client';
 import type { HostBridgeWsClient } from '../api/ws';
-import { DRAWER_CHAT_CACHE_TTL_MS, DRAWER_DEEP_CHAT_CACHE_TTL_MS, DRAWER_DEEP_CHAT_PAGE_LIMIT,
-  DRAWER_DEEP_LOAD_DELAY_MS, DRAWER_EVENT_REFRESH_DEBOUNCE_MS, DRAWER_FAST_CHAT_LIST_LIMIT,
-  DRAWER_FULL_CHAT_LIST_LIMIT, DRAWER_OPEN_STALE_REFRESH_MS, DRAWER_STREAM_BATCH_DELAY_MS,
-  DRAWER_STREAM_CHAT_LIST_LIMITS, type DrawerChatLoadingState } from './drawerChatLoadingConfig';
+import {
+  DRAWER_CHAT_CACHE_TTL_MS,
+  DRAWER_DEEP_CHAT_CACHE_TTL_MS,
+  DRAWER_DEEP_CHAT_PAGE_LIMIT,
+  DRAWER_DEEP_LOAD_DELAY_MS,
+  DRAWER_EVENT_REFRESH_DEBOUNCE_MS,
+  DRAWER_FAST_CHAT_LIST_LIMIT,
+  DRAWER_FULL_CHAT_LIST_LIMIT,
+  DRAWER_OPEN_STALE_REFRESH_MS,
+  DRAWER_STREAM_BATCH_DELAY_MS,
+  DRAWER_STREAM_CHAT_LIST_LIMITS,
+  type DrawerChatLoadingState,
+} from './drawerChatLoadingConfig';
 import { useDrawerPrioritySessionHydration } from './useDrawerPrioritySessionHydration';
 import { useDrawerChatCollection } from './useDrawerChatCollection';
 import { useDrawerLoadedChatHydration } from './useDrawerLoadedChatHydration';
@@ -14,7 +23,7 @@ export function useDrawerChatLoading(
   api: HostBridgeApiClient,
   ws: HostBridgeWsClient,
   active: boolean,
-  priorityThreadIds: readonly string[] = []
+  priorityThreadIds: readonly string[] = [],
 ): DrawerChatLoadingState {
   const [loading, setLoading] = useState(true);
   const [loadingOlderChats, setLoadingOlderChats] = useState(false);
@@ -35,9 +44,7 @@ export function useDrawerChatLoading(
     setRunIndicatorsByThread,
   } = useDrawerChatCollection(api, handleChatsApplied);
   const loadChatsInFlightRef = useRef<Promise<void> | null>(null);
-  const queuedLoadChatsRef = useRef<{ showRefresh: boolean; forceRefresh: boolean } | null>(
-    null
-  );
+  const queuedLoadChatsRef = useRef<{ showRefresh: boolean; forceRefresh: boolean } | null>(null);
   const scheduledLoadChatsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduledLoadChatsForceRefreshRef = useRef(false);
   const scheduledDeepLoadChatsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,10 +138,7 @@ export function useDrawerChatLoading(
           }
           return;
         }
-        if (
-          hasLoadedDeepChatListRef.current ||
-          scheduledDeepLoadChatsRef.current
-        ) {
+        if (hasLoadedDeepChatListRef.current || scheduledDeepLoadChatsRef.current) {
           return;
         }
         if (applyCachedDeepChats()) {
@@ -189,7 +193,7 @@ export function useDrawerChatLoading(
             if (activeRef.current) {
               applyChats(
                 latestChats,
-                showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT
+                showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
               );
             }
           } catch {
@@ -245,7 +249,7 @@ export function useDrawerChatLoading(
               setRefreshing(false);
             }
             setLoading(false);
-          }
+          },
         );
         streamStarted = true;
         if (!activeRef.current) {
@@ -292,7 +296,7 @@ export function useDrawerChatLoading(
         }
       }
     },
-    [api, applyChats, cancelChatListStream, hydrateLoadedChats]
+    [api, applyChats, cancelChatListStream, hydrateLoadedChats],
   );
 
   const loadChats = useCallback(
@@ -330,7 +334,7 @@ export function useDrawerChatLoading(
       loadChatsInFlightRef.current = promise;
       return promise;
     },
-    [active, loadChatsNow]
+    [active, loadChatsNow],
   );
   const retryDeepChatListRef = useRef<() => Promise<void>>(async () => {});
 
@@ -375,7 +379,7 @@ export function useDrawerChatLoading(
         void loadChats(false, shouldForceRefresh);
       }, delay);
     },
-    [active, loadChats]
+    [active, loadChats],
   );
 
   useEffect(() => {
@@ -432,9 +436,20 @@ export function useDrawerChatLoading(
 
   const partialHistoryDiagnostics = useMemo(
     () => Array.from(new Set([...deepHistoryDiagnostics, ...hydrationDiagnostics])),
-    [deepHistoryDiagnostics, hydrationDiagnostics]
+    [deepHistoryDiagnostics, hydrationDiagnostics],
   );
-  return { chats, loading, loadingOlderChats, partialHistoryDiagnostics, refreshing,
-    runIndicatorsByThread, wsConnected, loadChats, retryDeepChatListRef, cancelChatListStream,
-    scheduleLoadChats, setRunIndicatorsByThread };
+  return {
+    chats,
+    loading,
+    loadingOlderChats,
+    partialHistoryDiagnostics,
+    refreshing,
+    runIndicatorsByThread,
+    wsConnected,
+    loadChats,
+    retryDeepChatListRef,
+    cancelChatListStream,
+    scheduleLoadChats,
+    setRunIndicatorsByThread,
+  };
 }

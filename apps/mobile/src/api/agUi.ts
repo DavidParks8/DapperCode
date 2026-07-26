@@ -22,7 +22,7 @@ export interface AgUiEventEnvelope {
 }
 
 export function parseAgUiEventNotification(
-  notification: RpcNotification
+  notification: RpcNotification,
 ): AgUiEventEnvelope | null {
   if (notification.method !== 'bridge/agui.event') return null;
   const params = record(notification.params);

@@ -2,11 +2,7 @@ import { Platform } from 'react-native';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import {
-  BridgeProtocolVersionError,
-  HostBridgeWsClient,
-  RpcRequestError,
-} from './ws';
+import { BridgeProtocolVersionError, HostBridgeWsClient, RpcRequestError } from './ws';
 
 interface ContractManifest {
   protocolVersion: number;
@@ -83,8 +79,8 @@ describe('HostBridgeWsClient', () => {
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(__dirname, '../../../../contracts/bridge-rpc/v2/manifest.json'),
-        'utf8'
-      )
+        'utf8',
+      ),
     ) as ContractManifest;
 
     expect(manifest.protocolVersion).toBe(HostBridgeWsClient.PROTOCOL_VERSION);
@@ -152,7 +148,7 @@ describe('HostBridgeWsClient', () => {
     latestMockSocket().simulateOpen();
 
     latestMockSocket().simulateMessage(
-      JSON.stringify({ method: 'turn/completed', params: { threadId: 'thr_1' } })
+      JSON.stringify({ method: 'turn/completed', params: { threadId: 'thr_1' } }),
     );
 
     expect(listener).toHaveBeenCalledWith({
@@ -182,7 +178,7 @@ describe('HostBridgeWsClient', () => {
       JSON.stringify({
         id: sentPayload.id,
         result: { ok: true },
-      })
+      }),
     );
 
     await expect(requestPromise).resolves.toEqual({ ok: true });
@@ -207,7 +203,7 @@ describe('HostBridgeWsClient', () => {
           message: 'unknown field `experimentalRawEvents`',
           data: { field: 'experimentalRawEvents' },
         },
-      })
+      }),
     );
 
     const error = await requestPromise.catch((reason: unknown) => reason);
@@ -243,7 +239,7 @@ describe('HostBridgeWsClient', () => {
             retryable: true,
           },
         },
-      })
+      }),
     );
 
     await expect(requestPromise).rejects.toMatchObject({
@@ -389,7 +385,7 @@ describe('HostBridgeWsClient', () => {
 
     staleSocket.simulateOpen();
     staleSocket.simulateMessage(
-      JSON.stringify({ method: 'turn/completed', params: { threadId: 'thr_stale' } })
+      JSON.stringify({ method: 'turn/completed', params: { threadId: 'thr_stale' } }),
     );
     staleSocket.simulateClose();
 
@@ -425,7 +421,7 @@ describe('HostBridgeWsClient', () => {
             runId: 'run-without-source-turn',
           },
         },
-      })
+      }),
     );
 
     await expect(waitPromise).rejects.toThrow('turn timed out');
@@ -440,8 +436,12 @@ describe('HostBridgeWsClient', () => {
     latestMockSocket().simulateMessage(
       JSON.stringify({
         method: 'bridge/agui.event',
-        params: { threadId: 'thr_3', runId: 'run', event: { type: 'RUN_FINISHED', threadId: 'thr_3', runId: 'run' } },
-      })
+        params: {
+          threadId: 'thr_3',
+          runId: 'run',
+          event: { type: 'RUN_FINISHED', threadId: 'thr_3', runId: 'run' },
+        },
+      }),
     );
 
     await expect(waitPromise).rejects.toThrow('turn timed out');
@@ -465,7 +465,7 @@ describe('HostBridgeWsClient', () => {
             status: 'completed',
           },
         },
-      })
+      }),
     );
     latestMockSocket().simulateMessage(
       JSON.stringify({
@@ -478,7 +478,7 @@ describe('HostBridgeWsClient', () => {
             status: 'completed',
           },
         },
-      })
+      }),
     );
     latestMockSocket().simulateMessage(
       JSON.stringify({
@@ -491,7 +491,7 @@ describe('HostBridgeWsClient', () => {
             status: 'completed',
           },
         },
-      })
+      }),
     );
 
     expect(listener).toHaveBeenCalledTimes(1);
@@ -525,7 +525,7 @@ describe('HostBridgeWsClient', () => {
           threadId: 'thr_9',
           turnId: 'turn_9',
         },
-      })
+      }),
     );
 
     client.disconnect();
@@ -536,14 +536,15 @@ describe('HostBridgeWsClient', () => {
     await Promise.resolve();
 
     const replayRequest = secondSocket.send.mock.calls
-      .map((call) =>
-        JSON.parse(String(call[0])) as {
-          id: string;
-          method: string;
-          params?: {
-            afterEventId?: number;
-          };
-        }
+      .map(
+        (call) =>
+          JSON.parse(String(call[0])) as {
+            id: string;
+            method: string;
+            params?: {
+              afterEventId?: number;
+            };
+          },
       )
       .find((payload) => payload.method === 'bridge/events/replay');
 
@@ -571,7 +572,7 @@ describe('HostBridgeWsClient', () => {
           ],
           hasMore: false,
         },
-      })
+      }),
     );
 
     await Promise.resolve();
@@ -607,7 +608,7 @@ describe('HostBridgeWsClient', () => {
           threadId: 'thr_gap',
           turnId: 'turn_gap',
         },
-      })
+      }),
     );
     listener.mockClear();
 
@@ -619,14 +620,15 @@ describe('HostBridgeWsClient', () => {
     await Promise.resolve();
 
     const replayRequest = secondSocket.send.mock.calls
-      .map((call) =>
-        JSON.parse(String(call[0])) as {
-          id: string;
-          method: string;
-          params?: {
-            afterEventId?: number;
-          };
-        }
+      .map(
+        (call) =>
+          JSON.parse(String(call[0])) as {
+            id: string;
+            method: string;
+            params?: {
+              afterEventId?: number;
+            };
+          },
       )
       .find((payload) => payload.method === 'bridge/events/replay');
     expect(replayRequest).toBeDefined();
@@ -640,7 +642,7 @@ describe('HostBridgeWsClient', () => {
           threadId: 'thr_gap',
           turnId: 'turn_gap',
         },
-      })
+      }),
     );
     secondSocket.simulateMessage(
       JSON.stringify({
@@ -653,13 +655,13 @@ describe('HostBridgeWsClient', () => {
             status: 'completed',
           },
         },
-      })
+      }),
     );
 
     expect(
       listener.mock.calls
         .map((call) => (call[0] as { eventId?: number }).eventId)
-        .filter((id): id is number => typeof id === 'number')
+        .filter((id): id is number => typeof id === 'number'),
     ).toEqual([]);
 
     secondSocket.simulateMessage(
@@ -723,7 +725,7 @@ describe('HostBridgeWsClient', () => {
           ],
           hasMore: false,
         },
-      })
+      }),
     );
 
     await Promise.resolve();
@@ -746,12 +748,12 @@ describe('HostBridgeWsClient', () => {
     socket.simulateOpen();
     simulateConnectionIdentity(socket, 'stream-gap');
     socket.simulateMessage(
-      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_gap' } })
+      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_gap' } }),
     );
     listener.mockClear();
 
     socket.simulateMessage(
-      JSON.stringify({ method: 'turn/completed', eventId: 12, params: { threadId: 'thr_gap' } })
+      JSON.stringify({ method: 'turn/completed', eventId: 12, params: { threadId: 'thr_gap' } }),
     );
     await Promise.resolve();
 
@@ -773,7 +775,7 @@ describe('HostBridgeWsClient', () => {
           ],
           hasMore: false,
         },
-      })
+      }),
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -791,7 +793,7 @@ describe('HostBridgeWsClient', () => {
     firstSocket.simulateOpen();
     simulateConnectionIdentity(firstSocket, 'stream-truncated');
     firstSocket.simulateMessage(
-      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_1' } })
+      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_1' } }),
     );
     listener.mockClear();
 
@@ -804,7 +806,7 @@ describe('HostBridgeWsClient', () => {
     const replayRequest = readLatestReplayRequest(secondSocket);
 
     secondSocket.simulateMessage(
-      JSON.stringify({ method: 'turn/started', eventId: 26, params: { threadId: 'thr_1' } })
+      JSON.stringify({ method: 'turn/started', eventId: 26, params: { threadId: 'thr_1' } }),
     );
 
     secondSocket.simulateMessage(
@@ -818,13 +820,13 @@ describe('HostBridgeWsClient', () => {
           events: [],
           hasMore: false,
         },
-      })
+      }),
     );
     await Promise.resolve();
     await Promise.resolve();
 
     secondSocket.simulateMessage(
-      JSON.stringify({ method: 'item/completed', eventId: 27, params: { threadId: 'thr_2' } })
+      JSON.stringify({ method: 'item/completed', eventId: 27, params: { threadId: 'thr_2' } }),
     );
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -836,7 +838,7 @@ describe('HostBridgeWsClient', () => {
           earliestEventId: 20,
           latestEventId: 25,
         }),
-      })
+      }),
     );
 
     expect(readDeliveredEventIds(listener)).toEqual([]);
@@ -858,7 +860,7 @@ describe('HostBridgeWsClient', () => {
     firstSocket.simulateOpen();
     simulateConnectionIdentity(firstSocket, 'stream-overflow');
     firstSocket.simulateMessage(
-      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr' } })
+      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr' } }),
     );
     listener.mockClear();
 
@@ -869,32 +871,38 @@ describe('HostBridgeWsClient', () => {
     simulateConnectionIdentity(socket, 'stream-overflow');
     await Promise.resolve();
     const replayRequest = readLatestReplayRequest(socket);
-    socket.simulateMessage(JSON.stringify({
-      id: replayRequest?.id,
-      result: {
-        protocolVersion: 2,
-        streamId: 'stream-overflow',
-        earliestEventId: 20,
-        latestEventId: 20,
-        events: [],
-        hasMore: false,
-      },
-    }));
+    socket.simulateMessage(
+      JSON.stringify({
+        id: replayRequest?.id,
+        result: {
+          protocolVersion: 2,
+          streamId: 'stream-overflow',
+          earliestEventId: 20,
+          latestEventId: 20,
+          events: [],
+          hasMore: false,
+        },
+      }),
+    );
     await Promise.resolve();
     await Promise.resolve();
 
     for (let eventId = 21; eventId <= 2_069; eventId += 1) {
-      socket.simulateMessage(JSON.stringify({
-        method: 'item/completed',
-        eventId,
-        params: { threadId: eventId % 2 === 0 ? 'thread-a' : 'thread-b' },
-      }));
+      socket.simulateMessage(
+        JSON.stringify({
+          method: 'item/completed',
+          eventId,
+          params: { threadId: eventId % 2 === 0 ? 'thread-a' : 'thread-b' },
+        }),
+      );
     }
 
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      method: 'bridge/events/snapshotRequired',
-      params: expect.objectContaining({ reason: 'recoveryOverflow' }),
-    }));
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'bridge/events/snapshotRequired',
+        params: expect.objectContaining({ reason: 'recoveryOverflow' }),
+      }),
+    );
     expect(socket.close).toHaveBeenCalled();
 
     const reconnectedSocket = latestMockSocket();
@@ -903,51 +911,63 @@ describe('HostBridgeWsClient', () => {
     simulateConnectionIdentity(reconnectedSocket, 'stream-overflow');
     listener.mockClear();
 
-    socket.simulateMessage(JSON.stringify({
-      method: 'item/completed',
-      eventId: 2_070,
-      params: { threadId: 'stale-thread' },
-    }));
-    reconnectedSocket.simulateMessage(JSON.stringify({
-      method: 'item/completed',
-      eventId: 102,
-      params: { threadId: 'fresh-thread' },
-    }));
+    socket.simulateMessage(
+      JSON.stringify({
+        method: 'item/completed',
+        eventId: 2_070,
+        params: { threadId: 'stale-thread' },
+      }),
+    );
+    reconnectedSocket.simulateMessage(
+      JSON.stringify({
+        method: 'item/completed',
+        eventId: 102,
+        params: { threadId: 'fresh-thread' },
+      }),
+    );
     await Promise.resolve();
 
     const freshReplayRequest = readLatestReplayRequest(reconnectedSocket);
-    reconnectedSocket.simulateMessage(JSON.stringify({
-      id: freshReplayRequest?.id,
-      result: {
-        protocolVersion: 2,
-        streamId: 'stream-overflow',
-        earliestEventId: 200,
-        latestEventId: 200,
-        events: [],
-        hasMore: false,
-      },
-    }));
-    await Promise.resolve();
-    await Promise.resolve();
-    reconnectedSocket.simulateMessage(JSON.stringify({
-      method: 'item/completed',
-      eventId: 201,
-      params: { threadId: 'fresh-thread' },
-    }));
-
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      method: 'bridge/events/snapshotRequired',
-      params: expect.objectContaining({
-        reason: 'replayTruncated',
-        resumeAfterEventId: 200,
+    reconnectedSocket.simulateMessage(
+      JSON.stringify({
+        id: freshReplayRequest?.id,
+        result: {
+          protocolVersion: 2,
+          streamId: 'stream-overflow',
+          earliestEventId: 200,
+          latestEventId: 200,
+          events: [],
+          hasMore: false,
+        },
       }),
-    }));
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    reconnectedSocket.simulateMessage(
+      JSON.stringify({
+        method: 'item/completed',
+        eventId: 201,
+        params: { threadId: 'fresh-thread' },
+      }),
+    );
+
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'bridge/events/snapshotRequired',
+        params: expect.objectContaining({
+          reason: 'replayTruncated',
+          resumeAfterEventId: 200,
+        }),
+      }),
+    );
     expect(client.acknowledgeSnapshotRecovery(10)).toBe(false);
     expect(client.acknowledgeSnapshotRecovery(200)).toBe(true);
     expect(readDeliveredEventIds(listener)).toEqual([201]);
-    expect(listener).not.toHaveBeenCalledWith(expect.objectContaining({
-      params: expect.objectContaining({ threadId: 'stale-thread' }),
-    }));
+    expect(listener).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ threadId: 'stale-thread' }),
+      }),
+    );
   });
 
   it('ignores a stale replay response after the stream changes', async () => {
@@ -960,7 +980,7 @@ describe('HostBridgeWsClient', () => {
     firstSocket.simulateOpen();
     simulateConnectionIdentity(firstSocket, 'stream-old');
     firstSocket.simulateMessage(
-      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_old' } })
+      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thr_old' } }),
     );
 
     client.disconnect();
@@ -981,12 +1001,10 @@ describe('HostBridgeWsClient', () => {
           streamId: 'stream-old',
           earliestEventId: 1,
           latestEventId: 11,
-          events: [
-            { method: 'turn/completed', eventId: 11, params: { threadId: 'thr_old' } },
-          ],
+          events: [{ method: 'turn/completed', eventId: 11, params: { threadId: 'thr_old' } }],
           hasMore: false,
         },
-      })
+      }),
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -998,15 +1016,14 @@ describe('HostBridgeWsClient', () => {
         streamId: 'stream-new',
         eventId: 4,
         params: { threadId: 'thr_new' },
-      })
+      }),
     );
 
     expect(readDeliveredEventIds(listener)).toEqual([10, 4]);
     expect(
       listener.mock.calls.some(
-        (call) =>
-          (call[0] as { eventId?: number; params?: { threadId?: string } }).eventId === 11
-      )
+        (call) => (call[0] as { eventId?: number; params?: { threadId?: string } }).eventId === 11,
+      ),
     ).toBe(false);
   });
 
@@ -1027,7 +1044,7 @@ describe('HostBridgeWsClient', () => {
           threadId: 'thr_reset',
           turnId: 'turn_a',
         },
-      })
+      }),
     );
 
     client.disconnect();
@@ -1038,11 +1055,12 @@ describe('HostBridgeWsClient', () => {
     await Promise.resolve();
 
     const replayRequest = secondSocket.send.mock.calls
-      .map((call) =>
-        JSON.parse(String(call[0])) as {
-          id: string;
-          method: string;
-        }
+      .map(
+        (call) =>
+          JSON.parse(String(call[0])) as {
+            id: string;
+            method: string;
+          },
       )
       .find((payload) => payload.method === 'bridge/events/replay');
     expect(replayRequest).toBeUndefined();
@@ -1060,7 +1078,7 @@ describe('HostBridgeWsClient', () => {
             status: 'completed',
           },
         },
-      })
+      }),
     );
 
     expect(listener).toHaveBeenLastCalledWith({
@@ -1101,7 +1119,7 @@ describe('HostBridgeWsClient', () => {
       });
       client.connect();
       expect(global.WebSocket).toHaveBeenCalledWith(
-        'wss://bridge.example/rpc-base/rpc?token=a%20b%26c'
+        'wss://bridge.example/rpc-base/rpc?token=a%20b%26c',
       );
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
@@ -1155,7 +1173,9 @@ describe('HostBridgeWsClient', () => {
     client.connect();
     const socket = latestMockSocket();
     socket.simulateOpen();
-    socket.send.mockImplementationOnce(() => { throw new Error('send failed'); });
+    socket.send.mockImplementationOnce(() => {
+      throw new Error('send failed');
+    });
     await expect(client.request('broken/send')).rejects.toThrow('send failed');
   });
 
@@ -1169,7 +1189,9 @@ describe('HostBridgeWsClient', () => {
       await Promise.resolve();
       if (event === 'close') socket.simulateClose();
       else socket.simulateError();
-      await expect(request).rejects.toThrow(`Bridge websocket ${event === 'close' ? 'closed' : 'error'}`);
+      await expect(request).rejects.toThrow(
+        `Bridge websocket ${event === 'close' ? 'closed' : 'error'}`,
+      );
       client.disconnect();
     }
   });
@@ -1181,7 +1203,13 @@ describe('HostBridgeWsClient', () => {
     client.connect();
     const socket = latestMockSocket();
     socket.simulateOpen();
-    for (const payload of ['not json', 'null', '1', JSON.stringify({ id: 'missing' }), JSON.stringify({ method: 2 })]) {
+    for (const payload of [
+      'not json',
+      'null',
+      '1',
+      JSON.stringify({ id: 'missing' }),
+      JSON.stringify({ method: 2 }),
+    ]) {
       socket.simulateMessage(payload);
     }
     expect(listener).not.toHaveBeenCalled();
@@ -1217,10 +1245,12 @@ describe('HostBridgeWsClient', () => {
         agUiCompletion('thr_failed', `turn-${status}`, {
           error: expectedMessage,
           code: status,
-        })
-      )
+        }),
+      ),
     );
-    await expect(client.waitForTurnCompletion('thr_failed', `turn-${status}`, 100)).rejects.toThrow(expectedMessage);
+    await expect(client.waitForTurnCompletion('thr_failed', `turn-${status}`, 100)).rejects.toThrow(
+      expectedMessage,
+    );
   });
 
   it('ignores unrelated completion events before resolving a matching completion', async () => {
@@ -1243,14 +1273,19 @@ describe('HostBridgeWsClient', () => {
     socket.simulateOpen();
     const wait = client.waitForTurnCompletion('thr_live_failure', 'turn_live_failure', 100);
     socket.simulateMessage(JSON.stringify({ method: 'bridge/agui.event', params: null }));
-    socket.simulateMessage(JSON.stringify({ method: 'bridge/agui.event', params: { sourceTurnId: 'turn_live_failure' } }));
+    socket.simulateMessage(
+      JSON.stringify({
+        method: 'bridge/agui.event',
+        params: { sourceTurnId: 'turn_live_failure' },
+      }),
+    );
     socket.simulateMessage(
       JSON.stringify(
         agUiCompletion('thr_live_failure', 'turn_live_failure', {
           error: 'live failure',
           code: 'failed',
-        })
-      )
+        }),
+      ),
     );
     await expect(wait).rejects.toThrow('live failure');
   });
@@ -1278,7 +1313,9 @@ describe('HostBridgeWsClient', () => {
     socket.simulateOpen();
     socket.simulateMessage(JSON.stringify({ method: 'event/one', event_id: '9.8', params: null }));
     socket.simulateMessage(JSON.stringify({ method: 'event/reset', eventId: 1, params: {} }));
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ method: 'bridge/events/snapshotRequired' }));
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'bridge/events/snapshotRequired' }),
+    );
     expect(readDeliveredEventIds(listener)).toContain(1);
   });
 
@@ -1292,19 +1329,37 @@ describe('HostBridgeWsClient', () => {
     socket.simulateMessage(JSON.stringify({ method: 'event', eventId: 6, params: {} }));
     await Promise.resolve();
     const replay = readLatestReplayRequest(socket);
-    socket.simulateMessage(JSON.stringify({ id: replay?.id, error: { code: -32601, message: 'not found' } }));
+    socket.simulateMessage(
+      JSON.stringify({ id: replay?.id, error: { code: -32601, message: 'not found' } }),
+    );
     await Promise.resolve();
     await Promise.resolve();
     socket.simulateMessage(JSON.stringify({ method: 'event', eventId: 8, params: {} }));
     await Promise.resolve();
-    expect(socket.send.mock.calls.filter((call) => JSON.parse(String(call[0])).method === 'bridge/events/replay')).toHaveLength(1);
+    expect(
+      socket.send.mock.calls.filter(
+        (call) => JSON.parse(String(call[0])).method === 'bridge/events/replay',
+      ),
+    ).toHaveLength(1);
   });
 
   it.each([
-    ['latest behind cursor', { earliestEventId: 1, latestEventId: 5, events: [] }, 'replayInconsistent'],
+    [
+      'latest behind cursor',
+      { earliestEventId: 1, latestEventId: 5, events: [] },
+      'replayInconsistent',
+    ],
     ['missing earliest', { latestEventId: 12, events: [] }, 'replayTruncated'],
-    ['stalled final page', { earliestEventId: 1, latestEventId: 12, events: [], hasMore: false }, 'replayInconsistent'],
-    ['stalled next page', { earliestEventId: 1, latestEventId: 12, events: [], hasMore: true }, 'replayInconsistent'],
+    [
+      'stalled final page',
+      { earliestEventId: 1, latestEventId: 12, events: [], hasMore: false },
+      'replayInconsistent',
+    ],
+    [
+      'stalled next page',
+      { earliestEventId: 1, latestEventId: 12, events: [], hasMore: true },
+      'replayInconsistent',
+    ],
   ])('emits a snapshot for %s replay responses', async (_label, result, reason) => {
     const client = new HostBridgeWsClient('http://localhost:8787');
     const listener = jest.fn();
@@ -1317,20 +1372,27 @@ describe('HostBridgeWsClient', () => {
     socket.simulateMessage(JSON.stringify({ method: 'event', eventId: 13, params: {} }));
     await Promise.resolve();
     const replay = readLatestReplayRequest(socket);
-    socket.simulateMessage(JSON.stringify({ id: replay?.id, result: { protocolVersion: 2, streamId: `stream-${reason}`, ...result } }));
+    socket.simulateMessage(
+      JSON.stringify({
+        id: replay?.id,
+        result: { protocolVersion: 2, streamId: `stream-${reason}`, ...result },
+      }),
+    );
     await Promise.resolve();
     await Promise.resolve();
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      method: 'bridge/events/snapshotRequired',
-      params: expect.objectContaining({ reason }),
-    }));
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'bridge/events/snapshotRequired',
+        params: expect.objectContaining({ reason }),
+      }),
+    );
   });
 });
 
 function simulateConnectionIdentity(
   socket: MockWebSocket,
   streamId: string,
-  protocolVersion = 2
+  protocolVersion = 2,
 ): void {
   socket.simulateMessage(
     JSON.stringify({
@@ -1341,14 +1403,14 @@ function simulateConnectionIdentity(
         status: 'connected',
         at: '2026-07-17T00:00:00.000Z',
       },
-    })
+    }),
   );
 }
 
 function agUiCompletion(
   threadId: string,
   turnId: string,
-  options: { error?: string; code?: string } = {}
+  options: { error?: string; code?: string } = {},
 ): Record<string, unknown> {
   const runId = `${threadId}::turn::${turnId}`;
   return {
@@ -1373,16 +1435,21 @@ function agUiCompletion(
   };
 }
 
-function readLatestReplayRequest(socket: MockWebSocket): {
-  id: string;
-  params?: { afterEventId?: number };
-} | undefined {
-  return socket.send.mock.calls
-    .map((call) => JSON.parse(String(call[0])) as {
+function readLatestReplayRequest(socket: MockWebSocket):
+  | {
       id: string;
-      method: string;
       params?: { afterEventId?: number };
-    })
+    }
+  | undefined {
+  return socket.send.mock.calls
+    .map(
+      (call) =>
+        JSON.parse(String(call[0])) as {
+          id: string;
+          method: string;
+          params?: { afterEventId?: number };
+        },
+    )
     .filter((payload) => payload.method === 'bridge/events/replay')
     .at(-1);
 }
