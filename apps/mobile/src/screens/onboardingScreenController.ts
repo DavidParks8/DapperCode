@@ -48,10 +48,8 @@ export interface OnboardingController {
   scannerError: string | null;
   scannerLocked: boolean;
   cameraPermissionGranted: boolean;
-  introAgentLabel: string;
   introHeroAnimatedStyle: OnboardingHeroAnimatedStyle;
   introActionsAnimatedStyle: OnboardingTranslateAnimatedStyle;
-  introAgentAnimatedStyle: OnboardingTranslateAnimatedStyle;
   setUrlInput: (value: string) => void;
   setTokenInput: (value: string) => void;
   setTokenHidden: (updater: (previous: boolean) => boolean) => void;
@@ -106,8 +104,6 @@ export function useOnboardingScreenController(
   const {
     introHeroAnimatedStyle,
     introActionsAnimatedStyle,
-    introAgentAnimatedStyle,
-    introAgentLabel,
   } = useOnboardingIntroAnimations(showIntroStep, mode);
 
   const normalizedBridgeUrl = useMemo(() => normalizeBridgeUrlInput(urlInput), [urlInput]);
@@ -320,10 +316,8 @@ export function useOnboardingScreenController(
     scannerError,
     scannerLocked,
     cameraPermissionGranted: Boolean(cameraPermission?.granted),
-    introAgentLabel,
     introHeroAnimatedStyle,
     introActionsAnimatedStyle,
-    introAgentAnimatedStyle,
     setUrlInput: (value: string) => {
       setUrlInputState(value);
       setFormError(null);
