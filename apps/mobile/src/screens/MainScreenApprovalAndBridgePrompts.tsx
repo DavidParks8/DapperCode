@@ -1,3 +1,4 @@
+import { useMainScreenStyles } from './useMainScreenStyles';
 import {
   pendingUserInputRequestAtom,
   resolvingUserInputAtom,
@@ -17,15 +18,14 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 
 export function MainScreenApprovalAndBridgePrompts({ context }: { context: Context }) {
   const {
-    styles,
     setUserInputDraft,
-    theme,
     dismissUserInputRequest,
     submitUserInputRequest,
     modalBridgeUiSurface,
     handleBridgeUiAction,
     dismissBridgeUiSurface,
   } = context;
+  const { theme, styles } = useMainScreenStyles();
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const userInputDrafts = useAtomValue(userInputDraftsAtom);
   const userInputError = useAtomValue(userInputErrorAtom);

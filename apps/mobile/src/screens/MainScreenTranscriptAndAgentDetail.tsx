@@ -1,3 +1,4 @@
+import { useMainScreenStyles } from './useMainScreenStyles';
 import {
   liveAssistantByThreadAtom,
   pendingApprovalAtom,
@@ -36,7 +37,6 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 
 export function MainScreenTranscriptAndAgentDetail({ context }: { context: Context }) {
   const {
-    styles,
     selectedChat,
     isOpeningChat,
     selectedParentChat,
@@ -93,6 +93,7 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     agentPickerOptions,
     closeAgentModal,
   } = context;
+  const { styles } = useMainScreenStyles();
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);

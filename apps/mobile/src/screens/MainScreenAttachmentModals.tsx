@@ -1,3 +1,4 @@
+import { useMainScreenStyles } from './useMainScreenStyles';
 import { Ionicons } from '@expo/vector-icons';
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { decorativeAccessibilityProps } from '../accessibility';
@@ -12,10 +13,8 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
   const {
     attachmentModalVisible,
     closeAttachmentModal,
-    styles,
     attachmentPathDraft,
     setAttachmentPathDraft,
-    theme,
     isLoading,
     submitAttachmentPath,
     loadingAttachmentFileCandidates,
@@ -24,6 +23,7 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
     pendingMentionPaths,
     removePendingMentionPath,
   } = context;
+  const { theme, styles } = useMainScreenStyles();
 
   return (
     <>

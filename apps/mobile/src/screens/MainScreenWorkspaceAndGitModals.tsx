@@ -1,3 +1,4 @@
+import { useMainScreenStyles } from './useMainScreenStyles';
 import {
   favoriteWorkspacePathsAtom,
   loadingWorkspaceBrowseAtom,
@@ -40,7 +41,6 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 export function MainScreenWorkspaceAndGitModals({ context }: { context: Context }) {
   const {
     closeTitleEditor,
-    styles,
     saveTitle,
     preferredStartCwd,
     browseWorkspacePath,
@@ -50,7 +50,6 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     closeWorkspaceModal,
     closeGitCheckoutModal,
     safeAreaInsets,
-    theme,
     handleGitCheckoutRepoUrlChange,
     openGitCheckoutDestinationPicker,
     gitCheckoutDestinationLabel,
@@ -58,6 +57,7 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     submitGitCheckout,
     gitCheckoutTargetPath,
   } = context;
+  const { theme, styles } = useMainScreenStyles();
   const workspaceModalVisible = useAtomValue(workspaceModalVisibleAtom);
   const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
   const workspaceRoots = useAtomValue(workspaceRootsAtom);

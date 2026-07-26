@@ -1,3 +1,4 @@
+import { useMainScreenStyles } from './useMainScreenStyles';
 import {
   creatingAtom,
   sendingAtom,
@@ -34,11 +35,9 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     openTitleEditor,
     handleOpenGit,
     isOpeningChat,
-    styles,
     modelOptions,
     openModelModal,
     activeModelLabel,
-    theme,
     activeModelEffortOptions,
     openEffortModal,
     activeEffortLabel,
@@ -67,6 +66,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     implementPlan,
     stayInPlanMode,
   } = context;
+  const { theme, styles } = useMainScreenStyles();
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);

@@ -4,6 +4,7 @@ import { MainScreenWorkspaceAndGitModals } from './MainScreenWorkspaceAndGitModa
 import { MainScreenAttachmentModals } from './MainScreenAttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from './MainScreenApprovalAndBridgePrompts';
 import { View } from 'react-native';
+import { useMainScreenStyles } from './useMainScreenStyles';
 import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
 
 
@@ -12,8 +13,9 @@ import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapse
 type MainScreenViewContext = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
 export function MainScreenView({ context }: { context: MainScreenViewContext }) {
+  const { styles } = useMainScreenStyles();
   return (
-    <View style={context.styles.container}>
+    <View style={styles.container}>
       <MainScreenHeaderAndWorkflow context={context} />
       <MainScreenTranscriptAndAgentDetail context={context} />
       <MainScreenWorkspaceAndGitModals context={context} />
