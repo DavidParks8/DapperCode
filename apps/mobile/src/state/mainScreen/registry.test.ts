@@ -54,18 +54,29 @@ describe('MainScreen atom registry', () => {
   it('declares every screen atom through screenAtom', () => {
     // A bare atom() here would never be reset, so its value would leak into the next bridge
     // profile. Scanning the sources is what stops the registry from silently drifting.
-    const directory = __dirname;
+    // `*Actions.ts` modules are exempt because write-only action atoms hold no state; the next
+    // case is what keeps them from smuggling state in.
     const offenders: string[] = [];
-    for (const file of readdirSync(directory)) {
-      if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file === 'registry.ts') {
+    for (const file of readScreenStateFiles()) {
+      if (file.name.endsWith('Actions.ts')) {
         continue;
       }
-      const source = readFileSync(join(directory, file), 'utf8');
-      for (const line of source.split('\n')) {
+      for (const line of file.source.split('\n')) {
         if (/(?<!screen)\batom[(<]/.test(line) && !line.trim().startsWith('*')) {
-          offenders.push(`${file}: ${line.trim()}`);
+          offenders.push(`${file.name}: ${line.trim()}`);
         }
       }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps action modules free of screen state', () => {
+    const offenders: string[] = [];
+    for (const file of readScreenStateFiles()) {
+      if (!file.name.endsWith('Actions.ts') || !file.source.includes('screenAtom(')) {
+        continue;
+      }
+      offenders.push(file.name);
     }
     expect(offenders).toEqual([]);
   });
@@ -91,3 +102,9 @@ describe('MainScreen atom registry', () => {
     expect(b.get(selectedChatIdAtom)).toBeNull();
   });
 });
+
+function readScreenStateFiles(): { name: string; source: string }[] {
+  return readdirSync(__dirname)
+    .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts') && file !== 'registry.ts')
+    .map((name) => ({ name, source: readFileSync(join(__dirname, name), 'utf8') }));
+}

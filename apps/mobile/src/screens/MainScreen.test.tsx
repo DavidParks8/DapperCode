@@ -16,7 +16,10 @@ import type {
 import type { HostBridgeWsClient } from '../api/ws';
 import { ChatMessage } from '../components/ChatMessage';
 import { AppThemeProvider, createAppTheme } from '../theme';
+import { useAtomValue } from 'jotai';
 import { MainScreen } from './MainScreen';
+import { GitCheckoutScreen } from './GitCheckoutScreen';
+import { WorkspacePickerScreen } from './WorkspacePickerScreen';
 import { mainScreenCommandsAtom, type MainScreenCommands } from '../state/commands';
 import { defaultStartCwdAtom } from '../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../state/chat/atoms';
@@ -1089,6 +1092,53 @@ async function renderMain(options: {
   return { tree, api, store };
 }
 
+/** The subset of the app's screen switch these flows navigate between. */
+function WorkspaceFlowShell() {
+  const screen = useAtomValue(currentScreenAtom);
+  if (screen === 'WorkspacePicker') return <WorkspacePickerScreen />;
+  if (screen === 'GitCheckout') return <GitCheckoutScreen />;
+  return <MainScreen />;
+}
+
+/**
+ * Renders that switch rather than MainScreen alone, so flows that navigate to the workspace
+ * picker or git checkout screens can be driven end to end.
+ */
+async function renderShell(options: {
+  api?: HostBridgeApiClient;
+  defaultStartCwd?: string | null;
+} = {}): Promise<{ tree: ReactTestRenderer; api: HostBridgeApiClient; store: AppStore }> {
+  const api = options.api ?? createApi();
+  const store = createBridgeTestStore({
+    api,
+    ws: createWs(),
+    bridgeProfileId: 'profile-1',
+    preferredAgentId: 'codex',
+    defaultStartCwd: options.defaultStartCwd,
+  });
+  let tree: ReactTestRenderer | undefined;
+  await act(async () => {
+    tree = renderer.create(
+      withAppStore(
+        store,
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <AppThemeProvider theme={theme}>
+            <WorkspaceFlowShell />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
+    );
+    await flush();
+  });
+  if (!tree) throw new Error('Expected app shell renderer');
+  return { tree, api, store };
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -1338,7 +1388,7 @@ describe('MainScreen controls and modals', () => {
         entries: [],
       })
       .mockRejectedValueOnce(new Error('browse denied'));
-    const { tree, store } = await renderMain({ api, defaultStartCwd: '/workspace' });
+    const { tree, store } = await renderShell({ api, defaultStartCwd: '/workspace' });
     const root = rootOf(tree);
 
     await press(byLabelPrefix(root, 'Workspace, '));
@@ -1388,7 +1438,7 @@ describe('MainScreen controls and modals', () => {
         cwd: '/workspace/destination/repo',
         url: 'git@github.com:org/repo.git',
       });
-    const { tree, store } = await renderMain({ api, defaultStartCwd: '/workspace' });
+    const { tree, store } = await renderShell({ api, defaultStartCwd: '/workspace' });
     const root = rootOf(tree);
 
     await press(byLabelPrefix(root, 'Workspace, '));

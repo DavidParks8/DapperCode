@@ -1,6 +1,6 @@
 import { MainScreenHeaderAndWorkflow } from './MainScreenHeaderAndWorkflow';
 import { MainScreenTranscriptAndAgentDetail } from './MainScreenTranscriptAndAgentDetail';
-import { MainScreenWorkspaceAndGitModals } from './MainScreenWorkspaceAndGitModals';
+import { MainScreenRenameSheet } from './MainScreenRenameSheet';
 import { MainScreenAttachmentModals } from './MainScreenAttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from './MainScreenApprovalAndBridgePrompts';
 import { View } from 'react-native';
@@ -18,7 +18,7 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
     <View style={styles.container}>
       <MainScreenHeaderAndWorkflow context={context} />
       <MainScreenTranscriptAndAgentDetail context={context} />
-      <MainScreenWorkspaceAndGitModals context={context} />
+      <MainScreenRenameSheet context={context} />
       <MainScreenAttachmentModals context={context} />
       <MainScreenApprovalAndBridgePrompts context={context} />
     </View>

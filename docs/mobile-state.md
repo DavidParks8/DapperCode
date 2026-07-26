@@ -80,6 +80,11 @@ Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState
   `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive the
   component, so a bare `atom()` would leak state into the next bridge profile. `registry.test.ts`
   scans these files and fails on any bare `atom(`.
+- **Action atoms live in `*Actions.ts`.** Write-only action atoms hold no state, so they are exempt
+  from the `screenAtom` rule; in exchange `registry.test.ts` fails if an `*Actions.ts` module
+  declares a `screenAtom`. `workspaceActions.ts` is the workspace browsing and git checkout
+  behaviour: the workspace picker and git checkout are their own screens, so MainScreen is unmounted
+  while they run and cannot own their callbacks.
 - **Object and array atoms take a factory,** e.g. `screenAtom((): string[] => [])`. The type
   signature enforces it. Reset assigns whatever the factory returns, so a shared literal would let
   one in-place mutation poison the baseline for every later reset, in every store.

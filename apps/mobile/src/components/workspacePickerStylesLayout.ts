@@ -1,16 +1,7 @@
 import type { AppTheme } from '../theme';
 
 export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
-  backdrop: { flex: 1, backgroundColor: theme.colors.overlayBackdrop },
-  outer: { flex: 1, justifyContent: 'center' as const, paddingHorizontal: theme.spacing.lg },
-  card: {
-    borderRadius: 28, borderCurve: 'continuous' as const,
-    backgroundColor: theme.colors.bgElevated, borderWidth: 1,
-    borderColor: theme.colors.borderLight, overflow: 'hidden' as const,
-    boxShadow: theme.isDark
-      ? '0 24px 44px rgba(0, 0, 0, 0.34)'
-      : '0 18px 36px rgba(15, 23, 42, 0.14)',
-  },
+  screen: { flex: 1, backgroundColor: theme.colors.bgMain },
   header: {
     minHeight: 48, flexDirection: 'row' as const, alignItems: 'center' as const,
     justifyContent: 'space-between' as const, paddingHorizontal: theme.spacing.lg,

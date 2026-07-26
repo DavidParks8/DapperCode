@@ -1,4 +1,12 @@
-export type AppScreen = 'Main' | 'ChatGit' | 'Browser' | 'Settings' | 'Privacy' | 'Terms';
+export type AppScreen =
+  | 'Main'
+  | 'ChatGit'
+  | 'Browser'
+  | 'Settings'
+  | 'Privacy'
+  | 'Terms'
+  | 'WorkspacePicker'
+  | 'GitCheckout';
 export type Screen = AppScreen | 'Onboarding';
 
 export const DRAWER_MIN_WIDTH = 260;

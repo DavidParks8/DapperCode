@@ -4,9 +4,7 @@ import {
 import {
   agentRootThreadIdAtom,
   loadingAgentThreadsAtom,
-  relatedAgentThreadsAtom,
-  workspaceModalVisibleAtom,
-  workspacePickerPurposeAtom
+  relatedAgentThreadsAtom
 } from '../state/mainScreen/workspace';
 import {
   agentThreadMenuVisibleAtom
@@ -16,10 +14,6 @@ import { useCallback, useEffect } from 'react';
 import { AGENT_THREADS_SYNC_INTERVAL_MS, AGENT_THREADS_IDLE_SYNC_INTERVAL_MS, AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS } from './mainScreenHelpers';
 import { areChatSummaryListsEquivalent } from './mainScreenChatState';
 import type { MainScreenWorkspaceBrowserStateContext, MainScreenWorkspaceBrowserStateResult } from './mainScreenWorkspaceBrowserState';
-import {
-  gitCheckoutModalVisibleAtom,
-  resumeGitCheckoutAfterWorkspacePickerAtom,
-} from '../state/mainScreen/gitCheckout';
 
 
 
@@ -45,19 +39,10 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
   const setError = useSetAtom(errorAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
-  const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
   const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
   const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
   const setLoadingAgentThreads = useSetAtom(loadingAgentThreadsAtom);
-  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
-  const resumeGitCheckoutAfterWorkspacePicker = useAtomValue(
-    resumeGitCheckoutAfterWorkspacePickerAtom
-  );
-  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
-  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
-    resumeGitCheckoutAfterWorkspacePickerAtom
-  );
 
 
   const refreshAgentThreads = useCallback(
@@ -135,19 +120,6 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     [refreshAgentThreads]
   );
 
-  const closeWorkspaceModal = useCallback(() => {
-    setWorkspaceModalVisible(false);
-    if (
-      workspacePickerPurpose === 'git-checkout-destination' &&
-      resumeGitCheckoutAfterWorkspacePicker
-    ) {
-      setResumeGitCheckoutAfterWorkspacePicker(false);
-      setGitCheckoutModalVisible(true);
-    }
-  }, [
-    resumeGitCheckoutAfterWorkspacePicker,
-    workspacePickerPurpose,
-  ]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -216,7 +188,6 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
   return {
     refreshAgentThreads,
     scheduleAgentThreadsRefresh,
-    closeWorkspaceModal,
   };
 }
 

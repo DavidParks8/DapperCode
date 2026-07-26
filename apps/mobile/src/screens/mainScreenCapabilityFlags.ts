@@ -18,7 +18,6 @@ import {
 import {
   workspaceBridgeRootAtom,
   workspaceBrowseErrorAtom,
-  workspaceModalVisibleAtom,
   workspaceRootsAtom
 } from '../state/mainScreen/workspace';
 import {
@@ -85,7 +84,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
-  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
   const setWorkspaceRoots = useSetAtom(workspaceRootsAtom);
   const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);
   const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
@@ -132,7 +130,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     attachmentController.clear();
     setActiveTurnId(null);
     setStoppingTurn(false);
-    setWorkspaceModalVisible(false);
     setAgentThreadMenuVisible(false);
     setModelModalVisible(false);
     setCollaborationModeMenuVisible(false);

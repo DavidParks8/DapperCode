@@ -1,78 +1,34 @@
-import {
-  errorAtom
-} from '../state/mainScreen/turn';
-import {
-  workspaceBridgeRootAtom,
-  workspaceBrowseErrorAtom,
-  workspaceBrowseParentPathAtom,
-  workspaceBrowsePathAtom,
-  workspaceModalVisibleAtom,
-  workspacePickerPurposeAtom
-} from '../state/mainScreen/workspace';
-import {
-  bridgeRecoveryBannerVisibleAtom
-} from '../state/mainScreen/composer';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { AppState } from 'react-native';
-import { scheduleIdleTask, normalizeWorkspacePath, normalizeCloneDirectoryName, deriveCloneDirectoryName, formatGitCloneFailureMessage, joinWorkspacePath, isBridgeConnectionErrorMessage } from './mainScreenHelpers';
-import type { MainScreenAgentThreadsRefreshContext, MainScreenAgentThreadsRefreshResult } from './mainScreenAgentThreadsRefresh';
+
+import { bridgeRecoveryBannerVisibleAtom } from '../state/mainScreen/composer';
+import { errorAtom } from '../state/mainScreen/turn';
 import {
-  gitCheckoutCloningAtom,
-  gitCheckoutDirectoryNameAtom,
-  gitCheckoutDirectoryNameEditedAtom,
-  gitCheckoutErrorAtom,
-  gitCheckoutModalVisibleAtom,
-  gitCheckoutParentPathAtom,
-  gitCheckoutRepoUrlAtom,
-  resumeGitCheckoutAfterWorkspacePickerAtom,
-} from '../state/mainScreen/gitCheckout';
-
-
-
-
-
+  changeGitCheckoutDirectoryNameAtom,
+  changeGitCheckoutRepoUrlAtom,
+  selectWorkspaceAtom,
+  submitGitCheckoutAtom,
+} from '../state/mainScreen/workspaceActions';
+import { scheduleIdleTask, isBridgeConnectionErrorMessage } from './mainScreenHelpers';
+import type { MainScreenAgentThreadsRefreshContext, MainScreenAgentThreadsRefreshResult } from './mainScreenAgentThreadsRefresh';
 
 export type MainScreenWorkspaceCheckoutActionsContext = MainScreenAgentThreadsRefreshContext & MainScreenAgentThreadsRefreshResult;
 
 export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspaceCheckoutActionsContext) {
   const {
-    api,
     appStateRef,
     chatIdRef,
     clearDeferredDisconnectActivity,
     clearForegroundAgentRefresh,
     foregroundAgentRefreshHandleRef,
     lastAppForegroundedAtRef,
-    onDefaultStartCwdChange,
-    refreshWorkspaceRoots,
     scheduleAgentThreadsRefresh,
     scheduleDisconnectActivity,
     ws,
   } = context;
   const setError = useSetAtom(errorAtom);
-  const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
-  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
-  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
-  const setWorkspaceBrowsePath = useSetAtom(workspaceBrowsePathAtom);
-  const setWorkspaceBrowseParentPath = useSetAtom(workspaceBrowseParentPathAtom);
-  const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
   const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
-  const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
-  const gitCheckoutDirectoryNameEdited = useAtomValue(gitCheckoutDirectoryNameEditedAtom);
-  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
-  const gitCheckoutRepoUrl = useAtomValue(gitCheckoutRepoUrlAtom);
-  const setGitCheckoutCloning = useSetAtom(gitCheckoutCloningAtom);
-  const setGitCheckoutDirectoryName = useSetAtom(gitCheckoutDirectoryNameAtom);
-  const setGitCheckoutDirectoryNameEdited = useSetAtom(gitCheckoutDirectoryNameEditedAtom);
-  const setGitCheckoutError = useSetAtom(gitCheckoutErrorAtom);
-  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
-  const setGitCheckoutParentPath = useSetAtom(gitCheckoutParentPathAtom);
-  const setGitCheckoutRepoUrl = useSetAtom(gitCheckoutRepoUrlAtom);
-  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
-    resumeGitCheckoutAfterWorkspacePickerAtom
-  );
-
 
   useEffect(() => {
     if (appStateRef.current === 'active' && !ws.isConnected) {
@@ -148,97 +104,27 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     ws,
   ]);
 
+  const selectWorkspace = useSetAtom(selectWorkspaceAtom);
+  const changeRepoUrl = useSetAtom(changeGitCheckoutRepoUrlAtom);
+  const changeDirectoryName = useSetAtom(changeGitCheckoutDirectoryNameAtom);
+  const submitCheckout = useSetAtom(submitGitCheckoutAtom);
+
   const handleWorkspaceSelection = useCallback(
-    (cwd: string | null) => {
-      const normalizedPath = normalizeWorkspacePath(cwd);
-      setWorkspaceBrowseError(null);
-
-      if (workspacePickerPurpose === 'git-checkout-destination') {
-        setGitCheckoutParentPath(normalizedPath);
-        setResumeGitCheckoutAfterWorkspacePicker(false);
-        setWorkspaceModalVisible(false);
-        setGitCheckoutModalVisible(true);
-        return;
-      }
-
-      onDefaultStartCwdChange?.(normalizedPath);
-      setWorkspaceModalVisible(false);
-    },
-    [onDefaultStartCwdChange, workspacePickerPurpose]
+    (cwd: string | null) => { selectWorkspace(cwd); },
+    [selectWorkspace]
   );
 
   const handleGitCheckoutRepoUrlChange = useCallback(
-    (value: string) => {
-      setGitCheckoutRepoUrl(value);
-      setGitCheckoutError(null);
-      if (!gitCheckoutDirectoryNameEdited) {
-        setGitCheckoutDirectoryName(deriveCloneDirectoryName(value) ?? '');
-      }
-    },
-    [gitCheckoutDirectoryNameEdited]
+    (value: string) => { changeRepoUrl(value); },
+    [changeRepoUrl]
   );
 
-  const handleGitCheckoutDirectoryNameChange = useCallback((value: string) => {
-    setGitCheckoutDirectoryName(value);
-    setGitCheckoutDirectoryNameEdited(value.trim().length > 0);
-    setGitCheckoutError(null);
-  }, []);
+  const handleGitCheckoutDirectoryNameChange = useCallback(
+    (value: string) => { changeDirectoryName(value); },
+    [changeDirectoryName]
+  );
 
-  const submitGitCheckout = useCallback(async () => {
-    const url = gitCheckoutRepoUrl.trim();
-    const directoryName = normalizeCloneDirectoryName(gitCheckoutDirectoryName);
-    if (!url) {
-      setGitCheckoutError('Paste an HTTPS or SSH repository URL first.');
-      return;
-    }
-    if (!directoryName) {
-      setGitCheckoutError('Choose a valid folder name for the cloned repo.');
-      return;
-    }
-
-    let parentPath = normalizeWorkspacePath(gitCheckoutParentPath) ?? workspaceBridgeRoot;
-    if (!parentPath) {
-      const response = await refreshWorkspaceRoots();
-      parentPath = normalizeWorkspacePath(response?.bridgeRoot);
-    }
-    if (!parentPath) {
-      setGitCheckoutError('Choose where the repository should be cloned.');
-      return;
-    }
-
-    try {
-      setGitCheckoutCloning(true);
-      setGitCheckoutError(null);
-      const cloned = await api.gitClone({
-        url,
-        parentPath,
-        directoryName,
-      });
-      const cloneFailureMessage = formatGitCloneFailureMessage(cloned, directoryName);
-      if (cloneFailureMessage) {
-        setGitCheckoutError(cloneFailureMessage);
-        return;
-      }
-      const clonedPath = normalizeWorkspacePath(cloned.cwd) ?? joinWorkspacePath(parentPath, directoryName);
-      onDefaultStartCwdChange?.(clonedPath);
-      setWorkspaceBrowsePath(clonedPath);
-      setWorkspaceBrowseParentPath(parentPath);
-      setWorkspaceBrowseError(null);
-      setGitCheckoutModalVisible(false);
-    } catch (err) {
-      setGitCheckoutError((err as Error).message);
-    } finally {
-      setGitCheckoutCloning(false);
-    }
-  }, [
-    api,
-    gitCheckoutDirectoryName,
-    gitCheckoutParentPath,
-    gitCheckoutRepoUrl,
-    onDefaultStartCwdChange,
-    refreshWorkspaceRoots,
-    workspaceBridgeRoot,
-  ]);
+  const submitGitCheckout = useCallback(async () => { await submitCheckout(); }, [submitCheckout]);
 
   return {
     handleWorkspaceSelection,

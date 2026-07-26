@@ -1,4 +1,4 @@
-import { Alert, Modal, Text, TextInput } from 'react-native';
+import { Alert, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, {
   act,
@@ -8,7 +8,7 @@ import renderer, {
 
 import type { FileSystemEntry } from '../api/types';
 import { createAppTheme, AppThemeProvider } from '../theme';
-import { WorkspacePickerModal } from './WorkspacePickerModal';
+import { WorkspacePicker } from './WorkspacePicker';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -31,7 +31,7 @@ jest.mock('@expo/vector-icons', () => {
   };
 });
 
-describe('WorkspacePickerModal', () => {
+describe('WorkspacePicker', () => {
   const theme = createAppTheme('dark');
   const oldSelectionPath =
     '/Users/davidparks/Documents/github/serious-projects/tethercode';
@@ -107,9 +107,7 @@ describe('WorkspacePickerModal', () => {
     });
 
     const root = expectValue(rendered).root as QueryableTestInstance;
-    expect(root.findAll((node) => node.props.accessibilityViewIsModal === true).length)
-      .toBeGreaterThan(0);
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Close workspace picker').length)
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Back').length)
       .toBeGreaterThan(0);
     expect(
       root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0]?.props
@@ -148,7 +146,7 @@ describe('WorkspacePickerModal', () => {
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks');
     act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props)());
     expect(onSelectPath).toHaveBeenCalledWith(null);
-    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Close workspace picker')[0].props)());
+    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)());
     expect(onClose).toHaveBeenCalled();
     act(() => tree.unmount());
   });
@@ -186,10 +184,8 @@ describe('WorkspacePickerModal', () => {
     act(() => search.props.onChangeText('notes'));
     expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
 
-    act(() => tree.update(renderPickerMatrix({ visible: false, selectedPath: null, currentPath: null, bridgeRoot: null, parentPath: null, entries: [], onSelectPath })));
-    expect(tree.root.findByType(Modal).props.visible).toBe(false);
-    act(() => tree.update(renderPickerMatrix({ visible: true, selectedPath: null, currentPath: null, bridgeRoot: null, parentPath: null, entries: [], onSelectPath })));
-    expect(root.findAllByType(TextInput)[0].props.value).toBe('');
+    act(() => tree.update(renderPickerMatrix({ selectedPath: null, currentPath: null, bridgeRoot: null, parentPath: null, entries: [], onSelectPath })));
+    expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
     expect(flattenTreeText(root)).toContain('Default workspace');
     const use = root.findAll((node) => node.props.accessibilityLabel === 'Use Default workspace workspace')[0];
     const pin = root.findAll((node) => node.props.accessibilityLabel === 'Pin Default workspace')[0];
@@ -320,7 +316,7 @@ describe('WorkspacePickerModal', () => {
     expect(action.props.accessibilityHint).toBe('Create a checkout here');
     act(() => readOnPress(action.props)());
     expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/tethercode');
-    act(() => (root.findByType(Modal).props.onRequestClose as () => void)());
+    act(() => readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)());
     expect(onClose).toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
   });
@@ -331,18 +327,17 @@ describe('WorkspacePickerModal', () => {
       rendered = renderer.create(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
           <AppThemeProvider theme={theme}>
-            <WorkspacePickerModal visible={false} recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
+            <WorkspacePicker recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    expect(root.findByType(Modal).props.visible).toBe(false);
     act(() => {
       expectValue(rendered).update(
         <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, left: 0, right: 0, bottom: 0 } }}>
           <AppThemeProvider theme={theme}>
-            <WorkspacePickerModal visible recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
+            <WorkspacePicker recentWorkspaces={[]} entries={[]} onBrowsePath={jest.fn()} onSelectPath={jest.fn()} onClose={jest.fn()} />
           </AppThemeProvider>
         </SafeAreaProvider>
       );
@@ -355,8 +350,7 @@ describe('WorkspacePickerModal', () => {
     return (
       <SafeAreaProvider initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 47, left: 0, right: 0, bottom: 34 } }}>
         <AppThemeProvider theme={theme}>
-          <WorkspacePickerModal
-            visible
+          <WorkspacePicker
             selectedPath="/Users/davidparks/Code/tethercode"
             bridgeRoot="/Users/davidparks/Code"
             recentWorkspaces={[{ path: '/Users/davidparks/Code', chatCount: 12 }]}
@@ -395,8 +389,7 @@ describe('WorkspacePickerModal', () => {
         }}
       >
         <AppThemeProvider theme={theme}>
-          <WorkspacePickerModal
-            visible
+          <WorkspacePicker
             selectedPath={oldSelectionPath}
             bridgeRoot={oldSelectionPath}
             recentWorkspaces={[]}

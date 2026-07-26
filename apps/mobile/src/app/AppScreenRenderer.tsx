@@ -2,11 +2,13 @@ import { useAtomValue } from 'jotai';
 
 import { env } from '../config';
 import { BrowserScreen } from '../screens/BrowserScreen';
+import { GitCheckoutScreen } from '../screens/GitCheckoutScreen';
 import { GitScreen } from '../screens/GitScreen';
 import { MainScreen } from '../screens/MainScreen';
 import { PrivacyScreen } from '../screens/PrivacyScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TermsScreen } from '../screens/TermsScreen';
+import { WorkspacePickerScreen } from '../screens/WorkspacePickerScreen';
 import { activeBridgeProfileAtom } from '../state/bridge/atoms';
 import { gitChatAtom } from '../state/chat/atoms';
 import { drawerCommandsAtom } from '../state/drawer/atoms';
@@ -32,6 +34,10 @@ export function AppScreenRenderer() {
       return <SettingsScreen />;
     case 'Browser':
       return <BrowserScreen />;
+    case 'WorkspacePicker':
+      return <WorkspacePickerScreen />;
+    case 'GitCheckout':
+      return <GitCheckoutScreen />;
     case 'Privacy':
       return <PrivacyScreen policyUrl={env.privacyPolicyUrl} onOpenDrawer={onOpenDrawer} />;
     case 'Terms':

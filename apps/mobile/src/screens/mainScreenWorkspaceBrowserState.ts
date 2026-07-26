@@ -1,244 +1,55 @@
-import {
-  loadingWorkspaceBrowseAtom,
-  workspaceBridgeRootAtom,
-  workspaceBrowseEntriesAtom,
-  workspaceBrowseErrorAtom,
-  workspaceBrowseParentPathAtom,
-  workspaceBrowsePathAtom,
-  workspaceBrowseTruncationAtom,
-  workspaceModalVisibleAtom,
-  workspacePickerPurposeAtom
-} from '../state/mainScreen/workspace';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import type { FileSystemListResponse } from '../api/types';
-import { scheduleIdleTask, type WorkspacePickerPurpose, normalizeWorkspacePath, getWorkspaceBrowseCacheKey } from './mainScreenHelpers';
-import type { MainScreenCapabilityFlagsContext, MainScreenCapabilityFlagsResult } from './mainScreenCapabilityFlags';
+
 import {
-  gitCheckoutCloningAtom,
-  gitCheckoutDirectoryNameAtom,
-  gitCheckoutDirectoryNameEditedAtom,
-  gitCheckoutErrorAtom,
-  gitCheckoutModalVisibleAtom,
-  gitCheckoutParentPathAtom,
-  gitCheckoutRepoUrlAtom,
-  resumeGitCheckoutAfterWorkspacePickerAtom,
-} from '../state/mainScreen/gitCheckout';
-
-
-
-
-
+  browseWorkspacePathAtom,
+  closeGitCheckoutAtom,
+  openGitCheckoutAtom,
+  openGitCheckoutDestinationPickerAtom,
+  openWorkspaceModalAtom,
+  openWorkspacePickerAtom,
+} from '../state/mainScreen/workspaceActions';
+import type { WorkspacePickerPurpose } from './mainScreenHelpers';
+import type { MainScreenCapabilityFlagsContext, MainScreenCapabilityFlagsResult } from './mainScreenCapabilityFlags';
 
 export type MainScreenWorkspaceBrowserStateContext = MainScreenCapabilityFlagsContext & MainScreenCapabilityFlagsResult;
 
-export function useMainScreenWorkspaceBrowserState(context: MainScreenWorkspaceBrowserStateContext) {
-  const {
-    api,
-    onDefaultStartCwdChange,
-    preferredStartCwd,
-    refreshWorkspaceRoots,
-    workspaceBrowseCacheRef,
-    workspaceBrowseRequestRef,
-  } = context;
-  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
-  const workspaceBrowsePath = useAtomValue(workspaceBrowsePathAtom);
-  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
-  const setWorkspacePickerPurpose = useSetAtom(workspacePickerPurposeAtom);
-  const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);
-  const setWorkspaceBrowsePath = useSetAtom(workspaceBrowsePathAtom);
-  const setWorkspaceBrowseParentPath = useSetAtom(workspaceBrowseParentPathAtom);
-  const setWorkspaceBrowseEntries = useSetAtom(workspaceBrowseEntriesAtom);
-  const setLoadingWorkspaceBrowse = useSetAtom(loadingWorkspaceBrowseAtom);
-  const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
-  const setWorkspaceBrowseTruncation = useSetAtom(workspaceBrowseTruncationAtom);
-  const gitCheckoutCloning = useAtomValue(gitCheckoutCloningAtom);
-  const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
-  const setGitCheckoutCloning = useSetAtom(gitCheckoutCloningAtom);
-  const setGitCheckoutDirectoryName = useSetAtom(gitCheckoutDirectoryNameAtom);
-  const setGitCheckoutDirectoryNameEdited = useSetAtom(gitCheckoutDirectoryNameEditedAtom);
-  const setGitCheckoutError = useSetAtom(gitCheckoutErrorAtom);
-  const setGitCheckoutModalVisible = useSetAtom(gitCheckoutModalVisibleAtom);
-  const setGitCheckoutParentPath = useSetAtom(gitCheckoutParentPathAtom);
-  const setGitCheckoutRepoUrl = useSetAtom(gitCheckoutRepoUrlAtom);
-  const setResumeGitCheckoutAfterWorkspacePicker = useSetAtom(
-    resumeGitCheckoutAfterWorkspacePickerAtom
-  );
-
+/**
+ * Binds the workspace browsing actions for MainScreen. The behaviour lives in store actions so the
+ * workspace picker and git checkout screens, which render while MainScreen is unmounted, share it.
+ */
+export function useMainScreenWorkspaceBrowserState() {
+  const browse = useSetAtom(browseWorkspacePathAtom);
+  const openPicker = useSetAtom(openWorkspacePickerAtom);
+  const openWorkspace = useSetAtom(openWorkspaceModalAtom);
+  const openCheckout = useSetAtom(openGitCheckoutAtom);
+  const closeCheckout = useSetAtom(closeGitCheckoutAtom);
+  const openCheckoutDestination = useSetAtom(openGitCheckoutDestinationPickerAtom);
 
   const browseWorkspacePath = useCallback(
-    async (path: string | null | undefined) => {
-      const normalizedRequestPath = normalizeWorkspacePath(path);
-      const cacheKey = getWorkspaceBrowseCacheKey(normalizedRequestPath);
-      const cached = workspaceBrowseCacheRef.current[cacheKey];
-      const requestId = workspaceBrowseRequestRef.current + 1;
-      workspaceBrowseRequestRef.current = requestId;
-      const applyResponse = (
-        response: FileSystemListResponse,
-        responseCacheKey = cacheKey
-      ) => {
-        const normalizedPath = normalizeWorkspacePath(response.path);
-        workspaceBrowseCacheRef.current[responseCacheKey] = response;
-        if (normalizedPath) {
-          workspaceBrowseCacheRef.current[getWorkspaceBrowseCacheKey(normalizedPath)] = response;
-        }
-        setWorkspaceBridgeRoot((current) => normalizeWorkspacePath(response.bridgeRoot) ?? current);
-        setWorkspaceBrowsePath(normalizedPath);
-        setWorkspaceBrowseParentPath(normalizeWorkspacePath(response.parentPath));
-        setWorkspaceBrowseEntries(response.entries);
-        setWorkspaceBrowseTruncation(
-          response.truncated
-            ? `Showing ${String(response.entries.length)} of ${String(response.totalEntries)} entries.`
-            : null
-        );
-      };
-
-      if (cached) {
-        setWorkspaceBridgeRoot((current) => normalizeWorkspacePath(cached.bridgeRoot) ?? current);
-        setWorkspaceBrowsePath(normalizeWorkspacePath(cached.path));
-        setWorkspaceBrowseParentPath(normalizeWorkspacePath(cached.parentPath));
-        setWorkspaceBrowseEntries(cached.entries);
-        setWorkspaceBrowseTruncation(
-          cached.truncated
-            ? `Showing ${String(cached.entries.length)} of ${String(cached.totalEntries)} entries.`
-            : null
-        );
-        setWorkspaceBrowseError(null);
-      }
-
-      setLoadingWorkspaceBrowse(true);
-      try {
-        const response = await api.listFilesystemEntries({
-          path: normalizedRequestPath,
-          directoriesOnly: true,
-        });
-        if (workspaceBrowseRequestRef.current !== requestId) {
-          return;
-        }
-
-        applyResponse(response);
-        setWorkspaceBrowseError(null);
-      } catch (err) {
-        if (workspaceBrowseRequestRef.current !== requestId) {
-          return;
-        }
-        const message = (err as Error).message;
-        const missingRequestedWorkspace =
-          normalizedRequestPath !== null &&
-          /workspace directory is invalid or inaccessible|workspace directory must point to a folder/i.test(
-            message
-          );
-
-        if (missingRequestedWorkspace) {
-          try {
-            const rootResponse = await api.listFilesystemEntries({
-              path: null,
-              directoriesOnly: true,
-            });
-            if (workspaceBrowseRequestRef.current !== requestId) {
-              return;
-            }
-            applyResponse(
-              rootResponse,
-              getWorkspaceBrowseCacheKey(normalizeWorkspacePath(rootResponse.path))
-            );
-            if (normalizedRequestPath === preferredStartCwd) {
-              onDefaultStartCwdChange?.(null);
-            }
-            setWorkspaceBrowseError('Saved workspace was not found. Showing start folder.');
-            return;
-          } catch {
-            // Surface the original invalid path error; it names the path the user needs to fix.
-          }
-        }
-
-        setWorkspaceBrowseError(message);
-      } finally {
-        if (workspaceBrowseRequestRef.current === requestId) {
-          setLoadingWorkspaceBrowse(false);
-        }
-      }
-    },
-    [api, onDefaultStartCwdChange, preferredStartCwd]
+    async (path: string | null | undefined) => { await browse(path); },
+    [browse]
   );
 
   const openWorkspacePicker = useCallback(
-    (
-      purpose: WorkspacePickerPurpose,
-      initialPathOverride?: string | null
-    ) => {
-      const initialPath =
-        normalizeWorkspacePath(initialPathOverride) ??
-        preferredStartCwd ??
-        workspaceBrowsePath ??
-        workspaceBridgeRoot ??
-        null;
-      setWorkspacePickerPurpose(purpose);
-      setWorkspaceModalVisible(true);
-      void browseWorkspacePath(initialPath);
-      scheduleIdleTask(() => {
-        void refreshWorkspaceRoots();
-      });
+    (purpose: WorkspacePickerPurpose, initialPathOverride?: string | null) => {
+      openPicker(purpose, initialPathOverride);
     },
-    [
-      browseWorkspacePath,
-      preferredStartCwd,
-      refreshWorkspaceRoots,
-      workspaceBridgeRoot,
-      workspaceBrowsePath,
-    ]
+    [openPicker]
   );
 
-  const openWorkspaceModal = useCallback(() => {
-    setResumeGitCheckoutAfterWorkspacePicker(false);
-    openWorkspacePicker('default-start');
-  }, [openWorkspacePicker]);
+  const openWorkspaceModal = useCallback(() => { openWorkspace(); }, [openWorkspace]);
 
-  const openGitCheckoutModal = useCallback((initialParentPath?: string | null) => {
-    const defaultParentPath =
-      normalizeWorkspacePath(initialParentPath) ??
-      preferredStartCwd ??
-      workspaceBrowsePath ??
-      workspaceBridgeRoot ??
-      null;
-    setGitCheckoutRepoUrl('');
-    setGitCheckoutDirectoryName('');
-    setGitCheckoutDirectoryNameEdited(false);
-    setGitCheckoutParentPath(defaultParentPath);
-    setGitCheckoutError(null);
-    setGitCheckoutCloning(false);
-    setResumeGitCheckoutAfterWorkspacePicker(false);
-    setGitCheckoutModalVisible(true);
-    void refreshWorkspaceRoots().then((response) => {
-      const bridgeRoot = normalizeWorkspacePath(response?.bridgeRoot);
-      if (bridgeRoot) {
-        setGitCheckoutParentPath((current) => current ?? bridgeRoot);
-      }
-    });
-  }, [
-    preferredStartCwd,
-    refreshWorkspaceRoots,
-    workspaceBridgeRoot,
-    workspaceBrowsePath,
-  ]);
+  const openGitCheckoutModal = useCallback(
+    (initialParentPath?: string | null) => { openCheckout(initialParentPath); },
+    [openCheckout]
+  );
 
-  const closeGitCheckoutModal = useCallback(() => {
-    if (gitCheckoutCloning) {
-      return;
-    }
-    setGitCheckoutModalVisible(false);
-    setGitCheckoutError(null);
-    setResumeGitCheckoutAfterWorkspacePicker(false);
-  }, [gitCheckoutCloning]);
+  const closeGitCheckoutModal = useCallback(() => { closeCheckout(); }, [closeCheckout]);
 
   const openGitCheckoutDestinationPicker = useCallback(() => {
-    setResumeGitCheckoutAfterWorkspacePicker(true);
-    setGitCheckoutModalVisible(false);
-    openWorkspacePicker(
-      'git-checkout-destination',
-      gitCheckoutParentPath ?? preferredStartCwd ?? workspaceBridgeRoot ?? null
-    );
-  }, [gitCheckoutParentPath, openWorkspacePicker, preferredStartCwd, workspaceBridgeRoot]);
+    openCheckoutDestination();
+  }, [openCheckoutDestination]);
 
   return {
     browseWorkspacePath,

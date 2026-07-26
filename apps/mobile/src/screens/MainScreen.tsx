@@ -84,7 +84,7 @@ export function MainScreen() {
     const modelCatalogStateContext = { ...selectedRuntimeSelectorsContext, ...modelCatalogStateResult };
     const capabilityFlagsResult = useMainScreenCapabilityFlags(modelCatalogStateContext);
     const capabilityFlagsContext = { ...modelCatalogStateContext, ...capabilityFlagsResult };
-    const workspaceBrowserStateResult = useMainScreenWorkspaceBrowserState(capabilityFlagsContext);
+    const workspaceBrowserStateResult = useMainScreenWorkspaceBrowserState();
     const workspaceBrowserStateContext = { ...capabilityFlagsContext, ...workspaceBrowserStateResult };
     const agentThreadsRefreshResult = useMainScreenAgentThreadsRefresh(workspaceBrowserStateContext);
     const agentThreadsRefreshContext = { ...workspaceBrowserStateContext, ...agentThreadsRefreshResult };

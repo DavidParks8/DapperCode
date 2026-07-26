@@ -1,0 +1,122 @@
+import { StyleSheet } from 'react-native';
+
+import type { AppTheme } from '../theme';
+
+export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.colors.bgMain },
+    keyboardLayer: { flex: 1 },
+    header: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.sm,
+    },
+    headerSpacer: { width: 36 },
+    backButton: {
+      width: 36,
+      height: 36,
+      borderRadius: theme.radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.bgInput,
+      borderWidth: 1,
+      borderColor: theme.colors.borderLight,
+    },
+    pressed: { opacity: 0.86 },
+    title: {
+      ...theme.typography.headline,
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.textPrimary,
+      textAlign: 'center',
+    },
+    body: {
+      padding: theme.spacing.lg,
+      gap: theme.spacing.md,
+    },
+    hint: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      lineHeight: 18,
+    },
+    input: {
+      minHeight: 44,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgInput,
+      paddingHorizontal: theme.spacing.md,
+      color: theme.colors.textPrimary,
+      ...theme.typography.body,
+    },
+    pathButton: {
+      minHeight: 52,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgItem,
+      paddingHorizontal: theme.spacing.md,
+    },
+    pathCopy: { flex: 1, minWidth: 0, gap: 2 },
+    pathLabel: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      fontSize: 11,
+      textTransform: 'uppercase',
+      letterSpacing: 0,
+    },
+    pathValue: {
+      ...theme.typography.body,
+      color: theme.colors.textPrimary,
+      fontWeight: '600',
+    },
+    summary: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+    },
+    errorText: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
+    },
+    actions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.lg,
+      paddingBottom: theme.spacing.lg,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.borderLight,
+      paddingTop: theme.spacing.md,
+    },
+    button: {
+      minWidth: 110,
+      minHeight: 44,
+      borderRadius: theme.radius.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: theme.spacing.lg,
+    },
+    buttonSecondary: {
+      borderWidth: 1,
+      borderColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgInput,
+    },
+    buttonSecondaryText: {
+      ...theme.typography.body,
+      color: theme.colors.textPrimary,
+      fontWeight: '600',
+    },
+    buttonPrimary: { backgroundColor: theme.colors.accent },
+    buttonPrimaryText: {
+      ...theme.typography.body,
+      color: theme.colors.accentText,
+      fontWeight: '700',
+    },
+    buttonDisabled: { opacity: 0.5 },
+  });

@@ -16,7 +16,6 @@ import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   relatedAgentThreadsAtom,
-  workspaceModalVisibleAtom
 } from '../state/mainScreen/workspace';
 import {
   androidKeyboardInsetAtom,
@@ -84,7 +83,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
-  const workspaceModalVisible = useAtomValue(workspaceModalVisibleAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const androidKeyboardInset = useAtomValue(androidKeyboardInsetAtom);
   const composerHeight = useAtomValue(composerHeightAtom);
@@ -224,7 +222,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     !attachmentMenuVisible &&
     !attachmentModalVisible &&
     !collaborationModeMenuVisible &&
-    !workspaceModalVisible &&
     !modelModalVisible &&
     !effortModalVisible &&
     selectedQueuedMessages.length === 0;
