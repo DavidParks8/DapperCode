@@ -505,6 +505,7 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     const root = tree.root as QueryableTestInstance;
+    if (kind === 'reasoning') simulateTextLayout(root, 5);
     expect(root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(
       0,
     );
@@ -516,6 +517,24 @@ describe('ChatMessage system timeline matrices', () => {
     expect(hasRenderedText(root, kind === 'reasoning' ? 'First thought' : 'query=coverage')).toBe(
       true,
     );
+    act(() => tree.unmount());
+  });
+
+  it('hides the reasoning toggle when the preview already shows every line', () => {
+    const tree = renderMessage({
+      id: 'reasoning-short',
+      role: 'system',
+      systemKind: 'reasoning',
+      content: '• Plan\n  └ Short thought',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    simulateTextLayout(root, 2);
+    expect(hasRenderedText(root, 'Short thought')).toBe(true);
+    expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Plan')[0].props.accessibilityState,
+    ).toEqual({ disabled: true });
     act(() => tree.unmount());
   });
 
@@ -963,6 +982,19 @@ function readOnPress(props: Record<string, unknown>): () => void {
 
 function findTextNodes(root: QueryableTestInstance, text: string): QueryableTestInstance[] {
   return root.findAll((node) => node.type === Text && flattenTestTreeText(node) === text);
+}
+
+function simulateTextLayout(root: QueryableTestInstance, lineCount: number): void {
+  const measured = root.findAll(
+    (node) => node.type === Text && typeof node.props.onTextLayout === 'function',
+  );
+  act(() => {
+    for (const node of measured) {
+      (node.props.onTextLayout as (event: { nativeEvent: { lines: unknown[] } }) => void)({
+        nativeEvent: { lines: Array.from({ length: lineCount }, () => ({})) },
+      });
+    }
+  });
 }
 
 function findTextPressable(root: QueryableTestInstance, text: string): QueryableTestInstance {

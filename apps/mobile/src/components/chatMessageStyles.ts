@@ -109,6 +109,14 @@ export const createStyles = (theme: AppTheme) =>
       lineHeight: 17,
       marginTop: theme.spacing.xs,
     },
+    reasoningPreviewMeasure: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      opacity: 0,
+      pointerEvents: 'none',
+    },
     reasoningDetailWrap: { marginTop: theme.spacing.xs, gap: theme.spacing.xs },
     reasoningDetailLine: {
       ...theme.typography.caption,
