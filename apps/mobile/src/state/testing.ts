@@ -1,6 +1,9 @@
 import { Provider } from 'jotai';
 import { createElement, type ReactElement, type ReactNode } from 'react';
 
+import type { AgentId, Chat } from '../api/types';
+import type { HostBridgeApiClient } from '../api/client';
+import type { HostBridgeWsClient } from '../api/ws';
 import {
   createDefaultAppStateData,
   type AppStateAction,
@@ -17,6 +20,9 @@ import {
   retryPersistenceAtom,
 } from './appState/actions';
 import { appStateSnapshotAtom } from './appState/atoms';
+import { apiClientAtom, wsClientAtom } from './bridge/atoms';
+import { pendingMainChatIdAtom, pendingMainChatSnapshotAtom } from './chat/atoms';
+import { drawerCommandsAtom } from './drawer/atoms';
 import { createAppStore } from './store';
 import type { AppStore } from './types';
 
@@ -91,4 +97,50 @@ export function createAppStateHarness(persistence: AppStatePersistenceAdapter): 
 /** Wraps a tree so it resolves atoms from the supplied store. */
 export function withAppStore(store: AppStore, children: ReactNode): ReactElement {
   return createElement(Provider, { store }, children);
+}
+
+export interface CreateBridgeTestStoreOptions {
+  api: HostBridgeApiClient;
+  ws?: HostBridgeWsClient;
+  bridgeUrl?: string;
+  bridgeProfileId?: string;
+  preferredAgentId?: AgentId | null;
+  defaultStartCwd?: string | null;
+  recentBrowserTargetUrls?: string[];
+  pendingOpenChatId?: string | null;
+  pendingOpenChatSnapshot?: Chat | null;
+}
+
+/** Builds a loaded store with an active bridge profile and injected bridge clients. */
+export function createBridgeTestStore(options: CreateBridgeTestStoreOptions): AppStore {
+  const profileId = options.bridgeProfileId ?? 'profile-1';
+  const data = createDefaultAppStateData();
+  data.bridgeProfiles = {
+    activeProfileId: profileId,
+    profiles: [
+      {
+        id: profileId,
+        name: 'Bridge',
+        bridgeUrl: options.bridgeUrl ?? 'https://bridge.test',
+        bridgeToken: 'token',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  };
+  data.settings = {
+    ...data.settings,
+    preferredAgentId: options.preferredAgentId ?? null,
+    defaultStartCwd: options.defaultStartCwd ?? null,
+    recentBrowserTargetUrls: options.recentBrowserTargetUrls ?? [],
+  };
+  const store = createTestStore({ data });
+  store.set(apiClientAtom, options.api);
+  if (options.ws) {
+    store.set(wsClientAtom, options.ws);
+  }
+  store.set(drawerCommandsAtom, { closeDrawer: () => undefined, toggleNavigation: () => undefined });
+  store.set(pendingMainChatIdAtom, options.pendingOpenChatId ?? null);
+  store.set(pendingMainChatSnapshotAtom, options.pendingOpenChatSnapshot ?? null);
+  return store;
 }

@@ -16,7 +16,13 @@ import type {
 import type { HostBridgeWsClient } from '../api/ws';
 import { ChatMessage } from '../components/ChatMessage';
 import { AppThemeProvider, createAppTheme } from '../theme';
-import { MainScreen, type MainScreenHandle } from './MainScreen';
+import { MainScreen } from './MainScreen';
+import { mainScreenCommandsAtom, type MainScreenCommands } from '../state/commands';
+import { defaultStartCwdAtom } from '../state/appState/settings';
+import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../state/chat/atoms';
+import { currentScreenAtom, pendingBrowserTargetUrlAtom } from '../state/navigation/atoms';
+import { createBridgeTestStore, withAppStore } from '../state/testing';
+import type { AppStore } from '../state/types';
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
@@ -265,7 +271,7 @@ function createApi(options: {
   };
   return new Proxy(methods, {
     get(target, property) {
-      if (typeof property !== 'string') return undefined;
+      if (typeof property !== 'string' || property === 'then') return undefined;
       target[property] ??= jest.fn().mockResolvedValue(null);
       return target[property];
     },
@@ -370,50 +376,48 @@ async function renderMain(options: {
   connected?: boolean;
   pendingOpenChatId?: string | null;
   pendingOpenChatSnapshot?: Chat | null;
-} = {}): Promise<{ tree: ReactTestRenderer; ref: { current: MainScreenHandle | null } }> {
-  const ref = { current: null as MainScreenHandle | null };
+} = {}): Promise<{ tree: ReactTestRenderer; store: AppStore; ref: { current: MainScreenCommands | null } }> {
+  const store = createBridgeTestStore({
+    api: options.api ?? createApi(),
+    ws: createWs(options.connected ?? true),
+    bridgeProfileId: 'profile-1',
+    preferredAgentId: 'codex',
+    pendingOpenChatId: options.pendingOpenChatId,
+    pendingOpenChatSnapshot: options.pendingOpenChatSnapshot,
+  });
+  const ref = {
+    get current(): MainScreenCommands | null {
+      return store.get(mainScreenCommandsAtom);
+    },
+  };
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
-        <AppThemeProvider theme={theme}>
-          <MainScreen
-            ref={ref}
-            api={options.api ?? createApi()}
-            ws={createWs(options.connected ?? true)}
-            bridgeUrl="https://bridge.test"
-            bridgeProfileId="profile-1"
-            preferredAgentId="codex"
-            onOpenDrawer={jest.fn()}
-            onOpenGit={jest.fn()}
-            pendingOpenChatId={options.pendingOpenChatId}
-            pendingOpenChatSnapshot={options.pendingOpenChatSnapshot}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
-    );
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+      tree = renderer.create(
+        withAppStore(
+          store,
+          <SafeAreaProvider
+            initialMetrics={{
+              frame: { x: 0, y: 0, width: 390, height: 844 },
+              insets: { top: 47, left: 0, right: 0, bottom: 34 },
+            }}
+          >
+            <AppThemeProvider theme={theme}>
+              <MainScreen />
+            </AppThemeProvider>
+          </SafeAreaProvider>
+        )
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   if (!tree) throw new Error('Expected MainScreen tree');
-  return { tree, ref };
+  return { tree, store, ref };
 }
 
 describe('MainScreen shell behavior', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-  });
-
-  afterEach(() => {
-    jest.runOnlyPendingTimers();
-    jest.useRealTimers();
-    jest.clearAllMocks();
   });
 
   it.each([
@@ -1029,7 +1033,7 @@ function createApi(options: {
   };
   return new Proxy(methods, {
     get(target, property) {
-      if (typeof property !== 'string') return undefined;
+      if (typeof property !== 'string' || property === 'then') return undefined;
       target[property] ??= jest.fn().mockResolvedValue(null);
       return target[property];
     },
@@ -1051,39 +1055,38 @@ async function renderMain(options: {
   selectedChat?: Chat | null;
   onDefaultStartCwdChange?: jest.Mock;
   onOpenLocalPreview?: jest.Mock;
-} = {}): Promise<{ tree: ReactTestRenderer; api: HostBridgeApiClient }> {
+} = {}): Promise<{ tree: ReactTestRenderer; api: HostBridgeApiClient; store: AppStore }> {
   const api = options.api ?? createApi();
+  const store = createBridgeTestStore({
+    api,
+    ws: createWs(),
+    bridgeProfileId: 'profile-1',
+    preferredAgentId: 'codex',
+    defaultStartCwd: options.defaultStartCwd,
+    pendingOpenChatId: options.selectedChat?.id,
+    pendingOpenChatSnapshot: options.selectedChat,
+  });
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
-        <AppThemeProvider theme={theme}>
-          <MainScreen
-            api={api}
-            ws={createWs()}
-            bridgeUrl="https://bridge.test"
-            bridgeProfileId="profile-1"
-            preferredAgentId="codex"
-            defaultStartCwd={options.defaultStartCwd}
-            pendingOpenChatId={options.selectedChat?.id}
-            pendingOpenChatSnapshot={options.selectedChat}
-            onOpenDrawer={jest.fn()}
-            onOpenGit={jest.fn()}
-            onDefaultStartCwdChange={options.onDefaultStartCwdChange}
-            onOpenLocalPreview={options.onOpenLocalPreview}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        store,
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <AppThemeProvider theme={theme}>
+            <MainScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await flush();
   });
   if (!tree) throw new Error('Expected MainScreen renderer');
-  return { tree, api };
+  return { tree, api, store };
 }
 
 async function flush(): Promise<void> {
@@ -1321,7 +1324,7 @@ describe('MainScreen controls and modals', () => {
   });
 
   it('browses, pins, selects, defaults, loads, and reports workspace failures', async () => {
-    const onDefaultStartCwdChange = jest.fn();
+
     let resolveBrowse: ((value: unknown) => void) | undefined;
     const api = createApi();
     (api.listFilesystemEntries as jest.Mock)
@@ -1335,7 +1338,7 @@ describe('MainScreen controls and modals', () => {
         entries: [],
       })
       .mockRejectedValueOnce(new Error('browse denied'));
-    const { tree } = await renderMain({ api, defaultStartCwd: '/workspace', onDefaultStartCwdChange });
+    const { tree, store } = await renderMain({ api, defaultStartCwd: '/workspace' });
     const root = rootOf(tree);
 
     await press(byLabelPrefix(root, 'Workspace, '));
@@ -1357,13 +1360,13 @@ describe('MainScreen controls and modals', () => {
     await press(byLabel(root, 'Go to parent folder'));
     expect(hasText(root, 'browse denied')).toBe(true);
     await press(byLabel(root, 'Use default workspace'));
-    expect(onDefaultStartCwdChange).toHaveBeenCalledWith(null);
+    expect(store.get(defaultStartCwdAtom)).toBeNull();
 
     act(() => tree.unmount());
   });
 
   it('validates cloning, chooses a destination, and handles clone error and success', async () => {
-    const onDefaultStartCwdChange = jest.fn();
+
     const api = createApi({
       filesystem: [
         {
@@ -1385,7 +1388,7 @@ describe('MainScreen controls and modals', () => {
         cwd: '/workspace/destination/repo',
         url: 'git@github.com:org/repo.git',
       });
-    const { tree } = await renderMain({ api, defaultStartCwd: '/workspace', onDefaultStartCwdChange });
+    const { tree, store } = await renderMain({ api, defaultStartCwd: '/workspace' });
     const root = rootOf(tree);
 
     await press(byLabelPrefix(root, 'Workspace, '));
@@ -1411,7 +1414,7 @@ describe('MainScreen controls and modals', () => {
       parentPath: '/workspace/destination',
       directoryName: 'repo',
     });
-    expect(onDefaultStartCwdChange).toHaveBeenCalledWith('/workspace/destination/repo');
+    expect(store.get(defaultStartCwdAtom)).toBe('/workspace/destination/repo');
 
     act(() => tree.unmount());
   });
@@ -1654,17 +1657,18 @@ describe('MainScreen controls and modals', () => {
   });
 
   it('forwards browser previews and drives agent thread selector and detail callbacks', async () => {
-    const onOpenLocalPreview = jest.fn();
+
     const chats: ChatSummary[] = [rootChat, subAgentChat];
     const api = createApi({ chats });
-    const { tree } = await renderMain({ api, selectedChat: rootChat, onOpenLocalPreview });
+    const { tree, store } = await renderMain({ api, selectedChat: rootChat });
     const root = rootOf(tree);
     await advance();
 
     const rootMessage = root.findAllByType(ChatMessage)[0];
     expect(rootMessage).toBeTruthy();
     act(() => rootMessage.props.onOpenLocalPreview('http://127.0.0.1:5173'));
-    expect(onOpenLocalPreview).toHaveBeenCalledWith('http://127.0.0.1:5173');
+    expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
+    expect(store.get(currentScreenAtom)).toBe('Browser');
 
     await act(async () => {
       await flush();
@@ -1678,7 +1682,7 @@ describe('MainScreen controls and modals', () => {
     expect(root.findAll((node) => node.props.accessibilityLabel === 'Refresh sub-agent transcript')).toHaveLength(0);
     expect(root.findAll((node) => node.props.accessibilityLabel === 'Open sub-agent as chat')).toHaveLength(0);
     act(() => detailMessage?.props.onOpenLocalPreview('http://localhost:4173'));
-    expect(onOpenLocalPreview).toHaveBeenCalledWith('http://localhost:4173');
+    expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://localhost:4173');
     await press(byLabel(root, 'Back from sub-agent transcript'));
     await advance(250);
 
@@ -1792,7 +1796,7 @@ function createApi(): HostBridgeApiClient {
   };
   return new Proxy(methods, {
     get(target, property) {
-      if (typeof property !== 'string') return undefined;
+      if (typeof property !== 'string' || property === 'then') return undefined;
       target[property] ??= jest.fn().mockResolvedValue(null);
       return target[property];
     },
@@ -1821,27 +1825,28 @@ async function renderMain(options: { api?: HostBridgeApiClient; connected?: bool
 }> {
   const api = options.api ?? createApi();
   const ws = createWs(options.connected);
+  const store = createBridgeTestStore({
+    api,
+    ws,
+    bridgeProfileId: 'profile-events',
+    preferredAgentId: 'codex',
+    pendingOpenChatId: threadId,
+    pendingOpenChatSnapshot: chat,
+  });
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{
-        frame: { x: 0, y: 0, width: 390, height: 844 },
-        insets: { top: 47, left: 0, right: 0, bottom: 34 },
-      }}>
-        <AppThemeProvider theme={theme}>
-          <MainScreen
-            api={api}
-            ws={ws}
-            bridgeUrl="https://bridge.test"
-            bridgeProfileId="profile-events"
-            preferredAgentId="codex"
-            onOpenDrawer={jest.fn()}
-            onOpenGit={jest.fn()}
-            pendingOpenChatId={threadId}
-            pendingOpenChatSnapshot={chat}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        store,
+        <SafeAreaProvider initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 47, left: 0, right: 0, bottom: 34 },
+        }}>
+          <AppThemeProvider theme={theme}>
+            <MainScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -2184,7 +2189,8 @@ type Harness = {
     resetRecoveryEpoch: jest.Mock;
   };
   tree: ReactTestRenderer;
-  ref: { current: MainScreenHandle | null };
+  ref: { current: MainScreenCommands | null };
+  store: AppStore;
   emit(event: unknown): Promise<void>;
   setConnected(connected: boolean): Promise<void>;
   unmount(): void;
@@ -2232,7 +2238,7 @@ function createApi(options: ApiOptions = {}): MockApi {
   };
   return new Proxy(methods, {
     get(target, property) {
-      if (typeof property !== 'string') return undefined;
+      if (typeof property !== 'string' || property === 'then') return undefined;
       target[property] ??= jest.fn().mockResolvedValue(null);
       return target[property];
     },
@@ -2314,34 +2320,35 @@ async function renderMain(options: {
     disconnect: jest.fn(),
     resetRecoveryEpoch: jest.fn(),
   } as unknown as HostBridgeWsClient;
-  const ref = { current: null as MainScreenHandle | null };
+  const store = createBridgeTestStore({
+    api: api as unknown as HostBridgeApiClient,
+    ws,
+    bridgeProfileId: 'runtime-profile',
+    preferredAgentId: 'codex',
+    pendingOpenChatId: options.pendingId ?? options.chat?.id,
+    pendingOpenChatSnapshot: options.chat,
+  });
+  const ref = {
+    get current(): MainScreenCommands | null {
+      return store.get(mainScreenCommandsAtom);
+    },
+  };
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
-        <AppThemeProvider theme={theme}>
-          <MainScreen
-            ref={ref}
-            api={api as unknown as HostBridgeApiClient}
-            ws={ws}
-            bridgeUrl="https://bridge.test"
-            bridgeProfileId="runtime-profile"
-            preferredAgentId="codex"
-            onOpenDrawer={jest.fn()}
-            onOpenGit={jest.fn()}
-            onOpenBridgeRecoveryGuide={options.onRecovery}
-            onChatOpeningStateChange={options.onOpening}
-            onPendingOpenChatHandled={options.onHandled}
-            pendingOpenChatId={options.pendingId ?? options.chat?.id}
-            pendingOpenChatSnapshot={options.chat}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
+      withAppStore(
+        store,
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <AppThemeProvider theme={theme}>
+            <MainScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>
+      )
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -2353,6 +2360,7 @@ async function renderMain(options: {
     ws: ws as unknown as Harness['ws'],
     tree,
     ref,
+    store,
     async emit(event: unknown) {
       if (!eventHandler) throw new Error('WS event handler not registered');
       await act(async () => {
@@ -2435,14 +2443,12 @@ describe('MainScreen runtime recovery and synchronization', () => {
     { status: 'complete' as const, expected: 'Turn completed', activeTurnId: null, lastError: undefined },
   ])('renders $status pending snapshot truth', async ({ status, expected, activeTurnId, lastError }) => {
     const chat = { ...baseChat, status, activeTurnId, lastError };
-    const onHandled = jest.fn();
-    const onOpening = jest.fn();
-    const harness = await renderMain({ chat, onHandled, onOpening });
+    const harness = await renderMain({ chat });
 
     expect(text(harness.tree.root as Queryable, 'Runtime truth')).toBe(true);
     expect(text(harness.tree.root as Queryable, expected)).toBe(true);
-    expect(onHandled).toHaveBeenCalled();
-    expect(onOpening).toHaveBeenCalledWith(null);
+    expect(harness.store.get(pendingMainChatIdAtom)).toBeNull();
+    expect(harness.store.get(mainOpeningChatIdAtom)).toBeNull();
     harness.unmount();
   });
 
@@ -2887,7 +2893,8 @@ type Harness = {
   api: MockApi;
   tree: ReactTestRenderer;
   root: Queryable;
-  ref: { current: MainScreenHandle | null };
+  ref: { current: MainScreenCommands | null };
+  store: AppStore;
   ws: HostBridgeWsClient;
   emit(event: unknown): Promise<void>;
   status(connected: boolean): Promise<void>;
@@ -2993,7 +3000,7 @@ function createApi(overrides: Record<string, unknown> = {}): MockApi {
   };
   return new Proxy(methods, {
     get(target, property) {
-      if (typeof property !== 'string') return undefined;
+      if (typeof property !== 'string' || property === 'then') return undefined;
       target[property] ??= jest.fn().mockResolvedValue(null);
       return target[property];
     },
@@ -3023,40 +3030,44 @@ async function renderMain(options: {
     }),
     acknowledgeSnapshotRecovery: jest.fn(),
   } as unknown as HostBridgeWsClient;
-  const ref = { current: null as MainScreenHandle | null };
+  const store = createBridgeTestStore({
+    api: api as unknown as HostBridgeApiClient,
+    ws,
+    bridgeProfileId: 'profile-final',
+    preferredAgentId: 'codex',
+    defaultStartCwd: options.defaultStartCwd,
+    pendingOpenChatId: options.chat?.id,
+    pendingOpenChatSnapshot: options.chat,
+  });
+  const ref = {
+    get current(): MainScreenCommands | null {
+      return store.get(mainScreenCommandsAtom);
+    },
+  };
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(
-      <SafeAreaProvider initialMetrics={{
-        frame: { x: 0, y: 0, width: 390, height: 844 },
-        insets: { top: 47, left: 0, right: 0, bottom: 34 },
-      }}>
-        <AppThemeProvider theme={theme}>
-          <MainScreen
-            ref={ref}
-            api={api as unknown as HostBridgeApiClient}
-            ws={ws}
-            bridgeUrl="https://bridge.test"
-            bridgeProfileId="profile-final"
-            preferredAgentId="codex"
-            defaultStartCwd={options.defaultStartCwd}
-            pendingOpenChatId={options.chat?.id}
-            pendingOpenChatSnapshot={options.chat}
-            onOpenDrawer={jest.fn()}
-            onOpenGit={options.onOpenGit ?? jest.fn()}
-            onOpenBridgeRecoveryGuide={options.onRecovery}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>
-    );
-    await flush();
-  });
+      tree = renderer.create(
+        withAppStore(
+          store,
+          <SafeAreaProvider initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}>
+            <AppThemeProvider theme={theme}>
+              <MainScreen />
+            </AppThemeProvider>
+          </SafeAreaProvider>
+        )
+      );
+      await flush();
+    });
   if (!tree) throw new Error('MainScreen did not render');
   return {
     api,
     tree,
     root: tree.root as Queryable,
     ref,
+    store,
     ws,
     async emit(event) {
       if (!eventHandler) throw new Error('WebSocket event handler missing');
@@ -3156,15 +3167,14 @@ describe('MainScreen workflows and edge cases', () => {
   });
 
   it('executes slash command fallbacks, arguments, labels, status, review, diff, and suggestions', async () => {
-    const onOpenGit = jest.fn();
-    const harness = await renderMain({ chat: baseChat, onOpenGit });
+    const harness = await renderMain({ chat: baseChat });
 
     await submit(harness.root, '/help');
     await submit(harness.root, '/status');
     await submit(harness.root, '/model');
     await submit(harness.root, '/review');
     await submit(harness.root, '/diff');
-    expect(onOpenGit).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+    expect(harness.store.get(gitChatAtom)).toEqual(expect.objectContaining({ id: threadId }));
 
     await submit(harness.root, '/plan');
     await submit(harness.root, '/plan off');
@@ -3777,3 +3787,4 @@ describe('MainScreen workflows and edge cases', () => {
 });
 
 })();
+

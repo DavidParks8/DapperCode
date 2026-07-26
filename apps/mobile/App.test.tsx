@@ -7,7 +7,6 @@ import { AppStatePersistenceError, type AppStateSnapshot } from './src/appState'
 const mockScreenProps: Record<string, Record<string, unknown>> = {};
 const mockWsInstances: Array<Record<string, unknown>> = [];
 const mockApiInstances: Array<Record<string, unknown>> = [];
-const mockStoreListeners = new Set<() => void>();
 const mockPushControllers: Array<Record<string, jest.Mock>> = [];
 const mockWsStatusListeners: Array<(connected: boolean) => void> = [];
 const mockAppStateListeners: Array<(state: AppStateStatus) => void> = [];
@@ -27,14 +26,10 @@ const mockRequestNativeStoreReview = jest.fn().mockResolvedValue(false);
 const mockSaveAutoStoreReviewState = jest.fn().mockResolvedValue(undefined);
 const mockStore = {
   initialize: jest.fn().mockResolvedValue(undefined),
-  subscribe: jest.fn((listener: () => void) => {
-    mockStoreListeners.add(listener);
-    return () => mockStoreListeners.delete(listener);
-  }),
-  getSnapshot: jest.fn(() => mockSnapshot),
   dispatch: jest.fn(),
   dispatchDurable: jest.fn(),
   retryPersistence: jest.fn().mockResolvedValue(undefined),
+  flushPersistence: jest.fn().mockResolvedValue(undefined),
 };
 
 let mockSnapshot: AppStateSnapshot;
@@ -92,26 +87,8 @@ jest.mock('react-native-gesture-handler', () => {
     GestureHandlerRootView: View,
   };
 });
-jest.mock('./src/appState', () => ({
-  AppStatePersistenceError: class extends Error {
-    readonly code: 'read_failed' | 'invalid_data' | 'write_failed';
-    readonly operation: 'load' | 'import' | 'write';
-    readonly cause: unknown;
-
-    constructor(
-      code: 'read_failed' | 'invalid_data' | 'write_failed',
-      operation: 'load' | 'import' | 'write',
-      message: string,
-      cause?: unknown
-    ) {
-      super(message);
-      this.name = 'AppStatePersistenceError';
-      this.code = code;
-      this.operation = operation;
-      this.cause = cause;
-    }
-  },
-  createAppStateStore: () => mockStore,
+jest.mock('./src/state/appState/persistenceCoordinator', () => ({
+  getAppStateCoordinator: () => mockStore,
 }));
 jest.mock('./src/appStatePersistence', () => ({ createAppStatePersistence: () => ({}) }));
 jest.mock('./src/api/ws', () => ({
@@ -213,23 +190,35 @@ const mockBrowserBack = jest.fn().mockReturnValue(false);
 jest.mock('./src/screens/MainScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
+  const jotai = require('jotai') as typeof import('jotai');
+  const { mainScreenCommandsAtom } = require('./src/state/commands') as typeof import('./src/state/commands');
   return {
-    MainScreen: React.forwardRef(function MockMainScreen(props: Record<string, unknown>, ref) {
+    MainScreen: function MockMainScreen(props: Record<string, unknown>) {
       mockScreenProps.MainScreen = props;
-      React.useImperativeHandle(ref, () => ({ startNewChat: mockStartNewChat, openChat: jest.fn() }));
+      const setCommands = jotai.useSetAtom(mainScreenCommandsAtom);
+      React.useEffect(() => {
+        setCommands({ startNewChat: mockStartNewChat, openChat: jest.fn() });
+        return () => setCommands(null);
+      }, [setCommands]);
       return React.createElement(View, { testID: 'MainScreen' });
-    }),
+    },
   };
 });
 jest.mock('./src/screens/BrowserScreen', () => {
   const React = require('react') as typeof import('react');
   const { View } = require('react-native') as typeof import('react-native');
+  const jotai = require('jotai') as typeof import('jotai');
+  const { browserScreenCommandsAtom } = require('./src/state/commands') as typeof import('./src/state/commands');
   return {
-    BrowserScreen: React.forwardRef(function MockBrowserScreen(props: Record<string, unknown>, ref) {
+    BrowserScreen: function MockBrowserScreen(props: Record<string, unknown>) {
       mockScreenProps.BrowserScreen = props;
-      React.useImperativeHandle(ref, () => ({ handleHardwareBackPress: mockBrowserBack }));
+      const setCommands = jotai.useSetAtom(browserScreenCommandsAtom);
+      React.useEffect(() => {
+        setCommands({ handleHardwareBackPress: mockBrowserBack });
+        return () => setCommands(null);
+      }, [setCommands]);
       return React.createElement(View, { testID: 'BrowserScreen' });
-    }),
+    },
   };
 });
 jest.mock('./src/screens/GitScreen', () => mockScreen('GitScreen'));
@@ -239,7 +228,58 @@ jest.mock('./src/screens/SettingsScreen', () => mockScreen('SettingsScreen'));
 jest.mock('./src/screens/TermsScreen', () => mockScreen('TermsScreen'));
 jest.mock('./src/navigation/DrawerContent', () => mockScreen('DrawerContent'));
 
-import App from './App';
+import { AppRoot } from './src/app/AppRoot';
+import { AppStateProvider, createAppStore } from './src/state/store';
+import { appStateSnapshotAtom, bridgeProfilesAtom } from './src/state/appState/atoms';
+import {
+  approvalModeAtom,
+  appearancePreferenceAtom,
+  darkUiPaletteAtom,
+  defaultStartCwdAtom,
+  fontPreferenceAtom,
+  recentBrowserTargetUrlsAtom,
+  rememberThreadSettingsAtom,
+  showToolCallsAtom,
+  workspaceChatLimitAtom,
+} from './src/state/appState/settings';
+import { retryPersistenceAtom } from './src/state/appState/actions';
+import {
+  addBridgeProfileAtom,
+  cancelOnboardingAtom,
+  clearSavedBridgesAtom,
+  deleteBridgeProfileAtom,
+  editBridgeProfileAtom,
+  openBridgeRecoveryGuideAtom,
+  renameBridgeProfileAtom,
+  saveBridgeProfileAtom,
+  switchBridgeProfileAtom,
+} from './src/state/bridge/actions';
+import { activeBridgeProfileAtom } from './src/state/bridge/atoms';
+import {
+  gitChatAtom,
+  mainOpeningChatIdAtom,
+  pendingMainChatIdAtom,
+  pendingMainChatSnapshotAtom,
+} from './src/state/chat/atoms';
+import { closeDrawerAtom, drawerCommandsAtom, drawerVisibleAtom } from './src/state/drawer/atoms';
+import {
+  chatContextChangedAtom,
+  closeGitAtom,
+  navigateAtom,
+  openBrowserAtom,
+  openChatGitAtom,
+  openLegalScreenAtom,
+  selectChatAtom,
+  startNewChatAtom,
+} from './src/state/navigation/actions';
+import {
+  currentScreenAtom,
+  onboardingModeAtom,
+  pendingBrowserTargetUrlAtom,
+  settingsAllowsDrawerGestureAtom,
+} from './src/state/navigation/atoms';
+import type { AppStore } from './src/state/types';
+import type { Chat } from './src/api/types';
 
 type Queryable = ReactTestInstance & {
   children: unknown[];
@@ -295,10 +335,22 @@ function snapshot(options: {
   };
 }
 
+let store: AppStore;
+
 async function renderApp(): Promise<ReactTestRenderer> {
+  store = createAppStore({ persistence: {
+    readCurrent: () => Promise.resolve(null),
+    writeCurrent: () => Promise.resolve(),
+    readLegacy: () => Promise.resolve({ settingsRaw: null, bridgeProfilesRaw: null }),
+  } });
+  store.set(appStateSnapshotAtom, mockSnapshot);
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(<App />);
+    tree = renderer.create(
+      <AppStateProvider store={store}>
+        <AppRoot />
+      </AppStateProvider>
+    );
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -306,11 +358,9 @@ async function renderApp(): Promise<ReactTestRenderer> {
   return tree;
 }
 
-async function callProp(screen: string, prop: string, ...args: unknown[]): Promise<void> {
-  const callback = mockScreenProps[screen]?.[prop];
-  if (typeof callback !== 'function') throw new Error(`Missing ${screen}.${prop}`);
+async function dispatch(action: (currentStore: AppStore) => unknown): Promise<void> {
   await act(async () => {
-    await callback(...args);
+    await action(store);
     await Promise.resolve();
   });
 }
@@ -400,7 +450,7 @@ describe('App orchestration', () => {
 
     mockFonts = [false, new Error('font download failed')];
     const fallback = await renderApp();
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
     act(() => fallback.unmount());
   });
 
@@ -414,11 +464,14 @@ describe('App orchestration', () => {
       version: 1, profileId: profile.id, selectedChatId: cachedChat.id, entries: [{ chat: cachedChat }],
     });
     const tree = await renderApp();
-    expect(mockScreenProps.MainScreen.pendingOpenChatId).toBe(cachedChat.id);
-    expect(mockScreenProps.MainScreen.pendingOpenChatSnapshot).toEqual(cachedChat);
+    expect(store.get(pendingMainChatIdAtom)).toBe(cachedChat.id);
+    expect(store.get(pendingMainChatSnapshotAtom)).toEqual(cachedChat);
     expect(mockApiInstances[0].rememberChat).toHaveBeenCalledWith(cachedChat);
-    await callProp('MainScreen', 'onPendingOpenChatHandled');
-    await callProp('MainScreen', 'onChatContextChange', cachedChat);
+    await dispatch((s) => {
+      s.set(pendingMainChatIdAtom, null);
+      s.set(pendingMainChatSnapshotAtom, null);
+    });
+    await dispatch((s) => s.set(chatContextChangedAtom, cachedChat as unknown as Chat));
     await flushTimers(250);
     expect(mockSaveChatSnapshotCache).toHaveBeenCalledWith(expect.objectContaining({ selectedChatId: cachedChat.id }));
     act(() => tree.unmount());
@@ -440,24 +493,24 @@ describe('App orchestration', () => {
   it('dispatches every settings and browser persistence callback', async () => {
     mockSnapshot = snapshot({ settings: { recentBrowserTargetUrls: ['http://recent:5173'] } });
     const tree = await renderApp();
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    const updates: Array<[string, unknown]> = [
-      ['onApprovalModeChange', 'plan'],
-      ['onShowToolCallsChange', false],
-      ['onWorkspaceChatLimitChange', 12],
-      ['onAppearancePreferenceChange', 'dark'],
-      ['onDarkUiPaletteChange', 'graphite'],
-      ['onFontPreferenceChange', 'mono'],
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    const updates = [
+      () => store.set(approvalModeAtom, 'yolo'),
+      () => store.set(showToolCallsAtom, false),
+      () => store.set(workspaceChatLimitAtom, 25),
+      () => store.set(appearancePreferenceAtom, 'dark'),
+      () => store.set(darkUiPaletteAtom, 'grey'),
+      () => store.set(fontPreferenceAtom, 'jetbrainsMono'),
     ];
-    for (const [callback, value] of updates) await callProp('SettingsScreen', callback, value);
-    await callProp('SettingsScreen', 'onRetryPersistence');
-    await callProp('SettingsScreen', 'onDrawerGestureEnabledChange', false);
-    await callProp('SettingsScreen', 'onOpenDrawer');
+    for (const update of updates) await dispatch(update);
+    await dispatch((s) => s.set(retryPersistenceAtom));
+    await dispatch((s) => s.set(settingsAllowsDrawerGestureAtom, false));
+    await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
     act(() => expect(mockBackHandler?.()).toBe(true));
-    await callProp('DrawerContent', 'onNavigate', 'Browser');
-    expect(mockScreenProps.BrowserScreen.recentTargetUrls).toEqual(['http://recent:5173']);
-    await callProp('BrowserScreen', 'onRecentTargetUrlsChange', ['http://next:5173']);
-    await callProp('BrowserScreen', 'onPendingTargetHandled');
+    await dispatch((s) => s.set(navigateAtom, 'Browser'));
+    expect(store.get(recentBrowserTargetUrlsAtom)).toEqual(['http://recent:5173']);
+    await dispatch((s) => s.set(recentBrowserTargetUrlsAtom, ['http://next:5173']));
+    await dispatch((s) => s.set(pendingBrowserTargetUrlAtom, null));
     expect(mockStore.dispatch).toHaveBeenCalledTimes(updates.length + 1);
     expect(mockStore.retryPersistence).toHaveBeenCalled();
     act(() => tree.unmount());
@@ -469,7 +522,7 @@ describe('App orchestration', () => {
     });
     mockStore.initialize.mockRejectedValueOnce(new Error('load failed'));
     const tree = await renderApp();
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
     act(() => tree.unmount());
   });
 
@@ -477,9 +530,9 @@ describe('App orchestration', () => {
     mockSnapshot = snapshot({ profiles: [], activeProfileId: null });
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
     const tree = await renderApp();
-    expect(mockScreenProps.OnboardingScreen.mode).toBe('initial');
-    expect(mockScreenProps.OnboardingScreen.initialBridgeUrl).toBe('http://legacy:3001');
-    await expect(callProp('OnboardingScreen', 'onSave', { bridgeUrl: ' http://127.0.0.1:3001 ', bridgeToken: ' token ' })).resolves.toBeUndefined();
+    expect(mockScreenProps.OnboardingScreen?.mode).toBe('initial');
+    expect(mockScreenProps.OnboardingScreen?.initialBridgeUrl).toBe('http://legacy:3001');
+    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: ' http://127.0.0.1:3001 ', bridgeToken: ' token ' }))).resolves.toBeUndefined();
     expect(mockStore.dispatchDurable).toHaveBeenCalledWith(expect.objectContaining({ type: 'profiles/save' }));
     act(() => tree.unmount());
   });
@@ -487,36 +540,34 @@ describe('App orchestration', () => {
   it('rejects incomplete onboarding credentials and adds a profile', async () => {
     mockSnapshot = snapshot({ profiles: [], activeProfileId: null });
     const tree = await renderApp();
-    await expect(callProp('OnboardingScreen', 'onSave', { bridgeUrl: '', bridgeToken: 'token' })).rejects.toThrow('required');
-    await expect(callProp('OnboardingScreen', 'onSave', { bridgeUrl: profile.bridgeUrl, bridgeToken: ' ' })).rejects.toThrow('required');
+    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: '', bridgeToken: 'token' }))).rejects.toThrow('required');
+    await expect(dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: ' ' }))).rejects.toThrow('required');
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await callProp('OnboardingScreen', 'onSave', { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken });
+    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
     expect(mockLoadChatSnapshotCache).toHaveBeenCalledWith(profile.id);
-    expect(mockScreenProps.OnboardingScreen.onCancel).toBeUndefined();
+    expect(store.get(currentScreenAtom)).toBe('Main');
     act(() => tree.unmount());
   });
 
   it('adds and edits profiles with changed and unchanged bridge identities', async () => {
     const tree = await renderApp();
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    await callProp('SettingsScreen', 'onAddBridgeProfile');
-    expect(mockScreenProps.OnboardingScreen).toEqual(expect.objectContaining({ mode: 'add', initialBridgeUrl: '', initialBridgeToken: '' }));
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    await dispatch((s) => s.set(addBridgeProfileAtom));
+    expect(store.get(onboardingModeAtom)).toBe('add');
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await callProp('OnboardingScreen', 'onSave', { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken });
+    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
 
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    await callProp('SettingsScreen', 'onEditBridgeProfile');
-    expect(mockScreenProps.OnboardingScreen).toEqual(expect.objectContaining({
-      mode: 'edit', initialBridgeUrl: profile.bridgeUrl, initialBridgeToken: profile.bridgeToken,
-    }));
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    await dispatch((s) => s.set(editBridgeProfileAtom));
+    expect(store.get(onboardingModeAtom)).toBe('edit');
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await callProp('OnboardingScreen', 'onSave', { bridgeUrl: 'http://changed:3001', bridgeToken: 'changed-token' });
+    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: 'http://changed:3001', bridgeToken: 'changed-token' }));
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(profile.id);
 
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    await callProp('SettingsScreen', 'onEditBridgeProfile');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    await dispatch((s) => s.set(editBridgeProfileAtom));
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await callProp('OnboardingScreen', 'onSave', { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken });
+    await dispatch((s) => s.set(saveBridgeProfileAtom, { bridgeUrl: profile.bridgeUrl, bridgeToken: profile.bridgeToken }));
     expect(mockLoadChatSnapshotCache).toHaveBeenCalledWith(profile.id);
     act(() => tree.unmount());
   });
@@ -529,54 +580,54 @@ describe('App orchestration', () => {
     };
     mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
     const tree = await renderApp();
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
     mockLoadChatSnapshotCache.mockResolvedValueOnce({
       version: 1, profileId: secondProfile.id, selectedChatId: switchedChat.id, entries: [{ chat: switchedChat }],
     });
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] } });
-    await callProp('SettingsScreen', 'onSwitchBridgeProfile', secondProfile.id);
+    await dispatch((s) => s.set(switchBridgeProfileAtom, secondProfile.id));
     expect(mockStore.dispatchDurable).toHaveBeenCalledWith({ type: 'profiles/switch', profileId: secondProfile.id });
-    await callProp('SettingsScreen', 'onRenameBridgeProfile', secondProfile.id, 'Renamed');
+    await dispatch((s) => s.set(renameBridgeProfileAtom, secondProfile.id, 'Renamed'));
     expect(mockStore.dispatchDurable).toHaveBeenCalledWith({ type: 'profiles/rename', profileId: secondProfile.id, name: 'Renamed' });
 
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: profile.id, profiles: [profile] } });
-    await callProp('SettingsScreen', 'onDeleteBridgeProfile', secondProfile.id);
+    await dispatch((s) => s.set(deleteBridgeProfileAtom, secondProfile.id));
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(secondProfile.id);
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: null, profiles: [] } });
-    await callProp('SettingsScreen', 'onDeleteBridgeProfile', profile.id);
-    expect(mockScreenProps.OnboardingScreen.mode).toBe('initial');
+    await dispatch((s) => s.set(deleteBridgeProfileAtom, profile.id));
+    expect(mockScreenProps.OnboardingScreen?.mode).toBe('initial');
     act(() => tree.unmount());
 
     mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
     const clearTree = await renderApp();
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: null, profiles: [] } });
-    await callProp('SettingsScreen', 'onClearSavedBridges');
+    await dispatch((s) => s.set(clearSavedBridgesAtom));
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(profile.id);
     expect(mockDeleteChatSnapshotCache).toHaveBeenCalledWith(secondProfile.id);
-    expect(mockScreenProps.OnboardingScreen.mode).toBe('initial');
+    expect(mockScreenProps.OnboardingScreen?.mode).toBe('initial');
     act(() => clearTree.unmount());
   });
 
   it('constructs active clients and routes through all owned screens', async () => {
     const tree = await renderApp();
     expect(mockWsInstances[0]).toEqual(expect.objectContaining({ mockUrl: profile.bridgeUrl }));
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
-    expect(mockScreenProps.DrawerContent.selectedChatId).toBeNull();
-    await callProp('DrawerContent', 'onNewChat');
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
+    await dispatch((s) => s.set(startNewChatAtom));
     expect(mockStartNewChat).toHaveBeenCalled();
 
-    await callProp('MainScreen', 'onOpenLocalPreview', '  http://127.0.0.1:5173  ');
-    expect(mockScreenProps.BrowserScreen.pendingTargetUrl).toBe('http://127.0.0.1:5173');
+    await dispatch((s) => s.set(openBrowserAtom, '  http://127.0.0.1:5173  '));
+    expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
     act(() => expect(mockBackHandler?.()).toBe(true));
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
 
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
-    await callProp('SettingsScreen', 'onOpenPrivacy');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    expect(store.get(currentScreenAtom)).toBe('Settings');
+    await dispatch((s) => s.set(openLegalScreenAtom, 'Privacy'));
     expect(mockScreenProps.PrivacyScreen.policyUrl).toContain('privacy');
     act(() => expect(mockBackHandler?.()).toBe(true));
-    await callProp('SettingsScreen', 'onOpenTerms');
+    await dispatch((s) => s.set(openLegalScreenAtom, 'Terms'));
     expect(mockScreenProps.TermsScreen.termsUrl).toContain('terms');
     act(() => expect(mockBackHandler?.()).toBe(true));
     act(() => tree.unmount());
@@ -589,16 +640,16 @@ describe('App orchestration', () => {
       messages: [{ id: 'm1', role: 'assistant', content: 'hello' }],
     };
     const tree = await renderApp();
-    await callProp('MainScreen', 'onChatContextChange', hydrated);
-    await callProp('DrawerContent', 'onSelectChat', hydrated.id);
+    await dispatch((s) => s.set(chatContextChangedAtom, hydrated as unknown as Chat));
+    await dispatch((s) => s.set(selectChatAtom, hydrated.id));
     (mockApiInstances[0].peekChatShell as jest.Mock).mockReturnValueOnce(hydrated);
-    await callProp('DrawerContent', 'onSelectChat', hydrated.id);
-    await callProp('DrawerContent', 'onSelectChat', 'empty-shell');
+    await dispatch((s) => s.set(selectChatAtom, hydrated.id));
+    await dispatch((s) => s.set(selectChatAtom, 'empty-shell'));
     await flushTimers(250);
-    expect(mockScreenProps.MainScreen.pendingOpenChatId).toBe('empty-shell');
-    await callProp('MainScreen', 'onChatOpeningStateChange', null);
-    await callProp('MainScreen', 'onChatContextChange', null);
-    await callProp('MainScreen', 'onLastUsedThreadSettingsChange', 'codex', 'plan');
+    expect(store.get(pendingMainChatIdAtom)).toBe('empty-shell');
+    await dispatch((s) => s.set(mainOpeningChatIdAtom, null));
+    await dispatch((s) => s.set(chatContextChangedAtom, null as unknown as Chat));
+    await dispatch((s) => s.set(rememberThreadSettingsAtom, 'codex', 'plan'));
     expect(mockStore.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/remember-thread' }));
     act(() => tree.unmount());
   });
@@ -623,7 +674,7 @@ describe('App orchestration', () => {
       tapGesture.onEnd?.({}, false);
       tapGesture.onEnd?.({}, true);
     });
-    expect(mockScreenProps.DrawerContent.active).toBe(false);
+    expect(mockScreenProps.DrawerContent?.active).toBe(false);
     act(() => tree.unmount());
   });
 
@@ -651,9 +702,9 @@ describe('App orchestration', () => {
   it('toggles the tablet sidebar and suppresses phone drawer animation', async () => {
     jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ width: 800, height: 1024, scale: 2, fontScale: 1 });
     const tree = await renderApp();
-    expect(mockScreenProps.DrawerContent.active).toBe(true);
-    await callProp('MainScreen', 'onOpenDrawer');
-    await callProp('MainScreen', 'onOpenDrawer');
+    expect(mockScreenProps.DrawerContent?.active).toBe(true);
+    await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
+    await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
     act(() => expect(mockBackHandler?.()).toBe(false));
     act(() => tree.unmount());
   });
@@ -665,44 +716,43 @@ describe('App orchestration', () => {
       updatedAt: '2026-07-20T00:00:00.000Z', statusUpdatedAt: '2026-07-20T00:00:00.000Z',
       lastMessagePreview: '', messages: [],
     };
-    await callProp('MainScreen', 'onOpenGit', chat);
-    expect(mockScreenProps.GitScreen.chat).toEqual(chat);
+    await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
+    expect(store.get(gitChatAtom)).toEqual(chat);
     await act(async () => {
-      const callback = mockScreenProps.GitScreen.onBack as () => void;
-      callback();
+      store.set(closeGitAtom);
       jest.advanceTimersByTime(250);
       await Promise.resolve();
     });
-    expect(mockScreenProps.MainScreen.pendingOpenChatId).toBe(chat.id);
-    await callProp('MainScreen', 'onDefaultStartCwdChange', '/workspace');
+    expect(store.get(pendingMainChatIdAtom)).toBe(chat.id);
+    await dispatch((s) => s.set(defaultStartCwdAtom, '/workspace'));
     expect(mockStore.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/update' }));
-    await callProp('MainScreen', 'onOpenBridgeRecoveryGuide');
-    expect(mockScreenProps.OnboardingScreen.mode).toBe('reconnect');
-    expect(mockScreenProps.OnboardingScreen.onCancel).toEqual(expect.any(Function));
-    await callProp('OnboardingScreen', 'onCancel');
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    await dispatch((s) => s.set(openBridgeRecoveryGuideAtom));
+    expect(store.get(onboardingModeAtom)).toBe('reconnect');
+    expect(store.get(activeBridgeProfileAtom)).not.toBeNull();
+    await dispatch((s) => s.set(cancelOnboardingAtom));
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
     act(() => tree.unmount());
   });
 
   it('handles drawer and hardware back from every routed screen', async () => {
     const tree = await renderApp();
     act(() => expect(mockBackHandler?.()).toBe(false));
-    await callProp('MainScreen', 'onOpenDrawer');
+    await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
     act(() => expect(mockBackHandler?.()).toBe(true));
 
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
     act(() => expect(mockBackHandler?.()).toBe(true));
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
-    await callProp('DrawerContent', 'onNavigate', 'Privacy');
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
+    await dispatch((s) => s.set(navigateAtom, 'Privacy'));
     act(() => expect(mockBackHandler?.()).toBe(true));
-    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
-    await callProp('DrawerContent', 'onNavigate', 'Terms');
+    expect(store.get(currentScreenAtom)).toBe('Settings');
+    await dispatch((s) => s.set(navigateAtom, 'Terms'));
     act(() => expect(mockBackHandler?.()).toBe(true));
 
-    await callProp('MainScreen', 'onOpenLocalPreview', null);
+    await dispatch((s) => s.set(openBrowserAtom, null));
     mockBrowserBack.mockReturnValueOnce(true);
     act(() => expect(mockBackHandler?.()).toBe(true));
-    expect(mockScreenProps.BrowserScreen.api).toBeDefined();
+    expect(store.get(currentScreenAtom)).toBe('Browser');
     mockBrowserBack.mockReturnValueOnce(false);
     act(() => expect(mockBackHandler?.()).toBe(true));
 
@@ -710,11 +760,11 @@ describe('App orchestration', () => {
       id: 'git-back', title: 'Git', status: 'complete', createdAt: profile.createdAt,
       updatedAt: profile.updatedAt, statusUpdatedAt: profile.updatedAt, lastMessagePreview: '', messages: [],
     };
-    await callProp('MainScreen', 'onOpenGit', chat);
+    await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
     act(() => expect(mockBackHandler?.()).toBe(true));
     await flushTimers(250);
 
-    await callProp('MainScreen', 'onOpenBridgeRecoveryGuide');
+    await dispatch((s) => s.set(openBridgeRecoveryGuideAtom));
     act(() => expect(mockBackHandler?.()).toBe(true));
     act(() => tree.unmount());
 
@@ -728,27 +778,27 @@ describe('App orchestration', () => {
     const tree = await renderApp();
     const backSwipeGesture = mockGestures[0];
 
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
-    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
+    expect(store.get(currentScreenAtom)).toBe('Settings');
     await act(async () => {
       backSwipeGesture.onEnd?.({ translationX: 10, velocityX: 0 });
       await Promise.resolve();
     });
-    expect(mockScreenProps.SettingsScreen.bridgeProfileName).toBe(profile.name);
+    expect(store.get(currentScreenAtom)).toBe('Settings');
     await act(async () => {
       backSwipeGesture.onEnd?.({ translationX: 120, velocityX: 0 });
       await Promise.resolve();
     });
-    expect(mockScreenProps.MainScreen.bridgeProfileId).toBe(profile.id);
+    expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
     act(() => tree.unmount());
   });
 
   it('closes the full-page drawer from its close control', async () => {
     const tree = await renderApp();
-    await callProp('MainScreen', 'onOpenDrawer');
-    expect(mockScreenProps.DrawerContent.active).toBe(true);
-    await callProp('DrawerContent', 'onClose');
-    expect(mockScreenProps.DrawerContent.active).toBe(false);
+    await dispatch((s) => s.get(drawerCommandsAtom)?.toggleNavigation());
+    expect(mockScreenProps.DrawerContent?.active).toBe(true);
+    await dispatch((s) => s.set(closeDrawerAtom));
+    expect(mockScreenProps.DrawerContent?.active).toBe(false);
     act(() => tree.unmount());
   });
 
@@ -762,7 +812,7 @@ describe('App orchestration', () => {
     expect(mockPushControllers[0].setProfile).toHaveBeenCalledWith(expect.objectContaining({
       profileId: profile.id, registrationId: 'registration-1',
     }));
-    expect(mockSyncPushRegistration).toHaveBeenCalledWith(expect.anything(), mockStore, profile.id);
+    expect(mockSyncPushRegistration).toHaveBeenCalledWith(expect.anything(), store, profile.id);
     await act(async () => {
       mockWsStatusListeners.forEach((listener) => listener(false));
       mockWsStatusListeners.forEach((listener) => listener(true));
@@ -774,7 +824,7 @@ describe('App orchestration', () => {
       mockPushControllers[0].navigate({ target: { threadId: 'push-thread' } });
       await Promise.resolve();
     });
-    expect(mockScreenProps.MainScreen.pendingOpenChatId).toBe('push-thread');
+    expect(store.get(pendingMainChatIdAtom)).toBe('push-thread');
     await act(async () => {
       mockNotificationResponseListeners[0]({ notification: 'tap' });
       jest.setSystemTime(new Date(now.getTime() + 1000));
@@ -802,7 +852,7 @@ describe('App orchestration', () => {
     await flushTimers(1000);
     expect(mockPushControllers[0].setProfile).toHaveBeenCalledWith(null);
     expect(mockSyncPushRegistration.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(mockScreenProps.MainScreen.pendingOpenChatId).toBeNull();
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
     act(() => tree.unmount());
   });
 
@@ -822,16 +872,16 @@ describe('App orchestration', () => {
     const secondProfile = { ...profile, id: 'profile-2', name: 'Second' };
     mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
     const tree = await renderApp();
-    await callProp('DrawerContent', 'onNavigate', 'Settings');
+    await dispatch((s) => s.set(navigateAtom, 'Settings'));
     mockLoadChatSnapshotCache.mockResolvedValueOnce({
       version: 1, profileId: secondProfile.id, selectedChatId: 'missing', entries: [],
     });
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] } });
-    await callProp('SettingsScreen', 'onSwitchBridgeProfile', secondProfile.id);
+    await dispatch((s) => s.set(switchBridgeProfileAtom, secondProfile.id));
     mockLoadChatSnapshotCache.mockResolvedValueOnce(null);
     mockStore.dispatchDurable.mockResolvedValueOnce({ bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [secondProfile] } });
-    await callProp('SettingsScreen', 'onDeleteBridgeProfile', profile.id);
-    expect(mockScreenProps.SettingsScreen.bridgeProfiles).toHaveLength(2);
+    await dispatch((s) => s.set(deleteBridgeProfileAtom, profile.id));
+    expect(store.get(bridgeProfilesAtom)).toHaveLength(2);
     act(() => tree.unmount());
   });
 
