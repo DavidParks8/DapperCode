@@ -58,11 +58,38 @@ async fn poll_until_owner_exits(owner_pid: u32) {
 /// exit. Returns `false` when the watch could not be established and the caller should poll instead.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 async fn wait_for_owner_exit_via_kqueue(owner_pid: u32) -> bool {
-    let Ok(result) = tokio::task::spawn_blocking(move || block_on_owner_exit(owner_pid)).await
-    else {
-        return false;
-    };
-    result
+    // A join failure means the runtime is going down, which the polling fallback handles.
+    tokio::task::spawn_blocking(move || block_on_owner_exit(owner_pid))
+        .await
+        .unwrap_or(false)
+}
+
+/// What a `kevent` wait result means for the watch loop.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WatchStep {
+    /// The owner exited, so the bridge should shut down.
+    OwnerExited,
+    /// A spurious or interrupted wait; keep waiting.
+    Retry,
+    /// The watch broke, so the caller should fall back to polling.
+    Unavailable,
+}
+
+/// Interprets a `kevent` return value.
+///
+/// Split out from the syscall so every outcome is reachable in tests: interrupted and failed waits
+/// are otherwise nearly impossible to provoke, and getting them wrong would either spin forever or
+/// silently stop watching the owner.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn classify_kevent(received: libc::c_int, error_kind: std::io::ErrorKind) -> WatchStep {
+    if received > 0 {
+        return WatchStep::OwnerExited;
+    }
+    if received == 0 || error_kind == std::io::ErrorKind::Interrupted {
+        return WatchStep::Retry;
+    }
+    WatchStep::Unavailable
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -110,17 +137,11 @@ fn block_on_owner_exit(owner_pid: u32) -> bool {
                 std::ptr::null(),
             )
         };
-        if received > 0 {
-            return true;
+        match classify_kevent(received, std::io::Error::last_os_error().kind()) {
+            WatchStep::OwnerExited => return true,
+            WatchStep::Unavailable => return false,
+            WatchStep::Retry => {}
         }
-        if received == 0 {
-            continue;
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() == std::io::ErrorKind::Interrupted {
-            continue;
-        }
-        return false;
     }
 }
 
@@ -257,6 +278,36 @@ mod tests {
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn every_kevent_outcome_maps_to_the_right_next_step() {
+        use std::io::ErrorKind;
+
+        // A delivered event is the only thing that means the owner is gone.
+        assert_eq!(classify_kevent(1, ErrorKind::Other), WatchStep::OwnerExited);
+        assert_eq!(
+            classify_kevent(2, ErrorKind::Interrupted),
+            WatchStep::OwnerExited
+        );
+
+        // A spurious wake or a signal must keep waiting rather than abandon the watch.
+        assert_eq!(classify_kevent(0, ErrorKind::Other), WatchStep::Retry);
+        assert_eq!(
+            classify_kevent(-1, ErrorKind::Interrupted),
+            WatchStep::Retry
+        );
+
+        // Anything else means the watch is broken and the caller should fall back to polling.
+        assert_eq!(
+            classify_kevent(-1, ErrorKind::PermissionDenied),
+            WatchStep::Unavailable
+        );
+        assert_eq!(
+            classify_kevent(-1, ErrorKind::Other),
+            WatchStep::Unavailable
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[tokio::test]
     async fn the_kqueue_watch_resolves_when_the_owner_exits() {
         let mut child = std::process::Command::new("/bin/sleep")
@@ -314,5 +365,20 @@ mod tests {
             .await
             .expect("polling fallback should resolve after the owner exits")
             .expect("watchdog task should not panic");
+    }
+
+    #[tokio::test]
+    async fn polling_fallback_returns_immediately_for_a_dead_owner() {
+        let mut child = std::process::Command::new("/bin/echo")
+            .arg("done")
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id();
+        child.wait().expect("reap child");
+
+        // The loop must not sleep once before noticing an owner that is already gone.
+        tokio::time::timeout(Duration::from_secs(1), poll_until_owner_exits(pid))
+            .await
+            .expect("a dead owner should resolve without waiting a poll interval");
     }
 }
