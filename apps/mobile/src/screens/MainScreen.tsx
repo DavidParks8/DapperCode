@@ -1,5 +1,5 @@
 import { useStore } from 'jotai';
-import { useMemo } from 'react';
+import { useRef } from 'react';
 import type { Chat } from '../api/types';
 import { resetMainScreenStateAtom } from '../state/mainScreen/registry';
 import { useMainScreenBaseContext } from './useMainScreenBaseContext';
@@ -54,8 +54,13 @@ export interface MainScreenHandle {
 export function MainScreen() {
     const store = useStore();
     // MainScreen state lives in atoms that outlive this component, so a fresh mount (a new bridge
-    // profile) has to clear it explicitly before any child reads it.
-    useMemo(() => store.set(resetMainScreenStateAtom), [store]);
+    // profile) has to clear it before any child reads it. A ref guard rather than useMemo: React
+    // may discard a memo cache and recompute it later, which would wipe live state mid-session.
+    const didResetRef = useRef(false);
+    if (!didResetRef.current) {
+      didResetRef.current = true;
+      store.set(resetMainScreenStateAtom);
+    }
     const mainScreenBaseContext = useMainScreenBaseContext();
     const coreBootstrapResult = useMainScreenCoreBootstrap(mainScreenBaseContext);
     const coreBootstrapContext = { ...mainScreenBaseContext, ...coreBootstrapResult };

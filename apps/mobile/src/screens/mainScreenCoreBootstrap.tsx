@@ -66,8 +66,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     pendingOpenChatSnapshot.messages.length > 0
       ? pendingOpenChatSnapshot
       : null;
-  // Seeds the freshly reset screen atoms with the snapshot this mount was opened with.
-  useMemo(() => {
+  // Seeds the freshly reset screen atoms with the snapshot this mount was opened with. Guarded by a
+  // ref rather than useMemo so a discarded memo cache can never re-seed over live state.
+  const didSeedRef = useRef(false);
+  if (!didSeedRef.current) {
+    didSeedRef.current = true;
     if (initialPendingSnapshot) {
       store.set(selectedChatAtom, initialPendingSnapshot);
       store.set(
@@ -78,7 +81,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     store.set(selectedChatIdAtom, initialPendingSnapshot?.id ?? pendingOpenChatId ?? null);
     store.set(openingChatIdAtom, initialPendingSnapshot ? null : pendingOpenChatId ?? null);
     store.set(pendingAgentIdAtom, preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null);
-  }, [store]);
+  }
   const selectedChat = useAtomValue(selectedChatAtom);
   const setSelectedChat = useSetAtom(selectedChatAtom);
   const transcriptContinuationState = useAtomValue(transcriptContinuationStateAtom);
