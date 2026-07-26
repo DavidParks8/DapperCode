@@ -74,6 +74,9 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
     "collectCoverageFrom": [
       "App.tsx",
       "src/**/*.{ts,tsx}",

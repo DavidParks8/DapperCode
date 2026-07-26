@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ActionSheetIOS, AppState, Platform, RefreshControl } from 'react-native';
+import { AppState, RefreshControl } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -475,39 +475,26 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree.unmount());
   });
 
-  it('filters every lane with the native iOS folder picker', async () => {
-    const originalPlatform = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
-    const sheet = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementationOnce((options, callback) => {
-        callback(options.options.indexOf('beta'));
-      })
-      .mockImplementationOnce((_options, callback) => callback(0));
+  it('filters every lane with the shared folder picker', async () => {
     const harness = createHarness({
       chats: [
         createChat({ id: 'alpha', title: 'Alpha session', agentId: 'copilot', cwd: '/repo/alpha', updatedAt: '2026-07-20T00:29:00.000Z' }),
         createChat({ id: 'beta', title: 'Beta session', agentId: 'codex', cwd: '/repo/beta', status: 'running', updatedAt: '2026-07-20T00:28:00.000Z' }),
       ],
     });
-    try {
-      const tree = await renderDrawer(harness);
-      const root = tree.root as Queryable;
-      await press(findByLabel(root, 'Filter sessions by folder, All folders'));
-      expect(sheet).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Folder' }),
-        expect.any(Function)
-      );
-      expect(hasText(root, 'Alpha session')).toBe(false);
-      expect(hasText(root, 'Beta session')).toBe(true);
-      expect(findByLabel(root, 'Filter sessions by folder, beta')).toBeDefined();
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+    await press(findByLabel(root, 'Filter sessions by folder, All folders'));
+    await press(findByLabel(root, 'beta'));
+    expect(hasText(root, 'Alpha session')).toBe(false);
+    expect(hasText(root, 'Beta session')).toBe(true);
+    expect(findByLabel(root, 'Filter sessions by folder, beta')).toBeDefined();
 
-      await press(findByLabel(root, 'Filter sessions by folder, beta'));
-      expect(hasText(root, 'Alpha session')).toBe(true);
-      expect(hasText(root, 'Beta session')).toBe(true);
-      act(() => tree.unmount());
-    } finally {
-      Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatform });
-    }
+    await press(findByLabel(root, 'Filter sessions by folder, beta'));
+    await press(findByLabel(root, 'All folders'));
+    expect(hasText(root, 'Alpha session')).toBe(true);
+    expect(hasText(root, 'Beta session')).toBe(true);
+    act(() => tree.unmount());
   });
 
   it('reacts to websocket connectivity, lifecycle events, and snapshot refresh', async () => {
@@ -869,29 +856,6 @@ describe('DrawerContent render behavior matrix', () => {
     });
     expect(harness.api.startChatListStream).toHaveBeenCalledTimes(2);
     act(() => tree.unmount());
-  });
-
-  it('uses the in-app folder picker outside iOS', async () => {
-    const originalPlatform = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
-    const harness = createHarness({
-      chats: [
-        createChat({ id: 'platform', title: 'Platform session', cwd: '/repo/platform' }),
-        createChat({ id: 'other', title: 'Other session', cwd: '/repo/other' }),
-      ],
-    });
-    try {
-      const tree = await renderDrawer(harness);
-      const root = tree.root as Queryable;
-      await press(findByLabel(root, 'Filter sessions by folder, All folders'));
-      await press(findByLabel(root, 'platform, 1 session'));
-      expect(hasText(root, 'Platform session')).toBe(true);
-      expect(hasText(root, 'Other session')).toBe(false);
-      expect(root.findAll((node) => node.props.accessibilityLabel === 'Close folder picker')).toHaveLength(0);
-      act(() => tree.unmount());
-    } finally {
-      Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatform });
-    }
   });
 
   it('renders light theme, compact counts, duplicate updates, and explicit error state', async () => {

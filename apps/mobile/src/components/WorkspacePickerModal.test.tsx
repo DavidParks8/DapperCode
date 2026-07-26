@@ -1,4 +1,4 @@
-import { ActionSheetIOS, Modal, Text, TextInput } from 'react-native';
+import { Alert, Modal, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, {
   act,
@@ -233,9 +233,13 @@ describe('WorkspacePickerModal', () => {
     act(() => expectValue(rendered).unmount());
   });
 
-  it('confirms pinned and unpinned workspaces through long-press actions', () => {
+  it('confirms pinned and unpinned workspaces through long-press actions', async () => {
     const onToggleFavorite = jest.fn();
-    const actionSheet = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation((_options, callback) => callback(0));
+    const alert = jest
+      .spyOn(Alert, 'alert')
+      .mockImplementation((_title, _message, buttons) => {
+        buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
+      });
     let rendered: ReactTestRenderer | undefined;
     act(() => { rendered = renderer.create(renderPickerMatrix({ onToggleFavorite })); });
     const root = expectValue(rendered).root as QueryableTestInstance;
@@ -245,11 +249,14 @@ describe('WorkspacePickerModal', () => {
       pinnedTile.props.onLongPress();
       notesRow.props.onLongPress();
     });
-    expect(actionSheet.mock.calls[0]?.[0]).toMatchObject({ options: ['Unpin workspace', 'Cancel'], title: 'Unpin this workspace?' });
-    expect(actionSheet.mock.calls[1]?.[0]).toMatchObject({ options: ['Pin workspace', 'Cancel'], title: 'Pin this workspace?' });
+    await act(async () => { await Promise.resolve(); });
+    expect(alert.mock.calls[0]?.[0]).toBe('Unpin this workspace?');
+    expect(alert.mock.calls[0]?.[2]?.[1]).toMatchObject({ text: 'Unpin workspace' });
+    expect(alert.mock.calls[1]?.[0]).toBe('Pin this workspace?');
+    expect(alert.mock.calls[1]?.[2]?.[1]).toMatchObject({ text: 'Pin workspace' });
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code');
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
-    actionSheet.mockRestore();
+    alert.mockRestore();
     act(() => expectValue(rendered).unmount());
   });
 

@@ -1,5 +1,5 @@
 import * as mockReact from 'react';
-import { Modal, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -401,8 +401,7 @@ describe('BrowserScreen behavior', () => {
     await invoke(webView, 'onContentProcessDidTerminate');
     await invoke(findByLabel(root, 'Viewport size, 1920×1080'));
     exercisePressableStyles(root);
-    const modal = root.findAllByType(Modal)[0] as unknown as Queryable;
-    act(() => readHandler<() => void>(modal, 'onRequestClose')());
+    await invoke(findByLabel(root, 'Close viewport menu'));
     expect(hasText(root, 'Viewport')).toBe(false);
     act(() => result.tree.unmount());
   });

@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ActionSheetIOS, AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import type { AgentDescriptor } from '../api/types';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
@@ -16,7 +16,6 @@ import { navigateAtom, selectChatAtom, startNewChatAtom } from '../state/navigat
 import { useAppTheme } from '../theme';
 import {
   buildDrawerAttentionModel,
-  getDrawerFolderPickerLabels,
   type DrawerAttentionLane,
 } from './drawerAttention';
 import { createDrawerContentStyles } from './drawerContentStyles';
@@ -180,27 +179,8 @@ export const DrawerContent = memo(function DrawerContentComponent({
   }, []);
 
   const handleOpenFolderPicker = useCallback(() => {
-    if (Platform.OS !== 'ios') {
-      setFolderPickerVisible(true);
-      return;
-    }
-
-    const labels = getDrawerFolderPickerLabels(attentionModel.folderOptions);
-    const cancelButtonIndex = labels.length;
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        options: [...labels, 'Cancel'],
-        cancelButtonIndex,
-        title: 'Folder',
-      },
-      (buttonIndex) => {
-        const option = attentionModel.folderOptions[buttonIndex];
-        if (buttonIndex !== cancelButtonIndex && option) {
-          handleSelectFolder(option.key);
-        }
-      }
-    );
-  }, [attentionModel.folderOptions, handleSelectFolder]);
+    setFolderPickerVisible(true);
+  }, []);
 
   const refreshDrawer = useCallback(async () => {
     await Promise.all([

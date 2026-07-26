@@ -50,7 +50,6 @@ jest.mock('react-native-safe-area-context', () => {
     },
   };
 });
-jest.mock('@gorhom/bottom-sheet', () => require('./src/testing/bottomSheetMock'));
 jest.mock('react-native-reanimated', () => {
   const View = require('react-native').View;
   const transition = { duration: () => transition, easing: () => transition };

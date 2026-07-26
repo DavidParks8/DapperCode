@@ -9,8 +9,6 @@ import renderer, {
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { SelectionSheet, type SelectionSheetOption } from './SelectionSheet';
 
-jest.mock('@gorhom/bottom-sheet', () => require('../testing/bottomSheetMock'));
-
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
   const { Text: MockText } = jest.requireActual('react-native');

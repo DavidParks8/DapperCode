@@ -75,22 +75,24 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme): BrowserScreenS
       justifyContent: 'center',
       gap: theme.spacing.xs,
     },
-    viewportMenuBackdrop: {
-      flex: 1,
-      backgroundColor: theme.colors.overlayBackdrop,
-      justifyContent: 'center',
-      paddingHorizontal: theme.spacing.md,
+    viewportMenuFooter: {
+      alignItems: 'flex-end',
     },
-    viewportMenuKeyboardLayer: {
-      width: '100%',
-    },
-    viewportMenuCard: {
-      borderRadius: theme.radius.lg,
+    viewportMenuCloseButton: {
+      minWidth: 88,
+      minHeight: 36,
+      borderRadius: theme.radius.full,
       borderWidth: 1,
       borderColor: theme.colors.borderLight,
-      backgroundColor: theme.colors.bgElevated,
-      padding: theme.spacing.lg,
-      gap: theme.spacing.md,
+      backgroundColor: theme.colors.bgInput,
+      paddingHorizontal: theme.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    viewportMenuCloseText: {
+      ...theme.typography.body,
+      color: theme.colors.textPrimary,
+      fontWeight: '600',
     },
     viewportMenuHeader: {
       gap: theme.spacing.xs,
