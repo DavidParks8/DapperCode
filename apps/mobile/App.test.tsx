@@ -261,7 +261,7 @@ import {
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
 } from './src/state/chat/atoms';
-import { closeDrawerAtom, drawerCommandsAtom, drawerVisibleAtom } from './src/state/drawer/atoms';
+import { closeDrawerAtom, drawerCommandsAtom } from './src/state/drawer/atoms';
 import {
   chatContextChangedAtom,
   closeGitAtom,

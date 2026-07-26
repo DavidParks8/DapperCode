@@ -7,6 +7,7 @@ import { MainScreen } from '../screens/MainScreen';
 import { PrivacyScreen } from '../screens/PrivacyScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TermsScreen } from '../screens/TermsScreen';
+import { activeBridgeProfileAtom } from '../state/bridge/atoms';
 import { gitChatAtom } from '../state/chat/atoms';
 import { drawerCommandsAtom } from '../state/drawer/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
@@ -20,10 +21,12 @@ export function AppScreenRenderer() {
   const currentScreen = useAtomValue(currentScreenAtom);
   const gitChat = useAtomValue(gitChatAtom);
   const onOpenDrawer = useOpenDrawer();
+  // MainScreen still owns per-profile session state, so it is remounted per bridge profile.
+  const mainScreen = <MainScreen key={useAtomValue(activeBridgeProfileAtom)?.id} />;
 
   switch (currentScreen) {
     case 'ChatGit':
-      return gitChat ? <GitScreen chat={gitChat} /> : <MainScreen />;
+      return gitChat ? <GitScreen chat={gitChat} /> : mainScreen;
     case 'Settings':
       return <SettingsScreen />;
     case 'Browser':
@@ -33,6 +36,6 @@ export function AppScreenRenderer() {
     case 'Terms':
       return <TermsScreen termsUrl={env.termsOfServiceUrl} onOpenDrawer={onOpenDrawer} />;
     default:
-      return <MainScreen />;
+      return mainScreen;
   }
 }

@@ -41,6 +41,7 @@ already-installed ACP executable; it does not install package-manager distributi
 
 - `apps/mobile/App.tsx`: app shell and custom navigation
 - `src/api`: bridge client, WebSocket transport, typed contracts
+- `src/state`: jotai atoms for cross-component state (see `docs/mobile-state.md`)
 - `src/screens`: main product surfaces
 - `ios`: active Expo native iOS project
 
@@ -72,6 +73,8 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 - Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not npm scripts.
 - Never add an npm bridge package, JavaScript operator fallback, or bridge update RPC.
 - Preserve `.env.secure`, `.tethercode`, bridge logs, and user-installed agent state.
+- Cross-component mobile state lives in `apps/mobile/src/state` as jotai atoms; keep state used by a
+  single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.
 - The active iOS project is `apps/mobile/ios`, not the old root `ios` directory.
 - Version changes must keep both Rust lockfiles and mobile metadata synchronized.
