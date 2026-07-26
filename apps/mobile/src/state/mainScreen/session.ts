@@ -1,5 +1,5 @@
 import type { Chat, RunEvent } from '../../api/types';
-import type { TranscriptContinuationState } from '../../screens/controllers/transcriptContinuationController';
+import type { TranscriptContinuationState } from '../../screens/main/controllers/transcriptContinuationController';
 import { screenAtom } from './registry';
 
 export const selectedChatAtom = screenAtom<Chat | null>(null);

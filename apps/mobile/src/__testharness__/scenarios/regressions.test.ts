@@ -8,8 +8,8 @@ import {
   isThreadOrSubAgentRunning,
   OPENING_CHAT_ACTIVITY_TITLE,
   retireOpeningChatActivity,
-} from '../../screens/mainScreenHelperStatus';
-import { assessChatSync } from '../../screens/controllers/chatSyncController';
+} from '../../screens/main/mainScreenHelperStatus';
+import { assessChatSync } from '../../screens/main/controllers/chatSyncController';
 import { registerTestHarnessMatchers } from '../AssertionHelpers';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';

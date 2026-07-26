@@ -100,6 +100,14 @@ export abstract class HostBridgeApiClientCore {
   >();
   protected readonly chatCache = new Map<string, CacheEntry<Chat>>();
   protected readonly chatInFlight = new Map<string, Promise<Chat>>();
+  protected readonly modelListCache = new Map<
+    string,
+    CacheEntry<ModelOption[]>
+  >();
+  protected readonly modelListInFlight = new Map<
+    string,
+    Promise<ModelOption[]>
+  >();
   constructor(options: ApiClientOptions) {
     this.ws = options.ws;
     this.bridgeUrl = options.bridgeUrl?.replace(/\/$/, "") ?? null;
@@ -109,6 +117,7 @@ export abstract class HostBridgeApiClientCore {
   abstract readBridgeStatus(): Promise<BridgeStatus>;
   abstract readBridgeCapabilities(): Promise<BridgeCapabilities>;
   abstract listModelOptions(agentId?: AgentId | null): Promise<ModelOption[]>;
+  abstract peekModelOptions(agentId?: AgentId | null): ModelOption[] | null;
   abstract setThreadConfigOption(
     threadId: string,
     configId: string,

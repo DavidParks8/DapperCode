@@ -4,23 +4,6 @@ import type { AppTheme } from '../theme';
 
 export const createSelectionSheetStyles = (theme: AppTheme) =>
   StyleSheet.create({
-    backdrop: { flex: 1, backgroundColor: theme.colors.overlayBackdrop },
-    sheetOuter: { flex: 1, paddingHorizontal: theme.spacing.md },
-    sheetOuterExpanded: { paddingHorizontal: theme.spacing.md },
-    sheetCard: {
-      maxHeight: '82%', borderRadius: 24, borderCurve: 'continuous', borderWidth: 1,
-      borderColor: theme.colors.borderLight, backgroundColor: theme.colors.bgElevated,
-      paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm,
-      paddingBottom: theme.spacing.lg, gap: theme.spacing.md,
-      boxShadow: theme.isDark
-        ? '0 -10px 34px rgba(0, 0, 0, 0.42)'
-        : '0 -10px 34px rgba(15, 23, 42, 0.12)',
-    },
-    sheetCardExpanded: { maxHeight: undefined, minHeight: undefined, borderRadius: 28 },
-    handle: {
-      alignSelf: 'center', width: 38, height: 4, borderRadius: 999,
-      backgroundColor: theme.colors.border,
-    },
     header: { gap: 4 },
     eyebrow: {
       ...theme.typography.caption, color: theme.colors.textMuted, fontSize: 10,
@@ -33,11 +16,7 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
     subtitle: {
       ...theme.typography.caption, color: theme.colors.textMuted, fontSize: 12, lineHeight: 16,
     },
-    body: { flexShrink: 1, minHeight: 0 },
-    list: { flexGrow: 0 },
-    listExpanded: { minHeight: 0 },
-    listContent: { gap: theme.spacing.sm },
-    listContentExpanded: { paddingBottom: theme.spacing.xs },
+    list: { gap: theme.spacing.sm },
     loadingState: {
       minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: theme.spacing.sm,
     },

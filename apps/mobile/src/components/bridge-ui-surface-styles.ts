@@ -18,21 +18,6 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     bannerCard: {
       marginBottom: theme.spacing.sm,
     },
-    modalBackdrop: {
-      flex: 1,
-      backgroundColor: theme.colors.overlayBackdrop,
-      justifyContent: 'center',
-      paddingHorizontal: theme.spacing.lg,
-    },
-    modalCard: {
-      backgroundColor: theme.colors.bgItem,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.borderHighlight,
-      padding: theme.spacing.lg,
-      gap: theme.spacing.md,
-      maxHeight: '80%',
-    },
     modalScroll: {
       maxHeight: 420,
     },

@@ -1,7 +1,6 @@
 import type { FileSystemEntry, WorkspaceSummary } from '../api/types';
 
-export interface WorkspacePickerModalProps {
-  visible: boolean;
+export interface WorkspacePickerProps {
   selectedPath?: string | null;
   bridgeRoot?: string | null;
   recentWorkspaces: WorkspaceSummary[];

@@ -6,7 +6,7 @@ import type {
   ReasoningEffort,
   ServiceTier,
 } from '../../api/types';
-import type { SelectedServiceTier } from '../../screens/mainScreenHelpers';
+import type { SelectedServiceTier } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
 export const bridgeCapabilitiesAtom = screenAtom<BridgeCapabilities | null>(null);

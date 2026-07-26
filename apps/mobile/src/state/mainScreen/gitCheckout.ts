@@ -1,7 +1,5 @@
 import { screenAtom } from './registry';
 
-export const gitCheckoutModalVisibleAtom = screenAtom(false);
-
 export const gitCheckoutRepoUrlAtom = screenAtom('');
 
 export const gitCheckoutParentPathAtom = screenAtom<string | null>(null);

@@ -7,6 +7,7 @@ import {
   chatShellFromSummary,
   cloneChat,
   cloneChatSummaries,
+  cloneModelOptions,
   cloneChatSummary,
 } from "./clientChatCloneAndRetryInternals";
 import { normalizeEffort, readPositiveInteger } from "./clientBridgeResponseNormalization";
@@ -27,6 +28,8 @@ import {
 } from "./clientContractsAndSnapshotInternals";
 
 export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
+  private static readonly MODEL_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
+
   health(): Promise<HealthResponse> {
     return this.ws.request<HealthResponse>("bridge/health/read");
   }
@@ -36,7 +39,52 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
     return this.ws.request<BridgeCapabilities>("bridge/capabilities/read");
   }
+  /**
+   * The bridge answers `model/list` by shelling out to the agent, which is slow enough that the
+   * picker used to open on a spinner every time. Results are cached per agent and shared between
+   * concurrent callers.
+   */
   async listModelOptions(agentId?: AgentId | null): Promise<ModelOption[]> {
+    const cacheKey = this.modelListCacheKey(agentId);
+    const cached = this.modelListCache.get(cacheKey);
+    if (
+      cached &&
+      Date.now() - cached.loadedAt <
+        HostBridgeApiClientHealthAndCacheLayer.MODEL_LIST_CACHE_TTL_MS
+    ) {
+      return cloneModelOptions(cached.value);
+    }
+
+    const inFlight = this.modelListInFlight.get(cacheKey);
+    if (inFlight) {
+      return cloneModelOptions(await inFlight);
+    }
+
+    const request = this.fetchModelOptions(agentId)
+      .then((options) => {
+        this.modelListCache.set(cacheKey, {
+          value: cloneModelOptions(options),
+          loadedAt: Date.now(),
+        });
+        return options;
+      })
+      .finally(() => {
+        this.modelListInFlight.delete(cacheKey);
+      });
+    this.modelListInFlight.set(cacheKey, request);
+    return cloneModelOptions(await request);
+  }
+  /** Cached model options without triggering a fetch, so a picker can open populated. */
+  peekModelOptions(agentId?: AgentId | null): ModelOption[] | null {
+    const cached = this.modelListCache.get(this.modelListCacheKey(agentId));
+    return cached ? cloneModelOptions(cached.value) : null;
+  }
+  private modelListCacheKey(agentId?: AgentId | null): string {
+    return agentId ?? "";
+  }
+  private async fetchModelOptions(
+    agentId?: AgentId | null,
+  ): Promise<ModelOption[]> {
     const response = await this.ws.request<Record<string, unknown>>(
       "model/list",
       { agentId: agentId ?? null },

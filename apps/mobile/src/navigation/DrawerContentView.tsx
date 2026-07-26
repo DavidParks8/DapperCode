@@ -1,15 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { useMemo } from 'react';
+import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { getDrawerFolderPickerLabels } from './drawerAttention';
 import { formatCompactCount } from './drawerContentHelpers';
+import { SelectionSheet, type SelectionSheetOption } from '../components/SelectionSheet';
 import { DrawerChatList } from './DrawerChatList';
 import { useDrawerContentViewModel } from './drawerContentViewContext';
 
@@ -40,6 +36,19 @@ export function DrawerContentView() {
         ? '1 needs you'
         : `${String(attentionCount)} need you`;
   const folderPickerLabels = getDrawerFolderPickerLabels(folderOptions);
+  const folderSheetOptions = useMemo<SelectionSheetOption[]>(
+    () =>
+      folderOptions.map((option, index) => ({
+        key: option.key ?? 'all',
+        title: folderPickerLabels[index] ?? option.label,
+        description: option.subtitle,
+        meta: formatCompactCount(option.itemCount),
+        icon: option.key ? 'folder-outline' : 'albums-outline',
+        selected: option.key === selectedFolderKey,
+        onPress: () => handleSelectFolder(option.key),
+      })),
+    [folderOptions, folderPickerLabels, handleSelectFolder, selectedFolderKey]
+  );
 
   return (
     <View style={styles.container}>
@@ -191,86 +200,16 @@ export function DrawerContentView() {
         </View>
       </SafeAreaView>
 
-      <Modal
-        animationType="fade"
-        onRequestClose={handleDismissFolderPicker}
-        transparent
+      <SelectionSheet
         visible={folderPickerVisible}
-      >
-        <View style={styles.folderPickerRoot}>
-          <Pressable
-            accessibilityLabel="Close folder picker"
-            onPress={handleDismissFolderPicker}
-            style={styles.folderPickerBackdrop}
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.folderPickerSheet}
-          >
-            <View style={styles.folderPickerHeader}>
-              <Text style={styles.folderPickerTitle}>Folder</Text>
-              <Pressable
-                accessibilityLabel="Close folder picker"
-                onPress={handleDismissFolderPicker}
-                style={styles.folderPickerDoneButton}
-              >
-                <Text style={styles.folderPickerDone}>Done</Text>
-              </Pressable>
-            </View>
-            <ScrollView
-              contentContainerStyle={styles.folderPickerList}
-              showsVerticalScrollIndicator={false}
-            >
-              {folderOptions.map((option, index) => {
-                const selected = option.key === selectedFolderKey;
-                return (
-                  <Pressable
-                    key={option.key ?? 'all'}
-                    accessibilityLabel={`${folderPickerLabels[index] ?? option.label}, ${String(option.itemCount)} ${option.itemCount === 1 ? 'session' : 'sessions'}`}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: selected }}
-                    onPress={() => handleSelectFolder(option.key)}
-                    style={({ pressed }) => [
-                      styles.folderPickerRow,
-                      pressed && styles.folderPickerRowPressed,
-                    ]}
-                  >
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name={option.key ? 'folder-outline' : 'albums-outline'}
-                      size={17}
-                      color={theme.colors.textMuted}
-                    />
-                    <View style={styles.folderPickerRowCopy}>
-                      <Text style={styles.folderPickerRowTitle} numberOfLines={1}>
-                        {option.label}
-                      </Text>
-                      {option.subtitle ? (
-                        <Text style={styles.folderPickerRowSubtitle} numberOfLines={1}>
-                          {option.subtitle}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Text style={styles.folderPickerRowCount}>
-                      {formatCompactCount(option.itemCount)}
-                    </Text>
-                    {selected ? (
-                      <Ionicons
-                        {...decorativeAccessibilityProps}
-                        name="checkmark"
-                        size={18}
-                        color={theme.colors.accent}
-                      />
-                    ) : (
-                      <View style={styles.folderPickerCheckPlaceholder} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        eyebrow="Sessions"
+        title="Folder"
+        subtitle="Filter the session list by workspace folder."
+        options={folderSheetOptions}
+        closeLabel="Done"
+        onClose={handleDismissFolderPicker}
+        presentation="expanded"
+      />
     </View>
   );
 }

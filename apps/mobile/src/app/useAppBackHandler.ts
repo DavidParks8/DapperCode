@@ -5,6 +5,10 @@ import { BackHandler } from 'react-native';
 import { browserScreenCommandsAtom } from '../state/commands';
 import { cancelOnboardingAtom } from '../state/bridge/actions';
 import { activeBridgeProfileAtom } from '../state/bridge/atoms';
+import {
+  closeGitCheckoutAtom,
+  closeWorkspacePickerAtom,
+} from '../state/mainScreen/workspaceActions';
 import { closeGitAtom } from '../state/navigation/actions';
 import { closeDrawerAtom, drawerOpenAtom, drawerVisibleAtom } from '../state/drawer/atoms';
 import {
@@ -53,6 +57,12 @@ export function useAppBackHandler(): () => boolean {
           return true;
         }
         store.set(currentScreenAtom, store.get(browserReturnScreenAtom));
+        return true;
+      case 'WorkspacePicker':
+        store.set(closeWorkspacePickerAtom);
+        return true;
+      case 'GitCheckout':
+        store.set(closeGitCheckoutAtom);
         return true;
       case 'Settings':
         store.set(currentScreenAtom, 'Main');

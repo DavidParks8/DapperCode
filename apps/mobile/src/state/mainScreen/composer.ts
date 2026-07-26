@@ -1,4 +1,4 @@
-import type { ActivityState, PendingPlanImplementationPrompt } from '../../screens/mainScreenHelpers';
+import type { ActivityState, PendingPlanImplementationPrompt } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
 export const keyboardVisibleAtom = screenAtom(false);

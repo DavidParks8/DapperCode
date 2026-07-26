@@ -8,8 +8,8 @@ import type {
   AgUiMessageState,
   AgUiThreadMessageState,
 } from '../api/agUiMessagesState';
-import { projectTranscript } from '../screens/controllers/transcriptProjectionController';
-import type { TranscriptDisplayItem } from '../screens/transcriptMessages';
+import { projectTranscript } from '../screens/main/controllers/transcriptProjectionController';
+import type { TranscriptDisplayItem } from '../screens/main/transcriptMessages';
 import { getMessageText, getSubAgentMeta } from '../api/messages';
 
 export interface EventRecord {

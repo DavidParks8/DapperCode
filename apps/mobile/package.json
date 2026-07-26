@@ -19,6 +19,7 @@
     "@ag-ui/core": "0.0.57",
     "@expo/metro-runtime": "~55.0.12",
     "@expo/vector-icons": "15.0.3",
+    "@gorhom/bottom-sheet": "^5.2.14",
     "expo": "~55.0.28",
     "expo-blur": "~55.0.16",
     "expo-camera": "~55.0.21",
@@ -66,6 +67,9 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
     "collectCoverageFrom": [
       "App.tsx",
       "src/**/*.{ts,tsx}",

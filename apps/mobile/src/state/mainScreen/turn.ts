@@ -4,7 +4,7 @@ import type {
   PendingApproval,
   PendingUserInputRequest,
 } from '../../api/types';
-import type { ActivePlanState } from '../../screens/mainScreenHelpers';
+import type { ActivePlanState } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
 export const sendingAtom = screenAtom(false);

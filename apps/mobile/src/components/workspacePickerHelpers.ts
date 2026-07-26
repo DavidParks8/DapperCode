@@ -1,6 +1,5 @@
-import { ActionSheetIOS, Alert, Platform } from 'react-native';
-
 import type { WorkspaceSummary } from '../api/types';
+import { confirmAction } from './confirm';
 
 export const ENTRY_ROW_HEIGHT = 48;
 
@@ -44,17 +43,7 @@ function formatRelativeTime(iso?: string): string | null {
 export function showWorkspacePinAction(isPinned: boolean, onAction: () => void) {
   const actionTitle = isPinned ? 'Unpin workspace' : 'Pin workspace';
   const promptTitle = isPinned ? 'Unpin this workspace?' : 'Pin this workspace?';
-  if (Platform.OS === 'ios') {
-    ActionSheetIOS.showActionSheetWithOptions(
-      { options: [actionTitle, 'Cancel'], cancelButtonIndex: 1, title: promptTitle },
-      (buttonIndex) => {
-        if (buttonIndex === 0) onAction();
-      }
-    );
-    return;
-  }
-  Alert.alert(promptTitle, undefined, [
-    { text: actionTitle, onPress: onAction },
-    { text: 'Cancel', style: 'cancel' },
-  ]);
+  void confirmAction({ title: promptTitle, confirmLabel: actionTitle }).then((confirmed) => {
+    if (confirmed) onAction();
+  });
 }
