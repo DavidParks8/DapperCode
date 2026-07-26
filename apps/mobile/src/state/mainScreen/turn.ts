@@ -17,7 +17,7 @@ export const pendingApprovalAtom = screenAtom<PendingApproval | null>(null);
 
 export const pendingUserInputRequestAtom = screenAtom<PendingUserInputRequest | null>(null);
 
-export const userInputDraftsAtom = screenAtom<Record<string, string>>({});
+export const userInputDraftsAtom = screenAtom<Record<string, string>>((): Record<string, string> => ({}));
 
 export const userInputErrorAtom = screenAtom<string | null>(null);
 
@@ -25,9 +25,9 @@ export const resolvingUserInputAtom = screenAtom(false);
 
 export const activePlanAtom = screenAtom<ActivePlanState | null>(null);
 
-export const activeBridgeUiSurfacesAtom = screenAtom<BridgeUiSurface[]>([]);
+export const activeBridgeUiSurfacesAtom = screenAtom<BridgeUiSurface[]>(() => []);
 
-export const liveAssistantByThreadAtom = screenAtom<AgUiLiveAssistantMessages>({});
+export const liveAssistantByThreadAtom = screenAtom<AgUiLiveAssistantMessages>(() => ({}));
 
 export const activeTurnIdAtom = screenAtom<string | null>(null);
 
