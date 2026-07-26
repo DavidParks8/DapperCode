@@ -309,20 +309,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.accentText,
       fontWeight: '700',
     },
-    reviewModalBackdrop: {
-      flex: 1,
-      justifyContent: 'center',
-      padding: theme.spacing.lg,
-      backgroundColor: theme.colors.overlayBackdrop,
-    },
-    reviewModalCard: {
-      borderRadius: theme.radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderHighlight,
-      backgroundColor: theme.colors.bgElevated,
-      padding: theme.spacing.lg,
-      gap: theme.spacing.md,
-    },
     reviewModalHeader: {
       flexDirection: 'row',
       alignItems: 'flex-start',

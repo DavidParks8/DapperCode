@@ -17,8 +17,6 @@ export const createMainScreenModalStyles = (theme: AppTheme) => ({
   renameModalButtonDisabled: { opacity: 0.45 },
   renameModalButtonPressed: { opacity: 0.8 },
   renameModalButtonPrimaryText: { ...theme.typography.body, color: theme.colors.accentText, fontWeight: '600' },
-  userInputModalBackdrop: { flex: 1, backgroundColor: theme.colors.overlayBackdrop, justifyContent: 'center', paddingHorizontal: theme.spacing.lg },
-  userInputModalCard: { backgroundColor: theme.colors.bgItem, borderRadius: 14, borderWidth: 1, borderColor: theme.colors.borderHighlight, padding: theme.spacing.lg, gap: theme.spacing.md, maxHeight: '80%' },
   planPromptModalCard: { backgroundColor: theme.colors.bgItem, borderRadius: 14, borderWidth: 1, borderColor: theme.colors.borderHighlight, padding: theme.spacing.lg, gap: theme.spacing.md, maxHeight: '80%' },
   userInputModalTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
   planPromptOptionsColumn: { gap: theme.spacing.sm },
