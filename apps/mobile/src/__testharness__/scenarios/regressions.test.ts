@@ -1,4 +1,4 @@
-import { EventType } from '@ag-ui/core';
+import { EventType, type AGUIEvent } from '@ag-ui/core';
 import { registerTestHarnessMatchers } from '../AssertionHelpers';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
@@ -131,6 +131,68 @@ describe('Streaming and snapshot sequencing', () => {
     expect(state.getMessageContents('t1').map((m) => m.content)).toEqual([
       'The answer is 42',
     ]);
+  });
+
+  it('keeps earlier turns when a resumed thread snapshots only its newest turn', () => {
+    // Regression: an agent that resumes a thread snapshots just the turn it ran.
+    // That snapshot shares no ids with the stored history, so treating it as the
+    // whole transcript erased every earlier turn the instant a follow-up was sent.
+    const state = new TestableThreadState();
+    state.setPersistedChat({
+      ...state.buildSyntheticChat('t1'),
+      messages: [
+        { id: 't1:h1:User', role: 'user', content: 'old prompt', createdAt: new Date(1).toISOString() },
+        { id: 't1:h2:Agent', role: 'assistant', content: 'old answer', createdAt: new Date(2).toISOString() },
+      ],
+    });
+
+    state.applySequence(sequence('t1', 't1::run-9').runStarted().build());
+    state.applySequence([
+      {
+        threadId: 't1',
+        runId: 't1::run-9',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [{ id: 't1::u9', role: 'user', content: 'new prompt' }],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessagesInOrder('t1', 't1:h1:User', 't1:h2:Agent', 't1::u9');
+    expect(state).toHaveNoDuplicateIds('t1');
+    expect(state).toHaveNoDuplicateContent('t1');
+  });
+
+  it('does not duplicate history when a snapshot repeats it under new ids', () => {
+    // The same guard must not resurrect history the snapshot already contains,
+    // which happens when a replay re-ids the messages it restores.
+    const state = new TestableThreadState();
+    state.setPersistedChat({
+      ...state.buildSyntheticChat('t1'),
+      messages: [
+        { id: 'old-1', role: 'user', content: 'old prompt', createdAt: new Date(1).toISOString() },
+        { id: 'old-2', role: 'assistant', content: 'old answer', createdAt: new Date(2).toISOString() },
+      ],
+    });
+
+    state.applySequence(sequence('t1', 't1::run-9').runStarted().build());
+    state.applySequence([
+      {
+        threadId: 't1',
+        runId: 't1::run-9',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            { id: 'new-1', role: 'user', content: 'old prompt' },
+            { id: 'new-2', role: 'assistant', content: 'old answer' },
+            { id: 'new-3', role: 'user', content: 'new prompt' },
+          ],
+        } as unknown as AGUIEvent,
+      },
+    ]);
+
+    expect(state).toHaveMessageCount('t1', 3);
+    expect(state).toHaveNoDuplicateContent('t1');
   });
 
   it('never renders the same message twice across a multi-turn session', () => {

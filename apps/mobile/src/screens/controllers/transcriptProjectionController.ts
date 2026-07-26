@@ -84,7 +84,24 @@ export function projectTranscript({
       lastCoveredIndex >= 0
         ? messages.slice(lastCoveredIndex + 1).filter((message) => !liveIds.has(message.id))
         : [];
-    messages = [...projected, ...trailing];
+    if (lastCoveredIndex < 0 && projected.length > 0 && messages.length > 0) {
+      // The snapshot shares nothing with what we already have, so it describes a
+      // later segment of the conversation rather than the whole of it -- an agent
+      // that resumes a thread snapshots only the turn it just ran. Treating it as
+      // the entire transcript erases every earlier turn the moment a follow-up is
+      // sent, so the known history is kept ahead of it.
+      const snapshotSignatures = new Set(
+        projected.map((message) => `${message.role}\u0000${getMessageText(message).trim()}`)
+      );
+      const leading = messages.filter(
+        (message) =>
+          !liveIds.has(message.id) &&
+          !snapshotSignatures.has(`${message.role}\u0000${getMessageText(message).trim()}`)
+      );
+      messages = [...leading, ...projected];
+    } else {
+      messages = [...projected, ...trailing];
+    }
   }
   for (const liveAssistantMessage of liveMessages) {
     const liveText = getMessageText(liveAssistantMessage).trim();
