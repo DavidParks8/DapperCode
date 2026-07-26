@@ -1,4 +1,5 @@
-import { forwardRef, useImperativeHandle, useMemo } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useEffect, useMemo } from 'react';
 import { Animated as RNAnimated, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,24 +9,25 @@ import { BrowserBottomBar, BrowserStartPage } from './BrowserScreenStartBottom';
 import { BrowserTopBar, StatusBanner, ViewportTray } from './BrowserScreenTopSections';
 import { ViewportMenu } from './BrowserScreenViewportMenu';
 import { createBrowserScreenStyles } from './browserScreenStyles';
-import { type BrowserScreenHandle, type BrowserScreenProps } from './browserScreenShared';
+import { browserScreenCommandsAtom } from '../state/commands';
+import { drawerCommandsAtom } from '../state/drawer/atoms';
 import { useBrowserScreenCoreHandlers } from './useBrowserScreenCoreHandlers';
 import { useBrowserScreenModel } from './useBrowserScreenModel';
 import { useBrowserScreenViewport } from './useBrowserScreenViewport';
 
 export { type BrowserScreenHandle } from './browserScreenShared';
 
-export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>(
-  function BrowserScreen(props, ref) {
+export function BrowserScreen() {
     const theme = useAppTheme();
     const styles = useMemo(() => createBrowserScreenStyles(theme), [theme]);
-    const model = useBrowserScreenModel(props, theme);
+    const model = useBrowserScreenModel(theme);
     const handlers = useBrowserScreenCoreHandlers(model);
     const viewport = useBrowserScreenViewport(model);
+    const drawerCommands = useAtomValue(drawerCommandsAtom);
+    const setBrowserCommands = useSetAtom(browserScreenCommandsAtom);
 
-    useImperativeHandle(
-      ref,
-      () => ({
+    useEffect(() => {
+      setBrowserCommands({
         handleHardwareBackPress: () => {
           if (!model.previewUrl || !model.canGoBack) {
             return false;
@@ -33,16 +35,18 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
           handlers.handleGoBackPress();
           return true;
         },
-      }),
-      [handlers, model.canGoBack, model.previewUrl]
-    );
+      });
+      return () => {
+        setBrowserCommands(null);
+      };
+    }, [handlers, model.canGoBack, model.previewUrl, setBrowserCommands]);
 
     return (
       <View style={styles.container}>
         <SafeAreaView edges={['top']} style={styles.safeArea}>
           <View style={styles.chrome}>
             <BrowserTopBar
-              onOpenDrawer={props.onOpenDrawer}
+              onOpenDrawer={() => drawerCommands?.toggleNavigation()}
               inputValue={model.inputValue}
               setInputValue={model.setInputValue}
               previewUrl={model.previewUrl}
@@ -127,7 +131,7 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
               <BrowserStartPage
                 suggestionsLoading={model.suggestionsLoading}
                 suggestions={model.suggestions}
-                recentTargetUrls={props.recentTargetUrls}
+                recentTargetUrls={model.recentTargetUrls}
                 bottomBarReservedSpace={model.bottomBarReservedSpace}
                 openPreview={model.openPreview}
               />
@@ -158,5 +162,4 @@ export const BrowserScreen = forwardRef<BrowserScreenHandle, BrowserScreenProps>
         </SafeAreaView>
       </View>
     );
-  }
-);
+}

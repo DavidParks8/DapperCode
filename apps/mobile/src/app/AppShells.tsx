@@ -1,14 +1,15 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ActivityIndicator, Pressable, StatusBar, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
 import { env } from '../config';
-import type { AppStateSnapshot, AppStateStore } from '../appState';
-import {
-  OnboardingScreen,
-  type OnboardingBridgeProfileDraft,
-  type OnboardingMode,
-} from '../screens/OnboardingScreen';
+import { retryPersistenceAtom } from '../state/appState/actions';
+import { appStatePersistenceErrorAtom } from '../state/appState/atoms';
+import { cancelOnboardingAtom, saveBridgeProfileAtom } from '../state/bridge/actions';
+import { activeBridgeProfileAtom, bridgeUrlAtom } from '../state/bridge/atoms';
+import { onboardingModeAtom } from '../state/navigation/atoms';
+import { OnboardingScreen, type OnboardingMode } from '../screens/OnboardingScreen';
 import { AppThemeProvider, type AppTheme } from '../theme';
 import type { AppStyles } from './appStyles';
 
@@ -31,44 +32,46 @@ export function AppShellFrame({ theme, styles, children }: ShellFrameProps) {
   );
 }
 
-interface LoadingShellProps {
+interface ShellProps {
   theme: AppTheme;
   styles: AppStyles;
 }
 
-export function LoadingShell({ theme, styles }: LoadingShellProps) {
+export function LoadingShell({ theme, styles }: ShellProps) {
   return (
     <AppShellFrame theme={theme} styles={styles}>
-      <View style={styles.loadingRoot} accessibilityRole="progressbar" accessibilityLabel="Loading DapperCode">
+      <View
+        style={styles.loadingRoot}
+        accessibilityRole="progressbar"
+        accessibilityLabel="Loading DapperCode"
+      >
         <ActivityIndicator size="large" color={theme.colors.textMuted} />
       </View>
     </AppShellFrame>
   );
 }
 
-interface PersistenceRecoveryShellProps {
-  theme: AppTheme;
-  styles: AppStyles;
-  appStateSnapshot: AppStateSnapshot;
-  appStateStore: AppStateStore;
-}
+export function PersistenceRecoveryShell({ theme, styles }: ShellProps) {
+  const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
+  const retryPersistence = useSetAtom(retryPersistenceAtom);
 
-export function PersistenceRecoveryShell({
-  theme,
-  styles,
-  appStateSnapshot,
-  appStateStore,
-}: PersistenceRecoveryShellProps) {
   return (
     <AppShellFrame theme={theme} styles={styles}>
-      <View style={styles.persistenceRecoveryRoot} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+      <View
+        style={styles.persistenceRecoveryRoot}
+        accessibilityRole="alert"
+        accessibilityLiveRegion="assertive"
+      >
         <Text style={styles.persistenceRecoveryTitle}>Could not load saved app state</Text>
         <Text selectable style={styles.persistenceRecoveryMessage}>
-          {appStateSnapshot.persistenceError?.message}
+          {persistenceError?.message}
         </Text>
         <Pressable
-          onPress={() => void appStateStore.retryPersistence()}
-          style={({ pressed }) => [styles.persistenceRecoveryButton, pressed && styles.persistenceRecoveryButtonPressed]}
+          onPress={() => void retryPersistence()}
+          style={({ pressed }) => [
+            styles.persistenceRecoveryButton,
+            pressed && styles.persistenceRecoveryButtonPressed,
+          ]}
           accessibilityRole="button"
         >
           <Text style={styles.persistenceRecoveryButtonText}>Retry</Text>
@@ -78,26 +81,14 @@ export function PersistenceRecoveryShell({
   );
 }
 
-interface OnboardingShellProps {
-  theme: AppTheme;
-  styles: AppStyles;
-  bridgeUrl: string | null;
-  activeBridgeProfile: { bridgeUrl: string; bridgeToken: string; id: string } | null;
-  onboardingMode: OnboardingMode;
-  onSave: (draft: OnboardingBridgeProfileDraft) => Promise<void>;
-  onCancel?: () => void;
-}
+export function OnboardingShell({ theme, styles }: ShellProps) {
+  const bridgeUrl = useAtomValue(bridgeUrlAtom);
+  const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
+  const savedMode = useAtomValue(onboardingModeAtom);
+  const saveBridgeProfile = useSetAtom(saveBridgeProfileAtom);
+  const cancelOnboarding = useSetAtom(cancelOnboardingAtom);
 
-export function OnboardingShell({
-  theme,
-  styles,
-  bridgeUrl,
-  activeBridgeProfile,
-  onboardingMode,
-  onSave,
-  onCancel,
-}: OnboardingShellProps) {
-  const mode: OnboardingMode = bridgeUrl ? onboardingMode : 'initial';
+  const mode: OnboardingMode = bridgeUrl ? savedMode : 'initial';
   const shouldUseSavedBridgeCredentials = mode === 'edit' || mode === 'reconnect';
   const initialUrl = shouldUseSavedBridgeCredentials
     ? activeBridgeProfile?.bridgeUrl ?? ''
@@ -118,8 +109,8 @@ export function OnboardingShell({
         initialBridgeToken={initialToken}
         allowInsecureRemoteBridge={env.allowInsecureRemoteBridge}
         allowQueryTokenAuth={env.allowWsQueryTokenAuth}
-        onSave={onSave}
-        onCancel={onCancel}
+        onSave={saveBridgeProfile}
+        onCancel={mode !== 'initial' && activeBridgeProfile ? cancelOnboarding : undefined}
       />
     </AppShellFrame>
   );

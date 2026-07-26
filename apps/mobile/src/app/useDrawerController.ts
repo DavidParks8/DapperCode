@@ -1,42 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  useAnimatedStyle,
-  useSharedValue,
-} from 'react-native-reanimated';
+import { useCallback, useEffect } from 'react';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import {
   DRAWER_MAX_ELEVATION,
   DRAWER_MAX_SHADOW_OPACITY,
   DRAWER_MAX_SHADOW_RADIUS,
-  type Screen,
 } from './appConstants';
-import {
-  getDrawerOpenProgress,
-} from './appDrawerUtils';
+import { getDrawerOpenProgress } from './appDrawerUtils';
 import { useDrawerGestures } from './useDrawerGestures';
+import {
+  drawerCapturesTouchesAtom,
+  drawerCommandsAtom,
+  drawerOpenAtom,
+  drawerVisibleAtom,
+  tabletSidebarVisibleAtom,
+} from '../state/drawer/atoms';
+import { currentScreenAtom, settingsAllowsDrawerGestureAtom } from '../state/navigation/atoms';
 
 interface UseDrawerControllerArgs {
-  currentScreen: Screen;
   usesTabletLayout: boolean;
   drawerWidth: number;
-  settingsAllowsDrawerGesture: boolean;
   onBackSwipe: () => void;
 }
 
 export function useDrawerController({
-  currentScreen,
   usesTabletLayout,
   drawerWidth,
-  settingsAllowsDrawerGesture,
   onBackSwipe,
 }: UseDrawerControllerArgs) {
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [drawerCapturesTouches, setDrawerCapturesTouches] = useState(false);
-  const [tabletSidebarVisible, setTabletSidebarVisible] = useState(true);
-
-  const drawerOpenRef = useRef(false);
-  const drawerVisibleRef = useRef(false);
-  const drawerCapturesTouchesRef = useRef(false);
+  const store = useStore();
+  const currentScreen = useAtomValue(currentScreenAtom);
+  const settingsAllowsDrawerGesture = useAtomValue(settingsAllowsDrawerGestureAtom);
+  const drawerVisible = useAtomValue(drawerVisibleAtom);
+  const drawerCapturesTouches = useAtomValue(drawerCapturesTouchesAtom);
+  const tabletSidebarVisible = useAtomValue(tabletSidebarVisibleAtom);
+  const setDrawerCommands = useSetAtom(drawerCommandsAtom);
+  const setTabletSidebarVisible = useSetAtom(tabletSidebarVisibleAtom);
 
   const contentShiftOpen = drawerWidth;
   const drawerOffset = useSharedValue(-drawerWidth);
@@ -75,18 +75,19 @@ export function useDrawerController({
   }));
 
   useEffect(() => {
-    const nextOffset = drawerOpenRef.current ? 0 : -drawerWidth;
+    const nextOffset = store.get(drawerOpenAtom) ? 0 : -drawerWidth;
     drawerOffset.value = nextOffset;
     drawerDragStartOffset.value = nextOffset;
-  }, [drawerDragStartOffset, drawerOffset, drawerWidth]);
+  }, [drawerDragStartOffset, drawerOffset, drawerWidth, store]);
 
-  const handleDrawerSettled = useCallback((isOpen: boolean) => {
-    drawerOpenRef.current = isOpen;
-    drawerVisibleRef.current = isOpen;
-    drawerCapturesTouchesRef.current = isOpen;
-    setDrawerVisible(isOpen);
-    setDrawerCapturesTouches(isOpen);
-  }, []);
+  const handleDrawerSettled = useCallback(
+    (isOpen: boolean) => {
+      store.set(drawerOpenAtom, isOpen);
+      store.set(drawerVisibleAtom, isOpen);
+      store.set(drawerCapturesTouchesAtom, isOpen);
+    },
+    [store]
+  );
 
   const {
     closeDrawer,
@@ -104,14 +105,17 @@ export function useDrawerController({
     drawerOffset,
     drawerDragStartOffset,
     drawerGestureDidSettle,
-    drawerVisibleRef,
-    drawerCapturesTouchesRef,
-    setDrawerVisible,
-    setDrawerCapturesTouches,
     onDrawerSettled: handleDrawerSettled,
     onToggleTabletSidebar: () => setTabletSidebarVisible((visible) => !visible),
     onBackSwipe,
   });
+
+  useEffect(() => {
+    setDrawerCommands({ closeDrawer, toggleNavigation: handleNavigationToggle });
+    return () => {
+      setDrawerCommands(null);
+    };
+  }, [closeDrawer, handleNavigationToggle, setDrawerCommands]);
 
   useEffect(() => {
     if (!usesTabletLayout) {
@@ -121,20 +125,12 @@ export function useDrawerController({
     handleDrawerSettled(false);
     drawerOffset.value = -drawerWidth;
     drawerDragStartOffset.value = -drawerWidth;
-  }, [
-    drawerDragStartOffset,
-    drawerOffset,
-    drawerWidth,
-    handleDrawerSettled,
-    usesTabletLayout,
-  ]);
+  }, [drawerDragStartOffset, drawerOffset, drawerWidth, handleDrawerSettled, usesTabletLayout]);
 
   return {
     drawerVisible,
     drawerCapturesTouches,
     tabletSidebarVisible,
-    drawerOpenRef,
-    drawerVisibleRef,
     closeDrawer,
     handleNavigationToggle,
     openDrawerGesture,

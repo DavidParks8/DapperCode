@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { useAtomValue, useStore } from 'jotai';
+import { useEffect, useRef } from 'react';
 
 import {
   addNotificationResponseListener,
@@ -9,45 +9,31 @@ import {
   type PushResponseEvent,
 } from '../pushNotifications';
 import { PushResponseController } from '../pushResponseController';
-import type { PushProfileRegistration } from '../appState';
-import type { HostBridgeApiClient } from '../api/client';
-import type { HostBridgeWsClient } from '../api/ws';
-import type { Chat } from '../api/types';
-import type { Screen } from './appConstants';
+import { pushSettingsAtom } from '../state/appState/atoms';
+import { activeBridgeProfileAtom, apiClientAtom, wsClientAtom } from '../state/bridge/atoms';
+import { pendingMainChatIdAtom, pendingMainChatSnapshotAtom } from '../state/chat/atoms';
+import { currentScreenAtom } from '../state/navigation/atoms';
 
-interface UsePushNotificationsLifecycleArgs {
-  activeBridgeProfileId: string | null;
-  registrations: PushProfileRegistration[];
-  api: HostBridgeApiClient | null;
-  ws: HostBridgeWsClient | null;
-  pushResponseControllerRef: MutableRefObject<PushResponseController | null>;
-  setCurrentScreen: Dispatch<SetStateAction<Screen>>;
-  setPendingMainChatId: Dispatch<SetStateAction<string | null>>;
-  setPendingMainChatSnapshot: Dispatch<SetStateAction<Chat | null>>;
-}
+export function usePushNotificationsLifecycle(): void {
+  const store = useStore();
+  const api = useAtomValue(apiClientAtom);
+  const ws = useAtomValue(wsClientAtom);
+  const registrations = useAtomValue(pushSettingsAtom).registrations;
+  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const controllerRef = useRef<PushResponseController | null>(null);
 
-export function usePushNotificationsLifecycle({
-  activeBridgeProfileId,
-  registrations,
-  api,
-  ws,
-  pushResponseControllerRef,
-  setCurrentScreen,
-  setPendingMainChatId,
-  setPendingMainChatSnapshot,
-}: UsePushNotificationsLifecycleArgs): void {
   useEffect(() => {
     setupNotificationHandler();
     void registerNotificationCategories();
     const controller = new PushResponseController((event: PushResponseEvent) => {
       const { target } = event;
-      setCurrentScreen('Main');
+      store.set(currentScreenAtom, 'Main');
       if (target.threadId) {
-        setPendingMainChatId(target.threadId);
-        setPendingMainChatSnapshot(null);
+        store.set(pendingMainChatIdAtom, target.threadId);
+        store.set(pendingMainChatSnapshotAtom, null);
       }
     });
-    pushResponseControllerRef.current = controller;
+    controllerRef.current = controller;
 
     const subscription = addNotificationResponseListener((event) => controller.handle(event));
     void getInitialNotificationResponse().then((event) => {
@@ -56,13 +42,13 @@ export function usePushNotificationsLifecycle({
     return () => {
       subscription.remove();
       controller.dispose();
-      pushResponseControllerRef.current = null;
+      controllerRef.current = null;
     };
-  }, [pushResponseControllerRef, setCurrentScreen, setPendingMainChatId, setPendingMainChatSnapshot]);
+  }, [store]);
 
   useEffect(() => {
     const registration = registrations.find((entry) => entry.profileId === activeBridgeProfileId);
-    pushResponseControllerRef.current?.setProfile(
+    controllerRef.current?.setProfile(
       activeBridgeProfileId && registration && api && ws
         ? {
             profileId: activeBridgeProfileId,
@@ -72,5 +58,5 @@ export function usePushNotificationsLifecycle({
           }
         : null
     );
-  }, [activeBridgeProfileId, api, registrations, ws, pushResponseControllerRef]);
+  }, [activeBridgeProfileId, api, registrations, ws]);
 }

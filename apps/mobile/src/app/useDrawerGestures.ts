@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { useStore } from 'jotai';
 import { Keyboard } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
 import {
@@ -20,6 +21,7 @@ import {
   clampDrawerOffset,
   shouldSettleDrawerOpen,
 } from './appDrawerUtils';
+import { drawerCapturesTouchesAtom, drawerVisibleAtom } from '../state/drawer/atoms';
 
 interface UseDrawerGesturesArgs {
   currentScreen: Screen;
@@ -30,10 +32,6 @@ interface UseDrawerGesturesArgs {
   drawerOffset: SharedValue<number>;
   drawerDragStartOffset: SharedValue<number>;
   drawerGestureDidSettle: SharedValue<boolean>;
-  drawerVisibleRef: React.MutableRefObject<boolean>;
-  drawerCapturesTouchesRef: React.MutableRefObject<boolean>;
-  setDrawerVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  setDrawerCapturesTouches: React.Dispatch<React.SetStateAction<boolean>>;
   onDrawerSettled: (isOpen: boolean) => void;
   onToggleTabletSidebar: () => void;
   onBackSwipe: () => void;
@@ -48,35 +46,27 @@ export function useDrawerGestures({
   drawerOffset,
   drawerDragStartOffset,
   drawerGestureDidSettle,
-  drawerVisibleRef,
-  drawerCapturesTouchesRef,
-  setDrawerVisible,
-  setDrawerCapturesTouches,
   onDrawerSettled,
   onToggleTabletSidebar,
   onBackSwipe,
 }: UseDrawerGesturesArgs) {
+  const store = useStore();
+
   const dismissKeyboard = useCallback(() => {
     Keyboard.dismiss();
   }, []);
 
   const ensureDrawerVisible = useCallback(() => {
-    if (drawerVisibleRef.current) {
-      return;
+    if (!store.get(drawerVisibleAtom)) {
+      store.set(drawerVisibleAtom, true);
     }
-
-    drawerVisibleRef.current = true;
-    setDrawerVisible(true);
-  }, [drawerVisibleRef, setDrawerVisible]);
+  }, [store]);
 
   const ensureDrawerCapturesTouches = useCallback(() => {
-    if (drawerCapturesTouchesRef.current) {
-      return;
+    if (!store.get(drawerCapturesTouchesAtom)) {
+      store.set(drawerCapturesTouchesAtom, true);
     }
-
-    drawerCapturesTouchesRef.current = true;
-    setDrawerCapturesTouches(true);
-  }, [drawerCapturesTouchesRef, setDrawerCapturesTouches]);
+  }, [store]);
 
   const beginDrawerInteraction = useCallback(() => {
     ensureDrawerVisible();
@@ -94,7 +84,7 @@ export function useDrawerGestures({
         return;
       }
 
-      if (!shouldOpen && !drawerVisibleRef.current) {
+      if (!shouldOpen && !store.get(drawerVisibleAtom)) {
         return;
       }
 
@@ -118,11 +108,11 @@ export function useDrawerGestures({
       dismissKeyboard,
       drawerDragStartOffset,
       drawerOffset,
-      drawerVisibleRef,
       drawerWidth,
       ensureDrawerCapturesTouches,
       ensureDrawerVisible,
       handleDrawerSettled,
+      store,
       usesTabletLayout,
     ]
   );

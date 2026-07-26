@@ -1,17 +1,5 @@
 import type { NativeSyntheticEvent } from 'react-native';
 
-import type { HostBridgeApiClient } from '../api/client';
-
-export interface BrowserScreenProps {
-  api: HostBridgeApiClient;
-  bridgeUrl: string;
-  onOpenDrawer: () => void;
-  recentTargetUrls: string[];
-  onRecentTargetUrlsChange: (targets: string[]) => void;
-  pendingTargetUrl?: string | null;
-  onPendingTargetHandled?: () => void;
-}
-
 export interface BrowserScreenHandle {
   handleHardwareBackPress: () => boolean;
 }

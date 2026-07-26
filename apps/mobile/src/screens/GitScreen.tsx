@@ -1,10 +1,13 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { HostBridgeApiClient } from '../api/client';
-import type { ApprovalMode, Chat } from '../api/types';
+import type { Chat } from '../api/types';
 import { useAccessibilityAnnouncement } from '../accessibility';
+import { approvalModeAtom } from '../state/appState/settings';
+import { useBridgeApi } from '../state/bridge/hooks';
+import { closeGitAtom, gitChatUpdatedAtom } from '../state/navigation/actions';
 import { useAppTheme } from '../theme';
 import { GitScreenBranchSummarySection } from './GitScreenBranchSummarySection';
 import { GitScreenCommitHistorySection } from './GitScreenCommitHistorySection';
@@ -16,16 +19,16 @@ import { useGitScreenController } from './gitScreenController';
 import { createGitScreenStyles } from './gitScreenStyles';
 
 interface GitScreenProps {
-  api: HostBridgeApiClient;
   chat: Chat;
-  approvalMode?: ApprovalMode;
-  onBack: () => void;
-  onChatUpdated?: (chat: Chat) => void;
 }
 
-export function GitScreen({ api, chat, approvalMode, onBack, onChatUpdated }: GitScreenProps) {
+export function GitScreen({ chat }: GitScreenProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createGitScreenStyles(theme), [theme]);
+  const api = useBridgeApi();
+  const approvalMode = useAtomValue(approvalModeAtom);
+  const onBack = useSetAtom(closeGitAtom);
+  const onChatUpdated = useSetAtom(gitChatUpdatedAtom);
 
   const controller = useGitScreenController({
     api,

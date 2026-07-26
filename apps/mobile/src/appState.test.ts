@@ -1,15 +1,14 @@
 import {
   APP_STATE_VERSION,
-  AppStateStore,
   AppStatePersistenceError,
   appStateReducer,
-  createAppStateStore,
   createDefaultAppStateData,
   importLegacyAppState,
   parsePersistedAppState,
   serializeAppState,
   type AppStatePersistenceAdapter,
 } from './appState';
+import { createAppStateHarness } from './state/testing';
 
 function createPersistence(
   overrides: Partial<AppStatePersistenceAdapter> = {}
@@ -99,16 +98,16 @@ describe('current appState production behavior', () => {
     const settingsRaw = JSON.stringify({ version: 13, bridgeUrl: 'http://127.0.0.1:3001', bridgeToken: 'token', defaultStartCwd: '/workspace' });
     expect(importLegacyAppState({ settingsRaw, bridgeProfilesRaw: null }).bridgeProfiles.profiles).toHaveLength(1);
     const current = withProfile();
-    const currentStore = new AppStateStore(persistence({ readCurrent: jest.fn().mockResolvedValue(serializeAppState(current)) }));
+    const currentStore = createAppStateHarness(persistence({ readCurrent: jest.fn().mockResolvedValue(serializeAppState(current)) }));
     const listener = jest.fn();
     currentStore.subscribe(listener);
     await currentStore.initialize();
     expect(listener).toHaveBeenCalled();
     const legacyPersistence = persistence();
-    await new AppStateStore(legacyPersistence).initialize();
+    await createAppStateHarness(legacyPersistence).initialize();
     expect(legacyPersistence.writeCurrent).toHaveBeenCalled();
     for (const adapter of [persistence({ readCurrent: jest.fn().mockRejectedValue(new Error('read')) }), persistence({ readLegacy: jest.fn().mockRejectedValue(new Error('legacy')) })]) {
-      const store = new AppStateStore(adapter);
+      const store = createAppStateHarness(adapter);
       await store.initialize();
       expect(store.getSnapshot().persistenceError).toBeInstanceOf(AppStatePersistenceError);
     }
@@ -116,7 +115,7 @@ describe('current appState production behavior', () => {
 
   it('persists ordinary actions, retries failures, and rejects durable failures', async () => {
     const adapter = persistence();
-    const store = new AppStateStore(adapter);
+    const store = createAppStateHarness(adapter);
     expect(() => store.dispatch({ type: 'settings/update', patch: {} })).toThrow('has not loaded');
     await store.initialize();
     store.dispatch({ type: 'settings/update', patch: { showToolCalls: false } });
@@ -424,7 +423,7 @@ describe('app-state persistence format', () => {
   });
 });
 
-describe('AppStateStore', () => {
+describe('app-state atoms', () => {
   it('serializes writes and coalesces changes made during an in-flight write', async () => {
     let releaseFirstWrite!: () => void;
     const firstWrite = new Promise<void>((resolve) => {
@@ -434,7 +433,7 @@ describe('AppStateStore', () => {
       .fn<Promise<void>, [string]>()
       .mockImplementationOnce(() => firstWrite)
       .mockResolvedValue(undefined);
-    const store = createAppStateStore(createPersistence({ writeCurrent }));
+    const store = createAppStateHarness(createPersistence({ writeCurrent }));
     await store.initialize();
 
     store.dispatch({ type: 'settings/update', patch: { appearancePreference: 'light' } });
@@ -460,7 +459,7 @@ describe('AppStateStore', () => {
       .fn<Promise<void>, [string]>()
       .mockRejectedValueOnce(new Error('disk full'))
       .mockResolvedValue(undefined);
-    const store = createAppStateStore(createPersistence({ writeCurrent }));
+    const store = createAppStateHarness(createPersistence({ writeCurrent }));
     await store.initialize();
 
     store.dispatch({ type: 'settings/update', patch: { showToolCalls: false } });
@@ -494,7 +493,7 @@ describe('AppStateStore', () => {
       releaseSwitch = resolve;
     });
     const writeCurrent = jest.fn<Promise<void>, [string]>().mockReturnValue(switchWrite);
-    const store = createAppStateStore(
+    const store = createAppStateHarness(
       createPersistence({
         readCurrent: jest.fn().mockResolvedValue(serializeAppState(initial)),
         writeCurrent,
@@ -515,7 +514,7 @@ describe('AppStateStore', () => {
 
   it('loads once, publishes to subscribers, and supports unsubscribe', async () => {
     const persistence = createPersistence();
-    const store = createAppStateStore(persistence);
+    const store = createAppStateHarness(persistence);
     const listener = jest.fn();
     const unsubscribe = store.subscribe(listener);
     expect(store.initialize()).toBe(store.initialize());
@@ -529,7 +528,7 @@ describe('AppStateStore', () => {
   });
 
   it('rejects dispatch before initialization', () => {
-    const store = createAppStateStore(createPersistence());
+    const store = createAppStateHarness(createPersistence());
     expect(() => store.dispatch({ type: 'settings/update', patch: {} })).toThrow('not loaded');
   });
 
@@ -541,7 +540,7 @@ describe('AppStateStore', () => {
     }, 'import'],
     ['invalid current data', { readCurrent: jest.fn().mockResolvedValue('{') }, 'load'],
   ] as const)('exposes %s failures', async (_name, overrides, operation) => {
-    const store = createAppStateStore(createPersistence(overrides));
+    const store = createAppStateHarness(createPersistence(overrides));
     await store.initialize();
     expect(store.getSnapshot()).toMatchObject({
       loaded: true,
@@ -553,7 +552,7 @@ describe('AppStateStore', () => {
     const readCurrent = jest.fn()
       .mockRejectedValueOnce(new Error('read'))
       .mockResolvedValueOnce(serializeAppState(createDefaultAppStateData()));
-    const store = createAppStateStore(createPersistence({ readCurrent }));
+    const store = createAppStateHarness(createPersistence({ readCurrent }));
     await store.initialize();
     await store.retryPersistence();
     expect(store.getSnapshot().persistenceError).toBeNull();
@@ -564,7 +563,7 @@ describe('AppStateStore', () => {
     const writeCurrent = jest.fn()
       .mockRejectedValueOnce(new Error('disk'))
       .mockResolvedValueOnce(undefined);
-    const store = createAppStateStore(createPersistence({
+    const store = createAppStateHarness(createPersistence({
       readCurrent: jest.fn().mockResolvedValue(null),
       writeCurrent,
     }));
@@ -576,7 +575,7 @@ describe('AppStateStore', () => {
 
   it('keeps durable state unchanged when its write fails', async () => {
     const writeCurrent = jest.fn().mockRejectedValue(new Error('disk'));
-    const store = createAppStateStore(createPersistence({ writeCurrent }));
+    const store = createAppStateHarness(createPersistence({ writeCurrent }));
     await store.initialize();
     await expect(store.dispatchDurable({
       type: 'settings/update', patch: { showToolCalls: false },
@@ -585,7 +584,7 @@ describe('AppStateStore', () => {
   });
 
   it('initializes automatically for a durable action', async () => {
-    const store = createAppStateStore(createPersistence());
+    const store = createAppStateHarness(createPersistence());
     const data = await store.dispatchDurable({
       type: 'settings/update', patch: { appearancePreference: 'dark' },
     });

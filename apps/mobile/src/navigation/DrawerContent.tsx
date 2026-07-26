@@ -6,9 +6,13 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { ActionSheetIOS, AppState, Platform } from 'react-native';
 import type { AgentDescriptor } from '../api/types';
-import { DEFAULT_WORKSPACE_CHAT_LIMIT } from '../appSettings';
+import { workspaceChatLimitAtom } from '../state/appState/settings';
+import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
+import { selectedChatIdAtom } from '../state/chat/atoms';
+import { navigateAtom, selectChatAtom, startNewChatAtom } from '../state/navigation/actions';
 import { useAppTheme } from '../theme';
 import {
   buildDrawerAttentionModel,
@@ -26,17 +30,17 @@ import { useDrawerChatLoading } from './useDrawerChatLoading';
 const DRAWER_EVENT_REFRESH_DEBOUNCE_MS = 250;
 
 export const DrawerContent = memo(function DrawerContentComponent({
-  api,
-  ws,
   active,
-  workspaceChatLimit = DEFAULT_WORKSPACE_CHAT_LIMIT,
-  selectedChatId,
-  onSelectChat,
-  onNewChat,
-  onNavigate,
   onClose,
 }: DrawerContentProps) {
   const theme = useAppTheme();
+  const api = useBridgeApi();
+  const ws = useBridgeWs();
+  const workspaceChatLimit = useAtomValue(workspaceChatLimitAtom);
+  const selectedChatId = useAtomValue(selectedChatIdAtom);
+  const onSelectChat = useSetAtom(selectChatAtom);
+  const onNewChat = useSetAtom(startNewChatAtom);
+  const onNavigate = useSetAtom(navigateAtom);
   const {
     pendingApprovals,
     pendingUserInputs,

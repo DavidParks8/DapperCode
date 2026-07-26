@@ -1,6 +1,8 @@
-import { useCallback, useImperativeHandle, useLayoutEffect, useMemo } from 'react';
+import { useSetAtom } from 'jotai';
+import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import type { Chat } from '../api/types';
 import { type SelectionSheetOption } from '../components/SelectionSheet';
+import { mainScreenCommandsAtom } from '../state/commands';
 import { describeAgentThreadSource, findMatchingAgentThread, resolveAgentActivitySummary } from './agentThreads';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { formatAgentThreadOptionTitle, iconForAgentThread } from './mainScreenHelpers';
@@ -25,7 +27,6 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     openChatThread,
     pendingOpenChatId,
     pendingOpenChatSnapshot,
-    ref,
     refreshAgentThreads,
     relatedAgentThreads,
     runWatchdogNow,
@@ -154,9 +155,9 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     });
   }, [agentRootThreadId, agentThreadRows, closeAgentDetail, openAgentDetail]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
+  const setMainScreenCommands = useSetAtom(mainScreenCommandsAtom);
+  useEffect(() => {
+    setMainScreenCommands({
       openChat: (id: string, optimisticChat?: Chat | null) => {
         closeAgentDetail();
         openChatThread(id, optimisticChat);
@@ -165,9 +166,11 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
         closeAgentDetail();
         startNewChat();
       },
-    }),
-    [closeAgentDetail, openChatThread, startNewChat]
-  );
+    });
+    return () => {
+      setMainScreenCommands(null);
+    };
+  }, [closeAgentDetail, openChatThread, setMainScreenCommands, startNewChat]);
 
   useLayoutEffect(() => {
     if (!pendingOpenChatId) {

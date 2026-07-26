@@ -1,3 +1,4 @@
+import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Animated as RNAnimated,
@@ -25,25 +26,27 @@ import {
 } from '../browserPreview';
 import { BrowserPreviewSessionLifecycle } from '../browserPreviewSessionLifecycle';
 import { useAccessibilityAnnouncement, useModalAccessibilityFocus } from '../accessibility';
+import { recentBrowserTargetUrlsAtom } from '../state/appState/settings';
+import { bridgeUrlAtom } from '../state/bridge/atoms';
+import { useBridgeApi } from '../state/bridge/hooks';
+import { pendingBrowserTargetUrlAtom } from '../state/navigation/atoms';
 import type { AppTheme } from '../theme';
 import {
   DEFAULT_DESKTOP_VIEWPORT,
   DESKTOP_PREVIEW_USER_AGENT,
   DESKTOP_VIEWPORT_PRESETS,
   getCompactBrowserLabel,
-  type BrowserScreenProps,
   type ViewportPreset,
 } from './browserScreenShared';
 
-export function useBrowserScreenModel(props: BrowserScreenProps, theme: AppTheme) {
-  const {
-    api,
-    bridgeUrl,
-    recentTargetUrls,
-    onRecentTargetUrlsChange,
-    pendingTargetUrl,
-    onPendingTargetHandled,
-  } = props;
+export function useBrowserScreenModel(theme: AppTheme) {
+  const api = useBridgeApi();
+  const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
+  const [recentTargetUrls, onRecentTargetUrlsChange] = useAtom(recentBrowserTargetUrlsAtom);
+  const [pendingTargetUrl, setPendingTargetUrl] = useAtom(pendingBrowserTargetUrlAtom);
+  const onPendingTargetHandled = useCallback(() => {
+    setPendingTargetUrl(null);
+  }, [setPendingTargetUrl]);
 
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<WebView>(null);
@@ -293,6 +296,7 @@ export function useBrowserScreenModel(props: BrowserScreenProps, theme: AppTheme
   return {
     pendingTargetUrl,
     onPendingTargetHandled,
+    recentTargetUrls,
     webViewRef,
     desktopScrollViewRef,
     bottomBarTranslateY,

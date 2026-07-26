@@ -15,15 +15,14 @@ import { SubmissionController } from './controllers/submissionController';
 import { TurnExecutionController } from './controllers/turnExecutionController';
 import { MainScreenPersistenceController } from './controllers/mainScreenPersistenceController';
 import { TranscriptContinuationController, getTranscriptContinuationState, type TranscriptContinuationState } from './controllers/transcriptContinuationController';
-import type { ForwardedRef } from 'react';
-import type { MainScreenHandle, MainScreenProps } from './MainScreen';
+import type { MainScreenBaseContext } from './useMainScreenBaseContext';
 
 
 
 
 
 
-export type MainScreenCoreBootstrapContext = MainScreenProps & { ref: ForwardedRef<MainScreenHandle> };
+export type MainScreenCoreBootstrapContext = MainScreenBaseContext;
 
 export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapContext) {
   const {

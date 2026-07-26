@@ -1,3 +1,4 @@
+import { useAtomValue } from 'jotai';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
@@ -10,14 +11,13 @@ import {
   saveAutoStoreReviewState,
   type AutoStoreReviewState,
 } from '../storeReview';
-import { AUTO_STORE_REVIEW_RETRY_MS, type Screen } from './appConstants';
+import { appStateLoadedAtom } from '../state/appState/atoms';
+import { currentScreenAtom } from '../state/navigation/atoms';
+import { AUTO_STORE_REVIEW_RETRY_MS } from './appConstants';
 
-interface UseAppStoreReviewArgs {
-  settingsLoaded: boolean;
-  currentScreen: Screen;
-}
-
-export function useAppStoreReview({ settingsLoaded, currentScreen }: UseAppStoreReviewArgs): void {
+export function useAppStoreReview(): void {
+  const settingsLoaded = useAtomValue(appStateLoadedAtom);
+  const currentScreen = useAtomValue(currentScreenAtom);
   const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(
     AppState.currentState
   );

@@ -43,6 +43,7 @@
     "expo-secure-store": "~55.0.16",
     "expo-store-review": "~55.0.16",
     "expo-web-browser": "~55.0.18",
+    "jotai": "^2.20.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.6",

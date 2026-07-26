@@ -1,0 +1,113 @@
+import { atom } from 'jotai';
+
+import type { Chat } from '../../api/types';
+import type { Screen } from '../../app/appConstants';
+import {
+  activeChatAtom,
+  gitChatAtom,
+  mainOpeningChatIdAtom,
+  pendingMainChatIdAtom,
+  pendingMainChatSnapshotAtom,
+  selectedChatIdAtom,
+} from '../chat/atoms';
+import { cancelChatTransitionAtom, openChatWithTransitionAtom } from '../chat/actions';
+import { mainScreenCommandsAtom } from '../commands';
+import { closeDrawerAtom } from '../drawer/atoms';
+import {
+  browserReturnScreenAtom,
+  currentScreenAtom,
+  pendingBrowserTargetUrlAtom,
+  toAppScreen,
+} from './atoms';
+
+export const navigateAtom = atom(null, (get, set, screen: Screen): void => {
+  if (screen !== 'Main') {
+    set(cancelChatTransitionAtom);
+  }
+  set(currentScreenAtom, screen);
+  set(closeDrawerAtom);
+});
+
+export const selectChatAtom = atom(null, (get, set, id: string): void => {
+  const currentChatId = get(activeChatAtom)?.id ?? get(selectedChatIdAtom);
+  set(closeDrawerAtom);
+  if (get(currentScreenAtom) === 'Main' && currentChatId === id) {
+    return;
+  }
+  void set(openChatWithTransitionAtom, id, null, { immediate: true });
+});
+
+export const startNewChatAtom = atom(null, (get, set): void => {
+  set(cancelChatTransitionAtom);
+  set(pendingMainChatIdAtom, null);
+  set(pendingMainChatSnapshotAtom, null);
+  set(selectedChatIdAtom, null);
+  set(activeChatAtom, null);
+  set(gitChatAtom, null);
+  set(currentScreenAtom, 'Main');
+  get(mainScreenCommandsAtom)?.startNewChat();
+  set(closeDrawerAtom);
+});
+
+export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null): void => {
+  if (typeof targetUrl === 'string' && targetUrl.trim().length > 0) {
+    set(pendingBrowserTargetUrlAtom, targetUrl.trim());
+  }
+  const currentScreen = get(currentScreenAtom);
+  set(
+    browserReturnScreenAtom,
+    currentScreen === 'Browser' ? 'Main' : toAppScreen(currentScreen)
+  );
+  set(cancelChatTransitionAtom);
+  set(currentScreenAtom, 'Browser');
+  set(closeDrawerAtom);
+});
+
+export const openChatGitAtom = atom(null, (get, set, chat: Chat): void => {
+  set(cancelChatTransitionAtom);
+  set(gitChatAtom, chat);
+  set(selectedChatIdAtom, chat.id);
+  set(currentScreenAtom, 'ChatGit');
+});
+
+export const chatContextChangedAtom = atom(null, (get, set, chat: Chat | null): void => {
+  set(activeChatAtom, chat);
+  if (chat?.id) {
+    set(selectedChatIdAtom, chat.id);
+    return;
+  }
+  if (!get(mainOpeningChatIdAtom)) {
+    set(selectedChatIdAtom, null);
+  }
+});
+
+export const gitChatUpdatedAtom = atom(null, (get, set, chat: Chat): void => {
+  set(gitChatAtom, chat);
+  const activeChat = get(activeChatAtom);
+  if (activeChat?.id === chat.id) {
+    set(activeChatAtom, chat);
+  }
+});
+
+export const closeGitAtom = atom(null, (get, set): void => {
+  const gitChat = get(gitChatAtom);
+  const activeChat = get(activeChatAtom);
+  const chatId = gitChat?.id ?? activeChat?.id ?? get(selectedChatIdAtom);
+  const resumeChat =
+    gitChat && gitChat.id === chatId
+      ? gitChat
+      : activeChat && activeChat.id === chatId
+        ? activeChat
+        : null;
+  if (chatId) {
+    void set(openChatWithTransitionAtom, chatId, resumeChat);
+    return;
+  }
+  set(currentScreenAtom, 'Main');
+  set(gitChatAtom, null);
+});
+
+export const openLegalScreenAtom = atom(null, (get, set, screen: 'Privacy' | 'Terms'): void => {
+  set(cancelChatTransitionAtom);
+  set(currentScreenAtom, screen);
+});

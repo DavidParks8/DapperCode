@@ -1,13 +1,5 @@
-import { forwardRef } from 'react';
-import type { HostBridgeApiClient } from '../api/client';
-import type {
-  AgentDefaultSettingsMap,
-  AgentId,
-  ApprovalMode,
-  Chat,
-  CollaborationMode,
-} from '../api/types';
-import type { HostBridgeWsClient } from '../api/ws';
+import type { Chat } from '../api/types';
+import { useMainScreenBaseContext } from './useMainScreenBaseContext';
 import { useMainScreenCoreBootstrap } from './mainScreenCoreBootstrap';
 import { useMainScreenLifecycleRecovery } from './mainScreenLifecycleRecovery';
 import { useMainScreenChatSessionState } from './mainScreenChatSessionState';
@@ -56,84 +48,8 @@ export interface MainScreenHandle {
   startNewChat: () => void;
 }
 
-export interface MainScreenProps {
-  api: HostBridgeApiClient;
-  ws: HostBridgeWsClient;
-  bridgeUrl: string;
-  bridgeToken?: string | null;
-  bridgeProfileId: string;
-  onOpenDrawer: () => void;
-  onOpenGit: (chat: Chat) => void;
-  onOpenLocalPreview?: (targetUrl: string) => void;
-  onOpenBridgeRecoveryGuide?: () => void;
-  defaultStartCwd?: string | null;
-  preferredAgentId?: AgentId | null;
-  agentSettings?: AgentDefaultSettingsMap | null;
-  approvalMode?: ApprovalMode;
-  showToolCalls?: boolean;
-  onDefaultStartCwdChange?: (cwd: string | null) => void;
-  onLastUsedThreadSettingsChange?: (
-    agentId: AgentId,
-    collaborationMode: CollaborationMode
-  ) => void;
-  onChatContextChange?: (chat: Chat | null) => void;
-  onChatOpeningStateChange?: (chatId: string | null) => void;
-  pendingOpenChatId?: string | null;
-  pendingOpenChatSnapshot?: Chat | null;
-  onPendingOpenChatHandled?: () => void;
-}
-
-export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
-  function MainScreen(
-    {
-      api,
-      ws,
-      bridgeUrl,
-      bridgeToken = null,
-      bridgeProfileId,
-      onOpenDrawer,
-      onOpenGit,
-      onOpenLocalPreview: onOpenLocalPreviewHandler,
-      onOpenBridgeRecoveryGuide,
-      defaultStartCwd,
-      preferredAgentId,
-      agentSettings,
-      approvalMode,
-      showToolCalls = true,
-      onDefaultStartCwdChange,
-      onLastUsedThreadSettingsChange,
-      onChatContextChange,
-      onChatOpeningStateChange,
-      pendingOpenChatId,
-      pendingOpenChatSnapshot,
-      onPendingOpenChatHandled,
-    },
-    ref
-  ) {
-    const mainScreenBaseContext = {
-      api,
-      ws,
-      bridgeUrl,
-      bridgeToken,
-      bridgeProfileId,
-      onOpenDrawer,
-      onOpenGit,
-      onOpenLocalPreview: onOpenLocalPreviewHandler ?? undefined,
-      onOpenBridgeRecoveryGuide,
-      defaultStartCwd,
-      preferredAgentId,
-      agentSettings,
-      approvalMode,
-      showToolCalls: showToolCalls ?? true,
-      onDefaultStartCwdChange,
-      onLastUsedThreadSettingsChange,
-      onChatContextChange,
-      onChatOpeningStateChange,
-      pendingOpenChatId,
-      pendingOpenChatSnapshot,
-      onPendingOpenChatHandled,
-      ref,
-    };
+export function MainScreen() {
+    const mainScreenBaseContext = useMainScreenBaseContext();
     const coreBootstrapResult = useMainScreenCoreBootstrap(mainScreenBaseContext);
     const coreBootstrapContext = { ...mainScreenBaseContext, ...coreBootstrapResult };
     const lifecycleRecoveryResult = useMainScreenLifecycleRecovery(coreBootstrapContext);
@@ -210,5 +126,4 @@ export const MainScreen = forwardRef<MainScreenHandle, MainScreenProps>(
     const panelCollapseCoordinatorContext = { ...planExecutionActionsContext, ...panelCollapseCoordinatorResult };
     const mainScreenContext = panelCollapseCoordinatorContext as MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
     return <MainScreenView context={mainScreenContext} />;
-  }
-);
+}

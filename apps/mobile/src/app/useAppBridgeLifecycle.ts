@@ -1,81 +1,64 @@
-import { useEffect } from 'react';
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { useAtomValue, useStore } from 'jotai';
+import { useEffect, useRef } from 'react';
 
 import {
   createEmptyChatSnapshotCache,
   loadChatSnapshotCache,
   saveChatSnapshotCache,
   updateChatSnapshotCache,
-  type ChatSnapshotCache,
 } from '../chatSnapshotCache';
 import { bindAppWebSocketLifecycle } from '../appWebSocketLifecycle';
 import { syncPushRegistration } from '../pushController';
 import { getActiveBridgeProfile } from '../bridgeProfiles';
-import { APP_PREFETCH_CHAT_LIMIT, APP_PREFETCH_DELAY_MS, CHAT_SNAPSHOT_PERSIST_DELAY_MS, type Screen } from './appConstants';
-import type { Chat } from '../api/types';
-import type { HostBridgeApiClient } from '../api/client';
-import type { HostBridgeWsClient } from '../api/ws';
-import type { AppStateStore } from '../appState';
+import { appStateLoadedAtom, bridgeProfileStoreAtom } from '../state/appState/atoms';
+import { initializeAppStateAtom } from '../state/appState/actions';
+import { applyRestoredChatSnapshotAtom } from '../state/chat/actions';
+import { activeChatAtom, chatSnapshotCacheAtom, selectedChatIdAtom } from '../state/chat/atoms';
+import {
+  activeBridgeProfileAtom,
+  apiClientAtom,
+  bridgeConnectedAtom,
+  wsClientAtom,
+} from '../state/bridge/atoms';
+import { currentScreenAtom } from '../state/navigation/atoms';
+import {
+  APP_PREFETCH_CHAT_LIMIT,
+  APP_PREFETCH_DELAY_MS,
+  CHAT_SNAPSHOT_PERSIST_DELAY_MS,
+} from './appConstants';
 
-interface UseAppBridgeLifecycleArgs {
-  ws: HostBridgeWsClient | null;
-  api: HostBridgeApiClient | null;
-  appStateStore: AppStateStore;
-  settingsLoaded: boolean;
-  currentScreen: Screen;
-  activeBridgeProfileId: string | null;
-  activeBridgeProfile: ReturnType<typeof getActiveBridgeProfile>;
-  setBridgeConnected: Dispatch<SetStateAction<boolean>>;
-  setChatSnapshotCache: Dispatch<SetStateAction<ChatSnapshotCache | null>>;
-  setSelectedChatId: Dispatch<SetStateAction<string | null>>;
-  setActiveChat: Dispatch<SetStateAction<Chat | null>>;
-  setPendingMainChatId: Dispatch<SetStateAction<string | null>>;
-  setPendingMainChatSnapshot: Dispatch<SetStateAction<Chat | null>>;
-  selectedChatId: string | null;
-  activeChat: Chat | null;
-  chatSnapshotCache: ChatSnapshotCache | null;
-  chatSnapshotPersistTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
-}
+export function useAppBridgeLifecycle(): void {
+  const store = useStore();
+  const ws = useAtomValue(wsClientAtom);
+  const api = useAtomValue(apiClientAtom);
+  const currentScreen = useAtomValue(currentScreenAtom);
+  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const settingsLoaded = useAtomValue(appStateLoadedAtom);
+  const selectedChatId = useAtomValue(selectedChatIdAtom);
+  const activeChat = useAtomValue(activeChatAtom);
+  const chatSnapshotCache = useAtomValue(chatSnapshotCacheAtom);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-export function useAppBridgeLifecycle({
-  ws,
-  api,
-  appStateStore,
-  settingsLoaded,
-  currentScreen,
-  activeBridgeProfileId,
-  activeBridgeProfile,
-  setBridgeConnected,
-  setChatSnapshotCache,
-  setSelectedChatId,
-  setActiveChat,
-  setPendingMainChatId,
-  setPendingMainChatSnapshot,
-  selectedChatId,
-  activeChat,
-  chatSnapshotCache,
-  chatSnapshotPersistTimerRef,
-}: UseAppBridgeLifecycleArgs): void {
   useEffect(() => {
     if (!ws) {
-      setBridgeConnected(false);
+      store.set(bridgeConnectedAtom, false);
       return;
     }
 
     return bindAppWebSocketLifecycle(ws);
-  }, [setBridgeConnected, ws]);
+  }, [store, ws]);
 
   useEffect(() => {
     if (!ws) {
-      setBridgeConnected(false);
+      store.set(bridgeConnectedAtom, false);
       return;
     }
 
-    setBridgeConnected(ws.isConnected);
+    store.set(bridgeConnectedAtom, ws.isConnected);
     return ws.onStatus((connected) => {
-      setBridgeConnected(connected);
+      store.set(bridgeConnectedAtom, connected);
     });
-  }, [setBridgeConnected, ws]);
+  }, [store, ws]);
 
   useEffect(() => {
     if (!api || !ws || !activeBridgeProfileId || currentScreen === 'Onboarding') {
@@ -88,7 +71,7 @@ export function useAppBridgeLifecycle({
     const attempt = () => {
       if (cancelled || inFlight || !ws.isConnected) return;
       inFlight = true;
-      void syncPushRegistration(api, appStateStore, activeBridgeProfileId)
+      void syncPushRegistration(api, store, activeBridgeProfileId)
         .then(() => {
           retryDelay = 1000;
         })
@@ -115,7 +98,7 @@ export function useAppBridgeLifecycle({
       unsubscribe();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [activeBridgeProfileId, api, appStateStore, currentScreen, ws]);
+  }, [activeBridgeProfileId, api, currentScreen, store, ws]);
 
   useEffect(() => {
     if (!api || !ws || currentScreen === 'Onboarding') {
@@ -165,12 +148,11 @@ export function useAppBridgeLifecycle({
 
     const loadSettings = async () => {
       try {
-        await appStateStore.initialize();
+        await store.set(initializeAppStateAtom);
         if (cancelled) {
           return;
         }
-        const profileStore = appStateStore.getSnapshot().data.bridgeProfiles;
-        const activeProfile = getActiveBridgeProfile(profileStore);
+        const activeProfile = getActiveBridgeProfile(store.get(bridgeProfileStoreAtom));
         const snapshotCache = activeProfile
           ? await loadChatSnapshotCache(activeProfile.id)
           : null;
@@ -178,15 +160,13 @@ export function useAppBridgeLifecycle({
           return;
         }
         const selectedSnapshot =
-          snapshotCache?.entries.find((entry) => entry.chat.id === snapshotCache.selectedChatId)?.chat ?? null;
+          snapshotCache?.entries.find((entry) => entry.chat.id === snapshotCache.selectedChatId)
+            ?.chat ?? null;
 
-        setChatSnapshotCache(snapshotCache);
-        setSelectedChatId(selectedSnapshot?.id ?? null);
-        setActiveChat(selectedSnapshot);
-        setPendingMainChatId(selectedSnapshot?.id ?? null);
-        setPendingMainChatSnapshot(selectedSnapshot);
+        store.set(chatSnapshotCacheAtom, snapshotCache);
+        store.set(applyRestoredChatSnapshotAtom, selectedSnapshot);
       } catch {
-        // The typed persistence error remains available in the app-state snapshot.
+        // The typed persistence error remains available in the app-state atoms.
       }
     };
 
@@ -194,56 +174,42 @@ export function useAppBridgeLifecycle({
     return () => {
       cancelled = true;
     };
-  }, [
-    appStateStore,
-    setActiveChat,
-    setChatSnapshotCache,
-    setPendingMainChatId,
-    setPendingMainChatSnapshot,
-    setSelectedChatId,
-  ]);
+  }, [store]);
 
   useEffect(() => {
-    if (!api || !chatSnapshotCache || chatSnapshotCache.profileId !== activeBridgeProfile?.id) {
+    if (!api || !chatSnapshotCache || chatSnapshotCache.profileId !== activeBridgeProfileId) {
       return;
     }
     for (const entry of chatSnapshotCache.entries) {
       api.rememberChat(entry.chat);
     }
-  }, [activeBridgeProfile?.id, api, chatSnapshotCache]);
+  }, [activeBridgeProfileId, api, chatSnapshotCache]);
 
   useEffect(() => {
-    const profileId = activeBridgeProfile?.id;
-    if (!profileId || !settingsLoaded) {
+    if (!activeBridgeProfileId || !settingsLoaded) {
       return;
     }
 
-    if (chatSnapshotPersistTimerRef.current) {
-      clearTimeout(chatSnapshotPersistTimerRef.current);
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
     }
-    chatSnapshotPersistTimerRef.current = setTimeout(() => {
-      chatSnapshotPersistTimerRef.current = null;
-      setChatSnapshotCache((previous) => {
-        const base =
-          previous?.profileId === profileId ? previous : createEmptyChatSnapshotCache(profileId);
-        const next = updateChatSnapshotCache(base, selectedChatId, activeChat);
-        void saveChatSnapshotCache(next).catch(() => {});
-        return next;
-      });
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null;
+      const previous = store.get(chatSnapshotCacheAtom);
+      const base =
+        previous?.profileId === activeBridgeProfileId
+          ? previous
+          : createEmptyChatSnapshotCache(activeBridgeProfileId);
+      const next = updateChatSnapshotCache(base, selectedChatId, activeChat);
+      void saveChatSnapshotCache(next).catch(() => {});
+      store.set(chatSnapshotCacheAtom, next);
     }, CHAT_SNAPSHOT_PERSIST_DELAY_MS);
 
     return () => {
-      if (chatSnapshotPersistTimerRef.current) {
-        clearTimeout(chatSnapshotPersistTimerRef.current);
-        chatSnapshotPersistTimerRef.current = null;
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
       }
     };
-  }, [
-    activeBridgeProfile?.id,
-    activeChat,
-    chatSnapshotPersistTimerRef,
-    selectedChatId,
-    setChatSnapshotCache,
-    settingsLoaded,
-  ]);
+  }, [activeBridgeProfileId, activeChat, selectedChatId, settingsLoaded, store]);
 }
