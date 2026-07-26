@@ -1,9 +1,18 @@
 import {
+  agentDetailChatAtom,
+  agentDetailErrorAtom,
+  agentDetailLoadingAtom,
+  agentDetailParentChatAtom,
+  agentDetailStackAtom,
+  agentDetailThreadIdAtom,
+  agentRootThreadIdAtom
+} from '../state/mainScreen/workspace';
+import {
   activityAtom,
   queueActionItemIdAtom,
   queueActionKindAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import { resolveEquivalentChat } from './mainScreenChatState';
@@ -22,8 +31,6 @@ export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPi
 export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenChatNavigationAndAgentDetailContext) {
   const {
     agentDetailRequestRef,
-    agentDetailStack,
-    agentRootThreadId,
     agentThreadsController,
     api,
     applyThreadRuntimeSnapshot,
@@ -38,12 +45,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     selectedChatRef,
     setActivePlan,
     setActiveTurnId,
-    setAgentDetailChat,
-    setAgentDetailError,
-    setAgentDetailLoading,
-    setAgentDetailParentChat,
-    setAgentDetailStack,
-    setAgentDetailThreadId,
     setCreating,
     setError,
     setOpeningChatId,
@@ -61,6 +62,14 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     transcriptContinuationController,
     transcriptContinuationState,
   } = context;
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const agentDetailStack = useAtomValue(agentDetailStackAtom);
+  const setAgentDetailThreadId = useSetAtom(agentDetailThreadIdAtom);
+  const setAgentDetailStack = useSetAtom(agentDetailStackAtom);
+  const setAgentDetailChat = useSetAtom(agentDetailChatAtom);
+  const setAgentDetailParentChat = useSetAtom(agentDetailParentChatAtom);
+  const setAgentDetailLoading = useSetAtom(agentDetailLoadingAtom);
+  const setAgentDetailError = useSetAtom(agentDetailErrorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);

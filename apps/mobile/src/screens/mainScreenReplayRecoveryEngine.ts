@@ -1,3 +1,8 @@
+import {
+  agentDetailThreadIdAtom,
+  relatedAgentThreadsAtom
+} from '../state/mainScreen/workspace';
+import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
 import { RUN_WATCHDOG_MS, toPersistedActivePlanState, isChatLikelyRunning } from './mainScreenHelpers';
 import { fetchReplayRecoverySnapshot, ReplayRecoveryProtocolError, type ReplayRecoverySnapshot } from './controllers/replayRecoveryController';
@@ -14,7 +19,6 @@ export type MainScreenReplayRecoveryEngineContext = MainScreenComposerSubmitActi
 
 export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecoveryEngineContext) {
   const {
-    agentDetailThreadId,
     agentRootThreadIdRef,
     api,
     applyThreadRuntimeSnapshot,
@@ -26,7 +30,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     pendingOptimisticQueuedMessagesRef,
     pendingOptimisticUserMessagesRef,
     readThreadContextUsage,
-    relatedAgentThreads,
     replayRecoveryAbortControllerRef,
     replayRecoveryEpochResetPendingRef,
     replayRecoveryGenerationRef,
@@ -48,6 +51,8 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     threadRuntimeSnapshotsRef,
     ws,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
 
 
   const installReplayRecoverySnapshot = useCallback(

@@ -1,4 +1,12 @@
 import {
+  workspaceBridgeRootAtom,
+  workspaceBrowseErrorAtom,
+  workspaceBrowseParentPathAtom,
+  workspaceBrowsePathAtom,
+  workspaceModalVisibleAtom,
+  workspacePickerPurposeAtom
+} from '../state/mainScreen/workspace';
+import {
   bridgeRecoveryBannerVisibleAtom
 } from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -38,14 +46,14 @@ export function useMainScreenWorkspaceCheckoutActions(context: MainScreenWorkspa
     scheduleAgentThreadsRefresh,
     scheduleDisconnectActivity,
     setError,
-    setWorkspaceBrowseError,
-    setWorkspaceBrowseParentPath,
-    setWorkspaceBrowsePath,
-    setWorkspaceModalVisible,
-    workspaceBridgeRoot,
-    workspacePickerPurpose,
     ws,
   } = context;
+  const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
+  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
+  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
+  const setWorkspaceBrowsePath = useSetAtom(workspaceBrowsePathAtom);
+  const setWorkspaceBrowseParentPath = useSetAtom(workspaceBrowseParentPathAtom);
+  const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
   const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
   const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
   const gitCheckoutDirectoryNameEdited = useAtomValue(gitCheckoutDirectoryNameEditedAtom);

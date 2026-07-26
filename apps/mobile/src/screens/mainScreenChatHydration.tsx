@@ -1,3 +1,7 @@
+import {
+  favoriteWorkspacePathsAtom
+} from '../state/mainScreen/workspace';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiSurface, ReasoningEffort, ServiceTier } from '../api/types';
 import { type ActivePlanState, WORKSPACE_FAVORITES_LIMIT, type ChatModelPreference, normalizeWorkspacePath, normalizeModelId, normalizeReasoningEffort, normalizeServiceTier, toSelectedServiceTier } from './mainScreenHelpers';
@@ -27,11 +31,11 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
     scheduleBridgeUiSurfaceSnapshotsPersist,
     setChatModelPreferencesLoaded,
     setDefaultServiceTier,
-    setFavoriteWorkspacePaths,
     setSelectedEffort,
     setSelectedModelId,
     setSelectedServiceTier,
   } = context;
+  const setFavoriteWorkspacePaths = useSetAtom(favoriteWorkspacePathsAtom);
 
 
   useEffect(() => {

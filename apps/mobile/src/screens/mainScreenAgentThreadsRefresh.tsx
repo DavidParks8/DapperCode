@@ -1,4 +1,11 @@
 import {
+  agentRootThreadIdAtom,
+  loadingAgentThreadsAtom,
+  relatedAgentThreadsAtom,
+  workspaceModalVisibleAtom,
+  workspacePickerPurposeAtom
+} from '../state/mainScreen/workspace';
+import {
   agentThreadMenuVisibleAtom
 } from '../state/mainScreen/modals';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -21,7 +28,6 @@ export type MainScreenAgentThreadsRefreshContext = MainScreenWorkspaceBrowserSta
 export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreadsRefreshContext) {
   const {
     activeTurnIdRef,
-    agentRootThreadId,
     agentThreadsController,
     agentThreadsRefreshTimerRef,
     agentThreadsRequestRef,
@@ -29,17 +35,18 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     chatIdRef,
     clearDeferredDisconnectActivity,
     clearForegroundAgentRefresh,
-    relatedAgentThreads,
     runWatchdogUntilRef,
     selectedChatId,
     selectedChatRef,
-    setAgentRootThreadId,
     setError,
-    setLoadingAgentThreads,
-    setRelatedAgentThreads,
-    setWorkspaceModalVisible,
-    workspacePickerPurpose,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
+  const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
+  const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
+  const setLoadingAgentThreads = useSetAtom(loadingAgentThreadsAtom);
+  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const resumeGitCheckoutAfterWorkspacePicker = useAtomValue(
     resumeGitCheckoutAfterWorkspacePickerAtom

@@ -1,3 +1,14 @@
+import {
+  loadingWorkspaceBrowseAtom,
+  workspaceBridgeRootAtom,
+  workspaceBrowseEntriesAtom,
+  workspaceBrowseErrorAtom,
+  workspaceBrowseParentPathAtom,
+  workspaceBrowsePathAtom,
+  workspaceBrowseTruncationAtom,
+  workspaceModalVisibleAtom,
+  workspacePickerPurposeAtom
+} from '../state/mainScreen/workspace';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { FileSystemListResponse } from '../api/types';
@@ -27,20 +38,20 @@ export function useMainScreenWorkspaceBrowserState(context: MainScreenWorkspaceB
     onDefaultStartCwdChange,
     preferredStartCwd,
     refreshWorkspaceRoots,
-    setLoadingWorkspaceBrowse,
-    setWorkspaceBridgeRoot,
-    setWorkspaceBrowseEntries,
-    setWorkspaceBrowseError,
-    setWorkspaceBrowseParentPath,
-    setWorkspaceBrowsePath,
-    setWorkspaceBrowseTruncation,
-    setWorkspaceModalVisible,
-    setWorkspacePickerPurpose,
-    workspaceBridgeRoot,
     workspaceBrowseCacheRef,
-    workspaceBrowsePath,
     workspaceBrowseRequestRef,
   } = context;
+  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
+  const workspaceBrowsePath = useAtomValue(workspaceBrowsePathAtom);
+  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
+  const setWorkspacePickerPurpose = useSetAtom(workspacePickerPurposeAtom);
+  const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);
+  const setWorkspaceBrowsePath = useSetAtom(workspaceBrowsePathAtom);
+  const setWorkspaceBrowseParentPath = useSetAtom(workspaceBrowseParentPathAtom);
+  const setWorkspaceBrowseEntries = useSetAtom(workspaceBrowseEntriesAtom);
+  const setLoadingWorkspaceBrowse = useSetAtom(loadingWorkspaceBrowseAtom);
+  const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
+  const setWorkspaceBrowseTruncation = useSetAtom(workspaceBrowseTruncationAtom);
   const gitCheckoutCloning = useAtomValue(gitCheckoutCloningAtom);
   const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
   const setGitCheckoutCloning = useSetAtom(gitCheckoutCloningAtom);

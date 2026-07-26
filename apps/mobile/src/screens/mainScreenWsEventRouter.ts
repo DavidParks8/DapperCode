@@ -1,10 +1,13 @@
+import {
+  agentDetailThreadIdAtom
+} from '../state/mainScreen/workspace';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
 import { processAgUiRunEvents } from './mainScreenAgUiRunEvents';
 import { processThreadStateEvents } from './mainScreenThreadStateEvents';
 import { processPlanAndReasoningEvents } from './mainScreenPlanAndReasoningEvents';
 import { processBridgeInteractionEvents } from './mainScreenBridgeInteractionEvents';
 import { processBridgeConnectionEvents } from './mainScreenBridgeConnectionEvents';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { activityAtom } from '../state/mainScreen/composer';
 import type { RpcNotification } from '../api/types';
@@ -20,7 +23,6 @@ export type MainScreenWsEventRouterContext = MainScreenReplayRecoveryEngineConte
 
 export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterContext) {
   const {
-    agentDetailThreadId,
     api,
     appendStopSystemMessageIfNeeded,
     bumpAgentRuntimeRevision,
@@ -58,6 +60,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     upsertThreadRuntimeSnapshot,
     ws,
   } = context;
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setActivity = useSetAtom(activityAtom);
 
 

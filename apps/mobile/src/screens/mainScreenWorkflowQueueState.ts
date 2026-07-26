@@ -1,4 +1,10 @@
 import {
+  agentDetailThreadIdAtom,
+  agentRootThreadIdAtom,
+  relatedAgentThreadsAtom,
+  workspaceModalVisibleAtom
+} from '../state/mainScreen/workspace';
+import {
   androidKeyboardInsetAtom,
   composerHeightAtom,
   keyboardVisibleAtom,
@@ -33,8 +39,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     activeAgentSupports,
     activeBridgeUiSurfaces,
     activePlan,
-    agentDetailThreadId,
-    agentRootThreadId,
     agentThreadRows,
     api,
     attachmentMenuVisible,
@@ -48,7 +52,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     pendingApproval,
     pendingOptimisticQueuedMessagesRef,
     pendingUserInputRequest,
-    relatedAgentThreads,
     runWatchdogNow,
     safeAreaInsets,
     selectedChat,
@@ -62,9 +65,12 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     theme,
     threadRuntimeSnapshotsRef,
     userInputError,
-    workspaceModalVisible,
     ws,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
+  const workspaceModalVisible = useAtomValue(workspaceModalVisibleAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const androidKeyboardInset = useAtomValue(androidKeyboardInsetAtom);
   const composerHeight = useAtomValue(composerHeightAtom);

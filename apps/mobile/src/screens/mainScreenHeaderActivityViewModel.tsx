@@ -1,4 +1,8 @@
 import {
+  relatedAgentThreadsAtom,
+  workspaceBridgeRootAtom
+} from '../state/mainScreen/workspace';
+import {
   activityAtom,
   heldActivityAtom,
   showDelayedGenericRunningActivityAtom
@@ -34,14 +38,14 @@ export function useMainScreenHeaderActivityViewModel(context: MainScreenHeaderAc
     pendingApproval,
     pendingUserInputRequest,
     preferredStartCwd,
-    relatedAgentThreads,
     selectedChat,
     selectorAgentCount,
     showBridgeRecoveryBanner,
     turnFailureDetail,
-    workspaceBridgeRoot,
     ws,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
   const activity = useAtomValue(activityAtom);
   const heldActivity = useAtomValue(heldActivityAtom);
   const showDelayedGenericRunningActivity = useAtomValue(showDelayedGenericRunningActivityAtom);

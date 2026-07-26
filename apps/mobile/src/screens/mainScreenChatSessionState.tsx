@@ -1,8 +1,11 @@
 import {
+  agentRootThreadIdAtom
+} from '../state/mainScreen/workspace';
+import {
   androidKeyboardInsetAtom,
   keyboardVisibleAtom
 } from '../state/mainScreen/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../agents';
@@ -24,7 +27,6 @@ export type MainScreenChatSessionStateContext = MainScreenLifecycleRecoveryConte
 export function useMainScreenChatSessionState(context: MainScreenChatSessionStateContext) {
   const {
     activeTurnId,
-    agentRootThreadId,
     agentSettings,
     api,
     approvalMode,
@@ -42,6 +44,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     setDraft,
     setError,
   } = context;
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
   const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);
 

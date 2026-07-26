@@ -1,4 +1,7 @@
 import {
+  agentRuntimeRevisionAtom
+} from '../state/mainScreen/workspace';
+import {
   activityAtom,
   bridgeRecoveryBannerVisibleAtom,
   heldActivityAtom,
@@ -33,9 +36,9 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
     scheduledPinnedScrollTimeoutRef,
     scrollRef,
     scrollRetryTimeoutsRef,
-    setAgentRuntimeRevision,
     ws,
   } = context;
+  const setAgentRuntimeRevision = useSetAtom(agentRuntimeRevisionAtom);
   const setActivity = useSetAtom(activityAtom);
   const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
   const setHeldActivity = useSetAtom(heldActivityAtom);

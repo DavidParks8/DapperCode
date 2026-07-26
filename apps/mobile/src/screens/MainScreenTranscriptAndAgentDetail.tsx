@@ -1,4 +1,12 @@
 import {
+  agentDetailChatAtom,
+  agentDetailErrorAtom,
+  agentDetailLoadingAtom,
+  agentDetailParentChatAtom,
+  agentDetailThreadIdAtom,
+  loadingAgentThreadsAtom
+} from '../state/mainScreen/workspace';
+import {
   keyboardVisibleAtom
 } from '../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -70,25 +78,25 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     showFloatingActivity,
     displayedActivity,
     activityDetail,
-    agentDetailThreadId,
-    agentDetailChat,
-    agentDetailParentChat,
     agentDetailRuntime,
     agentDetailDisplay,
     agentDetailTitle,
     agentDetailSummary,
-    agentDetailLoading,
-    agentDetailError,
     popAgentDetail,
     attachmentMenuVisible,
     attachmentMenuOptions,
     attachmentController,
     agentThreadMenuOptions,
-    loadingAgentThreads,
     collaborationModeOptions,
     agentPickerOptions,
     closeAgentModal,
   } = context;
+  const loadingAgentThreads = useAtomValue(loadingAgentThreadsAtom);
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
+  const agentDetailChat = useAtomValue(agentDetailChatAtom);
+  const agentDetailParentChat = useAtomValue(agentDetailParentChatAtom);
+  const agentDetailLoading = useAtomValue(agentDetailLoadingAtom);
+  const agentDetailError = useAtomValue(agentDetailErrorAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const agentThreadMenuVisible = useAtomValue(agentThreadMenuVisibleAtom);
   const agentModalVisible = useAtomValue(agentModalVisibleAtom);

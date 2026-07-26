@@ -1,4 +1,10 @@
-import { useSetAtom } from 'jotai';
+import {
+  agentDetailThreadIdAtom,
+  agentRootThreadIdAtom,
+  agentRuntimeRevisionAtom,
+  relatedAgentThreadsAtom
+} from '../state/mainScreen/workspace';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import type { Chat } from '../api/types';
 import { type SelectionSheetOption } from '../components/SelectionSheet';
@@ -20,9 +26,6 @@ export type MainScreenAgentThreadSelectorStateContext = MainScreenChatNavigation
 
 export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentThreadSelectorStateContext) {
   const {
-    agentDetailThreadId,
-    agentRootThreadId,
-    agentRuntimeRevision,
     closeAgentDetail,
     onPendingOpenChatHandled,
     openAgentDetail,
@@ -31,13 +34,16 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     pendingOpenChatId,
     pendingOpenChatSnapshot,
     refreshAgentThreads,
-    relatedAgentThreads,
     runWatchdogNow,
     selectedChatRef,
     setError,
     startNewChat,
     threadRuntimeSnapshotsRef,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
 

@@ -1,4 +1,10 @@
 import {
+  workspaceBridgeRootAtom,
+  workspaceBrowseErrorAtom,
+  workspaceModalVisibleAtom,
+  workspaceRootsAtom
+} from '../state/mainScreen/workspace';
+import {
   activityAtom,
   queueActionItemIdAtom,
   queueActionKindAtom
@@ -59,13 +65,13 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setStreamingText,
     setUserInputDrafts,
     setUserInputError,
-    setWorkspaceBridgeRoot,
-    setWorkspaceBrowseError,
-    setWorkspaceModalVisible,
-    setWorkspaceRoots,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
   } = context;
+  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
+  const setWorkspaceRoots = useSetAtom(workspaceRootsAtom);
+  const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);
+  const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);

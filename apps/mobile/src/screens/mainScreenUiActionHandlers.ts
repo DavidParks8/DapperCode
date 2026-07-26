@@ -1,4 +1,7 @@
 import {
+  relatedAgentThreadsAtom
+} from '../state/mainScreen/workspace';
+import {
   activityAtom,
   bridgeRecoveryBannerVisibleAtom,
   heldActivityAtom
@@ -36,7 +39,6 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     runWatchdogNow,
     runWatchdogUntilRef,
     scrollToBottomReliable,
-    relatedAgentThreads,
     selectedChat,
     sendMessage,
     sending,
@@ -49,6 +51,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     uploadingAttachment,
     ws,
   } = context;
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const activity = useAtomValue(activityAtom);
   const bridgeRecoveryBannerVisible = useAtomValue(bridgeRecoveryBannerVisibleAtom);
   const setActivity = useSetAtom(activityAtom);

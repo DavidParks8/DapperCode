@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AgentId, BridgeCapabilities, BridgeUiSurface, CollaborationMode, PendingApproval, PendingUserInputRequest, RunEvent, Chat, ChatSummary, ModelOption, ReasoningEffort, ServiceTier, FileSystemEntry, FileSystemListResponse, WorkspaceSummary } from '../api/types';
+import type { AgentId, BridgeCapabilities, BridgeUiSurface, CollaborationMode, PendingApproval, PendingUserInputRequest, RunEvent, Chat, ModelOption, ReasoningEffort, ServiceTier, FileSystemListResponse } from '../api/types';
 import { type AgUiLiveAssistantMessages } from '../api/agUi';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../theme';
 import { createStyles } from './mainScreenStyles';
-import { type ActivePlanState, type IdleTaskHandle, type WorkspacePickerPurpose, type SelectedServiceTier } from './mainScreenHelpers';
+import { type ActivePlanState, type IdleTaskHandle, type SelectedServiceTier } from './mainScreenHelpers';
 import { ApprovalController } from './controllers/approvalController';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
@@ -108,23 +108,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   );
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [stoppingTurn, setStoppingTurn] = useState(false);
-  const [workspaceModalVisible, setWorkspaceModalVisible] = useState(false);
-  const [workspacePickerPurpose, setWorkspacePickerPurpose] =
-    useState<WorkspacePickerPurpose>('default-start');
-  const [workspaceRoots, setWorkspaceRoots] = useState<WorkspaceSummary[]>([]);
-  const [workspaceBridgeRoot, setWorkspaceBridgeRoot] = useState<string | null>(null);
   const [, setLoadingWorkspaceRoots] = useState(false);
-  const [workspaceBrowsePath, setWorkspaceBrowsePath] = useState<string | null>(null);
-  const [workspaceBrowseParentPath, setWorkspaceBrowseParentPath] = useState<string | null>(
-    null
-  );
-  const [workspaceBrowseEntries, setWorkspaceBrowseEntries] = useState<FileSystemEntry[]>([]);
-  const [loadingWorkspaceBrowse, setLoadingWorkspaceBrowse] = useState(false);
-  const [workspaceBrowseError, setWorkspaceBrowseError] = useState<string | null>(null);
-  const [workspaceBrowseTruncation, setWorkspaceBrowseTruncation] = useState<string | null>(null);
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
-  const [favoriteWorkspacePaths, setFavoriteWorkspacePaths] = useState<string[]>([]);
   const [bridgeCapabilities, setBridgeCapabilities] = useState<BridgeCapabilities | null>(
     null
   );
@@ -142,16 +128,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [selectedCollaborationMode, setSelectedCollaborationMode] =
     useState<CollaborationMode>('default');
   const [selectedAcpModeId, setSelectedAcpModeId] = useState<string | null>(null);
-  const [relatedAgentThreads, setRelatedAgentThreads] = useState<ChatSummary[]>([]);
-  const [agentRootThreadId, setAgentRootThreadId] = useState<string | null>(null);
-  const [agentRuntimeRevision, setAgentRuntimeRevision] = useState(0);
-  const [loadingAgentThreads, setLoadingAgentThreads] = useState(false);
-  const [agentDetailThreadId, setAgentDetailThreadId] = useState<string | null>(null);
-  const [agentDetailStack, setAgentDetailStack] = useState<string[]>([]);
-  const [agentDetailChat, setAgentDetailChat] = useState<Chat | null>(null);
-  const [agentDetailParentChat, setAgentDetailParentChat] = useState<Chat | null>(null);
-  const [agentDetailLoading, setAgentDetailLoading] = useState(false);
-  const [agentDetailError, setAgentDetailError] = useState<string | null>(null);
   const sendingRef = useRef(sending);
   sendingRef.current = sending;
   const creatingRef = useRef(creating);
@@ -222,31 +198,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setActiveTurnId,
     stoppingTurn,
     setStoppingTurn,
-    workspaceModalVisible,
-    setWorkspaceModalVisible,
-    workspacePickerPurpose,
-    setWorkspacePickerPurpose,
-    workspaceRoots,
-    setWorkspaceRoots,
-    workspaceBridgeRoot,
-    setWorkspaceBridgeRoot,
     setLoadingWorkspaceRoots,
-    workspaceBrowsePath,
-    setWorkspaceBrowsePath,
-    workspaceBrowseParentPath,
-    setWorkspaceBrowseParentPath,
-    workspaceBrowseEntries,
-    setWorkspaceBrowseEntries,
-    loadingWorkspaceBrowse,
-    setLoadingWorkspaceBrowse,
-    workspaceBrowseError,
-    setWorkspaceBrowseError,
-    workspaceBrowseTruncation,
-    setWorkspaceBrowseTruncation,
     workspaceBrowseCacheRef,
     workspaceBrowseRequestRef,
-    favoriteWorkspacePaths,
-    setFavoriteWorkspacePaths,
     bridgeCapabilities,
     setBridgeCapabilities,
     modelOptionsByAgent,
@@ -267,26 +221,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setSelectedCollaborationMode,
     selectedAcpModeId,
     setSelectedAcpModeId,
-    relatedAgentThreads,
-    setRelatedAgentThreads,
-    agentRootThreadId,
-    setAgentRootThreadId,
-    agentRuntimeRevision,
-    setAgentRuntimeRevision,
-    loadingAgentThreads,
-    setLoadingAgentThreads,
-    agentDetailThreadId,
-    setAgentDetailThreadId,
-    agentDetailStack,
-    setAgentDetailStack,
-    agentDetailChat,
-    setAgentDetailChat,
-    agentDetailParentChat,
-    setAgentDetailParentChat,
-    agentDetailLoading,
-    setAgentDetailLoading,
-    agentDetailError,
-    setAgentDetailError,
     sendingRef,
     creatingRef,
     stoppingTurnRef,

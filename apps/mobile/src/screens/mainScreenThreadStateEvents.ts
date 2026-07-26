@@ -1,3 +1,7 @@
+import {
+  agentDetailChatAtom,
+  agentDetailThreadIdAtom
+} from '../state/mainScreen/workspace';
 import { screenSetter } from '../state/mainScreen/registry';
 import {
   activityAtom
@@ -26,11 +30,9 @@ export function processThreadStateEvents(
     reasoningSummaryRef,
     reasoningBufferRef,
     recoverReplayGap,
-    agentDetailThreadId,
     scheduleAgentThreadsRefresh,
     setSelectedChat,
     loadChat,
-    agentDetailChat,
     loadAgentDetail,
     readThreadContextUsage,
     cacheThreadContextUsage,
@@ -44,6 +46,8 @@ export function processThreadStateEvents(
     upsertLiveReasoningMessage,
     store,
   } = context;
+  const agentDetailThreadId = store.get(agentDetailThreadIdAtom);
+  const agentDetailChat = store.get(agentDetailChatAtom);
   const setActivity = screenSetter(store, activityAtom);
 
       if (event.method === 'bridge/events/snapshotRequired') {

@@ -1,4 +1,17 @@
 import {
+  favoriteWorkspacePathsAtom,
+  loadingWorkspaceBrowseAtom,
+  workspaceBridgeRootAtom,
+  workspaceBrowseEntriesAtom,
+  workspaceBrowseErrorAtom,
+  workspaceBrowseParentPathAtom,
+  workspaceBrowsePathAtom,
+  workspaceBrowseTruncationAtom,
+  workspaceModalVisibleAtom,
+  workspacePickerPurposeAtom,
+  workspaceRootsAtom
+} from '../state/mainScreen/workspace';
+import {
   titleDraftAtom,
   titleModalVisibleAtom,
   titleSavingAtom
@@ -29,22 +42,10 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     closeTitleEditor,
     styles,
     saveTitle,
-    workspaceModalVisible,
-    workspacePickerPurpose,
     preferredStartCwd,
-    workspaceBridgeRoot,
-    workspaceRoots,
-    favoriteWorkspacePaths,
-    workspaceBrowsePath,
-    workspaceBrowseParentPath,
-    workspaceBrowseEntries,
-    loadingWorkspaceBrowse,
-    workspaceBrowseError,
-    workspaceBrowseTruncation,
     browseWorkspacePath,
     handleWorkspaceSelection,
     toggleWorkspaceFavorite,
-    setWorkspaceModalVisible,
     openGitCheckoutModal,
     closeWorkspaceModal,
     closeGitCheckoutModal,
@@ -57,6 +58,18 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     submitGitCheckout,
     gitCheckoutTargetPath,
   } = context;
+  const workspaceModalVisible = useAtomValue(workspaceModalVisibleAtom);
+  const workspacePickerPurpose = useAtomValue(workspacePickerPurposeAtom);
+  const workspaceRoots = useAtomValue(workspaceRootsAtom);
+  const workspaceBridgeRoot = useAtomValue(workspaceBridgeRootAtom);
+  const workspaceBrowsePath = useAtomValue(workspaceBrowsePathAtom);
+  const workspaceBrowseParentPath = useAtomValue(workspaceBrowseParentPathAtom);
+  const workspaceBrowseEntries = useAtomValue(workspaceBrowseEntriesAtom);
+  const loadingWorkspaceBrowse = useAtomValue(loadingWorkspaceBrowseAtom);
+  const workspaceBrowseError = useAtomValue(workspaceBrowseErrorAtom);
+  const workspaceBrowseTruncation = useAtomValue(workspaceBrowseTruncationAtom);
+  const favoriteWorkspacePaths = useAtomValue(favoriteWorkspacePathsAtom);
+  const setWorkspaceModalVisible = useSetAtom(workspaceModalVisibleAtom);
   const titleModalVisible = useAtomValue(titleModalVisibleAtom);
   const titleDraft = useAtomValue(titleDraftAtom);
   const titleSaving = useAtomValue(titleSavingAtom);
