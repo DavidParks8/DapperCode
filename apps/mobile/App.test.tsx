@@ -485,6 +485,35 @@ describe('App orchestration', () => {
     act(() => recovery.unmount());
   });
 
+  it('keeps the main screen unavailable until cached chat restoration settles', async () => {
+    let resolveCache: (value: null) => void = () => undefined;
+    mockLoadChatSnapshotCache.mockReturnValueOnce(
+      new Promise<null>((resolve) => {
+        resolveCache = resolve;
+      }),
+    );
+    const tree = await renderApp();
+    const root = tree.root as Queryable;
+
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading DapperCode'),
+    ).not.toHaveLength(0);
+    expect(root.findAll((node) => node.props.testID === 'MainScreen')).toHaveLength(0);
+
+    await flushTimers(250);
+    expect(root.findAll((node) => node.props.testID === 'MainScreen')).toHaveLength(0);
+    expect(mockSaveChatSnapshotCache).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveCache(null);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(root.findAll((node) => node.props.testID === 'MainScreen')).not.toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('restores the selected cached chat and persists subsequent context', async () => {
     const cachedChat = {
       id: 'cached',

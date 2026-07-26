@@ -7,6 +7,7 @@ import { Easing, LinearTransition } from 'react-native-reanimated';
 
 import { appStateLoadedAtom, appStatePersistenceErrorAtom } from '../state/appState/atoms';
 import { bridgeUrlAtom } from '../state/bridge/atoms';
+import { chatSnapshotCacheAtom } from '../state/chat/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
 import { systemColorSchemeAtom, themeAtom } from '../state/theme';
 import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_ANIMATION_MS } from './appConstants';
@@ -30,6 +31,7 @@ export function AppRoot() {
 
   const settingsLoaded = useAtomValue(appStateLoadedAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
+  const chatSnapshotCache = useAtomValue(chatSnapshotCacheAtom);
   const currentScreen = useAtomValue(currentScreenAtom);
   const bridgeUrl = useAtomValue(bridgeUrlAtom);
   const theme = useAtomValue(themeAtom);
@@ -54,7 +56,7 @@ export function AppRoot() {
   useAppBridgeLifecycle();
   useAppStoreReview();
 
-  if (!settingsLoaded) {
+  if (!settingsLoaded || chatSnapshotCache === undefined) {
     return <LoadingShell theme={theme} styles={styles} />;
   }
 

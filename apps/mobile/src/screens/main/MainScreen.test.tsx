@@ -699,6 +699,9 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       await pressLabel(root, 'Fast mode');
       act(() => messageInput(root).props.onChangeText('Build the release checklist'));
+      expect(messageInput(root).props.value).toBe('Build the release checklist');
+      expect(api.createChatIdempotent).not.toHaveBeenCalled();
+      expect(hasText(root, "Let's build")).toBe(true);
       await pressLabel(root, 'Send message');
 
       expect(api.createChatIdempotent).toHaveBeenCalledWith(

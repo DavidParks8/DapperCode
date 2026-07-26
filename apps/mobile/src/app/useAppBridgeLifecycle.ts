@@ -165,6 +165,10 @@ export function useAppBridgeLifecycle(): void {
         store.set(applyRestoredChatSnapshotAtom, selectedSnapshot);
       } catch {
         // The typed persistence error remains available in the app-state atoms.
+      } finally {
+        if (!cancelled && store.get(chatSnapshotCacheAtom) === undefined) {
+          store.set(chatSnapshotCacheAtom, null);
+        }
       }
     };
 
@@ -184,7 +188,7 @@ export function useAppBridgeLifecycle(): void {
   }, [activeBridgeProfileId, api, chatSnapshotCache]);
 
   useEffect(() => {
-    if (!activeBridgeProfileId || !settingsLoaded) {
+    if (!activeBridgeProfileId || !settingsLoaded || chatSnapshotCache === undefined) {
       return;
     }
 

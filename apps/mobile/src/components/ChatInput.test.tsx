@@ -1,4 +1,4 @@
-import { Platform, TextInput } from 'react-native';
+import { Platform, StyleSheet, TextInput, type TextInputProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -16,6 +16,7 @@ type Queryable = ReactTestInstance & {
     onLayout: jest.Mock;
     onPress: jest.Mock;
     onTextLayout: jest.Mock;
+    style: TextInputProps['style'];
   };
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
   findAllByType(type: unknown): Queryable[];
@@ -117,6 +118,31 @@ describe('ChatInput behavior', () => {
       ),
     );
     expect(byLabel(root, 'Agent is responding').props.disabled).toBe(true);
+    act(() => rendered.unmount());
+  });
+
+  it('reserves enough height for placeholder descenders', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        wrap(
+          <ChatInput
+            {...base}
+            value=""
+            isLoading={false}
+            placeholder="Message debugging..."
+            onAttachPress={base.onAttachPress}
+          />,
+        ),
+      );
+    });
+    const rendered = tree as ReactTestRenderer;
+    const input = byLabel(rendered.root as Queryable, 'Message');
+    const inputStyle = StyleSheet.flatten(input.props.style);
+    const verticalPadding = Number(inputStyle.paddingVertical ?? 0);
+
+    expect(input.props.placeholder).toBe('Message debugging...');
+    expect(inputStyle.height).toBe(Number(inputStyle.lineHeight) + verticalPadding * 2);
     act(() => rendered.unmount());
   });
 

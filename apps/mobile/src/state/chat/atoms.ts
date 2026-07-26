@@ -17,4 +17,5 @@ export const pendingMainChatIdAtom = atom<string | null>(null);
 
 export const pendingMainChatSnapshotAtom = atom<Chat | null>(null);
 
-export const chatSnapshotCacheAtom = atom<ChatSnapshotCache | null>(null);
+// `undefined` means startup restoration is still in progress; `null` means it completed empty.
+export const chatSnapshotCacheAtom = atom<ChatSnapshotCache | null | undefined>(undefined);

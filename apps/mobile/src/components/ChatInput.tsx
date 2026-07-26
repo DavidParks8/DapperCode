@@ -64,7 +64,7 @@ export function ChatInput({
   const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
   const INPUT_TEXT_LINE_HEIGHT = 20;
   const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
-  const INPUT_TEXT_MIN_HEIGHT = 20;
+  const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
   const INPUT_TEXT_MAX_HEIGHT = 96;
   const [inputHeight, setInputHeight] = useState(INPUT_TEXT_MIN_HEIGHT);
   const [inputWidth, setInputWidth] = useState(0);
