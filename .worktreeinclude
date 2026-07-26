@@ -1,0 +1,19 @@
+# Local configuration copied into new worktrees.
+# Patterns use .gitignore syntax and only match files Git already ignores.
+
+# Expo and bridge development environment.
+/.env
+/.env.*
+!/.env.example
+/apps/mobile/.env
+/apps/mobile/.env.*
+!/apps/mobile/.env.example
+
+# Machine-specific native mobile configuration.
+/apps/mobile/android/local.properties
+/apps/mobile/android/app/google-services.json
+/apps/mobile/ios/GoogleService-Info.plist
+
+# Local editor tasks and agent permissions.
+/.vscode/tasks.json
+/.claude/settings.local.json
