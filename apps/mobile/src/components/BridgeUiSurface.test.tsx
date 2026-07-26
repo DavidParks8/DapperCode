@@ -4,10 +4,16 @@ import renderer, {
   type ReactTestRenderer,
 } from 'react-test-renderer';
 
-import { Modal } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
+import { AppSheet } from './AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
+
+const safeAreaMetrics = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => {
@@ -63,13 +69,13 @@ describe('BridgeUiWorkflowCard', () => {
     let rendered: ReactTestRenderer | undefined;
     act(() => {
       rendered = renderer.create(
-        <AppThemeProvider theme={theme}>
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}>
           <BridgeUiWorkflowCard
             surface={surface}
             onAction={onAction}
             onDismiss={onDismiss}
           />
-        </AppThemeProvider>
+        </AppThemeProvider></SafeAreaProvider>
       );
     });
 
@@ -140,7 +146,7 @@ describe('BridgeUiWorkflowCard', () => {
     const onAction = jest.fn();
     const onDismiss = jest.fn();
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider>); });
+    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
     for (const text of ['Plain detail', 'Lint', 'Passed', 'Tests', 'Deploy', 'Files', '4', 'sh', 'Coverage', '4.5 / 10', '45%']) {
@@ -153,8 +159,8 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => readOnPress(findPressableByLabel(root, 'Dismiss Review changes').props)());
     expect(onDismiss).toHaveBeenCalledWith(surface);
 
-    act(() => { tree.update(<AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider>); });
-    act(() => (tree.root.findByType(Modal).props.onRequestClose as () => void)());
+    act(() => { tree.update(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={onAction} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
+    act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
     expect(onDismiss).toHaveBeenCalledTimes(2);
     act(() => tree.unmount());
   });
@@ -167,7 +173,7 @@ describe('BridgeUiWorkflowCard', () => {
       actions: [], dismissible: false,
     };
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} /></AppThemeProvider>); });
+    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiBanner surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} /></AppThemeProvider></SafeAreaProvider>); });
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(findText(root, `${tone} surface`)).toBe(true);
     expect(root.findAll((node) => node.props.accessibilityLabel === `Dismiss ${tone} surface`)).toHaveLength(0);
@@ -181,10 +187,10 @@ describe('BridgeUiWorkflowCard', () => {
     };
     const onDismiss = jest.fn();
     let rendered: ReactTestRenderer | undefined;
-    act(() => { rendered = renderer.create(<AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={jest.fn()} onDismiss={onDismiss} /></AppThemeProvider>); });
+    act(() => { rendered = renderer.create(<SafeAreaProvider initialMetrics={safeAreaMetrics}><AppThemeProvider theme={theme}><BridgeUiModal surface={surface} onAction={jest.fn()} onDismiss={onDismiss} /></AppThemeProvider></SafeAreaProvider>); });
     const tree = expectValue(rendered);
     expect(findText(tree.root as QueryableTestInstance, 'No details provided.')).toBe(true);
-    act(() => (tree.root.findByType(Modal).props.onRequestClose as () => void)());
+    act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
     expect(onDismiss).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });

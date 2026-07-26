@@ -28,6 +28,11 @@ export interface AppSheetProps {
   contentBottomInset?: number;
   /** Renders the content in a scrollable container, for lists that can outgrow the sheet. */
   scrollable?: boolean;
+  /**
+   * Whether the sheet can be dismissed by dragging it down or tapping the backdrop. Prompts that
+   * require an answer set this to false so the only way out is an explicit choice.
+   */
+  dismissible?: boolean;
 }
 
 const BACKDROP_APPEARS_AT = 0;
@@ -48,6 +53,7 @@ export function AppSheet({
   maxDynamicContentSize,
   contentBottomInset = 0,
   scrollable = false,
+  dismissible = true,
 }: AppSheetProps) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
@@ -81,18 +87,18 @@ export function AppSheet({
         {...backdropProps}
         appearsOnIndex={BACKDROP_APPEARS_AT}
         disappearsOnIndex={BACKDROP_DISAPPEARS_AT}
-        pressBehavior="close"
+        pressBehavior={dismissible ? 'close' : 'none'}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ? `Close ${accessibilityLabel}` : 'Close sheet'}
       />
     ),
-    [accessibilityLabel]
+    [accessibilityLabel, dismissible]
   );
 
   return (
     <BottomSheetModal
       ref={sheetRef}
-      enablePanDownToClose
+      enablePanDownToClose={dismissible}
       enableDynamicSizing={snapPoints === undefined}
       maxDynamicContentSize={maxDynamicContentSize}
       snapPoints={snapPoints}

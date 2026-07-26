@@ -1,12 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
 import type {
@@ -21,6 +15,7 @@ import {
   getSurfaceIconName,
   getToneColor,
 } from './bridge-ui-surface-helpers';
+import { AppSheet } from './AppSheet';
 import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 import { useAppTheme } from '../theme';
 import { createWorkflowMarkdownStyles } from '../screens/mainScreenStyles';
@@ -97,36 +92,31 @@ export function BridgeUiModal({
   const modalFocusRef = useModalAccessibilityFocus(true);
   useAccessibilityAnnouncement(`${surface.title}. ${surface.subtitle ?? ''}`);
 
+  const dismissible = surface.dismissible !== false;
+
   return (
-    <Modal
+    <AppSheet
       visible
-      transparent
-      animationType="fade"
-      onRequestClose={() => {
-        if (surface.dismissible !== false) {
+      dismissible={dismissible}
+      accessibilityLabel={surface.title}
+      onClose={() => {
+        if (dismissible) {
           onDismiss(surface);
         }
       }}
     >
-      <View style={styles.modalBackdrop}>
-        <View
-          ref={modalFocusRef}
-          accessibilityViewIsModal
-          importantForAccessibility="yes"
-          style={styles.modalCard}
-        >
-          <SurfaceHeader surface={surface} onDismiss={onDismiss} />
-          <ScrollView
-            style={styles.modalScroll}
-            contentContainerStyle={styles.surfaceBody}
-            showsVerticalScrollIndicator={false}
-          >
-            <SurfaceContent surface={surface} />
-          </ScrollView>
-          <SurfaceActions surface={surface} onAction={onAction} />
-        </View>
+      <View ref={modalFocusRef}>
+        <SurfaceHeader surface={surface} onDismiss={onDismiss} />
       </View>
-    </Modal>
+      <ScrollView
+        style={styles.modalScroll}
+        contentContainerStyle={styles.surfaceBody}
+        showsVerticalScrollIndicator={false}
+      >
+        <SurfaceContent surface={surface} />
+      </ScrollView>
+      <SurfaceActions surface={surface} onAction={onAction} />
+    </AppSheet>
   );
 }
 

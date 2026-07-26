@@ -19,7 +19,9 @@ import {
 } from '../state/mainScreen/modals';
 import { Ionicons } from '@expo/vector-icons';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { AppSheet } from '../components/AppSheet';
 import { WorkspacePickerModal } from '../components/WorkspacePickerModal';
 import { decorativeAccessibilityProps } from '../accessibility';
 import { normalizeCloneDirectoryName } from './mainScreenHelpers';
@@ -83,60 +85,50 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
 
   return (
     <>
-      <Modal
-                visible={titleModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={closeTitleEditor}
-              >
-                <KeyboardAvoidingView
-                  style={styles.renameModalKeyboardAvoider}
-                  behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                >
-                  <View style={styles.renameModalBackdrop}>
-                    <View accessibilityViewIsModal importantForAccessibility="yes" style={styles.renameModalCard}>
-                      <Text style={styles.renameModalTitle}>Rename session</Text>
-                      <TextInput
-                        value={titleDraft}
-                        onChangeText={setTitleDraft}
-                        style={styles.renameModalInput}
-                        accessibilityLabel="Session title"
-                        autoFocus
-                        maxLength={256}
-                        editable={!titleSaving}
-                        returnKeyType="done"
-                        onSubmitEditing={() => { void saveTitle(); }}
-                      />
-                      <View style={styles.renameModalActions}>
-                        <Pressable
-                          onPress={closeTitleEditor}
-                          style={[styles.renameModalButton, styles.renameModalButtonSecondary]}
-                          disabled={titleSaving}
-                          accessibilityRole="button"
-                          accessibilityLabel="Cancel rename"
-                        >
-                          <Text style={styles.renameModalButtonSecondaryText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => { void saveTitle(); }}
-                          style={[
-                            styles.renameModalButton,
-                            styles.renameModalButtonPrimary,
-                            (!titleDraft.trim() || titleSaving) && styles.renameModalButtonDisabled,
-                          ]}
-                          disabled={!titleDraft.trim() || titleSaving}
-                          accessibilityRole="button"
-                          accessibilityLabel="Save session title"
-                        >
-                          <Text style={styles.renameModalButtonPrimaryText}>
-                            {titleSaving ? 'Saving...' : 'Save'}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </View>
-                </KeyboardAvoidingView>
-              </Modal>
+      <AppSheet
+        visible={titleModalVisible}
+        onClose={closeTitleEditor}
+        accessibilityLabel="Rename session"
+      >
+        <Text style={styles.renameModalTitle}>Rename session</Text>
+        <BottomSheetTextInput
+          value={titleDraft}
+          onChangeText={setTitleDraft}
+          style={styles.renameModalInput}
+          accessibilityLabel="Session title"
+          autoFocus
+          maxLength={256}
+          editable={!titleSaving}
+          returnKeyType="done"
+          onSubmitEditing={() => { void saveTitle(); }}
+        />
+        <View style={styles.renameModalActions}>
+          <Pressable
+            onPress={closeTitleEditor}
+            style={[styles.renameModalButton, styles.renameModalButtonSecondary]}
+            disabled={titleSaving}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel rename"
+          >
+            <Text style={styles.renameModalButtonSecondaryText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { void saveTitle(); }}
+            style={[
+              styles.renameModalButton,
+              styles.renameModalButtonPrimary,
+              (!titleDraft.trim() || titleSaving) && styles.renameModalButtonDisabled,
+            ]}
+            disabled={!titleDraft.trim() || titleSaving}
+            accessibilityRole="button"
+            accessibilityLabel="Save session title"
+          >
+            <Text style={styles.renameModalButtonPrimaryText}>
+              {titleSaving ? 'Saving...' : 'Save'}
+            </Text>
+          </Pressable>
+        </View>
+      </AppSheet>
       <WorkspacePickerModal
                 visible={workspaceModalVisible}
                 selectedPath={

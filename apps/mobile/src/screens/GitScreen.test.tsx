@@ -1,4 +1,4 @@
-import { Modal, ScrollView, TextInput } from 'react-native';
+import { ScrollView, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -393,8 +393,7 @@ describe('GitScreen behavior', () => {
     if (!commentButton) throw new Error('Missing review comment action');
     await invoke(commentButton);
     exercisePressableStyles(root);
-    const modal = root.findAllByType(Modal)[0] as unknown as Queryable;
-    act(() => (modal.props.onRequestClose as () => void)());
+    await invoke(findByLabel(root, 'Close inline comment'));
     await invoke(commentButton);
     await press(root, 'Cancel');
     await invoke(commentButton);

@@ -1,7 +1,9 @@
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { decorativeAccessibilityProps, useModalAccessibilityFocus } from '../accessibility';
+import { AppSheet } from '../components/AppSheet';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 
 export function GitScreenReviewSection({ controller, styles, theme }: GitSectionCommonProps) {
@@ -63,74 +65,65 @@ export function GitScreenReviewSection({ controller, styles, theme }: GitSection
         </View>
       ) : null}
 
-      <Modal
+      <AppSheet
         visible={controller.reviewTarget !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={controller.closeReviewComment}
+        onClose={controller.closeReviewComment}
+        accessibilityLabel="Inline comment"
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.reviewModalBackdrop}
-        >
-          <Pressable style={{ position: 'absolute', inset: 0 }} onPress={controller.closeReviewComment} />
-          <View accessibilityViewIsModal importantForAccessibility="yes" style={styles.reviewModalCard}>
-            <View style={styles.reviewModalHeader}>
-              <View style={styles.reviewModalTitleBlock}>
-                <Text ref={reviewModalFocusRef} accessibilityRole="header" style={styles.reviewModalEyebrow}>
-                  Inline comment
-                </Text>
-                <Text style={styles.reviewModalTitle} numberOfLines={2}>
-                  {controller.reviewTarget
-                    ? `${controller.reviewTarget.path} · ${controller.reviewTarget.side} ${String(controller.reviewTarget.line)}`
-                    : ''}
-                </Text>
-              </View>
-              <Pressable
-                onPress={controller.closeReviewComment}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Close inline comment"
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="close"
-                  size={20}
-                  color={theme.colors.textMuted}
-                />
-              </Pressable>
-            </View>
-            <TextInput
-              value={controller.reviewCommentDraft}
-              onChangeText={controller.setReviewCommentDraft}
-              placeholder="What should the agent change here?"
-              placeholderTextColor={theme.colors.textMuted}
-              keyboardAppearance={theme.keyboardAppearance}
-              autoFocus
-              multiline
-              textAlignVertical="top"
-              style={styles.reviewCommentInput}
-              accessibilityLabel="Review comment"
-            />
-            <View style={styles.reviewModalActions}>
-              <Pressable onPress={controller.closeReviewComment} style={styles.reviewModalCancel}>
-                <Text style={styles.reviewModalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={controller.saveReviewComment}
-                disabled={!controller.reviewCommentDraft.trim()}
-                style={({ pressed }) => [
-                  styles.reviewModalSave,
-                  pressed && styles.actionBtnPressed,
-                  !controller.reviewCommentDraft.trim() && styles.actionBtnDisabled,
-                ]}
-              >
-                <Text style={styles.reviewModalSaveText}>Save comment</Text>
-              </Pressable>
-            </View>
+        <View style={styles.reviewModalHeader}>
+          <View style={styles.reviewModalTitleBlock}>
+            <Text ref={reviewModalFocusRef} accessibilityRole="header" style={styles.reviewModalEyebrow}>
+              Inline comment
+            </Text>
+            <Text style={styles.reviewModalTitle} numberOfLines={2}>
+              {controller.reviewTarget
+                ? `${controller.reviewTarget.path} · ${controller.reviewTarget.side} ${String(controller.reviewTarget.line)}`
+                : ''}
+            </Text>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          <Pressable
+            onPress={controller.closeReviewComment}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close inline comment"
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="close"
+              size={20}
+              color={theme.colors.textMuted}
+            />
+          </Pressable>
+        </View>
+        <BottomSheetTextInput
+          value={controller.reviewCommentDraft}
+          onChangeText={controller.setReviewCommentDraft}
+          placeholder="What should the agent change here?"
+          placeholderTextColor={theme.colors.textMuted}
+          keyboardAppearance={theme.keyboardAppearance}
+          autoFocus
+          multiline
+          textAlignVertical="top"
+          style={styles.reviewCommentInput}
+          accessibilityLabel="Review comment"
+        />
+        <View style={styles.reviewModalActions}>
+          <Pressable onPress={controller.closeReviewComment} style={styles.reviewModalCancel}>
+            <Text style={styles.reviewModalCancelText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            onPress={controller.saveReviewComment}
+            disabled={!controller.reviewCommentDraft.trim()}
+            style={({ pressed }) => [
+              styles.reviewModalSave,
+              pressed && styles.actionBtnPressed,
+              !controller.reviewCommentDraft.trim() && styles.actionBtnDisabled,
+            ]}
+          >
+            <Text style={styles.reviewModalSaveText}>Save comment</Text>
+          </Pressable>
+        </View>
+      </AppSheet>
     </>
   );
 }
