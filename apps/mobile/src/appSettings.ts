@@ -114,10 +114,6 @@ export function parseAppSettings(raw: string): {
   }
 }
 
-export function formatWorkspaceChatLimit(value: WorkspaceChatLimit): string {
-  return value === null ? 'All chats' : `${value} chats`;
-}
-
 function normalizeBridgeUrl(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null;

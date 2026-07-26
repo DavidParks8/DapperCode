@@ -249,13 +249,6 @@ function suppressedToolCallIds(
   return [];
 }
 
-export function messageUsesSuppressedTool(
-  message: Message,
-  suppressed: Record<string, true>,
-): boolean {
-  return suppressedToolCallIds(message, suppressed).length > 0;
-}
-
 export function applyActivityDelta(
   current: AgUiThreadMessageState,
   runId: string,

@@ -2,7 +2,6 @@ import {
   createContext,
   createElement,
   useContext,
-  useMemo,
   type PropsWithChildren,
 } from 'react';
 import {
@@ -340,9 +339,4 @@ export function AppThemeProvider({
 
 export function useAppTheme(): AppTheme {
   return useContext(AppThemeContext);
-}
-
-export function useThemeStyles<T>(factory: (theme: AppTheme) => T): T {
-  const theme = useAppTheme();
-  return useMemo(() => factory(theme), [factory, theme]);
 }
