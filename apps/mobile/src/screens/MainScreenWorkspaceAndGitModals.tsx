@@ -1,5 +1,10 @@
+import {
+  titleDraftAtom,
+  titleModalVisibleAtom,
+  titleSavingAtom
+} from '../state/mainScreen/modals';
 import { Ionicons } from '@expo/vector-icons';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { WorkspacePickerModal } from '../components/WorkspacePickerModal';
 import { decorativeAccessibilityProps } from '../accessibility';
@@ -21,12 +26,8 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 
 export function MainScreenWorkspaceAndGitModals({ context }: { context: Context }) {
   const {
-    titleModalVisible,
     closeTitleEditor,
     styles,
-    titleDraft,
-    setTitleDraft,
-    titleSaving,
     saveTitle,
     workspaceModalVisible,
     workspacePickerPurpose,
@@ -56,6 +57,10 @@ export function MainScreenWorkspaceAndGitModals({ context }: { context: Context 
     submitGitCheckout,
     gitCheckoutTargetPath,
   } = context;
+  const titleModalVisible = useAtomValue(titleModalVisibleAtom);
+  const titleDraft = useAtomValue(titleDraftAtom);
+  const titleSaving = useAtomValue(titleSavingAtom);
+  const setTitleDraft = useSetAtom(titleDraftAtom);
   const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
   const gitCheckoutModalVisible = useAtomValue(gitCheckoutModalVisibleAtom);
   const gitCheckoutRepoUrl = useAtomValue(gitCheckoutRepoUrlAtom);

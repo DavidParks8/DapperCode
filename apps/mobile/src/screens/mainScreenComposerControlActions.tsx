@@ -1,3 +1,4 @@
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { AgentId, ServiceTier } from '../api/types';
 import { type SelectionSheetOption } from '../components/SelectionSheet';
@@ -5,6 +6,13 @@ import { normalizeModelId } from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
 import { ATTACHMENT_MAX_LABEL } from './controllers/attachmentController';
 import type { MainScreenModeConfigurationSessionContext, MainScreenModeConfigurationSessionResult } from './mainScreenModeConfigurationSession';
+import {
+  agentModalVisibleAtom,
+  collaborationModeMenuVisibleAtom,
+  effortModalVisibleAtom,
+  effortPickerModelIdAtom,
+  modelModalVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -32,12 +40,7 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     retryFailedUploads,
     selectedChatId,
     setActivity,
-    setAgentModalVisible,
-    setCollaborationModeMenuVisible,
-    setEffortModalVisible,
-    setEffortPickerModelId,
     setError,
-    setModelModalVisible,
     setPendingAgentId,
     setSelectedAcpModeId,
     setSelectedCollaborationMode,
@@ -48,6 +51,11 @@ export function useMainScreenComposerControlActions(context: MainScreenComposerC
     uploadingAttachment,
     ws,
   } = context;
+  const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
+  const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
+  const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
+  const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
 
   const selectModel = useCallback(

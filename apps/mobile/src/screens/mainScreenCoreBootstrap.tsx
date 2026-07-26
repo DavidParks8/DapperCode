@@ -125,12 +125,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const workspaceBrowseCacheRef = useRef<Record<string, FileSystemListResponse>>({});
   const workspaceBrowseRequestRef = useRef(0);
   const [favoriteWorkspacePaths, setFavoriteWorkspacePaths] = useState<string[]>([]);
-  const [agentThreadMenuVisible, setAgentThreadMenuVisible] = useState(false);
-  const [modelModalVisible, setModelModalVisible] = useState(false);
-  const [agentModalVisible, setAgentModalVisible] = useState(false);
-  const [titleModalVisible, setTitleModalVisible] = useState(false);
-  const [titleDraft, setTitleDraft] = useState('');
-  const [titleSaving, setTitleSaving] = useState(false);
   const [bridgeCapabilities, setBridgeCapabilities] = useState<BridgeCapabilities | null>(
     null
   );
@@ -163,9 +157,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const [agentDetailParentChat, setAgentDetailParentChat] = useState<Chat | null>(null);
   const [agentDetailLoading, setAgentDetailLoading] = useState(false);
   const [agentDetailError, setAgentDetailError] = useState<string | null>(null);
-  const [collaborationModeMenuVisible, setCollaborationModeMenuVisible] = useState(false);
-  const [effortModalVisible, setEffortModalVisible] = useState(false);
-  const [effortPickerModelId, setEffortPickerModelId] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityState>({
     tone: 'idle',
     title: 'Ready',
@@ -274,18 +265,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     workspaceBrowseRequestRef,
     favoriteWorkspacePaths,
     setFavoriteWorkspacePaths,
-    agentThreadMenuVisible,
-    setAgentThreadMenuVisible,
-    modelModalVisible,
-    setModelModalVisible,
-    agentModalVisible,
-    setAgentModalVisible,
-    titleModalVisible,
-    setTitleModalVisible,
-    titleDraft,
-    setTitleDraft,
-    titleSaving,
-    setTitleSaving,
     bridgeCapabilities,
     setBridgeCapabilities,
     modelOptionsByAgent,
@@ -336,12 +315,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     setAgentDetailLoading,
     agentDetailError,
     setAgentDetailError,
-    collaborationModeMenuVisible,
-    setCollaborationModeMenuVisible,
-    effortModalVisible,
-    setEffortModalVisible,
-    effortPickerModelId,
-    setEffortPickerModelId,
     activity,
     setActivity,
     bridgeRecoveryBannerVisible,

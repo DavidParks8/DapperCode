@@ -1,7 +1,11 @@
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { Chat } from '../api/types';
 import { resolveEquivalentChat } from './mainScreenChatState';
 import type { MainScreenChatLoadPipelineContext, MainScreenChatLoadPipelineResult } from './mainScreenChatLoadPipeline';
+import {
+  agentThreadMenuVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -36,7 +40,6 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     setAgentDetailParentChat,
     setAgentDetailStack,
     setAgentDetailThreadId,
-    setAgentThreadMenuVisible,
     setCreating,
     setError,
     setOpeningChatId,
@@ -56,6 +59,7 @@ export function useMainScreenChatNavigationAndAgentDetail(context: MainScreenCha
     transcriptContinuationController,
     transcriptContinuationState,
   } = context;
+  const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
 
   const handleLoadEarlier = useCallback(async () => {

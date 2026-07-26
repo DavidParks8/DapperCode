@@ -1,9 +1,13 @@
+import { useAtomValue } from 'jotai';
 import { useEffect } from 'react';
 import type { CollaborationMode } from '../api/types';
 import { selectAgentId } from '../agents';
 import { formatModelOptionLabel } from '../modelOptions';
 import { normalizeServiceTier, toSelectedServiceTier, resolveSelectedServiceTier, formatCollaborationModeLabel, formatReasoningEffort } from './mainScreenHelpers';
 import type { MainScreenSelectedRuntimeSelectorsContext, MainScreenSelectedRuntimeSelectorsResult } from './mainScreenSelectedRuntimeSelectors';
+import {
+  effortPickerModelIdAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -19,7 +23,6 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     chatModelPreferencesLoaded,
     chatModelPreferencesRef,
     defaultServiceTier,
-    effortPickerModelId,
     modeConfig,
     modelOptions,
     pendingAgentId,
@@ -42,6 +45,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     setSelectedServiceTier,
     supportsFastMode,
   } = context;
+  const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
 
 
   useEffect(() => {

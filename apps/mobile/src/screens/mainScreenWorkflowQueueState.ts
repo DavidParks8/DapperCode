@@ -6,6 +6,11 @@ import { hasStructuredPlanCardContent, resolveWorkflowCardMode } from './planCar
 import { canOfferQueuedMessageSteer, isBridgeConnectionErrorMessage, resolveDisplayedThreadPlan, toPersistedActivePlanState, resolveUndismissedPlanImplementationPrompt, resolvePersistedPlanImplementationPrompt, formatAgentThreadOptionTitle } from './mainScreenHelpers';
 import type { MainScreenHeaderActivityViewModelContext, MainScreenHeaderActivityViewModelResult } from './mainScreenHeaderActivityViewModel';
 import { gitCheckoutErrorAtom } from '../state/mainScreen/gitCheckout';
+import {
+  collaborationModeMenuVisibleAtom,
+  effortModalVisibleAtom,
+  modelModalVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -27,16 +32,13 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     attachmentMenuVisible,
     attachmentModalVisible,
     chatPlanSnapshotsRef,
-    collaborationModeMenuVisible,
     composerHeight,
     creating,
     dismissedPlanImplementationTurnIdByThreadRef,
     draft,
-    effortModalVisible,
     error,
     isOpeningChat,
     keyboardVisible,
-    modelModalVisible,
     pendingApproval,
     pendingOptimisticQueuedMessagesRef,
     pendingPlanImplementationPrompts,
@@ -61,6 +63,9 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     workspaceModalVisible,
     ws,
   } = context;
+  const modelModalVisible = useAtomValue(modelModalVisibleAtom);
+  const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
+  const effortModalVisible = useAtomValue(effortModalVisibleAtom);
   const gitCheckoutError = useAtomValue(gitCheckoutErrorAtom);
 
   const agentDetailSummary = agentDetailThreadId

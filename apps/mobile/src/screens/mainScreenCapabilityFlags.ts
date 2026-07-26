@@ -1,7 +1,17 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgentId } from '../api/types';
 import { normalizeWorkspacePath } from './mainScreenHelpers';
 import type { MainScreenModelCatalogStateContext, MainScreenModelCatalogStateResult } from './mainScreenModelCatalogState';
+import {
+  agentThreadMenuVisibleAtom,
+  collaborationModeMenuVisibleAtom,
+  effortModalVisibleAtom,
+  modelModalVisibleAtom,
+  titleDraftAtom,
+  titleModalVisibleAtom,
+  titleSavingAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -29,12 +39,8 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setActivePlan,
     setActiveTurnId,
     setActivity,
-    setAgentThreadMenuVisible,
-    setCollaborationModeMenuVisible,
-    setEffortModalVisible,
     setError,
     setLoadingWorkspaceRoots,
-    setModelModalVisible,
     setOpeningChatId,
     setPendingAgentId,
     setPendingApproval,
@@ -49,9 +55,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setSelectedServiceTier,
     setStoppingTurn,
     setStreamingText,
-    setTitleDraft,
-    setTitleModalVisible,
-    setTitleSaving,
     setUserInputDrafts,
     setUserInputError,
     setWorkspaceBridgeRoot,
@@ -60,9 +63,16 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     setWorkspaceRoots,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
-    titleDraft,
-    titleSaving,
   } = context;
+  const titleDraft = useAtomValue(titleDraftAtom);
+  const titleSaving = useAtomValue(titleSavingAtom);
+  const setTitleModalVisible = useSetAtom(titleModalVisibleAtom);
+  const setTitleDraft = useSetAtom(titleDraftAtom);
+  const setTitleSaving = useSetAtom(titleSavingAtom);
+  const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
+  const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
+  const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
 
 
   const resetComposerState = useCallback((requestedAgentId?: AgentId) => {

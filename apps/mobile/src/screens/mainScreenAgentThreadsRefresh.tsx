@@ -1,3 +1,6 @@
+import {
+  agentThreadMenuVisibleAtom
+} from '../state/mainScreen/modals';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import { AGENT_THREADS_SYNC_INTERVAL_MS, AGENT_THREADS_IDLE_SYNC_INTERVAL_MS, AGENT_THREADS_BACKGROUND_SYNC_INTERVAL_MS } from './mainScreenHelpers';
@@ -31,13 +34,13 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     selectedChatId,
     selectedChatRef,
     setAgentRootThreadId,
-    setAgentThreadMenuVisible,
     setError,
     setLoadingAgentThreads,
     setRelatedAgentThreads,
     setWorkspaceModalVisible,
     workspacePickerPurpose,
   } = context;
+  const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const resumeGitCheckoutAfterWorkspacePicker = useAtomValue(
     resumeGitCheckoutAfterWorkspacePickerAtom
   );

@@ -1,9 +1,13 @@
+import { useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import type { CollaborationMode } from '../api/types';
 import { type SelectionSheetOption } from '../components/SelectionSheet';
 import { formatModelOptionDescription, formatModelOptionLabel } from '../modelOptions';
 import { formatReasoningEffort } from './mainScreenHelpers';
 import type { MainScreenComposerControlActionsContext, MainScreenComposerControlActionsResult } from './mainScreenComposerControlActions';
+import {
+  collaborationModeMenuVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -31,11 +35,11 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     selectedModel,
     selectedModelId,
     serverDefaultModel,
-    setCollaborationModeMenuVisible,
     setError,
     setSelectedAcpModeId,
     setSelectedCollaborationMode,
   } = context;
+  const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
 
 
   const collaborationModeOptions = useMemo<SelectionSheetOption[]>(

@@ -1,3 +1,4 @@
+import { useAtomValue, useSetAtom } from 'jotai';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { ActivityBar } from '../components/ActivityBar';
 import { SelectionSheet } from '../components/SelectionSheet';
@@ -6,6 +7,11 @@ import { SubAgentDetailView } from './SubAgentDetailView';
 import { ComposeView } from './MainScreenPresentation';
 import { ChatOpeningView } from './MainScreenPresentation';
 import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
+import {
+  agentModalVisibleAtom,
+  agentThreadMenuVisibleAtom,
+  collaborationModeMenuVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -75,17 +81,17 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     attachmentMenuVisible,
     attachmentMenuOptions,
     attachmentController,
-    agentThreadMenuVisible,
     agentThreadMenuOptions,
     loadingAgentThreads,
-    setAgentThreadMenuVisible,
-    collaborationModeMenuVisible,
     collaborationModeOptions,
-    setCollaborationModeMenuVisible,
-    agentModalVisible,
     agentPickerOptions,
     closeAgentModal,
   } = context;
+  const agentThreadMenuVisible = useAtomValue(agentThreadMenuVisibleAtom);
+  const agentModalVisible = useAtomValue(agentModalVisibleAtom);
+  const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
+  const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
+  const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
 
   return (
     <>

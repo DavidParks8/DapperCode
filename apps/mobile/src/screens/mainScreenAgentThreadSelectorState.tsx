@@ -7,6 +7,9 @@ import { describeAgentThreadSource, findMatchingAgentThread, resolveAgentActivit
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { formatAgentThreadOptionTitle, iconForAgentThread } from './mainScreenHelpers';
 import type { MainScreenChatNavigationAndAgentDetailContext, MainScreenChatNavigationAndAgentDetailResult } from './mainScreenChatNavigationAndAgentDetail';
+import {
+  agentThreadMenuVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -31,11 +34,11 @@ export function useMainScreenAgentThreadSelectorState(context: MainScreenAgentTh
     relatedAgentThreads,
     runWatchdogNow,
     selectedChatRef,
-    setAgentThreadMenuVisible,
     setError,
     startNewChat,
     threadRuntimeSnapshotsRef,
   } = context;
+  const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
 
   const openAgentThreadSelector = useCallback(

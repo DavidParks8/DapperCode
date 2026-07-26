@@ -1,3 +1,4 @@
+import { useAtomValue } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { BridgeUiWorkflowCard } from '../components/BridgeUiSurface';
@@ -6,6 +7,10 @@ import { InlineOptionsGroup } from './MainScreenInlineOptions';
 import { decorativeAccessibilityProps } from '../accessibility';
 import { WorkflowCard } from './MainScreenWorkflow';
 import type { MainScreenPanelCollapseCoordinatorContext, MainScreenPanelCollapseCoordinatorResult } from './mainScreenPanelCollapseCoordinator';
+import {
+  effortModalVisibleAtom,
+  modelModalVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -38,11 +43,9 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     fastModeEnabled,
     fastModeControlDisabled,
     toggleFastMode,
-    modelModalVisible,
     modelPickerOptions,
     loadingModels,
     closeModelModal,
-    effortModalVisible,
     effortPickerSheetOptions,
     closeEffortModal,
     showTopCardsRow,
@@ -60,6 +63,8 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     implementPlan,
     stayInPlanMode,
   } = context;
+  const modelModalVisible = useAtomValue(modelModalVisibleAtom);
+  const effortModalVisible = useAtomValue(effortModalVisibleAtom);
 
   return (
     <>

@@ -1,3 +1,4 @@
+import { useSetAtom } from 'jotai';
 import { useCallback, useRef } from 'react';
 import type { AcpConfigOption, Chat, ReasoningEffort } from '../api/types';
 import { normalizeModelId } from './mainScreenHelpers';
@@ -5,6 +6,12 @@ import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
 import { mergeModelOptions, modelOptionsFromAcpConfig } from './mainScreenChatState';
 import type { MainScreenWorkspaceCheckoutActionsContext, MainScreenWorkspaceCheckoutActionsResult } from './mainScreenWorkspaceCheckoutActions';
 import { EMPTY_MODEL_OPTIONS } from './mainScreenConstants';
+import {
+  agentModalVisibleAtom,
+  effortModalVisibleAtom,
+  effortPickerModelIdAtom,
+  modelModalVisibleAtom
+} from '../state/mainScreen/modals';
 
 
 
@@ -33,17 +40,17 @@ export function useMainScreenModeConfigurationSession(context: MainScreenModeCon
     selectedChatRef,
     selectedCollaborationMode,
     selectedEffort,
-    setAgentModalVisible,
-    setEffortModalVisible,
-    setEffortPickerModelId,
     setError,
     setLoadingModels,
-    setModelModalVisible,
     setModelOptionsByAgent,
     setSelectedChat,
     setSelectedChatId,
     setSelectedEffort,
   } = context;
+  const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
+  const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
+  const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
+  const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
 
   const refreshModelOptions = useCallback(async () => {
