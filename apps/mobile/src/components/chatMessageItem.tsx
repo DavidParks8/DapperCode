@@ -285,23 +285,23 @@ function ChatMessageComponent({
                       <SelectableMessageText
                         key={`${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`}
                         style={styles.subAgentDetailLine}
+                        numberOfLines={line.trimStart().startsWith('Latest:') ? 1 : undefined}
+                        ellipsizeMode={line.trimStart().startsWith('Latest:') ? 'tail' : undefined}
                       >
                         {line}
                       </SelectableMessageText>
                     ))}
                   </View>
                 ) : null}
-                {canOpen ? (
-                  <View style={styles.subAgentOpenHint}>
-                    <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name="chevron-forward"
-                      size={12}
-                      color={theme.colors.textMuted}
-                    />
-                  </View>
-                ) : null}
+                <View style={styles.subAgentOpenHint}>
+                  <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="chevron-forward"
+                    size={12}
+                    color={theme.colors.textMuted}
+                  />
+                </View>
               </Pressable>
             );
           })}

@@ -1046,6 +1046,7 @@ impl BridgeQueueService {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::sync::Mutex as StdMutex;
 
@@ -1298,6 +1299,110 @@ mod tests {
             .await
             .insert("thread".to_string(), active_runtime(item_ids, tool_ids));
         (service, receivers)
+    }
+
+    #[test]
+    fn runtime_blockers_report_each_busy_state() {
+        let mut runtime = BridgeThreadQueueRuntime::default();
+        assert!(!BridgeQueueService::runtime_has_blockers(&runtime));
+
+        runtime.thread_running = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.thread_running = false;
+
+        runtime.turn_start_in_flight = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.turn_start_in_flight = false;
+
+        runtime.action_in_flight_item_id = Some("item".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.action_in_flight_item_id = None;
+
+        runtime.steer_prepare_in_flight = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.steer_prepare_in_flight = false;
+
+        runtime.steer_dispatch_in_flight = Some(PendingSteerDispatch {
+            entry: queued("steer"),
+            expected_turn_id: "turn".to_string(),
+            expected_run_id: "run".to_string(),
+            prompt_generation: 1,
+            crossed_completion_boundary: false,
+        });
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.steer_dispatch_in_flight = None;
+
+        runtime.pending_steers.push_back(queued("pending"));
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.pending_steers.clear();
+
+        runtime.pending_approval_ids.insert("approval".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime.pending_approval_ids.clear();
+
+        runtime.pending_user_input_ids.insert("input".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+    }
+
+    #[tokio::test]
+    async fn pending_steer_drain_honors_each_preparation_blocker() {
+        let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime
+                .pending_steers
+                .push_back(runtime.items.pop_front().unwrap());
+            runtime.steer_prepare_in_flight = true;
+        }
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            service.drain_pending_steers("thread".to_string()),
+        )
+        .await
+        .expect("prepare blocker returns without dispatch");
+
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.steer_prepare_in_flight = false;
+            runtime.turn_start_in_flight = true;
+        }
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            service.drain_pending_steers("thread".to_string()),
+        )
+        .await
+        .expect("turn start blocker returns without dispatch");
+
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.turn_start_in_flight = false;
+            runtime.action_in_flight_item_id = Some("item".to_string());
+        }
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            service.drain_pending_steers("thread".to_string()),
+        )
+        .await
+        .expect("action blocker returns without dispatch");
+
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.action_in_flight_item_id = None;
+            runtime.thread_running = false;
+        }
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            service.drain_pending_steers("thread".to_string()),
+        )
+        .await
+        .expect("stopped thread blocker returns without dispatch");
+
+        assert!(calls.prepare.try_recv().is_err());
     }
 
     async fn accept_steer(service: &Arc<BridgeQueueService>, item_id: &str) {

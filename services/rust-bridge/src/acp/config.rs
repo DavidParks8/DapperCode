@@ -608,6 +608,7 @@ fn validate_env_name(name: &str) -> Result<(), RuntimeManifestError> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
