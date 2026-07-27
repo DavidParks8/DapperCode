@@ -2968,6 +2968,8 @@ mod tests {
         let mut ignored = Vec::new();
         projector.ensure_observed_run("explicit", Some("run"), None, 1, &mut ignored);
         assert!(ignored.is_empty());
+        assert!(!projector.runs.contains_key("explicit"));
+        assert!(projector.observed_runs.is_empty());
     }
 
     #[test]
@@ -3063,12 +3065,21 @@ mod tests {
 
         let envelope = messages_snapshot_envelope(&snapshot, "run".to_string(), None);
         let messages = envelope.event.messages.expect("snapshot messages");
-        assert!(messages
+        let message_ids = messages
             .iter()
-            .any(|message| message.id == "tool-call:ordinary"));
-        assert!(messages
-            .iter()
-            .any(|message| message.id == "subagent:working-task"));
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>();
+        assert!(!message_ids.contains(&"missing-message"));
+        assert!(!message_ids.contains(&"missing-tool"));
+        assert_eq!(
+            message_ids,
+            [
+                "tool-meta:ordinary",
+                "tool-call:ordinary",
+                "tool-result:ordinary",
+                "subagent:working-task",
+            ]
+        );
     }
 
     #[test]

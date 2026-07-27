@@ -1537,6 +1537,11 @@ mod tests {
             r#"<task id="child" state="running">"#.to_string(),
         );
         assert!(snapshot.mark_subagent_terminal("child", "completed"));
+        assert_eq!(snapshot.subagent_header("matching-child"), None);
+        assert_eq!(
+            snapshot.subagent_header("other-child"),
+            Some(r#"<task id="other" state="running">"#)
+        );
         snapshot.apply(&CanonicalEvent::RunFinished {
             agent_id: "agent".to_string(),
             thread_id: "thread".to_string(),
@@ -1640,8 +1645,26 @@ mod tests {
         snapshot.apply(&tool("history-only", Some(1), ToolCallStatus::InProgress));
         snapshot.tools.remove("history-only");
         snapshot.active_tool_ids.insert("history-only".to_string());
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-only")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::InProgress)
+        );
         snapshot.terminalize_active_tools(ToolCallStatus::Completed);
         assert!(snapshot.active_tool_ids.contains("history-only"));
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-only")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::Completed)
+        );
         snapshot.active_tool_ids.remove("history-only");
 
         snapshot.subagent_headers.insert(

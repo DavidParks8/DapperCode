@@ -1083,7 +1083,20 @@ mod tests {
 
         assert!(config.is_browser_origin_allowed(&HeaderMap::new()));
         assert!(config.is_browser_origin_allowed(&headers_with_origin("https://trusted.example")));
-        assert!(!config.is_browser_origin_allowed(&headers_with_origin("https://evil.example")));
+        for origin in ["https://evil.example", "null"] {
+            assert!(!config.is_browser_origin_allowed(&headers_with_origin(origin)));
+        }
+
+        let mut duplicate = headers_with_origin("https://trusted.example");
+        duplicate.append(ORIGIN, "https://trusted.example".parse().unwrap());
+        assert!(!config.is_browser_origin_allowed(&duplicate));
+
+        let mut malformed = HeaderMap::new();
+        malformed.insert(
+            ORIGIN,
+            axum::http::HeaderValue::from_bytes(b"\xff").unwrap(),
+        );
+        assert!(!config.is_browser_origin_allowed(&malformed));
     }
 
     #[test]
@@ -1109,21 +1122,13 @@ mod tests {
         input.allow_insecure_no_auth = true;
         assert!(validate(input).contains("BRIDGE_ALLOW_INSECURE_NO_AUTH"));
 
-        for connect_url in [
-            None,
-            Some("http://bridge.tailnet"),
-            Some("HTTPS://bridge.tailnet"),
-        ] {
+        for connect_url in [None, Some("http://bridge.tailnet")] {
             let mut input = pinned_transport_validation();
             input.connect_url = connect_url;
             assert!(validate(input).contains("BRIDGE_CONNECT_URL"));
         }
 
-        for preview_url in [
-            None,
-            Some("http://preview.tailnet"),
-            Some("HTTPS://preview.tailnet"),
-        ] {
+        for preview_url in [None, Some("http://preview.tailnet")] {
             let mut input = pinned_transport_validation();
             input.preview_connect_url = preview_url;
             assert!(validate(input).contains("BRIDGE_PREVIEW_CONNECT_URL"));
@@ -1234,6 +1239,28 @@ mod tests {
         assert_eq!(TransportMode::TailnetPinnedTls.as_str(), "tailnetPinnedTls");
         assert!(error().contains("not yet available"));
 
+        unsafe {
+            env::set_var("BRIDGE_CONNECT_URL", " HTTPS://bridge.tailnet/base/ ");
+            env::set_var(
+                "BRIDGE_PREVIEW_CONNECT_URL",
+                "HTTPS://preview.tailnet/base/",
+            );
+        }
+        assert_eq!(
+            parse_connect_url_env("BRIDGE_CONNECT_URL")
+                .unwrap()
+                .as_deref(),
+            Some("https://bridge.tailnet/base")
+        );
+        assert_eq!(
+            parse_connect_url_env("BRIDGE_PREVIEW_CONNECT_URL")
+                .unwrap()
+                .as_deref(),
+            Some("https://preview.tailnet/base")
+        );
+        assert!(error().contains("not yet available"));
+        configure_valid_shape();
+
         unsafe { env::set_var("BRIDGE_NETWORK_MODE", "local") };
         assert!(error().contains("BRIDGE_NETWORK_MODE=tailscale"));
         configure_valid_shape();
@@ -1268,27 +1295,6 @@ mod tests {
         assert!(error().contains("BRIDGE_PINNED_TLS_DEVICE_REGISTRY"));
         unsafe { env::set_var("BRIDGE_PINNED_TLS_DEVICE_REGISTRY", "relative/registry") };
         assert!(error().contains("must be an absolute path"));
-    }
-
-    #[test]
-    fn authenticated_origin_enforcement_rejects_unlisted_and_duplicate_origins() {
-        let mut config = no_auth_config("127.0.0.1");
-        config.auth_enabled = true;
-        config.auth_token = Some("secret".to_string());
-        config.enforce_authenticated_origins = true;
-
-        assert!(config.is_browser_origin_allowed(&HeaderMap::new()));
-        assert!(!config.is_browser_origin_allowed(&headers_with_origin("https://app.example")));
-
-        config
-            .authenticated_allowed_origins
-            .insert("https://app.example".to_string());
-        assert!(config.is_browser_origin_allowed(&headers_with_origin("https://app.example")));
-        assert!(!config.is_browser_origin_allowed(&headers_with_origin("https://app.example/path")));
-
-        let mut duplicate = headers_with_origin("https://app.example");
-        duplicate.append(ORIGIN, "https://app.example".parse().unwrap());
-        assert!(!config.is_browser_origin_allowed(&duplicate));
     }
 
     #[test]
