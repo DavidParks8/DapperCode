@@ -42,6 +42,7 @@
     "android": "./scripts/start-expo.sh android",
     "bridge": "BRIDGE_WORKDIR=$(pwd) cargo run --manifest-path services/rust-bridge/Cargo.toml",
     "bridge:ui:demo": "node ./scripts/send-bridge-ui-demo.js",
+    "release:latest": "node --experimental-strip-types ./scripts/release-latest.mts",
     "release:testflight": "node --experimental-strip-types ./scripts/release-testflight.mts",
     "operator": "cargo run --manifest-path apps/desktop/Cargo.toml --",
     "desktop:check": "cargo check --locked --manifest-path apps/desktop/Cargo.toml",

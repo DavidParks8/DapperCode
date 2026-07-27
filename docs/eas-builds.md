@@ -97,6 +97,23 @@ npm run release:testflight -- --allow-dirty                  # opt out of the cl
 The script lives at `scripts/release-testflight.mts` and runs through Node's built-in TypeScript
 support, so there is no build step.
 
+## Release Latest Main and Start the Tray
+
+To fast-forward to `origin/main`, rebuild and launch the macOS tray app, and submit a local iOS
+production archive to TestFlight with one command:
+
+```bash
+npm run release:latest
+```
+
+This command requires macOS, Xcode, CocoaPods, and an authenticated EAS account. It uses a local
+EAS build so it is not blocked by the account's cloud iOS build quota, submits the resulting IPA,
+and removes the temporary archive afterward. Tracked working-tree changes must be committed
+beforehand; untracked local files are left untouched.
+
+Use `npm run release:latest -- --dry-run` to print the workflow without changing the checkout or
+starting a build.
+
 ## Submit To Stores Manually
 
 ```bash
