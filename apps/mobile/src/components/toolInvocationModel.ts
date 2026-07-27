@@ -120,10 +120,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   const kind = meta?.kind ?? 'other';
   const status = meta?.status ?? 'completed';
   const parsed = parseStructuredContent(meta?.content);
-  const locations = [
-    ...parseLocations(meta?.locations),
-    ...parsed.locations.filter((location) => location.path),
-  ];
+  const locations = parseLocations(meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
   // the diff or console block, so it is not repeated as loose lines.
   const textLines = rawLines.filter(
@@ -166,18 +163,10 @@ function readToolMessage(
   message: ChatMessage,
   hasMeta: boolean,
 ): { title: string | null; lines: string[] } {
-  if (message.role === 'assistant') {
-    if (hasMeta) return { title: null, lines: [] };
-    const lines = getToolCallDisplayLines(message).flatMap((line) => line.split('\n'));
-    const entries = parseTimelineEntries(lines.join('\n'));
-    if (entries?.length) {
-      return { title: entries[0].title, lines: entries.flatMap((entry) => entry.details) };
-    }
-    return { title: null, lines };
-  }
-  const text = getMessageText(message);
+  const isToolCall = message.role === 'assistant';
+  const text = isToolCall ? getToolCallDisplayLines(message).join('\n') : getMessageText(message);
   if (!text.trim()) return { title: null, lines: [] };
-  if (hasMeta) return { title: null, lines: text.split('\n') };
+  if (hasMeta) return { title: null, lines: isToolCall ? [] : text.split('\n') };
   const entries = parseTimelineEntries(text);
   if (entries?.length) {
     return {
@@ -218,7 +207,6 @@ function appendLines(target: string[], lines: string[]): void {
 interface ParsedStructuredContent {
   diffs: ToolInvocationDiff[];
   terminals: ToolInvocationTerminal[];
-  locations: ToolInvocationLocation[];
   images: string[];
   /** Lines already rendered by a richer block, so they are not printed twice. */
   suppressedLines: Set<string>;
@@ -228,7 +216,6 @@ function parseStructuredContent(content: unknown): ParsedStructuredContent {
   const parsed: ParsedStructuredContent = {
     diffs: [],
     terminals: [],
-    locations: [],
     images: [],
     suppressedLines: new Set(),
   };

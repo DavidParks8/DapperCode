@@ -183,6 +183,62 @@ describe('buildToolInvocations', () => {
     });
   });
 
+  it('keeps every entry when a legacy tool message holds several timeline rows', () => {
+    const invocations = buildToolInvocations([
+      toolMessage('t1', '• Ran `pwd`\n  └ /repo\n• Ran `ls`\n  └ a.txt'),
+    ]);
+
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]).toMatchObject({
+      title: 'Ran `pwd`',
+      textLines: ['/repo', 'Ran `ls`', 'a.txt'],
+    });
+  });
+
+  it('collects terminal output from plain strings and nested wrappers', () => {
+    const invocations = buildToolInvocations([
+      toolMessage(
+        't1',
+        '',
+        meta({
+          kind: 'execute',
+          title: 'npm test',
+          content: [
+            { type: 'terminal', terminalId: 'plain', output: 'ran 3 tests' },
+            {
+              type: 'terminal',
+              terminalId: 'nested',
+              output: { chunks: [{ type: 'text', text: 'compiling' }, { note: 'linking' }] },
+            },
+          ],
+        }),
+      ),
+    ]);
+
+    expect(invocations[0].terminals).toEqual([
+      { terminalId: 'plain', output: 'ran 3 tests' },
+      { terminalId: 'nested', output: 'compiling\nlinking' },
+    ]);
+  });
+
+  it('builds a data URL for inline images and skips ones missing a mime type', () => {
+    const invocations = buildToolInvocations([
+      toolMessage(
+        't1',
+        '',
+        meta({
+          title: 'Screenshot',
+          content: [
+            { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+            { type: 'image', data: 'BBBB' },
+          ],
+        }),
+      ),
+    ]);
+
+    expect(invocations[0].images).toEqual(['data:image/png;base64,AAAA']);
+  });
+
   it('uses the first output line as a title when nothing else names the tool', () => {
     const invocations = buildToolInvocations([
       toolMessage('t1', 'raw output\nsecond line'),

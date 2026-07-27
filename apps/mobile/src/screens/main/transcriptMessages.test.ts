@@ -279,6 +279,56 @@ describe('buildTranscriptDisplayItems', () => {
     ]);
   });
 
+  it('keeps a run of computer-use tools grouped into one trace', () => {
+    const messages = [
+      message('u1', 'user', 'Drive the app'),
+      message('t1', 'system', '• Called tool `computeruse / screenshot`', { systemKind: 'tool' }),
+      message('t2', 'system', '• Called tool `computeruse / click`\n  └ App: Safari', {
+        systemKind: 'tool',
+      }),
+      message('a1', 'assistant', 'Done.'),
+    ];
+
+    const items = buildTranscriptDisplayItems(messages);
+
+    expect(summarizeItems(items)).toEqual([
+      { kind: 'message', id: 'user-1-Drive the app' },
+      { kind: 'toolGroup', id: 'tool-group-t1-t2' },
+      { kind: 'message', id: 'a1' },
+    ]);
+    const group = items[1];
+    if (group.kind !== 'toolGroup') throw new Error('expected a tool group');
+    expect(group.invocations.map((invocation) => invocation.title)).toEqual([
+      'Called tool `computeruse / screenshot`',
+      'Called tool `computeruse / click`',
+    ]);
+  });
+
+  it('splits a computer-use run apart once an unrelated tool joins it', () => {
+    const messages = [
+      message('t1', 'system', '• Called tool `computeruse / screenshot`', { systemKind: 'tool' }),
+      message('t2', 'system', '• Ran `ls`', { systemKind: 'tool' }),
+    ];
+
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'toolInvocation', id: 't1', title: 'Called tool `computeruse / screenshot`' },
+      { kind: 'toolInvocation', id: 't2', title: 'Ran `ls`' },
+    ]);
+  });
+
+  it('drops a buffered tool message that carries no invocation at all', () => {
+    const messages = [
+      message('u1', 'user', 'Audit this'),
+      { id: 't1', role: 'tool', toolCallId: 't1', content: '', createdAt: '2026-03-19T00:00:00.000Z' } as ChatMessage,
+      message('a1', 'assistant', 'Done.'),
+    ];
+
+    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
+      { kind: 'message', id: 'user-1-Audit this' },
+      { kind: 'message', id: 'a1' },
+    ]);
+  });
+
   it('turns legacy untyped tool timeline rows into individual invocations', () => {
     const messages = [
       message('u1', 'user', 'Audit this'),
