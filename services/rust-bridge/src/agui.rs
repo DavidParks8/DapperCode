@@ -4506,6 +4506,17 @@ mod tests {
             terminal_activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
         );
+        let parent_finished = projector.project_canonical(&CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: parent_thread.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        let parent_cards = subagent_cards(&parent_finished);
+        assert_eq!(parent_cards.len(), 1);
+        assert!(parent_cards[0].1.contains("Sub-agent completed"));
     }
 
     /// A foreground task tool names its child only once it has finished, so the bridge finds the
@@ -4558,8 +4569,85 @@ mod tests {
             .is_some_and(|text| text.contains("Latest: Working on Read repository")));
         assert_eq!(
             card["event"]["content"]["subAgent"]["receiverThreadIds"][0],
-            serde_json::Value::String(child_thread)
+            serde_json::Value::String(child_thread.clone())
         );
+
+        let blank_title = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "blank-title".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: " ".to_string(),
+            content: FieldUpdate::Set(String::new()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert!(subagent_cards(&blank_title)[0]
+            .1
+            .contains("Latest: Working on Using a tool"));
+
+        let whitespace = projector.project_canonical(&CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            role: MessageRole::Agent,
+            message_id: "whitespace".to_string(),
+            content: "   ".to_string(),
+            content_block: None,
+        });
+        assert!(subagent_cards(&whitespace).is_empty());
+
+        let child_finished = |thread_id: &str| CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: thread_id.to_string(),
+            run_id: format!("{thread_id}-run"),
+            source_turn_id: format!("{thread_id}-turn"),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        };
+        let completed = projector.project_canonical(&child_finished(&child_thread));
+        assert!(subagent_cards(&completed)[0]
+            .1
+            .contains("Sub-agent completed"));
+
+        assert!(projector.link_subagent(
+            parent_thread,
+            "stale-run",
+            Some("turn-1".to_string()),
+            "task-stale",
+            "stale-child",
+        ));
+        let stale = projector.project_canonical(&child_finished("stale-child"));
+        assert!(subagent_cards(&stale)[0].1.contains("Sub-agent completed"));
+
+        assert!(projector.link_subagent(
+            "missing-parent",
+            "missing-run",
+            None,
+            "task-orphan",
+            "orphan-child",
+        ));
+        let orphan = projector.project_canonical(&child_finished("orphan-child"));
+        assert!(subagent_cards(&orphan)[0].1.contains("Sub-agent completed"));
+
+        let source_correlated = projector.project_canonical(&CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "source-correlated".to_string(),
+            run_id: None,
+            source_turn_id: Some("source-turn".to_string()),
+            generation: Some(1),
+            role: MessageRole::Agent,
+            message_id: "source-message".to_string(),
+            content: "Response".to_string(),
+            content_block: None,
+        });
+        assert!(source_correlated.events.is_empty());
     }
 
     #[test]
