@@ -36,6 +36,17 @@ export function latestMockGesture(kind: string): MockGesture {
   throw new Error(`No ${kind} gesture was constructed`);
 }
 
+/** Returns the most recently constructed gesture registered under the given `withTestId`. */
+export function mockGestureByTestId(testId: string): MockGesture {
+  for (let index = mockGestures.length - 1; index >= 0; index -= 1) {
+    const gesture = mockGestures[index];
+    if (gesture.config.withTestId === testId) {
+      return gesture;
+    }
+  }
+  throw new Error(`No gesture with testId "${testId}" was constructed`);
+}
+
 /** Drives a gesture through the drag lifecycle so tests can assert on real swipe outcomes. */
 export function simulatePan(
   gesture: MockGesture,

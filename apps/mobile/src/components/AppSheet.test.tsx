@@ -29,7 +29,7 @@ function textOf(tree: ReactTestRenderer): string {
 }
 
 describe('AppSheet', () => {
-  it('mounts content while visible and unmounts it when closed', () => {
+  it('opens from an initially hidden state and can reopen after closing', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
     act(() => {
@@ -67,6 +67,18 @@ describe('AppSheet', () => {
       );
     });
     expect(textOf(tree)).not.toContain('Sheet body');
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => {
+      tree?.update(
+        wrap(
+          <AppSheet visible onClose={onClose} accessibilityLabel="Picker">
+            <Text>Sheet body</Text>
+          </AppSheet>,
+        ),
+      );
+    });
+    expect(textOf(tree)).toContain('Sheet body');
     expect(onClose).not.toHaveBeenCalled();
     act(() => tree?.unmount());
   });

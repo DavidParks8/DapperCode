@@ -32,7 +32,6 @@ export function PrivacyScreen({ policyUrl, onOpenDrawer }: PrivacyScreenProps) {
   return (
     <LegalScreen
       title="Privacy"
-      iconName="shield-checkmark"
       sections={privacySections}
       documentUrl={policyUrl}
       documentSectionLabel="Official Policy"

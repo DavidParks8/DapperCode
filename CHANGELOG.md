@@ -6,6 +6,10 @@ All notable DapperCode changes are documented here.
 
 ### Fixed
 
+- Renaming a session from the chat header works again. The title was wrapped in a press target that
+  also had to host a horizontally scrolling view, so the tap was swallowed and nothing happened.
+  The title is now a plain drag-to-scroll surface that reveals a long session name in full, and a
+  dedicated pencil button beside it opens the rename form.
 - Long-pressing an AI response now opens it for real text selection instead of doing nothing useful.
   React Native's `selectable` text only offers a menu whose one action copies the whole block, so the
   response is now handed to a read-only text field where a range can actually be selected, and the

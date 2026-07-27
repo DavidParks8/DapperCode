@@ -20,7 +20,8 @@ interface ChatHeaderProps {
   onOpenDrawer: () => void;
   title: string;
   agent?: AgentDescriptor | null;
-  onOpenTitleMenu?: () => void;
+  /** Opens the rename sheet. Rendered as a dedicated button so the title stays draggable. */
+  onRenameTitle?: () => void;
   rightIconName?: keyof typeof Ionicons.glyphMap;
   onRightActionPress?: () => void;
 }
@@ -29,7 +30,7 @@ export function ChatHeader({
   onOpenDrawer,
   title,
   agent,
-  onOpenTitleMenu,
+  onRenameTitle,
   rightIconName,
   onRightActionPress,
 }: ChatHeaderProps) {
@@ -56,30 +57,33 @@ export function ChatHeader({
               color={colors.textPrimary}
             />
           </Pressable>
-          {onOpenTitleMenu ? (
-            <Pressable
-              onPress={onOpenTitleMenu}
-              hitSlop={8}
-              style={({ pressed }) => [styles.titleButton, pressed && styles.titleButtonPressed]}
-              accessibilityRole="button"
-              accessibilityLabel={`${titleDisplay}, chat options`}
-              accessibilityHint="Opens actions for this chat"
-            >
-              <ScrollableTitle title={titleDisplay} />
-              <AgentIcon agent={agent} size={18} />
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="chevron-down"
-                size={12}
-                color={colors.textMuted}
-              />
-            </Pressable>
-          ) : (
-            <View style={styles.modelNameRow}>
-              <ScrollableTitle title={titleDisplay} />
-              <AgentIcon agent={agent} size={18} />
-            </View>
-          )}
+          {/*
+            The title is a horizontally scrollable surface so a long session name can be read in
+            full. It must not sit inside a Pressable: a press wrapper swallows the drag gesture on
+            the scroll view and its own press never fires, which made tapping the title a no-op.
+            Renaming lives in the dedicated button beside it instead.
+          */}
+          <View style={styles.titleRow}>
+            <ScrollableTitle title={titleDisplay} />
+            <AgentIcon agent={agent} size={18} />
+            {onRenameTitle ? (
+              <Pressable
+                onPress={onRenameTitle}
+                hitSlop={10}
+                style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Edit session title"
+                accessibilityHint="Opens the rename form for this session"
+              >
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="pencil"
+                  size={14}
+                  color={colors.textMuted}
+                />
+              </Pressable>
+            ) : null}
+          </View>
           <View style={{ flex: 1 }} />
           {rightIconName ? (
             onRightActionPress ? (
@@ -118,10 +122,12 @@ function ScrollableTitle({ title }: { title: string }) {
   const scrollRef = useRef<ScrollView>(null);
   const viewportWidthRef = useRef(0);
   const contentWidthRef = useRef(0);
+  const offsetRef = useRef(0);
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(false);
 
   const updateFades = (offsetX: number) => {
+    offsetRef.current = offsetX;
     const maxOffset = Math.max(0, contentWidthRef.current - viewportWidthRef.current);
     setShowLeftFade(offsetX > 1);
     setShowRightFade(offsetX < maxOffset - 1);
@@ -138,15 +144,17 @@ function ScrollableTitle({ title }: { title: string }) {
         ref={scrollRef}
         horizontal
         bounces={false}
+        scrollEnabled
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
+        accessibilityLabel={title}
         onLayout={(event) => {
           viewportWidthRef.current = event.nativeEvent.layout.width;
-          updateFades(0);
+          updateFades(offsetRef.current);
         }}
         onContentSizeChange={(width) => {
           contentWidthRef.current = width;
-          updateFades(0);
+          updateFades(offsetRef.current);
         }}
         onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
           updateFades(event.nativeEvent.contentOffset.x);
@@ -190,24 +198,19 @@ const createStyles = (theme: AppTheme) =>
     rightBtn: {
       padding: 2,
     },
-    modelNameRow: {
+    titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.xs,
       flexShrink: 1,
       minWidth: 0,
     },
-    titleButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.xs,
+    editBtn: {
+      flexShrink: 0,
       borderRadius: 8,
-      paddingHorizontal: 2,
-      paddingVertical: 1,
-      flexShrink: 1,
-      minWidth: 0,
+      padding: 4,
     },
-    titleButtonPressed: {
+    editBtnPressed: {
       backgroundColor: theme.colors.bgItem,
     },
     modelName: {

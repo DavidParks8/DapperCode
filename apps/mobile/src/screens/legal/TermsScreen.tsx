@@ -32,7 +32,6 @@ export function TermsScreen({ termsUrl, onOpenDrawer }: TermsScreenProps) {
   return (
     <LegalScreen
       title="Terms"
-      iconName="document-text"
       sections={termsSections}
       documentUrl={termsUrl}
       documentSectionLabel="Official Terms"
