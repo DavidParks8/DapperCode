@@ -20,8 +20,10 @@ import { createStyles } from './chatMessageStyles';
 import type { ScrollableRowTextProps } from './chatMessageTypes';
 
 export function SelectableMessageText({ children, ...props }: TextProps): ReactElement {
+  // The spread has to come first: a caller passing an explicit `selectable={undefined}` would
+  // otherwise clobber the computed default and silently make the text unselectable.
   return (
-    <Text selectable={props.selectable ?? !props.onPress} {...props}>
+    <Text {...props} selectable={props.selectable ?? !props.onPress}>
       {children}
     </Text>
   );

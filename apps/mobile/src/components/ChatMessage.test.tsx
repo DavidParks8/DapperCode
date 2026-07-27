@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -398,6 +399,115 @@ describe('ChatMessage copy action', () => {
 
     expect(findCopyButtons(tree.root as QueryableTestInstance, 'user-message').length).toBe(0);
     act(() => tree.unmount());
+  });
+});
+
+describe('ChatMessage text selection', () => {
+  const response = '# Heading\n\nThe bridge is running on port 4319.\n\n```sh\nnpm run bridge\n```';
+
+  it('leaves the markdown block text unselectable so the long press is not swallowed', () => {
+    // React Native's `Text selectable` only attaches a long press that opens a copy-the-whole-
+    // block edit menu; leaving it on means the user can never reach real selection. Only a Text
+    // with no Text ancestor becomes a real paragraph view, so those are the ones that matter.
+    const tree = renderMessage({
+      id: 'assistant-blocks',
+      role: 'assistant',
+      content: response,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    const blockTexts = root
+      .findAll((node) => node.type === Text)
+      .filter((node) => !hasTextAncestor(node));
+
+    expect(blockTexts.length).toBeGreaterThan(0);
+    expect(blockTexts.filter((node) => node.props.selectable === true)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('opens a selectable text sheet on long press and closes it again', () => {
+    const tree = renderMessage({
+      id: 'assistant-longpress',
+      role: 'assistant',
+      content: response,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    expect(
+      root.findAllByProps({ testID: 'chat-message-select-text-assistant-longpress' }),
+    ).toHaveLength(0);
+
+    const target = root.findByProps({ testID: 'chat-message-select-target-assistant-longpress' });
+    act(() => readOnLongPress(target.props)());
+
+    // A read-only multiline TextInput is the only React Native surface that supports partial
+    // selection, so the sheet has to hand the response to one.
+    const input = root.findByType(TextInput);
+    expect(input.props.value).toBe(response);
+    expect(input.props.editable).toBe(false);
+    expect(input.props.multiline).toBe(true);
+
+    act(() =>
+      readOnPress(
+        root.findByProps({ testID: 'chat-message-select-text-assistant-longpress-close' }).props,
+      )(),
+    );
+
+    expect(root.findAllByType(TextInput)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('opens the same sheet from the select-text action button', () => {
+    const tree = renderMessage({
+      id: 'assistant-action',
+      role: 'assistant',
+      content: response,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    const button = root.findByProps({ testID: 'chat-message-copy-assistant-action-select' });
+    expect(button.props.accessibilityLabel).toBe('Select message text');
+
+    act(() => readOnPress(button.props)());
+
+    expect(root.findByType(TextInput).props.value).toBe(response);
+    act(() => tree.unmount());
+  });
+
+  it('does not arm the long press while a response is still empty', () => {
+    const tree = renderMessage({
+      id: 'assistant-empty',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    expect(
+      root.findByProps({ testID: 'chat-message-select-target-assistant-empty' }).props.onLongPress,
+    ).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('keeps user bubbles and tool output selectable', () => {
+    const userTree = renderMessage({
+      id: 'user-selectable',
+      role: 'user',
+      content: 'Restart the bridge',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const userRoot = userTree.root as QueryableTestInstance;
+
+    expect(
+      userRoot
+        .findAll((node) => node.type === Text)
+        .filter((node) => !hasTextAncestor(node))
+        .some((node) => node.props.selectable === true),
+    ).toBe(true);
+    act(() => userTree.unmount());
   });
 });
 
@@ -1257,6 +1367,26 @@ function readOnPress(props: Record<string, unknown>): () => void {
     throw new Error('Expected press handler');
   }
   return props.onPress as () => void;
+}
+
+function readOnLongPress(props: Record<string, unknown>): () => void {
+  if (typeof props.onLongPress !== 'function') {
+    throw new Error('Expected long press handler');
+  }
+  return props.onLongPress as () => void;
+}
+
+/**
+ * React Native only turns the outermost `Text` of a tree into a real paragraph view, so a nested
+ * `Text` never carries the selection gesture no matter what its `selectable` prop says.
+ */
+function hasTextAncestor(node: QueryableTestInstance): boolean {
+  let parent = (node as unknown as { parent: QueryableTestInstance | null }).parent;
+  while (parent) {
+    if (parent.type === Text) return true;
+    parent = (parent as unknown as { parent: QueryableTestInstance | null }).parent;
+  }
+  return false;
 }
 
 function findCopyButtons(root: QueryableTestInstance, messageId: string): QueryableTestInstance[] {

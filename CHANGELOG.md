@@ -6,6 +6,10 @@ All notable DapperCode changes are documented here.
 
 ### Fixed
 
+- Long-pressing an AI response now opens it for real text selection instead of doing nothing useful.
+  React Native's `selectable` text only offers a menu whose one action copies the whole block, so the
+  response is now handed to a read-only text field where a range can actually be selected, and the
+  same view is reachable from a select-text button beside Copy.
 - Sub-agent cards now open a known child chat while it is running, summarize streamed answer text as
   `Responding...`, keep the latest activity on one horizontally scrollable line, and show one working
   update per child tool instead of flashing its pending and completed lifecycle states.
