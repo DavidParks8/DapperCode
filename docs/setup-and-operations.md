@@ -38,10 +38,11 @@ Profiles use one canonical transport mode:
   exception. It is private-network software for a trusted LAN, VPN, or Tailscale network and must
   never be exposed directly to the public internet.
 - `tailnetPinnedTls` represents the future Tailscale-reachable transport using mutual TLS 1.3 and
-  exact SHA-256 SPKI pins. Stage 0 only defines and validates this contract. The pinned listener,
-  bridge identity generation, device registry/enrollment, native iOS networking, and key rotation
-  are not implemented. Selecting this mode fails explicitly and never falls back to the current
-  HTTP/bearer router.
+  exact SHA-256 SPKI pins. Stage 0 defines and validates this contract, and the isolated
+  [native platform proof](pinned-tls-platform-proof.md) exercises iOS-to-rustls feasibility without
+  wiring production traffic. Pairing, the production pinned listener, device registry/enrollment,
+  mobile migration, and key rotation are not implemented. Selecting this mode fails explicitly and
+  never falls back to the current HTTP/bearer router.
 
 Stored desktop and mobile profiles without `transportMode`, and bridge environments without
 `BRIDGE_TRANSPORT_MODE`, migrate to `privateBearer`. Desktop setup, status, and list JSON report the

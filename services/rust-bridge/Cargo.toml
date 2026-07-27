@@ -3,6 +3,7 @@ name = "dappercode-bridge"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.97.1"
+default-run = "dappercode-bridge"
 license = "MIT"
 repository = "https://github.com/DavidParks8/DapperCode"
 publish = false
@@ -17,7 +18,10 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 futures-util = "0.3"
 getrandom = "0.3"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["service", "tokio"] }
 libc = "0.2"
+rcgen = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -26,8 +30,12 @@ thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 regex = "1"
 qr2term = "0.3"
+rustls = { version = "0.23.38", default-features = false, features = ["ring", "std", "tls12"] }
 rustix = { version = "1.1", features = ["fs"] }
 tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+tower = { version = "0.5", features = ["util"] }
 uuid = { version = "1", features = ["v4"] }
+x509-parser = { version = "0.18", features = ["verify"] }
 agent-client-protocol = { version = "1.2.0", features = ["unstable_elicitation"] }

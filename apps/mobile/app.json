@@ -48,6 +48,7 @@
     },
     "plugins": [
       "./plugins/withAndroidCleartextTraffic",
+      "./plugins/withPinnedTlsProofEmbeddedEntry",
       [
         "expo-camera",
         {
