@@ -20,6 +20,7 @@ import {
 } from '../api/messages';
 import { createAppTheme, AppThemeProvider } from '../theme';
 import { ChatMessage, ToolInvocationRow } from './ChatMessage';
+import { resetHuggedTextWidthCache } from './chatMessageUserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 
 type QueryableTestInstance = ReactTestInstance & {
@@ -556,6 +557,122 @@ describe('ChatMessage transcript width', () => {
     };
 
     expect(bodyStyle.marginRight).toBeUndefined();
+  });
+});
+
+describe('ChatMessage user bubble', () => {
+  beforeEach(() => {
+    resetHuggedTextWidthCache();
+  });
+
+  const findUserText = (root: QueryableTestInstance) => {
+    const node = root
+      .findAll((candidate) => candidate.type === Text)
+      .find((candidate) => flattenRenderedText(candidate.props.children).includes('wrapped'));
+    if (!node) throw new Error('Expected the user message text to render');
+    return node;
+  };
+
+  const readContentStyle = (root: QueryableTestInstance) =>
+    (StyleSheet.flatten(root.findByProps({ testID: 'user-bubble-content' }).props.style as never) ??
+      {}) as { maxWidth?: number | string };
+
+  const fireTextLayout = (node: QueryableTestInstance, widths: number[]) => {
+    const onTextLayout = node.props.onTextLayout as
+      ((event: { nativeEvent: { lines: { width: number }[] } }) => void) | undefined;
+    if (!onTextLayout) throw new Error('Expected the user text to report its layout');
+    act(() => {
+      onTextLayout({ nativeEvent: { lines: widths.map((width) => ({ width })) } });
+    });
+  };
+
+  it('hugs the widest rendered line instead of filling the allowed width', () => {
+    const tree = renderMessage({
+      id: 'user-hug',
+      role: 'user',
+      content: 'A message long enough that it gets wrapped across more than one line.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    expect(readContentStyle(root).maxWidth).toBeUndefined();
+
+    fireTextLayout(findUserText(root), [212.4, 98]);
+    expect(readContentStyle(root).maxWidth).toBe(213);
+
+    fireTextLayout(findUserText(root), [212.4, 98]);
+    expect(readContentStyle(root).maxWidth).toBe(213);
+
+    act(() => tree.unmount());
+  });
+
+  it('ignores empty and shrinking layout reports so the bubble stays stable', () => {
+    const tree = renderMessage({
+      id: 'user-stable',
+      role: 'user',
+      content: 'Another wrapped user message for measurement.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    fireTextLayout(findUserText(root), [180, 60]);
+    fireTextLayout(findUserText(root), []);
+    fireTextLayout(findUserText(root), [90]);
+
+    expect(readContentStyle(root).maxWidth).toBe(180);
+    act(() => tree.unmount());
+  });
+
+  it('reuses the measured width when the row remounts while scrolling', () => {
+    const message = {
+      id: 'user-remount',
+      role: 'user' as const,
+      content: 'A wrapped user message that gets recycled by the list.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+
+    const first = renderMessage(message);
+    fireTextLayout(findUserText(first.root as QueryableTestInstance), [164, 70]);
+    expect(readContentStyle(first.root as QueryableTestInstance).maxWidth).toBe(164);
+    act(() => first.unmount());
+
+    const second = renderMessage(message);
+    expect(readContentStyle(second.root as QueryableTestInstance).maxWidth).toBe(164);
+    act(() => second.unmount());
+  });
+
+  it('leaves bubbles with attachments unconstrained', () => {
+    const tree = renderMessage({
+      id: 'user-attachment',
+      role: 'user',
+      content: 'A wrapped caption\n[file: /tmp/a-very-long-attachment-path-report.txt]',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    expect(findUserText(root).props.onTextLayout).toBeUndefined();
+    expect(readContentStyle(root).maxWidth).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('renders user text in the shared UI font rather than a monospace face', () => {
+    const theme = createAppTheme('dark');
+    const tree = renderMessage({
+      id: 'user-font',
+      role: 'user',
+      content: 'A wrapped user message.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const style = (StyleSheet.flatten(findUserText(root).props.style as never) ?? {}) as {
+      fontFamily?: string;
+      fontSize?: number;
+    };
+
+    expect(style.fontFamily).toBeUndefined();
+    expect(style.fontFamily).not.toBe(theme.fonts.monoRegular);
+    expect(style.fontSize).toBe(theme.typography.body.fontSize);
+    act(() => tree.unmount());
   });
 });
 
