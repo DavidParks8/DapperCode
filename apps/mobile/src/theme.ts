@@ -1,5 +1,5 @@
 import { createContext, createElement, useContext, type PropsWithChildren } from 'react';
-import { Platform, type ColorSchemeName, type TextStyle } from 'react-native';
+import { type ColorSchemeName, type TextStyle } from 'react-native';
 
 import { SYSTEM_FONT_FAMILIES, type AppFontFamilies } from './fonts';
 
@@ -76,8 +76,6 @@ export interface AppTheme {
   typography: AppTypography;
   keyboardAppearance: 'light' | 'dark';
   blurTint: 'light' | 'dark';
-  activityBarTint:
-    'light' | 'dark' | 'systemUltraThinMaterialLight' | 'systemUltraThinMaterialDark';
   statusBarStyle: 'dark-content' | 'light-content';
 }
 
@@ -315,14 +313,6 @@ export function createAppTheme(
     typography: createTypography(colors, fonts),
     keyboardAppearance: isDark ? 'dark' : 'light',
     blurTint: isDark ? 'dark' : 'light',
-    activityBarTint:
-      Platform.OS === 'ios'
-        ? isDark
-          ? 'systemUltraThinMaterialDark'
-          : 'systemUltraThinMaterialLight'
-        : isDark
-          ? 'dark'
-          : 'light',
     statusBarStyle: isDark ? 'light-content' : 'dark-content',
   };
 }

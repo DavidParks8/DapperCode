@@ -27,6 +27,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { Platform } from 'react-native';
 import { useAccessibilityAnnouncement } from '../../accessibility';
+import { isSettledIdleActivity } from './mainScreenActivityIndicator';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { hasStructuredPlanCardContent, resolveWorkflowCardMode } from './planCardState';
 import {
@@ -61,6 +62,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     attachmentModalVisible,
     chatPlanSnapshotsRef,
     dismissedPlanImplementationTurnIdByThreadRef,
+    displayedActivity,
     draft,
     isOpeningChat,
     pendingOptimisticQueuedMessagesRef,
@@ -234,7 +236,11 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   const showTopCardsRow =
     !isOpeningChat && (workflowCardMode !== null || workflowBridgeUiSurfaces.length > 0);
   const showFloatingActivity =
-    shouldShowComposer && Boolean(selectedChat) && !isOpeningChat && !showBridgeRecoveryBanner;
+    shouldShowComposer &&
+    Boolean(selectedChat) &&
+    !isOpeningChat &&
+    !showBridgeRecoveryBanner &&
+    !isSettledIdleActivity(displayedActivity);
   const chatBottomInset = shouldShowComposer
     ? theme.spacing.lg
     : Math.max(theme.spacing.xxl, safeAreaInsets.bottom + theme.spacing.lg);

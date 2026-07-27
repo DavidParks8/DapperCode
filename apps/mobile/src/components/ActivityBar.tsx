@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { LoadingGlyph } from './LoadingGlyph';
 import { useAppTheme, type AppTheme } from '../theme';
@@ -21,6 +21,10 @@ const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
   idle: 'ellipse-outline',
 };
 
+/**
+ * A single quiet caption line, not a card: the agent's status sits directly on the
+ * chat background above the composer so it reads as chrome-free supporting text.
+ */
 export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -35,82 +39,58 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const hasDetail = normalizedDetail.length > 0;
   const normalizedTitle = title.trim();
   const titleText = normalizedTitle || title;
-  const singleLineText = titleText;
+  const stacked = hasDetail && tone !== 'running';
+  const labelStyle = [styles.titleText, tone === 'error' ? styles.titleTextError : null];
 
   return (
-    <BlurView
-      intensity={42}
-      tint={theme.activityBarTint}
-      blurMethod="dimezisBlurViewSdk31Plus"
-      style={styles.container}
+    <Animated.View
+      entering={FadeIn.duration(160)}
+      style={[styles.row, stacked ? styles.rowStacked : null]}
     >
-      <View
-        style={[styles.content, hasDetail && tone !== 'running' ? styles.contentExpanded : null]}
-      >
-        <View
-          style={[
-            styles.iconWrap,
-            hasDetail && tone !== 'running' ? styles.iconWrapExpanded : null,
-          ]}
-        >
-          {tone === 'running' ? (
-            <LoadingGlyph color={color} variant="bars" size="small" />
-          ) : (
-            <Ionicons name={ICON_BY_TONE[tone]} size={13} color={color} />
-          )}
-        </View>
-        {hasDetail && tone !== 'running' ? (
-          <View style={styles.textColumn}>
-            <Text style={styles.titleText} numberOfLines={1}>
-              {titleText}
-            </Text>
-            <Text style={styles.detailText} numberOfLines={1}>
-              {normalizedDetail}
-            </Text>
-          </View>
-        ) : hasDetail ? (
-          <Text style={styles.summaryText} numberOfLines={1}>
-            {normalizedDetail}
-          </Text>
+      <View style={[styles.iconWrap, stacked ? styles.iconWrapStacked : null]}>
+        {tone === 'running' ? (
+          <LoadingGlyph color={color} variant="bars" size="small" />
         ) : (
-          <Text style={styles.titleText} numberOfLines={1}>
-            {singleLineText}
-          </Text>
+          <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
         )}
       </View>
-    </BlurView>
+      {stacked ? (
+        <View style={styles.textColumn}>
+          <Text style={labelStyle} numberOfLines={1}>
+            {titleText}
+          </Text>
+          <Text style={styles.detailText} numberOfLines={1}>
+            {normalizedDetail}
+          </Text>
+        </View>
+      ) : (
+        <Text style={[...labelStyle, styles.titleTextInline]} numberOfLines={1}>
+          {hasDetail ? normalizedDetail : titleText}
+        </Text>
+      )}
+    </Animated.View>
   );
 }
 
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
-    container: {
-      borderRadius: 10,
-      overflow: 'hidden',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderLight,
-      backgroundColor: theme.colors.bgCanvasAccent,
-      marginHorizontal: theme.spacing.lg,
-      marginBottom: theme.spacing.xs / 2,
-    },
-    content: {
+    row: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.xs,
-      paddingHorizontal: theme.spacing.sm + 2,
-      paddingVertical: 3,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: 2,
     },
-    contentExpanded: {
+    rowStacked: {
       alignItems: 'flex-start',
-      paddingVertical: 5,
     },
     iconWrap: {
       width: 14,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    iconWrapExpanded: {
-      paddingTop: 1,
+    iconWrapStacked: {
+      paddingTop: 2,
     },
     textColumn: {
       flex: 1,
@@ -121,8 +101,13 @@ const createStyles = (theme: AppTheme) =>
       fontSize: 11,
       lineHeight: 15,
       fontWeight: '600',
-      color: theme.colors.textPrimary,
+      color: theme.colors.textMuted,
+    },
+    titleTextInline: {
       flex: 1,
+    },
+    titleTextError: {
+      color: theme.colors.statusError,
     },
     detailText: {
       ...theme.typography.caption,
@@ -130,13 +115,6 @@ const createStyles = (theme: AppTheme) =>
       lineHeight: 14,
       fontWeight: '500',
       color: theme.colors.textMuted,
-    },
-    summaryText: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      lineHeight: 14,
-      fontWeight: '600',
-      color: theme.colors.textPrimary,
-      flex: 1,
+      opacity: 0.75,
     },
   });
