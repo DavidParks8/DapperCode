@@ -2760,6 +2760,7 @@ mod tests {
             structured_content: vec![json!(" "), json!("result")],
             locations: Vec::new(),
             truncated: true,
+            subagent: false,
         };
         assert_eq!(
             tool_snapshot_text(&tool),
@@ -2816,21 +2817,23 @@ mod tests {
             (MessageRole::Agent, "Responding"),
             (MessageRole::User, "Received input"),
         ] {
-            let (_, progress) =
+            let progress =
                 subagent_progress(&canonical_message(role, "message", "payload")).unwrap();
-            assert!(progress.starts_with(prefix), "{progress}");
+            assert!(progress.latest.starts_with(prefix), "{}", progress.latest);
         }
         assert!(subagent_progress(&canonical_message(MessageRole::Agent, "empty", " ")).is_none());
 
-        for (status, prefix) in [
-            (ToolCallStatus::Failed, "Tool failed"),
-            (ToolCallStatus::Completed, "Completed"),
-            (ToolCallStatus::Pending, "Preparing"),
-            (ToolCallStatus::InProgress, "Working on"),
+        for (status, expected) in [
+            (ToolCallStatus::Failed, Some("Tool failed Using a tool")),
+            (ToolCallStatus::Completed, Some("Working on Using a tool")),
+            (ToolCallStatus::Pending, None),
+            (ToolCallStatus::InProgress, Some("Working on Using a tool")),
         ] {
             let tool = subagent_task_tool("tool", " ", status, FieldUpdate::Unchanged);
-            let (_, progress) = subagent_progress(&tool).unwrap();
-            assert_eq!(progress, format!("{prefix} Using a tool"));
+            assert_eq!(
+                subagent_progress(&tool).map(|progress| progress.latest),
+                expected.map(str::to_string)
+            );
         }
 
         assert_eq!(bounded("éé", 3), "é");
@@ -2903,6 +2906,7 @@ mod tests {
                 child_run_id,
                 child_generation,
                 minimum_child_generation,
+                progress_revisions: HashSet::new(),
             };
         let child_message = |generation, run_id: &str| {
             let mut event = canonical_message(MessageRole::Agent, "message", "working");
@@ -3082,6 +3086,7 @@ mod tests {
                 child_run_id: None,
                 child_generation: None,
                 minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
             },
         );
         projector.subagent_links.insert(
@@ -3095,6 +3100,7 @@ mod tests {
                 child_run_id: None,
                 child_generation: None,
                 minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
             },
         );
 
