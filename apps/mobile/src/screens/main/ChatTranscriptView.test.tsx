@@ -279,6 +279,34 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps the jump-to-latest control hidden when the transcript is not scrollable', () => {
+    const tree = render({});
+    const list = getList(tree);
+
+    scroll(list, 120, 240, 240);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('hides the jump-to-latest control once the remaining content fits the viewport', () => {
+    const tree = render({});
+    let list = getList(tree);
+
+    scroll(list, 120, 1000, 200);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
+    ).toBeGreaterThan(0);
+
+    list = getList(tree);
+    act(() => list.props.onContentSizeChange(320, 200));
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
   it('loads local pages from layout, content changes, and older-directed scrolls once per checkpoint', () => {
     const largeChat = makeChat({ messages: makeMessages(140) });
     const onPinnedAutoScroll = jest.fn();
