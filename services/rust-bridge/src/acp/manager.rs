@@ -2547,7 +2547,7 @@ mod catalog_tests {
         let statuses = events
             .iter()
             .map(|event| match event {
-                CanonicalEvent::Tool { status, .. } => status.clone(),
+                CanonicalEvent::Tool { status, .. } => *status,
                 _ => panic!("expected tool event"),
             })
             .collect::<Vec<_>>();

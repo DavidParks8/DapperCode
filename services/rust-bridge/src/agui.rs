@@ -2518,10 +2518,8 @@ mod tests {
         );
 
         let unicode = format!("{}é", "x".repeat(7));
-        let borrowed = unicode.as_str();
         assert_eq!(bounded(unicode.as_str(), 8), "xxxxxxx");
         assert_eq!(bounded(&unicode, 8), "xxxxxxx");
-        assert_eq!(bounded(&borrowed, 8), "xxxxxxx");
     }
 
     #[test]
