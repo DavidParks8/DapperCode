@@ -639,14 +639,17 @@ describe('ChatMessage system timeline matrices', () => {
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Reading repository',
+        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
-    expect(hasRenderedText(tree.root as QueryableTestInstance, 'Open agent chat')).toBe(true);
+    const root = tree.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
+    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
 
     const completed = createActivityMessage(
       'subagent-live',

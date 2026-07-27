@@ -287,6 +287,10 @@ function ChatMessageComponent({
                     {entry.details.map((line, lineIndex) => {
                       const key = `${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`;
                       if (line.trimStart().startsWith('Latest:')) {
+                        const displayLine =
+                          running && /^\s*Latest:\s*Responding:/i.test(line)
+                            ? line.replace(/Responding:.*$/i, 'Responding...')
+                            : line;
                         return (
                           <View key={key} style={styles.subAgentLatestLine}>
                             <ScrollableRowText
@@ -297,7 +301,7 @@ function ChatMessageComponent({
                               numberOfLines={1}
                               testID="subagent-latest-scroll"
                             >
-                              {line}
+                              {displayLine}
                             </ScrollableRowText>
                           </View>
                         );
