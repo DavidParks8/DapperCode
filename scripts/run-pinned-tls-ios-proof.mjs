@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { formatSocketAddress } from './pinned-tls-proof-network.mjs';
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mobileRoot = join(repoRoot, 'apps', 'mobile');
 const iosRoot = join(mobileRoot, 'ios');
@@ -350,7 +352,7 @@ async function readAppReport(options, selector, filename, timeoutMs, runID) {
 }
 
 async function startProofServer(options, clientPin, tailscaleIp, caSignedSubstitution = false) {
-  const bind = options.simulator ? '127.0.0.1:0' : `${tailscaleIp}:0`;
+  const bind = options.simulator ? '127.0.0.1:0' : formatSocketAddress(tailscaleIp, 0);
   const hostname = options.simulator ? 'localhost' : options.tailnetHost;
   const args = [
     'run',

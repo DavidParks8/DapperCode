@@ -115,7 +115,7 @@ npm run proof:pinned-tls:ios -- --device "<connected iPhone>" --tailnet-host "<h
 ```
 
 Pass `--development-team "<team ID>"` only when Xcode cannot infer signing, and
-`--tailscale-ip "<host Tailscale IP>"` only when the local `tailscale` CLI cannot report it.
+`--tailscale-ip "<host Tailscale IPv4 or IPv6>"` only when the local `tailscale` CLI cannot report it.
 
 The command prepares the public client wrapper, starts the exact-pin rustls servers on the selected
 Tailscale address, and relaunches the proof screen. The physical debug build uses its embedded
