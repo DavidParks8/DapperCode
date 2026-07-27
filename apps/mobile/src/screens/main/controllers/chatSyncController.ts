@@ -25,14 +25,17 @@ export function assessChatSync(
   latest: Chat,
   watchdogActive: boolean,
 ): ChatSyncAssessment {
-  const terminal = latest.status === 'complete' || latest.status === 'error';
+  const hasTerminalStatus = latest.status === 'complete' || latest.status === 'error';
+  const pendingUserMessage = !hasTerminalStatus && hasRecentUnansweredUserTurn(latest);
+  // An idle snapshot that already answers the latest prompt is authoritative. Treating the
+  // newly arrived answer as streaming progress re-armed the watchdog after the run had ended.
+  const terminal = hasTerminalStatus || (latest.status === 'idle' && !pendingUserMessage);
   const assistantProgress = !terminal && didAssistantMessageProgress(previous, latest);
-  const pendingUserMessage = !terminal && hasRecentUnansweredUserTurn(latest);
   const runningFromChat = isChatLikelyRunning(latest) || assistantProgress || pendingUserMessage;
   return {
     terminal,
-    shouldShowRunning: runningFromChat || (!terminal && watchdogActive),
-    shouldRefreshWatchdog: runningFromChat,
+    shouldShowRunning: !terminal && (runningFromChat || watchdogActive),
+    shouldRefreshWatchdog: !terminal && runningFromChat,
     watchdogDurationMs:
       assistantProgress && !isChatLikelyRunning(latest)
         ? Math.floor(RUN_WATCHDOG_MS / 4)

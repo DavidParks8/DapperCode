@@ -4,7 +4,7 @@ import {
   modelOptionsByAgentAtom,
   selectedEffortAtom,
 } from '../../state/mainScreen/models';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AcpConfigOption, Chat, ReasoningEffort } from '../../api/types';
 import { normalizeModelId } from './mainScreenHelpers';
@@ -42,7 +42,6 @@ export function useMainScreenModeConfigurationSession(
     setSelectedChat,
   } = context;
   const setError = useSetAtom(errorAtom);
-  const loadingModels = useAtomValue(loadingModelsAtom);
   const setModelOptionsByAgent = useSetAtom(modelOptionsByAgentAtom);
   const setLoadingModels = useSetAtom(loadingModelsAtom);
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
@@ -94,11 +93,8 @@ export function useMainScreenModeConfigurationSession(
   }, [activeAgentId, api, refreshModelOptions]);
 
   const closeModelModal = useCallback(() => {
-    if (loadingModels) {
-      return;
-    }
     setModelModalVisible(false);
-  }, [loadingModels]);
+  }, []);
 
   const openAgentModal = useCallback(() => {
     if (selectedChatId) {

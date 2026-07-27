@@ -3,6 +3,7 @@ import { MainScreenTranscriptAndAgentDetail } from './MainScreenTranscriptAndAge
 import { MainScreenRenameSheet } from './MainScreenRenameSheet';
 import { MainScreenAttachmentModals } from './MainScreenAttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from './MainScreenApprovalAndBridgePrompts';
+import { MainScreenModelAndEffortSheets } from './MainScreenModelAndEffortSheets';
 import { View } from 'react-native';
 import { useMainScreenStyles } from './useMainScreenStyles';
 import type {
@@ -19,6 +20,7 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
     <View style={styles.container}>
       <MainScreenHeaderAndWorkflow context={context} />
       <MainScreenTranscriptAndAgentDetail context={context} />
+      <MainScreenModelAndEffortSheets context={context} />
       <MainScreenRenameSheet context={context} />
       <MainScreenAttachmentModals context={context} />
       <MainScreenApprovalAndBridgePrompts context={context} />

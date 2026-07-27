@@ -1542,6 +1542,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         await flush();
         await flush();
       });
+      expect(byLabel(root, 'Choose a model')).toBeTruthy();
       expect(byLabel(root, 'GitHub Copilot · GPT-5.4')).toBeTruthy();
       await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(
@@ -1549,14 +1550,18 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         'model',
         'github-copilot/gpt-5-mini',
       );
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'High'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
 
       await press(byLabelPrefix(root, 'Agent mode, '));
       await press(pressForText(root, 'plan'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'mode', 'plan');
 
       await press(byLabelPrefix(root, 'Thinking level, '));
-      await press(pressForText(root, 'High'));
-      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'None'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'none');
 
       act(() => tree.unmount());
     });
@@ -2873,9 +2878,9 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return result;
   }
 
-  function transcript(root: Queryable): Array<{ message: { content: string } }> {
+  function transcript(root: Queryable): Array<{ message: { id: string; content: string } }> {
     return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
-      message: { content: string };
+      message: { id: string; content: string };
     }>;
   }
 
@@ -3082,6 +3087,65 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         harness.unmount();
       },
     );
+
+    it('settles the activity indicator and stop control when polling returns the full answer', async () => {
+      const prompt = {
+        id: 'prompt',
+        role: 'user' as const,
+        content: 'What is the answer?',
+        createdAt: now,
+      };
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-polling',
+        messages: [prompt],
+      };
+      const answered: Chat = {
+        ...running,
+        status: 'idle',
+        activeTurnId: null,
+        lastMessagePreview: 'The complete answer.',
+        messages: [
+          prompt,
+          {
+            id: 'answer',
+            role: 'assistant',
+            content: 'The complete answer.',
+            createdAt: now,
+          },
+        ],
+      };
+      let latest = running;
+      const api = createApi({ chat: running });
+      api.getChat.mockImplementation(() => Promise.resolve(latest));
+      const harness = await renderMain({ api, chat: running });
+      const root = harness.tree.root as Queryable;
+
+      expect(text(root, 'Working')).toBe(true);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+
+      latest = answered;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const answerVisible = transcript(root).some(({ message }) => message.id === 'answer');
+      const workingVisible = text(root, 'Working');
+      const stopControlCount = root.findAll(
+        (node) => node.props.accessibilityLabel === 'Stop agent',
+      ).length;
+      harness.unmount();
+
+      expect(answerVisible).toBe(true);
+      expect(workingVisible).toBe(false);
+      expect(stopControlCount).toBe(0);
+    });
 
     it('projects queue, approval, input, context, plan, and bridge surfaces from live runtime events', async () => {
       const harness = await renderMain({
