@@ -1312,6 +1312,7 @@ pub(super) async fn wait_for_shutdown_signal() -> &'static str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod client_request_tests {
     use super::*;
     use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};

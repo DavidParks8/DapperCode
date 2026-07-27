@@ -398,6 +398,7 @@ fn serde_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

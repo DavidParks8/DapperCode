@@ -2499,6 +2499,7 @@ fn tool_status_wire(status: agent_client_protocol::schema::v1::ToolCallStatus) -
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::acp::snapshot::SessionSnapshot;
@@ -2551,6 +2552,92 @@ mod tests {
 
         assert_eq!(task.session_id, "child-1");
         assert_eq!(task.state, "completed");
+    }
+
+    #[test]
+    fn parse_task_header_rejects_empty_and_oversized_attributes() {
+        assert!(parse_task_header("id=\"\" state=\"running\">").is_none());
+        assert!(
+            parse_task_header(&format!("id=\"{}\" state=\"running\">", "x".repeat(1_025)))
+                .is_none()
+        );
+        assert!(parse_task_header("id=\"child\" state=\"\">").is_none());
+        assert!(
+            parse_task_header(&format!("id=\"child\" state=\"{}\">", "x".repeat(65))).is_none()
+        );
+    }
+
+    #[test]
+    fn task_progress_preview_handles_reversed_result_markers() {
+        assert_eq!(
+            task_progress_preview("</task_result>\nStill working\n<task_result>").as_deref(),
+            Some("Still working")
+        );
+    }
+
+    #[test]
+    fn utf8_helpers_back_up_to_character_boundaries() {
+        assert_eq!(
+            utf8_chunks("a😀b", 4).collect::<Vec<_>>(),
+            vec!["a", "😀", "b"]
+        );
+
+        let unicode = format!("{}é", "x".repeat(7));
+        assert_eq!(bounded(unicode.as_str(), 8), "xxxxxxx");
+        assert_eq!(bounded(&unicode, 8), "xxxxxxx");
+    }
+
+    #[test]
+    fn discovers_only_tool_subagents_and_renders_structured_resources() {
+        assert!(discovered_subagent_session(&CanonicalEvent::RunStarted {
+            agent_id: "alpha".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run".to_string(),
+            source_turn_id: "turn".to_string(),
+            generation: 1,
+        })
+        .is_none());
+
+        let tool = CanonicalEvent::Tool {
+            agent_id: "alpha".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run".to_string()),
+            source_turn_id: Some("turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "task".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+        assert_eq!(
+            discovered_subagent_session(&tool),
+            Some((
+                "thread",
+                "child".to_string(),
+                Some("Research"),
+                "task",
+                false
+            ))
+        );
+
+        assert_eq!(
+            snapshot_content_lines(&json!({
+                "resource": {
+                    "uri": "file:///tmp/readme.md",
+                    "text": "Documentation"
+                }
+            })),
+            vec!["[resource: file:///tmp/readme.md]", "Documentation"]
+        );
+        assert!(snapshot_content_lines(&json!({
+            "resource": {}
+        }))
+        .is_empty());
     }
 
     #[test]

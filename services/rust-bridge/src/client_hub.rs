@@ -348,6 +348,7 @@ impl ClientHub {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod canonical_mailbox_tests {
     use super::*;
 

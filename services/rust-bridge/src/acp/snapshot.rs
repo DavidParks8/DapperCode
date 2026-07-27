@@ -1450,6 +1450,7 @@ fn bound(mut value: String, max: usize) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
 
@@ -1744,6 +1745,29 @@ mod tests {
         });
         assert_eq!(snapshot.active_generation, None);
         assert!(snapshot.active_tool_ids.is_empty());
+    }
+
+    #[test]
+    fn overlapping_runs_terminalize_prior_tools_and_ignore_missing_subagent_tools() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        assert!(!snapshot.mark_subagent_tool_terminal("missing", "failed", ToolCallStatus::Failed,));
+
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&tool("tool", Some(1), ToolCallStatus::InProgress));
+        snapshot.apply(&run_started(2));
+
+        assert_eq!(snapshot.active_generation, Some(2));
+        assert_eq!(
+            snapshot.tools.get("tool").map(|tool| tool.status),
+            Some(ToolCallStatus::Failed)
+        );
+
+        let mut orphaned_header = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        orphaned_header.subagent_headers.insert(
+            "missing".to_string(),
+            "<task id=\"child\" state=\"running\">".to_string(),
+        );
+        assert!(BridgeThreadSnapshot::from(orphaned_header).tools.is_empty());
     }
 
     #[test]
