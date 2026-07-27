@@ -794,6 +794,17 @@ impl RuntimeBackend {
                     .await;
                 Ok(json!({ "thread": session_to_thread_value(session)? }))
             }
+            "thread/delete" => {
+                let thread_id = required_string(&params, "threadId")?;
+                self.manager
+                    .delete_session(&thread_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                self.hub
+                    .broadcast_notification("thread/deleted", json!({ "threadId": thread_id }))
+                    .await;
+                Ok(json!({ "ok": true, "threadId": thread_id }))
+            }
             "thread/snapshot/page" => {
                 let thread_id = required_string(&params, "threadId")?;
                 let before = read_string(params.get("beforeCursor"));

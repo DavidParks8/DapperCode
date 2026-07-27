@@ -25,6 +25,8 @@ export interface DrawerChatLoadingState {
   runIndicatorsByThread: DrawerRunIndicatorMap;
   wsConnected: boolean;
   loadChats: (showRefresh?: boolean, forceRefresh?: boolean) => Promise<void>;
+  removeChat: (chatId: string) => void;
+  restoreChat: (chat: ChatSummary) => void;
   retryDeepChatListRef: RefObject<() => Promise<void>>;
   cancelChatListStream: () => void;
   scheduleLoadChats: (delay?: number, forceRefresh?: boolean) => void;
@@ -36,9 +38,22 @@ export function drawerEventRequiresRefresh(event: RpcNotification): boolean {
   return (
     event.method === 'thread/started' ||
     event.method === 'thread/name/updated' ||
+    event.method === 'thread/deleted' ||
     event.method === 'thread/status/changed' ||
     agUiEvent?.type === 'RUN_STARTED' ||
     agUiEvent?.type === 'RUN_FINISHED' ||
     agUiEvent?.type === 'RUN_ERROR'
   );
+}
+
+/**
+ * Reads the thread id from a `thread/deleted` notification. The drawer merges list batches, so a
+ * deleted session has to be dropped explicitly instead of waiting for it to fall out of a refresh.
+ */
+export function readDeletedThreadId(event: RpcNotification): string | null {
+  if (event.method !== 'thread/deleted') {
+    return null;
+  }
+  const threadId = event.params?.threadId;
+  return typeof threadId === 'string' && threadId.trim() ? threadId.trim() : null;
 }

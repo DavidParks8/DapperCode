@@ -45,12 +45,35 @@ export function useDrawerChatCollection(api: HostBridgeApiClient, onChatsApplied
     [api, onChatsApplied],
   );
 
+  const removeChat = useCallback((chatId: string) => {
+    const nextChats = chatsRef.current.filter((chat) => chat.id !== chatId);
+    if (nextChats.length === chatsRef.current.length) {
+      return;
+    }
+    chatsRef.current = nextChats;
+    setChats(nextChats);
+    setRunIndicatorsByThread((previous) =>
+      reconcileDrawerRunIndicatorsWithChats(previous, nextChats),
+    );
+  }, []);
+
+  const restoreChat = useCallback((chat: ChatSummary) => {
+    if (chatsRef.current.some((existing) => existing.id === chat.id)) {
+      return;
+    }
+    const nextChats = sortChats([...chatsRef.current, chat]);
+    chatsRef.current = nextChats;
+    setChats(nextChats);
+  }, []);
+
   return {
     applyChats,
     chats,
     chatsRef,
     hasHydratedOnceRef,
     lastLoadedAtRef,
+    removeChat,
+    restoreChat,
     runIndicatorsByThread,
     setRunIndicatorsByThread,
   };

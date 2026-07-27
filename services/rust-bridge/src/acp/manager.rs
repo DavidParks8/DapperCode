@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    ElicitationContentValue, ListSessionsRequest, LoadSessionRequest, NewSessionRequest,
-    PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SessionId,
+    DeleteSessionRequest, ElicitationContentValue, ListSessionsRequest, LoadSessionRequest,
+    NewSessionRequest, PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SessionId,
     SetSessionConfigOptionRequest,
 };
 use async_process::Command as AsyncCommand;
@@ -204,6 +204,7 @@ pub struct AgentCapabilities {
     pub session_load: bool,
     pub session_resume: bool,
     pub session_steer: bool,
+    pub session_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -471,6 +472,26 @@ impl DurableSessionIndex {
         if staged.len() > MAX_SESSIONS {
             staged.drain(0..staged.len() - MAX_SESSIONS);
         }
+        self.persist(staged).await
+    }
+
+    async fn remove(&mut self, identity: &AgentSessionId) -> Result<(), AgentManagerError> {
+        let staged = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.agent_id != identity.agent_id
+                    || entry.acp_session_id != identity.acp_session_id
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if staged.len() == self.entries.len() {
+            return Ok(());
+        }
+        self.persist(staged).await
+    }
+
+    async fn persist(&mut self, staged: Vec<SessionIndexEntry>) -> Result<(), AgentManagerError> {
         let Some(path) = &self.path else {
             self.entries = staged;
             return Ok(());
@@ -1212,6 +1233,35 @@ impl AgentManager {
             }])
             .await?;
         self.read_session(thread_id).await
+    }
+
+    /// Deletes a session through ACP `session/delete` and drops every local trace of it.
+    ///
+    /// The durable index is only updated once the agent confirms the delete, so a failed agent
+    /// call never hides a session that still exists in `session/list`.
+    pub async fn delete_session(&self, thread_id: &str) -> Result<(), AgentManagerError> {
+        let (identity, session_id, connection) = self.route_thread(thread_id)?;
+        if !connection.negotiated().supports_session_delete() {
+            return Err(AcpRuntimeError::Unsupported("session/delete").into());
+        }
+        if let Some(session) = connection.session(&session_id).await {
+            if session.snapshot().await.active_run_id.is_some() {
+                let _ = connection.cancel(session_id.clone()).await;
+            }
+        }
+        connection
+            .delete_session(DeleteSessionRequest::new(session_id))
+            .await?;
+        self.session_index.lock().await.remove(&identity).await?;
+        let thread_id = identity.encode();
+        self.pending_durable_sessions
+            .lock()
+            .await
+            .remove(&thread_id);
+        self.tracked_sessions.lock().await.remove(&thread_id);
+        self.reconstruction_locks.lock().await.remove(&thread_id);
+        self.subagent_generations.lock().await.remove(&thread_id);
+        Ok(())
     }
 
     pub async fn read_session(&self, thread_id: &str) -> Result<ManagedSession, AgentManagerError> {
@@ -2644,6 +2694,7 @@ fn capabilities(negotiated: &NegotiatedInitialize) -> AgentCapabilities {
         session_load: negotiated.supports_session_load(),
         session_resume: negotiated.supports_session_resume(),
         session_steer: negotiated.supports_session_steer(),
+        session_delete: negotiated.supports_session_delete(),
     }
 }
 
@@ -2678,10 +2729,11 @@ mod tests {
     use super::*;
 
     use agent_client_protocol::schema::v1::{
-        AgentCapabilities, CancelNotification, InitializeRequest, InitializeResponse,
-        ListSessionsRequest, ListSessionsResponse, LoadSessionResponse, NewSessionResponse,
-        PromptResponse, ResumeSessionResponse, SessionCapabilities, SessionInfo,
-        SessionListCapabilities, SessionResumeCapabilities, StopReason, ToolCallStatus, ToolKind,
+        AgentCapabilities, CancelNotification, DeleteSessionResponse, InitializeRequest,
+        InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionResponse,
+        NewSessionResponse, PromptResponse, ResumeSessionResponse, SessionCapabilities,
+        SessionDeleteCapabilities, SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
+        StopReason, ToolCallStatus, ToolKind,
     };
     use agent_client_protocol::Agent;
     use sha2::{Digest, Sha256};
@@ -2834,6 +2886,55 @@ mod tests {
         AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
             .await
             .expect("capability agent starts")
+    }
+
+    async fn deleting_connection(
+        agent_id: &str,
+        supports_delete: bool,
+        observed: mpsc::UnboundedSender<String>,
+    ) -> (AcpConnection, NegotiatedInitialize) {
+        let mut session_capabilities =
+            SessionCapabilities::new().list(SessionListCapabilities::new());
+        if supports_delete {
+            session_capabilities = session_capabilities.delete(SessionDeleteCapabilities::new());
+        }
+        let capabilities = AgentCapabilities::new().session_capabilities(session_capabilities);
+        let listed_agent = agent_id.to_string();
+        let delete_agent = agent_id.to_string();
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _| {
+                    responder.respond(
+                        InitializeResponse::new(request.protocol_version)
+                            .agent_capabilities(capabilities.clone()),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: ListSessionsRequest, responder, _| {
+                    responder.respond(ListSessionsResponse::new(vec![SessionInfo::new(
+                        format!("{listed_agent}-listed"),
+                        "/tmp",
+                    )]))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let observed = observed.clone();
+                    async move |request: DeleteSessionRequest, responder, _| {
+                        let _ =
+                            observed.send(format!("delete:{delete_agent}:{}", request.session_id));
+                        responder.respond(DeleteSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
+            .await
+            .expect("deleting agent starts")
     }
 
     async fn reconstructing_connection(
@@ -4474,6 +4575,98 @@ mod tests {
         ));
         assert!(manager.flush_pending_durable_sessions().await.is_ok());
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn manager_delete_removes_the_durable_entry_and_stops_listing_the_session() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("delete-agent", true, observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "delete-agent".to_string(),
+            vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+        )
+        .await
+        .unwrap();
+        let identity = AgentSessionId::new("delete-agent", "delete-agent-listed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        let thread_id = identity.encode();
+        assert!(manager
+            .list_sessions(None, 100)
+            .await
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|session| session.thread_id == thread_id));
+
+        manager.delete_session(&thread_id).await.unwrap();
+
+        assert_eq!(
+            observed_rx.recv().await.as_deref(),
+            Some("delete:delete-agent:delete-agent-listed")
+        );
+        assert!(manager.session_index.lock().await.entries.is_empty());
+        assert!(manager.loaded_session_ids().await.is_empty());
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_delete_is_rejected_and_keeps_the_session_when_the_agent_cannot_delete() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("plain-agent", false, observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "plain-agent".to_string(),
+            vec![(manifest("plain-agent", "Plain"), Ok(connection))],
+        )
+        .await
+        .unwrap();
+        let identity = AgentSessionId::new("plain-agent", "plain-agent-listed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        let thread_id = identity.encode();
+
+        assert!(matches!(
+            manager.delete_session(&thread_id).await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::Unsupported(
+                "session/delete"
+            )))
+        ));
+
+        assert!(observed_rx.try_recv().is_err());
+        assert_eq!(manager.session_index.lock().await.entries.len(), 1);
+        assert!(manager
+            .list_sessions(None, 100)
+            .await
+            .unwrap()
+            .sessions
+            .iter()
+            .any(|session| session.thread_id == thread_id));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_delete_rejects_an_unroutable_thread() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("delete-agent", true, observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "delete-agent".to_string(),
+            vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+        )
+        .await
+        .unwrap();
+
+        assert!(manager.delete_session("not-a-thread-id").await.is_err());
+        manager.shutdown().await;
     }
 
     #[tokio::test]

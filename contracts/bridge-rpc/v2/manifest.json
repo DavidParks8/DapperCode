@@ -22,15 +22,15 @@
     { "method": "POST", "path": "/attachments", "auth": "bearer", "contentType": "multipart/form-data", "maxFileBytes": 20971520 }
   ],
   "mobileForwardedMethods": [
-    "model/list", "thread/config/set", "thread/list", "thread/loaded/list", "thread/name/update", "thread/read", "thread/resume", "thread/snapshot/page",
-    "thread/start", "turn/interrupt", "turn/start", "turn/steer"
+    "model/list", "thread/config/set", "thread/delete", "thread/list", "thread/loaded/list", "thread/name/update", "thread/read", "thread/resume",
+    "thread/snapshot/page", "thread/start", "turn/interrupt", "turn/start", "turn/steer"
   ],
   "notifications": [
     "bridge/agui.event", "bridge/approval.requested", "bridge/approval.resolved", "bridge/connection/state",
     "bridge/git/updated", "bridge/notification.truncated", "bridge/terminal/completed", "bridge/thread/list/stream/batch",
     "bridge/thread/list/stream/error", "bridge/thread/queue/updated", "bridge/ui.dismiss",
     "bridge/ui.present", "bridge/ui.resolved", "bridge/ui.update", "bridge/userInput.requested",
-    "bridge/userInput.resolved", "thread/subagent/adopted"
+    "bridge/userInput.resolved", "thread/deleted", "thread/subagent/adopted"
   ],
   "errors": [
     { "code": -32700, "name": "parseError" },
@@ -54,7 +54,7 @@
         "version": "1.0.0",
         "provenance": "local manifest",
         "lifecycle": "ready",
-        "capabilities": { "sessionList": true, "sessionLoad": true, "sessionResume": true }
+        "capabilities": { "sessionList": true, "sessionLoad": true, "sessionResume": true, "sessionDelete": true }
       }],
       "agUiEvents": true
     },

@@ -5,6 +5,7 @@ import {
   DRAWER_REFRESH_CONNECTED_MS,
   DRAWER_REFRESH_DISCONNECTED_MS,
   drawerEventRequiresRefresh,
+  readDeletedThreadId,
 } from './drawerChatLoadingConfig';
 import {
   pruneStaleDrawerRunIndicators,
@@ -14,6 +15,7 @@ import {
 
 interface DrawerChatLiveSyncOptions {
   active: boolean;
+  onThreadDeleted: (threadId: string) => void;
   scheduleLoadChats: (delay?: number, forceRefresh?: boolean) => void;
   setRunIndicators: Dispatch<SetStateAction<DrawerRunIndicatorMap>>;
   setWsConnected: Dispatch<SetStateAction<boolean>>;
@@ -23,6 +25,7 @@ interface DrawerChatLiveSyncOptions {
 
 export function useDrawerChatLiveSync({
   active,
+  onThreadDeleted,
   scheduleLoadChats,
   setRunIndicators,
   setWsConnected,
@@ -37,12 +40,17 @@ export function useDrawerChatLiveSync({
         return;
       }
 
+      const deletedThreadId = readDeletedThreadId(event);
+      if (deletedThreadId) {
+        onThreadDeleted(deletedThreadId);
+      }
+
       setRunIndicators((previous) => updateDrawerRunIndicatorsForEvent(previous, event));
       if (drawerEventRequiresRefresh(event)) {
         scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
       }
     });
-  }, [scheduleLoadChats, setRunIndicators, ws]);
+  }, [onThreadDeleted, scheduleLoadChats, setRunIndicators, ws]);
 
   useEffect(() => {
     return ws.onStatus((connected) => {

@@ -58,6 +58,7 @@ pub(crate) fn is_forwarded_method(method: &str) -> bool {
             | "model/list"
             | "review/start"
             | "thread/list"
+            | "thread/delete"
             | "thread/name/update"
             | "thread/snapshot/page"
             | "thread/loaded/list"
@@ -120,6 +121,7 @@ mod tests {
         assert_eq!(parse_client_request_id(r#"{"method":"x"}"#), Value::Null);
         assert_eq!(parse_client_request_id("not json"), Value::Null);
         assert!(is_forwarded_method("thread/read"));
+        assert!(is_forwarded_method("thread/delete"));
         assert!(is_forwarded_method("turn/start"));
         assert!(!is_forwarded_method("bridge/status/read"));
         assert!(!is_forwarded_method("thread/read/extra"));
@@ -142,5 +144,20 @@ mod tests {
             .expect("forwarded method inventory");
         assert!(methods.iter().any(|method| method == "thread/start"));
         assert!(methods.iter().any(|method| method == "turn/start"));
+        assert!(methods.iter().any(|method| method == "thread/delete"));
+        assert!(methods
+            .iter()
+            .filter_map(Value::as_str)
+            .all(is_forwarded_method));
+        let notifications = manifest["notifications"]
+            .as_array()
+            .expect("notification inventory");
+        assert!(notifications
+            .iter()
+            .any(|notification| notification == "thread/deleted"));
+        assert_eq!(
+            manifest["fixtures"]["capabilities"]["agents"][0]["capabilities"]["sessionDelete"],
+            true
+        );
     }
 }

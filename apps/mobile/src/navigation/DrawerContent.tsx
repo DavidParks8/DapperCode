@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AppState } from 'react-native';
+import { Alert, AppState } from 'react-native';
 import type { AgentDescriptor } from '../api/types';
+import { confirmAction } from '../components/confirm';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
 import { selectedChatIdAtom } from '../state/chat/atoms';
@@ -56,6 +57,8 @@ export const DrawerContent = memo(function DrawerContentComponent({
     runIndicatorsByThread,
     wsConnected,
     loadChats,
+    removeChat,
+    restoreChat,
     retryDeepChatListRef,
     cancelChatListStream,
     scheduleLoadChats,
@@ -203,6 +206,53 @@ export const DrawerContent = memo(function DrawerContentComponent({
     onNewChat();
   }, [cancelChatListStream, onNewChat]);
 
+  /**
+   * Removes the row before the bridge answers so the list feels immediate, and puts it back when
+   * the agent refuses so the drawer never lies about what still exists.
+   */
+  const handleDeleteChat = useCallback(
+    async (chatId: string): Promise<boolean> => {
+      const chat = chats.find((entry) => entry.id === chatId);
+      const agent = chat?.agentId
+        ? agents.find((candidate) => candidate.agentId === chat.agentId)
+        : undefined;
+      if (agent?.capabilities?.sessionDelete === false) {
+        Alert.alert(
+          'Deleting is not supported',
+          `${agent.displayName} does not support deleting sessions.`,
+        );
+        return false;
+      }
+      const chatTitle = chat?.title?.trim();
+      const confirmed = await confirmAction({
+        title: 'Delete session?',
+        message: chatTitle
+          ? `“${chatTitle}” will be removed from this agent’s history.`
+          : 'This session will be removed from this agent’s history.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!confirmed) {
+        return false;
+      }
+      removeChat(chatId);
+      try {
+        await api.deleteChat(chatId);
+      } catch {
+        if (chat) {
+          restoreChat(chat);
+        }
+        Alert.alert('Could not delete session', 'The agent refused to delete this session.');
+        return false;
+      }
+      if (selectedChatId === chatId) {
+        onNewChat();
+      }
+      return true;
+    },
+    [agents, api, chats, onNewChat, removeChat, restoreChat, selectedChatId],
+  );
+
   const handleNavigate = useCallback(
     (screen: DrawerScreen) => {
       cancelChatListStream();
@@ -234,6 +284,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
     folderPickerVisible,
     handleClose: onClose,
     handleDismissFolderPicker: () => setFolderPickerVisible(false),
+    handleDeleteChat,
     handleNavigate,
     handleNewChat,
     handleOpenFolderPicker,

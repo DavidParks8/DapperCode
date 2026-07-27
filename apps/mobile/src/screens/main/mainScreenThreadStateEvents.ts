@@ -9,6 +9,7 @@ import {
 import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { agentDetailChatAtom, agentDetailThreadIdAtom } from '../../state/mainScreen/workspace';
 import { screenSetter } from '../../state/mainScreen/registry';
+import { startNewChatAtom } from '../../state/navigation/actions';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
 import {
@@ -105,6 +106,17 @@ export function processThreadStateEvents(
     } else {
       loadChat(threadId, { preserveRuntimeState: true }).catch(() => {});
     }
+    return;
+  }
+
+  if (event.method === 'thread/deleted') {
+    const params = toRecord(event.params);
+    const threadId = extractNotificationThreadId(params);
+    if (!threadId || threadId !== currentId) {
+      return;
+    }
+    // The thread is gone on the agent, so keeping it open would only surface stale history.
+    store.set(startNewChatAtom);
     return;
   }
 

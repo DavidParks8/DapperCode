@@ -1188,6 +1188,87 @@ describe('HostBridgeApiClient', () => {
     });
   });
 
+  it('deleteChat() removes the session through the bridge and purges cached listings', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValueOnce({ ok: true, threadId: 'thr_delete' });
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    client.rememberChats([
+      {
+        id: 'thr_delete',
+        title: 'Doomed',
+        status: 'complete',
+        createdAt: '2026-07-20T00:00:00.000Z',
+        updatedAt: '2026-07-20T00:00:00.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+        lastMessagePreview: '',
+      },
+      {
+        id: 'thr_keep',
+        title: 'Kept',
+        status: 'complete',
+        createdAt: '2026-07-20T00:00:00.000Z',
+        updatedAt: '2026-07-20T00:00:00.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+        lastMessagePreview: '',
+      },
+    ]);
+
+    await client.deleteChat(' thr_delete ');
+
+    expect(ws.request).toHaveBeenCalledWith('thread/delete', { threadId: 'thr_delete' });
+    expect(client.peekChats()?.map((chat) => chat.id)).toEqual(['thr_keep']);
+  });
+
+  it('deleteChat() rejects a blank thread id without calling the bridge', async () => {
+    const ws = createWsMock();
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+
+    await expect(client.deleteChat('   ')).rejects.toThrow('thread is required');
+    expect(ws.request).not.toHaveBeenCalled();
+  });
+
+  it('deleteChat() keeps cached listings when the bridge refuses the delete', async () => {
+    const ws = createWsMock();
+    ws.request.mockRejectedValueOnce(new Error('session/delete is not supported'));
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    client.rememberChats([
+      {
+        id: 'thr_delete',
+        title: 'Doomed',
+        status: 'complete',
+        createdAt: '2026-07-20T00:00:00.000Z',
+        updatedAt: '2026-07-20T00:00:00.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+        lastMessagePreview: '',
+      },
+    ]);
+
+    await expect(client.deleteChat('thr_delete')).rejects.toThrow(
+      'session/delete is not supported',
+    );
+    expect(client.peekChats()?.map((chat) => chat.id)).toEqual(['thr_delete']);
+  });
+
+  it('forgetChat() ignores a blank thread id', () => {
+    const ws = createWsMock();
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    client.rememberChats([
+      {
+        id: 'thr_keep',
+        title: 'Kept',
+        status: 'complete',
+        createdAt: '2026-07-20T00:00:00.000Z',
+        updatedAt: '2026-07-20T00:00:00.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+        lastMessagePreview: '',
+      },
+    ]);
+
+    client.forgetChat('  ');
+
+    expect(client.peekChats()?.map((chat) => chat.id)).toEqual(['thr_keep']);
+  });
+
   it('createChat() sends untrusted approval policy when none is selected', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({

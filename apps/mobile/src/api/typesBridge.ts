@@ -146,6 +146,7 @@ export interface AgentDescriptor {
     sessionLoad: boolean;
     sessionResume: boolean;
     sessionSteer: boolean;
+    sessionDelete?: boolean;
   } | null;
 }
 
@@ -155,6 +156,7 @@ export interface BridgeCapabilitySupport {
   planMode?: boolean;
   agentList?: boolean;
   turnSteer: boolean;
+  threadDelete?: boolean;
   commandOutputDelta: boolean;
   fastMode?: boolean;
   browserPreview: boolean;

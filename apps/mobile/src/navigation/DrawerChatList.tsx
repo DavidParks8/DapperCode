@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
+import { SwipeToDeleteRow } from '../components/SwipeToDeleteRow';
 import type { DrawerAttentionLane, DrawerAttentionRow } from './drawerAttention';
 import { relativeTime } from './drawerContentHelpers';
 import { useDrawerContentViewModel } from './drawerContentViewContext';
@@ -16,6 +17,7 @@ import { useDrawerContentViewModel } from './drawerContentViewContext';
 export function DrawerChatList() {
   const {
     collapsedLaneKeys,
+    handleDeleteChat,
     handleSelectChat,
     loading,
     loadingOlderChats,
@@ -165,13 +167,12 @@ export function DrawerChatList() {
         const isSelected = item.chat.id === selectedChatId;
         const isLast = index === section.data.length - 1;
         const chatIndent = Math.min(item.indentLevel, 4) * 12;
+        const chatTitle = item.chat.title || 'Untitled session';
         return (
-          <Pressable
-            accessibilityLabel={`${item.chat.title || 'Untitled session'}, ${item.workspaceLabel}, ${item.agentLabel}, ${item.stateLabel}`}
-            accessibilityHint="Opens this session."
-            accessibilityRole="button"
-            accessibilityState={controlAccessibilityState({ selected: isSelected })}
-            onPress={() => handleSelectChat(item.chat.id)}
+          <SwipeToDeleteRow
+            contentBackgroundColor={theme.colors.bgSidebar}
+            deleteAccessibilityLabel={`Delete ${chatTitle}`}
+            onDelete={() => handleDeleteChat(item.chat.id)}
             style={[
               styles.chatItemFrame,
               item.indentLevel > 0 && {
@@ -180,48 +181,56 @@ export function DrawerChatList() {
               isLast && styles.chatItemLast,
             ]}
           >
-            {({ pressed }) => (
-              <View
-                style={[
-                  styles.chatItem,
-                  isSelected && styles.chatItemSelected,
-                  pressed && styles.chatItemPressed,
-                ]}
-              >
-                <View style={styles.chatItemTextBlock}>
-                  <Text
-                    style={[styles.chatTitle, isSelected && styles.chatTitleSelected]}
-                    numberOfLines={1}
-                  >
-                    {item.chat.title || 'Untitled'}
-                  </Text>
-                  <Text style={styles.chatContext} numberOfLines={1}>
-                    {`${item.workspaceLabel} · ${item.agentLabel}`}
-                  </Text>
-                </View>
-                <View style={styles.chatItemMeta}>
-                  {item.chat.timestampsSynthesized ? null : (
-                    <Text style={styles.chatAge}>{relativeTime(item.chat.updatedAt)}</Text>
-                  )}
-                  <View style={styles.chatState}>
-                    <View
-                      {...decorativeAccessibilityProps}
-                      style={[styles.chatStateDot, rowStateDotStyle(item, styles)]}
-                    />
+            <Pressable
+              accessibilityLabel={`${chatTitle}, ${item.workspaceLabel}, ${item.agentLabel}, ${item.stateLabel}`}
+              accessibilityHint="Opens this session."
+              accessibilityRole="button"
+              accessibilityState={controlAccessibilityState({ selected: isSelected })}
+              onPress={() => handleSelectChat(item.chat.id)}
+            >
+              {({ pressed }) => (
+                <View
+                  style={[
+                    styles.chatItem,
+                    isSelected && styles.chatItemSelected,
+                    pressed && styles.chatItemPressed,
+                  ]}
+                >
+                  <View style={styles.chatItemTextBlock}>
                     <Text
-                      style={[
-                        styles.chatStateText,
-                        item.attentionReason === 'error' && styles.chatStateTextError,
-                      ]}
+                      style={[styles.chatTitle, isSelected && styles.chatTitleSelected]}
                       numberOfLines={1}
                     >
-                      {item.stateLabel}
+                      {item.chat.title || 'Untitled'}
+                    </Text>
+                    <Text style={styles.chatContext} numberOfLines={1}>
+                      {`${item.workspaceLabel} · ${item.agentLabel}`}
                     </Text>
                   </View>
+                  <View style={styles.chatItemMeta}>
+                    {item.chat.timestampsSynthesized ? null : (
+                      <Text style={styles.chatAge}>{relativeTime(item.chat.updatedAt)}</Text>
+                    )}
+                    <View style={styles.chatState}>
+                      <View
+                        {...decorativeAccessibilityProps}
+                        style={[styles.chatStateDot, rowStateDotStyle(item, styles)]}
+                      />
+                      <Text
+                        style={[
+                          styles.chatStateText,
+                          item.attentionReason === 'error' && styles.chatStateTextError,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item.stateLabel}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            )}
-          </Pressable>
+              )}
+            </Pressable>
+          </SwipeToDeleteRow>
         );
       }}
     />

@@ -74,6 +74,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
       if (
         event.method === 'bridge/events/snapshotRequired' ||
         event.method === 'thread/name/updated' ||
+        event.method === 'thread/deleted' ||
         event.method === 'thread/subagent/adopted' ||
         event.method === 'thread/tokenUsage/updated' ||
         event.method === 'item/started'

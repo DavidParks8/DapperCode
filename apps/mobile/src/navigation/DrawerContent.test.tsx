@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { AppState, RefreshControl } from 'react-native';
+import { Alert, AppState, RefreshControl } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -21,6 +21,11 @@ import type { AppStore } from '../state/types';
 import type { WorkspaceChatLimit } from '../appSettings';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+jest.mock('react-native-gesture-handler', () =>
+  jest.requireActual('../testing/gestureHandlerMock'),
+);
 
 interface DrawerProbeProps {
   api: HostBridgeApiClient;
@@ -195,6 +200,8 @@ function createHarness({
     : jest.fn().mockResolvedValue(chats);
   const api = {
     readBridgeCapabilities: jest.fn().mockResolvedValue({ agents, supportsByAgent: {} }),
+    deleteChat: jest.fn().mockResolvedValue(undefined),
+    forgetChat: jest.fn(),
     peekAllChats: jest.fn().mockReturnValue(null),
     peekChats: jest.fn().mockReturnValue(null),
     rememberChats: jest.fn(),
@@ -1535,5 +1542,160 @@ describe('DrawerContent partial history diagnostics', () => {
     expect(listAllChats).toHaveBeenLastCalledWith(expect.objectContaining({ forceRefresh: true }));
     expect(hasText(tree.root as Queryable, 'Some drawer data may be stale')).toBe(false);
     act(() => tree?.unmount());
+  });
+});
+
+describe('DrawerContent session deletion', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-20T00:30:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  function answerConfirm(answer: 'confirm' | 'cancel'): jest.SpyInstance {
+    return jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      const button = (buttons ?? []).find((candidate) =>
+        answer === 'confirm' ? candidate.style === 'destructive' : candidate.style === 'cancel',
+      );
+      button?.onPress?.();
+    });
+  }
+
+  function findDeleteAction(root: Queryable, title: string): Queryable {
+    const node = root.findAll(
+      (candidate) =>
+        candidate.props.accessibilityLabel === `Delete ${title}` &&
+        typeof candidate.props.onPress === 'function',
+    )[0];
+    if (!node) throw new Error(`Expected delete action for ${title}`);
+    return node;
+  }
+
+  it('removes the session from the list once the delete is confirmed', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the session when the confirmation is dismissed', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    answerConfirm('cancel');
+    const tree = await renderDrawer(harness);
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('puts the session back and warns when the agent refuses the delete', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    (harness.api.deleteChat as jest.Mock).mockRejectedValue(new Error('delete unsupported'));
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    expect(alert).toHaveBeenLastCalledWith(
+      'Could not delete session',
+      'The agent refused to delete this session.',
+    );
+    act(() => tree.unmount());
+  });
+
+  it('starts a new chat when the session being viewed is deleted', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    answerConfirm('confirm');
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'a' });
+    const tree = await renderDrawer(harness, { store, selectedChatId: 'a' });
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(store.get(selectedChatIdAtom)).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('explains that an agent without the delete capability cannot remove a session', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a', agentId: 'codex' })],
+      agents: [
+        {
+          agentId: 'codex',
+          displayName: 'Codex',
+          version: '1',
+          provenance: 'test',
+          lifecycle: 'ready',
+          capabilities: {
+            sessionList: true,
+            sessionLoad: true,
+            sessionResume: true,
+            sessionSteer: false,
+            sessionDelete: false,
+          },
+        },
+      ],
+    });
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith(
+      'Deleting is not supported',
+      'Codex does not support deleting sessions.',
+    );
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('drops a session that another client deleted', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness);
+
+    await act(async () => {
+      harness.emitEvent({ method: 'thread/deleted', params: { threadId: 'a' } });
+      await Promise.resolve();
+    });
+
+    expect(harness.api.forgetChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('ignores a deletion event without a thread id', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    const tree = await renderDrawer(harness);
+
+    await act(async () => {
+      harness.emitEvent({ method: 'thread/deleted', params: {} });
+      await Promise.resolve();
+    });
+
+    expect(harness.api.forgetChat).not.toHaveBeenCalled();
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    act(() => tree.unmount());
   });
 });

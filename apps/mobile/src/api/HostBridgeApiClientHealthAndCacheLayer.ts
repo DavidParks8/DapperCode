@@ -129,6 +129,53 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     this.rememberChat(chat);
     return chat;
   }
+  /**
+   * Deletes a session through the agent (ACP `session/delete`) and purges every cached copy so a
+   * stale list entry cannot resurrect the row after the drawer refreshes.
+   */
+  async deleteChat(threadId: string): Promise<void> {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) {
+      throw new Error('thread is required');
+    }
+    await this.ws.request<{ ok: boolean; threadId: string }>('thread/delete', {
+      threadId: normalizedThreadId,
+    });
+    this.forgetChat(normalizedThreadId);
+  }
+  forgetChat(threadId: string): void {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) {
+      return;
+    }
+    this.chatCache.delete(normalizedThreadId);
+    this.renamedTitles.delete(normalizedThreadId);
+    for (const [key, cachedList] of this.chatListCache.entries()) {
+      if (!cachedList.value.some((entry) => entry.id === normalizedThreadId)) {
+        continue;
+      }
+      this.chatListCache.set(key, {
+        value: cachedList.value
+          .filter((entry) => entry.id !== normalizedThreadId)
+          .map(cloneChatSummary),
+        loadedAt: cachedList.loadedAt,
+      });
+    }
+    for (const [key, cachedList] of this.allChatListCache.entries()) {
+      if (!cachedList.value.chats.some((entry) => entry.id === normalizedThreadId)) {
+        continue;
+      }
+      this.allChatListCache.set(key, {
+        value: {
+          ...cachedList.value,
+          chats: cachedList.value.chats
+            .filter((entry) => entry.id !== normalizedThreadId)
+            .map(cloneChatSummary),
+        },
+        loadedAt: cachedList.loadedAt,
+      });
+    }
+  }
   async renameChat(threadId: string, title: string): Promise<Chat> {
     const normalizedThreadId = threadId.trim();
     const normalizedTitle = title.trim();

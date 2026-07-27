@@ -45,6 +45,7 @@ pub(super) struct BridgeCapabilitySupport {
     pub(super) plan_mode: bool,
     pub(super) agent_list: bool,
     pub(super) turn_steer: bool,
+    pub(super) thread_delete: bool,
     pub(super) command_output_delta: bool,
     pub(super) fast_mode: bool,
     pub(super) account: bool,
@@ -90,6 +91,11 @@ impl BridgeCapabilitySupport {
                     .capabilities
                     .as_ref()
                     .is_some_and(|capabilities| capabilities.session_steer),
+            thread_delete: ready
+                && agent
+                    .capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| capabilities.session_delete),
             generic_ui_surface: ready,
             ..Self::default()
         }
@@ -117,5 +123,51 @@ pub(super) fn sanitize_client_metadata(
         fallback.to_string()
     } else {
         sanitized
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::acp::manager::{AgentCapabilities, AgentDescriptor, AgentLifecycle};
+
+    fn descriptor(lifecycle: AgentLifecycle, session_delete: bool) -> AgentDescriptor {
+        AgentDescriptor {
+            agent_id: "agent".to_string(),
+            display_name: "Agent".to_string(),
+            icon: None,
+            version: "1.0.0".to_string(),
+            provenance: "test".to_string(),
+            lifecycle,
+            last_error: None,
+            capabilities: Some(AgentCapabilities {
+                session_list: true,
+                session_load: true,
+                session_resume: true,
+                session_steer: false,
+                session_delete,
+            }),
+        }
+    }
+
+    #[test]
+    fn thread_delete_support_follows_the_agent_capability_and_readiness() {
+        assert!(
+            BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Ready, true))
+                .thread_delete
+        );
+        assert!(
+            !BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Ready, false))
+                .thread_delete
+        );
+        assert!(
+            !BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Unavailable, true))
+                .thread_delete
+        );
+
+        let mut unknown = descriptor(AgentLifecycle::Ready, true);
+        unknown.capabilities = None;
+        assert!(!BridgeCapabilitySupport::from_agent(&unknown).thread_delete);
     }
 }

@@ -6,11 +6,12 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     CancelNotification, ClientCapabilities, ContentBlock, CreateElicitationRequest,
-    ElicitationCapabilities, ElicitationContentValue, ElicitationFormCapabilities,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionId,
-    SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    DeleteSessionRequest, DeleteSessionResponse, ElicitationCapabilities, ElicitationContentValue,
+    ElicitationFormCapabilities, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
+    NewSessionResponse, PromptRequest, RequestPermissionRequest, ResumeSessionRequest,
+    ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Client, ConnectTo, JsonRpcRequest, JsonRpcResponse};
@@ -159,6 +160,14 @@ impl NegotiatedInitialize {
             .agent_capabilities
             .session_capabilities
             .resume
+            .is_some()
+    }
+
+    pub fn supports_session_delete(&self) -> bool {
+        self.response
+            .agent_capabilities
+            .session_capabilities
+            .delete
             .is_some()
     }
 
@@ -435,6 +444,17 @@ impl AcpConnection {
             return Err(AcpRuntimeError::Unsupported("session/resume"));
         }
         self.call(|response| Command::ResumeSession { request, response })
+            .await
+    }
+
+    pub async fn delete_session(
+        &self,
+        request: DeleteSessionRequest,
+    ) -> Result<DeleteSessionResponse, AcpRuntimeError> {
+        if !self.negotiated.supports_session_delete() {
+            return Err(AcpRuntimeError::Unsupported("session/delete"));
+        }
+        self.call(|response| Command::DeleteSession { request, response })
             .await
     }
 
@@ -724,6 +744,10 @@ enum Command {
         request: ResumeSessionRequest,
         response: oneshot::Sender<Result<ResumeSessionResponse, AcpRuntimeError>>,
     },
+    DeleteSession {
+        request: DeleteSessionRequest,
+        response: oneshot::Sender<Result<DeleteSessionResponse, AcpRuntimeError>>,
+    },
     Prompt {
         request: PromptRequest,
         run_id: String,
@@ -809,6 +833,22 @@ impl Command {
                  _: SessionRegistry,
                  _: String| async move { result }
             ),
+            Self::DeleteSession { request, response } => {
+                let session_id = request.session_id.clone();
+                dispatch_ordinary!(
+                    request,
+                    RequestCancellation::default(),
+                    response,
+                    move |result: Result<DeleteSessionResponse, AcpRuntimeError>,
+                          sessions: SessionRegistry,
+                          _: String| async move {
+                        if result.is_ok() {
+                            sessions.remove(&session_id).await;
+                        }
+                        result
+                    }
+                );
+            }
             Self::LoadSession { request, response } => {
                 let session_id = request.session_id.clone();
                 let session = sessions
@@ -1063,9 +1103,9 @@ mod tests {
         IntegerPropertySchema, ListSessionsResponse, LoadSessionResponse,
         MultiSelectPropertySchema, NewSessionResponse, NumberPropertySchema, PermissionOption,
         PermissionOptionKind, PromptResponse, RequestPermissionOutcome, RequestPermissionResponse,
-        ResumeSessionResponse, SessionCapabilities, SessionInfo, SessionListCapabilities,
-        SessionResumeCapabilities, SessionUpdate, StopReason, StringPropertySchema, ToolCallStatus,
-        ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        ResumeSessionResponse, SessionCapabilities, SessionDeleteCapabilities, SessionInfo,
+        SessionListCapabilities, SessionResumeCapabilities, SessionUpdate, StopReason,
+        StringPropertySchema, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
 
     #[tokio::test]
@@ -1273,6 +1313,90 @@ mod tests {
                 .expect("prompt response");
         }
         fixture.connection.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn delete_session_is_capability_gated_and_evicts_the_loaded_session() {
+        let delete_calls = Arc::new(AtomicUsize::new(0));
+
+        let plain_agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new()))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let delete_calls = delete_calls.clone();
+                    async move |_request: DeleteSessionRequest, responder, _| {
+                        delete_calls.fetch_add(1, AtomicOrdering::SeqCst);
+                        responder.respond(DeleteSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (plain, _) = AcpConnection::start_transport(
+            "no-delete-agent".into(),
+            plain_agent,
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("agent starts");
+        assert!(!plain.negotiated().supports_session_delete());
+        assert!(matches!(
+            plain
+                .delete_session(DeleteSessionRequest::new(SessionId::new("any")))
+                .await,
+            Err(AcpRuntimeError::Unsupported("session/delete"))
+        ));
+        assert_eq!(delete_calls.load(AtomicOrdering::SeqCst), 0);
+        plain.shutdown().await.expect("shutdown");
+
+        let capable_agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new().session_capabilities(
+                        SessionCapabilities::new().delete(SessionDeleteCapabilities::new()),
+                    )))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let delete_calls = delete_calls.clone();
+                    async move |_request: DeleteSessionRequest, responder, _| {
+                        delete_calls.fetch_add(1, AtomicOrdering::SeqCst);
+                        responder.respond(DeleteSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) = AcpConnection::start_transport(
+            "delete-agent".into(),
+            capable_agent,
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("agent starts");
+        assert!(connection.negotiated().supports_session_delete());
+        let session_id = SessionId::new("deletable");
+        connection
+            .ensure_session(session_id.clone())
+            .await
+            .expect("session capacity");
+        assert!(connection.session(&session_id).await.is_some());
+
+        connection
+            .delete_session(DeleteSessionRequest::new(session_id.clone()))
+            .await
+            .expect("delete succeeds");
+
+        assert_eq!(delete_calls.load(AtomicOrdering::SeqCst), 1);
+        assert!(connection.session(&session_id).await.is_none());
+        connection.shutdown().await.expect("shutdown");
     }
 
     fn initialized(capabilities: AgentCapabilities) -> InitializeResponse {

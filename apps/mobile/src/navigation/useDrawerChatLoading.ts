@@ -40,6 +40,8 @@ export function useDrawerChatLoading(
     chatsRef,
     hasHydratedOnceRef,
     lastLoadedAtRef,
+    removeChat,
+    restoreChat,
     runIndicatorsByThread,
     setRunIndicatorsByThread,
   } = useDrawerChatCollection(api, handleChatsApplied);
@@ -67,6 +69,14 @@ export function useDrawerChatLoading(
       scheduledDeepLoadChatsRef.current = null;
     }
   }, []);
+
+  const handleThreadDeleted = useCallback(
+    (threadId: string) => {
+      api.forgetChat(threadId);
+      removeChat(threadId);
+    },
+    [api, removeChat],
+  );
 
   const loadChatsNow = useCallback(
     async (showRefresh = false, forceRefresh = false) => {
@@ -400,6 +410,7 @@ export function useDrawerChatLoading(
 
   useDrawerChatLiveSync({
     active,
+    onThreadDeleted: handleThreadDeleted,
     scheduleLoadChats,
     setRunIndicators: setRunIndicatorsByThread,
     setWsConnected,
@@ -447,6 +458,8 @@ export function useDrawerChatLoading(
     runIndicatorsByThread,
     wsConnected,
     loadChats,
+    removeChat,
+    restoreChat,
     retryDeepChatListRef,
     cancelChatListStream,
     scheduleLoadChats,

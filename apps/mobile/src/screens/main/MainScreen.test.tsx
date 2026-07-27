@@ -2514,6 +2514,24 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       await unmount(tree);
     });
 
+    it('leaves a deleted session and keeps unrelated deletions on screen', async () => {
+      const { tree } = await renderMain();
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
+
+      await emit({ method: 'thread/deleted', params: { threadId: otherThreadId } });
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
+
+      await emit({ method: 'thread/deleted', params: {} });
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
+
+      await emit({ method: 'thread/deleted', params: { threadId } });
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(false);
+      expect(
+        transcript(tree).some(({ message }) => message.content.includes('Existing answer')),
+      ).toBe(false);
+      await unmount(tree);
+    });
+
     it('covers thread identity, queue, approval, input, and malformed notification branches', async () => {
       const api = createApi();
       const { tree } = await renderMain({ api });
