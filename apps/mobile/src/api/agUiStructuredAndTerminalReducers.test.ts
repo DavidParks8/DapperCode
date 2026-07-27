@@ -343,6 +343,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
         receiverThreadIds: ['receiver-1', 'receiver-1', 'receiver-2', ''],
         agentStatus: 'completed',
         resultPreview: 'done',
+        navigable: true,
       });
 
       expect(next.messages).toHaveLength(1);
@@ -363,6 +364,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
         senderThreadId: 'sender-1',
         receiverThreadIds: ['receiver-1', 'receiver-2'],
         toolCallId: 'tc-sub-2',
+        navigable: true,
       });
     });
 
@@ -370,6 +372,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
       const next = reduceSubagentActivity(createState(), createEnvelope(), {
         receiverThreadIds: ['receiver-x'],
         agentStatus: 'running',
+        navigable: false,
       });
 
       expect(next.subagentToolCallIds.unknown).toBe(true);
@@ -377,6 +380,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
       expect(message).toMatchObject({ id: 'subagent:unknown', role: 'activity' });
       if (message?.role === 'activity') {
         expect(message.content.text).toContain('Spawning sub-agent');
+        expect(message.content.subAgent?.navigable).toBe(false);
       }
     });
   });

@@ -298,6 +298,8 @@ export const createStyles = (theme: AppTheme) =>
       color: theme.colors.textMuted,
     },
     scrollableRowTextViewport: { flex: 1, minWidth: 0, overflow: 'hidden' },
+    scrollableRowTextScroll: { width: '100%' },
+    scrollableRowTextContent: { flexDirection: 'row' },
     scrollableRowText: { flex: 0, flexShrink: 0, paddingRight: theme.spacing.lg },
     scrollableRowTextFade: { position: 'absolute', top: 0, bottom: 0, width: 24 },
     scrollableRowTextFadeLeft: { left: 0 },
@@ -381,6 +383,7 @@ export const createStyles = (theme: AppTheme) =>
       gap: 3,
       marginTop: 4,
     },
+    subAgentOpenHintPressed: { opacity: 0.6 },
     subAgentOpenHintText: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,

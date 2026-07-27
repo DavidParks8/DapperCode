@@ -261,13 +261,24 @@ impl ClientHub {
         tool_call_id: &str,
         child_thread_id: &str,
     ) -> bool {
-        self.ag_ui_projector.lock().await.link_subagent(
+        let linked = self.ag_ui_projector.lock().await.link_subagent(
             parent_thread_id,
             parent_run_id,
-            parent_source_turn_id,
+            parent_source_turn_id.clone(),
             tool_call_id,
             child_thread_id,
-        )
+        );
+        if linked {
+            self.broadcast_ag_ui_envelope(crate::agui::linked_subagent_activity_envelope(
+                parent_thread_id,
+                parent_run_id,
+                parent_source_turn_id,
+                tool_call_id,
+                child_thread_id,
+            ))
+            .await;
+        }
+        linked
     }
 
     async fn broadcast_external_notification(&self, method: &str, params: Value) -> u64 {

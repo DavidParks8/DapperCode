@@ -52,10 +52,10 @@ instead:
    remembered so a later rename cannot hide it.
 2. The agent is polled for sessions whose parent is the running thread. Several sub-agents at once
    are told apart by the description the agent puts on both the child session and the tool call.
-3. The discovered child is indexed, resumed, and announced with `thread/subagent/adopted`. Resuming
-   is what starts its updates flowing.
-4. The child is linked to the tool call that spawned it, so the sub-agent card on the parent thread
-   follows its progress rather than waiting for the tool's own result.
+3. The discovered child is indexed and linked to the tool call that spawned it, immediately making
+   the parent card navigable.
+4. The child is resumed and announced with `thread/subagent/adopted`. Resuming starts its updates
+   flowing only after the link exists, so replayed progress reaches the card and mobile transcript.
 
 This is supported for OpenCode, which serves the session tree over an HTTP port the bridge assigns
 when it starts the agent. The port is allocated per agent process rather than fixed, so parallel

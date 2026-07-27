@@ -127,11 +127,13 @@ async fn discover_subagent_session(
             }
             state.claimed.insert(child_thread.clone());
         }
-        let adopted = adopt_subagent_session(
+        adopt_subagent_session(
             &manager,
             &hub,
             AdoptedSubagent {
                 parent_thread_id: &parent_thread_id,
+                parent_run_id: parent.snapshot.active_run_id.as_deref(),
+                parent_source_turn_id: parent.snapshot.active_source_turn_id.clone(),
                 child_session_id: &selected.acp_session_id,
                 child_title: selected.title.as_deref(),
                 tool_call_id: &tool_call_id,
@@ -139,18 +141,6 @@ async fn discover_subagent_session(
             },
         )
         .await;
-        if let (Some(child_thread), Some(parent_run_id)) =
-            (adopted, parent.snapshot.active_run_id.as_deref())
-        {
-            hub.link_subagent(
-                &parent_thread_id,
-                parent_run_id,
-                parent.snapshot.active_source_turn_id.clone(),
-                &tool_call_id,
-                &child_thread,
-            )
-            .await;
-        }
         break;
     }
     if let Ok(mut state) = in_flight.lock() {
@@ -182,6 +172,8 @@ fn child_matches_tool_title(child_title: Option<&str>, tool_title: &str) -> bool
 
 struct AdoptedSubagent<'a> {
     parent_thread_id: &'a str,
+    parent_run_id: Option<&'a str>,
+    parent_source_turn_id: Option<String>,
     child_session_id: &'a str,
     child_title: Option<&'a str>,
     tool_call_id: &'a str,
@@ -216,6 +208,16 @@ async fn adopt_subagent_session(
         manager
             .note_subagent_link(subagent.parent_thread_id, &thread_id, subagent.tool_call_id)
             .await;
+        if let Some(parent_run_id) = subagent.parent_run_id {
+            hub.link_subagent(
+                subagent.parent_thread_id,
+                parent_run_id,
+                subagent.parent_source_turn_id,
+                subagent.tool_call_id,
+                &thread_id,
+            )
+            .await;
+        }
     }
     if let Ok(session) = manager.read_session(&thread_id).await {
         hub.broadcast_ag_ui_envelope(crate::agui::messages_snapshot_envelope(
@@ -562,6 +564,14 @@ impl RuntimeBackend {
                     terminal,
                 )) = crate::agui::discovered_subagent_session(&event)
                 {
+                    let (parent_run_id, parent_source_turn_id) = match &event {
+                        crate::acp::events::CanonicalEvent::Tool {
+                            run_id,
+                            source_turn_id,
+                            ..
+                        } => (run_id.as_deref(), source_turn_id.clone()),
+                        _ => (None, None),
+                    };
                     if terminal {
                         if let Some(thread_id) =
                             child_thread_id(parent_thread_id, &child_session_id)
@@ -576,6 +586,8 @@ impl RuntimeBackend {
                         &event_hub,
                         AdoptedSubagent {
                             parent_thread_id,
+                            parent_run_id,
+                            parent_source_turn_id,
                             child_session_id: &child_session_id,
                             child_title,
                             tool_call_id,

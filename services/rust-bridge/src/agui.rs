@@ -1935,6 +1935,27 @@ fn subagent_activity_envelope(
     )
 }
 
+pub(super) fn linked_subagent_activity_envelope(
+    parent_thread_id: &str,
+    parent_run_id: &str,
+    parent_source_turn_id: Option<String>,
+    tool_call_id: &str,
+    child_thread_id: &str,
+) -> AgUiEventEnvelope {
+    subagent_activity_envelope(
+        SubagentActivityContext {
+            parent_thread_id,
+            parent_run_id,
+            parent_source_turn_id,
+            tool_call_id,
+            child_thread_id: Some(child_thread_id),
+        },
+        "running",
+        None,
+        Utc::now().timestamp_millis(),
+    )
+}
+
 fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
     match canonical {
         // The task header already created a navigable working card. RunStarted is
@@ -4891,6 +4912,77 @@ mod tests {
         assert_eq!(replay[0]["method"], AG_UI_EVENT_METHOD);
         assert_eq!(replay[1]["params"]["event"]["type"], "TEXT_MESSAGE_START");
         assert_eq!(replay[2]["params"]["event"]["type"], "TEXT_MESSAGE_CONTENT");
+    }
+
+    #[tokio::test]
+    async fn early_subagent_link_is_navigable_before_replay_and_projects_live_transcript() {
+        let hub = ClientHub::with_replay_capacity(32);
+        let parent_thread_id = "parent-thread";
+        let child_thread_id = "child-thread";
+        assert!(
+            hub.link_subagent(
+                parent_thread_id,
+                "parent-run",
+                Some("parent-turn".to_string()),
+                "task-1",
+                child_thread_id,
+            )
+            .await
+        );
+
+        let (initial, _, _) = hub.replay_since(None, 32).await;
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0]["params"]["threadId"], parent_thread_id);
+        assert_eq!(
+            initial[0]["params"]["event"]["content"]["subAgent"]["receiverThreadIds"][0],
+            child_thread_id
+        );
+        assert_eq!(
+            initial[0]["params"]["event"]["content"]["subAgent"]["navigable"],
+            true
+        );
+
+        let mut child_run = canonical_run_started();
+        if let CanonicalEvent::RunStarted {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        } = &mut child_run
+        {
+            *thread_id = child_thread_id.to_string();
+            *run_id = "child-run".to_string();
+            *source_turn_id = "child-turn".to_string();
+        }
+        hub.broadcast_canonical_event(&child_run).await;
+
+        let mut child_message =
+            canonical_message(MessageRole::Agent, "child-answer", "Reading project files");
+        if let CanonicalEvent::MessageChunk {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        } = &mut child_message
+        {
+            *thread_id = child_thread_id.to_string();
+            *run_id = Some("child-run".to_string());
+            *source_turn_id = Some("child-turn".to_string());
+        }
+        hub.broadcast_canonical_event(&child_message).await;
+
+        let (replay, _, _) = hub.replay_since(None, 32).await;
+        assert!(replay.iter().any(|event| {
+            event["params"]["threadId"] == parent_thread_id
+                && event["params"]["event"]["content"]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Latest: Responding: Reading project files"))
+        }));
+        assert!(replay.iter().any(|event| {
+            event["params"]["threadId"] == child_thread_id
+                && event["params"]["event"]["type"] == "TEXT_MESSAGE_CONTENT"
+                && event["params"]["event"]["delta"] == "Reading project files"
+        }));
     }
 
     #[test]

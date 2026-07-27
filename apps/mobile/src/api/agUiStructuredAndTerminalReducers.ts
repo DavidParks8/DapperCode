@@ -169,7 +169,7 @@ export function reduceSubagentActivity(
     senderThreadId: nonEmptyString(value?.senderThreadId) ?? envelope.threadId,
     receiverThreadIds: Array.from(new Set(receiverThreadIds)),
     agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
-    navigable: false,
+    navigable: typeof value?.navigable === 'boolean' ? value.navigable : true,
   };
   const resultPreview = nonEmptyString(value?.resultPreview);
   const text = [
