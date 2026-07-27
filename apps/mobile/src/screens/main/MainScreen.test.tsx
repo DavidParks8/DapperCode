@@ -492,6 +492,54 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => tree.unmount());
     });
 
+    it('keeps a restored transcript visible after summary-only revalidation', async () => {
+      let resolveRevalidation!: (value: Chat) => void;
+      const revalidation = new Promise<Chat>((resolve) => {
+        resolveRevalidation = resolve;
+      });
+      const api = createApi();
+      (api.getChat as jest.Mock).mockImplementation(() => revalidation);
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+
+      expect(root.findAllByType(FlatList)[0]?.props.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.objectContaining({ content: 'Rendered answer' }),
+          }),
+        ]),
+      );
+
+      await act(async () => {
+        resolveRevalidation({
+          ...chat,
+          title: 'Refreshed thread',
+          updatedAt: '2026-07-20T00:00:01.000Z',
+          lastMessagePreview: '',
+          messages: [],
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(hasText(root, 'Refreshed thread')).toBe(true);
+      expect(root.findAllByType(FlatList)[0]?.props.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.objectContaining({ content: 'Rendered answer' }),
+          }),
+        ]),
+      );
+      expect(
+        root.findAllByType(TextInput).some((node) => node.props.placeholder === 'Reply...'),
+      ).toBe(true);
+      act(() => tree.unmount());
+    });
+
     it('loads a selected thread through the imperative shell handle', async () => {
       const api = createApi();
       const { tree, ref } = await renderMain({ api });

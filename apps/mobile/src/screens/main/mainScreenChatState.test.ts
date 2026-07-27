@@ -108,4 +108,25 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
       ),
     ).toBe(resolved);
   });
+
+  it('keeps hydrated history when a settled refresh is summary-only', () => {
+    const previous = chat();
+    const refreshed = chat({
+      title: 'Refreshed title',
+      updatedAt: '2026-07-25T00:00:02.000Z',
+      lastMessagePreview: '',
+      messages: [],
+    });
+
+    const resolved = resolveEquivalentChat(previous, refreshed);
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        title: 'Refreshed title',
+        updatedAt: refreshed.updatedAt,
+        lastMessagePreview: previous.lastMessagePreview,
+        messages: previous.messages,
+      }),
+    );
+  });
 });

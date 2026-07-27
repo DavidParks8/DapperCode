@@ -3,6 +3,7 @@ import {
   appendSyntheticUserMessage,
   isMaterializationGapError,
   isTransientThreadReadError,
+  preserveCachedTranscript,
   sleep,
 } from './clientChatCloneAndRetryInternals';
 import {
@@ -146,7 +147,11 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
       }
       const response = await this.readAppServerThread(id, false);
       const rawThread = toRawThread(response.thread);
-      return { rawThread, chat: this.mapChatWithCachedTitle(rawThread) };
+      const cached = this.peekChat(id);
+      this.rememberRawThreadTitle(rawThread);
+      const chat = preserveCachedTranscript(cached, this.applyRememberedTitle(mapChat(rawThread)));
+      this.rememberChat(chat);
+      return { rawThread, chat };
     }
   }
   protected async readAppServerThread(
