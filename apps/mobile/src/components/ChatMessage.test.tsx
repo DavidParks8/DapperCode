@@ -557,12 +557,18 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
-    const latestText = root
-      .findAllByType(Text)
+    const latestViewport = root.findAllByProps({ testID: 'subagent-latest-scroll' })[0];
+    const latestScroll = latestViewport?.findAllByType(ScrollView)[0];
+    const latestText = latestScroll
+      ?.findAllByType(Text)
       .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+    expect(latestScroll?.props).toMatchObject({
+      horizontal: true,
+      nestedScrollEnabled: true,
+      showsHorizontalScrollIndicator: false,
+    });
     expect(latestText?.props).toMatchObject({
       numberOfLines: 1,
-      ellipsizeMode: 'tail',
     });
     const control = root.findAll(
       (node) =>
@@ -599,19 +605,51 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('opens a known running agent even when stale metadata says it is not navigable', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'subagent-running',
+        role: 'system',
+        systemKind: 'subAgent',
+        content: '• Sub-agent working\n  Latest: Inspecting files',
+        createdAt: '2026-04-17T00:00:00.000Z',
+        subAgentMeta: {
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+          navigable: false,
+        },
+      },
+      { onOpenSubAgentThread },
+    );
+    const root = tree.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Sub-agent working' &&
+        typeof node.props.onPress === 'function',
+    )[0];
+    expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
+    act(() => tree.unmount());
+  });
+
   it('animates a running subagent card and stops after completion', () => {
     const running = createActivityMessage(
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Reading repository',
+        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
-    expect(hasRenderedText(tree.root as QueryableTestInstance, 'Open agent chat')).toBe(true);
+    const root = tree.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
+    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
 
     const completed = createActivityMessage(
       'subagent-live',

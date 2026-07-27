@@ -6,9 +6,9 @@ All notable DapperCode changes are documented here.
 
 ### Fixed
 
-- Sub-agent cards now keep their latest activity to one line, retain the agent-chat affordance while
-	the child is running, and show one working update per child tool instead of flashing its pending
-	and completed lifecycle states.
+- Sub-agent cards now open a known child chat while it is running, summarize streamed answer text as
+  `Responding...`, keep the latest activity on one horizontally scrollable line, and show one working
+  update per child tool instead of flashing its pending and completed lifecycle states.
 - A sub-agent now streams while it works instead of appearing only once it has finished. The bridge
 	asks OpenCode which sessions a running thread has spawned, resumes the sub-agent's session as soon
 	as it exists, and links it to the tool call that spawned it, so both the sub-agent's own thread and

@@ -329,6 +329,7 @@ export const createStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     subAgentDetailWrap: { marginTop: theme.spacing.xs, paddingLeft: theme.spacing.lg + 2, gap: 2 },
+    subAgentLatestLine: { flexDirection: 'row', minWidth: 0 },
     subAgentDetailLine: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,

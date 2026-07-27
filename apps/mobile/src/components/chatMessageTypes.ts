@@ -33,6 +33,7 @@ export interface ScrollableRowTextProps {
   children: string;
   style: TextProps['style'];
   backgroundColor: string;
+  numberOfLines?: number;
   testID?: string;
 }
 
