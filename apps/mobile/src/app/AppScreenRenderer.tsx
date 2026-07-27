@@ -128,5 +128,5 @@ export function AppScreenRenderer({
 
 const styles = StyleSheet.create({
   stack: { flex: 1 },
-  pushedScreen: StyleSheet.absoluteFillObject,
+  pushedScreen: StyleSheet.absoluteFill,
 });

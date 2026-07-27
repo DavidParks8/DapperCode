@@ -339,7 +339,7 @@ export function SubAgentDetailView({
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     page: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 100,
       elevation: 24,
       backgroundColor: theme.colors.bgMain,

@@ -8,7 +8,7 @@ const reviewedAdvisories = new Map([
   // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
   [1121797, 'linkify-it'],
   [1124012, 'linkify-it'],
-  // Reached only through minimatch@3 inside the Expo/React Native build toolchain, never with
+  // Reached only through minimatch@3 inside the Jest/Expo test toolchain, never with
   // remote input. The sole patched release (5.0.8) is CommonJS-incompatible with minimatch@3.
   [1124334, 'brace-expansion'],
 ]);
@@ -78,6 +78,7 @@ if (critical.length > 0 || unexpected.length > 0 || stale.length > 0 || fixable.
   throw new Error(`Production dependency audit requires review (${details.join('; ')})`);
 }
 
+const advisoryLabel = found.size === 1 ? 'advisory' : 'advisories';
 process.stdout.write(
-  `Production dependency audit passed with ${found.size} reviewed high-severity advisories and no critical advisories.\n`,
+  `Production dependency audit passed with ${found.size} reviewed high-severity ${advisoryLabel} and no critical advisories.\n`,
 );

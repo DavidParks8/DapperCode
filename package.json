@@ -23,7 +23,7 @@
   "devDependencies": {
     "jscpd": "5.0.12",
     "prettier": "3.9.6",
-    "quicktype-core": "^23.2.6",
+    "quicktype-core": "23.2.6",
     "semver": "^7.8.5",
     "yaml": "^2.9.0",
     "zod-to-json-schema": "^3.25.1"
