@@ -55,6 +55,11 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
     return next;
   }
 
+  // A summary-only bridge fallback has no turns and must not erase already-hydrated history.
+  if (previous.messages.length > 0 && next.messages.length === 0) {
+    return withPreviousTranscript(previous, next);
+  }
+
   const previousUserCount = countUserMessages(previous.messages);
   const nextUserCount = countUserMessages(next.messages);
   if (nextUserCount >= previousUserCount) {
@@ -69,6 +74,10 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
     return next;
   }
 
+  return withPreviousTranscript(previous, next);
+}
+
+function withPreviousTranscript(previous: Chat, next: Chat): Chat {
   return {
     ...next,
     lastMessagePreview: previous.lastMessagePreview,

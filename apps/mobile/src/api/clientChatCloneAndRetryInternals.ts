@@ -73,6 +73,22 @@ export function cloneChat(chat: Chat): Chat {
   };
 }
 
+export function preserveCachedTranscript(cached: Chat | null, latest: Chat): Chat {
+  if (
+    !cached ||
+    cached.id !== latest.id ||
+    cached.messages.length === 0 ||
+    latest.messages.length > 0
+  ) {
+    return latest;
+  }
+  return {
+    ...latest,
+    lastMessagePreview: latest.lastMessagePreview || cached.lastMessagePreview,
+    messages: cached.messages,
+  };
+}
+
 export function cloneChatPlan<T extends Chat['latestPlan'] | Chat['latestTurnPlan']>(plan: T): T {
   if (!plan) {
     return plan;

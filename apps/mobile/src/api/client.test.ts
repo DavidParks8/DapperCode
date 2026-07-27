@@ -2637,12 +2637,37 @@ describe('HostBridgeApiClient', () => {
   it('propagates thread-read errors and falls back for materialization gaps', async () => {
     const ws = createWsMock();
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const cached = mapChat({
+      id: 'fallback',
+      name: 'Cached thread',
+      preview: 'Cached answer',
+      updatedAt: 1,
+      turns: [
+        {
+          id: 'cached-turn',
+          items: [{ id: 'cached-answer', type: 'agentMessage', text: 'Cached answer' }],
+        },
+      ],
+    });
+    client.rememberChat(cached);
     ws.request
       .mockRejectedValueOnce(
         new RpcRequestError('thread/read', -32602, 'includeTurns cannot materialise'),
       )
-      .mockResolvedValueOnce({ thread: { id: 'fallback', turns: [] } });
-    await expect(client.getChat('fallback')).resolves.toMatchObject({ id: 'fallback' });
+      .mockResolvedValueOnce({
+        thread: {
+          id: 'fallback',
+          name: 'Refreshed thread',
+          preview: 'Cached answer',
+          updatedAt: 2,
+        },
+      });
+    await expect(client.getChat('fallback', { forceRefresh: true })).resolves.toMatchObject({
+      id: 'fallback',
+      title: 'Refreshed thread',
+      messages: [expect.objectContaining({ id: 'cached-answer', content: 'Cached answer' })],
+    });
+    expect(client.peekChat('fallback')?.messages).toEqual(cached.messages);
 
     const readError = new RpcRequestError('thread/read', -32603, 'other failure');
     ws.request.mockRejectedValueOnce(readError);
