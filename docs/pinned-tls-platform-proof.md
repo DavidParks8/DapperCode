@@ -25,7 +25,11 @@ Production `tailnetPinnedTls` remains fail-closed.
 The server is the isolated `pinned_tls_proof` Cargo binary. It does not use the production bridge
 router or configuration. The iOS client is the `debugOnly` local Expo module
 `dappercode-pinned-tls-proof`, so clean Expo prebuilds wire it reproducibly while release
-configurations exclude it.
+configurations exclude it. The proof JavaScript is rooted at the dedicated
+`PinnedTlsProofEntry.tsx` Debug harness; production `index.js` and `App.tsx` do not import any proof
+source. A checked-in Expo config plugin gives proof builds a separate Swift compilation condition
+that selects the embedded proof bundle directly, so an unrelated Metro listener cannot substitute
+the production entry. Release builds do not define that condition.
 
 ## Exercised iOS target and dependencies
 
@@ -57,9 +61,9 @@ Run the full reproducible path:
 npm run proof:pinned-tls:simulator
 ```
 
-The command performs a clean Expo prebuild, installs Pods, asserts iOS 15.1, builds and installs the
-debug app, starts Metro and two isolated rustls servers, and runs native HTTPS and WSS checks. It
-also proves:
+The command performs a clean Expo prebuild, installs Pods, asserts iOS 15.1, embeds the dedicated
+proof entry in the Debug app without Metro, verifies that entry's marker in the built app, starts two
+isolated rustls servers, and runs native HTTPS and WSS checks. It also proves:
 
 - independent HTTPS and WSS TLS handshakes select the same `SecIdentity` when CA hints are empty;
 - the rustls side accepted four TLS 1.3 handshakes with the configured client SPKI after real
@@ -81,6 +85,7 @@ Focused automated checks are:
 ```bash
 cargo test --locked --manifest-path services/rust-bridge/Cargo.toml pinned_tls_proof -- --test-threads=1
 swift test --package-path apps/mobile/modules/dappercode-pinned-tls-proof --disable-sandbox
+npm run proof:pinned-tls:release-isolation
 ```
 
 The Rust suite rejects unknown pins, malformed/trailing DER, intermediates, expired and
@@ -93,6 +98,12 @@ The Swift policy suite covers valid wrapper/SPKI continuity plus wrong pin, vali
 CA=true, wrong curve, missing SAN, invalid self-signature, CA-signed substitution, and malformed DER.
 The full simulator run additionally exercises Security.framework hostname evaluation and native
 URLSession/WebSocket challenge handling.
+
+The Release-isolation check generates a production Metro Release bundle and source map, verifies
+that neither the unique proof marker nor any proof source enters that graph, and confirms a separate
+proof-entry bundle does contain the marker. It then performs a clean iOS prebuild/Pod install and
+Release simulator build, requiring the proof pod in Debug configuration while rejecting it from the
+Release Pods configuration, generated app artifacts, native executable, and embedded bundle.
 
 ## Physical-iPhone gate
 

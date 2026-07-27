@@ -10,7 +10,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +19,8 @@ const mobileRoot = join(repoRoot, 'apps', 'mobile');
 const iosRoot = join(mobileRoot, 'ios');
 const bridgeManifest = join(repoRoot, 'services', 'rust-bridge', 'Cargo.toml');
 const bundleIdentifier = 'com.dappermagna.tethercode';
+const proofJavaScriptMarker = 'DAPPERCODE_PINNED_TLS_PROOF_JS_ONLY_V1';
+const proofSwiftCondition = 'DAPPERCODE_PINNED_TLS_PROOF';
 const runDirectory = mkdtempSync(join(tmpdir(), 'dappercode-pinned-tls-proof-'));
 const children = new Set();
 
@@ -127,23 +128,6 @@ process.once('SIGTERM', () => {
   process.exit(143);
 });
 
-async function unusedPort() {
-  return await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        server.close();
-        reject(new Error('failed to allocate a local port'));
-        return;
-      }
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolvePort(port)));
-    });
-  });
-}
-
 async function waitUntil(check, timeoutMs, description) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
@@ -169,21 +153,28 @@ function podExecutable() {
   fail('CocoaPods is unavailable; run `gem install --user-install cocoapods`');
 }
 
-function generateNativeProject(options) {
+function generateNativeProject() {
   run('npx', ['expo', 'prebuild', '--clean', '--platform', 'ios', '--no-install'], {
     cwd: mobileRoot,
   });
   run(podExecutable(), ['install'], {
     cwd: iosRoot,
-    env: options.simulator ? {} : { EX_UPDATES_NATIVE_DEBUG: '1' },
+    env: { EX_UPDATES_NATIVE_DEBUG: '1' },
   });
   const project = readFileSync(join(iosRoot, 'DapperCode.xcodeproj', 'project.pbxproj'), 'utf8');
   const podfile = readFileSync(join(iosRoot, 'Podfile'), 'utf8');
+  const appDelegate = readFileSync(join(iosRoot, 'DapperCode', 'AppDelegate.swift'), 'utf8');
   if (!project.includes('IPHONEOS_DEPLOYMENT_TARGET = 15.1;')) {
     fail('generated Xcode project did not preserve the required iOS 15.1 target');
   }
   if (!podfile.includes("platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'")) {
     fail('generated Podfile did not preserve the required iOS 15.1 target');
+  }
+  if (
+    !appDelegate.includes(`#if ${proofSwiftCondition}`) ||
+    !appDelegate.includes('return Bundle.main.url(forResource: "main", withExtension: "jsbundle")')
+  ) {
+    fail('generated AppDelegate does not support the proof-only embedded JavaScript entry');
   }
 }
 
@@ -223,10 +214,17 @@ function buildAndInstall(options, selector) {
   ];
   if (!options.simulator) {
     args.splice(args.length - 2, 0, '-allowProvisioningUpdates');
-    args.splice(args.length - 2, 0, 'SKIP_BUNDLING_METRO_IP=1');
     if (options.developmentTeam)
       args.splice(args.length - 2, 0, `DEVELOPMENT_TEAM=${options.developmentTeam}`);
   }
+  args.splice(
+    args.length - 2,
+    0,
+    'ENTRY_FILE=src/proof/PinnedTlsProofEntry.tsx',
+    'FORCE_BUNDLING=1',
+    'SKIP_BUNDLING_METRO_IP=1',
+    `SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ${proofSwiftCondition}`,
+  );
   run('xcodebuild', args, { cwd: iosRoot });
   const platform = options.simulator ? 'iphonesimulator' : 'iphoneos';
   const appPath = join(
@@ -237,13 +235,15 @@ function buildAndInstall(options, selector) {
     'DapperCode.app',
   );
   if (!existsSync(appPath)) fail(`built app was not found at ${appPath}`);
-  if (!options.simulator) {
-    if (!existsSync(join(appPath, 'main.jsbundle'))) {
-      fail('physical debug app is missing its embedded JavaScript bundle');
-    }
-    if (existsSync(join(appPath, 'ip.txt'))) {
-      fail('physical debug app unexpectedly contains a Metro host hint');
-    }
+  const bundlePath = join(appPath, 'main.jsbundle');
+  if (!existsSync(bundlePath)) {
+    fail('proof debug app is missing its embedded JavaScript bundle');
+  }
+  if (!readFileSync(bundlePath).includes(Buffer.from(proofJavaScriptMarker))) {
+    fail('proof debug app embedded the wrong JavaScript entry');
+  }
+  if (existsSync(join(appPath, 'ip.txt'))) {
+    fail('proof debug app unexpectedly contains a Metro host hint');
   }
 
   if (options.simulator) {
@@ -254,44 +254,12 @@ function buildAndInstall(options, selector) {
   }
 }
 
-async function startMetro(metroPort) {
-  const { child, logPath } = start(
-    process.execPath,
-    [
-      join(mobileRoot, 'scripts', 'run-expo.cjs'),
-      'start',
-      '--dev-client',
-      '--host',
-      'localhost',
-      '--port',
-      String(metroPort),
-    ],
-    {
-      cwd: mobileRoot,
-      env: { CI: '1' },
-      name: 'metro',
-    },
-  );
-  await waitUntil(
-    async () => {
-      if (child.exitCode !== null) fail(`Metro exited early; see ${logPath}`);
-      const response = await fetch(`http://localhost:${metroPort}/status`);
-      return response.ok;
-    },
-    120_000,
-    'Metro',
-  );
-  return `localhost:${metroPort}`;
-}
-
-function launch(options, selector, jsLocation, environment = {}) {
+function launch(options, selector, environment = {}) {
   const proofEnvironment = {
     DAPPERCODE_PINNED_TLS_PROOF: '1',
     ...environment,
   };
-  const argumentsList = options.simulator
-    ? ['-RCT_jsLocation', jsLocation, '--dappercode-pinned-tls-proof']
-    : ['--dappercode-pinned-tls-proof'];
+  const argumentsList = ['--dappercode-pinned-tls-proof'];
   if (options.simulator) {
     const simEnvironment = Object.fromEntries(
       Object.entries(proofEnvironment).map(([key, value]) => [
@@ -547,12 +515,11 @@ async function main() {
   const selector = options.simulator ? selectSimulator() : options.device;
   const tailscaleIp = tailscaleAddress(options);
   if (!options.skipBuild) {
-    generateNativeProject(options);
+    generateNativeProject();
     buildAndInstall(options, selector);
   }
 
-  const jsLocation = options.simulator ? await startMetro(await unusedPort()) : '';
-  launch(options, selector, jsLocation, { DAPPERCODE_PINNED_TLS_RUN_ID: runID });
+  launch(options, selector, { DAPPERCODE_PINNED_TLS_RUN_ID: runID });
   const prepared = await readAppReport(
     options,
     selector,
@@ -575,7 +542,7 @@ async function main() {
     fail('substitution proof server reported an invalid bind address');
   }
   const hostname = options.simulator ? 'localhost' : options.tailnetHost;
-  launch(options, selector, jsLocation, {
+  launch(options, selector, {
     DAPPERCODE_PINNED_TLS_HTTPS_URL: `https://${hostname}:${port}/echo`,
     DAPPERCODE_PINNED_TLS_WSS_URL: `wss://${hostname}:${port}/ws/echo`,
     DAPPERCODE_PINNED_TLS_HOSTNAME: hostname,

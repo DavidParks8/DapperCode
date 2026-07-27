@@ -5,6 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { pinnedTlsProofNativeModule } from './nativePinnedTlsProof';
 import type { PinnedTlsIdentityReport, PinnedTlsProofReport } from './nativePinnedTlsProof';
 
+export const PINNED_TLS_PROOF_JS_BUNDLE_MARKER = 'DAPPERCODE_PINNED_TLS_PROOF_JS_ONLY_V1';
+
 type Phase =
   'preparing' | 'ready' | 'running' | 'confirming' | 'confirmingPrompts' | 'complete' | 'failed';
 
@@ -105,7 +107,7 @@ export function PinnedTlsProofScreen() {
   }, [automaticPromptCount, phase, run]);
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} testID={PINNED_TLS_PROOF_JS_BUNDLE_MARKER}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>Pinned TLS platform proof</Text>
         <Text style={styles.status}>Phase: {phase}</Text>
