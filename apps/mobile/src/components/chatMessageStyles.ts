@@ -21,10 +21,8 @@ export const createStyles = (theme: AppTheme) =>
     userBubbleContent: { gap: theme.spacing.sm },
     assistantContent: { gap: theme.spacing.xs },
     userMessageText: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 14,
+      ...theme.typography.body,
       color: theme.colors.textPrimary,
-      lineHeight: 20,
     },
     userInlineMentionText: {
       color: theme.colors.textSecondary,
@@ -49,8 +47,7 @@ export const createStyles = (theme: AppTheme) =>
       maxWidth: '100%',
     },
     userFileChipText: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 12,
+      ...theme.typography.caption,
       lineHeight: 16,
       color: theme.colors.textMuted,
       flexShrink: 1,

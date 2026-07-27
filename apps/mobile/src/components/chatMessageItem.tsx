@@ -23,13 +23,9 @@ import {
 } from './chatMessageContentHelpers';
 import { createMarkdownRules } from './chatMessageMarkdownRules';
 import { createMarkdownStyles } from './chatMessageMarkdownStyles';
-import {
-  MarkdownImage,
-  renderUserTextWithMentions,
-  ScrollableRowText,
-  SelectableMessageText,
-} from './chatMessagePrimitives';
+import { MarkdownImage, ScrollableRowText, SelectableMessageText } from './chatMessagePrimitives';
 import { createStyles } from './chatMessageStyles';
+import { ChatMessageUserBubble } from './chatMessageUserBubble';
 import { ReasoningEntryCard } from './chatMessageReasoningCard';
 import {
   entriesAreComputerUseTimeline,
@@ -133,48 +129,7 @@ function ChatMessageComponent({
   );
 
   if (message.role === 'user')
-    return (
-      <View style={[styles.messageWrapper, styles.messageWrapperUser]}>
-        <View
-          style={[styles.userBubble, messageBlocks.length > 1 && styles.userBubbleWithAttachments]}
-        >
-          <View style={styles.userBubbleContent}>
-            {messageBlocks.map((block, index) => {
-              if (block.kind === 'image')
-                return (
-                  <MarkdownImage
-                    key={`${message.id}-image-${String(index)}`}
-                    source={block.source}
-                    accessibilityLabel={block.accessibilityLabel}
-                  />
-                );
-              if (block.kind === 'file')
-                return (
-                  <View key={`${message.id}-file-${String(index)}`} style={styles.userFileChip}>
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name="document-text-outline"
-                      size={12}
-                      color={theme.colors.textMuted}
-                    />
-                    <Text style={styles.userFileChipText} numberOfLines={1}>
-                      {block.value}
-                    </Text>
-                  </View>
-                );
-              return (
-                <SelectableMessageText
-                  key={`${message.id}-text-${String(index)}`}
-                  style={styles.userMessageText}
-                >
-                  {renderUserTextWithMentions(block.value, styles.userInlineMentionText)}
-                </SelectableMessageText>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-    );
+    return <ChatMessageUserBubble messageId={message.id} blocks={messageBlocks} />;
 
   if (['assistant', 'developer', 'system'].includes(message.role))
     return (

@@ -444,7 +444,7 @@ describe('App orchestration', () => {
       .spyOn(require('react-native'), 'useWindowDimensions')
       .mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1 });
     jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, callback) => {
-      mockBackHandler = () => callback({ type: 'hardwareBackPress', timeStamp: 0 });
+      mockBackHandler = () => callback();
       return { remove: jest.fn() };
     });
     previousAppState = AppState.currentState;
