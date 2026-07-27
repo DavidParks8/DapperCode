@@ -164,10 +164,7 @@ export function applyMessagesSnapshot(
     if (message.role === 'activity' && message.activityType === TOOL_META_ACTIVITY_TYPE) {
       const meta = parseToolMeta(message.content);
       if (meta && !snapshotSubagentIds[meta.toolCallId]) {
-        toolMetaByCallId[meta.toolCallId] = mergeToolMeta(
-          toolMetaByCallId[meta.toolCallId],
-          meta,
-        );
+        toolMetaByCallId[meta.toolCallId] = mergeToolMeta(toolMetaByCallId[meta.toolCallId], meta);
       }
       continue;
     }
