@@ -27,12 +27,12 @@ import {
   SelectableMessageText,
 } from './chatMessagePrimitives';
 import { createStyles } from './chatMessageStyles';
+import { ReasoningEntryCard } from './chatMessageReasoningCard';
 import {
   entriesAreComputerUseTimeline,
   formatCompactionLabel,
   isTerminalSubAgentStatus,
   parseTimelineEntries,
-  summarizeReasoningPreview,
   toSubAgentVisual,
   toTimelineVisual,
 } from './chatMessageTimelineHelpers';
@@ -94,9 +94,6 @@ function ChatMessageComponent({
     [bridgeToken, bridgeUrl, onOpenLocalPreview],
   );
   const [expandedTimelineEntries, setExpandedTimelineEntries] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [expandedReasoningEntries, setExpandedReasoningEntries] = useState<Record<string, boolean>>(
     {},
   );
   const messageText = getMessageText(message);
@@ -237,79 +234,9 @@ function ChatMessageComponent({
     return (
       <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
         <View style={styles.reasoningStack}>
-          {entries.map((entry, index) => {
-            const key = `${message.id}-reasoning-${String(index)}`;
-            const hasDetails = entry.details.length > 0;
-            const expanded = expandedReasoningEntries[key] === true;
-            const preview = hasDetails ? summarizeReasoningPreview(entry.details) : null;
-            return (
-              <Pressable
-                key={key}
-                disabled={!hasDetails}
-                onPress={() =>
-                  hasDetails &&
-                  setExpandedReasoningEntries((previous) => ({
-                    ...previous,
-                    [key]: !previous[key],
-                  }))
-                }
-                style={({ pressed }) => [
-                  styles.reasoningCard,
-                  hasDetails && styles.reasoningCardInteractive,
-                  pressed && hasDetails && styles.reasoningCardPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={entry.title}
-                accessibilityHint={
-                  hasDetails ? `${expanded ? 'Hides' : 'Shows'} reasoning details` : undefined
-                }
-                accessibilityState={controlAccessibilityState({
-                  disabled: !hasDetails,
-                  expanded: hasDetails ? expanded : undefined,
-                })}
-              >
-                <View style={styles.reasoningHeader}>
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name="sparkles-outline"
-                    size={13}
-                    color={theme.colors.textMuted}
-                  />
-                  <Text style={styles.reasoningTitle}>{entry.title}</Text>
-                  {hasDetails ? (
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name={expanded ? 'chevron-up' : 'chevron-down'}
-                      size={14}
-                      color={theme.colors.textMuted}
-                    />
-                  ) : null}
-                </View>
-                {!expanded && preview ? (
-                  <SelectableMessageText style={styles.reasoningPreview} numberOfLines={3}>
-                    {preview}
-                  </SelectableMessageText>
-                ) : null}
-                {expanded && hasDetails ? (
-                  <View style={styles.reasoningDetailWrap}>
-                    {entry.details.map((line, lineIndex) => (
-                      <SelectableMessageText
-                        key={`${key}-line-${String(lineIndex)}`}
-                        style={styles.reasoningDetailLine}
-                      >
-                        {line}
-                      </SelectableMessageText>
-                    ))}
-                  </View>
-                ) : null}
-                {hasDetails ? (
-                  <Text style={styles.reasoningToggleText}>
-                    {expanded ? 'Tap to hide thinking' : 'Tap to show thinking'}
-                  </Text>
-                ) : null}
-              </Pressable>
-            );
-          })}
+          {entries.map((entry, index) => (
+            <ReasoningEntryCard key={`${message.id}-reasoning-${String(index)}`} entry={entry} />
+          ))}
         </View>
       </View>
     );
@@ -358,23 +285,23 @@ function ChatMessageComponent({
                       <SelectableMessageText
                         key={`${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`}
                         style={styles.subAgentDetailLine}
+                        numberOfLines={line.trimStart().startsWith('Latest:') ? 1 : undefined}
+                        ellipsizeMode={line.trimStart().startsWith('Latest:') ? 'tail' : undefined}
                       >
                         {line}
                       </SelectableMessageText>
                     ))}
                   </View>
                 ) : null}
-                {canOpen ? (
-                  <View style={styles.subAgentOpenHint}>
-                    <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name="chevron-forward"
-                      size={12}
-                      color={theme.colors.textMuted}
-                    />
-                  </View>
-                ) : null}
+                <View style={styles.subAgentOpenHint}>
+                  <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="chevron-forward"
+                    size={12}
+                    color={theme.colors.textMuted}
+                  />
+                </View>
               </Pressable>
             );
           })}

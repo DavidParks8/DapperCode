@@ -12,6 +12,7 @@ import { type ChatMessage, type ChatMessageSubAgentMeta } from './types';
 import { type ToolCall } from '@ag-ui/core';
 import { upsertMessage } from './agUiMessageMutations';
 import { upsertToolResult } from './agUiToolAndCustomEventReducers';
+import { attachToolMeta, withToolStructured } from './toolMeta';
 
 export function reduceStructuredMessageContent(
   current: AgUiThreadMessageState,
@@ -129,8 +130,18 @@ export function reduceToolContent(
     joined.text,
     envelope.event.timestamp,
   );
+  // Diffs and terminal payloads are only renderable while they are still typed,
+  // so the structured parts are kept next to their flattened text.
+  const meta = withToolStructured(
+    next.toolMetaByCallId[toolCallId],
+    toolCallId,
+    Array.isArray(value?.content) ? value.content : undefined,
+    Array.isArray(value?.locations) ? value.locations : undefined,
+  );
   return {
     ...next,
+    messages: attachToolMeta(next.messages, meta),
+    toolMetaByCallId: { ...next.toolMetaByCallId, [toolCallId]: meta },
     structuredRevisionByCallId: {
       ...next.structuredRevisionByCallId,
       [toolCallId]: revision,

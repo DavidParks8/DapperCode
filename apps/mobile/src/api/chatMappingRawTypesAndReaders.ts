@@ -80,6 +80,7 @@ export interface RawAcpSnapshot {
     structuredContent: unknown[];
     locations: unknown[];
     truncated: boolean;
+    subagent: boolean;
   }>;
   messageCollection?: RawSnapshotCollectionMetadata;
   reasoningCollection?: RawSnapshotCollectionMetadata;

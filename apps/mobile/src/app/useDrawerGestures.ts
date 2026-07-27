@@ -2,7 +2,13 @@ import { useCallback, useMemo } from 'react';
 import { useStore } from 'jotai';
 import { Keyboard } from 'react-native';
 import { Gesture } from 'react-native-gesture-handler';
-import { cancelAnimation, runOnJS, type SharedValue, withSpring } from 'react-native-reanimated';
+import {
+  cancelAnimation,
+  ReduceMotion,
+  runOnJS,
+  type SharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import {
   BACK_SWIPE_DISTANCE,
@@ -24,9 +30,13 @@ interface UseDrawerGesturesArgs {
   settingsAllowsDrawerGesture: boolean;
   drawerVisible: boolean;
   drawerWidth: number;
+  screenWidth: number;
   drawerOffset: SharedValue<number>;
   drawerDragStartOffset: SharedValue<number>;
   drawerGestureDidSettle: SharedValue<boolean>;
+  backSwipeOffset: SharedValue<number>;
+  backSwipeDragStartOffset: SharedValue<number>;
+  backSwipeGestureDidSettle: SharedValue<boolean>;
   onDrawerSettled: (isOpen: boolean) => void;
   onToggleTabletSidebar: () => void;
   onBackSwipe: () => void;
@@ -38,9 +48,13 @@ export function useDrawerGestures({
   settingsAllowsDrawerGesture,
   drawerVisible,
   drawerWidth,
+  screenWidth,
   drawerOffset,
   drawerDragStartOffset,
   drawerGestureDidSettle,
+  backSwipeOffset,
+  backSwipeDragStartOffset,
+  backSwipeGestureDidSettle,
   onDrawerSettled,
   onToggleTabletSidebar,
   onBackSwipe,
@@ -69,6 +83,26 @@ export function useDrawerGestures({
   }, [ensureDrawerCapturesTouches, ensureDrawerVisible]);
 
   const handleDrawerSettled = onDrawerSettled;
+
+  const settleBackSwipe = useCallback(
+    (shouldNavigateBack: boolean, velocityX: number) => {
+      'worklet';
+      backSwipeOffset.value = withSpring(
+        shouldNavigateBack ? screenWidth : 0,
+        {
+          ...buildDrawerSpringConfig(velocityX),
+          overshootClamping: true,
+          reduceMotion: ReduceMotion.System,
+        },
+        (finished) => {
+          if (finished && shouldNavigateBack) {
+            runOnJS(onBackSwipe)();
+          }
+        },
+      );
+    },
+    [backSwipeOffset, onBackSwipe, screenWidth],
+  );
 
   const animateDrawerTo = useCallback(
     (shouldOpen: boolean, velocityX = 0) => {
@@ -129,22 +163,68 @@ export function useDrawerGestures({
     openDrawer();
   }, [onToggleTabletSidebar, openDrawer, usesTabletLayout]);
 
-  const backSwipeGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(
-          currentScreen !== 'Main' && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture),
-        )
-        .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
-        .activeOffsetX(12)
-        .failOffsetY([-18, 18])
-        .onEnd((event) => {
-          if (event.translationX > BACK_SWIPE_DISTANCE || event.velocityX > BACK_SWIPE_VELOCITY) {
+  const backSwipeGesture = useMemo(() => {
+    const animatesCurrentScreen = currentScreen === 'ChatGit';
+    return Gesture.Pan()
+      .withTestId('app-back-swipe')
+      .enabled(
+        currentScreen !== 'Main' && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture),
+      )
+      .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
+      .activeOffsetX(12)
+      .failOffsetY([-18, 18])
+      .onStart((event) => {
+        if (!animatesCurrentScreen) {
+          return;
+        }
+        backSwipeGestureDidSettle.value = false;
+        cancelAnimation(backSwipeOffset);
+        backSwipeDragStartOffset.value = backSwipeOffset.value;
+        backSwipeOffset.value = Math.max(
+          0,
+          Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
+        );
+      })
+      .onUpdate((event) => {
+        if (animatesCurrentScreen) {
+          backSwipeOffset.value = Math.max(
+            0,
+            Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
+          );
+        }
+      })
+      .onEnd((event) => {
+        const dragDistance = animatesCurrentScreen
+          ? backSwipeDragStartOffset.value + event.translationX
+          : event.translationX;
+        const shouldNavigateBack =
+          dragDistance > BACK_SWIPE_DISTANCE || event.velocityX > BACK_SWIPE_VELOCITY;
+        if (!animatesCurrentScreen) {
+          if (shouldNavigateBack) {
             runOnJS(onBackSwipe)();
           }
-        }),
-    [currentScreen, onBackSwipe, settingsAllowsDrawerGesture],
-  );
+          return;
+        }
+        backSwipeGestureDidSettle.value = true;
+        settleBackSwipe(shouldNavigateBack, event.velocityX);
+      })
+      .onFinalize((event) => {
+        if (!animatesCurrentScreen || backSwipeGestureDidSettle.value) {
+          return;
+        }
+        backSwipeGestureDidSettle.value = true;
+        settleBackSwipe(false, event.velocityX);
+      });
+  }, [
+    backSwipeGestureDidSettle,
+    backSwipeDragStartOffset,
+    backSwipeOffset,
+    currentScreen,
+    onBackSwipe,
+    screenWidth,
+    settingsAllowsDrawerGesture,
+    settleBackSwipe,
+  ]);
 
   const settleDrawerFromGesture = useCallback(
     (translationX: number, velocityX: number) => {

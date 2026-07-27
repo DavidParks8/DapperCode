@@ -20,12 +20,14 @@ import { currentScreenAtom, settingsAllowsDrawerGestureAtom } from '../state/nav
 
 interface UseDrawerControllerArgs {
   usesTabletLayout: boolean;
+  screenWidth: number;
   drawerWidth: number;
   onBackSwipe: () => void;
 }
 
 export function useDrawerController({
   usesTabletLayout,
+  screenWidth,
   drawerWidth,
   onBackSwipe,
 }: UseDrawerControllerArgs) {
@@ -42,6 +44,9 @@ export function useDrawerController({
   const drawerOffset = useSharedValue(-drawerWidth);
   const drawerDragStartOffset = useSharedValue(-drawerWidth);
   const drawerGestureDidSettle = useSharedValue(true);
+  const backSwipeOffset = useSharedValue(0);
+  const backSwipeDragStartOffset = useSharedValue(0);
+  const backSwipeGestureDidSettle = useSharedValue(true);
 
   const screenFrameAnimatedStyle = useAnimatedStyle(() => {
     if (usesTabletLayout) {
@@ -74,11 +79,30 @@ export function useDrawerController({
     opacity: 0.88 + getDrawerOpenProgress(drawerOffset.value, drawerWidth) * 0.12,
   }));
 
+  const backSwipePushedScreenAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: backSwipeOffset.value }],
+  }));
+
+  const backSwipeUnderlayAnimatedStyle = useAnimatedStyle(() => {
+    const width = Math.max(screenWidth, 1);
+    const progress = Math.max(0, Math.min(1, backSwipeOffset.value / width));
+    const underlayStartOffset = Math.min(width * 0.22, 88);
+    return {
+      transform: [{ translateX: -underlayStartOffset * (1 - progress) }],
+    };
+  }, [screenWidth]);
+
   useEffect(() => {
     const nextOffset = store.get(drawerOpenAtom) ? 0 : -drawerWidth;
     drawerOffset.value = nextOffset;
     drawerDragStartOffset.value = nextOffset;
   }, [drawerDragStartOffset, drawerOffset, drawerWidth, store]);
+
+  useEffect(() => {
+    backSwipeOffset.value = 0;
+    backSwipeDragStartOffset.value = 0;
+    backSwipeGestureDidSettle.value = true;
+  }, [backSwipeDragStartOffset, backSwipeGestureDidSettle, backSwipeOffset, currentScreen]);
 
   const handleDrawerSettled = useCallback(
     (isOpen: boolean) => {
@@ -106,9 +130,13 @@ export function useDrawerController({
     settingsAllowsDrawerGesture,
     drawerVisible,
     drawerWidth,
+    screenWidth,
     drawerOffset,
     drawerDragStartOffset,
     drawerGestureDidSettle,
+    backSwipeOffset,
+    backSwipeDragStartOffset,
+    backSwipeGestureDidSettle,
     onDrawerSettled: handleDrawerSettled,
     onToggleTabletSidebar: toggleTabletSidebar,
     onBackSwipe,
@@ -150,5 +178,7 @@ export function useDrawerController({
     overlayAnimatedStyle,
     drawerAnimatedStyle,
     drawerContentAnimatedStyle,
+    backSwipeUnderlayAnimatedStyle,
+    backSwipePushedScreenAnimatedStyle,
   };
 }

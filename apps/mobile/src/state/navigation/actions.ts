@@ -86,20 +86,9 @@ export const gitChatUpdatedAtom = atom(null, (get, set, chat: Chat): void => {
   }
 });
 
-export const closeGitAtom = atom(null, (get, set): void => {
-  const gitChat = get(gitChatAtom);
-  const activeChat = get(activeChatAtom);
-  const chatId = gitChat?.id ?? activeChat?.id ?? get(selectedChatIdAtom);
-  const resumeChat =
-    gitChat && gitChat.id === chatId
-      ? gitChat
-      : activeChat && activeChat.id === chatId
-        ? activeChat
-        : null;
-  if (chatId) {
-    void set(openChatWithTransitionAtom, chatId, resumeChat);
-    return;
-  }
+export const closeGitAtom = atom(null, (_get, set): void => {
+  // MainScreen stays mounted beneath Git, so returning only needs to pop the pushed screen.
+  set(cancelChatTransitionAtom);
   set(currentScreenAtom, 'Main');
   set(gitChatAtom, null);
 });

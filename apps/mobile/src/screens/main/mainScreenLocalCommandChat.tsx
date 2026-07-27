@@ -60,7 +60,6 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
         const updated = {
           ...baseChat,
           updatedAt: createdAt,
-          statusUpdatedAt: createdAt,
           lastMessagePreview: normalized.slice(0, 120),
           messages: [
             ...baseChat.messages,
@@ -86,14 +85,12 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
         const createdAt = new Date().toISOString();
         const localChat = {
           ...baseChat,
-          status: 'complete' as const,
           updatedAt: createdAt,
-          statusUpdatedAt: createdAt,
           lastMessagePreview: command,
           messages: [
             ...baseChat.messages,
             {
-              id: `local-command-${Date.now()}`,
+              id: `local-command-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               role: 'user' as const,
               content: command,
               createdAt,
@@ -159,7 +156,6 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
         return {
           ...prev,
           updatedAt: createdAt,
-          statusUpdatedAt: createdAt,
           messages: [
             ...prev.messages,
             {

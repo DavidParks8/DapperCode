@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 
-import { ChatMessage, ToolActivityGroup } from '../../components/ChatMessage';
+import { ChatMessage, ToolInvocationRow } from '../../components/ChatMessage';
+import { ComputerUseTimeline } from '../../components/chatMessageComputerUse';
 import type { findInlineChoiceSet } from './mainScreenHelpers';
 import type { createStyles } from './mainScreenStyles';
 import type { TranscriptDisplayItem } from './transcriptMessages';
@@ -13,7 +14,6 @@ interface RenderChatTranscriptItemOptions {
   styles: ChatTranscriptStyles;
   bridgeUrl: string;
   bridgeToken: string | null;
-  liveTurnActive: boolean;
   inlineChoiceSet: InlineChoiceSet;
   onInlineOptionSelect: (value: string) => void;
   onOpenLocalPreview?: (targetUrl: string) => void;
@@ -25,7 +25,6 @@ export function renderChatTranscriptItem({
   styles,
   bridgeUrl,
   bridgeToken,
-  liveTurnActive,
   inlineChoiceSet,
   onInlineOptionSelect,
   onOpenLocalPreview,
@@ -34,11 +33,28 @@ export function renderChatTranscriptItem({
   if (item.kind === 'toolGroup') {
     return (
       <View style={styles.chatMessageBlock}>
-        <ToolActivityGroup
-          messages={item.messages}
+        <ComputerUseTimeline
+          entries={item.invocations.map((invocation) => ({
+            id: invocation.id,
+            title: invocation.title.includes('`')
+              ? invocation.title
+              : `\`${invocation.title}\``,
+            details: invocation.textLines,
+          }))}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
-          liveTurnActive={liveTurnActive}
+        />
+      </View>
+    );
+  }
+
+  if (item.kind === 'toolInvocation') {
+    return (
+      <View style={styles.chatMessageBlock}>
+        <ToolInvocationRow
+          invocation={item.invocation}
+          bridgeUrl={bridgeUrl}
+          bridgeToken={bridgeToken}
         />
       </View>
     );

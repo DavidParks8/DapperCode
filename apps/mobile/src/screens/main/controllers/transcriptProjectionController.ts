@@ -52,7 +52,11 @@ export function projectTranscript({
     const persistedById = new Map(messages.map((message) => [message.id, message]));
     const liveIds = new Set(liveMessages.map((message) => message.id));
     const projected = liveMessages
-      .filter((message) => !replacedMessageIds.has(message.id) && getMessageText(message).trim())
+      .filter(
+        (message) =>
+          !replacedMessageIds.has(message.id) &&
+          (getMessageText(message).trim() || carriesToolActivity(message)),
+      )
       .map((message) => {
         const persisted = persistedById.get(message.id);
         const parts = persisted?.parts ?? message.parts;
@@ -96,7 +100,7 @@ export function projectTranscript({
   }
   for (const liveAssistantMessage of liveMessages) {
     const liveText = getMessageText(liveAssistantMessage).trim();
-    if (!liveText) {
+    if (!liveText && !carriesToolActivity(liveAssistantMessage)) {
       continue;
     }
     if (replacedMessageIds.has(liveAssistantMessage.id)) {
@@ -160,8 +164,16 @@ export function projectTranscript({
   };
 }
 
-function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages.filter((message, index) => {
+/**
+ * A tool invocation is worth showing the moment it starts, before it has any
+ * output, so a message that only carries tool activity is not empty.
+ */
+function carriesToolActivity(message: ChatMessage): boolean {
+  if (message.toolMeta) return true;
+  return message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0;
+}
+
+function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {  return messages.filter((message, index) => {
     if (!isTransientUserMessage(message)) return true;
     const content = normalizeChatMessageMatchContent(getMessageText(message));
     if (!content) return true;

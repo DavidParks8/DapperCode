@@ -1,4 +1,6 @@
 import { isTerminalSubAgentStatus } from '../../components/chatMessageTimelineHelpers';
+import { buildToolInvocations, type ToolInvocation } from '../../components/toolInvocationModel';
+import { isComputerUseTraceEntry } from '../../components/computerUseTrace';
 import type { ChatMessage, ChatStatus } from '../../api/types';
 import {
   COMPACTION_ACTIVITY_TYPE,
@@ -8,10 +10,17 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../../api/messages';
 
+/** A computer-use trace only reads well as a whole, so it stays grouped. */
 export interface ToolTranscriptGroup {
   kind: 'toolGroup';
   id: string;
-  messages: ChatMessage[];
+  invocations: ToolInvocation[];
+}
+
+export interface ToolTranscriptInvocation {
+  kind: 'toolInvocation';
+  id: string;
+  invocation: ToolInvocation;
 }
 
 export type TranscriptDisplayItem =
@@ -20,9 +29,10 @@ export type TranscriptDisplayItem =
       message: ChatMessage;
       renderKey: string;
     }
-  | ToolTranscriptGroup;
+  | ToolTranscriptGroup
+  | ToolTranscriptInvocation;
 
-/** Keeps each tool card bounded so very long runs don’t dominate the transcript. */
+/** Keeps a computer-use trace bounded so very long runs don’t dominate the transcript. */
 export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
 export function getVisibleTranscriptMessages(
@@ -36,6 +46,7 @@ export function getVisibleTranscriptMessages(
       !showToolCalls &&
       (msg.role === 'tool' ||
         hasToolCalls ||
+        Boolean(msg.toolMeta) ||
         (msg.role === 'system' && isLegacyToolTimelineContent(text)) ||
         (msg.role === 'activity' &&
           msg.activityType !== SUBAGENT_ACTIVITY_TYPE &&
@@ -52,7 +63,7 @@ export function getVisibleTranscriptMessages(
     if (text.includes('You are operating in task worktree')) {
       return false;
     }
-    if (msg.role === 'assistant' && !text.trim() && !hasToolCalls) {
+    if (msg.role === 'assistant' && !text.trim() && !hasToolCalls && !msg.toolMeta) {
       return false;
     }
     return true;
@@ -71,13 +82,23 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
       return;
     }
 
-    items.push({
-      kind: 'toolGroup',
-      id: `tool-group-${toolBuffer[0]?.id ?? 'start'}-${toolBuffer[toolBuffer.length - 1]?.id ?? 'end'}`,
-      messages: [...toolBuffer],
-    });
-
+    const invocations = buildToolInvocations(toolBuffer);
+    const buffered = [...toolBuffer];
     toolBuffer = [];
+    if (invocations.length === 0) {
+      return;
+    }
+    if (isComputerUseTrace(invocations)) {
+      items.push({
+        kind: 'toolGroup',
+        id: `tool-group-${buffered[0]?.id ?? 'start'}-${buffered[buffered.length - 1]?.id ?? 'end'}`,
+        invocations,
+      });
+      return;
+    }
+    for (const invocation of invocations) {
+      items.push({ kind: 'toolInvocation', id: invocation.id, invocation });
+    }
   };
 
   for (const message of messages) {
@@ -105,8 +126,21 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
+function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
+  return (
+    invocations.length > 0 &&
+    invocations.every((invocation) =>
+      // Metadata-backed titles arrive without the backticks the legacy timeline
+      // text used, so the tool label is quoted before it is matched.
+      isComputerUseTraceEntry({
+        title: invocation.title.includes('`') ? invocation.title : `\`${invocation.title}\``,
+      }),
+    )
+  );
+}
+
 function isToolTranscriptMessage(message: ChatMessage): boolean {
-  if (message.role === 'tool' || getToolCallDisplayLines(message).length > 0) {
+  if (message.role === 'tool' || message.toolMeta || getToolCallDisplayLines(message).length > 0) {
     return true;
   }
   if (message.role !== 'system') {

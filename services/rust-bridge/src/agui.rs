@@ -1,6 +1,8 @@
 use crate::acp::events::{CanonicalEvent, FieldUpdate, MessageRole};
 use crate::acp::identity::AgentSessionId;
-use crate::acp::snapshot::{SessionSnapshot, SnapshotMessage, SnapshotTimelineKind, SnapshotTool};
+use crate::acp::snapshot::{
+    is_subagent_task_tool, SessionSnapshot, SnapshotMessage, SnapshotTimelineKind, SnapshotTool,
+};
 use crate::agui_generated::{
     AgUiEvent, AgUiEventContent, AgUiEventRole, AgUiEventType, Delta, Function, Message,
     MessageContent, MessageRole as AgUiMessageRole, ToolCall, ToolCallType,
@@ -13,6 +15,7 @@ pub(super) const AG_UI_EVENT_METHOD: &str = "bridge/agui.event";
 const CLOSED_THREAD_CAPACITY: usize = 2048;
 const OBSERVED_RUN_CAPACITY: usize = 256;
 const SUBAGENT_LINK_CAPACITY: usize = 2048;
+const SUBAGENT_PROGRESS_CAPACITY: usize = 1024;
 const MESSAGE_CHUNK_BYTES: usize = 32 * 1024;
 const TOOL_RESULT_CHUNK_BYTES: usize = 16 * 1024;
 const STRUCTURED_CHUNK_BYTES: usize = 16 * 1024;
@@ -57,6 +60,7 @@ struct AgUiToolState {
     locations: Vec<Value>,
     structured_truncated: bool,
     subagent_revision: Option<String>,
+    meta_revision: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +73,7 @@ struct SubagentActivityLink {
     child_run_id: Option<String>,
     child_generation: Option<u64>,
     minimum_child_generation: Option<u64>,
+    progress_revisions: HashSet<String>,
 }
 
 struct SubagentActivityContext<'a> {
@@ -77,6 +82,12 @@ struct SubagentActivityContext<'a> {
     parent_source_turn_id: Option<String>,
     tool_call_id: &'a str,
     child_thread_id: Option<&'a str>,
+}
+
+struct SubagentProgress {
+    status: &'static str,
+    latest: String,
+    revision: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -594,6 +605,13 @@ impl AgUiProjector {
                                 }
                             })
                         };
+                        let progress_revisions = if same_invocation {
+                            previous_link
+                                .map(|link| link.progress_revisions.clone())
+                                .unwrap_or_default()
+                        } else {
+                            HashSet::new()
+                        };
                         subagent_links.insert(
                             child_thread_id.clone(),
                             SubagentActivityLink {
@@ -605,6 +623,7 @@ impl AgUiProjector {
                                 child_run_id,
                                 child_generation,
                                 minimum_child_generation,
+                                progress_revisions,
                             },
                         );
                     }
@@ -612,6 +631,25 @@ impl AgUiProjector {
                 // Read after the linked branch above, which can classify this tool as a
                 // sub-agent from accumulated content when the update itself carried none.
                 let is_subagent_tool = state.subagent_activity;
+                // The client renders one row per tool call and needs the ACP kind, status
+                // and title to pick its icon, its progress affordance and its failure
+                // styling. A status transition carries no content, so this cannot ride on
+                // the tool-content event, which only fires when structured content moves.
+                let kind_wire = tool_kind_wire(*kind);
+                let status_wire = tool_status_wire(*status);
+                // Mirror the fallback `TOOL_CALL_START` already uses so a blank ACP title
+                // never reaches the client as an empty row label.
+                let title_wire = if title.trim().is_empty() {
+                    kind_wire.clone()
+                } else {
+                    bounded(title, 256)
+                };
+                let meta_revision = format!("{kind_wire}\0{status_wire}\0{title_wire}");
+                let meta_changed = !is_subagent_tool
+                    && state.meta_revision.as_deref() != Some(meta_revision.as_str());
+                if meta_changed {
+                    state.meta_revision = Some(meta_revision);
+                }
                 // Agents that never stream a child session only report progress through
                 // this tool, so mirror its latest output onto the card. Without real
                 // output there is nothing to say: an empty card reports "starting" and
@@ -688,6 +726,22 @@ impl AgUiProjector {
                             finished_child_thread_id = Some(child_thread_id);
                         }
                     }
+                }
+                if meta_changed {
+                    push_structured_chunks(
+                        &mut projection.events,
+                        thread_id,
+                        run,
+                        "dappercode.dev/tool-meta",
+                        tool_call_id,
+                        json!({
+                            "toolCallId": tool_call_id,
+                            "kind": kind_wire,
+                            "status": status_wire,
+                            "title": title_wire,
+                        }),
+                        timestamp,
+                    );
                 }
                 if let Some(previous_content) = previous_content {
                     let content = content.clone().unwrap_or_default();
@@ -1112,6 +1166,44 @@ impl AgUiProjector {
         }
     }
 
+    /// Records a sub-agent link discovered before its tool call reported one.
+    ///
+    /// The card can only follow a sub-agent's progress once the projector knows which tool call
+    /// the child belongs to. An existing link is left alone: it was built from the tool's own
+    /// `<task …>` header and carries run correlation this one cannot know yet.
+    pub(super) fn link_subagent(
+        &mut self,
+        parent_thread_id: &str,
+        parent_run_id: &str,
+        parent_source_turn_id: Option<String>,
+        tool_call_id: &str,
+        child_thread_id: &str,
+    ) -> bool {
+        if self.subagent_links.contains_key(child_thread_id) {
+            return false;
+        }
+        if self.subagent_links.len() >= SUBAGENT_LINK_CAPACITY {
+            if let Some(expired) = self.subagent_links.keys().next().cloned() {
+                self.subagent_links.remove(&expired);
+            }
+        }
+        self.subagent_links.insert(
+            child_thread_id.to_string(),
+            SubagentActivityLink {
+                parent_thread_id: parent_thread_id.to_string(),
+                parent_run_id: parent_run_id.to_string(),
+                parent_source_turn_id,
+                tool_call_id: tool_call_id.to_string(),
+                child_thread_id: child_thread_id.to_string(),
+                child_run_id: None,
+                child_generation: None,
+                minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
+            },
+        );
+        true
+    }
+
     fn project_subagent_progress(
         &mut self,
         canonical: &CanonicalEvent,
@@ -1154,9 +1246,21 @@ impl AgUiProjector {
                 current.child_generation = event_generation;
             }
         }
-        let Some((status, latest)) = subagent_progress(canonical) else {
+        let Some(progress) = subagent_progress(canonical) else {
             return;
         };
+        if let Some(revision) = progress.revision.as_deref() {
+            let Some(current) = self.subagent_links.get_mut(thread_id) else {
+                return;
+            };
+            if current.progress_revisions.contains(revision) {
+                return;
+            }
+            if current.progress_revisions.len() >= SUBAGENT_PROGRESS_CAPACITY {
+                current.progress_revisions.clear();
+            }
+            current.progress_revisions.insert(revision.to_string());
+        }
         events.push(subagent_activity_envelope(
             SubagentActivityContext {
                 parent_thread_id: &link.parent_thread_id,
@@ -1165,15 +1269,15 @@ impl AgUiProjector {
                 tool_call_id: &link.tool_call_id,
                 child_thread_id: Some(&link.child_thread_id),
             },
-            status,
-            Some(&latest),
+            progress.status,
+            Some(&progress.latest),
             timestamp,
         ));
-        if is_terminal_subagent_status(status) {
+        if is_terminal_subagent_status(progress.status) {
             if let Some(run) = self.runs.get_mut(&link.parent_thread_id) {
                 if run.run_id == link.parent_run_id {
                     if let Some(tool) = run.tools.get_mut(&link.tool_call_id) {
-                        tool.subagent_terminal_status = Some(status.to_string());
+                        tool.subagent_terminal_status = Some(progress.status.to_string());
                     }
                 }
             }
@@ -1259,7 +1363,8 @@ pub(super) fn messages_snapshot_envelope(
                 } else {
                     current_task.or(preserved_task)
                 };
-                if task.is_some() || is_subagent_task_tool(tool.kind, &tool.title) {
+                if task.is_some() || tool.subagent || is_subagent_task_tool(tool.kind, &tool.title)
+                {
                     let child_thread_id = task.as_ref().and_then(|task| {
                         AgentSessionId::new(&snapshot.agent_id, &task.session_id)
                             .ok()
@@ -1297,6 +1402,23 @@ pub(super) fn messages_snapshot_envelope(
                     ));
                     continue;
                 }
+                // The generated AG-UI `Message` cannot carry the ACP kind or status, so the
+                // client reads them from an activity message that sits immediately before
+                // the pair it describes. It is folded into the tool row and never rendered
+                // on its own.
+                messages.push(activity_message(
+                    format!("tool-meta:{}", tool.id),
+                    "dappercode.tool",
+                    json!({
+                        "toolCallId": tool.id,
+                        "kind": tool_kind_wire(tool.kind),
+                        "status": tool_status_wire(tool.status),
+                        "title": bounded(&tool.title, 256),
+                        "content": tool.structured_content,
+                        "locations": tool.locations,
+                        "truncated": tool.truncated,
+                    }),
+                ));
                 messages.push(Message {
                     id: format!("tool-call:{}", tool.id),
                     role: AgUiMessageRole::Assistant,
@@ -1309,7 +1431,7 @@ pub(super) fn messages_snapshot_envelope(
                         function: Function {
                             name: bounded(
                                 if tool.title.trim().is_empty() {
-                                    format!("{:?}", tool.kind).to_ascii_lowercase()
+                                    tool_kind_wire(tool.kind)
                                 } else {
                                     tool.title.clone()
                                 },
@@ -1720,16 +1842,6 @@ fn summarize_task_result(result: &str) -> String {
 
 const TASK_RESULT_SUMMARY_BYTES: usize = 140;
 
-fn is_subagent_task_tool(kind: agent_client_protocol::schema::v1::ToolKind, title: &str) -> bool {
-    let normalized = title
-        .trim()
-        .to_ascii_lowercase()
-        .replace(['-', '_', ' '], "");
-    matches!(normalized.as_str(), "task" | "spawnagent" | "subagent")
-        || kind == agent_client_protocol::schema::v1::ToolKind::Think
-            && normalized.contains("agent")
-}
-
 /// How a sub-agent's own state should be reported on its card.
 ///
 /// Agents announce a task as `starting` (or `pending`/`queued`) before the child
@@ -1823,7 +1935,7 @@ fn subagent_activity_envelope(
     )
 }
 
-fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String)> {
+fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
     match canonical {
         // The task header already created a navigable working card. RunStarted is
         // useful for correlation only; rendering it regresses the preview to a
@@ -1835,36 +1947,72 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String
                 MessageRole::Agent => "Responding",
                 MessageRole::User => "Received input",
             };
-            Some(("running", format!("{action}: {}", bounded(content, 320))))
+            Some(SubagentProgress {
+                status: "running",
+                latest: format!("{action}: {}", bounded(content, 320)),
+                revision: None,
+            })
         }
-        CanonicalEvent::Tool { title, status, .. } => {
+        CanonicalEvent::Tool {
+            tool_call_id,
+            title,
+            status,
+            ..
+        } => {
             let title = if title.trim().is_empty() {
                 "Using a tool"
             } else {
                 title
             };
-            let prefix = match status {
-                agent_client_protocol::schema::v1::ToolCallStatus::Failed => "Tool failed",
-                agent_client_protocol::schema::v1::ToolCallStatus::Completed => "Completed",
-                agent_client_protocol::schema::v1::ToolCallStatus::Pending => "Preparing",
-                agent_client_protocol::schema::v1::ToolCallStatus::InProgress => "Working on",
-                _ => "Working on",
-            };
-            Some(("running", format!("{prefix} {title}")))
+            match status {
+                agent_client_protocol::schema::v1::ToolCallStatus::Pending => None,
+                agent_client_protocol::schema::v1::ToolCallStatus::Failed => {
+                    Some(SubagentProgress {
+                        status: "running",
+                        latest: format!("Tool failed {title}"),
+                        revision: Some(format!("failed:{tool_call_id}")),
+                    })
+                }
+                _ => Some(SubagentProgress {
+                    status: "running",
+                    latest: format!("Working on {title}"),
+                    revision: Some(format!("working:{tool_call_id}")),
+                }),
+            }
         }
-        CanonicalEvent::Plan { .. } => Some(("running", "Updating plan".to_string())),
-        CanonicalEvent::PermissionRequested { .. } => {
-            Some(("running", "Waiting for approval".to_string()))
-        }
-        CanonicalEvent::ElicitationRequested { .. } => {
-            Some(("running", "Waiting for input".to_string()))
-        }
+        CanonicalEvent::Plan { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Updating plan".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::PermissionRequested { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Waiting for approval".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::ElicitationRequested { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Waiting for input".to_string(),
+            revision: None,
+        }),
         CanonicalEvent::RunFinished {
             stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
             ..
-        } => Some(("cancelled", "Cancelled".to_string())),
-        CanonicalEvent::RunFinished { .. } => Some(("completed", "Returned result".to_string())),
-        CanonicalEvent::RunFailed { message, .. } => Some(("failed", bounded(message, 512))),
+        } => Some(SubagentProgress {
+            status: "cancelled",
+            latest: "Cancelled".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::RunFinished { .. } => Some(SubagentProgress {
+            status: "completed",
+            latest: "Returned result".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::RunFailed { message, .. } => Some(SubagentProgress {
+            status: "failed",
+            latest: bounded(message, 512),
+            revision: None,
+        }),
         _ => None,
     }
 }
@@ -2333,7 +2481,25 @@ fn bounded(value: impl AsRef<str>, max_bytes: usize) -> String {
     value
 }
 
+/// Wire spelling of an ACP enum, so the client sees `switch_mode` rather than the
+/// Rust `SwitchMode` spelling and stays aligned with the session snapshot.
+fn acp_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{value:?}").to_ascii_lowercase())
+}
+
+fn tool_kind_wire(kind: agent_client_protocol::schema::v1::ToolKind) -> String {
+    acp_wire_value(&kind)
+}
+
+fn tool_status_wire(status: agent_client_protocol::schema::v1::ToolCallStatus) -> String {
+    acp_wire_value(&status)
+}
+
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::acp::snapshot::SessionSnapshot;
@@ -2354,6 +2520,7 @@ mod tests {
             ],
             locations: vec![json!({"path": "src/math.ts", "line": 7})],
             truncated: false,
+            subagent: false,
         };
 
         let text = tool_snapshot_text(&tool);
@@ -2388,6 +2555,92 @@ mod tests {
     }
 
     #[test]
+    fn parse_task_header_rejects_empty_and_oversized_attributes() {
+        assert!(parse_task_header("id=\"\" state=\"running\">").is_none());
+        assert!(
+            parse_task_header(&format!("id=\"{}\" state=\"running\">", "x".repeat(1_025)))
+                .is_none()
+        );
+        assert!(parse_task_header("id=\"child\" state=\"\">").is_none());
+        assert!(
+            parse_task_header(&format!("id=\"child\" state=\"{}\">", "x".repeat(65))).is_none()
+        );
+    }
+
+    #[test]
+    fn task_progress_preview_handles_reversed_result_markers() {
+        assert_eq!(
+            task_progress_preview("</task_result>\nStill working\n<task_result>").as_deref(),
+            Some("Still working")
+        );
+    }
+
+    #[test]
+    fn utf8_helpers_back_up_to_character_boundaries() {
+        assert_eq!(
+            utf8_chunks("a😀b", 4).collect::<Vec<_>>(),
+            vec!["a", "😀", "b"]
+        );
+
+        let unicode = format!("{}é", "x".repeat(7));
+        assert_eq!(bounded(unicode.as_str(), 8), "xxxxxxx");
+        assert_eq!(bounded(&unicode, 8), "xxxxxxx");
+    }
+
+    #[test]
+    fn discovers_only_tool_subagents_and_renders_structured_resources() {
+        assert!(discovered_subagent_session(&CanonicalEvent::RunStarted {
+            agent_id: "alpha".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run".to_string(),
+            source_turn_id: "turn".to_string(),
+            generation: 1,
+        })
+        .is_none());
+
+        let tool = CanonicalEvent::Tool {
+            agent_id: "alpha".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: Some("run".to_string()),
+            source_turn_id: Some("turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "task".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Research".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+        assert_eq!(
+            discovered_subagent_session(&tool),
+            Some((
+                "thread",
+                "child".to_string(),
+                Some("Research"),
+                "task",
+                false
+            ))
+        );
+
+        assert_eq!(
+            snapshot_content_lines(&json!({
+                "resource": {
+                    "uri": "file:///tmp/readme.md",
+                    "text": "Documentation"
+                }
+            })),
+            vec!["[resource: file:///tmp/readme.md]", "Documentation"]
+        );
+        assert!(snapshot_content_lines(&json!({
+            "resource": {}
+        }))
+        .is_empty());
+    }
+
+    #[test]
     fn tool_snapshot_text_keeps_diff_and_terminal_payloads() {
         let tool = SnapshotTool {
             id: "call-edit-1".to_string(),
@@ -2402,6 +2655,7 @@ mod tests {
             ],
             locations: vec![],
             truncated: false,
+            subagent: false,
         };
 
         let text = tool_snapshot_text(&tool);
@@ -4466,7 +4720,7 @@ mod tests {
         let started = projector.project_canonical(&tool("tool-1", ToolCallStatus::InProgress, ""));
         assert_eq!(
             event_types(&started.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
         assert!(projector
             .project_canonical(&tool("tool-1", ToolCallStatus::InProgress, ""))
@@ -4476,7 +4730,7 @@ mod tests {
             projector.project_canonical(&tool("tool-1", ToolCallStatus::Completed, "done"));
         assert_eq!(
             event_types(&completed.events),
-            ["TOOL_CALL_END", "TOOL_CALL_RESULT"]
+            ["TOOL_CALL_END", "CUSTOM", "TOOL_CALL_RESULT"]
         );
         assert!(projector
             .project_canonical(&tool("tool-1", ToolCallStatus::Completed, "done"))
@@ -4488,7 +4742,7 @@ mod tests {
                     .project_canonical(&tool("tool-open", ToolCallStatus::InProgress, ""))
                     .events
             ),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
 
         let terminal = projector.project_canonical(&CanonicalEvent::RunFinished {
@@ -4640,7 +4894,7 @@ mod tests {
         assert_eq!(event_types(&child_started.events), ["RUN_STARTED"]);
         assert_eq!(child_started.events[0].thread_id, child_thread);
 
-        let child_tool = projector.project_canonical(&CanonicalEvent::Tool {
+        let child_tool_event = |status| CanonicalEvent::Tool {
             agent_id: "alpha-agent".to_string(),
             thread_id: child_thread.clone(),
             run_id: Some("child-run".to_string()),
@@ -4648,16 +4902,29 @@ mod tests {
             generation: Some(1),
             tool_call_id: "read-live".to_string(),
             kind: ToolKind::Read,
-            status: ToolCallStatus::InProgress,
+            status,
             title: "Read repository".to_string(),
             content: FieldUpdate::Set(String::new()),
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
-        });
-        let parent_activity = serde_json::to_value(&child_tool.events[0]).unwrap();
+        };
+        let pending = projector.project_canonical(&child_tool_event(ToolCallStatus::Pending));
+        assert!(
+            subagent_cards(&pending).is_empty(),
+            "pending tools must not flash a Preparing update on the parent card"
+        );
+
+        let working = projector.project_canonical(&child_tool_event(ToolCallStatus::InProgress));
+        let parent_activity = serde_json::to_value(&working.events[0]).unwrap();
         assert!(parent_activity["event"]["content"]["text"]
             .as_str()
             .is_some_and(|text| text.contains("Latest: Working on Read repository")));
+
+        let completed = projector.project_canonical(&child_tool_event(ToolCallStatus::Completed));
+        assert!(
+            subagent_cards(&completed).is_empty(),
+            "the completed half of a tool lifecycle must reuse its working update"
+        );
 
         let finished = projector.project_canonical(&CanonicalEvent::RunFinished {
             agent_id: "alpha-agent".to_string(),
@@ -4671,6 +4938,60 @@ mod tests {
         assert_eq!(
             terminal_activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
+        );
+    }
+
+    /// A foreground task tool names its child only once it has finished, so the bridge finds the
+    /// child elsewhere and links it up front. From then on the card must follow the sub-agent's
+    /// work, exactly as it does for a link built from the tool's own header.
+    #[test]
+    fn an_early_link_streams_child_progress_onto_the_parent_card() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+        let child_thread = AgentSessionId::new("alpha-agent", "child-session")
+            .expect("child identity")
+            .encode();
+
+        assert!(projector.link_subagent(
+            parent_thread,
+            "run-1",
+            Some("turn-1".to_string()),
+            "task-early",
+            &child_thread,
+        ));
+        // The tool's own header arrives later and must not discard the correlation built since.
+        assert!(!projector.link_subagent(
+            parent_thread,
+            "run-1",
+            Some("turn-1".to_string()),
+            "task-early",
+            &child_thread,
+        ));
+
+        let child_tool = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "read-early".to_string(),
+            kind: ToolKind::Read,
+            status: ToolCallStatus::InProgress,
+            title: "Read repository".to_string(),
+            content: FieldUpdate::Set(String::new()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        let card = serde_json::to_value(&child_tool.events[0]).expect("card serializes");
+        assert_eq!(card["threadId"], parent_thread);
+        assert_eq!(card["event"]["messageId"], "subagent:task-early");
+        assert!(card["event"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Latest: Working on Read repository")));
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["receiverThreadIds"][0],
+            serde_json::Value::String(child_thread)
         );
     }
 
@@ -4748,6 +5069,77 @@ mod tests {
         assert!(messages
             .iter()
             .any(|message| { message["role"] == "tool" && message["toolCallId"] == "tool-1" }));
+        let meta = messages
+            .iter()
+            .find(|message| message["activityType"] == "dappercode.tool")
+            .expect("snapshot carries tool metadata");
+        assert_eq!(meta["content"]["toolCallId"], "tool-1");
+        assert_eq!(meta["content"]["kind"], "read");
+        assert_eq!(meta["content"]["status"], "completed");
+        assert_eq!(meta["content"]["title"], "Read");
+    }
+
+    #[test]
+    fn tool_meta_event_tracks_kind_and_status_without_repeating_itself() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let tool = |status| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "meta-tool".to_string(),
+            kind: ToolKind::SwitchMode,
+            status,
+            title: String::new(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        };
+        let started = projector.project_canonical(&tool(ToolCallStatus::InProgress));
+        let meta = serde_json::to_value(started.events.last().unwrap()).unwrap();
+        assert_eq!(meta["event"]["name"], "dappercode.dev/tool-meta");
+        assert_eq!(meta["event"]["value"]["kind"], "switch_mode");
+        assert_eq!(meta["event"]["value"]["status"], "in_progress");
+        // A blank ACP title falls back to the kind, matching `toolCallName`.
+        assert_eq!(meta["event"]["value"]["title"], "switch_mode");
+        assert!(projector
+            .project_canonical(&tool(ToolCallStatus::InProgress))
+            .events
+            .is_empty());
+        let failed = projector.project_canonical(&tool(ToolCallStatus::Failed));
+        assert_eq!(event_types(&failed.events), ["TOOL_CALL_END", "CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&failed.events[1]).unwrap()["event"]["value"]["status"],
+            "failed"
+        );
+    }
+
+    #[test]
+    fn subagent_tools_do_not_emit_tool_meta() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let projection = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg".to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-tool".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child-1\" state=\"running\">\nReading files\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        assert!(!serde_json::to_value(&projection.events)
+            .unwrap()
+            .to_string()
+            .contains("dappercode.dev/tool-meta"));
     }
 
     #[test]
@@ -5215,6 +5607,7 @@ mod tests {
                 "TOOL_CALL_START",
                 "TOOL_CALL_ARGS",
                 "TOOL_CALL_END",
+                "CUSTOM",
                 "CUSTOM"
             ]
         );
@@ -5297,14 +5690,14 @@ mod tests {
         let started = projector.project_canonical(&tool(ToolCallStatus::Pending, ""));
         assert_eq!(
             event_types(&started.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
         );
         let serialized = serde_json::to_value(&started.events[0]).unwrap();
         assert_eq!(serialized["event"]["toolCallName"], "edit");
         let partial = projector.project_canonical(&tool(ToolCallStatus::InProgress, "first"));
-        assert_eq!(event_types(&partial.events), ["CUSTOM"]);
+        assert_eq!(event_types(&partial.events), ["CUSTOM", "CUSTOM"]);
         assert_eq!(
-            serde_json::to_value(&partial.events[0]).unwrap()["event"]["name"],
+            serde_json::to_value(&partial.events[1]).unwrap()["event"]["name"],
             "dappercode.dev/tool-text"
         );
         assert!(projector
@@ -5314,10 +5707,10 @@ mod tests {
         let empty_terminal = projector.project_canonical(&tool(ToolCallStatus::Failed, ""));
         assert_eq!(
             event_types(&empty_terminal.events),
-            ["TOOL_CALL_END", "CUSTOM"]
+            ["TOOL_CALL_END", "CUSTOM", "CUSTOM"]
         );
         assert_eq!(
-            serde_json::to_value(&empty_terminal.events[1]).unwrap()["event"]["name"],
+            serde_json::to_value(&empty_terminal.events[2]).unwrap()["event"]["name"],
             "dappercode.dev/tool-text"
         );
         let metadata_only = CanonicalEvent::Tool {
@@ -5334,14 +5727,25 @@ mod tests {
             structured_content: FieldUpdate::Unchanged,
             locations: FieldUpdate::Unchanged,
         };
+        // A renamed tool still has to reach the row that shows its title, so the
+        // metadata event fires even though no content moved.
+        let renamed = projector.project_canonical(&metadata_only);
+        assert_eq!(event_types(&renamed.events), ["CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&renamed.events[0]).unwrap()["event"]["value"]["title"],
+            "updated title"
+        );
         assert!(projector
             .project_canonical(&metadata_only)
             .events
             .is_empty());
         let changed_result = projector.project_canonical(&tool(ToolCallStatus::Failed, "second"));
-        assert_eq!(event_types(&changed_result.events), ["TOOL_CALL_RESULT"]);
         assert_eq!(
-            serde_json::to_value(&changed_result.events[0]).unwrap()["event"]["content"],
+            event_types(&changed_result.events),
+            ["CUSTOM", "TOOL_CALL_RESULT"]
+        );
+        assert_eq!(
+            serde_json::to_value(&changed_result.events[1]).unwrap()["event"]["content"],
             "second"
         );
         let suffix_result = projector.project_canonical(&tool(ToolCallStatus::Failed, "second!"));
@@ -5443,6 +5847,7 @@ mod tests {
                 "TOOL_CALL_START",
                 "TOOL_CALL_ARGS",
                 "TOOL_CALL_END",
+                "CUSTOM",
                 "TOOL_CALL_RESULT",
                 "CUSTOM",
             ]
@@ -5451,6 +5856,11 @@ mod tests {
         assert_eq!(custom["event"]["name"], "dappercode.dev/tool-content");
         assert_eq!(custom["event"]["value"]["content"][1]["type"], "diff");
         assert_eq!(custom["event"]["value"]["locations"][0]["line"], 7);
+        let meta = serde_json::to_value(&projection.events[3]).unwrap();
+        assert_eq!(meta["event"]["name"], "dappercode.dev/tool-meta");
+        assert_eq!(meta["event"]["value"]["kind"], "edit");
+        assert_eq!(meta["event"]["value"]["status"], "completed");
+        assert_eq!(meta["event"]["value"]["toolCallId"], "tool-structured");
     }
 
     #[test]
@@ -5476,7 +5886,7 @@ mod tests {
         let first = projector.project_canonical(&tool("terminal-1"));
         assert_eq!(
             event_types(&first.events),
-            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM"]
+            ["TOOL_CALL_START", "TOOL_CALL_ARGS", "CUSTOM", "CUSTOM"]
         );
         assert!(projector
             .project_canonical(&tool("terminal-1"))
@@ -5502,7 +5912,11 @@ mod tests {
             locations: FieldUpdate::Append(vec![json!({"path":"src/main.rs"})]),
         };
         let appended = projector.project_canonical(&append);
-        let appended_value = serde_json::to_value(&appended.events[0]).unwrap();
+        let appended_value = serde_json::to_value(appended.events.last().unwrap()).unwrap();
+        assert_eq!(
+            appended_value["event"]["name"],
+            "dappercode.dev/tool-content"
+        );
         assert_eq!(
             appended_value["event"]["value"]["content"]
                 .as_array()
@@ -5529,6 +5943,14 @@ mod tests {
             *structured_content = FieldUpdate::Unchanged;
             *locations = FieldUpdate::Unchanged;
         }
+        // Only the title moved, so the structured payload stays put and the client is
+        // told about the rename alone.
+        let renamed = projector.project_canonical(&metadata_only);
+        assert_eq!(event_types(&renamed.events), ["CUSTOM"]);
+        assert_eq!(
+            serde_json::to_value(&renamed.events[0]).unwrap()["event"]["name"],
+            "dappercode.dev/tool-meta"
+        );
         assert!(projector
             .project_canonical(&metadata_only)
             .events
@@ -5545,7 +5967,11 @@ mod tests {
             *locations = FieldUpdate::Clear;
         }
         let cleared = projector.project_canonical(&clear);
-        let cleared_value = serde_json::to_value(&cleared.events[0]).unwrap();
+        let cleared_value = serde_json::to_value(cleared.events.last().unwrap()).unwrap();
+        assert_eq!(
+            cleared_value["event"]["name"],
+            "dappercode.dev/tool-content"
+        );
         assert_eq!(cleared_value["event"]["value"]["content"], json!([]));
         assert_eq!(cleared_value["event"]["value"]["locations"], json!([]));
 
@@ -5599,10 +6025,10 @@ mod tests {
             locations: FieldUpdate::Unchanged,
         };
         let unavailable = projector.project_canonical(&oversized);
-        assert_eq!(unavailable.events.len(), 1);
+        assert_eq!(unavailable.events.len(), 2);
         assert_eq!(
-            serde_json::to_value(&unavailable.events[0]).unwrap()["event"]["value"]["retrieval"]
-                ["available"],
+            serde_json::to_value(unavailable.events.last().unwrap()).unwrap()["event"]["value"]
+                ["retrieval"]["available"],
             false
         );
 

@@ -1,5 +1,5 @@
 import { EventType } from '@ag-ui/core';
-import type { ChatMessage } from './types';
+import type { ChatMessage, ChatToolMeta } from './types';
 
 export interface AgUiChunkAssembly {
   count: number;
@@ -15,6 +15,7 @@ export interface AgUiThreadMessageState {
   toolCallMessageIdByCallId: Record<string, string>;
   toolResultMessageIdByCallId: Record<string, string>;
   subagentToolCallIds: Record<string, true>;
+  toolMetaByCallId: Record<string, ChatToolMeta>;
   toolTextRevisionByCallId: Record<string, string>;
   structuredRevisionByCallId: Record<string, string>;
   structuredTextByCallId: Record<string, string>;
@@ -73,6 +74,7 @@ export function createAgUiThreadMessageState(): AgUiThreadMessageState {
     toolCallMessageIdByCallId: {},
     toolResultMessageIdByCallId: {},
     subagentToolCallIds: {},
+    toolMetaByCallId: {},
     toolTextRevisionByCallId: {},
     structuredRevisionByCallId: {},
     structuredTextByCallId: {},

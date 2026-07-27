@@ -39,6 +39,29 @@ Replay is process-local. A full bridge restart creates a new stream and discards
 buffer and in-memory message queues. Installed agent manifests and agent-owned durable sessions are
 not deleted by that restart.
 
+## Sub-Agent Streaming
+
+An agent only forwards updates for sessions the client has asked for, so a sub-agent's work is
+invisible until the bridge reads its session. A foreground `task` tool names the child session it
+spawned only once that child has finished, which is far too late to watch it work.
+
+Where an agent can be asked which sessions it has spawned, the bridge attaches during the run
+instead:
+
+1. A task tool starting is recognised from the first update that names it, and its classification is
+   remembered so a later rename cannot hide it.
+2. The agent is polled for sessions whose parent is the running thread. Several sub-agents at once
+   are told apart by the description the agent puts on both the child session and the tool call.
+3. The discovered child is indexed, resumed, and announced with `thread/subagent/adopted`. Resuming
+   is what starts its updates flowing.
+4. The child is linked to the tool call that spawned it, so the sub-agent card on the parent thread
+   follows its progress rather than waiting for the tool's own result.
+
+This is supported for OpenCode, which serves the session tree over an HTTP port the bridge assigns
+when it starts the agent. The port is allocated per agent process rather than fixed, so parallel
+worktrees keep working. OpenCode exits if it is handed a port that is already taken, so a failed
+start is retried without one — losing sub-agent streaming rather than the agent.
+
 ## Known Limits
 
 1. Only events emitted by the ACP agent session owned by this bridge can be delivered live.
@@ -49,6 +72,8 @@ not deleted by that restart.
 4. Queue state is intentionally in memory and does not survive a full bridge process restart.
 5. Agent capabilities vary. Steering, session resume/load, permissions, and elicitations are exposed
    only when negotiated or supported by the selected agent.
+6. Sub-agent streaming needs an agent that reports its session tree. Agents that only reveal a
+   sub-agent through the task tool's own result still show it when the tool completes.
 
 ## Operational Guidance
 
