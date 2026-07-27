@@ -15,6 +15,8 @@ export abstract class HostBridgeWsClientCore {
   protected socket: WebSocket | null = null;
   protected pendingSocket: WebSocket | null = null;
   protected connected = false;
+  protected everConnected = false;
+  protected connectAttemptFailed = false;
   protected shouldReconnect = false;
   protected reconnectAttempts = 0;
   protected reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -45,6 +47,10 @@ export abstract class HostBridgeWsClientCore {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 180000;
   }
   public abstract get isConnected(): boolean;
+  /** True once a websocket connection has succeeded during this app session. */
+  public abstract get hasEverConnected(): boolean;
+  /** True while the most recent connection attempt has failed and no socket is open. */
+  public abstract get hasFailedConnectAttempt(): boolean;
   public abstract get bridgeProtocolError(): BridgeProtocolVersionError | null;
   abstract acknowledgeSnapshotRecovery(resumeAfterEventId: number): boolean;
   abstract connect(): void;

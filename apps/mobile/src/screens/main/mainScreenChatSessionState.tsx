@@ -11,7 +11,7 @@ import {
   selectedChatIdAtom,
 } from '../../state/mainScreen/session';
 import { screenRefView } from '../../state/mainScreen/registry';
-import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
+import { Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../../agents';
 import type { BridgeUiSurface, Chat } from '../../api/types';
 import {
@@ -116,9 +116,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const activeTurnIdRef = screenRefView(store, activeTurnIdAtom);
   const stopRequestedRef = useRef(false);
   const stopSystemMessageLoggedRef = useRef(false);
-  const appStateRef = useRef(AppState.currentState);
-  const lastAppForegroundedAtRef = useRef(AppState.currentState === 'active' ? Date.now() : 0);
-  const deferredDisconnectActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track whether a command arrived since the last delta — used to
   // know when a new thinking segment starts so we can replace the old one.
@@ -248,9 +245,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     activeTurnIdRef,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
-    appStateRef,
-    lastAppForegroundedAtRef,
-    deferredDisconnectActivityTimeoutRef,
     hadCommandRef,
     reasoningSummaryRef,
     reasoningBufferRef,

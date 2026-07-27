@@ -37,6 +37,10 @@ export abstract class HostBridgeWsClientCompletionAndDispatchLayer extends HostB
   }
   protected emitStatus(connected: boolean): void {
     this.connected = connected;
+    if (connected) {
+      this.everConnected = true;
+      this.connectAttemptFailed = false;
+    }
     for (const listener of this.statusListeners) {
       listener(connected);
     }

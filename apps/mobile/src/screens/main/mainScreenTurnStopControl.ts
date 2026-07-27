@@ -7,6 +7,7 @@ import {
 } from '../../state/mainScreen/turn';
 import {
   activityAtom,
+  bridgeRecoveryBannerVisibleAtom,
   showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -28,6 +29,7 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
     setSelectedChat,
     stopRequestedRef,
     stopSystemMessageLoggedRef,
+    ws,
   } = context;
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const setSending = useSetAtom(sendingAtom);
@@ -37,6 +39,7 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setActivity = useSetAtom(activityAtom);
   const setShowDelayedGenericRunningActivity = useSetAtom(showDelayedGenericRunningActivityAtom);
+  const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
 
   const registerTurnStarted = useCallback(
     (threadId: string, turnId: string) => {
@@ -76,6 +79,20 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       return;
     }
 
+    if (!ws.isConnected) {
+      // Nothing can be interrupted without the bridge, so the stop stays local:
+      // the disconnected state is surfaced instead of a stop that never resolves.
+      stopRequestedRef.current = false;
+      setStoppingTurn(false);
+      setBridgeRecoveryBannerVisible(true);
+      setActivity({
+        tone: 'error',
+        title: 'Bridge disconnected',
+        detail: 'Start the bridge on your computer to continue.',
+      });
+      return;
+    }
+
     stopRequestedRef.current = true;
     stopSystemMessageLoggedRef.current = false;
     setStoppingTurn(true);
@@ -103,7 +120,7 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       tone: 'idle',
       title: 'No active turn found',
     });
-  }, [interruptActiveTurn, interruptLatestTurn, stoppingTurn]);
+  }, [interruptActiveTurn, interruptLatestTurn, stoppingTurn, ws]);
 
   return {
     registerTurnStarted,

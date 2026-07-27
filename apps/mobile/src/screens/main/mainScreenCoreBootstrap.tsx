@@ -12,7 +12,7 @@ import {
   transcriptContinuationStateAtom,
 } from '../../state/mainScreen/session';
 import { screenRefView } from '../../state/mainScreen/registry';
-import { type FlatList, useWindowDimensions } from 'react-native';
+import { AppState, type FlatList, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FileSystemListResponse } from '../../api/types';
 import type { TranscriptDisplayItem } from './transcriptMessages';
@@ -115,6 +115,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const sendingRef = screenRefView(store, sendingAtom);
   const creatingRef = screenRefView(store, creatingAtom);
   const stoppingTurnRef = screenRefView(store, stoppingTurnAtom);
+  // App-state and disconnect tracking is created here rather than alongside the other
+  // session refs so the recovery hook, which runs earlier, can actually reach it.
+  const appStateRef = useRef(AppState.currentState);
+  const lastAppForegroundedAtRef = useRef(AppState.currentState === 'active' ? Date.now() : 0);
+  const deferredDisconnectActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);
@@ -161,6 +166,9 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     sendingRef,
     creatingRef,
     stoppingTurnRef,
+    appStateRef,
+    lastAppForegroundedAtRef,
+    deferredDisconnectActivityTimeoutRef,
     heldActivityTimeoutRef,
     genericRunningActivityTimeoutRef,
     foregroundAgentRefreshHandleRef,

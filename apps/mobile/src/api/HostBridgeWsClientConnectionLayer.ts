@@ -7,6 +7,12 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
   public get isConnected(): boolean {
     return this.connected;
   }
+  public get hasEverConnected(): boolean {
+    return this.everConnected;
+  }
+  public get hasFailedConnectAttempt(): boolean {
+    return this.connectAttemptFailed;
+  }
   public get bridgeProtocolError(): BridgeProtocolVersionError | null {
     return this.protocolError;
   }
@@ -99,7 +105,14 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     });
     this.connectPromise = promise;
     void promise.catch(() => {
-      // Connection errors are surfaced through status listeners and retries.
+      // A failed attempt never opened a socket, so no close event reports it.
+      // Status listeners are notified so the UI can report the bridge as
+      // unreachable without waiting for a reconnect grace period to elapse.
+      if (generation !== this.connectGeneration || this.socket || this.pendingSocket) {
+        return;
+      }
+      this.connectAttemptFailed = true;
+      this.emitStatus(false);
     });
   }
   disconnect(): void {

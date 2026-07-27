@@ -3,7 +3,12 @@ import {
   pendingApprovalAtom,
   pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
-import { queueActionItemIdAtom, queueActionKindAtom } from '../../state/mainScreen/composer';
+import {
+  activityAtom,
+  bridgeRecoveryBannerVisibleAtom,
+  queueActionItemIdAtom,
+  queueActionKindAtom,
+} from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import type {
@@ -39,12 +44,15 @@ export function useMainScreenComposerSubmitActions(
     threadRuntimeSnapshotsRef,
     turnExecutionController,
     uploadingAttachment,
+    ws,
   } = context;
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const setError = useSetAtom(errorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
+  const setActivity = useSetAtom(activityAtom);
+  const setBridgeRecoveryBannerVisible = useSetAtom(bridgeRecoveryBannerVisibleAtom);
 
   const sendMessageContentRef = useRef(sendMessageContent);
   useEffect(() => {
@@ -73,6 +81,18 @@ export function useMainScreenComposerSubmitActions(
       return;
     }
 
+    if (!ws.isConnected) {
+      // The draft is kept so the message can be sent once the bridge is back, and
+      // the disconnected state is reported instead of a turn that never starts.
+      setBridgeRecoveryBannerVisible(true);
+      setActivity({
+        tone: 'error',
+        title: 'Bridge disconnected',
+        detail: 'Start the bridge on your computer to continue.',
+      });
+      return;
+    }
+
     const submission = submissionController.begin(draftSnapshot, {
       mentions: pendingMentionPaths,
       localImages: pendingLocalImagePaths,
@@ -88,6 +108,7 @@ export function useMainScreenComposerSubmitActions(
     pendingLocalImagePaths,
     uploadingAttachment,
     hasFailedAttachmentUploads,
+    ws,
   ]);
 
   const handleSteerQueuedMessage = useCallback(async () => {

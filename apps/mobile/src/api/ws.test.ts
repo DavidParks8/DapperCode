@@ -267,6 +267,31 @@ describe('HostBridgeWsClient', () => {
     expect(listener).toHaveBeenNthCalledWith(2, false);
   });
 
+  it('reports a failed connection attempt that never opened a socket', async () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    const listener = jest.fn();
+    client.onStatus(listener);
+
+    expect(client.hasEverConnected).toBe(false);
+    expect(client.hasFailedConnectAttempt).toBe(false);
+
+    client.connect();
+    latestMockSocket().simulateError();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(client.hasFailedConnectAttempt).toBe(true);
+    expect(client.hasEverConnected).toBe(false);
+    expect(listener).toHaveBeenCalledWith(false);
+
+    client.disconnect();
+    client.connect();
+    latestMockSocket().simulateOpen();
+
+    expect(client.hasEverConnected).toBe(true);
+    expect(client.hasFailedConnectAttempt).toBe(false);
+    client.disconnect();
+  });
+
   it('disconnect() ignores a late onopen from a socket that was still opening', () => {
     const client = new HostBridgeWsClient('http://localhost:8787');
     const listener = jest.fn();

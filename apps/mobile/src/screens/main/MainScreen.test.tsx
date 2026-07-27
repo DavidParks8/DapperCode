@@ -2840,6 +2840,10 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     let statusHandler: ((connected: boolean) => void) | null = null;
     const ws = {
       isConnected: options.connected ?? true,
+      // A harness that starts disconnected stands in for a cold start whose first
+      // connection attempt already failed.
+      hasEverConnected: options.connected ?? true,
+      hasFailedConnectAttempt: !(options.connected ?? true),
       onEvent: jest.fn((handler) => {
         eventHandler = handler;
         return jest.fn();
@@ -2948,6 +2952,73 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       await harness.setConnected(true);
       expect(root.findAll((node) => node.props.title === 'Bridge disconnected')).toHaveLength(0);
+      harness.unmount();
+    });
+
+    it('reports a cold start against an offline bridge without waiting out the grace period', async () => {
+      const appState = AppState as unknown as { currentState: unknown };
+      const previousAppState = appState.currentState;
+      appState.currentState = 'active';
+      let harness: Harness;
+      try {
+        harness = await renderMain({
+          connected: false,
+          chat: { ...baseChat, status: 'running' },
+        });
+      } finally {
+        appState.currentState = previousAppState;
+      }
+      const root = harness.tree.root as Queryable;
+
+      expect(text(root, 'Bridge disconnected')).toBe(true);
+      expect(text(root, 'Ready')).toBe(false);
+      // Nothing can be stopped over a bridge that was never reached.
+      expect(
+        root.findAll(
+          (node) =>
+            node.props.accessibilityLabel === 'Stop agent' ||
+            node.props.accessibilityLabel === 'Stopping agent',
+        ),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        (input(root).props as { onChangeText: (value: string) => void }).onChangeText('hello');
+        await Promise.resolve();
+      });
+      await press(root, 'Send message');
+
+      expect(harness.api.sendOrQueueChatMessage).not.toHaveBeenCalled();
+      expect((input(root).props as { value: string }).value).toBe('hello');
+      expect(text(root, 'Bridge disconnected')).toBe(true);
+      expect(text(root, 'Ready')).toBe(false);
+      harness.unmount();
+    });
+
+    it('settles a stop pressed against a bridge that went away', async () => {
+      const harness = await renderMain({
+        connected: true,
+        chat: { ...baseChat, status: 'running', activeTurnId: 'turn-runtime' },
+      });
+      const root = harness.tree.root as Queryable;
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+
+      await harness.setConnected(false);
+      await press(root, 'Stop agent');
+
+      expect(harness.api.interruptTurn).not.toHaveBeenCalled();
+      expect(text(root, 'Bridge disconnected')).toBe(true);
+      expect(text(root, 'Ready')).toBe(false);
+      // The stop control disappears with the bridge instead of hanging around
+      // in a stopping state that can never resolve.
+      expect(
+        root.findAll(
+          (node) =>
+            node.props.accessibilityLabel === 'Stop agent' ||
+            node.props.accessibilityLabel === 'Stopping agent',
+        ),
+      ).toHaveLength(0);
       harness.unmount();
     });
 

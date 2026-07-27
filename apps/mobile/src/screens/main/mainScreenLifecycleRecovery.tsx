@@ -6,8 +6,7 @@ import {
   showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
-import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
-import type { AppStateStatus } from 'react-native';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   type AutoScrollState,
   APP_FOCUS_DISCONNECT_GRACE_MS,
@@ -19,17 +18,16 @@ import type {
 } from './mainScreenCoreBootstrap';
 
 export type MainScreenLifecycleRecoveryContext = MainScreenCoreBootstrapContext &
-  MainScreenCoreBootstrapResult & {
-    appStateRef?: MutableRefObject<AppStateStatus>;
-    deferredDisconnectActivityTimeoutRef?: MutableRefObject<ReturnType<typeof setTimeout> | null>;
-    lastAppForegroundedAtRef?: MutableRefObject<number>;
-  };
+  MainScreenCoreBootstrapResult;
 
 export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecoveryContext) {
   const {
+    appStateRef,
+    deferredDisconnectActivityTimeoutRef,
     foregroundAgentRefreshHandleRef,
     genericRunningActivityTimeoutRef,
     heldActivityTimeoutRef,
+    lastAppForegroundedAtRef,
     lastPinnedScrollAtRef,
     scheduledPinnedScrollTimeoutRef,
     scrollRef,
@@ -64,10 +62,6 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   }, []);
 
   const clearDeferredDisconnectActivity = useCallback(() => {
-    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
-    if (!deferredDisconnectActivityTimeoutRef) {
-      return;
-    }
     if (deferredDisconnectActivityTimeoutRef.current) {
       clearTimeout(deferredDisconnectActivityTimeoutRef.current);
       deferredDisconnectActivityTimeoutRef.current = null;
@@ -97,19 +91,18 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
 
   const scheduleDisconnectActivity = useCallback(() => {
     clearDeferredDisconnectActivity();
-    const appStateRef = context.appStateRef;
-    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
-    const lastAppForegroundedAtRef = context.lastAppForegroundedAtRef;
-    if (!appStateRef || !deferredDisconnectActivityTimeoutRef || !lastAppForegroundedAtRef) {
-      return;
-    }
-
     if (appStateRef.current !== 'active') {
       return;
     }
 
     const elapsedSinceForeground = Date.now() - lastAppForegroundedAtRef.current;
-    const remainingGraceMs = Math.max(0, APP_FOCUS_DISCONNECT_GRACE_MS - elapsedSinceForeground);
+    // The grace period hides brief reconnects. A session that has never reached the
+    // bridge and already failed an attempt is not a blip, so it is reported at once
+    // instead of leaving a cached chat looking connected.
+    const remainingGraceMs =
+      !ws.hasEverConnected && ws.hasFailedConnectAttempt
+        ? 0
+        : Math.max(0, APP_FOCUS_DISCONNECT_GRACE_MS - elapsedSinceForeground);
 
     const showDisconnected = () => {
       deferredDisconnectActivityTimeoutRef.current = null;

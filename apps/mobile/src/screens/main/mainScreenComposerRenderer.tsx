@@ -261,7 +261,9 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         onFocus={handleComposerFocus}
         onSubmit={() => void handleSubmit()}
         onStop={() => handleStopTurn()}
-        showStopButton={isTurnLoading || isTurnLikelyRunning || stoppingTurn}
+        showStopButton={
+          (isTurnLoading || isTurnLikelyRunning || stoppingTurn) && !showBridgeRecoveryBanner
+        }
         isStopping={stoppingTurn}
         onAttachPress={openAttachmentMenu}
         attachDisabled={attachmentControlsDisabled}
