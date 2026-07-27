@@ -1,0 +1,8 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "podspecPath": "ios/DapperCodePinnedTlsProof.podspec",
+    "modules": ["DapperCodePinnedTlsProofModule"],
+    "debugOnly": true
+  }
+}
