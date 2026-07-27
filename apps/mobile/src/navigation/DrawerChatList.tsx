@@ -30,12 +30,13 @@ export function DrawerChatList() {
     theme,
     toggleAttentionSection,
     visibleAttentionSections,
+    wsConnected,
   } = useDrawerContentViewModel();
   const retryDrawerData = () => {
     void Promise.all([retryDeepChatListRef.current(), refreshDrawer()]);
   };
   const notice =
-    noticeMessages.length > 0 ? (
+    !wsConnected && noticeMessages.length > 0 ? (
       <Pressable
         accessibilityLabel={`${noticeMessages.join(' ')} Retry`}
         accessibilityRole="button"

@@ -375,6 +375,7 @@ describe('DrawerContent render behavior matrix', () => {
 
   it('keeps pending-session hydration failures retryable in an empty drawer', async () => {
     const harness = createHarness({
+      connected: false,
       userInputs: [createUserInput('missing-child')],
     });
     (harness.api.getChatSummaries as jest.Mock).mockRejectedValue(new Error('summary unavailable'));
@@ -390,6 +391,20 @@ describe('DrawerContent render behavior matrix', () => {
       await Promise.resolve();
     });
     expect(findByLabel(root, noticeLabel)).toBeDefined();
+
+    await act(async () => {
+      harness.emitStatus(true);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(root.findAll((node) => node.props.accessibilityLabel === noticeLabel)).toHaveLength(0);
+
+    await act(async () => {
+      harness.emitStatus(false);
+      await Promise.resolve();
+    });
+    expect(findByLabel(root, noticeLabel)).toBeDefined();
+
     act(() => tree.unmount());
   });
 
@@ -404,6 +419,7 @@ describe('DrawerContent render behavior matrix', () => {
       agentId: 'codex',
     });
     const harness = createHarness({
+      connected: false,
       userInputs: [createUserInput('stream-child')],
     });
     (harness.api.getChatSummaries as jest.Mock).mockRejectedValue(new Error('summary unavailable'));
@@ -671,6 +687,7 @@ describe('DrawerContent render behavior matrix', () => {
     const harness = createHarness({
       chats: [approvalChat],
       approvals: [createApproval('approval-partial')],
+      connected: false,
       userInputFailure: true,
     });
     const tree = await renderDrawer(harness);
@@ -699,6 +716,7 @@ describe('DrawerContent render behavior matrix', () => {
           agentId: 'custom-agent',
         }),
       ],
+      connected: false,
     });
     (harness.api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
       new Error('capabilities failed'),
@@ -1471,7 +1489,7 @@ describe('DrawerContent partial history diagnostics', () => {
       }),
     } as unknown as HostBridgeApiClient;
     const ws = {
-      isConnected: true,
+      isConnected: false,
       onEvent: jest.fn().mockReturnValue(jest.fn()),
       onStatus: jest.fn().mockReturnValue(jest.fn()),
     } as unknown as HostBridgeWsClient;
