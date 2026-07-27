@@ -28,14 +28,30 @@ We will acknowledge the report as soon as practical and work toward a fix and co
 
 ## Security Notes for Users
 
-- Prefer bearer-token auth.
+- The canonical transport modes are `privateBearer` and `tailnetPinnedTls`. Existing profiles and
+  environments that omit the mode migrate to `privateBearer`.
+- `privateBearer` is the current compatibility mode for a trusted LAN, VPN, or Tailscale network.
+  Its bearer credential does not make the bridge safe for direct public-internet exposure.
+- `tailnetPinnedTls` reserves the future Tailscale-reachable, exact SHA-256 SPKI-pinned mutual TLS
+  design. It is intentionally unavailable in this release: selecting it fails before any HTTP or
+  bearer router starts. TLS identities, device enrollment, and a pinned listener are not implemented.
+- Prefer bearer-token auth while using `privateBearer`.
 - Prefer a short-lived random bearer token even for local debugging.
 - `BRIDGE_ALLOW_INSECURE_NO_AUTH=true` is restricted to literal loopback listeners. No-auth browser access to RPC, status, and local images accepts only the listener origin or exact `BRIDGE_NO_AUTH_ALLOWED_ORIGINS`; origin-less native/operator clients remain supported.
+- Authenticated bearer mode can opt into browser Origin enforcement with
+  `BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS=true` and an exact
+  `BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS` allowlist. Origin-less native/operator requests remain
+  allowed after bearer authentication. Duplicate, malformed, wildcard, and `null` Origins are
+  rejected when enforcement applies. The future pinned mode requires this policy and cannot opt out.
 - Never allow wildcard or `null` browser origins.
 - Do not expose the bridge directly to the public internet.
 - Desktop setup registers an ACP executable already installed by the user. It canonicalizes and hashes the executable before atomically writing the agent manifest into the central data directory; it never resolves or executes npm, npx, uvx, shell installer, registry, or floating package sources.
 - Configuration and runtime state live in a per-user data directory (`~/Library/Application Support/dev.dappercode.desktop` on macOS) with owner-only permissions, not inside repositories. Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
 - The bridge bearer token is stored in the operating system keychain. Where no keychain exists it falls back to a `0600` file in the data directory, and the app reports which backend is in use. The token is never written to a repository and never appears in the process ownership record.
+- Desktop-managed bridges suppress the console pairing QR so the active bearer credential is not
+  appended to `bridge.log`; pairing data is rendered directly by the native app instead. Logs
+  preserved from versions before this protection may contain an encoded pairing credential and
+  should be treated as sensitive. Stage 0 does not rotate credentials or rewrite existing logs.
 - Each workspace gets a distinct token, so compromising one workspace's bridge does not grant access to another.
 - Each bridge exits when the desktop app that owns it does, including after a force quit or crash, so an authenticated listener cannot outlive its UI.
 - ACP agent processes do not inherit the bridge environment. Runtime clears the child environment, restores only `PATH`, `HOME`, `TMPDIR`, and `LANG` as a safe baseline, then applies validated manifest entries. Host references are limited to `CODEX_PATH`, `HOME`, `PATH`, and `XDG_CONFIG_HOME`. `BRIDGE_AUTH_TOKEN`, `EXPO_ACCESS_TOKEN`, and names matching token, key, secret, or password patterns are denied even as literals. Agent authentication has no broad default exception and requires a narrowly approved policy change.

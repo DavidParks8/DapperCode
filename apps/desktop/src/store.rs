@@ -214,11 +214,48 @@ impl AppConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum TransportMode {
+    #[default]
+    #[serde(rename = "privateBearer")]
+    PrivateBearer,
+    #[serde(rename = "tailnetPinnedTls")]
+    TailnetPinnedTls,
+}
+
+impl TransportMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::PrivateBearer => "privateBearer",
+            Self::TailnetPinnedTls => "tailnetPinnedTls",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim() {
+            "privateBearer" => Ok(Self::PrivateBearer),
+            "tailnetPinnedTls" => Ok(Self::TailnetPinnedTls),
+            _ => bail!("transport mode must be privateBearer or tailnetPinnedTls"),
+        }
+    }
+
+    pub fn ensure_available(self) -> Result<()> {
+        match self {
+            Self::PrivateBearer => Ok(()),
+            Self::TailnetPinnedTls => bail!(
+                "tailnetPinnedTls is not yet available; use privateBearer on a trusted private network until pinned TLS pairing and the dedicated listener are implemented"
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub profile_id: String,
     pub workspace: PathBuf,
+    #[serde(default)]
+    pub transport_mode: TransportMode,
     pub network_mode: String,
     pub bridge_host: String,
     pub bridge_port: u16,
@@ -414,6 +451,7 @@ mod tests {
         Profile {
             profile_id: profile_id.to_string(),
             workspace: PathBuf::from("/tmp/project"),
+            transport_mode: TransportMode::PrivateBearer,
             network_mode: "local".to_string(),
             bridge_host: "127.0.0.1".to_string(),
             bridge_port: port,
@@ -463,6 +501,10 @@ mod tests {
         assert_eq!(config.version, CONFIG_VERSION);
         assert_eq!(config.profiles.len(), 2);
         assert_eq!(config.find("alpha-000000000001").unwrap().bridge_port, 8787);
+        assert_eq!(
+            config.find("alpha-000000000001").unwrap().transport_mode,
+            TransportMode::PrivateBearer
+        );
 
         let reserved: Vec<u16> = config
             .reserved_ports("alpha-000000000001")
@@ -470,6 +512,38 @@ mod tests {
             .map(|(port, _)| port)
             .collect();
         assert_eq!(reserved, vec![8789, 8790]);
+    }
+
+    #[test]
+    fn legacy_profiles_default_to_private_bearer_and_serialize_canonically() {
+        let legacy = br#"{
+          "version": 1,
+          "profiles": [{
+            "profileId": "legacy",
+            "workspace": "/tmp/project",
+            "networkMode": "local",
+            "bridgeHost": "127.0.0.1",
+            "bridgePort": 8787,
+            "previewPort": 8788,
+            "connectUrl": "http://127.0.0.1:8787",
+            "previewConnectUrl": "http://127.0.0.1:8788",
+            "agent": {
+              "agentId": "opencode",
+              "displayName": "OpenCode",
+              "executable": "/bin/echo",
+              "resolvedVersion": "local",
+              "verifiedDigest": "sha256:abc"
+            },
+            "updatedAt": "2026-01-01T00:00:00Z"
+          }]
+        }"#;
+        let config: AppConfig = serde_json::from_slice(legacy).unwrap();
+        assert_eq!(
+            config.profiles[0].transport_mode,
+            TransportMode::PrivateBearer
+        );
+        let serialized = serde_json::to_value(config).unwrap();
+        assert_eq!(serialized["profiles"][0]["transportMode"], "privateBearer");
     }
 
     #[test]

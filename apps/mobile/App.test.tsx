@@ -269,7 +269,7 @@ import {
   saveBridgeProfileAtom,
   switchBridgeProfileAtom,
 } from './src/state/bridge/actions';
-import { activeBridgeProfileAtom } from './src/state/bridge/atoms';
+import { activeBridgeProfileAtom, bridgeTokenAtom } from './src/state/bridge/atoms';
 import {
   gitChatAtom,
   mainOpeningChatIdAtom,
@@ -306,6 +306,7 @@ type Queryable = ReactTestInstance & {
 const profile = {
   id: 'profile-1',
   name: 'Local bridge',
+  transportMode: 'privateBearer' as const,
   bridgeUrl: 'http://127.0.0.1:3001',
   bridgeToken: 'profile-token',
   createdAt: '2026-07-20T00:00:00.000Z',
@@ -558,7 +559,15 @@ describe('App orchestration', () => {
     );
     act(() => withProfileToken.unmount());
 
-    mockSnapshot = snapshot({ profiles: [{ ...profile, bridgeToken: null as unknown as string }] });
+    mockSnapshot = snapshot({
+      profiles: [
+        {
+          ...profile,
+          bridgeUrl: 'http://legacy:3001',
+          bridgeToken: null as unknown as string,
+        },
+      ],
+    });
     const withEnvironmentToken = await renderApp();
     expect(mockWsInstances.at(-1)?.mockOptions).toEqual({
       authToken: 'env-token',
@@ -567,6 +576,7 @@ describe('App orchestration', () => {
     expect(mockApiInstances.at(-1)?.mockOptions).toEqual(
       expect.objectContaining({ authToken: 'env-token' }),
     );
+    expect(store.get(bridgeTokenAtom)).toBe('env-token');
     act(() => withEnvironmentToken.unmount());
   });
 

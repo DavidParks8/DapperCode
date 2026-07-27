@@ -1,5 +1,6 @@
 import { useAtomValue, useStore } from 'jotai';
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 
 import {
   createEmptyChatSnapshotCache,
@@ -8,8 +9,9 @@ import {
   updateChatSnapshotCache,
 } from '../chatSnapshotCache';
 import { bindAppWebSocketLifecycle } from '../appWebSocketLifecycle';
+import { env } from '../config';
 import { syncPushRegistration } from '../pushController';
-import { getActiveBridgeProfile } from '../bridgeProfiles';
+import { getActiveUsableBridgeProfile } from '../bridgeProfiles';
 import { appStateLoadedAtom, bridgeProfileStoreAtom } from '../state/appState/atoms';
 import { initializeAppStateAtom } from '../state/appState/actions';
 import { applyRestoredChatSnapshotAtom } from '../state/chat/actions';
@@ -152,7 +154,12 @@ export function useAppBridgeLifecycle(): void {
         if (cancelled) {
           return;
         }
-        const activeProfile = getActiveBridgeProfile(store.get(bridgeProfileStoreAtom));
+        const activeProfile = getActiveUsableBridgeProfile(
+          store.get(bridgeProfileStoreAtom),
+          Platform.OS === 'web' ? 'web' : 'native',
+          env.hostBridgeToken,
+          env.legacyHostBridgeUrl,
+        );
         const snapshotCache = activeProfile ? await loadChatSnapshotCache(activeProfile.id) : null;
         if (cancelled) {
           return;

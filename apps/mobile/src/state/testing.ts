@@ -121,6 +121,7 @@ export function createBridgeTestStore(options: CreateBridgeTestStoreOptions): Ap
       {
         id: profileId,
         name: 'Bridge',
+        transportMode: 'privateBearer',
         bridgeUrl: options.bridgeUrl ?? 'https://bridge.test',
         bridgeToken: 'token',
         createdAt: '2026-01-01T00:00:00.000Z',

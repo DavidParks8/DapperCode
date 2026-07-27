@@ -43,6 +43,7 @@ export const saveBridgeProfileAtom = atom(
     const onboardingMode = get(onboardingModeAtom);
     const nextDraft: BridgeProfileDraft = {
       id: onboardingMode === 'edit' ? (get(activeBridgeProfileAtom)?.id ?? null) : null,
+      transportMode: 'privateBearer',
       bridgeUrl: normalized,
       bridgeToken: normalizedToken,
       activate: true,
@@ -53,7 +54,9 @@ export const saveBridgeProfileAtom = atom(
       : null;
     const bridgeIdentityChanged = Boolean(
       editedProfile &&
-      (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken),
+      (editedProfile.transportMode !== 'privateBearer' ||
+        editedProfile.bridgeUrl !== normalized ||
+        editedProfile.bridgeToken !== normalizedToken),
     );
     const nextState = await set(dispatchDurableAppStateAtom, {
       type: 'profiles/save',

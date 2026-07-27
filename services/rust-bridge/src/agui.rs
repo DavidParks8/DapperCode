@@ -1439,7 +1439,7 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
             if let Some(resource) = object.get("resource").and_then(Value::as_object) {
                 let mut lines = Vec::new();
                 if let Some(uri) = resource.get("uri").and_then(Value::as_str) {
-                    lines.push(format!("[resource: {uri}]"));
+                    lines.push(format!("[resource: {}]", redact_url_credentials(uri)));
                 }
                 if let Some(text) = resource.get("text").and_then(Value::as_str) {
                     lines.push(text.to_string());
@@ -1474,7 +1474,7 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
                         .get("uri")
                         .and_then(Value::as_str)
                         .filter(|value| !value.is_empty())
-                        .map(|uri| format!("[file: {uri}]"))
+                        .map(|uri| format!("[file: {}]", redact_url_credentials(uri)))
                         .into_iter()
                         .collect();
                 }

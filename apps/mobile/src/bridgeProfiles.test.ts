@@ -2,6 +2,8 @@ import {
   createEmptyBridgeProfileStore,
   deriveBridgeProfileName,
   getActiveBridgeProfile,
+  getActiveUsableBridgeProfile,
+  isBridgeProfileUsable,
   parseBridgeProfileStore,
   removeBridgeProfile,
   renameBridgeProfile,
@@ -56,6 +58,7 @@ describe('bridgeProfiles', () => {
 
     expect(parsed.activeProfileId).toBeNull();
     expect(parsed.profiles).toHaveLength(1);
+    expect(parsed.profiles[0]?.transportMode).toBe('privateBearer');
   });
 
   it('parses legacy auth fields without exposing them on profiles', () => {
@@ -175,7 +178,12 @@ describe('bridgeProfiles', () => {
           {},
           { id: 'x', bridgeUrl: 1, bridgeToken: 'token' },
           { id: 'x', bridgeUrl: 'ftp://host', bridgeToken: 'token' },
-          { id: 'x', bridgeUrl: 'http://host', bridgeToken: ' ' },
+          {
+            id: 'x',
+            transportMode: null,
+            bridgeUrl: 'http://host',
+            bridgeToken: ' ',
+          },
           {
             id: ' valid ',
             name: ' ',
@@ -191,6 +199,7 @@ describe('bridgeProfiles', () => {
     expect(parsed.profiles[0]).toMatchObject({
       id: 'valid',
       name: 'host',
+      transportMode: 'privateBearer',
       bridgeUrl: 'http://host:8787',
       bridgeToken: 'token',
     });
@@ -236,5 +245,98 @@ describe('bridgeProfiles', () => {
   it('derives safe fallback names', () => {
     expect(deriveBridgeProfileName(' Name ', 'not-used')).toBe('Name');
     expect(deriveBridgeProfileName(null, 'not a url')).toBe('Bridge');
+  });
+
+  it('preserves pinned profiles without requiring a bearer token but does not activate them', () => {
+    const parsed = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: 'pinned',
+        profiles: [
+          {
+            id: 'pinned',
+            name: 'Future paired bridge',
+            transportMode: 'tailnetPinnedTls',
+            bridgeUrl: 'https://bridge.example',
+            bridgeToken: null,
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.profiles[0]).toMatchObject({
+      transportMode: 'tailnetPinnedTls',
+      bridgeToken: null,
+    });
+    const pinned = parsed.profiles[0]!;
+    expect(isBridgeProfileUsable(pinned, 'native')).toBe(false);
+    expect(isBridgeProfileUsable(pinned, 'web')).toBe(false);
+    expect(getActiveUsableBridgeProfile(parsed, 'native')).toBeNull();
+    expect(getActiveUsableBridgeProfile(parsed, 'web')).toBeNull();
+  });
+
+  it('fails closed for invalid modes, insecure pinned URLs, and pinned profile creation', () => {
+    const invalid = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: null,
+        profiles: [
+          {
+            id: 'unknown',
+            transportMode: 'other',
+            bridgeUrl: 'https://bridge.example',
+            bridgeToken: null,
+          },
+          {
+            id: 'http-pinned',
+            transportMode: 'tailnetPinnedTls',
+            bridgeUrl: 'http://bridge.example',
+            bridgeToken: null,
+          },
+          {
+            id: 'pinned-with-bearer',
+            transportMode: 'tailnetPinnedTls',
+            bridgeUrl: 'https://bridge.example',
+            bridgeToken: 'must-not-survive',
+          },
+        ],
+      }),
+    );
+    expect(invalid.profiles).toEqual([]);
+
+    expect(() =>
+      upsertBridgeProfile(createEmptyBridgeProfileStore(), {
+        transportMode: 'tailnetPinnedTls',
+        bridgeUrl: 'https://bridge.example',
+        bridgeToken: null,
+      }),
+    ).toThrow('cannot be created');
+  });
+
+  it('binds the legacy environment-token fallback to its configured URL', () => {
+    const store = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: 'private',
+        profiles: [
+          {
+            id: 'private',
+            name: 'Private bridge',
+            bridgeUrl: 'http://bridge.example',
+          },
+        ],
+      }),
+    );
+    const profile = store.profiles[0]!;
+    expect(store.activeProfileId).toBe('private');
+    expect(profile.transportMode).toBe('privateBearer');
+    expect(profile.bridgeToken).toBeNull();
+    expect(isBridgeProfileUsable(profile, 'native')).toBe(false);
+    expect(
+      isBridgeProfileUsable(profile, 'web', 'environment-token', 'http://bridge.example'),
+    ).toBe(true);
+    expect(
+      getActiveUsableBridgeProfile(store, 'native', 'environment-token', 'http://bridge.example'),
+    ).toBe(profile);
+    expect(
+      getActiveUsableBridgeProfile(store, 'native', 'environment-token', 'http://attacker.example'),
+    ).toBeNull();
   });
 });

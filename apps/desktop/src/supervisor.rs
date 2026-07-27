@@ -218,6 +218,7 @@ impl BridgeSupervisor {
     }
 
     pub fn runtime_config(&self) -> Result<BridgeRuntimeConfig> {
+        self.profile.transport_mode.ensure_available()?;
         let secret = self
             .secrets
             .get(&self.paths, &self.profile.profile_id)?
@@ -789,6 +790,7 @@ mod tests {
         Profile {
             profile_id: "alpha-000000000001".to_string(),
             workspace: workspace.to_path_buf(),
+            transport_mode: crate::store::TransportMode::PrivateBearer,
             network_mode: "local".to_string(),
             bridge_host: "127.0.0.1".to_string(),
             bridge_port: port,

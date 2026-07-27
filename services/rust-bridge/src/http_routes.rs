@@ -325,9 +325,10 @@ pub(super) async fn handle_preview_http_request(
     let upstream_response = match upstream_request.send().await {
         Ok(response) => response,
         Err(error) => {
+            let safe_error = redact_url_credentials(&error.to_string());
             return preview_error_response(
                 StatusCode::BAD_GATEWAY,
-                &format!("failed to reach preview target: {error}"),
+                &format!("failed to reach preview target: {safe_error}"),
             );
         }
     };
@@ -382,9 +383,10 @@ pub(super) async fn handle_preview_http_request(
             let chunk = match chunk {
                 Ok(chunk) => chunk,
                 Err(error) => {
+                    let safe_error = redact_url_credentials(&error.to_string());
                     return preview_error_response(
                         StatusCode::BAD_GATEWAY,
-                        &format!("failed to read preview document: {error}"),
+                        &format!("failed to read preview document: {safe_error}"),
                     );
                 }
             };
@@ -512,9 +514,10 @@ pub(super) async fn handle_preview_websocket_request(
     let mut upstream_request = match upstream_url.as_str().into_client_request() {
         Ok(request) => request,
         Err(error) => {
+            let safe_error = redact_url_credentials(&error.to_string());
             return preview_error_response(
                 StatusCode::BAD_GATEWAY,
-                &format!("failed to create websocket request: {error}"),
+                &format!("failed to create websocket request: {safe_error}"),
             );
         }
     };
@@ -541,9 +544,10 @@ pub(super) async fn handle_preview_websocket_request(
     let (upstream_socket, upstream_response) = match connect_async(upstream_request).await {
         Ok(result) => result,
         Err(error) => {
+            let safe_error = redact_url_credentials(&error.to_string());
             return preview_error_response(
                 StatusCode::BAD_GATEWAY,
-                &format!("failed to connect websocket preview target: {error}"),
+                &format!("failed to connect websocket preview target: {safe_error}"),
             );
         }
     };

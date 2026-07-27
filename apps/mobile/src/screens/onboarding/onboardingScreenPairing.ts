@@ -11,12 +11,22 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
   try {
     const parsed = JSON.parse(raw) as {
       type?: unknown;
+      transportMode?: unknown;
       bridgeUrl?: unknown;
       url?: unknown;
       bridgeToken?: unknown;
       token?: unknown;
     };
     const type = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : '';
+    const hasTransportMode = Object.prototype.hasOwnProperty.call(parsed, 'transportMode');
+    const transportMode = hasTransportMode
+      ? typeof parsed.transportMode === 'string'
+        ? parsed.transportMode.trim()
+        : null
+      : 'privateBearer';
+    if (transportMode !== 'privateBearer') {
+      return null;
+    }
     const bridgeUrlRaw =
       typeof parsed.bridgeUrl === 'string'
         ? parsed.bridgeUrl
@@ -48,6 +58,10 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
   try {
     const parsed = new URL(raw);
     if (parsed.protocol !== 'dappercode:') {
+      return null;
+    }
+    const transportMode = parsed.searchParams.get('transportMode') ?? 'privateBearer';
+    if (transportMode !== 'privateBearer') {
       return null;
     }
     const bridgeUrl =

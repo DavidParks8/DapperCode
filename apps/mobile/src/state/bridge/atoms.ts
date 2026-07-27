@@ -1,8 +1,9 @@
 import { atom } from 'jotai';
+import { Platform } from 'react-native';
 
 import { HostBridgeApiClient } from '../../api/client';
 import { HostBridgeWsClient } from '../../api/ws';
-import { getActiveBridgeProfile } from '../../bridgeProfiles';
+import { getActiveBridgeProfile, getActiveUsableBridgeProfile } from '../../bridgeProfiles';
 import { env } from '../../config';
 import { bridgeProfileStoreAtom } from '../appState/atoms';
 
@@ -10,9 +11,21 @@ export const activeBridgeProfileAtom = atom((get) =>
   getActiveBridgeProfile(get(bridgeProfileStoreAtom)),
 );
 
-export const bridgeUrlAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeUrl ?? null);
+export const usableBridgeProfileAtom = atom((get) =>
+  getActiveUsableBridgeProfile(
+    get(bridgeProfileStoreAtom),
+    Platform.OS === 'web' ? 'web' : 'native',
+    env.hostBridgeToken,
+    env.legacyHostBridgeUrl,
+  ),
+);
 
-export const bridgeTokenAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeToken ?? null);
+export const bridgeUrlAtom = atom((get) => get(usableBridgeProfileAtom)?.bridgeUrl ?? null);
+
+export const bridgeTokenAtom = atom((get) => {
+  const profile = get(usableBridgeProfileAtom);
+  return profile ? (profile.bridgeToken ?? env.hostBridgeToken) : null;
+});
 
 const wsClientOverrideAtom = atom<HostBridgeWsClient | null>(null);
 const apiClientOverrideAtom = atom<HostBridgeApiClient | null>(null);
@@ -32,7 +45,7 @@ export const wsClientAtom = atom(
       return null;
     }
     return new HostBridgeWsClient(bridgeUrl, {
-      authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+      authToken: get(bridgeTokenAtom),
       allowQueryTokenAuth: env.allowWsQueryTokenAuth,
     });
   },
@@ -55,7 +68,7 @@ export const apiClientAtom = atom(
     return new HostBridgeApiClient({
       ws,
       bridgeUrl: bridgeUrl ?? undefined,
-      authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+      authToken: get(bridgeTokenAtom),
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

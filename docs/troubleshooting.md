@@ -59,6 +59,8 @@ Common causes:
 - the configured host/port is already in use
 - the workspace has no profile yet, or its stored agent manifest is missing or invalid
 - Tailscale/LAN connectivity changed
+- `tailnetPinnedTls` was selected; Stage 0 defines the mode but intentionally refuses to start until
+  the pinned TLS listener, bridge identity, and enrolled-device registry are implemented
 
 Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
 
@@ -80,6 +82,9 @@ Repair setup before starting again.
 - Do not use `localhost` on a physical phone.
 - Confirm the bearer token or scan the current pairing QR.
 - Keep the bridge private; do not expose it on the public internet.
+- If authenticated browser requests receive `403`, either disable the temporary
+  `BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS` migration flag or add the browser's exact origin to
+  `BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS`. Wildcard and `null` origins are never accepted.
 
 ## Expo Cannot Find Secure Configuration
 

@@ -1,10 +1,14 @@
 import { normalizeBridgeUrlInput } from './bridgeUrl';
 
+export const BRIDGE_TRANSPORT_MODES = ['privateBearer', 'tailnetPinnedTls'] as const;
+export type BridgeTransportMode = (typeof BRIDGE_TRANSPORT_MODES)[number];
+
 export interface BridgeProfile {
   id: string;
   name: string;
+  transportMode: BridgeTransportMode;
   bridgeUrl: string;
-  bridgeToken: string;
+  bridgeToken: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,8 +21,9 @@ export interface BridgeProfileStore {
 export interface BridgeProfileDraft {
   id?: string | null;
   name?: string | null;
+  transportMode?: BridgeTransportMode;
   bridgeUrl: string;
-  bridgeToken: string;
+  bridgeToken: string | null;
   activate?: boolean;
 }
 
@@ -70,19 +75,29 @@ export function upsertBridgeProfile(
 ): { profile: BridgeProfile; store: BridgeProfileStore } {
   const normalizedUrl = normalizeBridgeUrlInput(draft.bridgeUrl);
   const normalizedToken = normalizeBridgeToken(draft.bridgeToken);
-  if (!normalizedUrl || !normalizedToken) {
-    throw new Error('Bridge URL and token are required.');
-  }
-
   const existing = draft.id
     ? (store.profiles.find((profile) => profile.id === draft.id) ?? null)
     : null;
+  const transportMode = draft.transportMode ?? existing?.transportMode ?? 'privateBearer';
+  if (!normalizedUrl) {
+    throw new Error('Bridge URL is required.');
+  }
+  if (transportMode === 'tailnetPinnedTls') {
+    throw new Error(
+      'tailnetPinnedTls profiles cannot be created until pinned TLS device pairing is available.',
+    );
+  }
+  if (!normalizedToken) {
+    throw new Error('Bridge URL and token are required.');
+  }
+
   const now = new Date().toISOString();
   const profileId = existing?.id ?? createBridgeProfileId();
   const resolvedName = deriveBridgeProfileName(draft.name, normalizedUrl);
   const nextProfile: BridgeProfile = {
     id: profileId,
     name: resolvedName,
+    transportMode,
     bridgeUrl: normalizedUrl,
     bridgeToken: normalizedToken,
     createdAt: existing?.createdAt ?? now,
@@ -176,6 +191,39 @@ export function getActiveBridgeProfile(store: BridgeProfileStore): BridgeProfile
   return store.profiles.find((profile) => profile.id === store.activeProfileId) ?? null;
 }
 
+export function isBridgeProfileUsable(
+  profile: BridgeProfile,
+  platform: 'native' | 'web',
+  fallbackToken?: string | null,
+  fallbackBridgeUrl?: string | null,
+): boolean {
+  if (profile.transportMode === 'tailnetPinnedTls') {
+    return false;
+  }
+  if (platform !== 'native' && platform !== 'web') {
+    return false;
+  }
+  if (normalizeBridgeToken(profile.bridgeToken) !== null) {
+    return true;
+  }
+  return (
+    normalizeBridgeToken(fallbackToken) !== null &&
+    normalizeBridgeUrlInput(fallbackBridgeUrl ?? '') === profile.bridgeUrl
+  );
+}
+
+export function getActiveUsableBridgeProfile(
+  store: BridgeProfileStore,
+  platform: 'native' | 'web',
+  fallbackToken?: string | null,
+  fallbackBridgeUrl?: string | null,
+): BridgeProfile | null {
+  const profile = getActiveBridgeProfile(store);
+  return profile && isBridgeProfileUsable(profile, platform, fallbackToken, fallbackBridgeUrl)
+    ? profile
+    : null;
+}
+
 export function deriveBridgeProfileName(
   value: string | null | undefined,
   bridgeUrl: string,
@@ -220,27 +268,45 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
   const record = value as {
     id?: unknown;
     name?: unknown;
+    transportMode?: unknown;
     bridgeUrl?: unknown;
     bridgeToken?: unknown;
     createdAt?: unknown;
     updatedAt?: unknown;
   };
   const id = normalizeNonEmptyString(record.id);
+  const transportMode = normalizeBridgeTransportMode(record.transportMode);
   const bridgeUrl =
     typeof record.bridgeUrl === 'string' ? normalizeBridgeUrlInput(record.bridgeUrl) : null;
   const bridgeToken = normalizeBridgeToken(record.bridgeToken);
-  if (!id || !bridgeUrl || !bridgeToken) {
+  if (
+    !id ||
+    !transportMode ||
+    !bridgeUrl ||
+    (transportMode === 'tailnetPinnedTls' &&
+      (!bridgeUrl.startsWith('https://') || bridgeToken !== null))
+  ) {
     return null;
   }
 
   return {
     id,
     name: deriveBridgeProfileName(normalizeNonEmptyString(record.name), bridgeUrl),
+    transportMode,
     bridgeUrl,
     bridgeToken,
     createdAt: normalizeTimestamp(record.createdAt),
     updatedAt: normalizeTimestamp(record.updatedAt),
   };
+}
+
+function normalizeBridgeTransportMode(value: unknown): BridgeTransportMode | null {
+  if (value === undefined) {
+    return 'privateBearer';
+  }
+  return typeof value === 'string' && BRIDGE_TRANSPORT_MODES.includes(value as BridgeTransportMode)
+    ? (value as BridgeTransportMode)
+    : null;
 }
 
 function normalizeBridgeToken(value: unknown): string | null {
