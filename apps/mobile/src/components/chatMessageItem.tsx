@@ -251,15 +251,9 @@ function ChatMessageComponent({
           {entries.map((entry, index) => {
             const visual = toSubAgentVisual(entry.title);
             return (
-              <Pressable
+              <View
                 key={`${message.id}-subagent-${String(index)}`}
-                onPress={canOpen ? () => onOpenSubAgentThread?.(threadId) : undefined}
-                disabled={!canOpen}
                 style={[styles.subAgentCard, visual.isError && styles.subAgentCardError]}
-                accessibilityRole="button"
-                accessibilityLabel={entry.title}
-                accessibilityHint={canOpen ? 'Opens the sub-agent transcript' : undefined}
-                accessibilityState={controlAccessibilityState({ disabled: !canOpen })}
               >
                 <View style={styles.subAgentHeader}>
                   {running ? (
@@ -306,7 +300,19 @@ function ChatMessageComponent({
                     })}
                   </View>
                 ) : null}
-                <View style={styles.subAgentOpenHint}>
+                <Pressable
+                  onPress={canOpen ? () => onOpenSubAgentThread?.(threadId) : undefined}
+                  disabled={!canOpen}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.subAgentOpenHint,
+                    pressed && canOpen && styles.subAgentOpenHintPressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open agent chat"
+                  accessibilityHint={canOpen ? 'Opens the sub-agent transcript' : undefined}
+                  accessibilityState={controlAccessibilityState({ disabled: !canOpen })}
+                >
                   <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
                   <Ionicons
                     {...decorativeAccessibilityProps}
@@ -314,8 +320,8 @@ function ChatMessageComponent({
                     size={12}
                     color={theme.colors.textMuted}
                   />
-                </View>
-              </Pressable>
+                </Pressable>
+              </View>
             );
           })}
         </View>

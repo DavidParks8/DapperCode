@@ -1005,15 +1005,25 @@ describe('ChatMessage system timeline matrices', () => {
       horizontal: true,
       nestedScrollEnabled: true,
       showsHorizontalScrollIndicator: false,
+      contentContainerStyle: expect.objectContaining({ flexDirection: 'row' }),
     });
     expect(latestText?.props).toMatchObject({
       numberOfLines: 1,
     });
     const control = root.findAll(
       (node) =>
-        node.props.accessibilityLabel === 'Spawned agent' &&
+        node.props.accessibilityLabel === 'Open agent chat' &&
         typeof node.props.onPress === 'function',
     )[0];
+    expect(control.findAllByProps({ testID: 'subagent-latest-scroll' })).toHaveLength(0);
+    act(() => {
+      latestScroll?.props.onLayout({ nativeEvent: { layout: { width: 120 } } });
+      latestScroll?.props.onContentSizeChange(480);
+      latestScroll?.props.onScroll({ nativeEvent: { contentOffset: { x: 40 } } });
+    });
+    expect(
+      latestViewport?.findAll((node) => node.props.pointerEvents === 'none').length,
+    ).toBeGreaterThanOrEqual(2);
     act(() => readOnPress(control.props)());
     expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-thread');
     act(() => tree.unmount());
@@ -1037,7 +1047,7 @@ describe('ChatMessage system timeline matrices', () => {
       { onOpenSubAgentThread },
     );
     const root = tree.root as QueryableTestInstance;
-    const button = root.findAll((node) => node.props.accessibilityRole === 'button')[0];
+    const button = root.findAll((node) => node.props.accessibilityLabel === 'Open agent chat')[0];
     expect(button?.props.accessibilityState).toMatchObject({ disabled: true });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
@@ -1064,7 +1074,7 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     const control = root.findAll(
       (node) =>
-        node.props.accessibilityLabel === 'Sub-agent working' &&
+        node.props.accessibilityLabel === 'Open agent chat' &&
         typeof node.props.onPress === 'function',
     )[0];
     expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
@@ -1337,7 +1347,7 @@ describe('ChatMessage system timeline matrices', () => {
     });
     expect(
       (subagent.root as QueryableTestInstance).findAll(
-        (node) => node.props.accessibilityLabel === 'Agent failed',
+        (node) => node.props.accessibilityLabel === 'Open agent chat',
       )[0].props.accessibilityState,
     ).toEqual({ disabled: true });
     act(() => subagent.unmount());

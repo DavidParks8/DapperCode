@@ -5,7 +5,12 @@ import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'reac
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import type { HostBridgeApiClient } from '../../api/client';
-import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from '../../api/messages';
+import {
+  createActivityMessage,
+  getMessageText,
+  getSubAgentMeta,
+  SUBAGENT_ACTIVITY_TYPE,
+} from '../../api/messages';
 import type {
   BridgeCapabilities,
   BridgeUiAction,
@@ -15,6 +20,7 @@ import type {
 } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
 import { ChatMessage } from '../../components/ChatMessage';
+import type { ChatMessageProps } from '../../components/chatMessageTypes';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { useAtomValue } from 'jotai';
 import { MainScreen } from './MainScreen';
@@ -2434,6 +2440,163 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           'run-other',
         ),
       );
+      await unmount(tree);
+    });
+
+    it('opens a running subagent and preserves its streamed transcript after completion', async () => {
+      const childThreadId = 'thread-live-child';
+      let childChat: Chat = {
+        ...chat,
+        id: childThreadId,
+        title: 'Live child',
+        status: 'running',
+        parentThreadId: threadId,
+        messages: [],
+      };
+      const api = createApi();
+      (api.peekChat as jest.Mock).mockImplementation((id: string) =>
+        id === childThreadId ? childChat : chat,
+      );
+      (api.getChat as jest.Mock).mockImplementation((id: string) =>
+        Promise.resolve(id === childThreadId ? childChat : chat),
+      );
+      (api.getChatSummary as jest.Mock).mockImplementation((id: string) =>
+        Promise.resolve(id === childThreadId ? childChat : chat),
+      );
+      const { tree } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      const isChatMessageProps = (
+        props: Record<string, unknown>,
+      ): props is Record<string, unknown> & ChatMessageProps => {
+        const message = props.message;
+        return (
+          typeof message === 'object' &&
+          message !== null &&
+          'id' in message &&
+          typeof message.id === 'string' &&
+          'role' in message &&
+          typeof message.role === 'string' &&
+          'content' in message &&
+          (props.onOpenSubAgentThread === undefined ||
+            typeof props.onOpenSubAgentThread === 'function')
+        );
+      };
+      const messageProps = (node: Queryable) => {
+        if (!isChatMessageProps(node.props)) throw new Error('Invalid rendered ChatMessage props');
+        return node.props;
+      };
+      const renderedMessages = () => root.findAllByType(ChatMessage) as Queryable[];
+      const renderedMessage = (messageId: string) => {
+        const node = renderedMessages().find(
+          (candidate) => messageProps(candidate).message.id === messageId,
+        );
+        if (!node) throw new Error(`Missing rendered message: ${messageId}`);
+        return { node, props: messageProps(node) };
+      };
+      const subagentActivity = (status: 'running' | 'completed', latest: string) =>
+        agUi({
+          type: 'ACTIVITY_SNAPSHOT',
+          messageId: 'subagent:task-live',
+          activityType: 'dappercode.subagent',
+          replace: true,
+          timestamp: Date.parse('2026-07-20T00:00:01.000Z'),
+          content: {
+            text: `• Sub-agent ${status === 'running' ? 'working' : 'completed'}\n  Status: ${status}\n  Latest: ${latest}`,
+            subAgent: {
+              toolCallId: 'task-live',
+              tool: 'spawnAgent',
+              senderThreadId: threadId,
+              receiverThreadIds: [childThreadId],
+              agentStatus: status,
+              navigable: true,
+            },
+          },
+        });
+
+      await emit(subagentActivity('running', 'Thinking: Reviewing architecture'));
+      const liveCard = () => renderedMessage('subagent:task-live');
+      const liveMessage = () => liveCard().props.message;
+      expect(getMessageText(liveMessage())).toContain('Latest: Thinking: Reviewing architecture');
+      await emit(
+        agUi(
+          { type: 'RUN_STARTED', threadId: childThreadId, runId: 'child-run' },
+          childThreadId,
+          'child-run',
+        ),
+      );
+      await emit(
+        agUi(
+          {
+            type: 'TEXT_MESSAGE_START',
+            messageId: 'child-live-answer',
+            role: 'assistant',
+          },
+          childThreadId,
+          'child-run',
+        ),
+      );
+      await emit(
+        agUi(
+          {
+            type: 'TEXT_MESSAGE_CONTENT',
+            messageId: 'child-live-answer',
+            delta: 'Streaming child transcript',
+          },
+          childThreadId,
+          'child-run',
+        ),
+      );
+      await emit(subagentActivity('running', 'Responding: Streaming child transcript'));
+      expect(getMessageText(liveMessage())).toContain(
+        'Latest: Responding: Streaming child transcript',
+      );
+
+      const openRunning = liveCard().props.onOpenSubAgentThread;
+      expect(typeof openRunning).toBe('function');
+      await act(async () => {
+        openRunning?.(childThreadId);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(api.getChat).toHaveBeenCalledWith(childThreadId, { forceRefresh: true });
+      const childMessage = () => renderedMessage('child-live-answer').props.message;
+      expect(getMessageText(childMessage())).toBe('Streaming child transcript');
+
+      const back = root.findAll(
+        (node) => node.props.accessibilityLabel === 'Back from sub-agent transcript',
+      )[0];
+      await act(async () => {
+        (back.props.onPress as () => void)();
+        jest.advanceTimersByTime(250);
+        await Promise.resolve();
+      });
+      childChat = { ...childChat, status: 'complete' };
+      await emit(
+        agUi(
+          { type: 'TEXT_MESSAGE_END', messageId: 'child-live-answer' },
+          childThreadId,
+          'child-run',
+        ),
+      );
+      await emit(
+        agUi(
+          { type: 'RUN_FINISHED', threadId: childThreadId, runId: 'child-run' },
+          childThreadId,
+          'child-run',
+        ),
+      );
+      await emit(subagentActivity('completed', 'Returned result'));
+
+      expect(getSubAgentMeta(liveMessage())?.navigable).toBe(true);
+      const openCompleted = liveCard().props.onOpenSubAgentThread;
+      expect(typeof openCompleted).toBe('function');
+      await act(async () => {
+        openCompleted?.(childThreadId);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(getMessageText(childMessage())).toBe('Streaming child transcript');
+      expect(hasText(root, 'No transcript is available for this sub-agent.')).toBe(false);
       await unmount(tree);
     });
 

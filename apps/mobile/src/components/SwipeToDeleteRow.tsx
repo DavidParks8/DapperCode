@@ -188,7 +188,7 @@ function createSwipeToDeleteRowStyles(theme: AppTheme) {
       overflow: 'hidden',
     },
     actionLayer: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 0,
       flexDirection: 'row',
       alignItems: 'stretch',

@@ -1935,6 +1935,27 @@ fn subagent_activity_envelope(
     )
 }
 
+pub(super) fn linked_subagent_activity_envelope(
+    parent_thread_id: &str,
+    parent_run_id: &str,
+    parent_source_turn_id: Option<String>,
+    tool_call_id: &str,
+    child_thread_id: &str,
+) -> AgUiEventEnvelope {
+    subagent_activity_envelope(
+        SubagentActivityContext {
+            parent_thread_id,
+            parent_run_id,
+            parent_source_turn_id,
+            tool_call_id,
+            child_thread_id: Some(child_thread_id),
+        },
+        "running",
+        None,
+        Utc::now().timestamp_millis(),
+    )
+}
+
 fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
     match canonical {
         // The task header already created a navigable working card. RunStarted is
@@ -4485,6 +4506,17 @@ mod tests {
             terminal_activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
         );
+        let parent_finished = projector.project_canonical(&CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: parent_thread.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        let parent_cards = subagent_cards(&parent_finished);
+        assert_eq!(parent_cards.len(), 1);
+        assert!(parent_cards[0].1.contains("Sub-agent completed"));
     }
 
     /// A foreground task tool names its child only once it has finished, so the bridge finds the
@@ -4537,8 +4569,85 @@ mod tests {
             .is_some_and(|text| text.contains("Latest: Working on Read repository")));
         assert_eq!(
             card["event"]["content"]["subAgent"]["receiverThreadIds"][0],
-            serde_json::Value::String(child_thread)
+            serde_json::Value::String(child_thread.clone())
         );
+
+        let blank_title = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "blank-title".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: " ".to_string(),
+            content: FieldUpdate::Set(String::new()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert!(subagent_cards(&blank_title)[0]
+            .1
+            .contains("Latest: Working on Using a tool"));
+
+        let whitespace = projector.project_canonical(&CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            role: MessageRole::Agent,
+            message_id: "whitespace".to_string(),
+            content: "   ".to_string(),
+            content_block: None,
+        });
+        assert!(subagent_cards(&whitespace).is_empty());
+
+        let child_finished = |thread_id: &str| CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: thread_id.to_string(),
+            run_id: format!("{thread_id}-run"),
+            source_turn_id: format!("{thread_id}-turn"),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        };
+        let completed = projector.project_canonical(&child_finished(&child_thread));
+        assert!(subagent_cards(&completed)[0]
+            .1
+            .contains("Sub-agent completed"));
+
+        assert!(projector.link_subagent(
+            parent_thread,
+            "stale-run",
+            Some("turn-1".to_string()),
+            "task-stale",
+            "stale-child",
+        ));
+        let stale = projector.project_canonical(&child_finished("stale-child"));
+        assert!(subagent_cards(&stale)[0].1.contains("Sub-agent completed"));
+
+        assert!(projector.link_subagent(
+            "missing-parent",
+            "missing-run",
+            None,
+            "task-orphan",
+            "orphan-child",
+        ));
+        let orphan = projector.project_canonical(&child_finished("orphan-child"));
+        assert!(subagent_cards(&orphan)[0].1.contains("Sub-agent completed"));
+
+        let source_correlated = projector.project_canonical(&CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: "source-correlated".to_string(),
+            run_id: None,
+            source_turn_id: Some("source-turn".to_string()),
+            generation: Some(1),
+            role: MessageRole::Agent,
+            message_id: "source-message".to_string(),
+            content: "Response".to_string(),
+            content_block: None,
+        });
+        assert!(source_correlated.events.is_empty());
     }
 
     #[test]
@@ -4891,6 +5000,89 @@ mod tests {
         assert_eq!(replay[0]["method"], AG_UI_EVENT_METHOD);
         assert_eq!(replay[1]["params"]["event"]["type"], "TEXT_MESSAGE_START");
         assert_eq!(replay[2]["params"]["event"]["type"], "TEXT_MESSAGE_CONTENT");
+    }
+
+    #[tokio::test]
+    async fn early_subagent_link_is_navigable_before_replay_and_projects_live_transcript() {
+        let hub = ClientHub::with_replay_capacity(32);
+        let parent_thread_id = "parent-thread";
+        let child_thread_id = "child-thread";
+        assert!(
+            hub.link_subagent(
+                parent_thread_id,
+                "parent-run",
+                Some("parent-turn".to_string()),
+                "task-1",
+                child_thread_id,
+            )
+            .await
+        );
+
+        let (initial, _, _) = hub.replay_since(None, 32).await;
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0]["params"]["threadId"], parent_thread_id);
+        assert_eq!(
+            initial[0]["params"]["event"]["content"]["subAgent"]["receiverThreadIds"][0],
+            child_thread_id
+        );
+        assert_eq!(
+            initial[0]["params"]["event"]["content"]["subAgent"]["navigable"],
+            true
+        );
+        assert!(
+            !hub.link_subagent(
+                parent_thread_id,
+                "parent-run",
+                Some("parent-turn".to_string()),
+                "task-1",
+                child_thread_id,
+            )
+            .await
+        );
+        let (after_duplicate, _, _) = hub.replay_since(None, 32).await;
+        assert_eq!(after_duplicate.len(), 1);
+
+        let mut child_run = canonical_run_started();
+        if let CanonicalEvent::RunStarted {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        } = &mut child_run
+        {
+            *thread_id = child_thread_id.to_string();
+            *run_id = "child-run".to_string();
+            *source_turn_id = "child-turn".to_string();
+        }
+        hub.broadcast_canonical_event(&child_run).await;
+
+        let mut child_message =
+            canonical_message(MessageRole::Agent, "child-answer", "Reading project files");
+        if let CanonicalEvent::MessageChunk {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        } = &mut child_message
+        {
+            *thread_id = child_thread_id.to_string();
+            *run_id = Some("child-run".to_string());
+            *source_turn_id = Some("child-turn".to_string());
+        }
+        hub.broadcast_canonical_event(&child_message).await;
+
+        let (replay, _, _) = hub.replay_since(None, 32).await;
+        assert!(replay.iter().any(|event| {
+            event["params"]["threadId"] == parent_thread_id
+                && event["params"]["event"]["content"]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Latest: Responding: Reading project files"))
+        }));
+        assert!(replay.iter().any(|event| {
+            event["params"]["threadId"] == child_thread_id
+                && event["params"]["event"]["type"] == "TEXT_MESSAGE_CONTENT"
+                && event["params"]["event"]["delta"] == "Reading project files"
+        }));
     }
 
     #[test]

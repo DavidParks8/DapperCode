@@ -226,6 +226,8 @@ export function ScrollableRowText({
         bounces={false}
         nestedScrollEnabled
         directionalLockEnabled
+        style={styles.scrollableRowTextScroll}
+        contentContainerStyle={styles.scrollableRowTextContent}
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onLayout={(event) => {
