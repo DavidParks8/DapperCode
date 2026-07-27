@@ -117,8 +117,14 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
 
   useEffect(() => {
     if (!selectedChatId) {
+      agentThreadsRequestRef.current += 1;
+      if (agentThreadsRefreshTimerRef.current) {
+        clearTimeout(agentThreadsRefreshTimerRef.current);
+        agentThreadsRefreshTimerRef.current = null;
+      }
       setRelatedAgentThreads([]);
       setAgentRootThreadId(null);
+      setLoadingAgentThreads(false);
       setAgentThreadMenuVisible(false);
       return;
     }

@@ -16,6 +16,9 @@ import {
   selectedServiceTierAtom,
 } from '../../state/mainScreen/models';
 import {
+  agentRootThreadIdAtom,
+  loadingAgentThreadsAtom,
+  relatedAgentThreadsAtom,
   workspaceBridgeRootAtom,
   workspaceBrowseErrorAtom,
   workspaceRootsAtom,
@@ -49,6 +52,8 @@ export type MainScreenCapabilityFlagsContext = MainScreenModelCatalogStateContex
 export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsContext) {
   const {
     agentSettings,
+    agentThreadsRefreshTimerRef,
+    agentThreadsRequestRef,
     api,
     attachmentController,
     clearExternalStatusFullSync,
@@ -86,6 +91,9 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const setWorkspaceRoots = useSetAtom(workspaceRootsAtom);
   const setWorkspaceBridgeRoot = useSetAtom(workspaceBridgeRootAtom);
   const setWorkspaceBrowseError = useSetAtom(workspaceBrowseErrorAtom);
+  const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
+  const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
+  const setLoadingAgentThreads = useSetAtom(loadingAgentThreadsAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);
@@ -104,6 +112,14 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       const nextAgentId = requestedAgentId ?? selectedNewAgentId;
       clearExternalStatusFullSync();
       loadChatRequestRef.current += 1;
+      agentThreadsRequestRef.current += 1;
+      if (agentThreadsRefreshTimerRef.current) {
+        clearTimeout(agentThreadsRefreshTimerRef.current);
+        agentThreadsRefreshTimerRef.current = null;
+      }
+      setRelatedAgentThreads([]);
+      setAgentRootThreadId(null);
+      setLoadingAgentThreads(false);
       setSelectedChat(null);
       setSelectedChatId(null);
       setPendingAgentId(nextAgentId);

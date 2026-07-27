@@ -33,9 +33,9 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     selectEffort,
     selectModel,
     selectPendingAgent,
-    selectedChatId,
     selectedModel,
     serverDefaultModel,
+    supportsPlanMode,
   } = context;
   const setError = useSetAtom(errorAtom);
   const selectedModelId = useAtomValue(selectedModelIdAtom);
@@ -82,9 +82,6 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         } satisfies SelectionSheetOption;
       });
     }
-    if (selectedChatId) {
-      return [];
-    }
     return [
       {
         key: 'default',
@@ -96,18 +93,22 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
           void setMode('default', 'build');
         },
       },
-      {
-        key: 'plan',
-        title: 'Plan mode',
-        description: 'Pause to ask structured follow-up questions before execution.',
-        icon: 'git-branch-outline' as const,
-        selected: selectedCollaborationMode === 'plan',
-        onPress: () => {
-          void setMode('plan', 'plan');
-        },
-      },
+      ...(supportsPlanMode
+        ? [
+            {
+              key: 'plan',
+              title: 'Plan mode',
+              description: 'Pause to ask structured follow-up questions before execution.',
+              icon: 'git-branch-outline' as const,
+              selected: selectedCollaborationMode === 'plan',
+              onPress: () => {
+                void setMode('plan', 'plan');
+              },
+            },
+          ]
+        : []),
     ];
-  }, [applyAcpConfigOption, modeConfig, selectedCollaborationMode]);
+  }, [applyAcpConfigOption, modeConfig, selectedCollaborationMode, supportsPlanMode]);
 
   const agentPickerOptions = useMemo<SelectionSheetOption[]>(
     () =>
