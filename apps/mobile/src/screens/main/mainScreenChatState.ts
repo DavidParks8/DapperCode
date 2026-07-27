@@ -8,6 +8,11 @@ import {
 } from './mainScreenHelpers';
 
 const EMPTY_MODEL_OPTIONS: ModelOption[] = [];
+const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
+  'local-command-',
+  'local-assistant-',
+  'local-system-',
+] as const;
 
 export function areChatStatusMapsEquivalent(
   previous: ReadonlyMap<string, Chat['status']>,
@@ -30,7 +35,9 @@ export function areChatStatusMapsEquivalent(
 }
 
 export function resolveEquivalentChat(previous: Chat, next: Chat): Chat {
-  const stabilizedNext = preserveRecentUserTurnTranscript(previous, next);
+  // Merge client-only entries first so later stale-transcript protection cannot discard them.
+  const withLocalTranscript = preserveLocalTranscript(previous, next);
+  const stabilizedNext = preserveRecentUserTurnTranscript(previous, withLocalTranscript);
   return areChatsEquivalent(previous, stabilizedNext) ? previous : stabilizedNext;
 }
 
@@ -67,6 +74,61 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
     lastMessagePreview: previous.lastMessagePreview,
     messages: previous.messages,
   };
+}
+
+function preserveLocalTranscript(previous: Chat, next: Chat): Chat {
+  if (
+    previous.id !== next.id ||
+    !previous.messages.some((message) => isLocalTranscriptMessage(message))
+  ) {
+    return next;
+  }
+
+  const nextMessagesById = new Map(next.messages.map((message) => [message.id, message]));
+  const messages = previous.messages.map((message) => nextMessagesById.get(message.id) ?? message);
+  const mergedMessageIds = new Set(messages.map((message) => message.id));
+
+  for (const message of next.messages) {
+    if (mergedMessageIds.has(message.id)) {
+      continue;
+    }
+    insertMessageByTimestamp(messages, message);
+    mergedMessageIds.add(message.id);
+  }
+
+  const lastMessage = messages[messages.length - 1];
+  return {
+    ...next,
+    lastMessagePreview: isLocalTranscriptMessage(lastMessage)
+      ? previous.lastMessagePreview
+      : next.lastMessagePreview,
+    messages,
+  };
+}
+
+function isLocalTranscriptMessage(message: ChatMessage | undefined): boolean {
+  return Boolean(
+    message &&
+    LOCAL_TRANSCRIPT_MESSAGE_PREFIXES.some((prefix) => message.id.startsWith(prefix)),
+  );
+}
+
+function insertMessageByTimestamp(messages: ChatMessage[], message: ChatMessage): void {
+  const createdAtMs = Date.parse(message.createdAt);
+  if (!Number.isFinite(createdAtMs)) {
+    messages.push(message);
+    return;
+  }
+
+  const insertionIndex = messages.findIndex((candidate) => {
+    const candidateCreatedAtMs = Date.parse(candidate.createdAt);
+    return Number.isFinite(candidateCreatedAtMs) && candidateCreatedAtMs > createdAtMs;
+  });
+  if (insertionIndex < 0) {
+    messages.push(message);
+  } else {
+    messages.splice(insertionIndex, 0, message);
+  }
 }
 
 function areChatsEquivalent(previous: Chat | null, next: Chat | null): boolean {

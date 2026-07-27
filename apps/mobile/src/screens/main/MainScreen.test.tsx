@@ -25,6 +25,7 @@ import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
 import { currentScreenAtom, pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
+import { selectedChatAtom } from '../../state/mainScreen/session';
 import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
@@ -3974,6 +3975,12 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return root.findAll((node) => node.children.includes(value)).length > 0;
   }
 
+  function transcriptMessages(root: Queryable): Array<{ message: Chat['messages'][number] }> {
+    return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+      message: Chat['messages'][number];
+    }>;
+  }
+
   function labeled(root: Queryable, label: string): Queryable {
     const result = root.findAll((node) => node.props.accessibilityLabel === label)[0];
     if (!result) throw new Error(`Missing label: ${label}`);
@@ -4083,6 +4090,85 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       await submit(second.root, '/compact');
       await submit(second.root, '/definitely-unknown');
       second.unmount();
+    });
+
+    it('keeps status output and history through running-to-settled chat polls', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-status',
+      };
+      let latest: Chat = running;
+      const getChat = jest.fn().mockImplementation(() => Promise.resolve(latest));
+      const api = createApi({ getChat });
+      const harness = await renderMain({ api, chat: running });
+
+      await submit(harness.root, '/status');
+
+      const immediateMessages = transcriptMessages(harness.root).map(
+        ({ message }) => message.content,
+      );
+      expect(immediateMessages).toEqual(
+        expect.arrayContaining([
+          'Existing answer',
+          '/status',
+          expect.stringContaining('Chat status: running'),
+        ]),
+      );
+      expect(harness.store.get(selectedChatAtom)).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          statusUpdatedAt: running.statusUpdatedAt,
+        }),
+      );
+      expect(hasText(harness.root, 'Working')).toBe(true);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+
+      latest = {
+        ...running,
+        status: 'complete',
+        activeTurnId: null,
+        updatedAt: '2026-07-25T00:00:01.000Z',
+        statusUpdatedAt: '2026-07-25T00:00:01.000Z',
+        messages: [],
+      };
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        await flush();
+      });
+
+      expect(transcriptMessages(harness.root).map(({ message }) => message.content)).toEqual(
+        immediateMessages,
+      );
+      expect(harness.store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(hasText(harness.root, 'Turn completed')).toBe(true);
+      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+
+      const callsAfterFirstSettledPoll = getChat.mock.calls.length;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(getChat.mock.calls.length).toBeGreaterThan(callsAfterFirstSettledPoll);
+      expect(transcriptMessages(harness.root).map(({ message }) => message.content)).toEqual(
+        immediateMessages,
+      );
+      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+      harness.unmount();
     });
 
     it('covers new-thread plan create/send outcomes and ordinary create status variants', async () => {
