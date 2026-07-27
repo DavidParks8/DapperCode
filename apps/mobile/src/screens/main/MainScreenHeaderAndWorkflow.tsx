@@ -1,19 +1,16 @@
 import { useMainScreenStyles } from './useMainScreenStyles';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
-import { loadingModelsAtom } from '../../state/mainScreen/models';
 import { useAtomValue } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { BridgeUiWorkflowCard } from '../../components/BridgeUiSurface';
 import { ChatHeader } from '../../components/ChatHeader';
-import { InlineOptionsGroup } from './MainScreenInlineOptions';
 import { decorativeAccessibilityProps } from '../../accessibility';
 import { WorkflowCard } from './MainScreenWorkflow';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
 } from './mainScreenPanelCollapseCoordinator';
-import { effortModalVisibleAtom, modelModalVisibleAtom } from '../../state/mainScreen/modals';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
@@ -41,10 +38,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     fastModeEnabled,
     fastModeControlDisabled,
     toggleFastMode,
-    modelPickerOptions,
-    closeModelModal,
-    effortPickerSheetOptions,
-    closeEffortModal,
     showTopCardsRow,
     workflowBridgeUiSurfaces,
     windowHeight,
@@ -61,9 +54,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
-  const loadingModels = useAtomValue(loadingModelsAtom);
-  const modelModalVisible = useAtomValue(modelModalVisibleAtom);
-  const effortModalVisible = useAtomValue(effortModalVisibleAtom);
 
   return (
     <>
@@ -186,22 +176,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
             ) : null}
           </ScrollView>
         </View>
-      ) : null}
-      {modelModalVisible ? (
-        <InlineOptionsGroup
-          title="Model"
-          options={modelPickerOptions}
-          loading={loadingModels}
-          loadingLabel="Refreshing available models..."
-          onClose={closeModelModal}
-        />
-      ) : null}
-      {effortModalVisible ? (
-        <InlineOptionsGroup
-          title="Thinking level"
-          options={effortPickerSheetOptions}
-          onClose={closeEffortModal}
-        />
       ) : null}
       {showTopCardsRow ? (
         <View style={styles.topCardsRow}>
