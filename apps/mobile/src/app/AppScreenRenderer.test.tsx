@@ -3,7 +3,7 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { AppScreenRenderer } from './AppScreenRenderer';
 import { createBridgeTestStore, withAppStore } from '../state/testing';
 import { gitChatAtom } from '../state/chat/atoms';
-import { currentScreenAtom } from '../state/navigation/atoms';
+import { currentScreenAtom, navigationStackAtom } from '../state/navigation/atoms';
 import type { Chat } from '../api/types';
 import type { HostBridgeApiClient } from '../api/client';
 import type { AppStore } from '../state/types';
@@ -37,15 +37,31 @@ jest.mock('../screens/gitCheckout/GitCheckoutScreen', () => {
   const { Text: MockText } = jest.requireActual('react-native');
   return { GitCheckoutScreen: () => mockReact.createElement(MockText, null, 'CHECKOUT') };
 });
-jest.mock('../screens/browser/BrowserScreen', () => ({ BrowserScreen: () => null }));
+jest.mock('../screens/browser/BrowserScreen', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return { BrowserScreen: () => mockReact.createElement(MockText, null, 'BROWSER') };
+});
 jest.mock('../screens/git/GitScreen', () => {
   const mockReact = jest.requireActual('react');
   const { Text: MockText } = jest.requireActual('react-native');
   return { GitScreen: () => mockReact.createElement(MockText, null, 'GIT') };
 });
-jest.mock('../screens/settings/SettingsScreen', () => ({ SettingsScreen: () => null }));
-jest.mock('../screens/legal/PrivacyScreen', () => ({ PrivacyScreen: () => null }));
-jest.mock('../screens/legal/TermsScreen', () => ({ TermsScreen: () => null }));
+jest.mock('../screens/settings/SettingsScreen', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return { SettingsScreen: () => mockReact.createElement(MockText, null, 'SETTINGS') };
+});
+jest.mock('../screens/legal/PrivacyScreen', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return { PrivacyScreen: () => mockReact.createElement(MockText, null, 'PRIVACY') };
+});
+jest.mock('../screens/legal/TermsScreen', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return { TermsScreen: () => mockReact.createElement(MockText, null, 'TERMS') };
+});
 
 function textOf(tree: ReactTestRenderer): string {
   return JSON.stringify((tree as unknown as { toJSON: () => unknown }).toJSON() ?? null);
@@ -103,6 +119,70 @@ describe('AppScreenRenderer', () => {
     act(() => store.set(currentScreenAtom, 'Main'));
     expect(textOf(tree)).not.toContain('CHECKOUT');
     expect(textOf(tree)).not.toContain('GIT');
+    expect(mainMountCount).toBe(1);
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps chat mounted while pushing Settings, Browser, Privacy, and Terms', () => {
+    const store = createBridgeTestStore({ api: {} as unknown as HostBridgeApiClient });
+    const tree = render(store);
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(currentScreenAtom, 'Settings'));
+    expect(textOf(tree)).toContain('SETTINGS');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(currentScreenAtom, 'Browser'));
+    expect(textOf(tree)).toContain('BROWSER');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(currentScreenAtom, 'Privacy'));
+    expect(textOf(tree)).toContain('PRIVACY');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(currentScreenAtom, 'Terms'));
+    expect(textOf(tree)).toContain('TERMS');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(currentScreenAtom, 'Main'));
+    expect(mainMountCount).toBe(1);
+
+    act(() => tree.unmount());
+  });
+
+  it('renders intermediate layers for a three-level stack (Main → Settings → Privacy)', () => {
+    const store = createBridgeTestStore({ api: {} as unknown as HostBridgeApiClient });
+    const tree = render(store);
+
+    // `set(currentScreenAtom, 'Privacy')` resets to the canonical stack [Main, Settings, Privacy].
+    act(() => store.set(currentScreenAtom, 'Privacy'));
+
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'Settings' },
+      { screen: 'Privacy' },
+    ]);
+    // All three layers must be present.
+    expect(textOf(tree)).toContain('MAIN');
+    expect(textOf(tree)).toContain('SETTINGS');
+    expect(textOf(tree)).toContain('PRIVACY');
+    expect(mainMountCount).toBe(1);
+
+    // Pop Privacy → Settings is now the top layer, Main still mounted.
+    act(() => store.set(currentScreenAtom, 'Settings'));
+    expect(textOf(tree)).toContain('SETTINGS');
+    expect(textOf(tree)).not.toContain('PRIVACY');
+    expect(mainMountCount).toBe(1);
+
+    // Pop Settings → back to Main.
+    act(() => store.set(currentScreenAtom, 'Main'));
+    expect(textOf(tree)).toContain('MAIN');
+    expect(textOf(tree)).not.toContain('SETTINGS');
     expect(mainMountCount).toBe(1);
 
     act(() => tree.unmount());

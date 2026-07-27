@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import {
+  cancelAnimation,
+  ReduceMotion,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 import {
   DRAWER_MAX_ELEVATION,
   DRAWER_MAX_SHADOW_OPACITY,
   DRAWER_MAX_SHADOW_RADIUS,
 } from './appConstants';
-import { getDrawerOpenProgress } from './appDrawerUtils';
+import { buildDrawerSpringConfig, getDrawerOpenProgress } from './appDrawerUtils';
 import { useDrawerGestures } from './useDrawerGestures';
 import {
   drawerCapturesTouchesAtom,
@@ -19,6 +26,8 @@ import {
 import {
   currentScreenAtom,
   navigationCanGoBackAtom,
+  navigationStackAtom,
+  screenNavigationCommandsAtom,
   settingsAllowsDrawerGestureAtom,
 } from '../state/navigation/atoms';
 
@@ -42,7 +51,9 @@ export function useDrawerController({
   const drawerCapturesTouches = useAtomValue(drawerCapturesTouchesAtom);
   const tabletSidebarVisible = useAtomValue(tabletSidebarVisibleAtom);
   const navigationCanGoBack = useAtomValue(navigationCanGoBackAtom);
+  const navigationStack = useAtomValue(navigationStackAtom);
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
+  const setScreenNavigationCommands = useSetAtom(screenNavigationCommandsAtom);
   const setTabletSidebarVisible = useSetAtom(tabletSidebarVisibleAtom);
 
   const contentShiftOpen = drawerWidth;
@@ -103,16 +114,44 @@ export function useDrawerController({
     drawerDragStartOffset.value = nextOffset;
   }, [drawerDragStartOffset, drawerOffset, drawerWidth, store]);
 
+  // Track the previous stack length to distinguish pushes (animate in) from pops/resets (snap).
+  const previousStackLengthRef = useRef(navigationStack.length);
   useEffect(() => {
-    backSwipeOffset.value = 0;
-    backSwipeDragStartOffset.value = 0;
-    backSwipeGestureDidSettle.value = true;
+    const prevLength = previousStackLengthRef.current;
+    const nextLength = navigationStack.length;
+    previousStackLengthRef.current = nextLength;
+
+    const topRoute = navigationStack[nextLength - 1];
+    const isPush = nextLength > prevLength;
+    // SubAgent content is rendered by MainScreen; skip the slide-in animation for it.
+    const isAnimatedPush = isPush && nextLength > 1 && topRoute?.screen !== 'SubAgent';
+
+    if (isAnimatedPush) {
+      cancelAnimation(backSwipeOffset);
+      backSwipeGestureDidSettle.value = false;
+      backSwipeOffset.value = screenWidth;
+      backSwipeDragStartOffset.value = 0;
+      backSwipeOffset.value = withSpring(
+        0,
+        { ...buildDrawerSpringConfig(0), overshootClamping: true, reduceMotion: ReduceMotion.System },
+        (finished) => {
+          if (finished) {
+            backSwipeGestureDidSettle.value = true;
+          }
+        },
+      );
+    } else {
+      cancelAnimation(backSwipeOffset);
+      backSwipeOffset.value = 0;
+      backSwipeDragStartOffset.value = 0;
+      backSwipeGestureDidSettle.value = true;
+    }
   }, [
     backSwipeDragStartOffset,
     backSwipeGestureDidSettle,
     backSwipeOffset,
-    currentScreen,
-    navigationCanGoBack,
+    navigationStack,
+    screenWidth,
   ]);
 
   const handleDrawerSettled = useCallback(
@@ -123,6 +162,36 @@ export function useDrawerController({
     },
     [store],
   );
+
+  /**
+   * Triggers the same slide-out animation as the edge-swipe gesture, then calls `onBackSwipe`
+   * (the pure-pop callback) once the spring settles.  Used by the hardware-back handler so that
+   * programmatic pops look identical to gesture-driven pops.
+   */
+  const animateThenPop = useCallback(() => {
+    cancelAnimation(backSwipeOffset);
+    backSwipeDragStartOffset.value = 0;
+    backSwipeGestureDidSettle.value = false;
+    backSwipeOffset.value = withSpring(
+      screenWidth,
+      { ...buildDrawerSpringConfig(0), overshootClamping: true, reduceMotion: ReduceMotion.System },
+      (finished) => {
+        if (finished) {
+          backSwipeGestureDidSettle.value = true;
+          // Reset before the navigation state change so the next screen renders at offset 0.
+          backSwipeOffset.value = 0;
+          runOnJS(onBackSwipe)();
+        }
+      },
+    );
+  }, [backSwipeDragStartOffset, backSwipeGestureDidSettle, backSwipeOffset, onBackSwipe, screenWidth]);
+
+  useEffect(() => {
+    setScreenNavigationCommands({ triggerAnimatedPop: animateThenPop });
+    return () => {
+      setScreenNavigationCommands({ triggerAnimatedPop: null });
+    };
+  }, [animateThenPop, setScreenNavigationCommands]);
 
   const toggleTabletSidebar = useCallback(() => {
     setTabletSidebarVisible((visible) => !visible);

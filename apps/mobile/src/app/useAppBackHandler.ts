@@ -16,14 +16,51 @@ import {
   navigationCanGoBackAtom,
   onboardingModeAtom,
   popNavigationRouteAtom,
+  screenNavigationCommandsAtom,
   settingsAllowsDrawerGestureAtom,
 } from '../state/navigation/atoms';
 
+type Store = ReturnType<typeof useStore>;
+
 /**
- * Owns hardware/gesture back navigation. Returns the handler so the back-swipe gesture can
- * reuse the same resolution order.
+ * Pure pop: performs the actual navigation change after an animated transition has already played.
+ * Called by the back-swipe gesture (via `onBackSwipe`) once the spring settles, and by the
+ * hardware-back handler after it triggers the animation.
  */
-export function useAppBackHandler(): () => boolean {
+function popCurrentScreen(store: Store): void {
+  const screen = store.get(currentScreenAtom);
+  switch (screen) {
+    case 'ChatGit':
+      store.set(closeGitAtom);
+      break;
+    case 'WorkspacePicker':
+      store.set(closeWorkspacePickerAtom);
+      break;
+    case 'GitCheckout':
+      store.set(closeGitCheckoutAtom);
+      break;
+    case 'Settings':
+      if (store.get(navigationCanGoBackAtom)) {
+        store.set(popNavigationRouteAtom);
+      } else {
+        store.set(currentScreenAtom, 'Main');
+      }
+      break;
+    default:
+      if (store.get(navigationCanGoBackAtom)) {
+        store.set(popNavigationRouteAtom);
+      }
+      break;
+  }
+}
+
+/**
+ * Owns hardware/gesture back navigation.
+ *
+ * Returns `popCurrentScreen` so the back-swipe gesture can call it after its own animation
+ * settles — keeping programmatic and gesture-driven pops consistent.
+ */
+export function useAppBackHandler(): () => void {
   const store = useStore();
   const currentScreen = useAtomValue(currentScreenAtom);
   const setSettingsAllowsDrawerGesture = useSetAtom(settingsAllowsDrawerGestureAtom);
@@ -33,6 +70,10 @@ export function useAppBackHandler(): () => boolean {
       setSettingsAllowsDrawerGesture(true);
     }
   }, [currentScreen, setSettingsAllowsDrawerGesture]);
+
+  const handlePopCurrentScreen = useCallback(() => {
+    popCurrentScreen(store);
+  }, [store]);
 
   const handleHardwareBackPress = useCallback(() => {
     if (store.get(drawerVisibleAtom) || store.get(drawerOpenAtom)) {
@@ -49,41 +90,37 @@ export function useAppBackHandler(): () => boolean {
       return false;
     }
 
-    switch (screen) {
-      case 'ChatGit':
-        store.set(closeGitAtom);
-        return true;
-      case 'Browser':
-        if (store.get(browserScreenCommandsAtom)?.handleHardwareBackPress()) {
-          return true;
-        }
-        if (!store.get(navigationCanGoBackAtom)) {
-          return false;
-        }
-        store.set(popNavigationRouteAtom);
-        return true;
-      case 'WorkspacePicker':
-        store.set(closeWorkspacePickerAtom);
-        return true;
-      case 'GitCheckout':
-        store.set(closeGitCheckoutAtom);
-        return true;
-      case 'Settings':
-        if (store.get(navigationCanGoBackAtom)) {
-          store.set(popNavigationRouteAtom);
-        } else {
-          store.set(currentScreenAtom, 'Main');
-        }
-        return true;
-      case 'Privacy':
-      case 'Terms':
-      case 'SubAgent':
-        store.set(popNavigationRouteAtom);
-        return true;
-      case 'Main':
-      default:
-        return false;
+    if (screen === 'Main') {
+      return false;
     }
+
+    // Browser: WebView-internal back takes priority over the app stack.
+    if (screen === 'Browser') {
+      if (store.get(browserScreenCommandsAtom)?.handleHardwareBackPress()) {
+        return true;
+      }
+      if (!store.get(navigationCanGoBackAtom)) {
+        return false;
+      }
+      // Fall through to animated pop below.
+    }
+
+    // SubAgent is rendered inside MainScreen; pop it immediately without a slide animation.
+    if (screen === 'SubAgent') {
+      store.set(popNavigationRouteAtom);
+      return true;
+    }
+
+    // All other navigatable screens: trigger the slide-out animation if available, then pop.
+    const commands = store.get(screenNavigationCommandsAtom);
+    if (commands.triggerAnimatedPop) {
+      commands.triggerAnimatedPop();
+      return true;
+    }
+
+    // Fallback (controller not yet mounted): immediate pop.
+    popCurrentScreen(store);
+    return true;
   }, [store]);
 
   useEffect(() => {
@@ -91,5 +128,5 @@ export function useAppBackHandler(): () => boolean {
     return () => subscription.remove();
   }, [handleHardwareBackPress]);
 
-  return handleHardwareBackPress;
+  return handlePopCurrentScreen;
 }

@@ -98,6 +98,9 @@ export function useDrawerGestures({
         },
         (finished) => {
           if (finished && shouldNavigateBack) {
+            // Reset the offset before the navigation state change so the incoming screen
+            // renders at its natural position (offset 0) when the stack updates.
+            backSwipeOffset.value = 0;
             runOnJS(onBackSwipe)();
           }
         },
@@ -192,7 +195,10 @@ export function useDrawerGestures({
     // Settings is entered from the drawer and its header affordance is the drawer toggle, so its
     // edge swipe drags the session list back into view instead of popping to the chat screen.
     const opensDrawer = currentScreen === 'Settings' && !usesTabletLayout;
-    const animatesCurrentScreen = currentScreen === 'ChatGit';
+    // SubAgent content is rendered inline by MainScreen, so there is no pushed overlay to animate;
+    // its edge swipe falls through to an immediate pop below.
+    const animatesCurrentScreen =
+      navigationCanGoBack && !opensDrawer && currentScreen !== 'SubAgent';
     const enabled = opensDrawer ? settingsAllowsDrawerGesture : navigationCanGoBack;
     return Gesture.Pan()
       .withTestId('app-back-swipe')

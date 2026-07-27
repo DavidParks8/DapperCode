@@ -14,7 +14,12 @@ import {
   drawerOpenAtom,
   drawerVisibleAtom,
 } from '../state/drawer/atoms';
-import { currentScreenAtom, settingsAllowsDrawerGestureAtom } from '../state/navigation/atoms';
+import {
+  currentScreenAtom,
+  pushNavigationRouteAtom,
+  screenNavigationCommandsAtom,
+  settingsAllowsDrawerGestureAtom,
+} from '../state/navigation/atoms';
 import type { AppStore } from '../state/types';
 
 const SCREEN_WIDTH = 390;
@@ -146,5 +151,80 @@ describe('app edge swipe gesture', () => {
     expect(onBackSwipe).toHaveBeenCalledTimes(1);
     expect(store.get(drawerOpenAtom)).toBe(false);
     expect(drawerOffsetValue()).toBe(-DRAWER_WIDTH);
+  });
+
+  /**
+   * `backSwipeOffset` is the 4th shared value created by `useDrawerController`
+   * (index 3 in hook order: drawerOffset, drawerDragStartOffset, drawerGestureDidSettle,
+   * backSwipeOffset, …).
+   */
+  function backSwipeOffsetValue(): number {
+    return mockSharedValues[3]?.value as number;
+  }
+
+  it.each([
+    ['WorkspacePicker'],
+    ['GitCheckout'],
+    ['Browser'],
+    ['ChatGit'],
+  ] as const)(
+    'drives backSwipeOffset while swiping and calls onBackSwipe only after the spring settles (%s)',
+    (screen) => {
+      const store = createTestStore();
+      store.set(currentScreenAtom, screen);
+      const onBackSwipe = jest.fn();
+      render(store, onBackSwipe);
+
+      const gesture = mockGestureByTestId('app-back-swipe');
+      expect(gesture.config.enabled).toBe(true);
+
+      // Mid-drag: offset should track the finger; navigation must not have fired yet.
+      act(() => {
+        gesture.onStart?.({ translationX: 0 });
+        gesture.onUpdate?.({ translationX: 80 });
+      });
+      expect(backSwipeOffsetValue()).toBe(80);
+      expect(onBackSwipe).not.toHaveBeenCalled();
+
+      // Complete the swipe past the threshold.
+      act(() => {
+        gesture.onEnd?.({ translationX: 220, velocityX: 400 });
+        gesture.onFinalize?.({ translationX: 220, velocityX: 400 });
+      });
+
+      // withSpring is synchronous in the mock, so the spring callback fires immediately and calls
+      // onBackSwipe.  (In the mock, `value = withSpring(target, ...)` assigns the *return value*
+      // after the callback has already run, so the shared value ends at screenWidth rather than
+      // the 0 reset inside the callback — this is a mock artifact; production resets to 0 via
+      // the animation engine.)
+      expect(onBackSwipe).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not call onBackSwipe when the swipe is too short', () => {
+    const store = createTestStore();
+    store.set(currentScreenAtom, 'Browser');
+    const onBackSwipe = jest.fn();
+    render(store, onBackSwipe);
+
+    act(() => {
+      simulatePan(mockGestureByTestId('app-back-swipe'), [{ translationX: 20 }], {
+        translationX: 20,
+        velocityX: 0,
+      });
+    });
+
+    expect(onBackSwipe).not.toHaveBeenCalled();
+    // Offset settles back to 0 after a short swipe.
+    expect(backSwipeOffsetValue()).toBe(0);
+  });
+
+  it('registers triggerAnimatedPop on screenNavigationCommandsAtom', () => {
+    const store = createTestStore();
+    store.set(pushNavigationRouteAtom, { screen: 'WorkspacePicker' });
+    render(store, jest.fn());
+
+    const commands = store.get(screenNavigationCommandsAtom);
+    expect(typeof commands.triggerAnimatedPop).toBe('function');
   });
 });

@@ -80,3 +80,11 @@ export const settingsAllowsDrawerGestureAtom = atom(true);
 
 /** Incremented whenever an in-flight chat transition should be abandoned. */
 export const chatTransitionRequestIdAtom = atom(0);
+
+/**
+ * Commands registered by the screen-transition controller so that the hardware-back handler can
+ * trigger the same animated-pop as the edge-swipe gesture.  `null` when no controller is mounted.
+ */
+export const screenNavigationCommandsAtom = atom<{
+  triggerAnimatedPop: (() => void) | null;
+}>({ triggerAnimatedPop: null });
