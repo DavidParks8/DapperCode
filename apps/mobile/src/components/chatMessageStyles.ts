@@ -333,6 +333,7 @@ export const createStyles = (theme: AppTheme) =>
       ...theme.typography.caption,
       color: theme.colors.textMuted,
       lineHeight: 16,
+      minWidth: 0,
     },
     subAgentOpenHint: {
       flexDirection: 'row',

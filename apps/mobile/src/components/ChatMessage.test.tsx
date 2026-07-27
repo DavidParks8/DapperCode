@@ -541,13 +541,15 @@ describe('ChatMessage system timeline matrices', () => {
 
   it('renders subagent details and opens the receiver transcript', () => {
     const onOpenSubAgentThread = jest.fn();
+    const latest =
+      `Latest: ${'Inspecting a deliberately long repository path '.repeat(4)}`.trimEnd();
     const tree = renderMessage(
       {
         id: 'subagent',
         role: 'system',
         systemKind: 'subAgent',
-        content: '• Spawned agent\n  └ Analyze tests',
-        subAgentMeta: { receiverThreadIds: [' child-thread '] },
+        content: `• Spawned agent\n  └ Analyze tests\n  ${latest}`,
+        subAgentMeta: { receiverThreadIds: [' child-thread '], agentStatus: 'running' },
         createdAt: '2026-04-17T00:00:00.000Z',
       },
       { onOpenSubAgentThread },
@@ -555,6 +557,13 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    const latestText = root
+      .findAllByType(Text)
+      .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+    expect(latestText?.props).toMatchObject({
+      numberOfLines: 1,
+      ellipsizeMode: 'tail',
+    });
     const control = root.findAll(
       (node) =>
         node.props.accessibilityLabel === 'Spawned agent' &&
@@ -565,7 +574,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it('shows internal subagent results without a broken transcript action', () => {
+  it('keeps the agent chat affordance visible when the transcript is unavailable', () => {
     const onOpenSubAgentThread = jest.fn();
     const tree = renderMessage(
       {
@@ -586,7 +595,7 @@ describe('ChatMessage system timeline matrices', () => {
     const button = root.findAll((node) => node.props.accessibilityRole === 'button')[0];
     expect(button?.props.accessibilityState).toMatchObject({ disabled: true });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
-    expect(hasRenderedText(root, 'Open agent chat')).toBe(false);
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
     act(() => tree.unmount());
   });
 
@@ -602,6 +611,7 @@ describe('ChatMessage system timeline matrices', () => {
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(hasRenderedText(tree.root as QueryableTestInstance, 'Open agent chat')).toBe(true);
 
     const completed = createActivityMessage(
       'subagent-live',
