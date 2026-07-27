@@ -6,10 +6,9 @@ import { AppThemeProvider, createAppTheme } from '../../theme';
 import { PrivacyScreen } from './PrivacyScreen';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
-jest.mock('expo-blur', () => ({ BlurView: 'mock-blur-view' }));
-jest.mock('expo-linear-gradient', () => ({ LinearGradient: 'mock-linear-gradient' }));
 
 type Queryable = Omit<ReactTestInstance, 'children' | 'findAll' | 'parent' | 'props'> & {
+  type: string | { displayName?: string; name?: string };
   children: unknown[];
   props: Record<string, unknown>;
   parent: Queryable | null;
@@ -22,6 +21,11 @@ const theme = createAppTheme('dark');
 
 function hasText(root: Queryable, text: string): boolean {
   return root.findAll((node) => node.children.map(String).join('').includes(text)).length > 0;
+}
+
+function typeName(node: Queryable): string {
+  const { type } = node;
+  return typeof type === 'string' ? type : (type.displayName ?? type.name ?? '');
 }
 
 function findPressableByText(root: Queryable, text: string): Queryable {
@@ -127,6 +131,16 @@ describe('PrivacyScreen behavior', () => {
       'Please open the policy URL manually.',
     );
     act(() => failedTree.unmount());
+  });
+
+  it('renders flat native sections without card chrome and with real bullet rows', async () => {
+    const tree = await renderPrivacy(url);
+    const root = tree.root as Queryable;
+    expect(root.findAll((node) => /blur|gradient/i.test(typeName(node)))).toHaveLength(0);
+    expect(hasText(root, '- Bridge token auth is enabled by default.')).toBe(false);
+    expect(hasText(root, 'Bridge token auth is enabled by default.')).toBe(true);
+    expect(hasText(root, '\u2022')).toBe(true);
+    act(() => tree.unmount());
   });
 
   it('shows and guards the in-flight opening state', async () => {

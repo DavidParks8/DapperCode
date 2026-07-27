@@ -1,8 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useMemo, useState, type ComponentProps } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppTheme, type AppTheme } from '../../theme';
@@ -14,7 +12,6 @@ export interface LegalSection {
 
 interface LegalScreenProps {
   title: string;
-  iconName: ComponentProps<typeof Ionicons>['name'];
   sections: readonly LegalSection[];
   documentUrl: string | null;
   documentSectionLabel: string;
@@ -26,9 +23,10 @@ interface LegalScreenProps {
   onOpenDrawer: () => void;
 }
 
+type Styles = ReturnType<typeof createStyles>;
+
 export function LegalScreen({
   title,
-  iconName,
   sections,
   documentUrl,
   documentSectionLabel,
@@ -66,150 +64,148 @@ export function LegalScreen({
   }, [documentUrl, openFailureMessage, openingDocument, unsupportedDocumentMessage]);
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={[colors.bgMain, colors.bgMain, colors.bgMain]}
-        style={StyleSheet.absoluteFill}
-      />
-      <SafeAreaView style={styles.safeArea}>
-        <BlurView intensity={80} tint={theme.blurTint} style={styles.header}>
-          <Pressable onPress={onOpenDrawer} hitSlop={8} style={styles.menuBtn}>
-            <Ionicons name="menu" size={22} color={colors.textPrimary} />
-          </Pressable>
-          <Ionicons name={iconName} size={16} color={colors.textPrimary} />
-          <Text style={styles.headerTitle}>{title}</Text>
-        </BlurView>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <View style={styles.header}>
+        <Pressable
+          onPress={onOpenDrawer}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Open navigation drawer"
+        >
+          <Ionicons name="menu" size={22} color={colors.textPrimary} />
+        </Pressable>
+        <Text style={styles.headerTitle}>{title}</Text>
+      </View>
 
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-          {sections.map((section) => (
-            <Section
-              key={section.title}
-              title={section.title}
-              body={section.body}
-              styles={styles}
-              blurTint={theme.blurTint}
-            />
-          ))}
+      <ScrollView style={styles.body} contentContainerStyle={styles.content}>
+        {sections.map((section) => (
+          <Section key={section.title} title={section.title} body={section.body} styles={styles} />
+        ))}
 
+        <View style={styles.section}>
           <Text style={styles.sectionLabel}>{documentSectionLabel}</Text>
-          <BlurView intensity={50} tint={theme.blurTint} style={styles.card}>
-            <Text style={styles.cardTitle}>{documentLabel}</Text>
-            <Text selectable style={styles.documentUrl}>
-              {documentUrl ?? missingDocumentMessage}
+          <Pressable
+            disabled={openDocumentDisabled}
+            onPress={() => void openDocument()}
+            accessibilityRole="link"
+            style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+          >
+            <Text style={[styles.linkLabel, openDocumentDisabled && styles.linkLabelDisabled]}>
+              {openingDocument ? 'Opening...' : openButtonLabel}
             </Text>
-            <Pressable
-              disabled={openDocumentDisabled}
-              onPress={() => void openDocument()}
-              style={({ pressed }) => [
-                styles.openBtn,
-                openDocumentDisabled && styles.openBtnDisabled,
-                pressed && documentUrl && !openingDocument && styles.openBtnPressed,
-              ]}
-            >
-              <Ionicons
-                name="open-outline"
-                size={16}
-                color={openDocumentDisabled ? colors.textMuted : colors.accentText}
-              />
-              <Text
-                style={[styles.openBtnText, openDocumentDisabled && styles.openBtnTextDisabled]}
-              >
-                {openingDocument ? 'Opening...' : openButtonLabel}
-              </Text>
-            </Pressable>
-          </BlurView>
-        </ScrollView>
-      </SafeAreaView>
-    </View>
+            <Ionicons
+              name="open-outline"
+              size={16}
+              color={openDocumentDisabled ? colors.textMuted : colors.textPrimary}
+            />
+          </Pressable>
+          <Text style={styles.documentLabel}>{documentLabel}</Text>
+          <Text selectable style={styles.documentUrl}>
+            {documentUrl ?? missingDocumentMessage}
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 interface SectionProps {
   title: string;
   body: string;
-  styles: ReturnType<typeof createStyles>;
-  blurTint: AppTheme['blurTint'];
+  styles: Styles;
 }
 
-function Section({ title, body, styles, blurTint }: SectionProps) {
+function Section({ title, body, styles }: SectionProps) {
+  const blocks = useMemo(() => toBlocks(body), [body]);
   return (
-    <>
+    <View style={styles.section}>
       <Text style={styles.sectionLabel}>{title}</Text>
-      <BlurView intensity={50} tint={blurTint} style={styles.card}>
-        <Text style={styles.bodyText}>{body}</Text>
-      </BlurView>
-    </>
+      {blocks.map((block, index) =>
+        block.kind === 'bullet' ? (
+          <View key={`${block.kind}-${index}`} style={styles.bulletRow}>
+            <Text style={styles.bulletGlyph}>{'\u2022'}</Text>
+            <Text style={styles.bulletText}>{block.text}</Text>
+          </View>
+        ) : (
+          <Text key={`${block.kind}-${index}`} style={styles.paragraph}>
+            {block.text}
+          </Text>
+        ),
+      )}
+    </View>
   );
+}
+
+interface LegalBlock {
+  kind: 'paragraph' | 'bullet';
+  text: string;
+}
+
+/** Splits section copy into paragraphs and `- ` prefixed bullets for native list rendering. */
+function toBlocks(body: string): LegalBlock[] {
+  return body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) =>
+      line.startsWith('- ')
+        ? { kind: 'bullet' as const, text: line.slice(2).trim() }
+        : { kind: 'paragraph' as const, text: line },
+    );
 }
 
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.bgMain },
-    safeArea: { flex: 1 },
+    safeArea: { flex: 1, backgroundColor: theme.colors.bgMain },
     header: {
+      minHeight: 52,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: theme.spacing.sm,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.md,
+      gap: theme.spacing.lg,
+      paddingHorizontal: 18,
     },
-    menuBtn: { padding: theme.spacing.xs },
-    headerTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
+    headerTitle: { ...theme.typography.largeTitle, fontSize: 20 },
     body: { flex: 1 },
-    bodyContent: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
+    content: { padding: 18, gap: theme.spacing.xxl, paddingBottom: 48 },
+    section: { gap: theme.spacing.sm },
     sectionLabel: {
       ...theme.typography.caption,
+      fontWeight: '700',
       textTransform: 'uppercase',
-      letterSpacing: 0,
-      marginTop: theme.spacing.sm,
-      marginBottom: theme.spacing.sm,
       color: theme.colors.textMuted,
-      marginLeft: theme.spacing.xs,
     },
-    card: {
-      borderRadius: theme.radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderHighlight,
-      padding: theme.spacing.lg,
-      marginBottom: theme.spacing.sm,
-      overflow: 'hidden',
-      backgroundColor: theme.colors.bgCanvasAccent,
-    },
-    bodyText: {
+    paragraph: {
       ...theme.typography.body,
+      fontSize: 15,
+      lineHeight: 22,
       color: theme.colors.textSecondary,
     },
-    cardTitle: {
-      ...theme.typography.headline,
-      color: theme.colors.textPrimary,
-    },
-    documentUrl: {
-      ...theme.typography.mono,
-      marginTop: theme.spacing.sm,
+    bulletRow: { flexDirection: 'row', gap: theme.spacing.sm },
+    bulletGlyph: {
+      ...theme.typography.body,
+      fontSize: 15,
+      lineHeight: 22,
       color: theme.colors.textMuted,
     },
-    openBtn: {
-      marginTop: theme.spacing.md,
+    bulletText: {
+      ...theme.typography.body,
+      fontSize: 15,
+      lineHeight: 22,
+      flex: 1,
+      color: theme.colors.textSecondary,
+    },
+    linkRow: {
+      minHeight: 48,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      gap: theme.spacing.sm,
-      borderRadius: theme.radius.md,
-      paddingVertical: theme.spacing.md,
-      paddingHorizontal: theme.spacing.md,
-      backgroundColor: theme.colors.accent,
+      justifyContent: 'space-between',
+      gap: theme.spacing.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.borderLight,
     },
-    openBtnPressed: {
-      backgroundColor: theme.colors.accentPressed,
-    },
-    openBtnDisabled: {
-      backgroundColor: theme.colors.bgItem,
-    },
-    openBtnText: {
-      ...theme.typography.headline,
-      color: theme.colors.accentText,
-    },
-    openBtnTextDisabled: {
-      color: theme.colors.textMuted,
-    },
+    linkRowPressed: { opacity: 0.6 },
+    linkLabel: { ...theme.typography.body, fontSize: 15, color: theme.colors.textPrimary },
+    linkLabelDisabled: { color: theme.colors.textMuted },
+    documentLabel: { ...theme.typography.caption, color: theme.colors.textMuted },
+    documentUrl: { ...theme.typography.mono, color: theme.colors.textSecondary },
   });
