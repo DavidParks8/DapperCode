@@ -14,7 +14,7 @@ lives under `apps/mobile/src/state`.
 | `state/appState/settings.ts` | Read/write atoms for individual settings (`approvalModeAtom`, …) |
 | `state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms |
 | `state/bridge/*` | Active bridge profile, WS/API clients, profile lifecycle actions |
-| `state/navigation/*` | Current screen, onboarding mode, browser return screen, navigation actions |
+| `state/navigation/*` | Typed app route stack, current route/screen selectors, and navigation actions |
 | `state/chat/*` | Selected/active/pending chat routing and the chat-open transition |
 | `state/drawer/atoms.ts` | Drawer visibility plus the imperative drawer commands |
 | `state/commands.ts` | Screen-registered imperative entry points (replaces `useImperativeHandle` refs) |
@@ -36,6 +36,17 @@ lives under `apps/mobile/src/state`.
   `then`.
 - **`wsClientAtom` / `apiClientAtom` are derived but writable.** Writing installs an override; that is
   the injection seam used by tests.
+
+## Navigation stack
+
+`navigationStackAtom` is the source of truth for app navigation. Push screens with
+`pushNavigationRouteAtom`, return with `popNavigationRouteAtom`, and use `currentScreenAtom` only
+when intentionally resetting to a canonical root stack. `navigationCanGoBackAtom` drives both
+hardware back and the left-edge gesture, so drawer opening is available only at a root route.
+
+Sub-agent transcripts are parameterized routes (`{ screen: 'SubAgent', threadId }`). Drilling into a
+nested sub-agent pushes another route; back pops exactly one route before returning to the main
+session. Do not create a second feature-local navigation stack.
 
 ## App-state persistence
 
@@ -83,8 +94,8 @@ Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState
 - **Action atoms live in `*Actions.ts`.** Write-only action atoms hold no state, so they are exempt
   from the `screenAtom` rule; in exchange `registry.test.ts` fails if an `*Actions.ts` module
   declares a `screenAtom`. `workspaceActions.ts` is the workspace browsing and git checkout
-  behaviour: the workspace picker and git checkout are their own screens, so MainScreen is unmounted
-  while they run and cannot own their callbacks.
+  behaviour: the workspace picker and git checkout are pushed screens, so their callbacks cannot
+  live inside MainScreen.
 - **Object and array atoms take a factory,** e.g. `screenAtom((): string[] => [])`. The type
   signature enforces it. Reset assigns whatever the factory returns, so a shared literal would let
   one in-place mutation poison the baseline for every later reset, in every store.

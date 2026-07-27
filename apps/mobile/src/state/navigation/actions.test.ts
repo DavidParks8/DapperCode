@@ -11,7 +11,14 @@ import {
   selectedChatIdAtom,
 } from '../chat/atoms';
 import { chatContextChangedAtom, closeGitAtom, openChatGitAtom } from './actions';
-import { currentScreenAtom } from './atoms';
+import {
+  currentNavigationRouteAtom,
+  currentScreenAtom,
+  navigationCanGoBackAtom,
+  navigationStackAtom,
+  popNavigationRouteAtom,
+  pushNavigationRouteAtom,
+} from './atoms';
 
 function chat(messages: Chat['messages']): Chat {
   return {
@@ -42,10 +49,12 @@ describe('navigation actions', () => {
     store.set(chatContextChangedAtom, hydratedChat);
     store.set(openChatGitAtom, gitChatShell);
     expect(store.get(currentScreenAtom)).toBe('ChatGit');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }, { screen: 'ChatGit' }]);
 
     store.set(closeGitAtom);
 
     expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
     expect(store.get(gitChatAtom)).toBeNull();
     expect(store.get(activeChatAtom)).toBe(hydratedChat);
     expect(store.get(selectedChatIdAtom)).toBe(hydratedChat.id);
@@ -53,5 +62,49 @@ describe('navigation actions', () => {
     expect(store.get(mainOpeningChatIdAtom)).toBeNull();
     expect(store.get(pendingMainChatIdAtom)).toBeNull();
     expect(store.get(pendingMainChatSnapshotAtom)).toBeNull();
+  });
+
+  it('pushes and pops sub-agent routes through the app navigation stack', () => {
+    const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
+
+    store.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'child' });
+    store.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'grandchild' });
+
+    expect(store.get(currentScreenAtom)).toBe('SubAgent');
+    expect(store.get(currentNavigationRouteAtom)).toEqual({
+      screen: 'SubAgent',
+      threadId: 'grandchild',
+    });
+    expect(store.get(navigationCanGoBackAtom)).toBe(true);
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'SubAgent', threadId: 'child' },
+      { screen: 'SubAgent', threadId: 'grandchild' },
+    ]);
+
+    store.set(popNavigationRouteAtom);
+    expect(store.get(currentNavigationRouteAtom)).toEqual({
+      screen: 'SubAgent',
+      threadId: 'child',
+    });
+
+    store.set(popNavigationRouteAtom);
+    store.set(popNavigationRouteAtom);
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+    expect(store.get(navigationCanGoBackAtom)).toBe(false);
+  });
+
+  it('resets parameterless screens to their canonical stack', () => {
+    const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
+
+    store.set(currentScreenAtom, 'Privacy');
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'Settings' },
+      { screen: 'Privacy' },
+    ]);
+
+    store.set(currentScreenAtom, 'Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
   });
 });

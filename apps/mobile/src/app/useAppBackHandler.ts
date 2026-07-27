@@ -12,9 +12,10 @@ import {
 import { closeGitAtom } from '../state/navigation/actions';
 import { closeDrawerAtom, drawerOpenAtom, drawerVisibleAtom } from '../state/drawer/atoms';
 import {
-  browserReturnScreenAtom,
   currentScreenAtom,
+  navigationCanGoBackAtom,
   onboardingModeAtom,
+  popNavigationRouteAtom,
   settingsAllowsDrawerGestureAtom,
 } from '../state/navigation/atoms';
 
@@ -56,7 +57,10 @@ export function useAppBackHandler(): () => boolean {
         if (store.get(browserScreenCommandsAtom)?.handleHardwareBackPress()) {
           return true;
         }
-        store.set(currentScreenAtom, store.get(browserReturnScreenAtom));
+        if (!store.get(navigationCanGoBackAtom)) {
+          return false;
+        }
+        store.set(popNavigationRouteAtom);
         return true;
       case 'WorkspacePicker':
         store.set(closeWorkspacePickerAtom);
@@ -65,11 +69,16 @@ export function useAppBackHandler(): () => boolean {
         store.set(closeGitCheckoutAtom);
         return true;
       case 'Settings':
-        store.set(currentScreenAtom, 'Main');
+        if (store.get(navigationCanGoBackAtom)) {
+          store.set(popNavigationRouteAtom);
+        } else {
+          store.set(currentScreenAtom, 'Main');
+        }
         return true;
       case 'Privacy':
       case 'Terms':
-        store.set(currentScreenAtom, 'Settings');
+      case 'SubAgent':
+        store.set(popNavigationRouteAtom);
         return true;
       case 'Main':
       default:

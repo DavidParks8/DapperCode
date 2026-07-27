@@ -16,7 +16,11 @@ import {
   drawerVisibleAtom,
   tabletSidebarVisibleAtom,
 } from '../state/drawer/atoms';
-import { currentScreenAtom, settingsAllowsDrawerGestureAtom } from '../state/navigation/atoms';
+import {
+  currentScreenAtom,
+  navigationCanGoBackAtom,
+  settingsAllowsDrawerGestureAtom,
+} from '../state/navigation/atoms';
 
 interface UseDrawerControllerArgs {
   usesTabletLayout: boolean;
@@ -37,6 +41,7 @@ export function useDrawerController({
   const drawerVisible = useAtomValue(drawerVisibleAtom);
   const drawerCapturesTouches = useAtomValue(drawerCapturesTouchesAtom);
   const tabletSidebarVisible = useAtomValue(tabletSidebarVisibleAtom);
+  const navigationCanGoBack = useAtomValue(navigationCanGoBackAtom);
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
   const setTabletSidebarVisible = useSetAtom(tabletSidebarVisibleAtom);
 
@@ -102,7 +107,13 @@ export function useDrawerController({
     backSwipeOffset.value = 0;
     backSwipeDragStartOffset.value = 0;
     backSwipeGestureDidSettle.value = true;
-  }, [backSwipeDragStartOffset, backSwipeGestureDidSettle, backSwipeOffset, currentScreen]);
+  }, [
+    backSwipeDragStartOffset,
+    backSwipeGestureDidSettle,
+    backSwipeOffset,
+    currentScreen,
+    navigationCanGoBack,
+  ]);
 
   const handleDrawerSettled = useCallback(
     (isOpen: boolean) => {
@@ -126,6 +137,7 @@ export function useDrawerController({
     backSwipeGesture,
   } = useDrawerGestures({
     currentScreen,
+    navigationCanGoBack,
     usesTabletLayout,
     settingsAllowsDrawerGesture,
     drawerVisible,

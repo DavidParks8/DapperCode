@@ -9,7 +9,6 @@ import {
   agentDetailErrorAtom,
   agentDetailLoadingAtom,
   agentDetailParentChatAtom,
-  agentDetailThreadIdAtom,
   loadingAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
 import { keyboardVisibleAtom } from '../../state/mainScreen/composer';
@@ -30,6 +29,7 @@ import {
   agentThreadMenuVisibleAtom,
   collaborationModeMenuVisibleAtom,
 } from '../../state/mainScreen/modals';
+import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
@@ -96,7 +96,9 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
   const loadingAgentThreads = useAtomValue(loadingAgentThreadsAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
+  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
+  const agentDetailThreadId =
+    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
   const agentDetailChat = useAtomValue(agentDetailChatAtom);
   const agentDetailParentChat = useAtomValue(agentDetailParentChatAtom);
   const agentDetailLoading = useAtomValue(agentDetailLoadingAtom);

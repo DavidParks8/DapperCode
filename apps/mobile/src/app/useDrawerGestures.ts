@@ -26,6 +26,7 @@ import { drawerCapturesTouchesAtom, drawerVisibleAtom } from '../state/drawer/at
 
 interface UseDrawerGesturesArgs {
   currentScreen: Screen;
+  navigationCanGoBack: boolean;
   usesTabletLayout: boolean;
   settingsAllowsDrawerGesture: boolean;
   drawerVisible: boolean;
@@ -44,6 +45,7 @@ interface UseDrawerGesturesArgs {
 
 export function useDrawerGestures({
   currentScreen,
+  navigationCanGoBack,
   usesTabletLayout,
   settingsAllowsDrawerGesture,
   drawerVisible,
@@ -165,11 +167,11 @@ export function useDrawerGestures({
 
   const backSwipeGesture = useMemo(() => {
     const animatesCurrentScreen = currentScreen === 'ChatGit';
+    const canNavigateBack =
+      navigationCanGoBack && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture);
     return Gesture.Pan()
       .withTestId('app-back-swipe')
-      .enabled(
-        currentScreen !== 'Main' && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture),
-      )
+      .enabled(canNavigateBack)
       .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
       .activeOffsetX(12)
       .failOffsetY([-18, 18])
@@ -220,6 +222,7 @@ export function useDrawerGestures({
     backSwipeDragStartOffset,
     backSwipeOffset,
     currentScreen,
+    navigationCanGoBack,
     onBackSwipe,
     screenWidth,
     settingsAllowsDrawerGesture,
@@ -252,7 +255,8 @@ export function useDrawerGestures({
   const openDrawerGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!usesTabletLayout && currentScreen === 'Main')
+        .withTestId('app-open-drawer')
+        .enabled(!usesTabletLayout && currentScreen === 'Main' && !navigationCanGoBack)
         .activeOffsetX(12)
         .failOffsetY([-18, 18])
         .onStart(() => {
@@ -287,6 +291,7 @@ export function useDrawerGestures({
       drawerGestureDidSettle,
       drawerOffset,
       drawerWidth,
+      navigationCanGoBack,
       settleDrawerFromGesture,
       usesTabletLayout,
     ],

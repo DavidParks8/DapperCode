@@ -5,7 +5,6 @@ import type {
   FileSystemListResponse,
   WorkspaceSummary,
 } from '../../api/types';
-import type { AppScreen } from '../../app/appConstants';
 import type { WorkspacePickerPurpose } from '../../screens/main/mainScreenHelpers';
 import { screenAtom } from './registry';
 
@@ -18,8 +17,6 @@ export const agentRuntimeRevisionAtom = screenAtom(0);
 export const loadingAgentThreadsAtom = screenAtom(false);
 
 export const agentDetailThreadIdAtom = screenAtom<string | null>(null);
-
-export const agentDetailStackAtom = screenAtom<string[]>(() => []);
 
 export const agentDetailChatAtom = screenAtom<Chat | null>(null);
 
@@ -54,6 +51,3 @@ export const workspaceBrowseCacheAtom = screenAtom<Record<string, FileSystemList
 );
 
 export const workspaceBrowseRequestIdAtom = screenAtom(0);
-
-/** Where closing the workspace picker returns to when it was not opened for a git checkout. */
-export const workspacePickerReturnScreenAtom = screenAtom<AppScreen>('Main');

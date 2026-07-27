@@ -7,7 +7,7 @@ export type AppScreen =
   | 'Terms'
   | 'WorkspacePicker'
   | 'GitCheckout';
-export type Screen = AppScreen | 'Onboarding';
+export type Screen = AppScreen | 'SubAgent' | 'Onboarding';
 
 export const DRAWER_MIN_WIDTH = 260;
 export const TABLET_LAYOUT_MIN_WIDTH = 700;

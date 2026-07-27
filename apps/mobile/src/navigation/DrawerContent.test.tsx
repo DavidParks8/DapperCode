@@ -15,7 +15,7 @@ import type { HostBridgeWsClient } from '../api/ws';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { apiClientAtom, wsClientAtom } from '../state/bridge/atoms';
 import { selectedChatIdAtom } from '../state/chat/atoms';
-import { browserReturnScreenAtom, currentScreenAtom } from '../state/navigation/atoms';
+import { currentScreenAtom } from '../state/navigation/atoms';
 import { createTestStore, withAppStore } from '../state/testing';
 import type { AppStore } from '../state/types';
 import type { WorkspaceChatLimit } from '../appSettings';
@@ -536,7 +536,6 @@ describe('DrawerContent render behavior matrix', () => {
     await press(findByLabel(root, 'Needs your attention, 3 sessions'));
 
     expect(store.get(currentScreenAtom)).toBe('Settings');
-    expect(store.get(browserReturnScreenAtom)).toBe('Main');
     expect(store.get(selectedChatIdAtom)).toBeNull();
     expect(hasText(root, 'Approval chat')).toBe(false);
     act(() => tree.unmount());
