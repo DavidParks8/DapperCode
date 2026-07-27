@@ -24,6 +24,8 @@ import { mainScreenCommandsAtom, type MainScreenCommands } from '../../state/com
 import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
 import { currentScreenAtom, pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
+import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
+import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 
@@ -1378,9 +1380,8 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           lastError: 'missing',
         },
       ];
-      const { tree } = await renderMain({
-        api: createApi({ bridgeCapabilities: capabilities(agents) }),
-      });
+      const api = createApi({ bridgeCapabilities: capabilities(agents) });
+      const { tree } = await renderMain({ api });
       const root = rootOf(tree);
 
       await press(byLabel(root, 'Agent, Codex'));
@@ -1390,6 +1391,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(byLabel(root, 'Agent, Claude')).toBeTruthy();
 
       await press(byLabelPrefix(root, 'Agent mode, '));
+      expect(api.createChat).not.toHaveBeenCalled();
       await press(byLabel(root, 'Plan mode'));
       expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
       await press(byLabel(root, 'Fast mode'));
@@ -1407,6 +1409,23 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         rootOf(failed.tree).findAll((node) => node.props.accessibilityLabel === 'Fast mode'),
       ).toHaveLength(0);
       act(() => failed.tree.unmount());
+    });
+
+    it('offers fallback modes for a selected chat without ACP mode config', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        selectedChat: { ...rootChat, messages: [] },
+      });
+      const root = rootOf(tree);
+
+      await press(byLabelPrefix(root, 'Agent mode, '));
+      expect(byLabel(root, 'Default mode')).toBeTruthy();
+      await press(byLabel(root, 'Plan mode'));
+      expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
+      expect(api.createChat).not.toHaveBeenCalled();
+
+      act(() => tree.unmount());
     });
 
     it('uses the most recently persisted model for a new chat', async () => {
@@ -1932,6 +1951,65 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(
         root.findAll((node) => node.props.accessibilityLabel === '1 agent').length,
       ).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    });
+
+    it('clears agent threads synchronously when starting a new chat', async () => {
+      const secondSubAgentChat: Chat = {
+        ...subAgentChat,
+        id: 'thread-sub-two',
+        title: 'Review the implementation',
+      };
+      const chats: ChatSummary[] = [rootChat, subAgentChat, secondSubAgentChat];
+      const api = createApi({ chats });
+      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
+      const root = rootOf(tree);
+      await advance();
+      await act(async () => {
+        await flush();
+      });
+
+      expect(byLabel(root, '2 agents')).toBeTruthy();
+      const commands = store.get(mainScreenCommandsAtom);
+      expect(commands).toBeTruthy();
+      act(() => {
+        commands?.startNewChat();
+        expect(store.get(relatedAgentThreadsAtom)).toEqual([]);
+        expect(store.get(agentRootThreadIdAtom)).toBeNull();
+      });
+      expect(hasText(root, "Let's build")).toBe(true);
+
+      act(() => tree.unmount());
+    });
+
+    it('does not reopen stale agent threads after starting a new chat', async () => {
+      const chats: ChatSummary[] = [rootChat, subAgentChat];
+      const api = createApi({ chats });
+      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
+      const root = rootOf(tree);
+      await advance();
+      await act(async () => {
+        await flush();
+      });
+
+      let resolveRefresh!: (value: ChatSummary[]) => void;
+      const pendingRefresh = new Promise<ChatSummary[]>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      (api.listChats as jest.Mock).mockReturnValueOnce(pendingRefresh);
+      await press(byLabel(root, '1 agent'));
+
+      const commands = store.get(mainScreenCommandsAtom);
+      act(() => {
+        commands?.startNewChat();
+      });
+      await act(async () => {
+        resolveRefresh(chats);
+        await flush();
+      });
+
+      expect(store.get(agentThreadMenuVisibleAtom)).toBe(false);
+      expect(hasText(root, 'Agent threads')).toBe(false);
       act(() => tree.unmount());
     });
 

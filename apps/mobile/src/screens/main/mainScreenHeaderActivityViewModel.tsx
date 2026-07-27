@@ -142,7 +142,10 @@ export function useMainScreenHeaderActivityViewModel(
           normalizeCloneDirectoryName(gitCheckoutDirectoryName) ?? '',
         )
       : null;
-  const spawnedAgentCount = selectorAgentCount;
+  const relatedThreadsMatchSelectedChat = Boolean(
+    selectedChat && relatedAgentThreads.some((chat) => chat.id === selectedChat.id),
+  );
+  const spawnedAgentCount = relatedThreadsMatchSelectedChat ? selectorAgentCount : 0;
   const selectedChatIsSubAgent = Boolean(selectedChat?.parentThreadId);
   const showAgentThreadChip =
     !isOpeningChat && Boolean(selectedChat) && (spawnedAgentCount > 0 || selectedChatIsSubAgent);

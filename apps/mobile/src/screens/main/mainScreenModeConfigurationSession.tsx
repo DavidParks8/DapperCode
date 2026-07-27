@@ -2,16 +2,13 @@ import { errorAtom } from '../../state/mainScreen/turn';
 import {
   loadingModelsAtom,
   modelOptionsByAgentAtom,
-  selectedAcpModeIdAtom,
-  selectedCollaborationModeAtom,
   selectedEffortAtom,
 } from '../../state/mainScreen/models';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import type { AcpConfigOption, Chat, ReasoningEffort } from '../../api/types';
 import { normalizeModelId } from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
-import { mergeModelOptions, modelOptionsFromAcpConfig } from './mainScreenChatState';
 import type {
   MainScreenWorkspaceCheckoutActionsContext,
   MainScreenWorkspaceCheckoutActionsResult,
@@ -32,27 +29,20 @@ export function useMainScreenModeConfigurationSession(
 ) {
   const {
     activeAgentId,
-    activeApprovalPolicy,
     activeModelId,
     activeServiceTier,
     api,
     chatModelPreferencesRef,
     effortConfig,
     modelOptionsRequestRef,
-    preferredStartCwd,
     rememberChatModelPreference,
     saveChatModelPreferences,
     selectedChatId,
-    selectedChatIdRef,
     selectedChatRef,
     setSelectedChat,
-    setSelectedChatId,
   } = context;
   const setError = useSetAtom(errorAtom);
   const loadingModels = useAtomValue(loadingModelsAtom);
-  const selectedEffort = useAtomValue(selectedEffortAtom);
-  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
-  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
   const setModelOptionsByAgent = useSetAtom(modelOptionsByAgentAtom);
   const setLoadingModels = useSetAtom(loadingModelsAtom);
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
@@ -91,63 +81,6 @@ export function useMainScreenModeConfigurationSession(
     },
     [activeAgentId, api],
   );
-
-  const configurationSessionRef = useRef<Promise<Chat | null> | null>(null);
-  const ensureModeConfigurationSession = useCallback(async (): Promise<Chat | null> => {
-    if (selectedChatRef.current?.id) {
-      return selectedChatRef.current;
-    }
-    if (configurationSessionRef.current) {
-      return configurationSessionRef.current;
-    }
-    const request = api
-      .createChat({
-        agentId: activeAgentId ?? undefined,
-        cwd: preferredStartCwd ?? undefined,
-        model: activeModelId ?? undefined,
-        effort: selectedEffort ?? undefined,
-        serviceTier: activeServiceTier ?? undefined,
-        approvalPolicy: activeApprovalPolicy,
-        collaborationMode: selectedCollaborationMode,
-        agentMode: selectedAcpModeId,
-      })
-      .then((chat) => {
-        selectedChatIdRef.current = chat.id;
-        selectedChatRef.current = chat;
-        setSelectedChatId(chat.id);
-        setSelectedChat(chat);
-        const models = modelOptionsFromAcpConfig(chat.acpConfig ?? []);
-        if (chat.agentId && models.length > 0) {
-          setModelOptionsByAgent((previous) => ({
-            ...previous,
-            [chat.agentId!]: mergeModelOptions(
-              previous[chat.agentId!] ?? EMPTY_MODEL_OPTIONS,
-              models,
-            ),
-          }));
-        }
-        return chat;
-      })
-      .catch((err) => {
-        setError((err as Error).message);
-        return null;
-      })
-      .finally(() => {
-        configurationSessionRef.current = null;
-      });
-    configurationSessionRef.current = request;
-    return request;
-  }, [
-    activeAgentId,
-    activeApprovalPolicy,
-    activeModelId,
-    activeServiceTier,
-    api,
-    preferredStartCwd,
-    selectedAcpModeId,
-    selectedCollaborationMode,
-    selectedEffort,
-  ]);
 
   const openModelModal = useCallback(() => {
     // Serve whatever the client already has so the picker opens populated, then revalidate.
@@ -262,8 +195,6 @@ export function useMainScreenModeConfigurationSession(
 
   return {
     refreshModelOptions,
-    configurationSessionRef,
-    ensureModeConfigurationSession,
     openModelModal,
     closeModelModal,
     openAgentModal,

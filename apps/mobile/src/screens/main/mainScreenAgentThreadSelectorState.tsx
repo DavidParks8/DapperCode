@@ -30,6 +30,7 @@ export function useMainScreenAgentThreadSelectorState(
   context: MainScreenAgentThreadSelectorStateContext,
 ) {
   const {
+    chatIdRef,
     closeAgentDetail,
     onPendingOpenChatHandled,
     openAgentDetail,
@@ -59,6 +60,9 @@ export function useMainScreenAgentThreadSelectorState(
       }
 
       const related = await refreshAgentThreads(focusChat.id, { showLoading: true });
+      if (chatIdRef.current !== focusChat.id) {
+        return false;
+      }
       if (related.threads.length <= 1) {
         setAgentThreadMenuVisible(false);
         setError('No spawned agent threads for this chat yet.');
@@ -87,7 +91,7 @@ export function useMainScreenAgentThreadSelectorState(
       }
       return true;
     },
-    [agentRootThreadId, closeAgentDetail, openAgentDetail, refreshAgentThreads],
+    [agentRootThreadId, chatIdRef, closeAgentDetail, openAgentDetail, refreshAgentThreads],
   );
   openAgentThreadSelectorRef.current = openAgentThreadSelector;
 
