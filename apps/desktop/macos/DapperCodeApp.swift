@@ -90,100 +90,9 @@ private enum NetworkMode: String, CaseIterable, Identifiable {
     var title: String { self == .tailscale ? "Tailscale" : "Local network" }
 }
 
-private enum OperatorError: LocalizedError {
-    case unavailable
-    case failed(String)
-    case invalidResponse
-
-    var errorDescription: String? {
-        switch self {
-        case .unavailable:
-            return "The bundled DapperCode operator is unavailable. Reinstall the app."
-        case .failed(let message):
-            return message
-        case .invalidResponse:
-            return "The DapperCode operator returned an invalid response."
-        }
-    }
-}
-
-private final class OperatorProcessRegistry: @unchecked Sendable {
-    static let shared = OperatorProcessRegistry()
-
-    private let lock = NSLock()
-    private var processes: [ObjectIdentifier: Process] = [:]
-    private var isTerminating = false
-
-    func run(_ process: Process) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !isTerminating else {
-            throw OperatorError.failed("DapperCode is quitting.")
-        }
-        try process.run()
-        processes[ObjectIdentifier(process)] = process
-    }
-
-    func unregister(_ process: Process) {
-        lock.lock()
-        processes.removeValue(forKey: ObjectIdentifier(process))
-        lock.unlock()
-    }
-
-    func settleBeforeTermination() {
-        lock.lock()
-        isTerminating = true
-        lock.unlock()
-
-        let graceDeadline = Date().addingTimeInterval(2)
-        while Date() < graceDeadline {
-            let running = snapshot().filter(\.isRunning)
-            if running.isEmpty { return }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-
-        let running = snapshot().filter(\.isRunning)
-        running.forEach { $0.terminate() }
-        let terminationDeadline = Date().addingTimeInterval(1)
-        while Date() < terminationDeadline && running.contains(where: \.isRunning) {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-    }
-
-    private func snapshot() -> [Process] {
-        lock.lock()
-        defer { lock.unlock() }
-        return Array(processes.values)
-    }
-}
-
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
-        OperatorProcessRegistry.shared.settleBeforeTermination()
-        guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
-              FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
-            return
-        }
-
-        // Every parallel bridge belongs to this app, so quitting stops all of them.
-        let process = Process()
-        process.executableURL = operatorURL
-        process.arguments = ["stop", "--all"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            let deadline = Date().addingTimeInterval(18)
-            while process.isRunning && Date() < deadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                process.terminate()
-            }
-        } catch {
-            // Termination cannot present recovery UI; the ownership guard in the
-            // operator still prevents this fallback from stopping another process.
-        }
+        ApplicationTermination.begin()
     }
 }
 
@@ -701,7 +610,11 @@ private struct TrayMenu: View {
         ))
         Button("About DapperCode") { NSApplication.shared.orderFrontStandardAboutPanel(nil) }
         Divider()
-        Button("Quit DapperCode") { NSApplication.shared.terminate(nil) }
+        Button("Quit DapperCode") {
+            DispatchQueue.main.async {
+                NSApplication.shared.terminate(nil)
+            }
+        }
     }
 }
 
