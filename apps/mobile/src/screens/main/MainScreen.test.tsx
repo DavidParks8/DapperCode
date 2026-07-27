@@ -37,6 +37,8 @@ import {
 } from '../../state/navigation/atoms';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 import { selectedChatAtom } from '../../state/mainScreen/session';
+import { activeTurnIdAtom } from '../../state/mainScreen/turn';
+import { activityAtom } from '../../state/mainScreen/composer';
 import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
@@ -836,6 +838,268 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       expect(textCount(root, 'Immediate hello')).toBe(1);
       expect(hasText(root, 'Real thread')).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('keeps first-turn activity isolated when replay recovery overlaps creation', async () => {
+      let resolveSend!: (chat: Chat) => void;
+      const sendPending = new Promise<Chat>((resolve) => {
+        resolveSend = resolve;
+      });
+      let resolveRecovery!: (threadIds: string[]) => void;
+      const recoveryPending = new Promise<string[]>((resolve) => {
+        resolveRecovery = resolve;
+      });
+      const serverUserMessage = {
+        id: 'server-user-live',
+        role: 'user' as const,
+        content: 'Trace the first turn',
+        createdAt: '2026-07-20T00:00:01.000Z',
+      };
+      const created: Chat = {
+        ...chat,
+        id: 'thread-created',
+        title: 'First turn',
+        status: 'running',
+        activeTurnId: 'turn-first',
+        messages: [serverUserMessage],
+      };
+      const otherChat: Chat = {
+        ...chat,
+        id: 'thread-other',
+        title: 'Other thread',
+        status: 'complete',
+        activeTurnId: null,
+        messages: [
+          {
+            id: 'other-answer',
+            role: 'assistant',
+            content: 'Other answer',
+            createdAt: '2026-07-20T00:00:02.000Z',
+          },
+        ],
+      };
+      const api = createApi();
+      api.createChatIdempotent = jest.fn().mockResolvedValue(created);
+      api.sendChatMessageIdempotent = jest.fn().mockReturnValue(sendPending);
+      api.listLoadedChatIds = jest.fn().mockReturnValue(recoveryPending);
+      (api.peekChat as jest.Mock).mockImplementation((id: string) =>
+        id === otherChat.id ? otherChat : id === created.id ? created : null,
+      );
+      (api.getChat as jest.Mock).mockImplementation((id: string) =>
+        Promise.resolve(id === otherChat.id ? otherChat : created),
+      );
+      const { tree, store, ref } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      const agUi = (
+        event: Record<string, unknown>,
+        threadId = created.id,
+        runId = 'run-first',
+      ) => ({
+        method: 'bridge/agui.event',
+        params: { threadId, runId, sourceTurnId: 'turn-first', event },
+      });
+      const transcriptItems = () =>
+        (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+          kind: string;
+          message?: Chat['messages'][number];
+          invocation?: { id: string; title: string };
+        }>;
+      const transcriptMessages = () =>
+        transcriptItems().flatMap(({ message }) => (message ? [message] : []));
+
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: {
+          reason: 'streamChanged',
+          resumeAfterEventId: 10,
+          earliestEventId: null,
+          latestEventId: 10,
+        },
+      });
+      act(() => messageInput(root).props.onChangeText(serverUserMessage.content));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props.accessibilityLabel === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalled();
+
+      await emitWs(agUi({ type: 'RUN_STARTED', threadId: created.id, runId: 'run-first' }));
+      await emitWs(
+        agUi({
+          type: 'REASONING_MESSAGE_START',
+          messageId: 'reasoning-first',
+          role: 'assistant',
+        }),
+      );
+      await emitWs(
+        agUi({
+          type: 'REASONING_MESSAGE_CONTENT',
+          messageId: 'reasoning-first',
+          delta: 'Checking constraints',
+        }),
+      );
+      await emitWs(
+        agUi({
+          type: 'TOOL_CALL_START',
+          toolCallId: 'tool-first',
+          toolCallName: 'terminal',
+        }),
+      );
+      await emitWs(
+        agUi({
+          type: 'TOOL_CALL_ARGS',
+          toolCallId: 'tool-first',
+          delta: '{"command":"npm test"}',
+        }),
+      );
+      await emitWs(
+        agUi({
+          type: 'ACTIVITY_SNAPSHOT',
+          messageId: 'subagent:first',
+          activityType: SUBAGENT_ACTIVITY_TYPE,
+          replace: true,
+          content: {
+            text: '• Sub-agent working\n  Status: running\n  Latest: Inspecting the app',
+            subAgent: {
+              toolCallId: 'subagent-first',
+              tool: 'spawnAgent',
+              senderThreadId: created.id,
+              receiverThreadIds: ['thread-child'],
+              agentStatus: 'running',
+              navigable: true,
+            },
+          },
+        }),
+      );
+
+      expect(transcriptMessages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'reasoning', content: 'Checking constraints' }),
+          expect.objectContaining({ id: 'subagent:first', role: 'activity' }),
+        ]),
+      );
+      expect(transcriptItems()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'toolInvocation',
+            invocation: expect.objectContaining({ id: 'tool-first' }),
+          }),
+        ]),
+      );
+
+      await act(async () => {
+        resolveRecovery([]);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(transcriptMessages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'reasoning', content: 'Checking constraints' }),
+          expect.objectContaining({ id: 'subagent:first', role: 'activity' }),
+        ]),
+      );
+      expect(transcriptItems()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'toolInvocation',
+            invocation: expect.objectContaining({ id: 'tool-first' }),
+          }),
+        ]),
+      );
+      expect(store.get(activeTurnIdAtom)).toBe('turn-first');
+      expect(store.get(activityAtom).tone).toBe('running');
+      expect(
+        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+
+      await act(async () => {
+        ref.current?.openChat(otherChat.id);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(store.get(selectedChatAtom)?.id).toBe(otherChat.id);
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom).tone).not.toBe('running');
+      expect(
+        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(hasText(root, 'Other answer')).toBe(true);
+
+      await emitWs(
+        agUi(
+          {
+            type: 'TEXT_MESSAGE_START',
+            messageId: 'answer-first',
+            role: 'assistant',
+          },
+          created.id,
+        ),
+      );
+      await emitWs(
+        agUi(
+          {
+            type: 'TEXT_MESSAGE_CONTENT',
+            messageId: 'answer-first',
+            delta: 'Still belongs to the first turn',
+          },
+          created.id,
+        ),
+      );
+      expect(hasText(root, 'Still belongs to the first turn')).toBe(false);
+
+      await act(async () => {
+        ref.current?.openChat(created.id);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(store.get(selectedChatAtom)?.id).toBe(created.id);
+      expect(store.get(activeTurnIdAtom)).toBe('turn-first');
+      expect(store.get(activityAtom).tone).toBe('running');
+      expect(
+        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+      expect(transcriptMessages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'reasoning', content: 'Checking constraints' }),
+          expect.objectContaining({
+            role: 'assistant',
+            content: 'Still belongs to the first turn',
+          }),
+          expect.objectContaining({ id: 'subagent:first', role: 'activity' }),
+        ]),
+      );
+
+      await act(async () => {
+        resolveSend(created);
+        await sendPromise;
+      });
+      expect(transcriptMessages()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'reasoning', content: 'Checking constraints' }),
+          expect.objectContaining({
+            role: 'assistant',
+            content: 'Still belongs to the first turn',
+          }),
+          expect.objectContaining({ id: 'subagent:first', role: 'activity' }),
+        ]),
+      );
+      expect(transcriptItems()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'toolInvocation',
+            invocation: expect.objectContaining({ id: 'tool-first' }),
+          }),
+        ]),
+      );
       act(() => tree.unmount());
     });
 

@@ -9,12 +9,15 @@ import {
   stoppingTurnAtom,
   userInputDraftsAtom,
 } from '../../state/mainScreen/turn';
+import { activityAtom } from '../../state/mainScreen/composer';
 import { bridgeCapabilitiesAtom } from '../../state/mainScreen/models';
 import { agentDetailThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
+import type { AgUiLiveAssistantMessages } from '../../api/agUi';
 import {
   RUN_WATCHDOG_MS,
+  type ThreadRuntimeSnapshot,
   toPersistedActivePlanState,
   isChatLikelyRunning,
 } from './mainScreenHelpers';
@@ -32,6 +35,12 @@ import type {
 
 export type MainScreenReplayRecoveryEngineContext = MainScreenComposerSubmitActionsContext &
   MainScreenComposerSubmitActionsResult;
+
+interface ReplayRecoveryInstallGuard {
+  liveAssistantByThread: AgUiLiveAssistantMessages;
+  runtimeSnapshotsByThread: Record<string, ThreadRuntimeSnapshot>;
+  selectedThreadId: string | null;
+}
 
 export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecoveryEngineContext) {
   const {
@@ -54,6 +63,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     setSelectedChat,
     setStreamingText,
     setTranscriptContinuationState,
+    store,
     threadRuntimeSnapshotsRef,
     ws,
   } = context;
@@ -67,19 +77,39 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
+  const setActivity = useSetAtom(activityAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
 
   const installReplayRecoverySnapshot = useCallback(
-    (snapshot: ReplayRecoverySnapshot) => {
+    (snapshot: ReplayRecoverySnapshot, guard: ReplayRecoveryInstallGuard) => {
       const approvalsByThread = new Map(
         snapshot.approvals.map((approval) => [approval.threadId, approval] as const),
       );
       const userInputsByThread = new Map(
         snapshot.userInputs.map((request) => [request.threadId, request] as const),
       );
+      const recoveredThreadIds = new Set(snapshot.threads.map(({ chat }) => chat.id));
+      const runtimeAdvancedThreadIds = new Set<string>();
       setBridgeCapabilities(snapshot.capabilities);
-      setLiveAssistantByThread({});
+      // A recovery read is asynchronous. Only retire live state that is still the exact state
+      // captured when the read began; newer events belong to the post-recovery timeline.
+      setLiveAssistantByThread((current) => {
+        let next = current;
+        for (const threadId of recoveredThreadIds) {
+          if (
+            current[threadId] === undefined ||
+            current[threadId] !== guard.liveAssistantByThread[threadId]
+          ) {
+            continue;
+          }
+          if (next === current) {
+            next = { ...current };
+          }
+          delete next[threadId];
+        }
+        return next;
+      });
 
       for (const { chat, queue } of snapshot.threads) {
         api.rememberChat(chat);
@@ -89,6 +119,12 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         const plan = chat.latestPlan
           ? toPersistedActivePlanState(chat.latestPlan, chat.updatedAt)
           : null;
+        if (
+          threadRuntimeSnapshotsRef.current[chat.id] !== guard.runtimeSnapshotsByThread[chat.id]
+        ) {
+          runtimeAdvancedThreadIds.add(chat.id);
+          continue;
+        }
         threadRuntimeSnapshotsRef.current[chat.id] = {
           activity: pendingThreadApproval
             ? { tone: 'idle', title: 'Waiting for approval' }
@@ -128,7 +164,8 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
 
       const selectedId = chatIdRef.current;
       const selectedSnapshot = snapshot.threads.find(({ chat }) => chat.id === selectedId);
-      if (selectedSnapshot) {
+      const selectionChanged = selectedId !== guard.selectedThreadId;
+      if (selectedSnapshot && !selectionChanged) {
         const selected = mergeChatWithPendingOptimisticMessages(selectedSnapshot.chat);
         setSelectedChat((previous) =>
           previous?.id === selected.id ? resolveEquivalentChat(previous, selected) : selected,
@@ -136,8 +173,10 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         setTranscriptContinuationState(getTranscriptContinuationState(selected));
         setStoppingTurn(false);
         setError(null);
-        applyThreadRuntimeSnapshot(selected.id);
-      } else {
+        if (!runtimeAdvancedThreadIds.has(selected.id)) {
+          applyThreadRuntimeSnapshot(selected.id);
+        }
+      } else if (!selectedId && !selectionChanged) {
         setActiveCommands([]);
         setStreamingText(null);
         setPendingApproval(null);
@@ -146,6 +185,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         setActivePlan(null);
         setActiveBridgeUiSurfaces([]);
         setActiveTurnId(null);
+        setActivity({ tone: 'idle', title: 'Ready' });
       }
       bumpAgentRuntimeRevision();
     },
@@ -162,6 +202,11 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     (resumeAfterEventId: number | null, acknowledge: boolean) => {
       const generation = replayRecoveryGenerationRef.current + 1;
       replayRecoveryGenerationRef.current = generation;
+      const installGuard: ReplayRecoveryInstallGuard = {
+        liveAssistantByThread: store.get(liveAssistantByThreadAtom),
+        runtimeSnapshotsByThread: { ...threadRuntimeSnapshotsRef.current },
+        selectedThreadId: chatIdRef.current,
+      };
       replayRecoveryAbortControllerRef.current?.abort();
       const abortController = new AbortController();
       replayRecoveryAbortControllerRef.current = abortController;
@@ -190,7 +235,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             abortController.signal,
           );
           if (generation !== replayRecoveryGenerationRef.current) return;
-          installReplayRecoverySnapshot(snapshot);
+          installReplayRecoverySnapshot(snapshot, installGuard);
           replayRecoveryEpochResetPendingRef.current = false;
           if (acknowledge && resumeAfterEventId !== null) {
             ws.acknowledgeSnapshotRecovery(resumeAfterEventId);
@@ -218,7 +263,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       };
       void attempt();
     },
-    [agentDetailThreadId, api, installReplayRecoverySnapshot, relatedAgentThreads, ws],
+    [agentDetailThreadId, api, installReplayRecoverySnapshot, relatedAgentThreads, store, ws],
   );
 
   return {
