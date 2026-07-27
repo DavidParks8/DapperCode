@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
@@ -434,6 +434,131 @@ describe('ChatMessage command rows', () => {
   });
 });
 
+describe('ChatMessage transcript width', () => {
+  const theme = createAppTheme('dark');
+
+  const flattenRootStyle = (element: ReactElement) => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(<AppThemeProvider theme={theme}>{element}</AppThemeProvider>);
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+    const root = tree.toJSON() as { props: { style?: unknown } };
+    return (StyleSheet.flatten(root.props.style) ?? {}) as {
+      maxWidth?: number | string;
+      width?: number | string;
+    };
+  };
+
+  it.each([
+    {
+      name: 'assistant message',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'assistant-width',
+            role: 'assistant',
+            content: 'A fairly long assistant answer that should reach the transcript edge.',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'reasoning card',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'reasoning-width',
+            role: 'reasoning',
+            content: 'Thinking through the change',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'sub-agent card',
+      element: (
+        <ChatMessage
+          message={createActivityMessage(
+            'subagent-width',
+            SUBAGENT_ACTIVITY_TYPE,
+            { text: 'Delegated to explore agent' },
+            '2026-04-17T00:00:00.000Z',
+          )}
+        />
+      ),
+    },
+    {
+      name: 'tool card',
+      element: (
+        <ToolInvocationRow
+          invocation={onlyInvocation([
+            {
+              id: 'tool-width',
+              role: 'system',
+              systemKind: 'tool',
+              content: '• Ran npm test\n  output line',
+              createdAt: '2026-04-17T00:00:00.000Z',
+            },
+          ])}
+        />
+      ),
+    },
+  ])('stretches the $name to the full transcript width', ({ element }) => {
+    expect(flattenRootStyle(element).maxWidth).toBe('100%');
+  });
+
+  it('keeps user bubbles inset from the opposite edge', () => {
+    const style = flattenRootStyle(
+      <ChatMessage
+        message={{
+          id: 'user-width',
+          role: 'user',
+          content: 'A user message that stays visually distinct from the assistant column.',
+          createdAt: '2026-04-17T00:00:00.000Z',
+        }}
+      />,
+    );
+
+    expect(style.maxWidth).toBe('92%');
+  });
+
+  it('renders expanded tool output without a right inset', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ToolInvocationRow
+            invocation={onlyInvocation([
+              {
+                id: 'tool-body-width',
+                role: 'system',
+                systemKind: 'tool',
+                content: '• Ran npm test\n  output line',
+                createdAt: '2026-04-17T00:00:00.000Z',
+              },
+            ])}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+
+    act(() => {
+      readOnPress(tree.root.findByProps({ accessibilityRole: 'button' }).props)();
+    });
+
+    const body = tree.root.findByProps({ testID: 'tool-output-body' });
+    const bodyStyle = (StyleSheet.flatten(body.props.style as never) ?? {}) as {
+      marginRight?: number;
+    };
+
+    expect(bodyStyle.marginRight).toBeUndefined();
+  });
+});
+
 describe('ChatMessage role and part matrices', () => {
   it.each([
     {
@@ -644,12 +769,18 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
-    const latestText = root
-      .findAllByType(Text)
+    const latestViewport = root.findAllByProps({ testID: 'subagent-latest-scroll' })[0];
+    const latestScroll = latestViewport?.findAllByType(ScrollView)[0];
+    const latestText = latestScroll
+      ?.findAllByType(Text)
       .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+    expect(latestScroll?.props).toMatchObject({
+      horizontal: true,
+      nestedScrollEnabled: true,
+      showsHorizontalScrollIndicator: false,
+    });
     expect(latestText?.props).toMatchObject({
       numberOfLines: 1,
-      ellipsizeMode: 'tail',
     });
     const control = root.findAll(
       (node) =>
@@ -686,19 +817,51 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('opens a known running agent even when stale metadata says it is not navigable', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'subagent-running',
+        role: 'system',
+        systemKind: 'subAgent',
+        content: '• Sub-agent working\n  Latest: Inspecting files',
+        createdAt: '2026-04-17T00:00:00.000Z',
+        subAgentMeta: {
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+          navigable: false,
+        },
+      },
+      { onOpenSubAgentThread },
+    );
+    const root = tree.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Sub-agent working' &&
+        typeof node.props.onPress === 'function',
+    )[0];
+    expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
+    act(() => tree.unmount());
+  });
+
   it('animates a running subagent card and stops after completion', () => {
     const running = createActivityMessage(
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Reading repository',
+        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
-    expect(hasRenderedText(tree.root as QueryableTestInstance, 'Open agent chat')).toBe(true);
+    const root = tree.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
+    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
 
     const completed = createActivityMessage(
       'subagent-live',
