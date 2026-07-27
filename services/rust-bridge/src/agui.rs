@@ -1114,6 +1114,43 @@ impl AgUiProjector {
         }
     }
 
+    /// Records a sub-agent link discovered before its tool call reported one.
+    ///
+    /// The card can only follow a sub-agent's progress once the projector knows which tool call
+    /// the child belongs to. An existing link is left alone: it was built from the tool's own
+    /// `<task …>` header and carries run correlation this one cannot know yet.
+    pub(super) fn link_subagent(
+        &mut self,
+        parent_thread_id: &str,
+        parent_run_id: &str,
+        parent_source_turn_id: Option<String>,
+        tool_call_id: &str,
+        child_thread_id: &str,
+    ) -> bool {
+        if self.subagent_links.contains_key(child_thread_id) {
+            return false;
+        }
+        if self.subagent_links.len() >= SUBAGENT_LINK_CAPACITY {
+            if let Some(expired) = self.subagent_links.keys().next().cloned() {
+                self.subagent_links.remove(&expired);
+            }
+        }
+        self.subagent_links.insert(
+            child_thread_id.to_string(),
+            SubagentActivityLink {
+                parent_thread_id: parent_thread_id.to_string(),
+                parent_run_id: parent_run_id.to_string(),
+                parent_source_turn_id,
+                tool_call_id: tool_call_id.to_string(),
+                child_thread_id: child_thread_id.to_string(),
+                child_run_id: None,
+                child_generation: None,
+                minimum_child_generation: None,
+            },
+        );
+        true
+    }
+
     fn project_subagent_progress(
         &mut self,
         canonical: &CanonicalEvent,
@@ -4212,6 +4249,60 @@ mod tests {
         assert_eq!(
             terminal_activity["event"]["content"]["subAgent"]["agentStatus"],
             "completed"
+        );
+    }
+
+    /// A foreground task tool names its child only once it has finished, so the bridge finds the
+    /// child elsewhere and links it up front. From then on the card must follow the sub-agent's
+    /// work, exactly as it does for a link built from the tool's own header.
+    #[test]
+    fn an_early_link_streams_child_progress_onto_the_parent_card() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+        let child_thread = AgentSessionId::new("alpha-agent", "child-session")
+            .expect("child identity")
+            .encode();
+
+        assert!(projector.link_subagent(
+            parent_thread,
+            "run-1",
+            Some("turn-1".to_string()),
+            "task-early",
+            &child_thread,
+        ));
+        // The tool's own header arrives later and must not discard the correlation built since.
+        assert!(!projector.link_subagent(
+            parent_thread,
+            "run-1",
+            Some("turn-1".to_string()),
+            "task-early",
+            &child_thread,
+        ));
+
+        let child_tool = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "read-early".to_string(),
+            kind: ToolKind::Read,
+            status: ToolCallStatus::InProgress,
+            title: "Read repository".to_string(),
+            content: FieldUpdate::Set(String::new()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        let card = serde_json::to_value(&child_tool.events[0]).expect("card serializes");
+        assert_eq!(card["threadId"], parent_thread);
+        assert_eq!(card["event"]["messageId"], "subagent:task-early");
+        assert!(card["event"]["content"]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Latest: Working on Read repository")));
+        assert_eq!(
+            card["event"]["content"]["subAgent"]["receiverThreadIds"][0],
+            serde_json::Value::String(child_thread)
         );
     }
 

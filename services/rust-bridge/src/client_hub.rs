@@ -252,6 +252,24 @@ impl ClientHub {
             .await;
     }
 
+    /// Tells the projector which tool call a sub-agent belongs to, so its card can follow along.
+    pub(super) async fn link_subagent(
+        &self,
+        parent_thread_id: &str,
+        parent_run_id: &str,
+        parent_source_turn_id: Option<String>,
+        tool_call_id: &str,
+        child_thread_id: &str,
+    ) -> bool {
+        self.ag_ui_projector.lock().await.link_subagent(
+            parent_thread_id,
+            parent_run_id,
+            parent_source_turn_id,
+            tool_call_id,
+            child_thread_id,
+        )
+    }
+
     async fn broadcast_external_notification(&self, method: &str, params: Value) -> u64 {
         let event_id = self.next_event_id.fetch_add(1, Ordering::Relaxed);
         let mut payload = json!({

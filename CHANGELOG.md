@@ -6,6 +6,10 @@ All notable DapperCode changes are documented here.
 
 ### Fixed
 
+- A sub-agent now streams while it works instead of appearing only once it has finished. The bridge
+	asks OpenCode which sessions a running thread has spawned, resumes the sub-agent's session as soon
+	as it exists, and links it to the tool call that spawned it, so both the sub-agent's own thread and
+	the card on the parent update live.
 - A sub-agent now shows a sub-agent card while it works instead of an ordinary tool call. The
 	bridge remembers that a tool call spawns a sub-agent from the update that names it, so agents
 	that relabel the tool with the task description — OpenCode does — no longer hide the sub-agent

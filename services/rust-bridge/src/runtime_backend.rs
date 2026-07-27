@@ -36,6 +36,206 @@ fn parent_subagent_snapshot_envelope(parent: &ManagedSession) -> crate::agui::Ag
     crate::agui::messages_snapshot_envelope(&parent.snapshot, run_id, source_turn_id)
 }
 
+/// The bridge thread id for a child ACP session spawned by `parent_thread_id`.
+fn child_thread_id(parent_thread_id: &str, child_session_id: &str) -> Option<String> {
+    crate::acp::identity::AgentSessionId::decode(parent_thread_id)
+        .ok()
+        .and_then(|parent| {
+            crate::acp::identity::AgentSessionId::new(parent.agent_id, child_session_id.to_string())
+                .ok()
+        })
+        .map(|identity| identity.encode())
+}
+
+/// How long to keep looking for the child session a sub-agent tool just spawned.
+const SUBAGENT_DISCOVERY_ATTEMPTS: usize = 120;
+const SUBAGENT_DISCOVERY_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Bookkeeping shared by every sub-agent discovery in flight.
+#[derive(Default)]
+struct SubagentDiscoveryState {
+    /// Tool calls already being polled, so repeated reports of a running task tool add nothing.
+    polling: HashSet<String>,
+    /// Child threads already attached, so concurrent sub-agents cannot claim each other's.
+    claimed: HashSet<String>,
+}
+
+const MAX_CLAIMED_SUBAGENTS: usize = 512;
+
+type SubagentDiscoveries = Arc<StdMutex<SubagentDiscoveryState>>;
+
+/// Attaches to a sub-agent while it is still working.
+///
+/// A foreground task tool reports its child only once that child has finished, so waiting for the
+/// tool leaves the sub-agent invisible for its whole run. The agent knows about the child as soon
+/// as it is created, so poll for it and adopt it the moment it appears; adopting resumes the
+/// child session, which is what starts its updates flowing.
+async fn discover_subagent_session(
+    manager: Arc<AgentManager>,
+    hub: Arc<ClientHub>,
+    parent_thread_id: String,
+    tool_call_id: String,
+    in_flight: SubagentDiscoveries,
+) {
+    for attempt in 0..SUBAGENT_DISCOVERY_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(SUBAGENT_DISCOVERY_INTERVAL).await;
+        }
+        let Ok(parent) = manager.read_session(&parent_thread_id).await else {
+            break;
+        };
+        let Some(tool) = parent.snapshot.tools.get(&tool_call_id) else {
+            continue;
+        };
+        if matches!(
+            tool.status,
+            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+        ) {
+            // The tool named its child on the way out; the header path owns it from here.
+            break;
+        }
+        let mut candidates = Vec::new();
+        for child in manager.opencode_child_sessions(&parent_thread_id).await {
+            let Some(thread_id) = child_thread_id(&parent_thread_id, &child.acp_session_id) else {
+                continue;
+            };
+            // The bridge indexes a sub-agent's session for other reasons, so being known is not
+            // evidence that anything is following it. Only an attachment claims a child.
+            let claimed = in_flight
+                .lock()
+                .map(|state| state.claimed.contains(&thread_id))
+                .unwrap_or(true)
+                || manager.tracks_subagent_generation(&thread_id).await;
+            if claimed {
+                continue;
+            }
+            candidates.push((child, thread_id));
+        }
+        // With several sub-agents in flight the title is what tells them apart: an agent titles
+        // the child after the task description it also puts on the tool call.
+        let selected = candidates
+            .iter()
+            .find(|(child, _)| child_matches_tool_title(child.title.as_deref(), &tool.title))
+            .or_else(|| candidates.first().filter(|_| candidates.len() == 1));
+        let Some((selected, child_thread)) = selected else {
+            continue;
+        };
+        if let Ok(mut state) = in_flight.lock() {
+            if state.claimed.len() >= MAX_CLAIMED_SUBAGENTS {
+                state.claimed.clear();
+            }
+            state.claimed.insert(child_thread.clone());
+        }
+        let adopted = adopt_subagent_session(
+            &manager,
+            &hub,
+            AdoptedSubagent {
+                parent_thread_id: &parent_thread_id,
+                child_session_id: &selected.acp_session_id,
+                child_title: selected.title.as_deref(),
+                tool_call_id: &tool_call_id,
+                link: true,
+            },
+        )
+        .await;
+        if let (Some(child_thread), Some(parent_run_id)) =
+            (adopted, parent.snapshot.active_run_id.as_deref())
+        {
+            hub.link_subagent(
+                &parent_thread_id,
+                parent_run_id,
+                parent.snapshot.active_source_turn_id.clone(),
+                &tool_call_id,
+                &child_thread,
+            )
+            .await;
+        }
+        break;
+    }
+    if let Ok(mut state) = in_flight.lock() {
+        state
+            .polling
+            .remove(&discovery_key(&parent_thread_id, &tool_call_id));
+    }
+}
+
+/// A key that identifies one tool call, and cannot be forged by ids that contain the separator.
+fn discovery_key(parent_thread_id: &str, tool_call_id: &str) -> String {
+    format!(
+        "{}\u{1}{parent_thread_id}\u{1}{tool_call_id}",
+        parent_thread_id.len()
+    )
+}
+
+/// Whether a child session's title names the same task as the tool call that spawned it.
+fn child_matches_tool_title(child_title: Option<&str>, tool_title: &str) -> bool {
+    let tool_title = tool_title.trim().to_ascii_lowercase();
+    // Every task tool starts out called "task", which describes nothing and matches everything.
+    if tool_title.is_empty() || tool_title == "task" {
+        return false;
+    }
+    child_title
+        .map(|title| title.trim().to_ascii_lowercase())
+        .is_some_and(|title| title.starts_with(&tool_title))
+}
+
+struct AdoptedSubagent<'a> {
+    parent_thread_id: &'a str,
+    child_session_id: &'a str,
+    child_title: Option<&'a str>,
+    tool_call_id: &'a str,
+    /// Whether the sub-agent is still working, and so worth tracking for progress.
+    link: bool,
+}
+
+/// Indexes a sub-agent's session, resumes it, and tells clients it exists.
+///
+/// Resuming is what makes the sub-agent stream: an agent only forwards updates for sessions the
+/// client has asked for, so until the bridge reads the child session its work is invisible.
+async fn adopt_subagent_session(
+    manager: &Arc<AgentManager>,
+    hub: &Arc<ClientHub>,
+    subagent: AdoptedSubagent<'_>,
+) -> Option<String> {
+    let thread_id = match manager
+        .adopt_related_session(
+            subagent.parent_thread_id,
+            subagent.child_session_id,
+            subagent.child_title,
+        )
+        .await
+    {
+        Ok(thread_id) => thread_id,
+        Err(error) => {
+            eprintln!("failed to adopt ACP subagent session: {error}");
+            return None;
+        }
+    };
+    if subagent.link {
+        manager
+            .note_subagent_link(subagent.parent_thread_id, &thread_id, subagent.tool_call_id)
+            .await;
+    }
+    if let Ok(session) = manager.read_session(&thread_id).await {
+        hub.broadcast_ag_ui_envelope(crate::agui::messages_snapshot_envelope(
+            &session.snapshot,
+            format!("{thread_id}::history"),
+            None,
+        ))
+        .await;
+    }
+    hub.broadcast_notification(
+        "thread/subagent/adopted",
+        json!({
+            "threadId": thread_id,
+            "parentThreadId": subagent.parent_thread_id,
+        }),
+    )
+    .await;
+    Some(thread_id)
+}
+
 struct ClientRequestOwner {
     client_id: u64,
     cancellation: RequestCancellation,
@@ -239,8 +439,44 @@ impl RuntimeBackend {
             .ok_or_else(|| "ACP canonical event receiver already taken".to_string())?;
         let event_hub = hub.clone();
         let snapshot_manager = manager.clone();
+        let subagent_discoveries: SubagentDiscoveries =
+            Arc::new(StdMutex::new(SubagentDiscoveryState::default()));
         let event_pump = tokio::spawn(async move {
             while let Some(event) = events.recv().await {
+                if let crate::acp::events::CanonicalEvent::Tool {
+                    thread_id,
+                    tool_call_id,
+                    kind,
+                    status,
+                    title,
+                    ..
+                } = &event
+                {
+                    let settled = matches!(
+                        status,
+                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                            | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                    );
+                    if !settled
+                        && crate::acp::snapshot::is_subagent_task_tool(*kind, title)
+                        && snapshot_manager.can_discover_subagents(thread_id)
+                    {
+                        let key = discovery_key(thread_id, tool_call_id);
+                        let started = subagent_discoveries
+                            .lock()
+                            .map(|mut state| state.polling.insert(key))
+                            .unwrap_or(false);
+                        if started {
+                            tokio::spawn(discover_subagent_session(
+                                snapshot_manager.clone(),
+                                event_hub.clone(),
+                                thread_id.clone(),
+                                tool_call_id.clone(),
+                                subagent_discoveries.clone(),
+                            ));
+                        }
+                    }
+                }
                 if let crate::acp::events::CanonicalEvent::RunStarted {
                     thread_id,
                     generation,
@@ -326,59 +562,27 @@ impl RuntimeBackend {
                     terminal,
                 )) = crate::agui::discovered_subagent_session(&event)
                 {
-                    let discovered_thread_id =
-                        crate::acp::identity::AgentSessionId::decode(parent_thread_id)
-                            .ok()
-                            .and_then(|parent| {
-                                crate::acp::identity::AgentSessionId::new(
-                                    parent.agent_id,
-                                    child_session_id.clone(),
-                                )
-                                .ok()
-                            })
-                            .map(|identity| identity.encode());
                     if terminal {
-                        if let Some(thread_id) = discovered_thread_id.as_deref() {
+                        if let Some(thread_id) =
+                            child_thread_id(parent_thread_id, &child_session_id)
+                        {
                             snapshot_manager
-                                .retire_subagent_link(thread_id, tool_call_id)
+                                .retire_subagent_link(&thread_id, tool_call_id)
                                 .await;
                         }
                     }
-                    match snapshot_manager
-                        .adopt_related_session(parent_thread_id, &child_session_id, child_title)
-                        .await
-                    {
-                        Ok(thread_id) => {
-                            if !terminal {
-                                snapshot_manager
-                                    .note_subagent_link(parent_thread_id, &thread_id, tool_call_id)
-                                    .await;
-                            }
-                            if let Ok(session) = snapshot_manager.read_session(&thread_id).await {
-                                event_hub
-                                    .broadcast_ag_ui_envelope(
-                                        crate::agui::messages_snapshot_envelope(
-                                            &session.snapshot,
-                                            format!("{thread_id}::history"),
-                                            None,
-                                        ),
-                                    )
-                                    .await;
-                            }
-                            event_hub
-                                .broadcast_notification(
-                                    "thread/subagent/adopted",
-                                    json!({
-                                        "threadId": thread_id,
-                                        "parentThreadId": parent_thread_id,
-                                    }),
-                                )
-                                .await;
-                        }
-                        Err(error) => {
-                            eprintln!("failed to adopt ACP subagent session: {error}");
-                        }
-                    }
+                    adopt_subagent_session(
+                        &snapshot_manager,
+                        &event_hub,
+                        AdoptedSubagent {
+                            parent_thread_id,
+                            child_session_id: &child_session_id,
+                            child_title,
+                            tool_call_id,
+                            link: !terminal,
+                        },
+                    )
+                    .await;
                 }
                 event_hub.broadcast_canonical_event(&event).await;
                 let terminal = match &event {
@@ -1116,6 +1320,40 @@ mod client_request_tests {
         sync::{oneshot, Semaphore},
         time::{timeout, Duration},
     };
+
+    /// Several sub-agents at once are told apart by the description their child session is
+    /// named after; the placeholder title every task tool starts with names none of them.
+    #[test]
+    fn child_titles_are_matched_to_the_task_they_were_spawned_for() {
+        assert!(child_matches_tool_title(
+            Some("Read txt files, write report (@general subagent)"),
+            "Read txt files, write report",
+        ));
+        assert!(!child_matches_tool_title(
+            Some("Audit dependencies (@general subagent)"),
+            "Read txt files, write report",
+        ));
+        assert!(!child_matches_tool_title(
+            Some("Read txt files, write report (@general subagent)"),
+            "task",
+        ));
+        assert!(!child_matches_tool_title(None, "Read txt files"));
+        assert!(!child_matches_tool_title(Some("anything"), "   "));
+    }
+
+    /// One discovery per tool call: the agent reports a running task tool repeatedly, and each
+    /// report must not start another poller for the same sub-agent.
+    #[test]
+    fn discovery_keys_separate_tool_calls_without_colliding() {
+        let mut in_flight = HashSet::new();
+        assert!(in_flight.insert(discovery_key("parent", "call-1")));
+        assert!(!in_flight.insert(discovery_key("parent", "call-1")));
+        assert!(in_flight.insert(discovery_key("parent", "call-2")));
+        assert_ne!(
+            discovery_key("parent", "a\u{1}b"),
+            discovery_key("parent\u{1}a", "b"),
+        );
+    }
 
     #[test]
     fn late_child_terminal_after_projector_state_loss_broadcasts_the_updated_parent_snapshot() {

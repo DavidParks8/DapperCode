@@ -44,6 +44,8 @@ const MAX_SESSION_INDEX_BYTES: usize = 256 * 1024;
 const MAX_SESSION_CWD_BYTES: usize = 4_096;
 const SESSION_INDEX_FILE: &str = "session-index.json";
 const OPENCODE_SESSION_CATALOG_TIMEOUT: Duration = Duration::from_secs(3);
+const OPENCODE_CHILD_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_OPENCODE_CHILD_SESSIONS: usize = 32;
 const MAX_OPENCODE_SESSION_CATALOG_BYTES: usize = 256 * 1024;
 const OPENCODE_MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_MODEL_CATALOG_BYTES: usize = 2 * 1024 * 1024;
@@ -233,6 +235,21 @@ struct OpenCodeSessionCatalogRow {
     title: Option<String>,
     updated: Option<u64>,
     created: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenCodeChildSessionRow {
+    id: String,
+    title: Option<String>,
+    #[serde(rename = "parentID")]
+    parent_id: Option<String>,
+}
+
+/// A session that OpenCode reports as spawned by another session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpenCodeChildSession {
+    pub(crate) acp_session_id: String,
+    pub(crate) title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -563,6 +580,8 @@ struct AgentRuntime {
     negotiated: Option<NegotiatedInitialize>,
     lifecycle: AgentLifecycle,
     last_error: Option<String>,
+    /// Base URL of the agent's own HTTP server, when the bridge was able to place it.
+    http_base: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -595,6 +614,7 @@ pub struct AgentManager {
     events: CanonicalEventSender,
     event_receiver: Mutex<Option<CanonicalEventReceiver>>,
     stopped: AtomicBool,
+    http: reqwest::Client,
 }
 
 impl AgentManager {
@@ -610,28 +630,84 @@ impl AgentManager {
         manifests.validate(approved_roots)?;
         let preferred_agent_id = manifests.preferred_agent_id.clone();
         let mut results = Vec::new();
+        let mut http_bases = Vec::new();
         for manifest in manifests.agents.into_iter().filter(|agent| agent.enabled) {
-            let result = AcpConnection::start(
+            let (result, http_base) = Self::start_agent(
                 &manifest.resolved,
                 approved_roots,
                 host_environment,
                 initialize_timeout,
             )
             .await;
+            if let Some(http_base) = http_base {
+                http_bases.push((manifest.resolved.agent_id.clone(), http_base));
+            }
             results.push((manifest, result));
         }
         let storage_dir = state_dir.to_path_buf();
         tokio::fs::create_dir_all(&storage_dir)
             .await
             .map_err(|error| AgentManagerError::SessionIndex(error.to_string()))?;
-        Self::from_start_results_with_index(
+        let mut manager = Self::from_start_results_with_index(
             preferred_agent_id,
             results,
             Some(storage_dir.join(SESSION_INDEX_FILE)),
             storage_root.to_path_buf(),
             allow_outside_root_cwd,
         )
-        .await
+        .await?;
+        for (agent_id, http_base) in http_bases {
+            if let Some(runtime) = manager.agents.get_mut(&agent_id) {
+                runtime.http_base = Some(http_base);
+            }
+        }
+        Ok(manager)
+    }
+
+    /// Starts one agent, asking OpenCode to put its HTTP server on a port the bridge chose.
+    ///
+    /// OpenCode exposes the child sessions a `task` tool spawns over HTTP long before the tool
+    /// reports them, which is the only way to attach to a sub-agent while it is still working.
+    /// It picks its own port by default, so the bridge has to name one to be able to reach it.
+    /// A port that turns out to be taken makes OpenCode exit instead of falling back, so a failed
+    /// start is retried without one: losing sub-agent streaming is better than losing the agent.
+    async fn start_agent(
+        manifest: &ResolvedAgentManifest,
+        approved_roots: &[PathBuf],
+        host_environment: &BTreeMap<String, String>,
+        initialize_timeout: Duration,
+    ) -> (
+        Result<(AcpConnection, NegotiatedInitialize), AcpRuntimeError>,
+        Option<String>,
+    ) {
+        let port = is_opencode_acp(manifest)
+            .then(allocate_loopback_port)
+            .flatten();
+        if let Some(port) = port {
+            let argv = ["--port".to_string(), port.to_string()];
+            let result = AcpConnection::start(
+                manifest,
+                approved_roots,
+                host_environment,
+                initialize_timeout,
+                &argv,
+            )
+            .await;
+            if result.is_ok() {
+                return (result, Some(format!("http://127.0.0.1:{port}")));
+            }
+        }
+        (
+            AcpConnection::start(
+                manifest,
+                approved_roots,
+                host_environment,
+                initialize_timeout,
+                &[],
+            )
+            .await,
+            None,
+        )
     }
 
     #[cfg(test)]
@@ -686,6 +762,7 @@ impl AgentManager {
                             negotiated: Some(negotiated),
                             lifecycle: AgentLifecycle::Ready,
                             last_error: None,
+                            http_base: None,
                         },
                     );
                 }
@@ -698,6 +775,7 @@ impl AgentManager {
                             negotiated: None,
                             lifecycle: AgentLifecycle::Unavailable,
                             last_error: Some(redact_error(&error)),
+                            http_base: None,
                         },
                     );
                 }
@@ -719,6 +797,11 @@ impl AgentManager {
             events,
             event_receiver: Mutex::new(Some(event_receiver)),
             stopped: AtomicBool::new(false),
+            // Loopback only: the agent's HTTP server is never reached through a proxy.
+            http: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_default(),
         })
     }
 
@@ -772,9 +855,7 @@ impl AgentManager {
         else {
             return Vec::new();
         };
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return Vec::new();
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -1359,6 +1440,92 @@ impl AgentManager {
             .contains_key(child_thread_id)
     }
 
+    /// Whether this thread's agent can be asked which sub-agents it has spawned.
+    ///
+    /// Agents that cannot only reveal a sub-agent through the task tool itself, so there is
+    /// nothing to poll for and the sub-agent resolves when the tool reports it.
+    pub(crate) fn can_discover_subagents(&self, thread_id: &str) -> bool {
+        let Ok(identity) = AgentSessionId::decode(thread_id) else {
+            return false;
+        };
+        self.agents.get(&identity.agent_id).is_some_and(|runtime| {
+            runtime.http_base.is_some() && is_opencode_acp(&runtime.manifest.resolved)
+        })
+    }
+
+    /// Sessions OpenCode reports as spawned by `parent_thread_id`.
+    ///
+    /// A foreground `task` tool only names its child once it has finished, so the tool's own
+    /// updates cannot be used to attach to a sub-agent while it works. OpenCode's HTTP server
+    /// knows about the child as soon as it is created, which is what makes live streaming
+    /// possible. Any failure is reported as "no children" so a sub-agent still resolves the
+    /// slow way when the server cannot be reached.
+    pub(crate) async fn opencode_child_sessions(
+        &self,
+        parent_thread_id: &str,
+    ) -> Vec<OpenCodeChildSession> {
+        let Ok(parent) = AgentSessionId::decode(parent_thread_id) else {
+            return Vec::new();
+        };
+        let Some(runtime) = self.agents.get(&parent.agent_id) else {
+            return Vec::new();
+        };
+        if !is_opencode_acp(&runtime.manifest.resolved) {
+            return Vec::new();
+        }
+        let Some(http_base) = runtime.http_base.as_deref() else {
+            return Vec::new();
+        };
+        let cwd = {
+            let index = self.session_index.lock().await;
+            index
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.agent_id == parent.agent_id
+                        && entry.acp_session_id == parent.acp_session_id
+                })
+                .map(|entry| entry.cwd.clone())
+        };
+        let Some(cwd) = cwd else {
+            return Vec::new();
+        };
+        let Ok(url) = reqwest::Url::parse_with_params(
+            &format!("{http_base}/session/{}/children", parent.acp_session_id),
+            [("directory", cwd.to_string_lossy().as_ref())],
+        ) else {
+            return Vec::new();
+        };
+        let request = self.http.get(url).send();
+        let Ok(Ok(response)) = tokio::time::timeout(OPENCODE_CHILD_LOOKUP_TIMEOUT, request).await
+        else {
+            return Vec::new();
+        };
+        if !response.status().is_success() {
+            return Vec::new();
+        }
+        let Ok(rows) = response.json::<Vec<OpenCodeChildSessionRow>>().await else {
+            return Vec::new();
+        };
+        rows.into_iter()
+            .filter(|row| row.parent_id.as_deref() == Some(parent.acp_session_id.as_str()))
+            .filter_map(|row| {
+                let acp_session_id = row.id.trim().to_string();
+                if acp_session_id.is_empty() || acp_session_id.len() > 1_024 {
+                    return None;
+                }
+                Some(OpenCodeChildSession {
+                    title: row
+                        .title
+                        .map(|title| title.trim().to_string())
+                        .filter(|title| valid_session_title(title)),
+                    acp_session_id,
+                })
+            })
+            .take(MAX_OPENCODE_CHILD_SESSIONS)
+            .collect()
+    }
+
     pub async fn adopt_related_session(
         &self,
         parent_thread_id: &str,
@@ -1727,9 +1894,7 @@ impl AgentManager {
         &self,
         runtime: &AgentRuntime,
     ) -> HashMap<String, OpenCodeSessionSummary> {
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return HashMap::new();
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -1930,9 +2095,7 @@ impl AgentManager {
         cwd: &Path,
     ) -> Option<OpenCodeExportDocument> {
         let runtime = self.agents.get(&identity.agent_id)?;
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return None;
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -2083,6 +2246,21 @@ fn exported_session_events(
         }
     }
     events
+}
+
+/// Whether this agent is OpenCode running as an ACP server.
+///
+/// OpenCode-specific behaviour is opt-in on exactly this shape so a differently configured
+/// agent, or one that merely borrows the id, is never probed.
+fn is_opencode_acp(manifest: &ResolvedAgentManifest) -> bool {
+    manifest.agent_id == "opencode" && manifest.argv == ["acp"]
+}
+
+fn allocate_loopback_port() -> Option<u16> {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .ok()
+        .and_then(|listener| listener.local_addr().ok())
+        .map(|address| address.port())
 }
 
 fn valid_session_title(title: &str) -> bool {

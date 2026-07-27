@@ -225,10 +225,11 @@ impl AcpConnection {
         approved_roots: &[PathBuf],
         host_environment: &BTreeMap<String, String>,
         initialize_timeout: Duration,
+        extra_argv: &[String],
     ) -> Result<(Self, NegotiatedInitialize), AcpRuntimeError> {
         Self::start_transport(
             manifest.agent_id.clone(),
-            manifest.acp_agent(approved_roots, host_environment)?,
+            manifest.acp_agent_with_args(approved_roots, host_environment, extra_argv)?,
             initialize_timeout,
         )
         .await
