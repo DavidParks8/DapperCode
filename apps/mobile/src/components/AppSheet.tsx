@@ -64,20 +64,31 @@ export function AppSheet({
     [contentBottomInset, insets.bottom, theme.spacing.lg],
   );
   const visibleRef = useRef(visible);
+  const presentedRef = useRef(false);
   visibleRef.current = visible;
 
   useEffect(() => {
     if (visible) {
-      sheetRef.current?.present();
+      if (!presentedRef.current) {
+        presentedRef.current = true;
+        sheetRef.current?.present();
+      }
       return;
     }
-    sheetRef.current?.dismiss();
+
+    // @gorhom/bottom-sheet 5.2.11+ wedges a modal when dismiss() runs before its first
+    // presentation or after a user dismissal. Only dismiss a sheet we still own as presented.
+    if (presentedRef.current) {
+      sheetRef.current?.dismiss();
+    }
   }, [visible]);
 
   // Fires for drag-to-dismiss and backdrop taps as well as programmatic dismissal; the guard
   // keeps a close driven by `visible` from bouncing back into the caller.
   const handleDismiss = useCallback(() => {
-    if (visibleRef.current) {
+    const wasPresented = presentedRef.current;
+    presentedRef.current = false;
+    if (wasPresented && visibleRef.current) {
       onClose();
     }
   }, [onClose]);

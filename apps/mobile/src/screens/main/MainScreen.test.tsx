@@ -1546,6 +1546,48 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => tree.unmount());
     });
 
+    it('opens and applies model, thinking, and mode controls before creating a chat', async () => {
+      const api = createApi();
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'github-copilot/gpt-5.4',
+          displayName: 'GPT-5.4',
+          providerName: 'GitHub Copilot',
+          isDefault: true,
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+        {
+          id: 'github-copilot/gpt-5-mini',
+          displayName: 'GPT-5 Mini',
+          providerName: 'GitHub Copilot',
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+      ]);
+      const { tree } = await renderMain({ api });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      await press(byLabelPrefix(root, 'Model, '));
+      expect(byLabel(root, 'Choose a model')).toBeTruthy();
+      await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'High'));
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, High')).toBeTruthy();
+
+      await press(byLabelPrefix(root, 'Agent mode, '));
+      expect(byLabel(root, 'Agent mode')).toBeTruthy();
+      await press(byLabel(root, 'Plan mode'));
+      expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
+      expect(api.createChat).not.toHaveBeenCalled();
+      expect(api.setThreadConfigOption).not.toHaveBeenCalled();
+
+      act(() => tree.unmount());
+    });
+
     it('uses advertised ACP model, thinking, and primary mode controls', async () => {
       const configuredChat: Chat = {
         ...rootChat,
