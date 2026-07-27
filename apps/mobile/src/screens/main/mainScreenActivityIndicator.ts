@@ -104,3 +104,21 @@ export function resolveDisplayedActivity(inputs: ActivityIndicatorInputs): Activ
     detail: 'Start the bridge on your computer to continue.',
   };
 }
+
+const SETTLED_IDLE_TITLES = new Set(['ready']);
+
+/**
+ * Whether the status is a settled "nothing is happening" state that is not worth a
+ * line above the composer. An enabled composer already says the agent is ready, so
+ * rendering "Ready" only leaves permanent chrome on screen. Idle states that are
+ * genuinely waiting on the user, such as an approval or an input request, are not
+ * settled and still report themselves.
+ */
+export function isSettledIdleActivity(activity: ActivityState): boolean {
+  if (activity.tone !== 'idle' || (activity.detail?.trim().length ?? 0) > 0) {
+    return false;
+  }
+
+  const title = activity.title.trim().toLowerCase();
+  return title.length === 0 || SETTLED_IDLE_TITLES.has(title);
+}

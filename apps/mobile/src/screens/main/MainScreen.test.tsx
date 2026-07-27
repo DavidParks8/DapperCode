@@ -39,6 +39,7 @@ jest.mock('react-native-reanimated', () => {
   return {
     __esModule: true,
     default: { View },
+    FadeIn: transition,
     FadeInDown: transition,
     FadeInUp: transition,
     cancelAnimation: jest.fn(),
@@ -3056,33 +3057,43 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     });
 
     it.each([
-      { status: 'idle' as const, expected: 'Ready', activeTurnId: null, lastError: undefined },
+      {
+        // A settled chat says nothing: "Ready" is chrome the enabled composer already implies.
+        status: 'idle' as const,
+        expected: 'Ready',
+        indicatorVisible: false,
+        activeTurnId: null,
+        lastError: undefined,
+      },
       {
         status: 'running' as const,
         expected: 'Working',
+        indicatorVisible: true,
         activeTurnId: 'turn-active',
         lastError: undefined,
       },
       {
         status: 'error' as const,
         expected: 'snapshot exploded',
+        indicatorVisible: true,
         activeTurnId: null,
         lastError: 'snapshot exploded',
       },
       {
         status: 'complete' as const,
         expected: 'Turn completed',
+        indicatorVisible: true,
         activeTurnId: null,
         lastError: undefined,
       },
     ])(
       'renders $status pending snapshot truth',
-      async ({ status, expected, activeTurnId, lastError }) => {
+      async ({ status, expected, indicatorVisible, activeTurnId, lastError }) => {
         const chat = { ...baseChat, status, activeTurnId, lastError };
         const harness = await renderMain({ chat });
 
         expect(text(harness.tree.root as Queryable, 'Runtime truth')).toBe(true);
-        expect(text(harness.tree.root as Queryable, expected)).toBe(true);
+        expect(text(harness.tree.root as Queryable, expected)).toBe(indicatorVisible);
         expect(harness.store.get(pendingMainChatIdAtom)).toBeNull();
         expect(harness.store.get(mainOpeningChatIdAtom)).toBeNull();
         harness.unmount();

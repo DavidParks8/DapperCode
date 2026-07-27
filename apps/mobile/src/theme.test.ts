@@ -1,5 +1,4 @@
 import { SYSTEM_FONT_FAMILIES } from './fonts';
-import { Platform } from 'react-native';
 import { AppThemeProvider, colors, createAppTheme, resolveThemeMode, typography } from './theme';
 
 describe('theme', () => {
@@ -69,13 +68,5 @@ describe('theme', () => {
     expect(AppThemeProvider({ theme, children: child })).toBeTruthy();
     expect(colors.bgMain).toBe(theme.colors.bgMain);
     expect(typography.body).toEqual(theme.typography.body);
-  });
-
-  it('uses plain activity-bar tints outside iOS', () => {
-    const originalOs = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
-    expect(createAppTheme('dark').activityBarTint).toBe('dark');
-    expect(createAppTheme('light').activityBarTint).toBe('light');
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
   });
 });

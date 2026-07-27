@@ -7,7 +7,11 @@ import type { Chat, GitStatusResponse } from '../../api/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { GitScreen } from './GitScreen';
 import { apiClientAtom } from '../../state/bridge/atoms';
-import { chatTransitionChatIdAtom } from '../../state/chat/atoms';
+import {
+  chatTransitionChatIdAtom,
+  mainOpeningChatIdAtom,
+  pendingMainChatIdAtom,
+} from '../../state/chat/atoms';
 import { currentScreenAtom } from '../../state/navigation/atoms';
 import { createTestStore, withAppStore } from '../../state/testing';
 
@@ -340,7 +344,10 @@ describe('GitScreen behavior', () => {
         content: expect.stringContaining('Please preserve this behavior.'),
       }),
     );
-    expect(store.get(chatTransitionChatIdAtom)).toBe(chat.id);
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(store.get(mainOpeningChatIdAtom)).toBeNull();
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
     act(() => tree?.unmount());
   });
 

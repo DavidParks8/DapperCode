@@ -282,6 +282,8 @@ import {
 } from './src/state/bridge/actions';
 import { activeBridgeProfileAtom } from './src/state/bridge/atoms';
 import {
+  activeChatAtom,
+  chatTransitionChatIdAtom,
   gitChatAtom,
   mainOpeningChatIdAtom,
   pendingMainChatIdAtom,
@@ -894,14 +896,19 @@ describe('App orchestration', () => {
       lastMessagePreview: '',
       messages: [],
     };
-    await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
+    await dispatch((s) => {
+      s.set(chatContextChangedAtom, chat as unknown as Chat);
+      s.set(openChatGitAtom, chat as unknown as Chat);
+    });
     expect(store.get(gitChatAtom)).toEqual(chat);
     await act(async () => {
       store.set(closeGitAtom);
       jest.advanceTimersByTime(250);
       await Promise.resolve();
     });
-    expect(store.get(pendingMainChatIdAtom)).toBe(chat.id);
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
+    expect(store.get(activeChatAtom)).toEqual(chat);
     await dispatch((s) => s.set(defaultStartCwdAtom, '/workspace'));
     expect(mockStore.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'settings/update' }),
@@ -979,10 +986,10 @@ describe('App orchestration', () => {
     act(() => tree.unmount());
   });
 
-  it('animates the Git screen over its mounted chat before completing a back swipe', async () => {
+  it('keeps an old chat intact after a Git back swipe and subsequent session switch', async () => {
     const tree = await renderApp();
     const root = tree.root as Queryable;
-    const chat = {
+    const hydratedChat = {
       id: 'git-swipe',
       title: 'Git swipe',
       status: 'complete',
@@ -992,9 +999,13 @@ describe('App orchestration', () => {
       lastMessagePreview: 'ready',
       messages: [{ id: 'message-1', role: 'assistant', content: 'ready' }],
     };
+    const gitChatShell = { ...hydratedChat, messages: [] };
     const gestureCount = mockGestures.length;
 
-    await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
+    await dispatch((s) => {
+      s.set(chatContextChangedAtom, hydratedChat as unknown as Chat);
+      s.set(openChatGitAtom, gitChatShell as unknown as Chat);
+    });
     const backSwipeGesture = mockGestures
       .slice(gestureCount)
       .find((gesture) => gesture.testId === 'app-back-swipe');
@@ -1020,7 +1031,31 @@ describe('App orchestration', () => {
       await Promise.resolve();
     });
     expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(activeChatAtom)).toEqual(hydratedChat);
+    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(store.get(mainOpeningChatIdAtom)).toBeNull();
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
+    expect(store.get(pendingMainChatSnapshotAtom)).toBeNull();
     expect(root.findAll((node) => node.props.testID === 'GitScreen')).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Opening chat'),
+    ).toHaveLength(0);
+
+    const nextChat = {
+      ...hydratedChat,
+      id: 'next-thread',
+      title: 'Next thread',
+      messages: [{ id: 'message-2', role: 'assistant', content: 'Next answer' }],
+    };
+    (mockApiInstances[0].peekChatShell as jest.Mock).mockReturnValueOnce(nextChat);
+    await dispatch((s) => s.set(selectChatAtom, nextChat.id));
+    expect(store.get(activeChatAtom)).toEqual(nextChat);
+    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(store.get(mainOpeningChatIdAtom)).toBeNull();
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Opening chat'),
+    ).toHaveLength(0);
+
     act(() => tree.unmount());
   });
 

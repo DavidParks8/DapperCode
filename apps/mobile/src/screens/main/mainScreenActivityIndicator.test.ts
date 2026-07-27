@@ -1,4 +1,5 @@
 import {
+  isSettledIdleActivity,
   resolveDisplayedActivity,
   resolveVisibleActivity,
   type ActivityIndicatorInputs,
@@ -158,5 +159,26 @@ describe('activity indicator', () => {
     expect(resolveDisplayedActivity(inputs({ ...disconnected, isConnected: true }))).toEqual(
       disconnected.activity,
     );
+  });
+
+  it('treats only a settled idle status as not worth rendering', () => {
+    // "Ready" is permanent chrome: the composer already says the agent is available.
+    expect(isSettledIdleActivity(READY)).toBe(true);
+    expect(isSettledIdleActivity({ tone: 'idle', title: '  ready  ' })).toBe(true);
+    expect(isSettledIdleActivity({ tone: 'idle', title: '' })).toBe(true);
+    // Idle states that block on the user still have something to say.
+    expect(isSettledIdleActivity({ tone: 'idle', title: 'Waiting for input' })).toBe(false);
+    expect(
+      isSettledIdleActivity({
+        tone: 'idle',
+        title: 'Waiting for approval',
+        detail: 'npm test',
+      }),
+    ).toBe(false);
+    expect(isSettledIdleActivity({ tone: 'idle', title: 'Ready', detail: 'npm test' })).toBe(false);
+    // Every other tone reports itself.
+    expect(isSettledIdleActivity({ tone: 'running', title: 'Working' })).toBe(false);
+    expect(isSettledIdleActivity({ tone: 'complete', title: 'Turn completed' })).toBe(false);
+    expect(isSettledIdleActivity({ tone: 'error', title: 'Turn failed' })).toBe(false);
   });
 });
