@@ -1528,6 +1528,7 @@ pub(super) fn html_escape(value: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use axum::body::to_bytes;

@@ -434,6 +434,13 @@ impl DurableSessionIndex {
         &mut self,
         entries: impl IntoIterator<Item = SessionIndexEntry>,
     ) -> Result<(), AgentManagerError> {
+        self.insert_entries(entries.into_iter().collect()).await
+    }
+
+    async fn insert_entries(
+        &mut self,
+        entries: Vec<SessionIndexEntry>,
+    ) -> Result<(), AgentManagerError> {
         let mut staged = self.entries.clone();
         let mut changed = false;
         for entry in entries {
@@ -2361,7 +2368,10 @@ fn parse_opencode_model_catalog(bytes: &[u8]) -> Vec<OpenCodeModelCatalogEntry> 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod catalog_tests {
+    use agent_client_protocol::schema::v1::ToolCallStatus;
+
     use super::*;
 
     #[test]
@@ -2391,25 +2401,64 @@ mod catalog_tests {
             br#"{
                     "messages": [{
                         "info": { "id": "message-parent", "role": "assistant" },
-                        "parts": [{
-                            "type": "tool",
-                            "tool": "task",
-                            "state": {
-                                "input": { "description": "Ask subagent about hobbies" },
-                                "output": "<task id=\"child-fallback\" state=\"completed\"></task>",
-                                "metadata": { "sessionId": "child-session" }
+                        "parts": [
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "input": { "description": "Ask subagent about hobbies" },
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>",
+                                    "metadata": { "sessionId": "child-session" }
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "input": { "description": " " },
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>"
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>"
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task"
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "read",
+                                "state": {}
                             }
-                        }]
+                        ]
                     }]
                 }"#,
         )
         .unwrap();
         let related = parse_opencode_related_sessions(document);
-        assert_eq!(related.len(), 1);
-        assert_eq!(related[0].session_id, "child-session");
+        assert_eq!(related.len(), 2);
+        assert_eq!(related[0].session_id, "child-fallback");
+        assert_eq!(related[0].title, None);
+        assert_eq!(related[1].session_id, "child-session");
         assert_eq!(
-            related[0].title.as_deref(),
+            related[1].title.as_deref(),
             Some("Ask subagent about hobbies")
+        );
+        assert_eq!(
+            snapshot_task_session_id("<task id=\"\" state=\"running\">"),
+            None
+        );
+        assert_eq!(
+            snapshot_task_session_id(&format!(
+                "<task id=\"{}\" state=\"running\">",
+                "x".repeat(1_025)
+            )),
+            None
         );
     }
 
@@ -2457,6 +2506,106 @@ mod catalog_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn converts_opencode_export_tool_states_to_canonical_events() {
+        let document = serde_json::from_slice::<OpenCodeExportDocument>(
+            br#"{
+                    "messages": [{
+                        "info": { "id": "tool-message", "role": "assistant" },
+                        "parts": [
+                            { "id": "metadata", "type": "metadata" },
+                            { "id": "missing-state", "type": "tool", "tool": "read" },
+                            {
+                                "id": "completed",
+                                "type": "tool",
+                                "tool": "read",
+                                "state": { "status": "completed", "output": "done" }
+                            },
+                            {
+                                "id": "failed",
+                                "type": "tool",
+                                "state": { "status": "error", "title": "Failure", "error": "bad" }
+                            },
+                            {
+                                "id": "running",
+                                "type": "tool",
+                                "state": { "status": "running" }
+                            },
+                            {
+                                "type": "tool",
+                                "state": { "status": "unknown" }
+                            }
+                        ]
+                    }]
+                }"#,
+        )
+        .unwrap();
+        let identity = AgentSessionId::new("opencode", "tool-session").unwrap();
+        let events = exported_session_events(&identity, document);
+        let statuses = events
+            .iter()
+            .map(|event| match event {
+                CanonicalEvent::Tool { status, .. } => status.clone(),
+                _ => panic!("expected tool event"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            statuses,
+            vec![
+                ToolCallStatus::Completed,
+                ToolCallStatus::Failed,
+                ToolCallStatus::InProgress,
+                ToolCallStatus::Pending,
+            ]
+        );
+        assert!(matches!(
+            &events[0],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "read" && content == "done"
+        ));
+        assert!(matches!(
+            &events[1],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "Failure" && content == "bad"
+        ));
+        assert!(matches!(
+            &events[3],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "tool" && content.is_empty()
+        ));
+    }
+
+    #[test]
+    fn model_catalog_handles_invalid_json_and_non_reasoning_models() {
+        let catalog = parse_opencode_model_catalog(
+            br#"{invalid}
+{
+  "id": "plain",
+  "providerID": "provider",
+  "name": "",
+  "capabilities": { "reasoning": false },
+  "variants": { "unsupported": {} }
+}
+"#,
+        );
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].display_name, "provider/plain");
+        assert_eq!(catalog[0].context_window, None);
+        assert!(catalog[0].reasoning_effort.is_empty());
+        assert!(parse_opencode_model_catalog(&[0xff]).is_empty());
     }
 }
 
@@ -2524,6 +2673,7 @@ fn redact_error(error: &AcpRuntimeError) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -4060,6 +4210,13 @@ mod tests {
                 title: None,
                 parent_acp_session_id: None,
             },
+            SessionIndexEntry {
+                agent_id: "alpha".into(),
+                acp_session_id: "self-parent".into(),
+                cwd: PathBuf::from("/tmp"),
+                title: None,
+                parent_acp_session_id: Some("self-parent".into()),
+            },
         ]);
         assert_eq!(entries, vec![valid, other_session, other_agent]);
 
@@ -4078,21 +4235,51 @@ mod tests {
         assert_eq!(reloaded.entries[0].title.as_deref(), Some("Manual title"));
 
         let mut memory_only = DurableSessionIndex::load(None).await;
+        let original = SessionIndexEntry {
+            agent_id: "alpha".into(),
+            acp_session_id: "memory".into(),
+            cwd: PathBuf::from("/tmp/original"),
+            title: Some("Original title".into()),
+            parent_acp_session_id: Some("original-parent".into()),
+        };
+        memory_only.insert_all([original]).await.unwrap();
         memory_only
-            .insert_all([index_entry(
-                AgentSessionId::new("alpha", "memory").unwrap(),
-                PathBuf::from("/tmp"),
-            )])
-            .await
-            .unwrap();
-        memory_only
-            .insert_all([index_entry(
-                AgentSessionId::new("alpha", "memory").unwrap(),
-                PathBuf::from("/tmp"),
-            )])
+            .insert_all([SessionIndexEntry {
+                agent_id: "alpha".into(),
+                acp_session_id: "memory".into(),
+                cwd: PathBuf::from("/tmp/updated"),
+                title: None,
+                parent_acp_session_id: None,
+            }])
             .await
             .unwrap();
         assert_eq!(memory_only.entries.len(), 1);
+        assert_eq!(memory_only.entries[0].cwd, PathBuf::from("/tmp/updated"));
+        assert_eq!(
+            memory_only.entries[0].title.as_deref(),
+            Some("Original title")
+        );
+        assert_eq!(
+            memory_only.entries[0].parent_acp_session_id.as_deref(),
+            Some("original-parent")
+        );
+        let replacement = SessionIndexEntry {
+            agent_id: "alpha".into(),
+            acp_session_id: "memory".into(),
+            cwd: PathBuf::from("/tmp/replaced"),
+            title: Some("Replacement title".into()),
+            parent_acp_session_id: Some("replacement-parent".into()),
+        };
+        memory_only.insert_all([replacement.clone()]).await.unwrap();
+        memory_only.insert_all([replacement]).await.unwrap();
+        assert_eq!(
+            memory_only.entries[0].title.as_deref(),
+            Some("Replacement title")
+        );
+        assert_eq!(
+            memory_only.entries[0].parent_acp_session_id.as_deref(),
+            Some("replacement-parent")
+        );
         memory_only
             .insert_all((0..=MAX_SESSIONS).map(|index| {
                 index_entry(

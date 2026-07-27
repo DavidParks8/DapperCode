@@ -1622,12 +1622,22 @@ mod tests {
         .is_ok());
         for key_value in [
             "filter.secret.clean\n/tmp/helper",
+            "filter.secret.smudge\n/tmp/helper",
+            "filter.secret.process\n/tmp/helper",
+            "diff.secret.command\n/tmp/helper",
             "diff.secret.textconv\n/tmp/helper",
             "merge.secret.driver\n/tmp/helper %O %A %B",
+            "core.fsmonitor\n/tmp/helper",
+            "core.editor\n/tmp/helper",
             "core.sshCommand\n/tmp/helper",
             "credential.helper\nosxkeychain",
+            "credential.example.helper\nosxkeychain",
             "sequence.editor\n/tmp/helper",
             "alias.deploy\n!/tmp/helper",
+            "https.example.proxy\nhttp://proxy.invalid",
+            "remote.origin.proxy\nhttp://proxy.invalid",
+            "remote.origin.vcs\ncustom",
+            "url.ssh://git@example/.insteadof\nhttps://example/",
             "protocol.file.allow\nalways",
         ] {
             let raw = format!("local\0file:.git/config\0{key_value}\0");
@@ -1637,6 +1647,11 @@ mod tests {
             );
         }
         assert!(validate_effective_git_config("local\0file:.git/config\0user.name\0").is_err());
+        assert!(validate_effective_git_config("local\0file:.git/config\0").is_err());
+        assert!(
+            validate_effective_git_config("local\0file:.git/config\0http.sslVerify\ntrue\0")
+                .is_ok()
+        );
     }
 
     #[test]

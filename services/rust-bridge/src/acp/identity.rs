@@ -79,6 +79,7 @@ fn decode_component(value: Option<&str>) -> Result<String, IdentityError> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
