@@ -15,6 +15,7 @@ pub(super) const AG_UI_EVENT_METHOD: &str = "bridge/agui.event";
 const CLOSED_THREAD_CAPACITY: usize = 2048;
 const OBSERVED_RUN_CAPACITY: usize = 256;
 const SUBAGENT_LINK_CAPACITY: usize = 2048;
+const SUBAGENT_PROGRESS_CAPACITY: usize = 1024;
 const MESSAGE_CHUNK_BYTES: usize = 32 * 1024;
 const TOOL_RESULT_CHUNK_BYTES: usize = 16 * 1024;
 const STRUCTURED_CHUNK_BYTES: usize = 16 * 1024;
@@ -72,6 +73,7 @@ struct SubagentActivityLink {
     child_run_id: Option<String>,
     child_generation: Option<u64>,
     minimum_child_generation: Option<u64>,
+    progress_revisions: HashSet<String>,
 }
 
 struct SubagentActivityContext<'a> {
@@ -80,6 +82,12 @@ struct SubagentActivityContext<'a> {
     parent_source_turn_id: Option<String>,
     tool_call_id: &'a str,
     child_thread_id: Option<&'a str>,
+}
+
+struct SubagentProgress {
+    status: &'static str,
+    latest: String,
+    revision: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -597,6 +605,13 @@ impl AgUiProjector {
                                 }
                             })
                         };
+                        let progress_revisions = if same_invocation {
+                            previous_link
+                                .map(|link| link.progress_revisions.clone())
+                                .unwrap_or_default()
+                        } else {
+                            HashSet::new()
+                        };
                         subagent_links.insert(
                             child_thread_id.clone(),
                             SubagentActivityLink {
@@ -608,6 +623,7 @@ impl AgUiProjector {
                                 child_run_id,
                                 child_generation,
                                 minimum_child_generation,
+                                progress_revisions,
                             },
                         );
                     }
@@ -1182,6 +1198,7 @@ impl AgUiProjector {
                 child_run_id: None,
                 child_generation: None,
                 minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
             },
         );
         true
@@ -1229,9 +1246,21 @@ impl AgUiProjector {
                 current.child_generation = event_generation;
             }
         }
-        let Some((status, latest)) = subagent_progress(canonical) else {
+        let Some(progress) = subagent_progress(canonical) else {
             return;
         };
+        if let Some(revision) = progress.revision.as_deref() {
+            let Some(current) = self.subagent_links.get_mut(thread_id) else {
+                return;
+            };
+            if current.progress_revisions.contains(revision) {
+                return;
+            }
+            if current.progress_revisions.len() >= SUBAGENT_PROGRESS_CAPACITY {
+                current.progress_revisions.clear();
+            }
+            current.progress_revisions.insert(revision.to_string());
+        }
         events.push(subagent_activity_envelope(
             SubagentActivityContext {
                 parent_thread_id: &link.parent_thread_id,
@@ -1240,15 +1269,15 @@ impl AgUiProjector {
                 tool_call_id: &link.tool_call_id,
                 child_thread_id: Some(&link.child_thread_id),
             },
-            status,
-            Some(&latest),
+            progress.status,
+            Some(&progress.latest),
             timestamp,
         ));
-        if is_terminal_subagent_status(status) {
+        if is_terminal_subagent_status(progress.status) {
             if let Some(run) = self.runs.get_mut(&link.parent_thread_id) {
                 if run.run_id == link.parent_run_id {
                     if let Some(tool) = run.tools.get_mut(&link.tool_call_id) {
-                        tool.subagent_terminal_status = Some(status.to_string());
+                        tool.subagent_terminal_status = Some(progress.status.to_string());
                     }
                 }
             }
@@ -1906,7 +1935,7 @@ fn subagent_activity_envelope(
     )
 }
 
-fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String)> {
+fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
     match canonical {
         // The task header already created a navigable working card. RunStarted is
         // useful for correlation only; rendering it regresses the preview to a
@@ -1918,36 +1947,72 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<(&'static str, String
                 MessageRole::Agent => "Responding",
                 MessageRole::User => "Received input",
             };
-            Some(("running", format!("{action}: {}", bounded(content, 320))))
+            Some(SubagentProgress {
+                status: "running",
+                latest: format!("{action}: {}", bounded(content, 320)),
+                revision: None,
+            })
         }
-        CanonicalEvent::Tool { title, status, .. } => {
+        CanonicalEvent::Tool {
+            tool_call_id,
+            title,
+            status,
+            ..
+        } => {
             let title = if title.trim().is_empty() {
                 "Using a tool"
             } else {
                 title
             };
-            let prefix = match status {
-                agent_client_protocol::schema::v1::ToolCallStatus::Failed => "Tool failed",
-                agent_client_protocol::schema::v1::ToolCallStatus::Completed => "Completed",
-                agent_client_protocol::schema::v1::ToolCallStatus::Pending => "Preparing",
-                agent_client_protocol::schema::v1::ToolCallStatus::InProgress => "Working on",
-                _ => "Working on",
-            };
-            Some(("running", format!("{prefix} {title}")))
+            match status {
+                agent_client_protocol::schema::v1::ToolCallStatus::Pending => None,
+                agent_client_protocol::schema::v1::ToolCallStatus::Failed => {
+                    Some(SubagentProgress {
+                        status: "running",
+                        latest: format!("Tool failed {title}"),
+                        revision: Some(format!("failed:{tool_call_id}")),
+                    })
+                }
+                _ => Some(SubagentProgress {
+                    status: "running",
+                    latest: format!("Working on {title}"),
+                    revision: Some(format!("working:{tool_call_id}")),
+                }),
+            }
         }
-        CanonicalEvent::Plan { .. } => Some(("running", "Updating plan".to_string())),
-        CanonicalEvent::PermissionRequested { .. } => {
-            Some(("running", "Waiting for approval".to_string()))
-        }
-        CanonicalEvent::ElicitationRequested { .. } => {
-            Some(("running", "Waiting for input".to_string()))
-        }
+        CanonicalEvent::Plan { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Updating plan".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::PermissionRequested { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Waiting for approval".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::ElicitationRequested { .. } => Some(SubagentProgress {
+            status: "running",
+            latest: "Waiting for input".to_string(),
+            revision: None,
+        }),
         CanonicalEvent::RunFinished {
             stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
             ..
-        } => Some(("cancelled", "Cancelled".to_string())),
-        CanonicalEvent::RunFinished { .. } => Some(("completed", "Returned result".to_string())),
-        CanonicalEvent::RunFailed { message, .. } => Some(("failed", bounded(message, 512))),
+        } => Some(SubagentProgress {
+            status: "cancelled",
+            latest: "Cancelled".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::RunFinished { .. } => Some(SubagentProgress {
+            status: "completed",
+            latest: "Returned result".to_string(),
+            revision: None,
+        }),
+        CanonicalEvent::RunFailed { message, .. } => Some(SubagentProgress {
+            status: "failed",
+            latest: bounded(message, 512),
+            revision: None,
+        }),
         _ => None,
     }
 }
@@ -4288,7 +4353,7 @@ mod tests {
         assert_eq!(event_types(&child_started.events), ["RUN_STARTED"]);
         assert_eq!(child_started.events[0].thread_id, child_thread);
 
-        let child_tool = projector.project_canonical(&CanonicalEvent::Tool {
+        let child_tool_event = |status| CanonicalEvent::Tool {
             agent_id: "alpha-agent".to_string(),
             thread_id: child_thread.clone(),
             run_id: Some("child-run".to_string()),
@@ -4296,16 +4361,29 @@ mod tests {
             generation: Some(1),
             tool_call_id: "read-live".to_string(),
             kind: ToolKind::Read,
-            status: ToolCallStatus::InProgress,
+            status,
             title: "Read repository".to_string(),
             content: FieldUpdate::Set(String::new()),
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
-        });
-        let parent_activity = serde_json::to_value(&child_tool.events[0]).unwrap();
+        };
+        let pending = projector.project_canonical(&child_tool_event(ToolCallStatus::Pending));
+        assert!(
+            subagent_cards(&pending).is_empty(),
+            "pending tools must not flash a Preparing update on the parent card"
+        );
+
+        let working = projector.project_canonical(&child_tool_event(ToolCallStatus::InProgress));
+        let parent_activity = serde_json::to_value(&working.events[0]).unwrap();
         assert!(parent_activity["event"]["content"]["text"]
             .as_str()
             .is_some_and(|text| text.contains("Latest: Working on Read repository")));
+
+        let completed = projector.project_canonical(&child_tool_event(ToolCallStatus::Completed));
+        assert!(
+            subagent_cards(&completed).is_empty(),
+            "the completed half of a tool lifecycle must reuse its working update"
+        );
 
         let finished = projector.project_canonical(&CanonicalEvent::RunFinished {
             agent_id: "alpha-agent".to_string(),
