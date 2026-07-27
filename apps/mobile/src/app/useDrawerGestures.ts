@@ -165,70 +165,6 @@ export function useDrawerGestures({
     openDrawer();
   }, [onToggleTabletSidebar, openDrawer, usesTabletLayout]);
 
-  const backSwipeGesture = useMemo(() => {
-    const animatesCurrentScreen = currentScreen === 'ChatGit';
-    const canNavigateBack =
-      navigationCanGoBack && (currentScreen !== 'Settings' || settingsAllowsDrawerGesture);
-    return Gesture.Pan()
-      .withTestId('app-back-swipe')
-      .enabled(canNavigateBack)
-      .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
-      .activeOffsetX(12)
-      .failOffsetY([-18, 18])
-      .onStart((event) => {
-        if (!animatesCurrentScreen) {
-          return;
-        }
-        backSwipeGestureDidSettle.value = false;
-        cancelAnimation(backSwipeOffset);
-        backSwipeDragStartOffset.value = backSwipeOffset.value;
-        backSwipeOffset.value = Math.max(
-          0,
-          Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
-        );
-      })
-      .onUpdate((event) => {
-        if (animatesCurrentScreen) {
-          backSwipeOffset.value = Math.max(
-            0,
-            Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
-          );
-        }
-      })
-      .onEnd((event) => {
-        const dragDistance = animatesCurrentScreen
-          ? backSwipeDragStartOffset.value + event.translationX
-          : event.translationX;
-        const shouldNavigateBack =
-          dragDistance > BACK_SWIPE_DISTANCE || event.velocityX > BACK_SWIPE_VELOCITY;
-        if (!animatesCurrentScreen) {
-          if (shouldNavigateBack) {
-            runOnJS(onBackSwipe)();
-          }
-          return;
-        }
-        backSwipeGestureDidSettle.value = true;
-        settleBackSwipe(shouldNavigateBack, event.velocityX);
-      })
-      .onFinalize((event) => {
-        if (!animatesCurrentScreen || backSwipeGestureDidSettle.value) {
-          return;
-        }
-        backSwipeGestureDidSettle.value = true;
-        settleBackSwipe(false, event.velocityX);
-      });
-  }, [
-    backSwipeGestureDidSettle,
-    backSwipeDragStartOffset,
-    backSwipeOffset,
-    currentScreen,
-    navigationCanGoBack,
-    onBackSwipe,
-    screenWidth,
-    settingsAllowsDrawerGesture,
-    settleBackSwipe,
-  ]);
-
   const settleDrawerFromGesture = useCallback(
     (translationX: number, velocityX: number) => {
       'worklet';
@@ -251,6 +187,108 @@ export function useDrawerGestures({
     },
     [drawerDragStartOffset, drawerOffset, drawerWidth, handleDrawerSettled],
   );
+
+  const backSwipeGesture = useMemo(() => {
+    // Settings is entered from the drawer and its header affordance is the drawer toggle, so its
+    // edge swipe drags the session list back into view instead of popping to the chat screen.
+    const opensDrawer = currentScreen === 'Settings' && !usesTabletLayout;
+    const animatesCurrentScreen = currentScreen === 'ChatGit';
+    const enabled = opensDrawer ? settingsAllowsDrawerGesture : navigationCanGoBack;
+    return Gesture.Pan()
+      .withTestId('app-back-swipe')
+      .enabled(enabled)
+      .hitSlop({ left: 0, width: EDGE_SWIPE_WIDTH })
+      .activeOffsetX(12)
+      .failOffsetY([-18, 18])
+      .onStart((event) => {
+        if (opensDrawer) {
+          drawerGestureDidSettle.value = false;
+          cancelAnimation(drawerOffset);
+          drawerDragStartOffset.value = drawerOffset.value;
+          runOnJS(dismissKeyboard)();
+          runOnJS(beginDrawerInteraction)();
+          return;
+        }
+        if (!animatesCurrentScreen) {
+          return;
+        }
+        backSwipeGestureDidSettle.value = false;
+        cancelAnimation(backSwipeOffset);
+        backSwipeDragStartOffset.value = backSwipeOffset.value;
+        backSwipeOffset.value = Math.max(
+          0,
+          Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
+        );
+      })
+      .onUpdate((event) => {
+        if (opensDrawer) {
+          drawerOffset.value = applyDrawerRubberBand(
+            drawerDragStartOffset.value + event.translationX,
+            drawerWidth,
+          );
+          return;
+        }
+        if (animatesCurrentScreen) {
+          backSwipeOffset.value = Math.max(
+            0,
+            Math.min(screenWidth, backSwipeDragStartOffset.value + event.translationX),
+          );
+        }
+      })
+      .onEnd((event) => {
+        if (opensDrawer) {
+          drawerGestureDidSettle.value = true;
+          settleDrawerFromGesture(event.translationX, event.velocityX);
+          return;
+        }
+        const dragDistance = animatesCurrentScreen
+          ? backSwipeDragStartOffset.value + event.translationX
+          : event.translationX;
+        const shouldNavigateBack =
+          dragDistance > BACK_SWIPE_DISTANCE || event.velocityX > BACK_SWIPE_VELOCITY;
+        if (!animatesCurrentScreen) {
+          if (shouldNavigateBack) {
+            runOnJS(onBackSwipe)();
+          }
+          return;
+        }
+        backSwipeGestureDidSettle.value = true;
+        settleBackSwipe(shouldNavigateBack, event.velocityX);
+      })
+      .onFinalize((event) => {
+        if (opensDrawer) {
+          if (drawerGestureDidSettle.value) {
+            return;
+          }
+          drawerGestureDidSettle.value = true;
+          settleDrawerFromGesture(event.translationX, event.velocityX);
+          return;
+        }
+        if (!animatesCurrentScreen || backSwipeGestureDidSettle.value) {
+          return;
+        }
+        backSwipeGestureDidSettle.value = true;
+        settleBackSwipe(false, event.velocityX);
+      });
+  }, [
+    backSwipeGestureDidSettle,
+    backSwipeDragStartOffset,
+    backSwipeOffset,
+    beginDrawerInteraction,
+    currentScreen,
+    dismissKeyboard,
+    drawerDragStartOffset,
+    drawerGestureDidSettle,
+    drawerOffset,
+    drawerWidth,
+    navigationCanGoBack,
+    onBackSwipe,
+    screenWidth,
+    settingsAllowsDrawerGesture,
+    settleBackSwipe,
+    settleDrawerFromGesture,
+    usesTabletLayout,
+  ]);
 
   const openDrawerGesture = useMemo(
     () =>
