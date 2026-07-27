@@ -2,7 +2,7 @@ import type { HostBridgeApiClient } from '../../api/client';
 import type { AppStore } from '../types';
 import { createBridgeTestStore } from '../testing';
 import { defaultStartCwdAtom } from '../appState/settings';
-import { currentScreenAtom } from '../navigation/atoms';
+import { currentScreenAtom, navigationStackAtom } from '../navigation/atoms';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -22,7 +22,6 @@ import {
   workspaceBrowsePathAtom,
   workspaceBrowseTruncationAtom,
   workspacePickerPurposeAtom,
-  workspacePickerReturnScreenAtom,
   workspaceRootsAtom,
 } from './workspace';
 import {
@@ -149,11 +148,15 @@ describe('workspace actions', () => {
 
     store.set(openWorkspaceModalAtom);
     expect(store.get(currentScreenAtom)).toBe('WorkspacePicker');
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'WorkspacePicker' },
+    ]);
     expect(store.get(workspacePickerPurposeAtom)).toBe('default-start');
-    expect(store.get(workspacePickerReturnScreenAtom)).toBe('Main');
 
     store.set(closeWorkspacePickerAtom);
     expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
   });
 
   it('returns to git checkout after choosing a destination', async () => {
@@ -167,11 +170,17 @@ describe('workspace actions', () => {
 
     store.set(openGitCheckoutDestinationPickerAtom);
     expect(store.get(currentScreenAtom)).toBe('WorkspacePicker');
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'GitCheckout' },
+      { screen: 'WorkspacePicker' },
+    ]);
     expect(store.get(resumeGitCheckoutAfterWorkspacePickerAtom)).toBe(true);
 
     // Backing out of the picker resumes the checkout it interrupted.
     store.set(closeWorkspacePickerAtom);
     expect(store.get(currentScreenAtom)).toBe('GitCheckout');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }, { screen: 'GitCheckout' }]);
     expect(store.get(resumeGitCheckoutAfterWorkspacePickerAtom)).toBe(false);
 
     store.set(openGitCheckoutDestinationPickerAtom);
@@ -182,7 +191,6 @@ describe('workspace actions', () => {
 
   it('records the chosen default workspace and leaves the picker', () => {
     const { store } = createStore();
-    store.set(workspacePickerReturnScreenAtom, 'Main');
     store.set(workspacePickerPurposeAtom, 'default-start');
 
     store.set(selectWorkspaceAtom, '/workspace/app');

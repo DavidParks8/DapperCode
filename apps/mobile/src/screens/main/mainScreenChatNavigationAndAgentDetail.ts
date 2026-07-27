@@ -15,7 +15,6 @@ import {
   agentDetailErrorAtom,
   agentDetailLoadingAtom,
   agentDetailParentChatAtom,
-  agentDetailStackAtom,
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   relatedAgentThreadsAtom,
@@ -26,7 +25,7 @@ import {
   queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCallback } from 'react';
+import { useCallback, useLayoutEffect } from 'react';
 import type { Chat } from '../../api/types';
 import { resolveEquivalentChat } from './mainScreenChatState';
 import { OPENING_CHAT_ACTIVITY_TITLE } from './mainScreenHelpers';
@@ -35,6 +34,12 @@ import type {
   MainScreenChatLoadPipelineResult,
 } from './mainScreenChatLoadPipeline';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
+import {
+  currentNavigationRouteAtom,
+  currentScreenAtom,
+  popNavigationRouteAtom,
+  pushNavigationRouteAtom,
+} from '../../state/navigation/atoms';
 
 export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPipelineContext &
   MainScreenChatLoadPipelineResult;
@@ -78,9 +83,8 @@ export function useMainScreenChatNavigationAndAgentDetail(
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
   const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
-  const agentDetailStack = useAtomValue(agentDetailStackAtom);
+  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setAgentDetailThreadId = useSetAtom(agentDetailThreadIdAtom);
-  const setAgentDetailStack = useSetAtom(agentDetailStackAtom);
   const setAgentDetailChat = useSetAtom(agentDetailChatAtom);
   const setAgentDetailParentChat = useSetAtom(agentDetailParentChatAtom);
   const setAgentDetailLoading = useSetAtom(agentDetailLoadingAtom);
@@ -89,6 +93,10 @@ export function useMainScreenChatNavigationAndAgentDetail(
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
+  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
+  const setCurrentScreen = useSetAtom(currentScreenAtom);
+  const pushNavigationRoute = useSetAtom(pushNavigationRouteAtom);
+  const popNavigationRoute = useSetAtom(popNavigationRouteAtom);
 
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
@@ -182,15 +190,19 @@ export function useMainScreenChatNavigationAndAgentDetail(
     ],
   );
 
-  const closeAgentDetail = useCallback(() => {
+  const clearAgentDetailState = useCallback(() => {
     agentDetailRequestRef.current += 1;
-    setAgentDetailStack([]);
     setAgentDetailThreadId(null);
     setAgentDetailChat(null);
     setAgentDetailParentChat(null);
     setAgentDetailLoading(false);
     setAgentDetailError(null);
   }, []);
+
+  const closeAgentDetail = useCallback(() => {
+    clearAgentDetailState();
+    setCurrentScreen('Main');
+  }, [clearAgentDetailState, setCurrentScreen]);
 
   const loadAgentDetail = useCallback(
     async (threadId: string, showLoading = false) => {
@@ -249,27 +261,29 @@ export function useMainScreenChatNavigationAndAgentDetail(
         closeAgentDetail();
         return;
       }
-      // A sub-agent can itself spawn sub-agents, so drilling in has to stack:
-      // Back walks one level up rather than dumping you to the main thread.
-      setAgentDetailStack((previous) =>
-        previous[previous.length - 1] === threadId
-          ? previous
-          : [...previous.filter((id) => id !== threadId), threadId],
-      );
       showAgentDetail(threadId);
+      pushNavigationRoute({ screen: 'SubAgent', threadId });
     },
-    [agentRootThreadId, closeAgentDetail, setAgentDetailStack, showAgentDetail],
+    [agentRootThreadId, closeAgentDetail, pushNavigationRoute, showAgentDetail],
   );
 
   const popAgentDetail = useCallback(() => {
-    const parent = agentDetailStack[agentDetailStack.length - 2];
-    if (!parent) {
-      closeAgentDetail();
+    popNavigationRoute();
+  }, [popNavigationRoute]);
+
+  useLayoutEffect(() => {
+    const routeThreadId =
+      currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
+    if (!routeThreadId) {
+      if (agentDetailThreadId) {
+        clearAgentDetailState();
+      }
       return;
     }
-    setAgentDetailStack((previous) => previous.slice(0, -1));
-    showAgentDetail(parent);
-  }, [agentDetailStack, closeAgentDetail, setAgentDetailStack, showAgentDetail]);
+    if (agentDetailThreadId !== routeThreadId) {
+      showAgentDetail(routeThreadId);
+    }
+  }, [agentDetailThreadId, clearAgentDetailState, currentNavigationRoute, showAgentDetail]);
 
   return {
     handleLoadEarlier,

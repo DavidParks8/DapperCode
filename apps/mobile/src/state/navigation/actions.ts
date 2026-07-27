@@ -1,7 +1,6 @@
 import { atom } from 'jotai';
 
 import type { Chat } from '../../api/types';
-import type { Screen } from '../../app/appConstants';
 import {
   activeChatAtom,
   gitChatAtom,
@@ -14,13 +13,14 @@ import { cancelChatTransitionAtom, openChatWithTransitionAtom } from '../chat/ac
 import { mainScreenCommandsAtom } from '../commands';
 import { closeDrawerAtom } from '../drawer/atoms';
 import {
-  browserReturnScreenAtom,
   currentScreenAtom,
   pendingBrowserTargetUrlAtom,
-  toAppScreen,
+  popNavigationRouteAtom,
+  pushNavigationRouteAtom,
+  type NavigationScreen,
 } from './atoms';
 
-export const navigateAtom = atom(null, (get, set, screen: Screen): void => {
+export const navigateAtom = atom(null, (get, set, screen: NavigationScreen): void => {
   if (screen !== 'Main') {
     set(cancelChatTransitionAtom);
   }
@@ -53,10 +53,8 @@ export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null):
   if (typeof targetUrl === 'string' && targetUrl.trim().length > 0) {
     set(pendingBrowserTargetUrlAtom, targetUrl.trim());
   }
-  const currentScreen = get(currentScreenAtom);
-  set(browserReturnScreenAtom, currentScreen === 'Browser' ? 'Main' : toAppScreen(currentScreen));
   set(cancelChatTransitionAtom);
-  set(currentScreenAtom, 'Browser');
+  set(pushNavigationRouteAtom, { screen: 'Browser' });
   set(closeDrawerAtom);
 });
 
@@ -64,7 +62,7 @@ export const openChatGitAtom = atom(null, (get, set, chat: Chat): void => {
   set(cancelChatTransitionAtom);
   set(gitChatAtom, chat);
   set(selectedChatIdAtom, chat.id);
-  set(currentScreenAtom, 'ChatGit');
+  set(pushNavigationRouteAtom, { screen: 'ChatGit' });
 });
 
 export const chatContextChangedAtom = atom(null, (get, set, chat: Chat | null): void => {
@@ -89,11 +87,11 @@ export const gitChatUpdatedAtom = atom(null, (get, set, chat: Chat): void => {
 export const closeGitAtom = atom(null, (_get, set): void => {
   // MainScreen stays mounted beneath Git, so returning only needs to pop the pushed screen.
   set(cancelChatTransitionAtom);
-  set(currentScreenAtom, 'Main');
+  set(popNavigationRouteAtom);
   set(gitChatAtom, null);
 });
 
 export const openLegalScreenAtom = atom(null, (get, set, screen: 'Privacy' | 'Terms'): void => {
   set(cancelChatTransitionAtom);
-  set(currentScreenAtom, screen);
+  set(pushNavigationRouteAtom, { screen });
 });

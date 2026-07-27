@@ -23,10 +23,19 @@ import { WorkspacePickerScreen } from '../workspacePicker/WorkspacePickerScreen'
 import { mainScreenCommandsAtom, type MainScreenCommands } from '../../state/commands';
 import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
-import { currentScreenAtom, pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
+import {
+  currentScreenAtom,
+  navigationStackAtom,
+  pendingBrowserTargetUrlAtom,
+  popNavigationRouteAtom,
+} from '../../state/navigation/atoms';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 import { selectedChatAtom } from '../../state/mainScreen/session';
-import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
+import {
+  agentDetailThreadIdAtom,
+  agentRootThreadIdAtom,
+  relatedAgentThreadsAtom,
+} from '../../state/mainScreen/workspace';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 
@@ -1869,7 +1878,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           id === grandChild.id ? grandChild : id === nestedParent.id ? nestedParent : rootChat,
         ),
       );
-      const { tree } = await renderMain({ api, selectedChat: rootChat });
+      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
       const root = rootOf(tree);
       await advance();
       await act(async () => {
@@ -1887,6 +1896,10 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           .findAllByType(ChatMessage)
           .some((node) => node.props.message.id === 'message-sub-nested'),
       ).toBe(true);
+      expect(store.get(navigationStackAtom)).toEqual([
+        { screen: 'Main' },
+        { screen: 'SubAgent', threadId: nestedParent.id },
+      ]);
 
       // Depth 2: the nested card is openable from inside the detail view.
       const nestedNode = root
@@ -1904,6 +1917,11 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(
         root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-subsub'),
       ).toBe(true);
+      expect(store.get(navigationStackAtom)).toEqual([
+        { screen: 'Main' },
+        { screen: 'SubAgent', threadId: nestedParent.id },
+        { screen: 'SubAgent', threadId: grandChild.id },
+      ]);
 
       // Back returns to the sub-agent that spawned it, not to the main thread.
       await press(byLabel(root, 'Back from sub-agent transcript'));
@@ -1913,6 +1931,14 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           .findAllByType(ChatMessage)
           .some((node) => node.props.message.id === 'message-sub-nested'),
       ).toBe(true);
+      expect(store.get(navigationStackAtom)).toEqual([
+        { screen: 'Main' },
+        { screen: 'SubAgent', threadId: nestedParent.id },
+      ]);
+
+      act(() => store.set(popNavigationRouteAtom));
+      expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+      expect(store.get(agentDetailThreadIdAtom)).toBeNull();
       act(() => tree.unmount());
     });
 

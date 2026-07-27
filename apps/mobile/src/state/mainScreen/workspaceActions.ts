@@ -15,7 +15,11 @@ import {
 } from '../../screens/main/mainScreenHelpers';
 import { defaultStartCwdAtom } from '../appState/settings';
 import { apiClientAtom } from '../bridge/atoms';
-import { currentScreenAtom, toAppScreen } from '../navigation/atoms';
+import {
+  currentScreenAtom,
+  popNavigationRouteAtom,
+  pushNavigationRouteAtom,
+} from '../navigation/atoms';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -29,7 +33,6 @@ import {
   favoriteWorkspacePathsAtom,
   workspaceBrowseCacheAtom,
   workspaceBrowseRequestIdAtom,
-  workspacePickerReturnScreenAtom,
   loadingWorkspaceBrowseAtom,
   workspaceBridgeRootAtom,
   workspaceBrowseEntriesAtom,
@@ -213,10 +216,7 @@ export const openWorkspacePickerAtom = atom(
       get(workspaceBridgeRootAtom) ??
       null;
     set(workspacePickerPurposeAtom, purpose);
-    if (purpose !== 'git-checkout-destination') {
-      set(workspacePickerReturnScreenAtom, toAppScreen(get(currentScreenAtom)));
-    }
-    set(currentScreenAtom, 'WorkspacePicker');
+    set(pushNavigationRouteAtom, { screen: 'WorkspacePicker' });
     void set(browseWorkspacePathAtom, initialPath);
     scheduleIdleTask(() => {
       void set(refreshWorkspaceRootsAtom);
@@ -235,10 +235,10 @@ export const closeWorkspacePickerAtom = atom(null, (get, set): void => {
     get(resumeGitCheckoutAfterWorkspacePickerAtom)
   ) {
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(currentScreenAtom, 'GitCheckout');
+    set(popNavigationRouteAtom);
     return;
   }
-  set(currentScreenAtom, get(workspacePickerReturnScreenAtom));
+  set(popNavigationRouteAtom);
 });
 
 export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): void => {
@@ -248,12 +248,12 @@ export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): vo
   if (get(workspacePickerPurposeAtom) === 'git-checkout-destination') {
     set(gitCheckoutParentPathAtom, normalizedPath);
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(currentScreenAtom, 'GitCheckout');
+    set(popNavigationRouteAtom);
     return;
   }
 
   set(defaultStartCwdAtom, normalizedPath);
-  set(currentScreenAtom, get(workspacePickerReturnScreenAtom));
+  set(popNavigationRouteAtom);
 });
 
 export const openGitCheckoutAtom = atom(
@@ -272,7 +272,7 @@ export const openGitCheckoutAtom = atom(
     set(gitCheckoutErrorAtom, null);
     set(gitCheckoutCloningAtom, false);
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(currentScreenAtom, 'GitCheckout');
+    set(pushNavigationRouteAtom, { screen: 'GitCheckout' });
     void set(refreshWorkspaceRootsAtom).then((response) => {
       const bridgeRoot = normalizeWorkspacePath(response?.bridgeRoot);
       if (bridgeRoot) {
@@ -288,7 +288,7 @@ export const closeGitCheckoutAtom = atom(null, (get, set): void => {
   }
   set(gitCheckoutErrorAtom, null);
   set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-  set(currentScreenAtom, 'Main');
+  set(popNavigationRouteAtom);
 });
 
 export const openGitCheckoutDestinationPickerAtom = atom(null, (get, set): void => {

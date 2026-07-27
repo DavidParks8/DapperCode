@@ -13,6 +13,7 @@ const mockAppStateListeners: Array<(state: AppStateStatus) => void> = [];
 const mockNotificationResponseListeners: Array<(event: unknown) => void> = [];
 interface MockGesture {
   testId?: string;
+  enabled?: boolean;
   onStart?: (...args: unknown[]) => unknown;
   onUpdate?: (...args: unknown[]) => unknown;
   onEnd?: (...args: unknown[]) => unknown;
@@ -86,6 +87,8 @@ jest.mock('react-native-gesture-handler', () => {
             Object.assign(target, { [property]: args[0] });
           } else if (property === 'withTestId' && typeof args[0] === 'string') {
             target.testId = args[0];
+          } else if (property === 'enabled' && typeof args[0] === 'boolean') {
+            target.enabled = args[0];
           }
           return gesture;
         },
@@ -289,7 +292,12 @@ import {
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
 } from './src/state/chat/atoms';
-import { closeDrawerAtom, drawerCommandsAtom } from './src/state/drawer/atoms';
+import {
+  closeDrawerAtom,
+  drawerCommandsAtom,
+  drawerOpenAtom,
+  drawerVisibleAtom,
+} from './src/state/drawer/atoms';
 import {
   chatContextChangedAtom,
   closeGitAtom,
@@ -302,8 +310,10 @@ import {
 } from './src/state/navigation/actions';
 import {
   currentScreenAtom,
+  navigationStackAtom,
   onboardingModeAtom,
   pendingBrowserTargetUrlAtom,
+  pushNavigationRouteAtom,
   settingsAllowsDrawerGestureAtom,
 } from './src/state/navigation/atoms';
 import type { AppStore } from './src/state/types';
@@ -743,6 +753,8 @@ describe('App orchestration', () => {
       type: 'profiles/switch',
       profileId: secondProfile.id,
     });
+    expect(store.get(currentScreenAtom)).toBe('Settings');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }, { screen: 'Settings' }]);
     await dispatch((s) => s.set(renameBridgeProfileAtom, secondProfile.id, 'Renamed'));
     expect(mockStore.dispatchDurable).toHaveBeenCalledWith({
       type: 'profiles/rename',
@@ -983,6 +995,50 @@ describe('App orchestration', () => {
       await Promise.resolve();
     });
     expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
+    act(() => tree.unmount());
+  });
+
+  it('pops a sub-agent route before allowing the sessions drawer to open', async () => {
+    const tree = await renderApp();
+    const gestureCount = mockGestures.length;
+
+    await dispatch((s) => {
+      s.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'sub-agent-1' });
+      s.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'sub-agent-2' });
+    });
+    expect(store.get(currentScreenAtom)).toBe('SubAgent');
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'SubAgent', threadId: 'sub-agent-1' },
+      { screen: 'SubAgent', threadId: 'sub-agent-2' },
+    ]);
+    const detailGestures = mockGestures.slice(gestureCount);
+    const backSwipeGesture = detailGestures.find((gesture) => gesture.testId === 'app-back-swipe');
+    const openDrawerGesture = detailGestures.find(
+      (gesture) => gesture.testId === 'app-open-drawer',
+    );
+    expect(backSwipeGesture?.enabled).toBe(true);
+    expect(openDrawerGesture?.enabled).toBe(false);
+
+    await act(async () => {
+      backSwipeGesture?.onEnd?.({ translationX: 120, velocityX: 0 });
+      await Promise.resolve();
+    });
+
+    expect(store.get(currentScreenAtom)).toBe('SubAgent');
+    expect(store.get(navigationStackAtom)).toEqual([
+      { screen: 'Main' },
+      { screen: 'SubAgent', threadId: 'sub-agent-1' },
+    ]);
+    expect(store.get(drawerOpenAtom)).toBe(false);
+    expect(store.get(drawerVisibleAtom)).toBe(false);
+    expect(
+      [...mockGestures].reverse().find((gesture) => gesture.testId === 'app-open-drawer')?.enabled,
+    ).toBe(false);
+
+    act(() => expect(mockBackHandler?.()).toBe(true));
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
     act(() => tree.unmount());
   });
 

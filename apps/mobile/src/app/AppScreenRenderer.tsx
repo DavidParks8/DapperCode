@@ -77,7 +77,7 @@ export function AppScreenRenderer({
   const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
 
   useEffect(() => {
-    if (currentScreen === 'ChatGit') {
+    if (currentScreen === 'ChatGit' || currentScreen === 'SubAgent') {
       Keyboard.dismiss();
     }
   }, [currentScreen]);
@@ -103,6 +103,7 @@ export function AppScreenRenderer({
       return <PrivacyScreen policyUrl={env.privacyPolicyUrl} onOpenDrawer={onOpenDrawer} />;
     case 'Terms':
       return <TermsScreen termsUrl={env.termsOfServiceUrl} onOpenDrawer={onOpenDrawer} />;
+    case 'SubAgent':
     case 'ChatGit':
     case 'Main':
     case 'WorkspacePicker':

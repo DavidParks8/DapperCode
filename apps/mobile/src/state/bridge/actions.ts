@@ -16,9 +16,10 @@ import { chatSnapshotCacheAtom } from '../chat/atoms';
 import { closeDrawerAtom } from '../drawer/atoms';
 import {
   currentScreenAtom,
+  navigationCanGoBackAtom,
   onboardingModeAtom,
-  onboardingReturnScreenAtom,
-  toAppScreen,
+  popNavigationRouteAtom,
+  pushNavigationRouteAtom,
 } from '../navigation/atoms';
 import { activeBridgeProfileAtom } from './atoms';
 
@@ -70,7 +71,13 @@ export const saveBridgeProfileAtom = atom(
         ? await loadChatSnapshotCache(nextStore.activeProfileId)
         : null;
     set(applyRestoredCacheAtom, nextCache);
-    set(currentScreenAtom, onboardingMode === 'initial' ? 'Main' : get(onboardingReturnScreenAtom));
+    if (onboardingMode === 'initial') {
+      set(currentScreenAtom, 'Main');
+    } else if (get(navigationCanGoBackAtom)) {
+      set(popNavigationRouteAtom);
+    } else {
+      set(currentScreenAtom, 'Settings');
+    }
     set(onboardingModeAtom, 'edit');
     set(closeDrawerAtom);
   },
@@ -79,10 +86,12 @@ export const saveBridgeProfileAtom = atom(
 const openOnboardingAtom = atom(
   null,
   (get, set, mode: 'edit' | 'add' | 'reconnect' | 'initial'): void => {
-    const currentScreen = get(currentScreenAtom);
     set(onboardingModeAtom, mode);
-    set(onboardingReturnScreenAtom, toAppScreen(currentScreen, 'Settings'));
-    set(currentScreenAtom, 'Onboarding');
+    if (mode === 'initial') {
+      set(currentScreenAtom, 'Onboarding');
+    } else {
+      set(pushNavigationRouteAtom, { screen: 'Onboarding' });
+    }
     set(closeDrawerAtom);
   },
 );
@@ -122,7 +131,6 @@ export const renameBridgeProfileAtom = atom(
 
 const resetToOnboardingAtom = atom(null, (get, set): void => {
   set(onboardingModeAtom, 'initial');
-  set(onboardingReturnScreenAtom, 'Main');
   set(currentScreenAtom, 'Onboarding');
   set(closeDrawerAtom);
 });
@@ -161,5 +169,9 @@ export const clearSavedBridgesAtom = atom(null, async (get, set): Promise<void> 
 });
 
 export const cancelOnboardingAtom = atom(null, (get, set): void => {
-  set(currentScreenAtom, get(onboardingReturnScreenAtom));
+  if (get(navigationCanGoBackAtom)) {
+    set(popNavigationRouteAtom);
+    return;
+  }
+  set(currentScreenAtom, 'Main');
 });
