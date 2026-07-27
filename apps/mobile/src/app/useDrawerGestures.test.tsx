@@ -6,11 +6,7 @@ jest.mock('react-native-gesture-handler', () =>
 );
 
 import { useDrawerController } from './useDrawerController';
-import {
-  mockGestureByTestId,
-  resetMockGestures,
-  simulatePan,
-} from '../testing/gestureHandlerMock';
+import { mockGestureByTestId, resetMockGestures, simulatePan } from '../testing/gestureHandlerMock';
 import { mockSharedValues, resetMockSharedValues } from '../testing/reanimatedMock';
 import { createTestStore, withAppStore } from '../state/testing';
 import {
@@ -18,10 +14,7 @@ import {
   drawerOpenAtom,
   drawerVisibleAtom,
 } from '../state/drawer/atoms';
-import {
-  currentScreenAtom,
-  settingsAllowsDrawerGestureAtom,
-} from '../state/navigation/atoms';
+import { currentScreenAtom, settingsAllowsDrawerGestureAtom } from '../state/navigation/atoms';
 import type { AppStore } from '../state/types';
 
 const SCREEN_WIDTH = 390;
@@ -93,10 +86,14 @@ describe('app edge swipe gesture', () => {
     render(store, onBackSwipe);
 
     act(() => {
-      simulatePan(mockGestureByTestId('app-back-swipe'), [{ translationX: 0 }, { translationX: 220 }], {
-        translationX: 220,
-        velocityX: 800,
-      });
+      simulatePan(
+        mockGestureByTestId('app-back-swipe'),
+        [{ translationX: 0 }, { translationX: 220 }],
+        {
+          translationX: 220,
+          velocityX: 800,
+        },
+      );
     });
 
     expect(onBackSwipe).not.toHaveBeenCalled();
