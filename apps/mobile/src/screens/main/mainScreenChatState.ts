@@ -108,8 +108,7 @@ function preserveLocalTranscript(previous: Chat, next: Chat): Chat {
 
 function isLocalTranscriptMessage(message: ChatMessage | undefined): boolean {
   return Boolean(
-    message &&
-    LOCAL_TRANSCRIPT_MESSAGE_PREFIXES.some((prefix) => message.id.startsWith(prefix)),
+    message && LOCAL_TRANSCRIPT_MESSAGE_PREFIXES.some((prefix) => message.id.startsWith(prefix)),
   );
 }
 

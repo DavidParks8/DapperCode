@@ -35,7 +35,9 @@ describe('buildToolInvocations', () => {
         role: 'assistant',
         content: '',
         createdAt: '2026-05-01T00:00:00.000Z',
-        toolCalls: [{ id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } }],
+        toolCalls: [
+          { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } },
+        ],
         toolMeta: meta({ kind: 'read', status: 'in_progress', title: 'Read package.json' }),
       },
       toolMessage(
@@ -91,9 +93,7 @@ describe('buildToolInvocations', () => {
       ),
     ]);
 
-    expect(invocations[0].diffs).toEqual([
-      { path: 'src/app.ts', oldText: 'old', newText: 'new' },
-    ]);
+    expect(invocations[0].diffs).toEqual([{ path: 'src/app.ts', oldText: 'old', newText: 'new' }]);
     expect(invocations[0].terminals).toEqual([{ terminalId: 'term-1', output: 'boot' }]);
     expect(invocations[0].images).toEqual([
       'data:image/png;base64,AAA',

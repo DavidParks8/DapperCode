@@ -87,17 +87,15 @@ describe('ToolInvocationRow', () => {
 
   it('only highlights the press state while the row can actually expand', () => {
     const open = render(invocation({ id: 'tool-pressable', textLines: ['out'] }));
-    const openStyle = open.root.findAll(
-      (node) => typeof node.props.onPress === 'function',
-    )[0].props.style as (state: { pressed: boolean }) => unknown[];
+    const openStyle = open.root.findAll((node) => typeof node.props.onPress === 'function')[0].props
+      .style as (state: { pressed: boolean }) => unknown[];
     expect(openStyle({ pressed: true })[2]).toBeTruthy();
     expect(openStyle({ pressed: false })[2]).toBeFalsy();
     act(() => open.unmount());
 
     const closed = render(invocation({ id: 'tool-inert', empty: true }));
-    const closedStyle = closed.root.findAll(
-      (node) => typeof node.props.onPress === 'function',
-    )[0].props.style as (state: { pressed: boolean }) => unknown[];
+    const closedStyle = closed.root.findAll((node) => typeof node.props.onPress === 'function')[0]
+      .props.style as (state: { pressed: boolean }) => unknown[];
     expect(closedStyle({ pressed: true })[2]).toBeFalsy();
     act(() => closed.unmount());
   });
@@ -161,7 +159,10 @@ describe('ToolInvocationOutput', () => {
   });
 
   it('renders usable images and skips ones the bridge cannot serve', () => {
-    const value = invocation({ id: 'tool-image', images: ['data:image/png;base64,AAAA', 'not-a-usable-source.png'] });
+    const value = invocation({
+      id: 'tool-image',
+      images: ['data:image/png;base64,AAAA', 'not-a-usable-source.png'],
+    });
     const tree = render(value, 'http://127.0.0.1:8081');
     expand(tree, value.title);
 

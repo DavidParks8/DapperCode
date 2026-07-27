@@ -1037,9 +1037,9 @@ describe('App orchestration', () => {
     expect(store.get(pendingMainChatIdAtom)).toBeNull();
     expect(store.get(pendingMainChatSnapshotAtom)).toBeNull();
     expect(root.findAll((node) => node.props.testID === 'GitScreen')).toHaveLength(0);
-    expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Opening chat'),
-    ).toHaveLength(0);
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Opening chat')).toHaveLength(
+      0,
+    );
 
     const nextChat = {
       ...hydratedChat,
@@ -1052,9 +1052,9 @@ describe('App orchestration', () => {
     expect(store.get(activeChatAtom)).toEqual(nextChat);
     expect(store.get(chatTransitionChatIdAtom)).toBeNull();
     expect(store.get(mainOpeningChatIdAtom)).toBeNull();
-    expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Opening chat'),
-    ).toHaveLength(0);
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Opening chat')).toHaveLength(
+      0,
+    );
 
     act(() => tree.unmount());
   });

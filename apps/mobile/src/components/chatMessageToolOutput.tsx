@@ -58,9 +58,7 @@ export function ToolInvocationOutput({
       ))}
       {invocation.images.map((image, index) => {
         const source = toMarkdownImageSource(image, bridgeUrl, bridgeToken);
-        return source ? (
-          <MarkdownImage key={`image-${String(index)}`} source={source} />
-        ) : null;
+        return source ? <MarkdownImage key={`image-${String(index)}`} source={source} /> : null;
       })}
       {invocation.textLines.length > 0 ? (
         <View style={styles.toolOutputSurface}>

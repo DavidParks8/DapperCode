@@ -112,10 +112,7 @@ describe('attachToolMeta', () => {
     expect(messageReferencesToolCall(toolCall, 'call-1')).toBe(true);
     expect(messageReferencesToolCall(unrelated, 'call-1')).toBe(false);
     expect(
-      messageReferencesToolCall(
-        { id: 'u1', role: 'user', content: 'hi', createdAt: '' },
-        'call-1',
-      ),
+      messageReferencesToolCall({ id: 'u1', role: 'user', content: 'hi', createdAt: '' }, 'call-1'),
     ).toBe(false);
   });
 });

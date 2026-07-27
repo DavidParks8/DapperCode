@@ -128,6 +128,21 @@ export const createStyles = (theme: AppTheme) =>
       color: theme.colors.textMuted,
       marginTop: theme.spacing.xs,
     },
+    messageActionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      marginTop: theme.spacing.xs,
+      marginLeft: -theme.spacing.xs,
+    },
+    messageActionButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 30,
+      height: 30,
+      borderRadius: theme.radius.full,
+    },
+    messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {
       flexDirection: 'row',

@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Image,
@@ -46,6 +47,8 @@ type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
   systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
   subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
 };
+
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
 jest.mock('react-native-reanimated', () => {
   const reactNative = jest.requireActual('react-native');
@@ -310,6 +313,90 @@ describe('ChatMessage markdown formatting', () => {
       images.some((node) => node.props.source?.uri === 'https://example.test/remote.png'),
     ).toBe(true);
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Remote' }).length).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+});
+
+describe('ChatMessage copy action', () => {
+  beforeEach(() => {
+    jest.mocked(Clipboard.setStringAsync).mockClear();
+    jest.mocked(Clipboard.setStringAsync).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('copies the assistant response and shows a transient copied state', () => {
+    jest.useFakeTimers();
+    const tree = renderMessage({
+      id: 'assistant-copy',
+      role: 'assistant',
+      content: 'The bridge is running on port 4319.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const button = findCopyButton(root, 'assistant-copy');
+
+    expect(button.props.accessibilityLabel).toBe('Copy message');
+
+    act(() => readOnPress(button.props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('The bridge is running on port 4319.');
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copied message');
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copy message');
+
+    act(() => tree.unmount());
+  });
+
+  it('joins ordered text parts and omits attachments from the copied text', () => {
+    const tree = renderMessage({
+      id: 'assistant-parts',
+      role: 'assistant',
+      content: 'ignored',
+      parts: [
+        { type: 'text', text: 'First paragraph.' },
+        { type: 'image', uri: 'https://example.test/shot.png' },
+        { type: 'text', text: 'Second paragraph.' },
+      ],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    act(() => readOnPress(findCopyButton(root, 'assistant-parts').props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('First paragraph.\n\nSecond paragraph.');
+    act(() => tree.unmount());
+  });
+
+  it('hides the copy action while an assistant response is still empty', () => {
+    const tree = renderMessage({
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'assistant-streaming').length).toBe(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('does not offer a copy action on user messages', () => {
+    const tree = renderMessage({
+      id: 'user-message',
+      role: 'user',
+      content: 'Restart the bridge',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'user-message').length).toBe(0);
     act(() => tree.unmount());
   });
 });
@@ -1170,6 +1257,22 @@ function readOnPress(props: Record<string, unknown>): () => void {
     throw new Error('Expected press handler');
   }
   return props.onPress as () => void;
+}
+
+function findCopyButtons(root: QueryableTestInstance, messageId: string): QueryableTestInstance[] {
+  return root.findAll(
+    (node) =>
+      node.props.testID === `chat-message-copy-${messageId}` &&
+      typeof node.props.onPress === 'function',
+  );
+}
+
+function findCopyButton(root: QueryableTestInstance, messageId: string): QueryableTestInstance {
+  const button = findCopyButtons(root, messageId)[0];
+  if (!button) {
+    throw new Error(`Expected a copy button for ${messageId}`);
+  }
+  return button;
 }
 
 function findTextNodes(root: QueryableTestInstance, text: string): QueryableTestInstance[] {

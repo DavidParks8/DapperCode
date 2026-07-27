@@ -13,6 +13,7 @@ import {
 import { extractLocalPreviewUrls } from '../browserPreview';
 import { useAppTheme } from '../theme';
 import { ComputerUseTimeline } from './chatMessageComputerUse';
+import { MessageCopyButton } from './chatMessageCopyButton';
 import {
   messagePartToBlocks,
   parseMessageBlocks,
@@ -112,6 +113,14 @@ function ChatMessageComponent({
         : [],
     [message.role, messageText],
   );
+  const copyText = useMemo(
+    () =>
+      messageBlocks
+        .flatMap((block) => (block.kind === 'text' ? [block.value] : []))
+        .join('\n\n')
+        .trim() || messageText.trim(),
+    [messageBlocks, messageText],
+  );
 
   if (message.role === 'user')
     return (
@@ -203,6 +212,7 @@ function ChatMessageComponent({
           urls={localPreviewUrls}
           onOpen={onOpenLocalPreview}
         />
+        <MessageCopyButton text={copyText} testID={`chat-message-copy-${message.id}`} />
       </View>
     );
 

@@ -23,6 +23,9 @@ All notable DapperCode changes are documented here.
 
 ### Changed
 
+- Assistant responses in the mobile transcript now end with a copy button that puts the response
+	text on the clipboard and confirms with a checkmark, so a long markdown answer no longer has to
+	be extracted with text selection.
 - Rebranded the mobile app, CLI, bridge, protocol extensions, persistence paths, and package
 	identities as DapperCode.
 - Reset native and hosted-service ownership so new Expo, Apple, Google, Firebase, npm, and store
