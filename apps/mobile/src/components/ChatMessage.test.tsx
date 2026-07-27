@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -344,6 +344,131 @@ describe('ChatMessage command rows', () => {
     expect(horizontalScroll.props.horizontal).toBe(true);
     expect(commandText.props.numberOfLines).toBeUndefined();
     expect(flattenRenderedText(commandText.props.children)).toContain('ChatMessage.test.tsx');
+  });
+});
+
+describe('ChatMessage transcript width', () => {
+  const theme = createAppTheme('dark');
+
+  const flattenRootStyle = (element: ReactElement) => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(<AppThemeProvider theme={theme}>{element}</AppThemeProvider>);
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+    const root = tree.toJSON() as { props: { style?: unknown } };
+    return (StyleSheet.flatten(root.props.style) ?? {}) as {
+      maxWidth?: number | string;
+      width?: number | string;
+    };
+  };
+
+  it.each([
+    {
+      name: 'assistant message',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'assistant-width',
+            role: 'assistant',
+            content: 'A fairly long assistant answer that should reach the transcript edge.',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'reasoning card',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'reasoning-width',
+            role: 'reasoning',
+            content: 'Thinking through the change',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'sub-agent card',
+      element: (
+        <ChatMessage
+          message={createActivityMessage(
+            'subagent-width',
+            SUBAGENT_ACTIVITY_TYPE,
+            { text: 'Delegated to explore agent' },
+            '2026-04-17T00:00:00.000Z',
+          )}
+        />
+      ),
+    },
+    {
+      name: 'tool card',
+      element: (
+        <ToolInvocationRow
+          invocation={onlyInvocation([
+            {
+              id: 'tool-width',
+              role: 'system',
+              systemKind: 'tool',
+              content: '• Ran npm test\n  output line',
+              createdAt: '2026-04-17T00:00:00.000Z',
+            },
+          ])}
+        />
+      ),
+    },
+  ])('stretches the $name to the full transcript width', ({ element }) => {
+    expect(flattenRootStyle(element).maxWidth).toBe('100%');
+  });
+
+  it('keeps user bubbles inset from the opposite edge', () => {
+    const style = flattenRootStyle(
+      <ChatMessage
+        message={{
+          id: 'user-width',
+          role: 'user',
+          content: 'A user message that stays visually distinct from the assistant column.',
+          createdAt: '2026-04-17T00:00:00.000Z',
+        }}
+      />,
+    );
+
+    expect(style.maxWidth).toBe('92%');
+  });
+
+  it('renders expanded tool output without a right inset', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ToolInvocationRow
+            invocation={onlyInvocation([
+              {
+                id: 'tool-body-width',
+                role: 'system',
+                systemKind: 'tool',
+                content: '• Ran npm test\n  output line',
+                createdAt: '2026-04-17T00:00:00.000Z',
+              },
+            ])}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+
+    act(() => {
+      readOnPress(tree.root.findByProps({ accessibilityRole: 'button' }).props)();
+    });
+
+    const body = tree.root.findByProps({ testID: 'tool-output-body' });
+    const bodyStyle = (StyleSheet.flatten(body.props.style as never) ?? {}) as {
+      marginRight?: number;
+    };
+
+    expect(bodyStyle.marginRight).toBeUndefined();
   });
 });
 

@@ -4,8 +4,8 @@ import type { AppTheme } from '../theme';
 
 export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
-    messageWrapper: { maxWidth: '92%' },
-    messageWrapperUser: { alignSelf: 'flex-end' },
+    messageWrapper: { maxWidth: '100%' },
+    messageWrapperUser: { alignSelf: 'flex-end', maxWidth: '92%' },
     messageWrapperAssistant: { alignSelf: 'flex-start', width: '100%' },
     messageWrapperFullWidth: { alignSelf: 'stretch', maxWidth: '100%' },
     userBubble: {
@@ -199,7 +199,6 @@ export const createStyles = (theme: AppTheme) =>
     toolRowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     toolRowBody: {
       marginLeft: theme.spacing.sm + 16 + theme.spacing.sm,
-      marginRight: theme.spacing.sm,
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
       gap: theme.spacing.xs,
