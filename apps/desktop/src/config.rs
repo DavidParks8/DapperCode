@@ -735,6 +735,12 @@ mod tests {
         let runtime = RuntimePaths::discover().unwrap();
         assert_ne!(runtime.package_root, temp.path());
 
+        std::fs::create_dir_all(temp.path().join("bin")).unwrap();
+        std::fs::write(temp.path().join("bin/dappercode-bridge"), b"x").unwrap();
+        let runtime = RuntimePaths::discover().unwrap();
+        assert_eq!(runtime.package_root, temp.path().canonicalize().unwrap());
+        std::fs::remove_dir_all(temp.path().join("bin")).unwrap();
+
         std::fs::create_dir_all(temp.path().join("services/rust-bridge")).unwrap();
         std::fs::write(temp.path().join("services/rust-bridge/Cargo.toml"), b"x").unwrap();
         let runtime = RuntimePaths::discover().unwrap();

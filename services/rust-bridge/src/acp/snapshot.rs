@@ -1456,6 +1456,178 @@ mod tests {
         }
     }
 
+    #[test]
+    fn snapshot_fallbacks_ignore_orphaned_and_stale_state() {
+        let mut orphaned = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        orphaned.subagent_headers.insert(
+            "missing-tool".to_string(),
+            r#"<task id="child" state="running">"#.to_string(),
+        );
+        let durable = BridgeThreadSnapshot::from(orphaned);
+        assert!(durable.tools.is_empty());
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        assert!(!snapshot.mark_subagent_terminal("missing-child", "completed"));
+        assert!(!snapshot.mark_subagent_tool_terminal(
+            "missing-tool",
+            "completed",
+            ToolCallStatus::Completed
+        ));
+
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&tool("active-tool", Some(1), ToolCallStatus::InProgress));
+        snapshot.apply(&run_started(2));
+        assert_eq!(snapshot.tools["active-tool"].status, ToolCallStatus::Failed);
+        snapshot.subagent_headers.insert(
+            "other-child".to_string(),
+            r#"<task id="other" state="running">"#.to_string(),
+        );
+        assert!(!snapshot.mark_subagent_terminal("missing-child", "completed"));
+        snapshot.subagent_headers.insert(
+            "matching-child".to_string(),
+            r#"<task id="child" state="running">"#.to_string(),
+        );
+        assert!(snapshot.mark_subagent_terminal("child", "completed"));
+        snapshot.apply(&CanonicalEvent::RunFinished {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        assert_eq!(snapshot.active_generation, Some(2));
+        snapshot.apply(&CanonicalEvent::RunFailed {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "stale failure".to_string(),
+        });
+        assert_eq!(snapshot.active_generation, Some(2));
+
+        let mut subagent = tool("subagent", Some(2), ToolCallStatus::InProgress);
+        if let CanonicalEvent::Tool { content, .. } = &mut subagent {
+            *content = FieldUpdate::Set(
+                r#"<task id="child-2" state="running">working</task>"#.to_string(),
+            );
+        }
+        snapshot.apply(&subagent);
+        snapshot.terminalize_unresolved_subagents("completed", 2);
+        assert_eq!(snapshot.tools["subagent"].status, ToolCallStatus::Completed);
+
+        snapshot.apply(&tool("without-header", Some(2), ToolCallStatus::InProgress));
+        snapshot.update_subagent_tool_terminal(
+            "without-header",
+            "completed",
+            ToolCallStatus::Completed,
+        );
+        assert_eq!(
+            snapshot.tools["without-header"].status,
+            ToolCallStatus::Completed
+        );
+
+        assert_eq!(
+            SessionSnapshot::latest_valid_task_header(concat!(
+                r#"<task id="child" state="running">"#,
+                r#"<task incidental="markup">"#
+            )),
+            Some(r#"<task id="child" state="running">"#)
+        );
+        assert_eq!(
+            SessionSnapshot::task_header_with_state(r#"<task id="child">"#, "failed"),
+            r#"<task id="child">"#
+        );
+        assert_eq!(
+            SessionSnapshot::task_header_with_state(
+                r#"<task id="child" state="running>"#,
+                "failed"
+            ),
+            r#"<task id="child" state="running>"#
+        );
+    }
+
+    #[test]
+    fn snapshot_reconciliation_covers_evicted_and_headerless_tools() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&tool("rehydrated", None, ToolCallStatus::Completed));
+        snapshot.tools.remove("rehydrated");
+        snapshot.apply(&tool("rehydrated", None, ToolCallStatus::Completed));
+        assert!(snapshot.tools.contains_key("rehydrated"));
+
+        snapshot.subagent_headers.insert(
+            "terminal-header".to_string(),
+            r#"<task id="child" state="completed">"#.to_string(),
+        );
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            tool_call_id: "terminal-header".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                r#"<task id="child" state="completed">finished</task>"#.to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert_eq!(
+            snapshot.subagent_header("terminal-header"),
+            Some(r#"<task id="child" state="completed">"#)
+        );
+
+        snapshot
+            .active_tool_ids
+            .insert("missing-active".to_string());
+        snapshot.terminalize_active_tools(ToolCallStatus::Failed);
+        assert!(snapshot.active_tool_ids.contains("missing-active"));
+        snapshot.active_tool_ids.remove("missing-active");
+
+        snapshot.apply(&tool("history-only", Some(1), ToolCallStatus::InProgress));
+        snapshot.tools.remove("history-only");
+        snapshot.active_tool_ids.insert("history-only".to_string());
+        snapshot.terminalize_active_tools(ToolCallStatus::Completed);
+        assert!(snapshot.active_tool_ids.contains("history-only"));
+        snapshot.active_tool_ids.remove("history-only");
+
+        snapshot.subagent_headers.insert(
+            "already-terminal".to_string(),
+            r#"<task id="done" state="completed">"#.to_string(),
+        );
+        snapshot.terminalize_unresolved_subagents("completed", 1);
+        assert!(snapshot.subagent_headers.contains_key("already-terminal"));
+
+        snapshot.apply(&tool("history-update", Some(1), ToolCallStatus::InProgress));
+        snapshot.tools.remove("history-update");
+        snapshot.update_subagent_tool_terminal(
+            "history-update",
+            "completed",
+            ToolCallStatus::Completed,
+        );
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-update")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::Completed)
+        );
+
+        for index in 0..=MAX_ACTIVE_TOOL_TOMBSTONES {
+            snapshot
+                .active_tool_ids
+                .insert(format!("missing-tombstone-{index}"));
+        }
+        snapshot.enforce_active_tool_tombstone_bounds();
+        assert!(snapshot.active_tool_ids.len() <= MAX_ACTIVE_TOOL_TOMBSTONES);
+    }
+
     /// Reproduces "a long complete session showed as in progress".
     ///
     /// Restarting the bridge replays a thread from history. Replayed tool events carry no

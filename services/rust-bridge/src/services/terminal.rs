@@ -941,6 +941,11 @@ mod tests {
         assert_eq!(success.command, "git --version");
         assert_eq!(success.code, Some(0));
         assert!(success.stdout.starts_with("git version"));
+        let inspected = service
+            .inspect_git_config(&["--list".to_string()], temp.0.clone(), true)
+            .await
+            .expect("inspect standard git configuration");
+        assert_eq!(inspected.command, "git config inspection");
 
         let failure = service
             .execute_git(
@@ -966,6 +971,10 @@ mod tests {
 
         let (bytes, truncated) = read_stream_limited(&b"long"[..], 0).await;
         assert!(bytes.is_empty());
+        assert!(truncated);
+
+        let (bytes, truncated) = read_stream_limited(&b"long"[..], 2).await;
+        assert_eq!(bytes, b"lo");
         assert!(truncated);
     }
 
