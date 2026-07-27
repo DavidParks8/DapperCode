@@ -1937,13 +1937,26 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => tree.unmount());
     });
 
-    it('renames the selected session from the chat header', async () => {
+    it('renames the selected session from the chat header edit button', async () => {
       const api = createApi();
       (api.renameChat as jest.Mock).mockResolvedValue({ ...rootChat, title: 'Manual title' });
       const { tree } = await renderMain({ api, selectedChat: rootChat });
       const root = rootOf(tree);
 
-      await press(byLabel(root, 'Root thread, chat options'));
+      // The title itself is a scrollable surface, so nothing around it may be pressable.
+      const titleScroll = root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === rootChat.title && node.props.horizontal === true,
+      )[0];
+      expect(titleScroll).toBeTruthy();
+      let ancestor = titleScroll.parent;
+      while (ancestor) {
+        expect(typeof ancestor.props.onPress).not.toBe('function');
+        ancestor = ancestor.parent;
+      }
+      expect(hasText(root, 'Rename session')).toBe(false);
+
+      await press(byLabel(root, 'Edit session title'));
       expect(hasText(root, 'Rename session')).toBe(true);
       await act(async () => {
         textInput(root, 'Session title').props.onChangeText('Manual title');

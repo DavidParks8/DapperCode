@@ -61,7 +61,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
         onOpenDrawer={onOpenDrawer}
         title={headerTitle}
         agent={activeAgent}
-        onOpenTitleMenu={selectedChat ? openTitleEditor : undefined}
+        onRenameTitle={selectedChat ? openTitleEditor : undefined}
         rightIconName={selectedChat ? 'git-branch-outline' : undefined}
         onRightActionPress={selectedChat ? handleOpenGit : undefined}
       />
