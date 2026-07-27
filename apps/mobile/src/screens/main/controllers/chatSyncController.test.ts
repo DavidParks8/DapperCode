@@ -40,9 +40,32 @@ describe('chatSyncController', () => {
     expect(getChatSyncInterval(true, false)).toBe(5_000);
   });
 
-  it('detects assistant progress and falls back to a running watchdog', () => {
+  it('settles an answered idle snapshot instead of extending the running watchdog', () => {
+    const user = {
+      id: 'u',
+      role: 'user' as const,
+      content: 'question',
+      createdAt: new Date().toISOString(),
+    };
+    const previous = chat('running', [user]);
+    const latest = chat('idle', [
+      user,
+      { id: 'a', role: 'assistant', content: 'complete answer', createdAt: '' },
+    ]);
+
+    expect(assessChatSync(previous, latest, true)).toMatchObject({
+      terminal: true,
+      shouldShowRunning: false,
+      shouldRefreshWatchdog: false,
+    });
+  });
+
+  it('detects assistant progress when lifecycle status is unavailable and falls back to a watchdog', () => {
     const previous = chat('idle', [{ id: 'a', role: 'assistant', content: 'a', createdAt: '' }]);
-    const latest = chat('idle', [{ id: 'a', role: 'assistant', content: 'answer', createdAt: '' }]);
+    const latest = {
+      ...chat('idle', [{ id: 'a', role: 'assistant', content: 'answer', createdAt: '' }]),
+      status: 'unknown' as Chat['status'],
+    };
     expect(assessChatSync(previous, latest, false)).toMatchObject({
       terminal: false,
       shouldShowRunning: true,
