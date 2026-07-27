@@ -13,7 +13,12 @@ export function createMarkdownRules(
   bridgeUrl: string | null,
   bridgeToken: string | null,
   onOpenLocalPreview?: (targetUrl: string) => void,
+  { selectable = true }: { selectable?: boolean } = {},
 ): RenderRules {
+  // React Native flattens nested `Text` into the block's outermost node, so only these three
+  // rules become real paragraph views. Turning `selectable` off on them releases the long press
+  // for a caller that wants to offer real selection instead of RN's copy-the-whole-block menu.
+  const blockSelectable = selectable ? undefined : false;
   return {
     text: (node, _children, _parent, styles, inheritedStyles = {}) => (
       <SelectableMessageText key={node.key} style={[inheritedStyles, styles.text]}>
@@ -21,7 +26,7 @@ export function createMarkdownRules(
       </SelectableMessageText>
     ),
     textgroup: (node, children, _parent, styles) => (
-      <SelectableMessageText key={node.key} style={styles.textgroup}>
+      <SelectableMessageText key={node.key} selectable={blockSelectable} style={styles.textgroup}>
         {children}
       </SelectableMessageText>
     ),
@@ -51,7 +56,11 @@ export function createMarkdownRules(
           ? node.content.substring(0, node.content.length - 1)
           : node.content;
       return (
-        <SelectableMessageText key={node.key} style={[inheritedStyles, styles.code_block]}>
+        <SelectableMessageText
+          key={node.key}
+          selectable={blockSelectable}
+          style={[inheritedStyles, styles.code_block]}
+        >
           {content}
         </SelectableMessageText>
       );
@@ -62,7 +71,11 @@ export function createMarkdownRules(
           ? node.content.substring(0, node.content.length - 1)
           : node.content;
       return (
-        <SelectableMessageText key={node.key} style={[inheritedStyles, styles.fence]}>
+        <SelectableMessageText
+          key={node.key}
+          selectable={blockSelectable}
+          style={[inheritedStyles, styles.fence]}
+        >
           {content}
         </SelectableMessageText>
       );

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
@@ -13,7 +13,8 @@ import {
 import { extractLocalPreviewUrls } from '../browserPreview';
 import { useAppTheme } from '../theme';
 import { ComputerUseTimeline } from './chatMessageComputerUse';
-import { MessageCopyButton } from './chatMessageCopyButton';
+import { MessageActions } from './chatMessageActions';
+import { SelectableTextSheet } from './chatMessageSelectTextSheet';
 import {
   messagePartToBlocks,
   parseMessageBlocks,
@@ -92,12 +93,21 @@ function ChatMessageComponent({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const markdownStyles = useMemo(() => createMarkdownStyles(theme), [theme]);
   const markdownRules = useMemo(
-    () => createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview),
+    // The chat surface offers its own selection sheet, so the markdown must not claim the long
+    // press for React Native's copy-the-whole-block edit menu.
+    () => createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview, { selectable: false }),
     [bridgeToken, bridgeUrl, onOpenLocalPreview],
   );
   const [expandedTimelineEntries, setExpandedTimelineEntries] = useState<Record<string, boolean>>(
     {},
   );
+  const [selectTextVisible, setSelectTextVisible] = useState(false);
+  const openSelectText = useCallback(() => {
+    setSelectTextVisible(true);
+  }, []);
+  const closeSelectText = useCallback(() => {
+    setSelectTextVisible(false);
+  }, []);
   const messageText = getMessageText(message);
   const messageBlocks = useMemo(
     () =>
@@ -169,7 +179,13 @@ function ChatMessageComponent({
   if (['assistant', 'developer', 'system'].includes(message.role))
     return (
       <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
-        <View style={styles.assistantContent}>
+        <Pressable
+          testID={`chat-message-select-target-${message.id}`}
+          onLongPress={copyText ? openSelectText : undefined}
+          delayLongPress={400}
+          style={styles.assistantContent}
+          accessible={false}
+        >
           {messageBlocks.map((block, index) => {
             if (block.kind === 'image')
               return (
@@ -206,13 +222,24 @@ function ChatMessageComponent({
               </Markdown>
             );
           })}
-        </View>
+        </Pressable>
         <LocalPreviewLinks
           messageId={message.id}
           urls={localPreviewUrls}
           onOpen={onOpenLocalPreview}
         />
-        <MessageCopyButton text={copyText} testID={`chat-message-copy-${message.id}`} />
+        <MessageActions
+          text={copyText}
+          onSelectText={openSelectText}
+          testID={`chat-message-copy-${message.id}`}
+        />
+        {selectTextVisible ? (
+          <SelectableTextSheet
+            text={copyText}
+            onClose={closeSelectText}
+            testID={`chat-message-select-text-${message.id}`}
+          />
+        ) : null}
       </View>
     );
 
@@ -452,14 +479,28 @@ function ChatMessageComponent({
 
   return (
     <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
-      <Markdown style={markdownStyles} rules={markdownRules}>
-        {messageText || '\u258D'}
-      </Markdown>
+      <Pressable
+        testID={`chat-message-select-target-${message.id}`}
+        onLongPress={copyText ? openSelectText : undefined}
+        delayLongPress={400}
+        accessible={false}
+      >
+        <Markdown style={markdownStyles} rules={markdownRules}>
+          {messageText || '\u258D'}
+        </Markdown>
+      </Pressable>
       <LocalPreviewLinks
         messageId={message.id}
         urls={localPreviewUrls}
         onOpen={onOpenLocalPreview}
       />
+      {selectTextVisible ? (
+        <SelectableTextSheet
+          text={copyText}
+          onClose={closeSelectText}
+          testID={`chat-message-select-text-${message.id}`}
+        />
+      ) : null}
     </View>
   );
 }

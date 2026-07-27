@@ -9,7 +9,21 @@ import { createStyles } from './chatMessageStyles';
 
 const COPIED_RESET_MS = 1600;
 
-export function MessageCopyButton({ text, testID }: { text: string; testID?: string }) {
+/**
+ * The action row under a response: copy the whole thing, or open it for real text selection.
+ *
+ * Selection needs its own affordance because React Native's `<Text selectable>` cannot select a
+ * range - see `SelectableTextSheet`.
+ */
+export function MessageActions({
+  text,
+  onSelectText,
+  testID,
+}: {
+  text: string;
+  onSelectText?: () => void;
+  testID?: string;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [copied, setCopied] = useState(false);
@@ -54,6 +68,27 @@ export function MessageCopyButton({ text, testID }: { text: string; testID?: str
           color={copied ? theme.colors.success : theme.colors.textMuted}
         />
       </Pressable>
+      {onSelectText ? (
+        <Pressable
+          testID={testID ? `${testID}-select` : undefined}
+          onPress={onSelectText}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.messageActionButton,
+            pressed && styles.messageActionButtonPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Select message text"
+          accessibilityHint="Opens this response so you can select part of it"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="text-outline"
+            size={16}
+            color={theme.colors.textMuted}
+          />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
