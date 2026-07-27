@@ -49,7 +49,6 @@ export function useMainScreenModeConfigurationSession(
     setSelectedChatId,
   } = context;
   const setError = useSetAtom(errorAtom);
-  const loadingModels = useAtomValue(loadingModelsAtom);
   const selectedEffort = useAtomValue(selectedEffortAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
@@ -161,11 +160,8 @@ export function useMainScreenModeConfigurationSession(
   }, [activeAgentId, api, refreshModelOptions]);
 
   const closeModelModal = useCallback(() => {
-    if (loadingModels) {
-      return;
-    }
     setModelModalVisible(false);
-  }, [loadingModels]);
+  }, []);
 
   const openAgentModal = useCallback(() => {
     if (selectedChatId) {

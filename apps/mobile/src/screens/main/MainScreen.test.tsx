@@ -1523,6 +1523,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         await flush();
         await flush();
       });
+      expect(byLabel(root, 'Choose a model')).toBeTruthy();
       expect(byLabel(root, 'GitHub Copilot · GPT-5.4')).toBeTruthy();
       await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(
@@ -1530,14 +1531,18 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         'model',
         'github-copilot/gpt-5-mini',
       );
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'High'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
 
       await press(byLabelPrefix(root, 'Agent mode, '));
       await press(pressForText(root, 'plan'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'mode', 'plan');
 
       await press(byLabelPrefix(root, 'Thinking level, '));
-      await press(pressForText(root, 'High'));
-      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'None'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'none');
 
       act(() => tree.unmount());
     });
