@@ -77,7 +77,7 @@ jest.mock('expo-image-manipulator', () => ({
     })),
   },
 }));
-jest.mock('@believer/react-native-markdown-display', () => ({ Markdown: 'Markdown' }));
+jest.mock('react-native-markdown-display', () => 'Markdown');
 jest.mock('../../components/ChatMessage', () => ({
   ChatMessage: ({ message }: { message: { content: string | { text?: unknown } } }) =>
     typeof message.content === 'string'

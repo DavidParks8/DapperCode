@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const reviewedAdvisories = new Map([
+  // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
+  [1121797, 'linkify-it'],
+  [1124012, 'linkify-it'],
   // Reached only through minimatch@3 inside the Jest/Expo test toolchain, never with
   // remote input. The sole patched release (5.0.8) is CommonJS-incompatible with minimatch@3.
   [1124334, 'brace-expansion'],

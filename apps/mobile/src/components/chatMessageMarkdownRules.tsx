@@ -1,5 +1,5 @@
 import { ScrollView, View } from 'react-native';
-import type { RenderRules } from '@believer/react-native-markdown-display';
+import type { RenderRules } from 'react-native-markdown-display';
 
 import { toMarkdownImageSource } from './chatImageSource';
 import { openMarkdownLink, toLocalFileReferenceLabel } from './chatMessageContentHelpers';
