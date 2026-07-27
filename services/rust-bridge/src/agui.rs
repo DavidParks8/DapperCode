@@ -4941,6 +4941,18 @@ mod tests {
             initial[0]["params"]["event"]["content"]["subAgent"]["navigable"],
             true
         );
+        assert!(
+            !hub.link_subagent(
+                parent_thread_id,
+                "parent-run",
+                Some("parent-turn".to_string()),
+                "task-1",
+                child_thread_id,
+            )
+            .await
+        );
+        let (after_duplicate, _, _) = hub.replay_since(None, 32).await;
+        assert_eq!(after_duplicate.len(), 1);
 
         let mut child_run = canonical_run_started();
         if let CanonicalEvent::RunStarted {

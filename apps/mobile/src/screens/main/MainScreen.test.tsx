@@ -2516,9 +2516,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       await emit(subagentActivity('running', 'Thinking: Reviewing architecture'));
       const liveCard = () => renderedMessage('subagent:task-live');
       const liveMessage = () => liveCard().props.message;
-      expect(getMessageText(liveMessage())).toContain(
-        'Latest: Thinking: Reviewing architecture',
-      );
+      expect(getMessageText(liveMessage())).toContain('Latest: Thinking: Reviewing architecture');
       await emit(
         agUi(
           { type: 'RUN_STARTED', threadId: childThreadId, runId: 'child-run' },

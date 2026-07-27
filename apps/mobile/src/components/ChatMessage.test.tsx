@@ -1047,9 +1047,7 @@ describe('ChatMessage system timeline matrices', () => {
       { onOpenSubAgentThread },
     );
     const root = tree.root as QueryableTestInstance;
-    const button = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Open agent chat',
-    )[0];
+    const button = root.findAll((node) => node.props.accessibilityLabel === 'Open agent chat')[0];
     expect(button?.props.accessibilityState).toMatchObject({ disabled: true });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
