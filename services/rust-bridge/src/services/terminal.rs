@@ -59,6 +59,38 @@ fn hardened_git_args(args: &[String]) -> Vec<String> {
     hardened_git_args_with_helper(args, trusted_credential_helper())
 }
 
+/// Config keys pinned on every bridge `git` command line, which therefore cannot be honored from
+/// any configuration file.
+///
+/// Command-line `-c` settings outrank every file, so a repository cannot re-enable these. Callers
+/// use this to avoid rejecting configuration that is already neutralized - `core.fsmonitor=true`
+/// is set by VS Code and `feature.manyfiles`, and refusing it made ordinary checkouts unusable.
+///
+/// `credential.helper` is deliberately excluded. It is multi-valued and has URL-scoped
+/// `credential.<url>.helper` siblings, so pinning an empty generic value does not clear a
+/// repository's own helper for a matching URL.
+pub(crate) fn pinned_git_config_keys() -> HashSet<String> {
+    let mut keys = HashSet::new();
+    let mut arguments = hardened_git_args_with_helper(&[], None).into_iter();
+    while let Some(argument) = arguments.next() {
+        if argument != "-c" {
+            continue;
+        }
+        let Some(setting) = arguments.next() else {
+            break;
+        };
+        let Some((key, _)) = setting.split_once('=') else {
+            continue;
+        };
+        let key = key.to_ascii_lowercase();
+        if key == "credential.helper" {
+            continue;
+        }
+        keys.insert(key);
+    }
+    keys
+}
+
 fn hardened_git_args_with_helper(args: &[String], helper: Option<String>) -> Vec<String> {
     let mut hardened_args = vec![
         "--no-pager".to_string(),
@@ -123,7 +155,6 @@ pub(crate) struct TerminalStatus {
 struct BinaryExecutionOptions {
     timeout_ms: Option<u64>,
     max_output_bytes: usize,
-    preserve_git_config: bool,
 }
 
 impl TerminalService {
@@ -205,7 +236,6 @@ impl TerminalService {
             BinaryExecutionOptions {
                 timeout_ms: request.timeout_ms,
                 max_output_bytes: DEFAULT_TERMINAL_MAX_OUTPUT_BYTES,
-                preserve_git_config: false,
             },
         )
         .await
@@ -236,32 +266,6 @@ impl TerminalService {
             BinaryExecutionOptions {
                 timeout_ms,
                 max_output_bytes: GIT_COMMAND_MAX_OUTPUT_BYTES,
-                preserve_git_config: false,
-            },
-        )
-        .await
-    }
-
-    pub(crate) async fn inspect_git_config(
-        &self,
-        args: &[String],
-        cwd: PathBuf,
-        preserve_standard_config: bool,
-    ) -> Result<TerminalExecResponse, BridgeError> {
-        let cwd = self
-            .path_policy
-            .resolve_existing(cwd.to_string_lossy().as_ref(), PathKind::Directory)?;
-        let hardened_args = hardened_git_args(args);
-
-        self.execute_binary_internal(
-            "git",
-            &hardened_args,
-            "git config inspection".to_string(),
-            cwd,
-            BinaryExecutionOptions {
-                timeout_ms: None,
-                max_output_bytes: GIT_COMMAND_MAX_OUTPUT_BYTES,
-                preserve_git_config: preserve_standard_config,
             },
         )
         .await
@@ -376,14 +380,13 @@ impl TerminalService {
             .current_dir(&cwd)
             .env_clear()
             .env("GIT_TERMINAL_PROMPT", "0")
+            // System and global config never reach a bridge-run command, so the operator's own
+            // credential helpers, aliases, and editors can neither run nor be validated against.
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if !options.preserve_git_config {
-            command
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null");
-        }
         #[cfg(unix)]
         command.process_group(0);
         for name in ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SystemRoot"] {
@@ -773,7 +776,6 @@ mod tests {
                 BinaryExecutionOptions {
                     timeout_ms: None,
                     max_output_bytes: 1024,
-                    preserve_git_config: false,
                 },
             )
             .await
@@ -792,7 +794,6 @@ mod tests {
                 BinaryExecutionOptions {
                     timeout_ms: None,
                     max_output_bytes: 1024,
-                    preserve_git_config: false,
                 },
             )
             .await
@@ -818,7 +819,6 @@ mod tests {
                 BinaryExecutionOptions {
                     timeout_ms: None,
                     max_output_bytes: 5,
-                    preserve_git_config: false,
                 },
             )
             .await
@@ -843,7 +843,6 @@ mod tests {
                 BinaryExecutionOptions {
                     timeout_ms: Some(100),
                     max_output_bytes: 1024,
-                    preserve_git_config: false,
                 },
             ),
         )
@@ -883,7 +882,6 @@ mod tests {
                         BinaryExecutionOptions {
                             timeout_ms: Some(5_000),
                             max_output_bytes: 1024,
-                            preserve_git_config: false,
                         },
                     )
                     .await
@@ -903,7 +901,6 @@ mod tests {
                     BinaryExecutionOptions {
                         timeout_ms: None,
                         max_output_bytes: 1024,
-                        preserve_git_config: false,
                     },
                 )
                 .await
