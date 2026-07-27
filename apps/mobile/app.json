@@ -8,11 +8,6 @@
     "userInterfaceStyle": "automatic",
     "orientation": "portrait",
     "icon": "./assets/brand/app-icon.png",
-    "splash": {
-      "image": "./assets/brand/splash-icon-white.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0C0F12"
-    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -49,6 +44,14 @@
     "plugins": [
       "./plugins/withAndroidCleartextTraffic",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/brand/splash-icon-white.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0C0F12"
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "DapperCode uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat."
@@ -62,7 +65,9 @@
         }
       ],
       "expo-secure-store",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

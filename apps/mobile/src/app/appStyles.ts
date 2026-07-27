@@ -85,7 +85,7 @@ export function createStyles(theme: AppTheme): ReturnType<typeof StyleSheet.crea
       elevation: 0,
     },
     chatTransitionOverlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 5,
       alignItems: 'center',
       justifyContent: 'center',
@@ -111,16 +111,16 @@ export function createStyles(theme: AppTheme): ReturnType<typeof StyleSheet.crea
       textAlign: 'center',
     },
     overlay: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: theme.colors.overlayBackdrop,
       zIndex: 10,
     },
     drawerLayer: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       zIndex: 10,
     },
     drawerGestureSurface: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
     drawer: {
       position: 'absolute',

@@ -4,6 +4,9 @@ describe('appStatePersistence', () => {
   const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 
   afterEach(() => {
+    jest.dontMock('react-native');
+    jest.dontMock('expo-secure-store');
+    jest.dontMock('expo-file-system/legacy');
     jest.resetModules();
     jest.clearAllMocks();
     if (originalLocalStorage) {
