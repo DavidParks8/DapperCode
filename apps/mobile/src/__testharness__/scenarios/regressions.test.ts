@@ -1212,13 +1212,13 @@ describe('Opening a finished session does not look like a live run', () => {
     } as unknown as Chat['messages'][number];
   }
 
-  function chatWith(messages: Chat['messages']): Chat {
+  function chatWith(messages: Chat['messages'], status: Chat['status'] = 'idle'): Chat {
     return {
       id: 'thread-a',
       title: 'Thread',
       createdAt: '2024-03-02T00:00:00.000Z',
       updatedAt: '2024-03-02T00:00:00.000Z',
-      status: 'idle',
+      status,
       messages,
     } as unknown as Chat;
   }
@@ -1245,15 +1245,35 @@ describe('Opening a finished session does not look like a live run', () => {
     expect(assessment.shouldRefreshWatchdog).toBe(false);
   });
 
-  it('still reports a genuinely growing assistant message', () => {
+  /**
+   * Reproduces a complete answer followed by roughly one watchdog interval of false "Working"
+   * state and a visible stop control.
+   *
+   * ACP snapshots expose the active run directly. Once that run is gone and the snapshot is
+   * idle, an answer added since the previous poll is completed content, not proof of more work.
+   */
+  it('settles an answered idle snapshot even while the previous watchdog is active', () => {
+    const prompt = message('m1', 'user', 'hello');
+    const before = chatWith([prompt], 'running');
+    const answered = chatWith([prompt, message('m2', 'assistant', 'Done.')]);
+
+    expect(didAssistantMessageProgress(before, answered)).toBe(true);
+    expect(assessChatSync(before, answered, true)).toMatchObject({
+      terminal: true,
+      shouldShowRunning: false,
+      shouldRefreshWatchdog: false,
+    });
+  });
+
+  it('still reports a genuinely growing assistant message when lifecycle status is unavailable', () => {
     const before = chatWith([
       message('m1', 'user', 'hello'),
       message('m2', 'assistant', 'Working on'),
     ]);
-    const after = chatWith([
-      message('m1', 'user', 'hello'),
-      message('m2', 'assistant', 'Working on it now'),
-    ]);
+    const after = chatWith(
+      [message('m1', 'user', 'hello'), message('m2', 'assistant', 'Working on it now')],
+      'unknown' as Chat['status'],
+    );
 
     expect(didAssistantMessageProgress(before, after)).toBe(true);
     expect(assessChatSync(before, after, false).shouldShowRunning).toBe(true);
