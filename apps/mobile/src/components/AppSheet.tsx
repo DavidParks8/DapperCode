@@ -9,6 +9,14 @@ import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import {
+  MIN_TOUCH_TARGET,
+  SHEET_HANDLE_INDICATOR_HEIGHT,
+  SHEET_HANDLE_INDICATOR_WIDTH,
+  sheetContentBottomPadding,
+  sheetContentHorizontalPadding,
+  sheetHandleVerticalPadding,
+} from './sheetLayout';
 import { useAppTheme, type AppTheme } from '../theme';
 
 export interface AppSheetProps {
@@ -37,6 +45,10 @@ export interface AppSheetProps {
 
 const BACKDROP_APPEARS_AT = 0;
 const BACKDROP_DISAPPEARS_AT = -1;
+const HANDLE_VERTICAL_PADDING = sheetHandleVerticalPadding(
+  SHEET_HANDLE_INDICATOR_HEIGHT,
+  MIN_TOUCH_TARGET,
+);
 
 /**
  * The app's single sheet surface.
@@ -59,9 +71,13 @@ export function AppSheet({
   const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheetModal>(null);
   const styles = useMemo(() => createAppSheetStyles(theme), [theme]);
-  const contentBottomPadding = useMemo(
-    () => ({ paddingBottom: insets.bottom + theme.spacing.lg + contentBottomInset }),
-    [contentBottomInset, insets.bottom, theme.spacing.lg],
+  const contentEdgeInsets = useMemo(
+    () => ({
+      paddingLeft: sheetContentHorizontalPadding(insets.left, theme.spacing.lg),
+      paddingRight: sheetContentHorizontalPadding(insets.right, theme.spacing.lg),
+      paddingBottom: sheetContentBottomPadding(insets.bottom, theme.spacing.lg, contentBottomInset),
+    }),
+    [contentBottomInset, insets.bottom, insets.left, insets.right, theme.spacing.lg],
   );
   const visibleRef = useRef(visible);
   const presentedRef = useRef(false);
@@ -120,6 +136,7 @@ export function AppSheet({
       onDismiss={handleDismiss}
       backdropComponent={renderBackdrop}
       backgroundStyle={styles.background}
+      handleStyle={styles.handle}
       handleIndicatorStyle={styles.handleIndicator}
       style={styles.sheet}
     >
@@ -130,7 +147,7 @@ export function AppSheet({
           accessibilityLabel={accessibilityLabel}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.content, styles.contentInner, contentBottomPadding]}
+          contentContainerStyle={[styles.content, styles.contentInner, contentEdgeInsets]}
         >
           {children}
         </BottomSheetScrollView>
@@ -139,7 +156,7 @@ export function AppSheet({
           accessibilityViewIsModal
           importantForAccessibility="yes"
           accessibilityLabel={accessibilityLabel}
-          style={[styles.content, contentBottomPadding]}
+          style={[styles.content, contentEdgeInsets]}
         >
           <View style={styles.contentInner}>{children}</View>
         </BottomSheetView>
@@ -163,8 +180,16 @@ function createAppSheetStyles(theme: AppTheme) {
       borderWidth: 1,
       borderColor: theme.colors.borderLight,
     },
-    handleIndicator: { backgroundColor: theme.colors.border, width: 38, height: 4 },
-    content: { paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.xs },
+    handle: {
+      paddingTop: HANDLE_VERTICAL_PADDING,
+      paddingBottom: HANDLE_VERTICAL_PADDING,
+    },
+    handleIndicator: {
+      backgroundColor: theme.colors.border,
+      width: SHEET_HANDLE_INDICATOR_WIDTH,
+      height: SHEET_HANDLE_INDICATOR_HEIGHT,
+    },
+    content: { paddingTop: theme.spacing.xs },
     contentInner: { gap: theme.spacing.md },
   });
 }

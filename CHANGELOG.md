@@ -6,6 +6,12 @@ All notable DapperCode changes are documented here.
 
 ### Fixed
 
+- The model picker's Close button no longer sits in the rounded bottom corner of the phone screen
+  where it was visually clipped: it is centred in the sheet footer, sized to a full 44pt target, and
+  every sheet now keeps a corner clearance below its content even on devices that report no bottom
+  safe-area inset. Sheet content also respects left/right insets in landscape.
+- The bottom sheet's drag handle is now a full 44pt touch target instead of the stock 24pt, so a
+  drag aimed at the handle drags the sheet rather than scrolling the list underneath it.
 - Renaming a session from the chat header works again. The title was wrapped in a press target that
   also had to host a horizontally scrolling view, so the tap was swallowed and nothing happened.
   The title is now a plain drag-to-scroll surface that reveals a long session name in full, and a

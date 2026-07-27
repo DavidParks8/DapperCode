@@ -129,11 +129,12 @@ export function SelectionSheet({
         </View>
       )}
 
-      <View style={styles.footer}>
+      <View style={styles.footer} testID="selection-sheet-footer">
         <Pressable
           onPress={onClose}
           accessibilityRole="button"
           accessibilityLabel={closeLabel}
+          testID="selection-sheet-close"
           style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
         >
           <Text style={styles.closeText}>{closeLabel}</Text>

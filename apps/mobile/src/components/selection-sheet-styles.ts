@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 
+import { MIN_TOUCH_TARGET } from './sheetLayout';
 import type { AppTheme } from '../theme';
 
 export const createSelectionSheetStyles = (theme: AppTheme) =>
@@ -122,13 +123,16 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
       fontWeight: '600',
     },
     footer: {
-      alignItems: 'flex-end',
+      // Right-aligning this button parked it inside the display's bottom-corner arc, where a
+      // rounded screen clips it. Centring keeps the whole target inside the safe rectangle.
+      alignItems: 'center',
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: theme.colors.borderLight,
       paddingTop: theme.spacing.md,
     },
     closeButton: {
-      minWidth: 88,
+      minWidth: 160,
+      minHeight: MIN_TOUCH_TARGET,
       borderRadius: 14,
       borderCurve: 'continuous',
       borderWidth: 1,

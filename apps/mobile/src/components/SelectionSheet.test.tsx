@@ -1,9 +1,11 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { AppThemeProvider, createAppTheme } from '../theme';
+import { AppThemeProvider, createAppTheme, spacing } from '../theme';
 import { SelectionSheet, type SelectionSheetOption } from './SelectionSheet';
+import { MIN_TOUCH_TARGET, SHEET_CORNER_CLEARANCE } from './sheetLayout';
 
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
@@ -65,6 +67,10 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
 function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
   const style = node.props.style;
   return typeof style === 'function' ? style({ pressed }) : style;
+}
+
+function flattenStyle(style: unknown): Record<string, number | string | undefined> {
+  return (StyleSheet.flatten(style as never) ?? {}) as Record<string, number | string | undefined>;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
@@ -167,5 +173,76 @@ describe('SelectionSheet', () => {
     });
     expect(textContent(queryRoot(tree))).not.toContain('Hidden');
     act(() => tree.unmount());
+  });
+
+  it('keeps the close button out of the display corner and on a full touch target', () => {
+    const onClose = jest.fn();
+    const tree = render(
+      <SelectionSheet
+        visible
+        title="Choose a model"
+        subtitle="Choose the model for this session."
+        options={[{ key: 'a', title: 'Model A', onPress: jest.fn() }]}
+        onClose={onClose}
+        presentation="expanded"
+      />,
+    );
+    const root = queryRoot(tree);
+
+    const footer = root.findAll((node) => node.props.testID === 'selection-sheet-footer')[0];
+    if (!footer) throw new Error('Missing selection sheet footer');
+    const footerStyle = flattenStyle(footer.props.style);
+    // Right aligning the button parked it in the screen's rounded bottom corner, where it was
+    // visually clipped.
+    expect(footerStyle.alignItems).toBe('center');
+    expect(footerStyle.alignItems).not.toBe('flex-end');
+
+    const close = findPressable(root, 'Close');
+    const closeStyle = flattenStyle(invokeStyle(close, false));
+    expect(Number(closeStyle.minHeight ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(closeStyle.alignSelf).not.toBe('flex-end');
+
+    const pressedStyle = flattenStyle(invokeStyle(close, true));
+    expect(Number(pressedStyle.minHeight ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(pressedStyle.alignItems).toBe('center');
+
+    act(() => invokeProp(close, 'onPress'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('leaves room below the close button even when the device reports no bottom inset', () => {
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: safeAreaMetrics.frame,
+            insets: { top: 0, left: 0, right: 0, bottom: 0 },
+          }}
+        >
+          <AppThemeProvider theme={theme}>
+            <SelectionSheet
+              visible
+              title="Choose a model"
+              options={[{ key: 'a', title: 'Model A', onPress: jest.fn() }]}
+              onClose={onClose}
+              presentation="expanded"
+            />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    if (!tree) throw new Error('Component did not render');
+    const content = queryRoot(tree).findAll(
+      (node) => node.props.accessibilityViewIsModal === true,
+    )[0];
+    if (!content) throw new Error('Missing sheet content');
+    const contentStyle = flattenStyle(content.props.contentContainerStyle ?? content.props.style);
+    expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
+      SHEET_CORNER_CLEARANCE + spacing.lg,
+    );
+    act(() => tree?.unmount());
   });
 });
