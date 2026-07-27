@@ -145,18 +145,18 @@ impl BridgeConfig {
         let pinned_tls_identity = parse_optional_absolute_path_env("BRIDGE_PINNED_TLS_IDENTITY")?;
         let pinned_tls_device_registry =
             parse_optional_absolute_path_env("BRIDGE_PINNED_TLS_DEVICE_REGISTRY")?;
-        validate_transport_configuration(
+        validate_transport_configuration(TransportValidation {
             transport_mode,
             network_mode,
-            &host,
-            auth_token.as_deref(),
+            host: &host,
+            auth_token: auth_token.as_deref(),
             allow_insecure_no_auth,
             allow_query_token_auth,
-            connect_url.as_deref(),
-            preview_connect_url.as_deref(),
-            pinned_tls_identity.as_deref(),
-            pinned_tls_device_registry.as_deref(),
-        )?;
+            connect_url: connect_url.as_deref(),
+            preview_connect_url: preview_connect_url.as_deref(),
+            pinned_tls_identity: pinned_tls_identity.as_deref(),
+            pinned_tls_device_registry: pinned_tls_device_registry.as_deref(),
+        })?;
         let auth_enabled = auth_token.is_some();
         let allow_outside_root_cwd =
             parse_bool_env_with_default("BRIDGE_ALLOW_OUTSIDE_ROOT_CWD", true)?;
@@ -263,6 +263,20 @@ enum BrowserOriginPolicy<'a> {
     LoopbackDevelopment,
 }
 
+#[derive(Clone, Copy)]
+struct TransportValidation<'a> {
+    transport_mode: TransportMode,
+    network_mode: NetworkMode,
+    host: &'a str,
+    auth_token: Option<&'a str>,
+    allow_insecure_no_auth: bool,
+    allow_query_token_auth: bool,
+    connect_url: Option<&'a str>,
+    preview_connect_url: Option<&'a str>,
+    pinned_tls_identity: Option<&'a std::path::Path>,
+    pinned_tls_device_registry: Option<&'a std::path::Path>,
+}
+
 fn request_browser_origin(headers: &HeaderMap) -> Result<Option<String>, ()> {
     let mut origins = headers.get_all(ORIGIN).iter();
     let Some(raw_origin) = origins.next() else {
@@ -275,78 +289,49 @@ fn request_browser_origin(headers: &HeaderMap) -> Result<Option<String>, ()> {
     normalize_browser_origin(raw_origin).map(Some).ok_or(())
 }
 
-fn validate_transport_configuration(
-    transport_mode: TransportMode,
-    network_mode: NetworkMode,
-    host: &str,
-    auth_token: Option<&str>,
-    allow_insecure_no_auth: bool,
-    allow_query_token_auth: bool,
-    connect_url: Option<&str>,
-    preview_connect_url: Option<&str>,
-    pinned_tls_identity: Option<&std::path::Path>,
-    pinned_tls_device_registry: Option<&std::path::Path>,
-) -> Result<(), String> {
-    match transport_mode {
+fn validate_transport_configuration(input: TransportValidation<'_>) -> Result<(), String> {
+    match input.transport_mode {
         TransportMode::PrivateBearer => {
-            if auth_token.is_none() && !allow_insecure_no_auth {
+            if input.auth_token.is_none() && !input.allow_insecure_no_auth {
                 return Err(
                     "BRIDGE_AUTH_TOKEN is required. Set BRIDGE_ALLOW_INSECURE_NO_AUTH=true only for local development."
                         .to_string(),
                 );
             }
-            if auth_token.is_none() {
-                validate_no_auth_listener(host)?;
+            if input.auth_token.is_none() {
+                validate_no_auth_listener(input.host)?;
             }
             Ok(())
         }
-        TransportMode::TailnetPinnedTls => validate_pinned_tls_configuration(
-            network_mode,
-            auth_token,
-            allow_insecure_no_auth,
-            allow_query_token_auth,
-            connect_url,
-            preview_connect_url,
-            pinned_tls_identity,
-            pinned_tls_device_registry,
-        ),
+        TransportMode::TailnetPinnedTls => validate_pinned_tls_configuration(&input),
     }
 }
 
-fn validate_pinned_tls_configuration(
-    network_mode: NetworkMode,
-    auth_token: Option<&str>,
-    allow_insecure_no_auth: bool,
-    allow_query_token_auth: bool,
-    connect_url: Option<&str>,
-    preview_connect_url: Option<&str>,
-    pinned_tls_identity: Option<&std::path::Path>,
-    pinned_tls_device_registry: Option<&std::path::Path>,
-) -> Result<(), String> {
-    if network_mode != NetworkMode::Tailscale {
+fn validate_pinned_tls_configuration(input: &TransportValidation<'_>) -> Result<(), String> {
+    if input.network_mode != NetworkMode::Tailscale {
         return Err("tailnetPinnedTls requires BRIDGE_NETWORK_MODE=tailscale".to_string());
     }
-    if auth_token.is_some() {
+    if input.auth_token.is_some() {
         return Err(
             "tailnetPinnedTls rejects BRIDGE_AUTH_TOKEN; bearer credentials cannot be used by the pinned TLS listener"
                 .to_string(),
         );
     }
-    if allow_query_token_auth {
+    if input.allow_query_token_auth {
         return Err("tailnetPinnedTls rejects BRIDGE_ALLOW_QUERY_TOKEN_AUTH=true".to_string());
     }
-    if allow_insecure_no_auth {
+    if input.allow_insecure_no_auth {
         return Err("tailnetPinnedTls rejects BRIDGE_ALLOW_INSECURE_NO_AUTH=true".to_string());
     }
-    require_https_url("BRIDGE_CONNECT_URL", connect_url)?;
-    require_https_url("BRIDGE_PREVIEW_CONNECT_URL", preview_connect_url)?;
-    if pinned_tls_identity.is_none() {
+    require_https_url("BRIDGE_CONNECT_URL", input.connect_url)?;
+    require_https_url("BRIDGE_PREVIEW_CONNECT_URL", input.preview_connect_url)?;
+    if input.pinned_tls_identity.is_none() {
         return Err(
             "tailnetPinnedTls requires BRIDGE_PINNED_TLS_IDENTITY for the future bridge identity"
                 .to_string(),
         );
     }
-    if pinned_tls_device_registry.is_none() {
+    if input.pinned_tls_device_registry.is_none() {
         return Err(
             "tailnetPinnedTls requires BRIDGE_PINNED_TLS_DEVICE_REGISTRY for the future enrolled-device registry"
                 .to_string(),
@@ -705,6 +690,66 @@ fn validate_no_auth_listener(host: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const CONFIG_ENV_NAMES: &[&str] = &[
+        "BRIDGE_TRANSPORT_MODE",
+        "BRIDGE_NETWORK_MODE",
+        "BRIDGE_HOST",
+        "BRIDGE_PORT",
+        "BRIDGE_PREVIEW_HOST",
+        "BRIDGE_PREVIEW_PORT",
+        "BRIDGE_CONNECT_URL",
+        "BRIDGE_PREVIEW_CONNECT_URL",
+        "BRIDGE_WORKDIR",
+        "BRIDGE_STATE_DIR",
+        "BRIDGE_ATTACHMENTS_DIR",
+        "ACP_AGENT_MANIFEST",
+        "ACP_AGENT_ROOTS",
+        "ACP_INITIALIZE_TIMEOUT_MS",
+        "BRIDGE_AUTH_TOKEN",
+        "BRIDGE_ALLOW_INSECURE_NO_AUTH",
+        "BRIDGE_NO_AUTH_ALLOWED_ORIGINS",
+        "BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS",
+        "BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS",
+        "BRIDGE_ALLOW_QUERY_TOKEN_AUTH",
+        "BRIDGE_PINNED_TLS_IDENTITY",
+        "BRIDGE_PINNED_TLS_DEVICE_REGISTRY",
+        "BRIDGE_ALLOW_OUTSIDE_ROOT_CWD",
+        "BRIDGE_SHOW_PAIRING_QR",
+        "BRIDGE_WS_MAX_FRAME_BYTES",
+        "BRIDGE_WS_MAX_MESSAGE_BYTES",
+        "BRIDGE_WS_PER_CLIENT_IN_FLIGHT",
+        "BRIDGE_WS_GLOBAL_IN_FLIGHT",
+        "BRIDGE_TERMINAL_EXEC_POLICIES",
+    ];
+
+    struct RestoreEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+    impl RestoreEnv {
+        fn cleared(names: &'static [&'static str]) -> Self {
+            let previous = names
+                .iter()
+                .map(|name| {
+                    let value = env::var_os(name);
+                    unsafe { env::remove_var(name) };
+                    (*name, value)
+                })
+                .collect();
+            Self(previous)
+        }
+    }
+
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            for (name, value) in self.0.drain(..) {
+                if let Some(value) = value {
+                    unsafe { env::set_var(name, value) };
+                } else {
+                    unsafe { env::remove_var(name) };
+                }
+            }
+        }
+    }
+
     /// Scratch directory that cleans itself up, mirroring the helper the attachment tests use so
     /// the bridge keeps its dependency-free test setup.
     struct TestDir(PathBuf);
@@ -867,6 +912,36 @@ mod tests {
         headers
     }
 
+    fn private_bearer_validation(host: &str) -> TransportValidation<'_> {
+        TransportValidation {
+            transport_mode: TransportMode::PrivateBearer,
+            network_mode: NetworkMode::Local,
+            host,
+            auth_token: Some("secret"),
+            allow_insecure_no_auth: false,
+            allow_query_token_auth: false,
+            connect_url: None,
+            preview_connect_url: None,
+            pinned_tls_identity: None,
+            pinned_tls_device_registry: None,
+        }
+    }
+
+    fn pinned_transport_validation() -> TransportValidation<'static> {
+        TransportValidation {
+            transport_mode: TransportMode::TailnetPinnedTls,
+            network_mode: NetworkMode::Tailscale,
+            host: "100.64.0.1",
+            auth_token: None,
+            allow_insecure_no_auth: false,
+            allow_query_token_auth: false,
+            connect_url: Some("https://bridge.tailnet"),
+            preview_connect_url: Some("https://preview.tailnet"),
+            pinned_tls_identity: Some(std::path::Path::new("/tmp/bridge-identity")),
+            pinned_tls_device_registry: Some(std::path::Path::new("/tmp/device-registry")),
+        }
+    }
+
     #[test]
     fn no_auth_listener_requires_literal_loopback_ip() {
         for host in ["127.0.0.1", "127.42.0.9", "::1"] {
@@ -937,9 +1012,12 @@ mod tests {
             "https:example.com",
             r"https:\example.com",
             "https://user@example.com",
+            "https://:secret@example.com",
             "https://example.com/path",
             "https://trusted.example/path/..",
             "https://example.com?query=1",
+            "https://example .com",
+            "http://",
             "file:///tmp/index.html",
         ] {
             assert!(
@@ -1005,135 +1083,218 @@ mod tests {
 
         assert!(config.is_browser_origin_allowed(&HeaderMap::new()));
         assert!(config.is_browser_origin_allowed(&headers_with_origin("https://trusted.example")));
-        assert!(!config.is_browser_origin_allowed(&headers_with_origin("https://evil.example")));
+        for origin in ["https://evil.example", "null"] {
+            assert!(!config.is_browser_origin_allowed(&headers_with_origin(origin)));
+        }
+
+        let mut duplicate = headers_with_origin("https://trusted.example");
+        duplicate.append(ORIGIN, "https://trusted.example".parse().unwrap());
+        assert!(!config.is_browser_origin_allowed(&duplicate));
+
+        let mut malformed = HeaderMap::new();
+        malformed.insert(
+            ORIGIN,
+            axum::http::HeaderValue::from_bytes(b"\xff").unwrap(),
+        );
+        assert!(!config.is_browser_origin_allowed(&malformed));
     }
 
     #[test]
     fn pinned_transport_validation_rejects_each_unsafe_or_incomplete_configuration() {
-        let identity = std::path::Path::new("/tmp/bridge-identity");
-        let registry = std::path::Path::new("/tmp/device-registry");
-        let validate = |network_mode,
-                        auth_token,
-                        allow_insecure_no_auth,
-                        allow_query_token_auth,
-                        connect_url,
-                        preview_connect_url,
-                        pinned_tls_identity,
-                        pinned_tls_device_registry| {
-            validate_transport_configuration(
-                TransportMode::TailnetPinnedTls,
-                network_mode,
-                "100.64.0.1",
-                auth_token,
-                allow_insecure_no_auth,
-                allow_query_token_auth,
-                connect_url,
-                preview_connect_url,
-                pinned_tls_identity,
-                pinned_tls_device_registry,
-            )
-            .unwrap_err()
+        let validate = |input| {
+            validate_transport_configuration(input)
+                .expect_err("tailnetPinnedTls must remain unavailable in Stage 0")
         };
 
-        assert!(validate(
-            NetworkMode::Local,
-            None,
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("BRIDGE_NETWORK_MODE=tailscale"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            Some("legacy-token"),
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("rejects BRIDGE_AUTH_TOKEN"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            true,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("BRIDGE_ALLOW_QUERY_TOKEN_AUTH"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            true,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("BRIDGE_ALLOW_INSECURE_NO_AUTH"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            false,
-            Some("http://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("BRIDGE_CONNECT_URL"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            None,
-            Some(identity),
-            Some(registry),
-        )
-        .contains("BRIDGE_PREVIEW_CONNECT_URL"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            None,
-            Some(registry),
-        )
-        .contains("BRIDGE_PINNED_TLS_IDENTITY"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            None,
-        )
-        .contains("BRIDGE_PINNED_TLS_DEVICE_REGISTRY"));
-        assert!(validate(
-            NetworkMode::Tailscale,
-            None,
-            false,
-            false,
-            Some("https://bridge.tailnet"),
-            Some("https://preview.tailnet"),
-            Some(identity),
-            Some(registry),
-        )
-        .contains("not yet available"));
+        let mut input = pinned_transport_validation();
+        input.network_mode = NetworkMode::Local;
+        assert!(validate(input).contains("BRIDGE_NETWORK_MODE=tailscale"));
+
+        let mut input = pinned_transport_validation();
+        input.auth_token = Some("legacy-token");
+        assert!(validate(input).contains("rejects BRIDGE_AUTH_TOKEN"));
+
+        let mut input = pinned_transport_validation();
+        input.allow_query_token_auth = true;
+        assert!(validate(input).contains("BRIDGE_ALLOW_QUERY_TOKEN_AUTH"));
+
+        let mut input = pinned_transport_validation();
+        input.allow_insecure_no_auth = true;
+        assert!(validate(input).contains("BRIDGE_ALLOW_INSECURE_NO_AUTH"));
+
+        for connect_url in [None, Some("http://bridge.tailnet")] {
+            let mut input = pinned_transport_validation();
+            input.connect_url = connect_url;
+            assert!(validate(input).contains("BRIDGE_CONNECT_URL"));
+        }
+
+        for preview_url in [None, Some("http://preview.tailnet")] {
+            let mut input = pinned_transport_validation();
+            input.preview_connect_url = preview_url;
+            assert!(validate(input).contains("BRIDGE_PREVIEW_CONNECT_URL"));
+        }
+
+        let mut input = pinned_transport_validation();
+        input.pinned_tls_identity = None;
+        assert!(validate(input).contains("BRIDGE_PINNED_TLS_IDENTITY"));
+
+        let mut input = pinned_transport_validation();
+        input.pinned_tls_device_registry = None;
+        assert!(validate(input).contains("BRIDGE_PINNED_TLS_DEVICE_REGISTRY"));
+
+        assert!(validate(pinned_transport_validation()).contains("not yet available"));
+    }
+
+    #[test]
+    fn private_bearer_validation_preserves_authenticated_and_loopback_development_modes() {
+        let mut input = private_bearer_validation("192.168.1.20");
+        input.allow_query_token_auth = true;
+        assert!(validate_transport_configuration(input).is_ok());
+
+        let mut input = private_bearer_validation("127.0.0.1");
+        input.auth_token = None;
+        assert!(validate_transport_configuration(input).is_err());
+
+        input.allow_insecure_no_auth = true;
+        assert!(validate_transport_configuration(input).is_ok());
+
+        input.host = "0.0.0.0";
+        assert!(validate_transport_configuration(input).is_err());
+    }
+
+    #[test]
+    fn legacy_private_bearer_environment_uses_safe_canonical_defaults() {
+        let _restore = RestoreEnv::cleared(CONFIG_ENV_NAMES);
+        let temp = TestDir::new();
+        unsafe {
+            env::set_var("BRIDGE_WORKDIR", temp.path());
+            env::set_var("BRIDGE_AUTH_TOKEN", " legacy-secret ");
+        }
+
+        let config = BridgeConfig::from_env().expect("legacy environment should migrate");
+        assert_eq!(config.transport_mode, TransportMode::PrivateBearer);
+        assert_eq!(config.transport_mode.as_str(), "privateBearer");
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 8787);
+        assert_eq!(config.preview_host, "127.0.0.1");
+        assert_eq!(config.preview_port, 8788);
+        assert_eq!(config.auth_token.as_deref(), Some("legacy-secret"));
+        assert!(config.auth_enabled);
+        assert!(!config.allow_insecure_no_auth);
+        assert!(!config.allow_query_token_auth);
+        assert!(!config.enforce_authenticated_origins);
+        assert!(config.no_auth_allowed_origins.is_empty());
+        assert!(config.authenticated_allowed_origins.is_empty());
+        assert!(config.allow_outside_root_cwd);
+        assert!(config.show_pairing_qr);
+        assert_eq!(
+            config.acp_manifest_path,
+            config.workdir.join(".dappercode/agents.json")
+        );
+        assert_eq!(
+            config.acp_approved_executable_roots,
+            vec![config.workdir.join(".dappercode/agents")]
+        );
+        assert_eq!(config.acp_initialize_timeout, Duration::from_millis(15_000));
+        assert_eq!(
+            config.attachments_dir,
+            config
+                .workdir
+                .join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME)
+        );
+        assert_eq!(config.ws_limits.max_frame_bytes, DEFAULT_WS_MAX_FRAME_BYTES);
+        assert_eq!(
+            config.ws_limits.max_message_bytes,
+            DEFAULT_WS_MAX_MESSAGE_BYTES
+        );
+        assert_eq!(
+            config.ws_limits.per_client_in_flight,
+            DEFAULT_WS_PER_CLIENT_IN_FLIGHT
+        );
+        assert_eq!(
+            config.ws_limits.global_in_flight,
+            DEFAULT_WS_GLOBAL_IN_FLIGHT
+        );
+    }
+
+    #[test]
+    fn pinned_environment_rejects_every_legacy_or_incomplete_input() {
+        let _restore = RestoreEnv::cleared(CONFIG_ENV_NAMES);
+        let temp = TestDir::new();
+        let configure_valid_shape = || unsafe {
+            env::set_var("BRIDGE_TRANSPORT_MODE", "tailnetPinnedTls");
+            env::set_var("BRIDGE_NETWORK_MODE", "tailscale");
+            env::set_var("BRIDGE_WORKDIR", temp.path());
+            env::set_var("BRIDGE_CONNECT_URL", "https://bridge.tailnet");
+            env::set_var("BRIDGE_PREVIEW_CONNECT_URL", "https://preview.tailnet");
+            env::set_var("BRIDGE_PINNED_TLS_IDENTITY", "/tmp/identity");
+            env::set_var("BRIDGE_PINNED_TLS_DEVICE_REGISTRY", "/tmp/registry");
+        };
+        let error = || match BridgeConfig::from_env() {
+            Ok(_) => panic!("pinned mode must fail closed"),
+            Err(error) => error,
+        };
+
+        configure_valid_shape();
+        assert_eq!(TransportMode::TailnetPinnedTls.as_str(), "tailnetPinnedTls");
+        assert!(error().contains("not yet available"));
+
+        unsafe {
+            env::set_var("BRIDGE_CONNECT_URL", " HTTPS://bridge.tailnet/base/ ");
+            env::set_var(
+                "BRIDGE_PREVIEW_CONNECT_URL",
+                "HTTPS://preview.tailnet/base/",
+            );
+        }
+        assert_eq!(
+            parse_connect_url_env("BRIDGE_CONNECT_URL")
+                .unwrap()
+                .as_deref(),
+            Some("https://bridge.tailnet/base")
+        );
+        assert_eq!(
+            parse_connect_url_env("BRIDGE_PREVIEW_CONNECT_URL")
+                .unwrap()
+                .as_deref(),
+            Some("https://preview.tailnet/base")
+        );
+        assert!(error().contains("not yet available"));
+        configure_valid_shape();
+
+        unsafe { env::set_var("BRIDGE_NETWORK_MODE", "local") };
+        assert!(error().contains("BRIDGE_NETWORK_MODE=tailscale"));
+        configure_valid_shape();
+
+        unsafe { env::set_var("BRIDGE_AUTH_TOKEN", "legacy-secret") };
+        assert!(error().contains("rejects BRIDGE_AUTH_TOKEN"));
+        unsafe { env::remove_var("BRIDGE_AUTH_TOKEN") };
+
+        unsafe { env::set_var("BRIDGE_ALLOW_QUERY_TOKEN_AUTH", "true") };
+        assert!(error().contains("BRIDGE_ALLOW_QUERY_TOKEN_AUTH"));
+        unsafe { env::remove_var("BRIDGE_ALLOW_QUERY_TOKEN_AUTH") };
+
+        unsafe { env::set_var("BRIDGE_ALLOW_INSECURE_NO_AUTH", "true") };
+        assert!(error().contains("BRIDGE_ALLOW_INSECURE_NO_AUTH"));
+        unsafe { env::remove_var("BRIDGE_ALLOW_INSECURE_NO_AUTH") };
+
+        unsafe { env::remove_var("BRIDGE_CONNECT_URL") };
+        assert!(error().contains("BRIDGE_CONNECT_URL"));
+        unsafe { env::set_var("BRIDGE_CONNECT_URL", "https://bridge.tailnet") };
+
+        unsafe { env::remove_var("BRIDGE_PREVIEW_CONNECT_URL") };
+        assert!(error().contains("BRIDGE_PREVIEW_CONNECT_URL"));
+        unsafe { env::set_var("BRIDGE_PREVIEW_CONNECT_URL", "https://preview.tailnet") };
+
+        unsafe { env::remove_var("BRIDGE_PINNED_TLS_IDENTITY") };
+        assert!(error().contains("BRIDGE_PINNED_TLS_IDENTITY"));
+        unsafe { env::set_var("BRIDGE_PINNED_TLS_IDENTITY", "relative/identity") };
+        assert!(error().contains("must be an absolute path"));
+        unsafe { env::set_var("BRIDGE_PINNED_TLS_IDENTITY", "/tmp/identity") };
+
+        unsafe { env::remove_var("BRIDGE_PINNED_TLS_DEVICE_REGISTRY") };
+        assert!(error().contains("BRIDGE_PINNED_TLS_DEVICE_REGISTRY"));
+        unsafe { env::set_var("BRIDGE_PINNED_TLS_DEVICE_REGISTRY", "relative/registry") };
+        assert!(error().contains("must be an absolute path"));
     }
 
     #[test]
@@ -1182,6 +1343,7 @@ mod tests {
         assert_eq!(normalize_connect_url("not a url"), None);
         assert_eq!(normalize_connect_url("ftp://example.com"), None);
         assert_eq!(normalize_connect_url("https://user@example.com"), None);
+        assert_eq!(normalize_connect_url("https://:secret@example.com"), None);
         assert_eq!(
             normalize_connect_url("https://example.com/"),
             Some("https://example.com".into())
@@ -1190,6 +1352,15 @@ mod tests {
             normalize_connect_url(" https://example.com/base///?query=1#fragment "),
             Some("https://example.com/base".into())
         );
+    }
+
+    #[test]
+    fn executable_root_environment_rejects_empty_and_relative_lists() {
+        let _restore = RestoreEnv::cleared(&["ACP_AGENT_ROOTS"]);
+        unsafe { env::set_var("ACP_AGENT_ROOTS", "") };
+        assert!(parse_path_list_env("ACP_AGENT_ROOTS", &[]).is_err());
+        unsafe { env::set_var("ACP_AGENT_ROOTS", "relative/path") };
+        assert!(parse_path_list_env("ACP_AGENT_ROOTS", &[]).is_err());
     }
 
     #[test]
@@ -1310,55 +1481,7 @@ mod tests {
 
     #[test]
     fn bridge_config_loads_a_fully_configured_environment() {
-        const NAMES: &[&str] = &[
-            "BRIDGE_TRANSPORT_MODE",
-            "BRIDGE_NETWORK_MODE",
-            "BRIDGE_HOST",
-            "BRIDGE_PORT",
-            "BRIDGE_PREVIEW_HOST",
-            "BRIDGE_PREVIEW_PORT",
-            "BRIDGE_CONNECT_URL",
-            "BRIDGE_PREVIEW_CONNECT_URL",
-            "BRIDGE_WORKDIR",
-            "ACP_AGENT_MANIFEST",
-            "ACP_AGENT_ROOTS",
-            "ACP_INITIALIZE_TIMEOUT_MS",
-            "BRIDGE_AUTH_TOKEN",
-            "BRIDGE_ALLOW_INSECURE_NO_AUTH",
-            "BRIDGE_NO_AUTH_ALLOWED_ORIGINS",
-            "BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS",
-            "BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS",
-            "BRIDGE_ALLOW_QUERY_TOKEN_AUTH",
-            "BRIDGE_PINNED_TLS_IDENTITY",
-            "BRIDGE_PINNED_TLS_DEVICE_REGISTRY",
-            "BRIDGE_ALLOW_OUTSIDE_ROOT_CWD",
-            "BRIDGE_SHOW_PAIRING_QR",
-            "BRIDGE_WS_MAX_FRAME_BYTES",
-            "BRIDGE_WS_MAX_MESSAGE_BYTES",
-            "BRIDGE_WS_PER_CLIENT_IN_FLIGHT",
-            "BRIDGE_WS_GLOBAL_IN_FLIGHT",
-            "BRIDGE_TERMINAL_EXEC_POLICIES",
-        ];
-
-        struct RestoreEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
-        impl Drop for RestoreEnv {
-            fn drop(&mut self) {
-                for (name, value) in self.0.drain(..) {
-                    if let Some(value) = value {
-                        unsafe { env::set_var(name, value) };
-                    } else {
-                        unsafe { env::remove_var(name) };
-                    }
-                }
-            }
-        }
-
-        let _restore = RestoreEnv(
-            NAMES
-                .iter()
-                .map(|name| (*name, env::var_os(name)))
-                .collect(),
-        );
+        let _restore = RestoreEnv::cleared(CONFIG_ENV_NAMES);
         let root = std::env::temp_dir().join(format!("dappercode-config-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&root).unwrap();
         let values = [

@@ -40,7 +40,6 @@ export function useMainScreenComposerControlActions(
     applyAcpConfigOption,
     attachmentController,
     attachmentPickerBusy,
-    ensureModeConfigurationSession,
     hasFailedAttachmentUploads,
     modelConfig,
     modelOptions,
@@ -154,10 +153,7 @@ export function useMainScreenComposerControlActions(
 
   const openCollaborationModeMenu = useCallback(() => {
     setCollaborationModeMenuVisible(true);
-    if (!selectedChatId) {
-      void ensureModeConfigurationSession();
-    }
-  }, [ensureModeConfigurationSession, selectedChatId]);
+  }, []);
 
   const toggleFastMode = useCallback(() => {
     if (!supportsFastMode) {

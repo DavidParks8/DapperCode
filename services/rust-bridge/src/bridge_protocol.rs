@@ -573,6 +573,7 @@ pub(super) struct PendingUserInputQuestionOption {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod pending_interaction_contract_tests {
     use agent_client_protocol::schema::v1::{PermissionOptionKind, ToolCallStatus, ToolKind};
 

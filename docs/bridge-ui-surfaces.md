@@ -122,8 +122,40 @@ The projected AG-UI event shape is:
 }
 ```
 
-For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
+## Implemented Tool Metadata Example
 
+Every ACP tool call carries a `kind` (`read`, `edit`, `execute`, …) and a per-call `status`
+(`pending`, `in_progress`, `completed`, `failed`). Neither fits an AG-UI `TOOL_CALL_START`, so the
+projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the
+`(kind, status, title)` tuple moves. It cannot ride on `dappercode.dev/tool-content`, which only
+fires when structured content changes: a pure `in_progress` → `completed` transition would be lost.
+
+```json
+{
+  "type": "CUSTOM",
+  "threadId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x",
+  "runId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x::turn::7",
+  "name": "dappercode.dev/tool-meta",
+  "value": {
+    "toolCallId": "call-1",
+    "kind": "execute",
+    "status": "in_progress",
+    "title": "npm test"
+  }
+}
+```
+
+A `MESSAGES_SNAPSHOT` cannot carry a custom event, and the AG-UI `Message` bindings are generated
+and must not gain fields, so a snapshot instead carries an activity message with
+`activityType: "dappercode.tool"` immediately before the matching `tool-call:` / `tool-result:`
+pair, holding the same payload plus the bounded `content`, `locations`, and `truncated` fields.
+Mobile folds it into the tool row and never renders it on its own. Sub-agent tools are excluded from
+both paths because they already have their own `dappercode.subagent` card.
+
+Raw tool input is deliberately absent. The bridge strips `rawInput`, `rawOutput`, and `_meta` in
+`acp/handlers.rs` and `acp/snapshot.rs`; rows are built from the ACP `title` and `locations` instead.
+
+For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
 ```bash
 npm run bridge:ui:demo
 ```

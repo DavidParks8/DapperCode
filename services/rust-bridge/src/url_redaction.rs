@@ -198,6 +198,34 @@ mod tests {
     }
 
     #[test]
+    fn redaction_fallbacks_preserve_structure_without_leaking_credentials() {
+        let rendered = redact_url_credentials(concat!(
+            "//first:password@example.test ",
+            "ignored//literal ",
+            "(//second:secret@example.test/path) ",
+            "?flag&token=hidden#code=also-hidden"
+        ));
+        assert_eq!(
+            rendered,
+            "//[REDACTED]@example.test ignored//literal \
+             (//[REDACTED]@example.test/path) ?flag&token=[REDACTED]#code=[REDACTED]"
+        );
+        for secret in ["first", "password", "second", "secret", "hidden"] {
+            assert!(!rendered.contains(secret), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn encoded_and_malformed_query_keys_fail_safely() {
+        let value = "?%54OKEN=one&to%6Ben=two&%G0=kept&%=also-kept&safe+key=value";
+        let rendered = redact_url_credentials(value);
+        assert_eq!(
+            rendered,
+            "?%54OKEN=[REDACTED]&to%6Ben=[REDACTED]&%G0=kept&%=also-kept&safe+key=value"
+        );
+    }
+
+    #[test]
     fn leaves_non_sensitive_urls_unchanged() {
         let value = "https://example.test/path?view=full&tab=2#section";
         assert_eq!(redact_url_credentials(value), value);

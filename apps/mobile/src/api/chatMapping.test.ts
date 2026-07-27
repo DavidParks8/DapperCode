@@ -216,6 +216,16 @@ describe('chatMapping', () => {
       'message-b',
       'reasoning-r',
     ]);
+    // The persisted path must describe a tool row as richly as the live one.
+    expect(snapshot.messages[1].toolMeta).toEqual({
+      toolCallId: 'tool-t',
+      kind: 'read',
+      status: 'completed',
+      title: 'T',
+      content: [],
+      locations: [],
+      truncated: false,
+    });
   });
 
   it('maps persisted OpenCode task tools to one non-navigable subagent card', () => {
@@ -504,6 +514,86 @@ describe('chatMapping', () => {
         subAgent: expect.objectContaining({ toolCallId: 'task-running', agentStatus: 'running' }),
       }),
     });
+  });
+
+  it('keeps a renamed in-progress task tool as a running subagent card', () => {
+    const mapped = mapChat(
+      toRawThread({
+        id: 'parent-renamed-task',
+        acpSnapshot: {
+          version: 2,
+          timeline: [{ sequence: 0, kind: 'tool', canonicalId: 'task-renamed' }],
+          messages: [],
+          tools: [
+            {
+              // OpenCode relabels the tool with the task description once it starts, so only
+              // the bridge's remembered classification identifies it while it is still working.
+              id: 'task-renamed',
+              kind: 'think',
+              status: 'in_progress',
+              title: 'Inspect workspace',
+              content: '',
+              structuredContent: [],
+              locations: [],
+              subagent: true,
+            },
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: {
+            agentId: 'opencode',
+            threadId: 'parent-renamed-task',
+            historyReconstruction: false,
+          },
+          active: {
+            runId: 'run-1',
+            sourceTurnId: 'turn-1',
+            generation: 1,
+            toolIds: ['task-renamed'],
+          },
+        },
+      }),
+    );
+
+    expect(mapped.messages).toHaveLength(1);
+    expect(mapped.messages[0]).toMatchObject({
+      id: 'subagent:task-renamed',
+      role: 'activity',
+      activityType: SUBAGENT_ACTIVITY_TYPE,
+      content: expect.objectContaining({
+        subAgent: expect.objectContaining({ toolCallId: 'task-renamed', agentStatus: 'running' }),
+      }),
+    });
+  });
+
+  it('reports a thread with a live ACP run as running even without a lifecycle status', () => {
+    const raw = {
+      id: 'parent-live-run',
+      acpSnapshot: {
+        version: 2,
+        timeline: [],
+        messages: [],
+        tools: [],
+        plan: [],
+        usage: {},
+        config: [],
+        commands: [],
+        session: { agentId: 'opencode', threadId: 'parent-live-run', historyReconstruction: false },
+        active: { runId: 'run-1', sourceTurnId: 'turn-1', generation: 4, toolIds: [] },
+      },
+    };
+
+    expect(mapChatSummary(toRawThread(raw))?.status).toBe('running');
+    expect(
+      mapChatSummary(
+        toRawThread({
+          ...raw,
+          acpSnapshot: { ...raw.acpSnapshot, active: { toolIds: [] } },
+        }),
+      )?.status,
+    ).toBe('idle');
   });
 
   it('maps the checked Rust ACP snapshot fixture without legacy turns', () => {
@@ -2245,6 +2335,7 @@ describe('chatMapping', () => {
               structuredContent: [],
               locations: [],
               truncated: false,
+              subagent: false,
             },
           ],
           active: { runId: 'run', sourceTurnId: null, toolIds: [] },
@@ -2651,6 +2742,7 @@ describe('chatMapping', () => {
               structuredContent: [],
               locations: [],
               truncated: true,
+              subagent: false,
             },
           ],
           messageCollection: { truncated: true, omittedCount: 0, revision: 1 },

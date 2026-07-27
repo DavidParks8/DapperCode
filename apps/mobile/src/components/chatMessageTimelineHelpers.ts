@@ -64,25 +64,6 @@ function stripLeadingTimelineBullet(title: string): string {
     .trim();
 }
 
-export function summarizeToolGroup(titles: string[]): string {
-  const normalized = titles.map((title) => stripLeadingTimelineBullet(title).toLowerCase());
-  if (normalized.every((title) => title.startsWith('ran ')))
-    return `${String(titles.length)} command${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('called tool')))
-    return `${String(titles.length)} tool call${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('searched web')))
-    return `${String(titles.length)} web search${titles.length === 1 ? '' : 'es'}`;
-  if (normalized.every((title) => title.startsWith('applied file changes')))
-    return `${String(titles.length)} file change${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('reading')))
-    return `${String(titles.length)} file read${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('listing')))
-    return `${String(titles.length)} folder listing${titles.length === 1 ? '' : 's'}`;
-  if (normalized.every((title) => title.startsWith('explored')))
-    return `${String(titles.length)} exploration${titles.length === 1 ? '' : 's'}`;
-  return `${String(titles.length)} tool step${titles.length === 1 ? '' : 's'}`;
-}
-
 export function toTimelineVisual(title: string): {
   icon: keyof typeof Ionicons.glyphMap;
   useMonospaceTitle: boolean;

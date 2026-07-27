@@ -11,7 +11,14 @@ const mockPushControllers: Array<Record<string, jest.Mock>> = [];
 const mockWsStatusListeners: Array<(connected: boolean) => void> = [];
 const mockAppStateListeners: Array<(state: AppStateStatus) => void> = [];
 const mockNotificationResponseListeners: Array<(event: unknown) => void> = [];
-const mockGestures: Array<Record<string, (...args: unknown[]) => unknown>> = [];
+interface MockGesture {
+  testId?: string;
+  onStart?: (...args: unknown[]) => unknown;
+  onUpdate?: (...args: unknown[]) => unknown;
+  onEnd?: (...args: unknown[]) => unknown;
+  onFinalize?: (...args: unknown[]) => unknown;
+}
+const mockGestures: MockGesture[] = [];
 const mockLoadChatSnapshotCache = jest.fn().mockResolvedValue(null);
 const mockSaveChatSnapshotCache = jest.fn().mockResolvedValue(undefined);
 const mockDeleteChatSnapshotCache = jest.fn().mockResolvedValue(undefined);
@@ -57,6 +64,7 @@ jest.mock('react-native-reanimated', () => {
     cancelAnimation: jest.fn(),
     Easing: { out: (value: unknown) => value, cubic: 'cubic' },
     LinearTransition: transition,
+    ReduceMotion: { System: 'system' },
     runOnJS: (callback: (...args: unknown[]) => unknown) => callback,
     useAnimatedStyle: (factory: () => unknown) => factory(),
     useSharedValue: (value: unknown) => ({ value }),
@@ -69,13 +77,16 @@ jest.mock('react-native-reanimated', () => {
 jest.mock('react-native-gesture-handler', () => {
   const View = require('react-native').View;
   const createGesture = () => {
-    const callbacks: Record<string, (...args: unknown[]) => unknown> = {};
+    const callbacks: MockGesture = {};
     const gesture = new Proxy(callbacks, {
       get:
         (target, property: string) =>
         (...args: unknown[]) => {
-          if (property.startsWith('on') && typeof args[0] === 'function')
-            target[property] = args[0] as (...args: unknown[]) => unknown;
+          if (property.startsWith('on') && typeof args[0] === 'function') {
+            Object.assign(target, { [property]: args[0] });
+          } else if (property === 'withTestId' && typeof args[0] === 'string') {
+            target.testId = args[0];
+          }
           return gesture;
         },
     });
@@ -271,6 +282,8 @@ import {
 } from './src/state/bridge/actions';
 import { activeBridgeProfileAtom, bridgeTokenAtom } from './src/state/bridge/atoms';
 import {
+  activeChatAtom,
+  chatTransitionChatIdAtom,
   gitChatAtom,
   mainOpeningChatIdAtom,
   pendingMainChatIdAtom,
@@ -893,14 +906,19 @@ describe('App orchestration', () => {
       lastMessagePreview: '',
       messages: [],
     };
-    await dispatch((s) => s.set(openChatGitAtom, chat as unknown as Chat));
+    await dispatch((s) => {
+      s.set(chatContextChangedAtom, chat as unknown as Chat);
+      s.set(openChatGitAtom, chat as unknown as Chat);
+    });
     expect(store.get(gitChatAtom)).toEqual(chat);
     await act(async () => {
       store.set(closeGitAtom);
       jest.advanceTimersByTime(250);
       await Promise.resolve();
     });
-    expect(store.get(pendingMainChatIdAtom)).toBe(chat.id);
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
+    expect(store.get(activeChatAtom)).toEqual(chat);
     await dispatch((s) => s.set(defaultStartCwdAtom, '/workspace'));
     expect(mockStore.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'settings/update' }),
@@ -975,6 +993,79 @@ describe('App orchestration', () => {
       await Promise.resolve();
     });
     expect(store.get(activeBridgeProfileAtom)?.id).toBe(profile.id);
+    act(() => tree.unmount());
+  });
+
+  it('keeps an old chat intact after a Git back swipe and subsequent session switch', async () => {
+    const tree = await renderApp();
+    const root = tree.root as Queryable;
+    const hydratedChat = {
+      id: 'git-swipe',
+      title: 'Git swipe',
+      status: 'complete',
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+      statusUpdatedAt: profile.updatedAt,
+      lastMessagePreview: 'ready',
+      messages: [{ id: 'message-1', role: 'assistant', content: 'ready' }],
+    };
+    const gitChatShell = { ...hydratedChat, messages: [] };
+    const gestureCount = mockGestures.length;
+
+    await dispatch((s) => {
+      s.set(chatContextChangedAtom, hydratedChat as unknown as Chat);
+      s.set(openChatGitAtom, gitChatShell as unknown as Chat);
+    });
+    const backSwipeGesture = mockGestures
+      .slice(gestureCount)
+      .find((gesture) => gesture.testId === 'app-back-swipe');
+    if (!backSwipeGesture) {
+      throw new Error('Expected the Git back-swipe gesture');
+    }
+    expect(root.findAll((node) => node.props.testID === 'MainScreen')).not.toHaveLength(0);
+    expect(root.findAll((node) => node.props.testID === 'GitScreen')).not.toHaveLength(0);
+
+    mockSpringFinished = false;
+    act(() => {
+      backSwipeGesture.onStart?.({ translationX: 14 });
+      backSwipeGesture.onUpdate?.({ translationX: 120 });
+      backSwipeGesture.onEnd?.({ translationX: 120, velocityX: 0 });
+    });
+    expect(store.get(currentScreenAtom)).toBe('ChatGit');
+
+    mockSpringFinished = true;
+    await act(async () => {
+      backSwipeGesture.onStart?.({ translationX: 14 });
+      backSwipeGesture.onUpdate?.({ translationX: 120 });
+      backSwipeGesture.onEnd?.({ translationX: 120, velocityX: 0 });
+      await Promise.resolve();
+    });
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(activeChatAtom)).toEqual(hydratedChat);
+    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(store.get(mainOpeningChatIdAtom)).toBeNull();
+    expect(store.get(pendingMainChatIdAtom)).toBeNull();
+    expect(store.get(pendingMainChatSnapshotAtom)).toBeNull();
+    expect(root.findAll((node) => node.props.testID === 'GitScreen')).toHaveLength(0);
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Opening chat')).toHaveLength(
+      0,
+    );
+
+    const nextChat = {
+      ...hydratedChat,
+      id: 'next-thread',
+      title: 'Next thread',
+      messages: [{ id: 'message-2', role: 'assistant', content: 'Next answer' }],
+    };
+    (mockApiInstances[0].peekChatShell as jest.Mock).mockReturnValueOnce(nextChat);
+    await dispatch((s) => s.set(selectChatAtom, nextChat.id));
+    expect(store.get(activeChatAtom)).toEqual(nextChat);
+    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(store.get(mainOpeningChatIdAtom)).toBeNull();
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Opening chat')).toHaveLength(
+      0,
+    );
+
     act(() => tree.unmount());
   });
 

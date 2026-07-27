@@ -219,16 +219,37 @@ async fn finish_cancel_attempt(
     }
 }
 
+async fn finish_connection_actor(
+    result: Result<(), String>,
+    ready_tx: &mpsc::Sender<Result<NegotiatedInitialize, AcpRuntimeError>>,
+    requested_shutdown: &AtomicBool,
+    failure_tx: &watch::Sender<Option<String>>,
+    sessions: &SessionRegistry,
+) {
+    if let Err(message) = result {
+        let _ = ready_tx
+            .send(Err(AcpRuntimeError::Connection(message.clone())))
+            .await;
+        if !requested_shutdown.load(Ordering::SeqCst) {
+            let _ = failure_tx.send(Some(message.clone()));
+            for session in sessions.all().await {
+                session.fail_active(message.clone()).await;
+            }
+        }
+    }
+}
+
 impl AcpConnection {
     pub async fn start(
         manifest: &ResolvedAgentManifest,
         approved_roots: &[PathBuf],
         host_environment: &BTreeMap<String, String>,
         initialize_timeout: Duration,
+        extra_argv: &[String],
     ) -> Result<(Self, NegotiatedInitialize), AcpRuntimeError> {
         Self::start_transport(
             manifest.agent_id.clone(),
-            manifest.acp_agent(approved_roots, host_environment)?,
+            manifest.acp_agent_with_args(approved_roots, host_environment, extra_argv)?,
             initialize_timeout,
         )
         .await
@@ -319,18 +340,14 @@ impl AcpConnection {
                 Ok(())
             }).await;
             actor_interactions.drain().await;
-            if let Err(error) = result {
-                let message = error.to_string();
-                let _ = ready_tx
-                    .send(Err(AcpRuntimeError::Connection(message.clone())))
-                    .await;
-                if !actor_requested_shutdown.load(Ordering::SeqCst) {
-                    let _ = failure_tx.send(Some(message.clone()));
-                    for session in actor_sessions.all().await {
-                        session.fail_active(message.clone()).await;
-                    }
-                }
-            }
+            finish_connection_actor(
+                result.map_err(|error| error.to_string()),
+                &ready_tx,
+                &actor_requested_shutdown,
+                &failure_tx,
+                &actor_sessions,
+            )
+            .await;
         });
         match tokio::time::timeout(initialize_timeout, ready_rx.recv()).await {
             Ok(Some(Ok(negotiated))) => Ok((
@@ -1034,6 +1051,7 @@ impl Command {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -1049,6 +1067,27 @@ mod tests {
         SessionResumeCapabilities, SessionUpdate, StopReason, StringPropertySchema, ToolCallStatus,
         ToolCallUpdate, ToolCallUpdateFields, ToolKind,
     };
+
+    #[tokio::test]
+    async fn requested_shutdown_does_not_publish_connection_failure() {
+        let (ready_tx, mut ready_rx) = mpsc::channel(1);
+        let (failure_tx, failure) = watch::channel(None);
+
+        finish_connection_actor(
+            Err("closed".to_string()),
+            &ready_tx,
+            &AtomicBool::new(true),
+            &failure_tx,
+            &SessionRegistry::default(),
+        )
+        .await;
+
+        assert!(matches!(
+            ready_rx.recv().await,
+            Some(Err(AcpRuntimeError::Connection(message))) if message == "closed"
+        ));
+        assert_eq!(*failure.borrow(), None);
+    }
     use agent_client_protocol::{Agent, Client, ConnectTo, Responder};
 
     #[derive(Clone)]

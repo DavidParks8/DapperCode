@@ -589,6 +589,28 @@ mod tests {
         }
     }
 
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(name);
+            unsafe { std::env::set_var(name, value) };
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(previous) => unsafe { std::env::set_var(self.name, previous) },
+                None => unsafe { std::env::remove_var(self.name) },
+            }
+        }
+    }
+
     fn service(root: &Path, policies: &[TerminalExecPolicy]) -> TerminalService {
         let policy = Arc::new(PathPolicy::new(root.to_path_buf(), false).expect("create policy"));
         TerminalService::new(policy, policies.iter().copied().collect())
@@ -942,6 +964,33 @@ mod tests {
         assert_eq!(success.code, Some(0));
         assert!(success.stdout.starts_with("git version"));
 
+        let home = TestDir::new();
+        fs::write(
+            home.0.join(".gitconfig"),
+            "[dappercode]\n\tsentinel = visible\n",
+        )
+        .expect("write global git config");
+        let _home = EnvVarGuard::set("HOME", &home.0);
+        let inspect_args = [
+            "config".to_string(),
+            "--global".to_string(),
+            "--get".to_string(),
+            "dappercode.sentinel".to_string(),
+        ];
+        let preserved = service
+            .inspect_git_config(&inspect_args, temp.0.clone(), true)
+            .await
+            .expect("inspect standard git configuration");
+        assert_eq!(preserved.code, Some(0));
+        assert_eq!(preserved.stdout, "visible");
+
+        let hardened = service
+            .inspect_git_config(&inspect_args, temp.0.clone(), false)
+            .await
+            .expect("inspect hardened git configuration");
+        assert_ne!(hardened.code, Some(0));
+        assert!(hardened.stdout.is_empty());
+
         let failure = service
             .execute_git(
                 &["rev-parse".to_string(), "--is-inside-work-tree".to_string()],
@@ -966,6 +1015,10 @@ mod tests {
 
         let (bytes, truncated) = read_stream_limited(&b"long"[..], 0).await;
         assert!(bytes.is_empty());
+        assert!(truncated);
+
+        let (bytes, truncated) = read_stream_limited(&b"long"[..], 2).await;
+        assert_eq!(bytes, b"lo");
         assert!(truncated);
     }
 

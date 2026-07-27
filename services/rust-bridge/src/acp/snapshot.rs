@@ -80,6 +80,13 @@ pub struct SnapshotTool {
     pub structured_content: Vec<serde_json::Value>,
     pub locations: Vec<serde_json::Value>,
     pub truncated: bool,
+    /// Whether this tool call spawns a sub-agent.
+    ///
+    /// Agents rename a task tool once it reports progress -- OpenCode opens it as `task` and
+    /// then relabels it with the task description -- so the only update that names it is the
+    /// first one. Without a durable flag a running sub-agent renders as an ordinary tool until
+    /// its `<task …>` result lands, which for a foreground task is when it has already finished.
+    pub subagent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -608,9 +615,14 @@ impl SessionSnapshot {
                 .map(|tool| tool.locations.clone())
                 .unwrap_or_default(),
             truncated: existing.as_ref().is_some_and(|tool| tool.truncated),
+            // Sticky: a later update that renames the tool must not un-classify it.
+            subagent: existing.as_ref().is_some_and(|tool| tool.subagent)
+                || self.subagent_headers.contains_key(id)
+                || is_subagent_task_tool(*projection.kind, projection.title),
         };
         tool.truncated |= apply_tool_text(&mut tool.content, projection.content);
         if let Some(header) = Self::latest_valid_task_header(&tool.content) {
+            tool.subagent = true;
             let incoming_state = Self::task_header_state(header);
             let preserved_terminal = self
                 .subagent_headers
@@ -1260,6 +1272,20 @@ fn apply_field(target: &mut Option<String>, update: &FieldUpdate) {
     }
 }
 
+/// Whether a tool call spawns a sub-agent.
+///
+/// The title is the only protocol-visible name a tool call has, and agents rename a task tool
+/// as soon as it reports a description, so this must run on every update and its result must be
+/// remembered rather than recomputed from the latest title.
+pub(crate) fn is_subagent_task_tool(kind: ToolKind, title: &str) -> bool {
+    let normalized = title
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', '_', ' '], "");
+    matches!(normalized.as_str(), "task" | "spawnagent" | "subagent")
+        || kind == ToolKind::Think && normalized.contains("agent")
+}
+
 fn apply_tool_text(target: &mut String, update: &FieldUpdate<String>) -> bool {
     match update {
         FieldUpdate::Unchanged => false,
@@ -1424,6 +1450,7 @@ fn bound(mut value: String, max: usize) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
 
@@ -1436,6 +1463,28 @@ mod tests {
             run_id: format!("run-{generation}"),
             source_turn_id: format!("turn-{generation}"),
             generation,
+        }
+    }
+
+    fn subagent_tool_update(
+        id: &str,
+        title: &str,
+        status: ToolCallStatus,
+        content: &str,
+    ) -> CanonicalEvent {
+        CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: Some(1),
+            tool_call_id: id.to_string(),
+            kind: ToolKind::Think,
+            status,
+            title: title.to_string(),
+            content: FieldUpdate::Set(content.to_string()),
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
         }
     }
 
@@ -1454,6 +1503,201 @@ mod tests {
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
         }
+    }
+
+    #[test]
+    fn snapshot_fallbacks_ignore_orphaned_and_stale_state() {
+        let mut orphaned = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        orphaned.subagent_headers.insert(
+            "missing-tool".to_string(),
+            r#"<task id="child" state="running">"#.to_string(),
+        );
+        let durable = BridgeThreadSnapshot::from(orphaned);
+        assert!(durable.tools.is_empty());
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        assert!(!snapshot.mark_subagent_terminal("missing-child", "completed"));
+        assert!(!snapshot.mark_subagent_tool_terminal(
+            "missing-tool",
+            "completed",
+            ToolCallStatus::Completed
+        ));
+
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&tool("active-tool", Some(1), ToolCallStatus::InProgress));
+        snapshot.apply(&run_started(2));
+        assert_eq!(snapshot.tools["active-tool"].status, ToolCallStatus::Failed);
+        snapshot.subagent_headers.insert(
+            "other-child".to_string(),
+            r#"<task id="other" state="running">"#.to_string(),
+        );
+        assert!(!snapshot.mark_subagent_terminal("missing-child", "completed"));
+        snapshot.subagent_headers.insert(
+            "matching-child".to_string(),
+            r#"<task id="child" state="running">"#.to_string(),
+        );
+        assert!(snapshot.mark_subagent_terminal("child", "completed"));
+        assert_eq!(snapshot.subagent_header("matching-child"), None);
+        assert_eq!(
+            snapshot.subagent_header("other-child"),
+            Some(r#"<task id="other" state="running">"#)
+        );
+        snapshot.apply(&CanonicalEvent::RunFinished {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        assert_eq!(snapshot.active_generation, Some(2));
+        snapshot.apply(&CanonicalEvent::RunFailed {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "stale failure".to_string(),
+        });
+        assert_eq!(snapshot.active_generation, Some(2));
+
+        let mut subagent = tool("subagent", Some(2), ToolCallStatus::InProgress);
+        if let CanonicalEvent::Tool { content, .. } = &mut subagent {
+            *content = FieldUpdate::Set(
+                r#"<task id="child-2" state="running">working</task>"#.to_string(),
+            );
+        }
+        snapshot.apply(&subagent);
+        snapshot.terminalize_unresolved_subagents("completed", 2);
+        assert_eq!(snapshot.tools["subagent"].status, ToolCallStatus::Completed);
+
+        snapshot.apply(&tool("without-header", Some(2), ToolCallStatus::InProgress));
+        snapshot.update_subagent_tool_terminal(
+            "without-header",
+            "completed",
+            ToolCallStatus::Completed,
+        );
+        assert_eq!(
+            snapshot.tools["without-header"].status,
+            ToolCallStatus::Completed
+        );
+
+        assert_eq!(
+            SessionSnapshot::latest_valid_task_header(concat!(
+                r#"<task id="child" state="running">"#,
+                r#"<task incidental="markup">"#
+            )),
+            Some(r#"<task id="child" state="running">"#)
+        );
+        assert_eq!(
+            SessionSnapshot::task_header_with_state(r#"<task id="child">"#, "failed"),
+            r#"<task id="child">"#
+        );
+        assert_eq!(
+            SessionSnapshot::task_header_with_state(
+                r#"<task id="child" state="running>"#,
+                "failed"
+            ),
+            r#"<task id="child" state="running>"#
+        );
+    }
+
+    #[test]
+    fn snapshot_reconciliation_covers_evicted_and_headerless_tools() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&tool("rehydrated", None, ToolCallStatus::Completed));
+        snapshot.tools.remove("rehydrated");
+        snapshot.apply(&tool("rehydrated", None, ToolCallStatus::Completed));
+        assert!(snapshot.tools.contains_key("rehydrated"));
+
+        snapshot.subagent_headers.insert(
+            "terminal-header".to_string(),
+            r#"<task id="child" state="completed">"#.to_string(),
+        );
+        snapshot.apply(&CanonicalEvent::Tool {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            tool_call_id: "terminal-header".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Task".to_string(),
+            content: FieldUpdate::Set(
+                r#"<task id="child" state="completed">finished</task>"#.to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        });
+        assert_eq!(
+            snapshot.subagent_header("terminal-header"),
+            Some(r#"<task id="child" state="completed">"#)
+        );
+
+        snapshot
+            .active_tool_ids
+            .insert("missing-active".to_string());
+        snapshot.terminalize_active_tools(ToolCallStatus::Failed);
+        assert!(snapshot.active_tool_ids.contains("missing-active"));
+        snapshot.active_tool_ids.remove("missing-active");
+
+        snapshot.apply(&tool("history-only", Some(1), ToolCallStatus::InProgress));
+        snapshot.tools.remove("history-only");
+        snapshot.active_tool_ids.insert("history-only".to_string());
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-only")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::InProgress)
+        );
+        snapshot.terminalize_active_tools(ToolCallStatus::Completed);
+        assert!(snapshot.active_tool_ids.contains("history-only"));
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-only")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::Completed)
+        );
+        snapshot.active_tool_ids.remove("history-only");
+
+        snapshot.subagent_headers.insert(
+            "already-terminal".to_string(),
+            r#"<task id="done" state="completed">"#.to_string(),
+        );
+        snapshot.terminalize_unresolved_subagents("completed", 1);
+        assert!(snapshot.subagent_headers.contains_key("already-terminal"));
+
+        snapshot.apply(&tool("history-update", Some(1), ToolCallStatus::InProgress));
+        snapshot.tools.remove("history-update");
+        snapshot.update_subagent_tool_terminal(
+            "history-update",
+            "completed",
+            ToolCallStatus::Completed,
+        );
+        assert_eq!(
+            snapshot
+                .history
+                .iter()
+                .find(|entry| entry.canonical_id == "history-update")
+                .and_then(|entry| entry.tool.as_ref())
+                .map(|tool| tool.status),
+            Some(ToolCallStatus::Completed)
+        );
+
+        for index in 0..=MAX_ACTIVE_TOOL_TOMBSTONES {
+            snapshot
+                .active_tool_ids
+                .insert(format!("missing-tombstone-{index}"));
+        }
+        snapshot.enforce_active_tool_tombstone_bounds();
+        assert!(snapshot.active_tool_ids.len() <= MAX_ACTIVE_TOOL_TOMBSTONES);
     }
 
     /// Reproduces "a long complete session showed as in progress".
@@ -1503,6 +1747,59 @@ mod tests {
             .expect("tool")
             .content
             .contains("state=\"running\""));
+    }
+
+    /// OpenCode opens its task tool as `task` and relabels it with the task description on the
+    /// next update, long before any `<task …>` result exists. Recomputing the classification
+    /// from the newest title left a live sub-agent rendering as an ordinary tool call for its
+    /// entire run.
+    #[test]
+    fn renaming_a_task_tool_keeps_it_classified_as_a_sub_agent() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "task",
+            ToolCallStatus::Pending,
+            "",
+        ));
+
+        assert!(snapshot.tools.get("call-task-1").expect("tool").subagent);
+
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "Inspect workspace",
+            ToolCallStatus::InProgress,
+            "",
+        ));
+
+        let tool = snapshot.tools.get("call-task-1").expect("tool");
+        assert!(tool.subagent, "renaming un-classified the sub-agent");
+        assert_eq!(tool.title, "Inspect workspace");
+    }
+
+    /// Agents that never name the tool `task` are still classified once a task header lands.
+    #[test]
+    fn a_task_header_classifies_a_tool_that_was_never_named_task() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "Inspect workspace",
+            ToolCallStatus::InProgress,
+            "",
+        ));
+
+        assert!(!snapshot.tools.get("call-task-1").expect("tool").subagent);
+
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "Inspect workspace",
+            ToolCallStatus::Completed,
+            "<task id=\"child\" state=\"completed\">\n<task_result>done</task_result>\n</task>",
+        ));
+
+        assert!(snapshot.tools.get("call-task-1").expect("tool").subagent);
     }
 
     /// A failed tool call must settle its header as failed, not launder it into a success.
@@ -1643,6 +1940,29 @@ mod tests {
         });
         assert_eq!(snapshot.active_generation, None);
         assert!(snapshot.active_tool_ids.is_empty());
+    }
+
+    #[test]
+    fn overlapping_runs_terminalize_prior_tools_and_ignore_missing_subagent_tools() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        assert!(!snapshot.mark_subagent_tool_terminal("missing", "failed", ToolCallStatus::Failed,));
+
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&tool("tool", Some(1), ToolCallStatus::InProgress));
+        snapshot.apply(&run_started(2));
+
+        assert_eq!(snapshot.active_generation, Some(2));
+        assert_eq!(
+            snapshot.tools.get("tool").map(|tool| tool.status),
+            Some(ToolCallStatus::Failed)
+        );
+
+        let mut orphaned_header = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        orphaned_header.subagent_headers.insert(
+            "missing".to_string(),
+            "<task id=\"child\" state=\"running\">".to_string(),
+        );
+        assert!(BridgeThreadSnapshot::from(orphaned_header).tools.is_empty());
     }
 
     #[test]
@@ -2589,6 +2909,7 @@ mod tests {
                 ],
                 locations: vec![serde_json::json!({"path":"src/file.ts","line":7})],
                 truncated: false,
+                subagent: false,
             },
         );
         snapshot.plan = vec![PlanEntry {
@@ -2819,6 +3140,7 @@ mod tests {
             structured_content: Vec::new(),
             locations: Vec::new(),
             truncated: false,
+            subagent: false,
         });
         tools.history_bytes = MAX_HISTORY_BYTES + 1;
         tools.enforce_history_bounds();
@@ -2841,6 +3163,7 @@ mod tests {
             structured_content: Vec::new(),
             locations: Vec::new(),
             truncated: false,
+            subagent: false,
         });
         assert!(absent.history.is_empty());
     }

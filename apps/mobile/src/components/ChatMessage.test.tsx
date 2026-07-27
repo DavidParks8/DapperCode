@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Image,
@@ -18,7 +19,8 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../api/messages';
 import { createAppTheme, AppThemeProvider } from '../theme';
-import { ChatMessage, ToolActivityGroup } from './ChatMessage';
+import { ChatMessage, ToolInvocationRow } from './ChatMessage';
+import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -45,6 +47,8 @@ type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
   systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
   subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
 };
+
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
 jest.mock('react-native-reanimated', () => {
   const reactNative = jest.requireActual('react-native');
@@ -313,6 +317,90 @@ describe('ChatMessage markdown formatting', () => {
   });
 });
 
+describe('ChatMessage copy action', () => {
+  beforeEach(() => {
+    jest.mocked(Clipboard.setStringAsync).mockClear();
+    jest.mocked(Clipboard.setStringAsync).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('copies the assistant response and shows a transient copied state', () => {
+    jest.useFakeTimers();
+    const tree = renderMessage({
+      id: 'assistant-copy',
+      role: 'assistant',
+      content: 'The bridge is running on port 4319.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const button = findCopyButton(root, 'assistant-copy');
+
+    expect(button.props.accessibilityLabel).toBe('Copy message');
+
+    act(() => readOnPress(button.props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('The bridge is running on port 4319.');
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copied message');
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copy message');
+
+    act(() => tree.unmount());
+  });
+
+  it('joins ordered text parts and omits attachments from the copied text', () => {
+    const tree = renderMessage({
+      id: 'assistant-parts',
+      role: 'assistant',
+      content: 'ignored',
+      parts: [
+        { type: 'text', text: 'First paragraph.' },
+        { type: 'image', uri: 'https://example.test/shot.png' },
+        { type: 'text', text: 'Second paragraph.' },
+      ],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    act(() => readOnPress(findCopyButton(root, 'assistant-parts').props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('First paragraph.\n\nSecond paragraph.');
+    act(() => tree.unmount());
+  });
+
+  it('hides the copy action while an assistant response is still empty', () => {
+    const tree = renderMessage({
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'assistant-streaming').length).toBe(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('does not offer a copy action on user messages', () => {
+    const tree = renderMessage({
+      id: 'user-message',
+      role: 'user',
+      content: 'Restart the bridge',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'user-message').length).toBe(0);
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatMessage command rows', () => {
   const theme = createAppTheme('dark');
 
@@ -331,7 +419,7 @@ describe('ChatMessage command rows', () => {
     act(() => {
       rendered = renderer.create(
         <AppThemeProvider theme={theme}>
-          <ToolActivityGroup messages={messages.map(toOfficialMessage)} />
+          <ToolInvocationRow invocation={onlyInvocation(messages)} />
         </AppThemeProvider>,
       );
     });
@@ -343,6 +431,131 @@ describe('ChatMessage command rows', () => {
     expect(horizontalScroll.props.horizontal).toBe(true);
     expect(commandText.props.numberOfLines).toBeUndefined();
     expect(flattenRenderedText(commandText.props.children)).toContain('ChatMessage.test.tsx');
+  });
+});
+
+describe('ChatMessage transcript width', () => {
+  const theme = createAppTheme('dark');
+
+  const flattenRootStyle = (element: ReactElement) => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(<AppThemeProvider theme={theme}>{element}</AppThemeProvider>);
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+    const root = tree.toJSON() as { props: { style?: unknown } };
+    return (StyleSheet.flatten(root.props.style) ?? {}) as {
+      maxWidth?: number | string;
+      width?: number | string;
+    };
+  };
+
+  it.each([
+    {
+      name: 'assistant message',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'assistant-width',
+            role: 'assistant',
+            content: 'A fairly long assistant answer that should reach the transcript edge.',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'reasoning card',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'reasoning-width',
+            role: 'reasoning',
+            content: 'Thinking through the change',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'sub-agent card',
+      element: (
+        <ChatMessage
+          message={createActivityMessage(
+            'subagent-width',
+            SUBAGENT_ACTIVITY_TYPE,
+            { text: 'Delegated to explore agent' },
+            '2026-04-17T00:00:00.000Z',
+          )}
+        />
+      ),
+    },
+    {
+      name: 'tool card',
+      element: (
+        <ToolInvocationRow
+          invocation={onlyInvocation([
+            {
+              id: 'tool-width',
+              role: 'system',
+              systemKind: 'tool',
+              content: '• Ran npm test\n  output line',
+              createdAt: '2026-04-17T00:00:00.000Z',
+            },
+          ])}
+        />
+      ),
+    },
+  ])('stretches the $name to the full transcript width', ({ element }) => {
+    expect(flattenRootStyle(element).maxWidth).toBe('100%');
+  });
+
+  it('keeps user bubbles inset from the opposite edge', () => {
+    const style = flattenRootStyle(
+      <ChatMessage
+        message={{
+          id: 'user-width',
+          role: 'user',
+          content: 'A user message that stays visually distinct from the assistant column.',
+          createdAt: '2026-04-17T00:00:00.000Z',
+        }}
+      />,
+    );
+
+    expect(style.maxWidth).toBe('92%');
+  });
+
+  it('renders expanded tool output without a right inset', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ToolInvocationRow
+            invocation={onlyInvocation([
+              {
+                id: 'tool-body-width',
+                role: 'system',
+                systemKind: 'tool',
+                content: '• Ran npm test\n  output line',
+                createdAt: '2026-04-17T00:00:00.000Z',
+              },
+            ])}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+
+    act(() => {
+      readOnPress(tree.root.findByProps({ accessibilityRole: 'button' }).props)();
+    });
+
+    const body = tree.root.findByProps({ testID: 'tool-output-body' });
+    const bodyStyle = (StyleSheet.flatten(body.props.style as never) ?? {}) as {
+      marginRight?: number;
+    };
+
+    expect(bodyStyle.marginRight).toBeUndefined();
   });
 });
 
@@ -505,6 +718,7 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     const root = tree.root as QueryableTestInstance;
+    if (kind === 'reasoning') simulateTextLayout(root, 5);
     expect(root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(
       0,
     );
@@ -519,15 +733,35 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('hides the reasoning toggle when the preview already shows every line', () => {
+    const tree = renderMessage({
+      id: 'reasoning-short',
+      role: 'system',
+      systemKind: 'reasoning',
+      content: '• Plan\n  └ Short thought',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    simulateTextLayout(root, 2);
+    expect(hasRenderedText(root, 'Short thought')).toBe(true);
+    expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Plan')[0].props.accessibilityState,
+    ).toEqual({ disabled: true });
+    act(() => tree.unmount());
+  });
+
   it('renders subagent details and opens the receiver transcript', () => {
     const onOpenSubAgentThread = jest.fn();
+    const latest =
+      `Latest: ${'Inspecting a deliberately long repository path '.repeat(4)}`.trimEnd();
     const tree = renderMessage(
       {
         id: 'subagent',
         role: 'system',
         systemKind: 'subAgent',
-        content: '• Spawned agent\n  └ Analyze tests',
-        subAgentMeta: { receiverThreadIds: [' child-thread '] },
+        content: `• Spawned agent\n  └ Analyze tests\n  ${latest}`,
+        subAgentMeta: { receiverThreadIds: [' child-thread '], agentStatus: 'running' },
         createdAt: '2026-04-17T00:00:00.000Z',
       },
       { onOpenSubAgentThread },
@@ -535,6 +769,19 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    const latestViewport = root.findAllByProps({ testID: 'subagent-latest-scroll' })[0];
+    const latestScroll = latestViewport?.findAllByType(ScrollView)[0];
+    const latestText = latestScroll
+      ?.findAllByType(Text)
+      .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+    expect(latestScroll?.props).toMatchObject({
+      horizontal: true,
+      nestedScrollEnabled: true,
+      showsHorizontalScrollIndicator: false,
+    });
+    expect(latestText?.props).toMatchObject({
+      numberOfLines: 1,
+    });
     const control = root.findAll(
       (node) =>
         node.props.accessibilityLabel === 'Spawned agent' &&
@@ -545,7 +792,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it('shows internal subagent results without a broken transcript action', () => {
+  it('keeps the agent chat affordance visible when the transcript is unavailable', () => {
     const onOpenSubAgentThread = jest.fn();
     const tree = renderMessage(
       {
@@ -566,7 +813,36 @@ describe('ChatMessage system timeline matrices', () => {
     const button = root.findAll((node) => node.props.accessibilityRole === 'button')[0];
     expect(button?.props.accessibilityState).toMatchObject({ disabled: true });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
-    expect(hasRenderedText(root, 'Open agent chat')).toBe(false);
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('opens a known running agent even when stale metadata says it is not navigable', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'subagent-running',
+        role: 'system',
+        systemKind: 'subAgent',
+        content: '• Sub-agent working\n  Latest: Inspecting files',
+        createdAt: '2026-04-17T00:00:00.000Z',
+        subAgentMeta: {
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+          navigable: false,
+        },
+      },
+      { onOpenSubAgentThread },
+    );
+    const root = tree.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Sub-agent working' &&
+        typeof node.props.onPress === 'function',
+    )[0];
+    expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
     act(() => tree.unmount());
   });
 
@@ -575,13 +851,17 @@ describe('ChatMessage system timeline matrices', () => {
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Reading repository',
+        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
+    const root = tree.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
+    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
 
     const completed = createActivityMessage(
       'subagent-live',
@@ -598,49 +878,119 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => completedTree.unmount());
   });
 
-  it('renders collapsed and expanded tool activity groups with error and overflow entries', () => {
-    const messages: LegacyTestMessage[] = [
-      {
-        id: 'one',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Ran npm test\n  └ pass',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-      {
-        id: 'two',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Called tool `lint`\n  └ clean',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-      {
-        id: 'three',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Tool failed `build`\n  └ compile error',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
-    ];
+  it('expands a failed invocation row and shows its output', () => {
+    const invocation: ToolInvocation = {
+      id: 'build',
+      kind: 'execute',
+      status: 'failed',
+      title: 'npm run build',
+      monospaceTitle: true,
+      isError: true,
+      locations: [{ path: 'src/app.ts', line: 12 }],
+      diffs: [],
+      terminals: [{ terminalId: 'term-1', output: 'compile error\nexit 1' }],
+      textLines: [],
+      images: [],
+      truncated: true,
+      empty: false,
+    };
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
         <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup messages={messages.map(toOfficialMessage)} liveTurnActive />
+          <ToolInvocationRow invocation={invocation} />
         </AppThemeProvider>,
       );
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    expect(hasRenderedText(root, '+1 more')).toBe(true);
-    const expand = root.findAll(
+    expect(hasRenderedText(root, 'compile error')).toBe(false);
+    const control = root.findAll(
       (node) =>
         typeof node.props.onPress === 'function' &&
-        (node.props.accessibilityState as { expanded?: boolean } | undefined)?.expanded === false,
+        node.props.accessibilityLabel === 'npm run build',
     )[0];
-    if (!expand) throw new Error('Missing tool group expander');
-    act(() => readOnPress(expand.props)());
-    expect(hasRenderedText(root, 'Tool failed `build`')).toBe(true);
+    if (!control) throw new Error('Missing invocation row');
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, 'compile error')).toBe(true);
+    expect(hasRenderedText(root, 'src/app.ts:12')).toBe(true);
+    expect(hasRenderedText(root, 'Output truncated by the bridge.')).toBe(true);
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, 'compile error')).toBe(false);
+    act(() => rendered.unmount());
+  });
+
+  it('renders an edit invocation as a coloured diff', () => {
+    const invocation: ToolInvocation = {
+      id: 'edit',
+      kind: 'edit',
+      status: 'completed',
+      title: 'Edit src/app.ts',
+      monospaceTitle: false,
+      isError: false,
+      locations: [],
+      diffs: [{ path: 'src/app.ts', oldText: 'const a = 1;', newText: 'const a = 2;' }],
+      terminals: [],
+      textLines: [],
+      images: [],
+      truncated: false,
+      empty: false,
+    };
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={createAppTheme('dark')}>
+          <ToolInvocationRow invocation={invocation} />
+        </AppThemeProvider>,
+      );
+    });
+    const rendered = expectValue(tree);
+    const root = rendered.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Edit src/app.ts',
+    )[0];
+    act(() => readOnPress(control.props)());
+    expect(hasRenderedText(root, '- const a = 1;')).toBe(true);
+    expect(hasRenderedText(root, '+ const a = 2;')).toBe(true);
+    expect(hasRenderedText(root, 'src/app.ts')).toBe(true);
+    act(() => rendered.unmount());
+  });
+
+  it('shows a spinner while a tool is still running', () => {
+    const invocation: ToolInvocation = {
+      id: 'running',
+      kind: 'read',
+      status: 'in_progress',
+      title: 'Read package.json',
+      monospaceTitle: false,
+      isError: false,
+      locations: [],
+      diffs: [],
+      terminals: [],
+      textLines: [],
+      images: [],
+      truncated: false,
+      empty: true,
+    };
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={createAppTheme('dark')}>
+          <ToolInvocationRow invocation={invocation} />
+        </AppThemeProvider>,
+      );
+    });
+    const rendered = expectValue(tree);
+    const root = rendered.root as QueryableTestInstance;
+    expect(root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Read package.json',
+    )[0];
+    expect(control.props.accessibilityState).toEqual({ disabled: true });
     act(() => rendered.unmount());
   });
 
@@ -681,48 +1031,9 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it.each([
-    ['Ran command', '1 command'],
-    ['Called tool `search`', '1 tool call'],
-    ['Searched web for coverage', '1 web search'],
-    ['Applied file changes', '1 file change'],
-    ['Reading source.ts', '1 file read'],
-    ['Listing src', '1 folder listing'],
-    ['Explored tests', '1 exploration'],
-    ['Viewed image', '1 tool step'],
-  ])('summarizes %s tool groups', (title, summary) => {
-    let tree: ReactTestRenderer | undefined;
-    act(() => {
-      tree = renderer.create(
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup
-            messages={[
-              toOfficialMessage({
-                id: title,
-                role: 'system',
-                systemKind: 'tool',
-                content: `• ${title}`,
-                createdAt: '2026-04-17T00:00:00.000Z',
-              }),
-            ]}
-          />
-        </AppThemeProvider>,
-      );
-    });
-    expect(hasRenderedText(expectValue(tree).root as QueryableTestInstance, summary)).toBe(true);
-    act(() => expectValue(tree).unmount());
-  });
-
-  it('expands image and long-output tool details and updates command fades', () => {
+  it('scrolls long tool output and updates command fades', () => {
     const details = Array.from({ length: 26 }, (_, index) => `line ${String(index + 1)}`);
     const messages: LegacyTestMessage[] = [
-      {
-        id: 'view',
-        role: 'system',
-        systemKind: 'tool',
-        content: '• Viewed image\n  └ /tmp/screen.png',
-        createdAt: '2026-04-17T00:00:00.000Z',
-      },
       {
         id: 'long',
         role: 'system',
@@ -735,8 +1046,8 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => {
       tree = renderer.create(
         <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup
-            messages={messages.map(toOfficialMessage)}
+          <ToolInvocationRow
+            invocation={onlyInvocation(messages)}
             bridgeUrl="https://bridge"
             bridgeToken="token"
           />
@@ -745,16 +1056,6 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    const header = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        String(node.props.accessibilityLabel).includes('tools'),
-    )[0];
-    act(() => readOnPress(header.props)());
-    const viewEntry = root.findAll((node) => node.props.accessibilityLabel === 'Viewed image')[0];
-    const longEntry = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Ran exhaustive command',
-    )[0];
     const commandScroll = root
       .findByProps({ testID: 'tool-command-scroll' })
       .findByType(ScrollView) as QueryableTestInstance;
@@ -769,13 +1070,12 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => {
       commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 200 } } });
     });
-    act(() => {
-      readOnPress(viewEntry.props)();
-    });
-    expect(hasRenderedText(root, 'Tap to hide output')).toBe(true);
-    act(() => {
-      readOnPress(longEntry.props)();
-    });
+    const control = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        node.props.accessibilityLabel === 'Ran exhaustive command',
+    )[0];
+    act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, 'line 26')).toBe(true);
     expect(
       root
@@ -815,16 +1115,7 @@ describe('ChatMessage system timeline matrices', () => {
     ).toEqual({ disabled: true });
     act(() => subagent.unmount());
 
-    let emptyGroup: ReactTestRenderer | undefined;
-    act(() => {
-      emptyGroup = renderer.create(
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ToolActivityGroup messages={[]} />
-        </AppThemeProvider>,
-      );
-    });
-    expect((expectValue(emptyGroup) as QueryableRenderer).toJSON()).toBeNull();
-    act(() => expectValue(emptyGroup).unmount());
+    expect(buildToolInvocations([])).toEqual([]);
   });
 
   it.each([
@@ -902,6 +1193,13 @@ function renderMessage(
   return expectValue(tree) as QueryableRenderer;
 }
 
+function onlyInvocation(messages: LegacyTestMessage[]): ToolInvocation {
+  const invocations = buildToolInvocations(messages.map(toOfficialMessage));
+  const invocation = invocations[0];
+  if (!invocation) throw new Error('Expected a tool invocation');
+  return invocation;
+}
+
 function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChatMessage {
   const legacy = message as LegacyTestMessage;
   if (legacy.systemKind === 'reasoning') {
@@ -961,8 +1259,37 @@ function readOnPress(props: Record<string, unknown>): () => void {
   return props.onPress as () => void;
 }
 
+function findCopyButtons(root: QueryableTestInstance, messageId: string): QueryableTestInstance[] {
+  return root.findAll(
+    (node) =>
+      node.props.testID === `chat-message-copy-${messageId}` &&
+      typeof node.props.onPress === 'function',
+  );
+}
+
+function findCopyButton(root: QueryableTestInstance, messageId: string): QueryableTestInstance {
+  const button = findCopyButtons(root, messageId)[0];
+  if (!button) {
+    throw new Error(`Expected a copy button for ${messageId}`);
+  }
+  return button;
+}
+
 function findTextNodes(root: QueryableTestInstance, text: string): QueryableTestInstance[] {
   return root.findAll((node) => node.type === Text && flattenTestTreeText(node) === text);
+}
+
+function simulateTextLayout(root: QueryableTestInstance, lineCount: number): void {
+  const measured = root.findAll(
+    (node) => node.type === Text && typeof node.props.onTextLayout === 'function',
+  );
+  act(() => {
+    for (const node of measured) {
+      (node.props.onTextLayout as (event: { nativeEvent: { lines: unknown[] } }) => void)({
+        nativeEvent: { lines: Array.from({ length: lineCount }, () => ({})) },
+      });
+    }
+  });
 }
 
 function findTextPressable(root: QueryableTestInstance, text: string): QueryableTestInstance {

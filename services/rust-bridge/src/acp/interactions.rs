@@ -1241,6 +1241,7 @@ async fn emit_elicitation(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

@@ -17,6 +17,7 @@ import { useAppTheme } from '../../theme';
 import {
   type AutoScrollState,
   CHAT_AUTO_LOAD_OLDER_TOP_THRESHOLD_PX,
+  CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX,
   CHAT_MESSAGE_PAGE_SIZE,
   LARGE_CHAT_MESSAGE_COUNT_THRESHOLD,
   findInlineChoiceSet,
@@ -231,7 +232,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       const distanceFromBottom = contentOffset.y;
       const shouldStickToBottom = distanceFromBottom <= theme.spacing.xl * 2;
       autoScrollStateRef.current.shouldStickToBottom = shouldStickToBottom;
-      const nextShowJumpToLatest = !shouldStickToBottom;
+      const hasScrollableHistory =
+        contentSize.height - layoutMeasurement.height > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX;
+      const nextShowJumpToLatest = hasScrollableHistory && !shouldStickToBottom;
       if (showJumpToLatestRef.current !== nextShowJumpToLatest) {
         showJumpToLatestRef.current = nextShowJumpToLatest;
         setShowJumpToLatest(nextShowJumpToLatest);
@@ -240,6 +243,21 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     },
     [autoScrollStateRef, maybeAutoLoadOlderMessages, theme.spacing.xl],
   );
+
+  const hideJumpToLatestWhenContentFits = useCallback(() => {
+    if (!showJumpToLatestRef.current) {
+      return;
+    }
+    const viewportHeight = viewportHeightRef.current;
+    if (viewportHeight <= 0) {
+      return;
+    }
+    if (contentHeightRef.current - viewportHeight > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX) {
+      return;
+    }
+    showJumpToLatestRef.current = false;
+    setShowJumpToLatest(false);
+  }, []);
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -261,7 +279,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         : [styles.messageListContent, { paddingBottom: bottomInset }],
     [bottomInset, styles.messageListContent],
   );
-  const liveTurnActive = chat.status === 'running';
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
@@ -274,7 +291,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         styles,
         bridgeUrl,
         bridgeToken,
-        liveTurnActive,
         inlineChoiceSet,
         onInlineOptionSelect,
         onOpenLocalPreview,
@@ -285,7 +301,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       bridgeUrl,
       chat.status,
       inlineChoiceSet,
-      liveTurnActive,
       onInlineOptionSelect,
       onOpenLocalPreview,
       onOpenSubAgentThread,
@@ -332,10 +347,12 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         scrollEventThrottle={32}
         onLayout={(event) => {
           viewportHeightRef.current = event.nativeEvent.layout.height;
+          hideJumpToLatestWhenContentFits();
           maybeAutoLoadOlderMessages(true);
         }}
         onContentSizeChange={(_width, height) => {
           contentHeightRef.current = height;
+          hideJumpToLatestWhenContentFits();
           onPinnedAutoScroll(false);
           maybeAutoLoadOlderMessages(true);
         }}

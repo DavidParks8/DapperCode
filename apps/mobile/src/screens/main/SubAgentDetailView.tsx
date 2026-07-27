@@ -100,6 +100,7 @@ export function SubAgentDetailView({
           toolResultMessageIdByCallId: {},
           subagentToolCallIds: {},
           toolTextRevisionByCallId: {},
+          toolMetaByCallId: {},
           structuredRevisionByCallId: {},
           structuredTextByCallId: {},
           chunkAssemblies: {},

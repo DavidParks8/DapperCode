@@ -24,6 +24,9 @@ import { mainScreenCommandsAtom, type MainScreenCommands } from '../../state/com
 import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
 import { currentScreenAtom, pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
+import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
+import { selectedChatAtom } from '../../state/mainScreen/session';
+import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 
@@ -36,6 +39,7 @@ jest.mock('react-native-reanimated', () => {
   return {
     __esModule: true,
     default: { View },
+    FadeIn: transition,
     FadeInDown: transition,
     FadeInUp: transition,
     cancelAnimation: jest.fn(),
@@ -81,8 +85,8 @@ jest.mock('../../components/ChatMessage', () => ({
       : typeof message.content.text === 'string'
         ? message.content.text
         : '',
-  ToolActivityGroup: ({ events }: { events?: unknown[] }) =>
-    `activities:${String((events ?? []).length)}`,
+  ToolInvocationRow: ({ invocation }: { invocation: { title: string } }) =>
+    `tool:${invocation.title}`,
 }));
 
 let approvalBannerProps: Record<string, unknown> | null = null;
@@ -1378,9 +1382,8 @@ jest.mock('../../components/BridgeUiSurface', () => ({
           lastError: 'missing',
         },
       ];
-      const { tree } = await renderMain({
-        api: createApi({ bridgeCapabilities: capabilities(agents) }),
-      });
+      const api = createApi({ bridgeCapabilities: capabilities(agents) });
+      const { tree } = await renderMain({ api });
       const root = rootOf(tree);
 
       await press(byLabel(root, 'Agent, Codex'));
@@ -1390,6 +1393,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(byLabel(root, 'Agent, Claude')).toBeTruthy();
 
       await press(byLabelPrefix(root, 'Agent mode, '));
+      expect(api.createChat).not.toHaveBeenCalled();
       await press(byLabel(root, 'Plan mode'));
       expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
       await press(byLabel(root, 'Fast mode'));
@@ -1407,6 +1411,23 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         rootOf(failed.tree).findAll((node) => node.props.accessibilityLabel === 'Fast mode'),
       ).toHaveLength(0);
       act(() => failed.tree.unmount());
+    });
+
+    it('offers fallback modes for a selected chat without ACP mode config', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        selectedChat: { ...rootChat, messages: [] },
+      });
+      const root = rootOf(tree);
+
+      await press(byLabelPrefix(root, 'Agent mode, '));
+      expect(byLabel(root, 'Default mode')).toBeTruthy();
+      await press(byLabel(root, 'Plan mode'));
+      expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
+      expect(api.createChat).not.toHaveBeenCalled();
+
+      act(() => tree.unmount());
     });
 
     it('uses the most recently persisted model for a new chat', async () => {
@@ -1523,6 +1544,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         await flush();
         await flush();
       });
+      expect(byLabel(root, 'Choose a model')).toBeTruthy();
       expect(byLabel(root, 'GitHub Copilot · GPT-5.4')).toBeTruthy();
       await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(
@@ -1530,14 +1552,18 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         'model',
         'github-copilot/gpt-5-mini',
       );
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'High'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
 
       await press(byLabelPrefix(root, 'Agent mode, '));
       await press(pressForText(root, 'plan'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'mode', 'plan');
 
       await press(byLabelPrefix(root, 'Thinking level, '));
-      await press(pressForText(root, 'High'));
-      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'high');
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await press(byLabel(root, 'None'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'none');
 
       act(() => tree.unmount());
     });
@@ -1932,6 +1958,65 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(
         root.findAll((node) => node.props.accessibilityLabel === '1 agent').length,
       ).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    });
+
+    it('clears agent threads synchronously when starting a new chat', async () => {
+      const secondSubAgentChat: Chat = {
+        ...subAgentChat,
+        id: 'thread-sub-two',
+        title: 'Review the implementation',
+      };
+      const chats: ChatSummary[] = [rootChat, subAgentChat, secondSubAgentChat];
+      const api = createApi({ chats });
+      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
+      const root = rootOf(tree);
+      await advance();
+      await act(async () => {
+        await flush();
+      });
+
+      expect(byLabel(root, '2 agents')).toBeTruthy();
+      const commands = store.get(mainScreenCommandsAtom);
+      expect(commands).toBeTruthy();
+      act(() => {
+        commands?.startNewChat();
+        expect(store.get(relatedAgentThreadsAtom)).toEqual([]);
+        expect(store.get(agentRootThreadIdAtom)).toBeNull();
+      });
+      expect(hasText(root, "Let's build")).toBe(true);
+
+      act(() => tree.unmount());
+    });
+
+    it('does not reopen stale agent threads after starting a new chat', async () => {
+      const chats: ChatSummary[] = [rootChat, subAgentChat];
+      const api = createApi({ chats });
+      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
+      const root = rootOf(tree);
+      await advance();
+      await act(async () => {
+        await flush();
+      });
+
+      let resolveRefresh!: (value: ChatSummary[]) => void;
+      const pendingRefresh = new Promise<ChatSummary[]>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      (api.listChats as jest.Mock).mockReturnValueOnce(pendingRefresh);
+      await press(byLabel(root, '1 agent'));
+
+      const commands = store.get(mainScreenCommandsAtom);
+      act(() => {
+        commands?.startNewChat();
+      });
+      await act(async () => {
+        resolveRefresh(chats);
+        await flush();
+      });
+
+      expect(store.get(agentThreadMenuVisibleAtom)).toBe(false);
+      expect(hasText(root, 'Agent threads')).toBe(false);
       act(() => tree.unmount());
     });
 
@@ -2795,9 +2880,9 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return result;
   }
 
-  function transcript(root: Queryable): Array<{ message: { content: string } }> {
+  function transcript(root: Queryable): Array<{ message: { id: string; content: string } }> {
     return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
-      message: { content: string };
+      message: { id: string; content: string };
     }>;
   }
 
@@ -2972,38 +3057,107 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     });
 
     it.each([
-      { status: 'idle' as const, expected: 'Ready', activeTurnId: null, lastError: undefined },
+      {
+        // A settled chat says nothing: "Ready" is chrome the enabled composer already implies.
+        status: 'idle' as const,
+        expected: 'Ready',
+        indicatorVisible: false,
+        activeTurnId: null,
+        lastError: undefined,
+      },
       {
         status: 'running' as const,
         expected: 'Working',
+        indicatorVisible: true,
         activeTurnId: 'turn-active',
         lastError: undefined,
       },
       {
         status: 'error' as const,
         expected: 'snapshot exploded',
+        indicatorVisible: true,
         activeTurnId: null,
         lastError: 'snapshot exploded',
       },
       {
         status: 'complete' as const,
         expected: 'Turn completed',
+        indicatorVisible: true,
         activeTurnId: null,
         lastError: undefined,
       },
     ])(
       'renders $status pending snapshot truth',
-      async ({ status, expected, activeTurnId, lastError }) => {
+      async ({ status, expected, indicatorVisible, activeTurnId, lastError }) => {
         const chat = { ...baseChat, status, activeTurnId, lastError };
         const harness = await renderMain({ chat });
 
         expect(text(harness.tree.root as Queryable, 'Runtime truth')).toBe(true);
-        expect(text(harness.tree.root as Queryable, expected)).toBe(true);
+        expect(text(harness.tree.root as Queryable, expected)).toBe(indicatorVisible);
         expect(harness.store.get(pendingMainChatIdAtom)).toBeNull();
         expect(harness.store.get(mainOpeningChatIdAtom)).toBeNull();
         harness.unmount();
       },
     );
+
+    it('settles the activity indicator and stop control when polling returns the full answer', async () => {
+      const prompt = {
+        id: 'prompt',
+        role: 'user' as const,
+        content: 'What is the answer?',
+        createdAt: now,
+      };
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-polling',
+        messages: [prompt],
+      };
+      const answered: Chat = {
+        ...running,
+        status: 'idle',
+        activeTurnId: null,
+        lastMessagePreview: 'The complete answer.',
+        messages: [
+          prompt,
+          {
+            id: 'answer',
+            role: 'assistant',
+            content: 'The complete answer.',
+            createdAt: now,
+          },
+        ],
+      };
+      let latest = running;
+      const api = createApi({ chat: running });
+      api.getChat.mockImplementation(() => Promise.resolve(latest));
+      const harness = await renderMain({ api, chat: running });
+      const root = harness.tree.root as Queryable;
+
+      expect(text(root, 'Working')).toBe(true);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+
+      latest = answered;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const answerVisible = transcript(root).some(({ message }) => message.id === 'answer');
+      const workingVisible = text(root, 'Working');
+      const stopControlCount = root.findAll(
+        (node) => node.props.accessibilityLabel === 'Stop agent',
+      ).length;
+      harness.unmount();
+
+      expect(answerVisible).toBe(true);
+      expect(workingVisible).toBe(false);
+      expect(stopControlCount).toBe(0);
+    });
 
     it('projects queue, approval, input, context, plan, and bridge surfaces from live runtime events', async () => {
       const harness = await renderMain({
@@ -3832,6 +3986,12 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return root.findAll((node) => node.children.includes(value)).length > 0;
   }
 
+  function transcriptMessages(root: Queryable): Array<{ message: Chat['messages'][number] }> {
+    return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+      message: Chat['messages'][number];
+    }>;
+  }
+
   function labeled(root: Queryable, label: string): Queryable {
     const result = root.findAll((node) => node.props.accessibilityLabel === label)[0];
     if (!result) throw new Error(`Missing label: ${label}`);
@@ -3941,6 +4101,85 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       await submit(second.root, '/compact');
       await submit(second.root, '/definitely-unknown');
       second.unmount();
+    });
+
+    it('keeps status output and history through running-to-settled chat polls', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-status',
+      };
+      let latest: Chat = running;
+      const getChat = jest.fn().mockImplementation(() => Promise.resolve(latest));
+      const api = createApi({ getChat });
+      const harness = await renderMain({ api, chat: running });
+
+      await submit(harness.root, '/status');
+
+      const immediateMessages = transcriptMessages(harness.root).map(
+        ({ message }) => message.content,
+      );
+      expect(immediateMessages).toEqual(
+        expect.arrayContaining([
+          'Existing answer',
+          '/status',
+          expect.stringContaining('Chat status: running'),
+        ]),
+      );
+      expect(harness.store.get(selectedChatAtom)).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          statusUpdatedAt: running.statusUpdatedAt,
+        }),
+      );
+      expect(hasText(harness.root, 'Working')).toBe(true);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+
+      latest = {
+        ...running,
+        status: 'complete',
+        activeTurnId: null,
+        updatedAt: '2026-07-25T00:00:01.000Z',
+        statusUpdatedAt: '2026-07-25T00:00:01.000Z',
+        messages: [],
+      };
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        await flush();
+      });
+
+      expect(transcriptMessages(harness.root).map(({ message }) => message.content)).toEqual(
+        immediateMessages,
+      );
+      expect(harness.store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(hasText(harness.root, 'Turn completed')).toBe(true);
+      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+
+      const callsAfterFirstSettledPoll = getChat.mock.calls.length;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(getChat.mock.calls.length).toBeGreaterThan(callsAfterFirstSettledPoll);
+      expect(transcriptMessages(harness.root).map(({ message }) => message.content)).toEqual(
+        immediateMessages,
+      );
+      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(input(harness.root).props.placeholder).toBe('Reply...');
+      harness.unmount();
     });
 
     it('covers new-thread plan create/send outcomes and ordinary create status variants', async () => {

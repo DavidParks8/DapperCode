@@ -9,7 +9,7 @@ import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscri
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../../components/ChatMessage', () => ({
   ChatMessage: ({ message }: { message: { content: string } }) => message.content,
-  ToolActivityGroup: () => null,
+  ToolInvocationRow: () => null,
 }));
 
 type Queryable = ReactTestInstance & {
@@ -279,6 +279,34 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps the jump-to-latest control hidden when the transcript is not scrollable', () => {
+    const tree = render({});
+    const list = getList(tree);
+
+    scroll(list, 120, 240, 240);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('hides the jump-to-latest control once the remaining content fits the viewport', () => {
+    const tree = render({});
+    let list = getList(tree);
+
+    scroll(list, 120, 1000, 200);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
+    ).toBeGreaterThan(0);
+
+    list = getList(tree);
+    act(() => list.props.onContentSizeChange(320, 200));
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
   it('loads local pages from layout, content changes, and older-directed scrolls once per checkpoint', () => {
     const largeChat = makeChat({ messages: makeMessages(140) });
     const onPinnedAutoScroll = jest.fn();
@@ -509,7 +537,7 @@ describe('ChatTranscriptView continuation', () => {
     });
     const list = getList(tree);
     const messageItem = list.props.data.find((item) => item.kind === 'message');
-    const toolItem = list.props.data.find((item) => item.kind === 'toolGroup');
+    const toolItem = list.props.data.find((item) => item.kind === 'toolInvocation');
     if (!messageItem || !toolItem) throw new Error('Expected message and tool items');
     expect(list.props.keyExtractor(messageItem)).toBe(messageItem.renderKey);
     expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);
@@ -568,6 +596,53 @@ describe('ChatTranscriptView continuation', () => {
       toolTree?.unmount();
       itemTree?.unmount();
       noChoicesTree.unmount();
+      tree.unmount();
+    });
+  });
+
+  it('renders a computer-use run as one grouped timeline', () => {
+    const messages: Chat['messages'] = [
+      {
+        id: 'cu1',
+        role: 'tool',
+        toolCallId: 'cu1',
+        content: '• Called tool `computeruse / screenshot`',
+        createdAt: '2026-07-20T00:00:00.000Z',
+      },
+      {
+        id: 'cu2',
+        role: 'tool',
+        toolCallId: 'cu2',
+        content: 'Window: Inbox, App: Safari',
+        createdAt: '2026-07-20T00:00:01.000Z',
+        toolMeta: {
+          toolCallId: 'cu2',
+          kind: 'other',
+          status: 'completed',
+          title: 'computeruse / click',
+        },
+      },
+    ];
+    const tree = render({ chat: makeChat({ messages }) });
+    const groupItem = getList(tree).props.data.find((item) => item.kind === 'toolGroup');
+    if (!groupItem) throw new Error('Expected a computer-use tool group');
+
+    let groupTree: ReactTestRenderer | undefined;
+    act(() => {
+      groupTree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          {getList(tree).props.renderItem({ item: groupItem, index: 0, separators: {} })}
+        </AppThemeProvider>,
+      );
+    });
+    const rendered = JSON.stringify((groupTree as QueryableRenderer | undefined)?.toJSON());
+    // The bare metadata title still resolves, so both actions land in the same timeline.
+    expect(rendered).toContain('Screenshot');
+    expect(rendered).toContain('Click');
+    expect(rendered).toContain('Safari');
+
+    act(() => {
+      groupTree?.unmount();
       tree.unmount();
     });
   });

@@ -166,7 +166,8 @@
             { "type": "terminal", "terminalId": "terminal-1" }
           ],
           "locations": [{ "path": "src/file.ts", "line": 7 }],
-          "truncated": false
+          "truncated": false,
+          "subagent": false
         }],
         "messageCollection": {
           "truncated": false, "omittedCount": 0, "oldestAvailableSequence": 0,

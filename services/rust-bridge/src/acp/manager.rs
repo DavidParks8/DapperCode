@@ -44,6 +44,8 @@ const MAX_SESSION_INDEX_BYTES: usize = 256 * 1024;
 const MAX_SESSION_CWD_BYTES: usize = 4_096;
 const SESSION_INDEX_FILE: &str = "session-index.json";
 const OPENCODE_SESSION_CATALOG_TIMEOUT: Duration = Duration::from_secs(3);
+const OPENCODE_CHILD_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_OPENCODE_CHILD_SESSIONS: usize = 32;
 const MAX_OPENCODE_SESSION_CATALOG_BYTES: usize = 256 * 1024;
 const OPENCODE_MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_MODEL_CATALOG_BYTES: usize = 2 * 1024 * 1024;
@@ -235,6 +237,21 @@ struct OpenCodeSessionCatalogRow {
     created: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenCodeChildSessionRow {
+    id: String,
+    title: Option<String>,
+    #[serde(rename = "parentID")]
+    parent_id: Option<String>,
+}
+
+/// A session that OpenCode reports as spawned by another session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OpenCodeChildSession {
+    pub(crate) acp_session_id: String,
+    pub(crate) title: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct OpenCodeSessionSummary {
     title: Option<String>,
@@ -417,6 +434,13 @@ impl DurableSessionIndex {
         &mut self,
         entries: impl IntoIterator<Item = SessionIndexEntry>,
     ) -> Result<(), AgentManagerError> {
+        self.insert_entries(entries.into_iter().collect()).await
+    }
+
+    async fn insert_entries(
+        &mut self,
+        entries: Vec<SessionIndexEntry>,
+    ) -> Result<(), AgentManagerError> {
         let mut staged = self.entries.clone();
         let mut changed = false;
         for entry in entries {
@@ -563,6 +587,8 @@ struct AgentRuntime {
     negotiated: Option<NegotiatedInitialize>,
     lifecycle: AgentLifecycle,
     last_error: Option<String>,
+    /// Base URL of the agent's own HTTP server, when the bridge was able to place it.
+    http_base: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -595,6 +621,7 @@ pub struct AgentManager {
     events: CanonicalEventSender,
     event_receiver: Mutex<Option<CanonicalEventReceiver>>,
     stopped: AtomicBool,
+    http: reqwest::Client,
 }
 
 impl AgentManager {
@@ -610,28 +637,84 @@ impl AgentManager {
         manifests.validate(approved_roots)?;
         let preferred_agent_id = manifests.preferred_agent_id.clone();
         let mut results = Vec::new();
+        let mut http_bases = Vec::new();
         for manifest in manifests.agents.into_iter().filter(|agent| agent.enabled) {
-            let result = AcpConnection::start(
+            let (result, http_base) = Self::start_agent(
                 &manifest.resolved,
                 approved_roots,
                 host_environment,
                 initialize_timeout,
             )
             .await;
+            if let Some(http_base) = http_base {
+                http_bases.push((manifest.resolved.agent_id.clone(), http_base));
+            }
             results.push((manifest, result));
         }
         let storage_dir = state_dir.to_path_buf();
         tokio::fs::create_dir_all(&storage_dir)
             .await
             .map_err(|error| AgentManagerError::SessionIndex(error.to_string()))?;
-        Self::from_start_results_with_index(
+        let mut manager = Self::from_start_results_with_index(
             preferred_agent_id,
             results,
             Some(storage_dir.join(SESSION_INDEX_FILE)),
             storage_root.to_path_buf(),
             allow_outside_root_cwd,
         )
-        .await
+        .await?;
+        for (agent_id, http_base) in http_bases {
+            if let Some(runtime) = manager.agents.get_mut(&agent_id) {
+                runtime.http_base = Some(http_base);
+            }
+        }
+        Ok(manager)
+    }
+
+    /// Starts one agent, asking OpenCode to put its HTTP server on a port the bridge chose.
+    ///
+    /// OpenCode exposes the child sessions a `task` tool spawns over HTTP long before the tool
+    /// reports them, which is the only way to attach to a sub-agent while it is still working.
+    /// It picks its own port by default, so the bridge has to name one to be able to reach it.
+    /// A port that turns out to be taken makes OpenCode exit instead of falling back, so a failed
+    /// start is retried without one: losing sub-agent streaming is better than losing the agent.
+    async fn start_agent(
+        manifest: &ResolvedAgentManifest,
+        approved_roots: &[PathBuf],
+        host_environment: &BTreeMap<String, String>,
+        initialize_timeout: Duration,
+    ) -> (
+        Result<(AcpConnection, NegotiatedInitialize), AcpRuntimeError>,
+        Option<String>,
+    ) {
+        let port = is_opencode_acp(manifest)
+            .then(allocate_loopback_port)
+            .flatten();
+        if let Some(port) = port {
+            let argv = ["--port".to_string(), port.to_string()];
+            let result = AcpConnection::start(
+                manifest,
+                approved_roots,
+                host_environment,
+                initialize_timeout,
+                &argv,
+            )
+            .await;
+            if result.is_ok() {
+                return (result, Some(format!("http://127.0.0.1:{port}")));
+            }
+        }
+        (
+            AcpConnection::start(
+                manifest,
+                approved_roots,
+                host_environment,
+                initialize_timeout,
+                &[],
+            )
+            .await,
+            None,
+        )
     }
 
     #[cfg(test)]
@@ -686,6 +769,7 @@ impl AgentManager {
                             negotiated: Some(negotiated),
                             lifecycle: AgentLifecycle::Ready,
                             last_error: None,
+                            http_base: None,
                         },
                     );
                 }
@@ -698,6 +782,7 @@ impl AgentManager {
                             negotiated: None,
                             lifecycle: AgentLifecycle::Unavailable,
                             last_error: Some(redact_error(&error)),
+                            http_base: None,
                         },
                     );
                 }
@@ -719,6 +804,11 @@ impl AgentManager {
             events,
             event_receiver: Mutex::new(Some(event_receiver)),
             stopped: AtomicBool::new(false),
+            // Loopback only: the agent's HTTP server is never reached through a proxy.
+            http: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_default(),
         })
     }
 
@@ -772,9 +862,7 @@ impl AgentManager {
         else {
             return Vec::new();
         };
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return Vec::new();
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -1359,6 +1447,92 @@ impl AgentManager {
             .contains_key(child_thread_id)
     }
 
+    /// Whether this thread's agent can be asked which sub-agents it has spawned.
+    ///
+    /// Agents that cannot only reveal a sub-agent through the task tool itself, so there is
+    /// nothing to poll for and the sub-agent resolves when the tool reports it.
+    pub(crate) fn can_discover_subagents(&self, thread_id: &str) -> bool {
+        let Ok(identity) = AgentSessionId::decode(thread_id) else {
+            return false;
+        };
+        self.agents.get(&identity.agent_id).is_some_and(|runtime| {
+            runtime.http_base.is_some() && is_opencode_acp(&runtime.manifest.resolved)
+        })
+    }
+
+    /// Sessions OpenCode reports as spawned by `parent_thread_id`.
+    ///
+    /// A foreground `task` tool only names its child once it has finished, so the tool's own
+    /// updates cannot be used to attach to a sub-agent while it works. OpenCode's HTTP server
+    /// knows about the child as soon as it is created, which is what makes live streaming
+    /// possible. Any failure is reported as "no children" so a sub-agent still resolves the
+    /// slow way when the server cannot be reached.
+    pub(crate) async fn opencode_child_sessions(
+        &self,
+        parent_thread_id: &str,
+    ) -> Vec<OpenCodeChildSession> {
+        let Ok(parent) = AgentSessionId::decode(parent_thread_id) else {
+            return Vec::new();
+        };
+        let Some(runtime) = self.agents.get(&parent.agent_id) else {
+            return Vec::new();
+        };
+        if !is_opencode_acp(&runtime.manifest.resolved) {
+            return Vec::new();
+        }
+        let Some(http_base) = runtime.http_base.as_deref() else {
+            return Vec::new();
+        };
+        let cwd = {
+            let index = self.session_index.lock().await;
+            index
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.agent_id == parent.agent_id
+                        && entry.acp_session_id == parent.acp_session_id
+                })
+                .map(|entry| entry.cwd.clone())
+        };
+        let Some(cwd) = cwd else {
+            return Vec::new();
+        };
+        let Ok(url) = reqwest::Url::parse_with_params(
+            &format!("{http_base}/session/{}/children", parent.acp_session_id),
+            [("directory", cwd.to_string_lossy().as_ref())],
+        ) else {
+            return Vec::new();
+        };
+        let request = self.http.get(url).send();
+        let Ok(Ok(response)) = tokio::time::timeout(OPENCODE_CHILD_LOOKUP_TIMEOUT, request).await
+        else {
+            return Vec::new();
+        };
+        if !response.status().is_success() {
+            return Vec::new();
+        }
+        let Ok(rows) = response.json::<Vec<OpenCodeChildSessionRow>>().await else {
+            return Vec::new();
+        };
+        rows.into_iter()
+            .filter(|row| row.parent_id.as_deref() == Some(parent.acp_session_id.as_str()))
+            .filter_map(|row| {
+                let acp_session_id = row.id.trim().to_string();
+                if acp_session_id.is_empty() || acp_session_id.len() > 1_024 {
+                    return None;
+                }
+                Some(OpenCodeChildSession {
+                    title: row
+                        .title
+                        .map(|title| title.trim().to_string())
+                        .filter(|title| valid_session_title(title)),
+                    acp_session_id,
+                })
+            })
+            .take(MAX_OPENCODE_CHILD_SESSIONS)
+            .collect()
+    }
+
     pub async fn adopt_related_session(
         &self,
         parent_thread_id: &str,
@@ -1727,9 +1901,7 @@ impl AgentManager {
         &self,
         runtime: &AgentRuntime,
     ) -> HashMap<String, OpenCodeSessionSummary> {
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return HashMap::new();
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -1930,9 +2102,7 @@ impl AgentManager {
         cwd: &Path,
     ) -> Option<OpenCodeExportDocument> {
         let runtime = self.agents.get(&identity.agent_id)?;
-        if runtime.manifest.resolved.agent_id != "opencode"
-            || runtime.manifest.resolved.argv != ["acp"]
-        {
+        if !is_opencode_acp(&runtime.manifest.resolved) {
             return None;
         }
         let mut command = AsyncCommand::new(&runtime.manifest.resolved.executable);
@@ -2085,6 +2255,21 @@ fn exported_session_events(
     events
 }
 
+/// Whether this agent is OpenCode running as an ACP server.
+///
+/// OpenCode-specific behaviour is opt-in on exactly this shape so a differently configured
+/// agent, or one that merely borrows the id, is never probed.
+fn is_opencode_acp(manifest: &ResolvedAgentManifest) -> bool {
+    manifest.agent_id == "opencode" && manifest.argv == ["acp"]
+}
+
+fn allocate_loopback_port() -> Option<u16> {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .ok()
+        .and_then(|listener| listener.local_addr().ok())
+        .map(|address| address.port())
+}
+
 fn valid_session_title(title: &str) -> bool {
     let title = title.trim();
     !title.is_empty() && title.len() <= 256 && !title.chars().any(char::is_control)
@@ -2183,7 +2368,10 @@ fn parse_opencode_model_catalog(bytes: &[u8]) -> Vec<OpenCodeModelCatalogEntry> 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod catalog_tests {
+    use agent_client_protocol::schema::v1::ToolCallStatus;
+
     use super::*;
 
     #[test]
@@ -2213,25 +2401,64 @@ mod catalog_tests {
             br#"{
                     "messages": [{
                         "info": { "id": "message-parent", "role": "assistant" },
-                        "parts": [{
-                            "type": "tool",
-                            "tool": "task",
-                            "state": {
-                                "input": { "description": "Ask subagent about hobbies" },
-                                "output": "<task id=\"child-fallback\" state=\"completed\"></task>",
-                                "metadata": { "sessionId": "child-session" }
+                        "parts": [
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "input": { "description": "Ask subagent about hobbies" },
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>",
+                                    "metadata": { "sessionId": "child-session" }
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "input": { "description": " " },
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>"
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task",
+                                "state": {
+                                    "output": "<task id=\"child-fallback\" state=\"completed\"></task>"
+                                }
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "task"
+                            },
+                            {
+                                "type": "tool",
+                                "tool": "read",
+                                "state": {}
                             }
-                        }]
+                        ]
                     }]
                 }"#,
         )
         .unwrap();
         let related = parse_opencode_related_sessions(document);
-        assert_eq!(related.len(), 1);
-        assert_eq!(related[0].session_id, "child-session");
+        assert_eq!(related.len(), 2);
+        assert_eq!(related[0].session_id, "child-fallback");
+        assert_eq!(related[0].title, None);
+        assert_eq!(related[1].session_id, "child-session");
         assert_eq!(
-            related[0].title.as_deref(),
+            related[1].title.as_deref(),
             Some("Ask subagent about hobbies")
+        );
+        assert_eq!(
+            snapshot_task_session_id("<task id=\"\" state=\"running\">"),
+            None
+        );
+        assert_eq!(
+            snapshot_task_session_id(&format!(
+                "<task id=\"{}\" state=\"running\">",
+                "x".repeat(1_025)
+            )),
+            None
         );
     }
 
@@ -2279,6 +2506,106 @@ mod catalog_tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn converts_opencode_export_tool_states_to_canonical_events() {
+        let document = serde_json::from_slice::<OpenCodeExportDocument>(
+            br#"{
+                    "messages": [{
+                        "info": { "id": "tool-message", "role": "assistant" },
+                        "parts": [
+                            { "id": "metadata", "type": "metadata" },
+                            { "id": "missing-state", "type": "tool", "tool": "read" },
+                            {
+                                "id": "completed",
+                                "type": "tool",
+                                "tool": "read",
+                                "state": { "status": "completed", "output": "done" }
+                            },
+                            {
+                                "id": "failed",
+                                "type": "tool",
+                                "state": { "status": "error", "title": "Failure", "error": "bad" }
+                            },
+                            {
+                                "id": "running",
+                                "type": "tool",
+                                "state": { "status": "running" }
+                            },
+                            {
+                                "type": "tool",
+                                "state": { "status": "unknown" }
+                            }
+                        ]
+                    }]
+                }"#,
+        )
+        .unwrap();
+        let identity = AgentSessionId::new("opencode", "tool-session").unwrap();
+        let events = exported_session_events(&identity, document);
+        let statuses = events
+            .iter()
+            .map(|event| match event {
+                CanonicalEvent::Tool { status, .. } => *status,
+                _ => panic!("expected tool event"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            statuses,
+            vec![
+                ToolCallStatus::Completed,
+                ToolCallStatus::Failed,
+                ToolCallStatus::InProgress,
+                ToolCallStatus::Pending,
+            ]
+        );
+        assert!(matches!(
+            &events[0],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "read" && content == "done"
+        ));
+        assert!(matches!(
+            &events[1],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "Failure" && content == "bad"
+        ));
+        assert!(matches!(
+            &events[3],
+            CanonicalEvent::Tool {
+                title,
+                content: FieldUpdate::Set(content),
+                ..
+            } if title == "tool" && content.is_empty()
+        ));
+    }
+
+    #[test]
+    fn model_catalog_handles_invalid_json_and_non_reasoning_models() {
+        let catalog = parse_opencode_model_catalog(
+            br#"{invalid}
+{
+  "id": "plain",
+  "providerID": "provider",
+  "name": "",
+  "capabilities": { "reasoning": false },
+  "variants": { "unsupported": {} }
+}
+"#,
+        );
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].display_name, "provider/plain");
+        assert_eq!(catalog[0].context_window, None);
+        assert!(catalog[0].reasoning_effort.is_empty());
+        assert!(parse_opencode_model_catalog(&[0xff]).is_empty());
     }
 }
 
@@ -2346,6 +2673,7 @@ fn redact_error(error: &AcpRuntimeError) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 
@@ -3882,6 +4210,13 @@ mod tests {
                 title: None,
                 parent_acp_session_id: None,
             },
+            SessionIndexEntry {
+                agent_id: "alpha".into(),
+                acp_session_id: "self-parent".into(),
+                cwd: PathBuf::from("/tmp"),
+                title: None,
+                parent_acp_session_id: Some("self-parent".into()),
+            },
         ]);
         assert_eq!(entries, vec![valid, other_session, other_agent]);
 
@@ -3900,21 +4235,51 @@ mod tests {
         assert_eq!(reloaded.entries[0].title.as_deref(), Some("Manual title"));
 
         let mut memory_only = DurableSessionIndex::load(None).await;
+        let original = SessionIndexEntry {
+            agent_id: "alpha".into(),
+            acp_session_id: "memory".into(),
+            cwd: PathBuf::from("/tmp/original"),
+            title: Some("Original title".into()),
+            parent_acp_session_id: Some("original-parent".into()),
+        };
+        memory_only.insert_all([original]).await.unwrap();
         memory_only
-            .insert_all([index_entry(
-                AgentSessionId::new("alpha", "memory").unwrap(),
-                PathBuf::from("/tmp"),
-            )])
-            .await
-            .unwrap();
-        memory_only
-            .insert_all([index_entry(
-                AgentSessionId::new("alpha", "memory").unwrap(),
-                PathBuf::from("/tmp"),
-            )])
+            .insert_all([SessionIndexEntry {
+                agent_id: "alpha".into(),
+                acp_session_id: "memory".into(),
+                cwd: PathBuf::from("/tmp/updated"),
+                title: None,
+                parent_acp_session_id: None,
+            }])
             .await
             .unwrap();
         assert_eq!(memory_only.entries.len(), 1);
+        assert_eq!(memory_only.entries[0].cwd, PathBuf::from("/tmp/updated"));
+        assert_eq!(
+            memory_only.entries[0].title.as_deref(),
+            Some("Original title")
+        );
+        assert_eq!(
+            memory_only.entries[0].parent_acp_session_id.as_deref(),
+            Some("original-parent")
+        );
+        let replacement = SessionIndexEntry {
+            agent_id: "alpha".into(),
+            acp_session_id: "memory".into(),
+            cwd: PathBuf::from("/tmp/replaced"),
+            title: Some("Replacement title".into()),
+            parent_acp_session_id: Some("replacement-parent".into()),
+        };
+        memory_only.insert_all([replacement.clone()]).await.unwrap();
+        memory_only.insert_all([replacement]).await.unwrap();
+        assert_eq!(
+            memory_only.entries[0].title.as_deref(),
+            Some("Replacement title")
+        );
+        assert_eq!(
+            memory_only.entries[0].parent_acp_session_id.as_deref(),
+            Some("replacement-parent")
+        );
         memory_only
             .insert_all((0..=MAX_SESSIONS).map(|index| {
                 index_entry(

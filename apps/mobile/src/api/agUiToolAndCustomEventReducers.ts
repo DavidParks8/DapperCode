@@ -8,6 +8,13 @@ import {
   upsertToolCall,
 } from './agUiReducerUtilities';
 import {
+  attachToolMeta,
+  mergeToolMeta,
+  parseToolMeta,
+  TOOL_META_ACTIVITY_TYPE,
+  TOOL_META_EVENT_NAME,
+} from './toolMeta';
+import {
   findMessage,
   reduceStructuredMessageContent,
   reduceSubagentActivity,
@@ -22,7 +29,40 @@ import {
   MAX_CUSTOM_METADATA_ENTRIES,
   MAX_MESSAGES_PER_THREAD,
 } from './agUiMessagesState';
-import { type ChatMessage } from './types';
+import { type ChatMessage, type ChatToolMeta } from './types';
+
+/**
+ * Records a tool's kind, status and title, and stamps them onto every message
+ * that speaks for the same call so the transcript can render one typed row.
+ */
+export function rememberToolMeta(
+  current: AgUiThreadMessageState,
+  meta: ChatToolMeta,
+): AgUiThreadMessageState {
+  if (current.subagentToolCallIds[meta.toolCallId]) return current;
+  const merged = mergeToolMeta(current.toolMetaByCallId[meta.toolCallId], meta);
+  return {
+    ...current,
+    messages: attachToolMeta(current.messages, merged),
+    toolMetaByCallId: { ...current.toolMetaByCallId, [meta.toolCallId]: merged },
+  };
+}
+
+export function reduceToolMeta(
+  current: AgUiThreadMessageState,
+  runId: string,
+  value: Record<string, unknown> | null,
+  timestamp?: number,
+): AgUiThreadMessageState {
+  const meta = parseToolMeta(value);
+  if (!meta) return current;
+  // A tool can be announced by its metadata before any output exists, which is
+  // what puts a running row on screen the moment the agent starts working.
+  const started = current.toolCallMessageIdByCallId[meta.toolCallId]
+    ? current
+    : startToolCall(current, runId, meta.toolCallId, meta.title, undefined, timestamp);
+  return rememberToolMeta(started, meta);
+}
 
 export function appendToolArgs(
   current: AgUiThreadMessageState,
@@ -70,8 +110,12 @@ export function upsertToolResult(
     createdAt: timestampIso(timestamp),
   };
   const next = upsertMessage(current, toolMessage, runId, timestamp);
+  const meta = next.toolMetaByCallId[toolCallId];
   return {
     ...next,
+    // A result can land after the metadata that describes it, so the freshly
+    // created message is stamped instead of waiting for the next update.
+    messages: meta ? attachToolMeta(next.messages, meta) : next.messages,
     toolResultMessageIdByCallId: {
       ...next.toolResultMessageIdByCallId,
       [toolCallId]: messageId,
@@ -112,7 +156,18 @@ export function applyMessagesSnapshot(
   const previous = new Map(current.messages.map((message) => [message.id, message]));
   const restoredSubagents = new Set<string>();
   const nextMessages: ChatMessage[] = [];
+  // The snapshot describes each tool's kind and status in a companion activity
+  // message. It is bookkeeping for the tool row, never a transcript entry of its
+  // own, so it is folded into the metadata map and dropped here.
+  const toolMetaByCallId = { ...current.toolMetaByCallId };
   for (const message of messages) {
+    if (message.role === 'activity' && message.activityType === TOOL_META_ACTIVITY_TYPE) {
+      const meta = parseToolMeta(message.content);
+      if (meta && !snapshotSubagentIds[meta.toolCallId]) {
+        toolMetaByCallId[meta.toolCallId] = mergeToolMeta(toolMetaByCallId[meta.toolCallId], meta);
+      }
+      continue;
+    }
     const suppressedIds = suppressedToolCallIds(message, snapshotSubagentIds);
     if (suppressedIds.length > 0) {
       // A malformed bridge snapshot can forget that a live task tool was already
@@ -147,13 +202,18 @@ export function applyMessagesSnapshot(
         : undefined,
     } as ChatMessage);
   }
+  const kept = Object.values(toolMetaByCallId).reduce(
+    (messages, meta) => attachToolMeta(messages, meta),
+    nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
+  );
   return {
     ...current,
-    messages: nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
+    messages: kept,
     authoritativeSnapshot: true,
     runByMessageId: Object.fromEntries(nextMessages.map((message) => [message.id, runId])),
     terminalMessageIds: nextMessages.map((message) => message.id),
     subagentToolCallIds: snapshotSubagentIds,
+    toolMetaByCallId,
   };
 }
 
@@ -259,6 +319,9 @@ export function reduceCustomEvent(
   }
   if (event.name === 'dappercode.dev/subagent') {
     return reduceSubagentActivity(current, envelope, value);
+  }
+  if (event.name === TOOL_META_EVENT_NAME) {
+    return reduceToolMeta(current, envelope.runId, value, event.timestamp);
   }
   return storeCustomMetadata(current, event.name, event.value);
 }

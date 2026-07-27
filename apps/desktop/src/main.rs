@@ -543,6 +543,10 @@ mod tests {
         );
         assert_eq!(args, vec!["tail"]);
         assert_eq!(default_agent_args("opencode"), vec!["acp"]);
+
+        let mut missing_value = vec!["--workspace".into()];
+        assert_eq!(option(&mut missing_value, "--workspace"), None);
+        assert_eq!(missing_value, vec!["--workspace"]);
     }
 
     #[test]

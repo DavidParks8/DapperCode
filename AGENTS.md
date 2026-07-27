@@ -89,6 +89,21 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 - The active iOS project is `apps/mobile/ios`, not the old root `ios` directory.
 - Version changes must keep both Rust lockfiles and mobile metadata synchronized.
 
+## Regression Protection
+
+- Every bug fix must include an automated regression test that fails on the broken behavior and
+  passes with the fix. Reproduce the reported sequence; do not settle for testing a helper's final
+  value when the defect depends on timing, ordering, navigation, or state transitions.
+- Assert all user-visible states coupled to the defect. For lifecycle bugs, cover the transition
+  from running to settled and every control derived from it, such as status text, loading
+  indicators, stop/cancel actions, and composer availability.
+- Test the lowest layer that owns the bug, then add an integration test when the failure crosses
+  layers or only appears after components are wired together. Contract regressions still require
+  mirrored Rust, mobile, fixture, and contract coverage.
+- Do not weaken, delete, or broadly snapshot existing assertions to make a fix pass. If automated
+  coverage is genuinely infeasible, explain why in the PR and provide deterministic manual
+  reproduction and verification steps.
+
 ## Validation
 
 Desktop changes:
