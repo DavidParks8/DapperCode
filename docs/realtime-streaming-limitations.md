@@ -52,10 +52,19 @@ instead:
    remembered so a later rename cannot hide it.
 2. The agent is polled for sessions whose parent is the running thread. Several sub-agents at once
    are told apart by the description the agent puts on both the child session and the tool call.
+   A task tool is called "task" until it finishes, so usually there is no description to match on;
+   the children the parent already had when polling started are recorded instead, which makes a
+   child that appears afterwards the one this tool call spawned. Without that, a parent that already
+   owned an unclaimed child could never resolve its sub-agent while it ran.
 3. The discovered child is indexed and linked to the tool call that spawned it, immediately making
    the parent card navigable.
 4. The child is resumed and announced with `thread/subagent/adopted`. Resuming starts its updates
    flowing only after the link exists, so replayed progress reaches the card and mobile transcript.
+
+While a sub-agent runs, its card reports the last tool it actually ran rather than the response it
+is narrating, and an update that would not change the card is dropped. A card that repaints on every
+streamed token resizes the transcript under the reader's finger, which cancels the tap that opens
+the sub-agent.
 
 This is supported for OpenCode, which serves the session tree over an HTTP port the bridge assigns
 when it starts the agent. The port is allocated per agent process rather than fixed, so parallel

@@ -2,6 +2,27 @@ import { StyleSheet } from 'react-native';
 
 import type { AppTheme } from '../theme';
 
+const SUBAGENT_CARD_HEADER_HEIGHT = 20;
+const SUBAGENT_CARD_DETAIL_LINE_HEIGHT = 16;
+const SUBAGENT_CARD_FOOTER_HEIGHT = 18;
+const SUBAGENT_CARD_DETAIL_ROW_GAP = 2;
+const SUBAGENT_CARD_DETAIL_ROWS = 2;
+
+/**
+ * A sub-agent card is the same height whatever the sub-agent is doing.
+ *
+ * Vertical padding (`spacing.sm + 1`, twice) plus the header, the two detail rows and their gap,
+ * plus the footer button and the gap above it.
+ */
+export const SUBAGENT_CARD_HEIGHT =
+  (8 + 1) * 2 +
+  SUBAGENT_CARD_HEADER_HEIGHT +
+  4 +
+  SUBAGENT_CARD_DETAIL_LINE_HEIGHT * SUBAGENT_CARD_DETAIL_ROWS +
+  SUBAGENT_CARD_DETAIL_ROW_GAP * (SUBAGENT_CARD_DETAIL_ROWS - 1) +
+  4 +
+  SUBAGENT_CARD_FOOTER_HEIGHT;
+
 export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     messageWrapper: { maxWidth: '100%' },
@@ -355,12 +376,28 @@ export const createStyles = (theme: AppTheme) =>
       backgroundColor: theme.colors.warningBg,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm + 1,
+      // Every row below is a fixed height, so a sub-agent streaming progress never resizes the
+      // card. A card that grows and shrinks makes the transcript jump and cancels the tap that
+      // opens the sub-agent.
+      height: SUBAGENT_CARD_HEIGHT,
     },
     subAgentCardError: {
       borderColor: theme.colors.statusError,
       backgroundColor: theme.colors.errorBg,
     },
-    subAgentHeader: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
+    subAgentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      height: SUBAGENT_CARD_HEADER_HEIGHT,
+    },
+    // A spinner and a status glyph have different intrinsic sizes, so both sit in one fixed slot.
+    subAgentHeaderIcon: {
+      width: SUBAGENT_CARD_HEADER_HEIGHT,
+      height: SUBAGENT_CARD_HEADER_HEIGHT,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     subAgentTitle: {
       ...theme.typography.body,
       color: theme.colors.textPrimary,
@@ -369,11 +406,15 @@ export const createStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     subAgentDetailWrap: { marginTop: theme.spacing.xs, paddingLeft: theme.spacing.lg + 2, gap: 2 },
-    subAgentLatestLine: { flexDirection: 'row', minWidth: 0 },
+    subAgentDetailRow: {
+      flexDirection: 'row',
+      minWidth: 0,
+      height: SUBAGENT_CARD_DETAIL_LINE_HEIGHT,
+    },
     subAgentDetailLine: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      lineHeight: 16,
+      lineHeight: SUBAGENT_CARD_DETAIL_LINE_HEIGHT,
       minWidth: 0,
     },
     subAgentOpenHint: {
@@ -382,6 +423,7 @@ export const createStyles = (theme: AppTheme) =>
       justifyContent: 'flex-end',
       gap: 3,
       marginTop: 4,
+      height: SUBAGENT_CARD_FOOTER_HEIGHT,
     },
     subAgentOpenHintPressed: { opacity: 0.6 },
     subAgentOpenHintText: {

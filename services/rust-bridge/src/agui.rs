@@ -74,6 +74,10 @@ struct SubagentActivityLink {
     child_generation: Option<u64>,
     minimum_child_generation: Option<u64>,
     progress_revisions: HashSet<String>,
+    /// The last tool the sub-agent actually ran, which is what its card reports.
+    last_tool_latest: Option<String>,
+    /// The last `status` and preview projected onto the card, so identical updates stay silent.
+    last_rendered: Option<String>,
 }
 
 struct SubagentActivityContext<'a> {
@@ -88,6 +92,8 @@ struct SubagentProgress {
     status: &'static str,
     latest: String,
     revision: Option<String>,
+    /// Whether this preview names a tool the sub-agent ran, rather than its narration.
+    from_tool: bool,
 }
 
 #[derive(Debug, Default)]
@@ -612,6 +618,15 @@ impl AgUiProjector {
                         } else {
                             HashSet::new()
                         };
+                        let (last_tool_latest, last_rendered) = if same_invocation {
+                            previous_link
+                                .map(|link| {
+                                    (link.last_tool_latest.clone(), link.last_rendered.clone())
+                                })
+                                .unwrap_or((None, None))
+                        } else {
+                            (None, None)
+                        };
                         subagent_links.insert(
                             child_thread_id.clone(),
                             SubagentActivityLink {
@@ -624,6 +639,8 @@ impl AgUiProjector {
                                 child_generation,
                                 minimum_child_generation,
                                 progress_revisions,
+                                last_tool_latest,
+                                last_rendered,
                             },
                         );
                     }
@@ -1199,6 +1216,8 @@ impl AgUiProjector {
                 child_generation: None,
                 minimum_child_generation: None,
                 progress_revisions: HashSet::new(),
+                last_tool_latest: None,
+                last_rendered: None,
             },
         );
         true
@@ -1261,6 +1280,31 @@ impl AgUiProjector {
             }
             current.progress_revisions.insert(revision.to_string());
         }
+        // A sub-agent narrating its answer says nothing about what it is doing, so the card keeps
+        // naming the last tool it actually ran instead of churning through response text.
+        let terminal = is_terminal_subagent_status(progress.status);
+        let latest = if progress.from_tool || terminal {
+            progress.latest.clone()
+        } else {
+            link.last_tool_latest
+                .clone()
+                .unwrap_or_else(|| progress.latest.clone())
+        };
+        {
+            let Some(current) = self.subagent_links.get_mut(thread_id) else {
+                return;
+            };
+            if progress.from_tool {
+                current.last_tool_latest = Some(progress.latest.clone());
+            }
+            let rendered = format!("{}\u{0}{latest}", progress.status);
+            // Repainting an unchanged card resizes the transcript under the user's finger, which
+            // cancels the tap that opens the sub-agent.
+            if current.last_rendered.as_deref() == Some(rendered.as_str()) {
+                return;
+            }
+            current.last_rendered = Some(rendered);
+        }
         events.push(subagent_activity_envelope(
             SubagentActivityContext {
                 parent_thread_id: &link.parent_thread_id,
@@ -1270,7 +1314,7 @@ impl AgUiProjector {
                 child_thread_id: Some(&link.child_thread_id),
             },
             progress.status,
-            Some(&progress.latest),
+            Some(&latest),
             timestamp,
         ));
         if is_terminal_subagent_status(progress.status) {
@@ -1972,6 +2016,7 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
                 status: "running",
                 latest: format!("{action}: {}", bounded(content, 320)),
                 revision: None,
+                from_tool: false,
             })
         }
         CanonicalEvent::Tool {
@@ -1992,12 +2037,14 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
                         status: "running",
                         latest: format!("Tool failed {title}"),
                         revision: Some(format!("failed:{tool_call_id}")),
+                        from_tool: true,
                     })
                 }
                 _ => Some(SubagentProgress {
                     status: "running",
                     latest: format!("Working on {title}"),
                     revision: Some(format!("working:{tool_call_id}")),
+                    from_tool: true,
                 }),
             }
         }
@@ -2005,16 +2052,19 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
             status: "running",
             latest: "Updating plan".to_string(),
             revision: None,
+            from_tool: false,
         }),
         CanonicalEvent::PermissionRequested { .. } => Some(SubagentProgress {
             status: "running",
             latest: "Waiting for approval".to_string(),
             revision: None,
+            from_tool: false,
         }),
         CanonicalEvent::ElicitationRequested { .. } => Some(SubagentProgress {
             status: "running",
             latest: "Waiting for input".to_string(),
             revision: None,
+            from_tool: false,
         }),
         CanonicalEvent::RunFinished {
             stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
@@ -2023,16 +2073,19 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
             status: "cancelled",
             latest: "Cancelled".to_string(),
             revision: None,
+            from_tool: false,
         }),
         CanonicalEvent::RunFinished { .. } => Some(SubagentProgress {
             status: "completed",
             latest: "Returned result".to_string(),
             revision: None,
+            from_tool: false,
         }),
         CanonicalEvent::RunFailed { message, .. } => Some(SubagentProgress {
             status: "failed",
             latest: bounded(message, 512),
             revision: None,
+            from_tool: false,
         }),
         _ => None,
     }
@@ -4517,6 +4570,106 @@ mod tests {
         let parent_cards = subagent_cards(&parent_finished);
         assert_eq!(parent_cards.len(), 1);
         assert!(parent_cards[0].1.contains("Sub-agent completed"));
+    }
+
+    /// The card reports what the sub-agent is doing, and narration is not doing anything. Once a
+    /// tool has run, response and reasoning chunks must keep naming that tool instead of
+    /// repainting the card with streamed prose.
+    #[test]
+    fn a_running_card_names_the_last_tool_instead_of_streamed_narration() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let parent_thread = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg";
+        let child_thread = AgentSessionId::new("alpha-agent", "child-session")
+            .expect("child identity")
+            .encode();
+        assert!(projector.link_subagent(
+            parent_thread,
+            "run-1",
+            Some("turn-1".to_string()),
+            "task-tools",
+            &child_thread,
+        ));
+
+        let child_message = |message_id: &str, role, content: &str| CanonicalEvent::MessageChunk {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            role,
+            message_id: message_id.to_string(),
+            content: content.to_string(),
+            content_block: None,
+        };
+        let child_tool = |tool_call_id: &str, title: &str| CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread.clone(),
+            run_id: Some("child-run".to_string()),
+            source_turn_id: Some("child-turn".to_string()),
+            generation: Some(1),
+            tool_call_id: tool_call_id.to_string(),
+            kind: ToolKind::Read,
+            status: ToolCallStatus::InProgress,
+            title: title.to_string(),
+            content: FieldUpdate::Set(String::new()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+
+        // Before any tool has run there is nothing else to report, so narration still shows.
+        let narrating = projector.project_canonical(&child_message(
+            "answer-1",
+            MessageRole::Agent,
+            "Let me look at the code",
+        ));
+        assert!(subagent_cards(&narrating)[0]
+            .1
+            .contains("Latest: Responding: Let me look at the code"));
+
+        let searched = projector.project_canonical(&child_tool("read-1", "Search dependencies"));
+        assert!(subagent_cards(&searched)[0]
+            .1
+            .contains("Latest: Working on Search dependencies"));
+
+        // Every later narration chunk keeps naming that tool, and repeats stay silent so the
+        // transcript does not resize under the user's finger.
+        for (index, chunk) in ["Now I will", " summarize the findings"].iter().enumerate() {
+            let narrated = projector.project_canonical(&child_message(
+                &format!("answer-{}", index + 2),
+                MessageRole::Agent,
+                chunk,
+            ));
+            assert!(
+                subagent_cards(&narrated).is_empty(),
+                "narration repainted the card: {:?}",
+                subagent_cards(&narrated)
+            );
+        }
+        let reasoning =
+            projector.project_canonical(&child_message("thought-1", MessageRole::Thought, "Hmm"));
+        assert!(subagent_cards(&reasoning).is_empty());
+
+        // A genuinely new tool still updates the card.
+        let edited = projector.project_canonical(&child_tool("read-2", "Edit manifest"));
+        assert!(subagent_cards(&edited)[0]
+            .1
+            .contains("Latest: Working on Edit manifest"));
+
+        let finished = projector.project_canonical(&CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: child_thread,
+            run_id: "child-run".to_string(),
+            source_turn_id: "child-turn".to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        });
+        let completed = subagent_cards(&finished);
+        assert!(completed[0].1.contains("Sub-agent completed"));
+        assert!(
+            completed[0].1.contains("Latest: Returned result"),
+            "terminal card must report its outcome, got {completed:?}"
+        );
     }
 
     /// A foreground task tool names its child only once it has finished, so the bridge finds the

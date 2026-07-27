@@ -37,6 +37,29 @@ import {
 } from './chatMessageTimelineHelpers';
 import type { ChatMessageProps } from './chatMessageTypes';
 
+/** Reads one labelled line out of a sub-agent card body, ignoring its indentation. */
+function findSubAgentDetailLine(details: string[], label: string): string | undefined {
+  const prefix = `${label.toLowerCase()}:`;
+  return details.map((line) => line.trim()).find((line) => line.toLowerCase().startsWith(prefix));
+}
+
+/**
+ * The one supporting line a sub-agent card shows above its latest activity.
+ *
+ * The card is a fixed height, so it has room for exactly one. What the sub-agent was asked to do,
+ * or what it returned, says more than a status the heading and icon already convey.
+ */
+function subAgentSummaryLine(details: string[], agentStatus: string | undefined): string {
+  const trimmed = details.map((line) => line.trim()).filter(Boolean);
+  return (
+    trimmed.find(
+      (line) => !/^(status|latest):/i.test(line) && !line.toLowerCase().startsWith('thread:'),
+    ) ??
+    findSubAgentDetailLine(details, 'Status') ??
+    `Status: ${agentStatus ?? 'running'}`
+  );
+}
+
 function LocalPreviewLinks({
   messageId,
   urls,
@@ -256,50 +279,41 @@ function ChatMessageComponent({
                 style={[styles.subAgentCard, visual.isError && styles.subAgentCardError]}
               >
                 <View style={styles.subAgentHeader}>
-                  {running ? (
-                    <ActivityIndicator size="small" color={theme.colors.warning} />
-                  ) : (
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name={visual.icon}
-                      size={14}
-                      color={visual.isError ? theme.colors.statusError : theme.colors.warning}
-                    />
-                  )}
-                  <Text style={styles.subAgentTitle}>{entry.title}</Text>
-                </View>
-                {entry.details.length ? (
-                  <View style={styles.subAgentDetailWrap}>
-                    {entry.details.map((line, lineIndex) => {
-                      const key = `${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`;
-                      if (line.trimStart().startsWith('Latest:')) {
-                        const displayLine =
-                          running && /^\s*Latest:\s*Responding:/i.test(line)
-                            ? line.replace(/Responding:.*$/i, 'Responding...')
-                            : line;
-                        return (
-                          <View key={key} style={styles.subAgentLatestLine}>
-                            <ScrollableRowText
-                              style={styles.subAgentDetailLine}
-                              backgroundColor={
-                                visual.isError ? theme.colors.errorBg : theme.colors.warningBg
-                              }
-                              numberOfLines={1}
-                              testID="subagent-latest-scroll"
-                            >
-                              {displayLine}
-                            </ScrollableRowText>
-                          </View>
-                        );
-                      }
-                      return (
-                        <SelectableMessageText key={key} style={styles.subAgentDetailLine}>
-                          {line}
-                        </SelectableMessageText>
-                      );
-                    })}
+                  <View style={styles.subAgentHeaderIcon}>
+                    {running ? (
+                      <ActivityIndicator size="small" color={theme.colors.warning} />
+                    ) : (
+                      <Ionicons
+                        {...decorativeAccessibilityProps}
+                        name={visual.icon}
+                        size={14}
+                        color={visual.isError ? theme.colors.statusError : theme.colors.warning}
+                      />
+                    )}
                   </View>
-                ) : null}
+                  <Text style={styles.subAgentTitle} numberOfLines={1}>
+                    {entry.title}
+                  </Text>
+                </View>
+                <View style={styles.subAgentDetailWrap}>
+                  <View style={styles.subAgentDetailRow}>
+                    <SelectableMessageText style={styles.subAgentDetailLine} numberOfLines={1}>
+                      {subAgentSummaryLine(entry.details, meta?.agentStatus)}
+                    </SelectableMessageText>
+                  </View>
+                  <View style={styles.subAgentDetailRow}>
+                    <ScrollableRowText
+                      style={styles.subAgentDetailLine}
+                      backgroundColor={
+                        visual.isError ? theme.colors.errorBg : theme.colors.warningBg
+                      }
+                      numberOfLines={1}
+                      testID="subagent-latest-scroll"
+                    >
+                      {findSubAgentDetailLine(entry.details, 'Latest') ?? 'Latest: —'}
+                    </ScrollableRowText>
+                  </View>
+                </View>
                 <Pressable
                   onPress={canOpen ? () => onOpenSubAgentThread?.(threadId) : undefined}
                   disabled={!canOpen}

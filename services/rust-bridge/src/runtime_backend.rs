@@ -13,7 +13,9 @@ use agent_client_protocol::schema::v1::{
 use futures_util::future::BoxFuture;
 
 use crate::acp::interactions::ElicitationFieldKind;
-use crate::acp::manager::{AgentLifecycle, AgentManager, LocalAgentManifestSet, ManagedSession};
+use crate::acp::manager::{
+    AgentLifecycle, AgentManager, LocalAgentManifestSet, ManagedSession, OpenCodeChildSession,
+};
 use crate::acp::runtime::RequestCancellation;
 use crate::*;
 
@@ -77,6 +79,7 @@ async fn discover_subagent_session(
     tool_call_id: String,
     in_flight: SubagentDiscoveries,
 ) {
+    let mut baseline: Option<HashSet<String>> = None;
     for attempt in 0..SUBAGENT_DISCOVERY_ATTEMPTS {
         if attempt > 0 {
             tokio::time::sleep(SUBAGENT_DISCOVERY_INTERVAL).await;
@@ -114,10 +117,13 @@ async fn discover_subagent_session(
         }
         // With several sub-agents in flight the title is what tells them apart: an agent titles
         // the child after the task description it also puts on the tool call.
-        let selected = candidates
-            .iter()
-            .find(|(child, _)| child_matches_tool_title(child.title.as_deref(), &tool.title))
-            .or_else(|| candidates.first().filter(|_| candidates.len() == 1));
+        let baseline = baseline.get_or_insert_with(|| {
+            candidates
+                .iter()
+                .map(|(_, thread_id)| thread_id.clone())
+                .collect()
+        });
+        let selected = select_spawned_child(&candidates, &tool.title, baseline);
         let Some((selected, child_thread)) = selected else {
             continue;
         };
@@ -168,6 +174,31 @@ fn child_matches_tool_title(child_title: Option<&str>, tool_title: &str) -> bool
     child_title
         .map(|title| title.trim().to_ascii_lowercase())
         .is_some_and(|title| title.starts_with(&tool_title))
+}
+
+/// Picks the child session a still-running task tool spawned.
+///
+/// The tool's title is the best evidence, but a task tool is called "task" until it finishes, so
+/// usually there is none. `baseline` holds the children the parent already had when this tool call
+/// started polling, which makes a child that appears afterwards the one it spawned. Without that,
+/// a parent that already owned an unclaimed child could never resolve its sub-agent while it ran,
+/// and the card stayed unopenable until the tool finished and named the child itself.
+fn select_spawned_child<'a>(
+    candidates: &'a [(OpenCodeChildSession, String)],
+    tool_title: &str,
+    baseline: &HashSet<String>,
+) -> Option<&'a (OpenCodeChildSession, String)> {
+    candidates
+        .iter()
+        .find(|(child, _)| child_matches_tool_title(child.title.as_deref(), tool_title))
+        .or_else(|| {
+            let mut appeared = candidates
+                .iter()
+                .filter(|(_, thread_id)| !baseline.contains(thread_id));
+            let first = appeared.next()?;
+            appeared.next().is_none().then_some(first)
+        })
+        .or_else(|| candidates.first().filter(|_| candidates.len() == 1))
 }
 
 struct AdoptedSubagent<'a> {
@@ -1369,6 +1400,55 @@ mod client_request_tests {
         ));
         assert!(!child_matches_tool_title(None, "Read txt files"));
         assert!(!child_matches_tool_title(Some("anything"), "   "));
+    }
+
+    /// A sub-agent has to be found while it is still running, because that is the only thing that
+    /// makes its card openable before the task tool finishes. A parent that already owns other
+    /// unclaimed children must not defeat that.
+    #[test]
+    fn a_child_that_appears_after_polling_started_is_the_one_the_tool_spawned() {
+        let child = |id: &str, title: Option<&str>| {
+            (
+                OpenCodeChildSession {
+                    title: title.map(str::to_string),
+                    acp_session_id: id.to_string(),
+                },
+                format!("thread-{id}"),
+            )
+        };
+        let existing = child("old", Some("Earlier errand (@general subagent)"));
+        let spawned = child("new", None);
+
+        // Nothing has appeared yet, so the single-candidate rule still resolves the sub-agent.
+        let baseline = HashSet::new();
+        let candidates = vec![spawned.clone()];
+        assert_eq!(
+            select_spawned_child(&candidates, "task", &baseline)
+                .map(|(_, thread_id)| thread_id.as_str()),
+            Some("thread-new"),
+        );
+
+        // A leftover child from earlier work used to make this unresolvable, leaving the running
+        // card unopenable for the whole run.
+        let baseline: HashSet<String> = [existing.1.clone()].into_iter().collect();
+        let candidates = vec![existing.clone(), spawned.clone()];
+        assert_eq!(
+            select_spawned_child(&candidates, "task", &baseline)
+                .map(|(_, thread_id)| thread_id.as_str()),
+            Some("thread-new"),
+        );
+
+        // Two children appearing at once are genuinely ambiguous without a title to tell them
+        // apart, so nothing is claimed and the tool's own header resolves it later.
+        let both_new = vec![existing.clone(), spawned.clone()];
+        assert!(select_spawned_child(&both_new, "task", &HashSet::new()).is_none());
+
+        // A named tool call still wins outright.
+        assert_eq!(
+            select_spawned_child(&both_new, "Earlier errand", &HashSet::new())
+                .map(|(_, thread_id)| thread_id.as_str()),
+            Some("thread-old"),
+        );
     }
 
     /// One discovery per tool call: the agent reports a running task tool repeatedly, and each

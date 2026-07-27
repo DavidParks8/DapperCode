@@ -9,6 +9,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -1088,7 +1091,7 @@ describe('ChatMessage system timeline matrices', () => {
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
+        text: '• Sub-agent working\n  Status: running\n  Latest: Working on Read repository',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
@@ -1097,20 +1100,25 @@ describe('ChatMessage system timeline matrices', () => {
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
-    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
-    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
+    // The card names the tool the sub-agent actually ran, not its narration.
+    expect(hasRenderedText(root, 'Latest: Working on Read repository')).toBe(true);
 
     const completed = createActivityMessage(
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent completed\n  Latest: Returned result',
+        text: '• Sub-agent completed\n  Status: completed\n  Latest: Returned result',
         subAgent: { toolCallId: 'task-live', agentStatus: 'completed', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:01.000Z',
     );
     const completedTree = renderMessage(completed);
     expect(completedTree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    // A running card and a finished card occupy exactly the same height, so a sub-agent
+    // reporting progress never makes the transcript jump under the reader.
+    expect(subAgentCardHeight(tree.root as QueryableTestInstance)).toBe(
+      subAgentCardHeight(completedTree.root as QueryableTestInstance),
+    );
     act(() => tree.unmount());
     act(() => completedTree.unmount());
   });
@@ -1480,6 +1488,18 @@ function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChat
 
 function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
   return root.findAll((node) => flattenRenderedText(node.children).includes(text)).length > 0;
+}
+
+/** The resolved height of the rendered sub-agent card, which must not depend on its state. */
+function subAgentCardHeight(root: QueryableTestInstance): number {
+  const card = root
+    .findAllByType(View)
+    .map((node) => StyleSheet.flatten(node.props.style as StyleProp<ViewStyle>))
+    .find((style) => typeof style?.height === 'number' && style.borderRadius !== undefined);
+  if (typeof card?.height !== 'number') {
+    throw new Error('Expected the sub-agent card to declare a fixed height');
+  }
+  return card.height;
 }
 
 function expectValue<T>(value: T | undefined): T {
