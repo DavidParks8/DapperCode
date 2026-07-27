@@ -27,7 +27,7 @@ export function ToolInvocationOutput({
     invocation.diffs.reduce((total, diff) => total + countLines(diff.newText), 0);
 
   const body = (
-    <View style={styles.toolRowBody}>
+    <View testID="tool-output-body" style={styles.toolRowBody}>
       {invocation.locations.length > 0 ? (
         <View style={styles.toolLocationChips}>
           {invocation.locations.map((location, index) => (
