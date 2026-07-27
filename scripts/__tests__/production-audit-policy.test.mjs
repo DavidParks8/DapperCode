@@ -21,13 +21,6 @@ function runChecker(vulnerabilities) {
 }
 
 const reviewed = {
-  'linkify-it': {
-    via: [
-      { source: 1121797, name: 'linkify-it', severity: 'high' },
-      { source: 1124012, name: 'linkify-it', severity: 'high' },
-    ],
-    fixAvailable: false,
-  },
   'brace-expansion': {
     via: [{ source: 1124334, name: 'brace-expansion', severity: 'high' }],
     fixAvailable: { name: 'react-native', version: '0.86.0', isSemVerMajor: true },
@@ -37,7 +30,7 @@ const reviewed = {
 test('production audit accepts only the reviewed high-severity advisories', () => {
   const result = runChecker(reviewed);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /3 reviewed high-severity advisories/);
+  assert.match(result.stdout, /1 reviewed high-severity advisory/);
 });
 
 test('production audit rejects new, stale, or newly fixable advisories', () => {
@@ -53,17 +46,13 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(
-    stale.stderr,
-    /stale exceptions: linkify-it#1121797, linkify-it#1124012, brace-expansion#1124334/,
-  );
+  assert.match(stale.stderr, /stale exceptions: brace-expansion#1124334/);
 
   const fixable = runChecker({
-    ...reviewed,
-    'linkify-it': { ...reviewed['linkify-it'], fixAvailable: true },
+    'brace-expansion': { ...reviewed['brace-expansion'], fixAvailable: true },
   });
   assert.notEqual(fixable.status, 0);
-  assert.match(fixable.stderr, /fix now available: linkify-it/);
+  assert.match(fixable.stderr, /fix now available: brace-expansion/);
 
   const compatibleUpgrade = runChecker({
     ...reviewed,
@@ -76,15 +65,14 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
   assert.match(compatibleUpgrade.stderr, /fix now available: brace-expansion/);
 
   const escalated = runChecker({
-    ...reviewed,
-    'linkify-it': {
-      ...reviewed['linkify-it'],
-      via: reviewed['linkify-it'].via.map((advisory) => ({
+    'brace-expansion': {
+      ...reviewed['brace-expansion'],
+      via: reviewed['brace-expansion'].via.map((advisory) => ({
         ...advisory,
         severity: 'critical',
       })),
     },
   });
   assert.notEqual(escalated.status, 0);
-  assert.match(escalated.stderr, /critical: linkify-it#1121797, linkify-it#1124012/);
+  assert.match(escalated.stderr, /critical: brace-expansion#1124334/);
 });

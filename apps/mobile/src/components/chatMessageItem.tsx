@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Markdown } from '@believer/react-native-markdown-display';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import {

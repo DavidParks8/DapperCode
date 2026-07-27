@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Markdown } from '@believer/react-native-markdown-display';
 import type { BridgeQueuedMessage } from '../../api/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
 import { hasStructuredPlanCardContent } from './planCardState';

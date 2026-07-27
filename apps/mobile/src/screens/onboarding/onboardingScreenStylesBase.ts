@@ -16,7 +16,7 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
       flex: 1,
     },
     ambientCanvas: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       overflow: 'hidden',
     },
     ambientOrbPrimary: {

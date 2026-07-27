@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { Markdown } from '@believer/react-native-markdown-display';
 
 import type { BridgeUiAction, BridgeUiBlock, BridgeUiSurface } from '../api/types';
 import {
