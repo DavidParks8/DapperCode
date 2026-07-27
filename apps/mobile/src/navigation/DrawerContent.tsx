@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Alert, AppState } from 'react-native';
-import type { AgentDescriptor } from '../api/types';
+import type { AgentDescriptor, ChatSummary } from '../api/types';
 import { confirmAction } from '../components/confirm';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
@@ -18,6 +18,25 @@ import { useDrawerAttentionRequests } from './useDrawerAttentionRequests';
 import { useDrawerChatLoading } from './useDrawerChatLoading';
 
 const DRAWER_EVENT_REFRESH_DEBOUNCE_MS = 250;
+
+function chatDeletionFamily(chats: ChatSummary[], rootId: string): ChatSummary[] {
+  const affectedIds = new Set([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const chat of chats) {
+      if (
+        chat.parentThreadId &&
+        affectedIds.has(chat.parentThreadId) &&
+        !affectedIds.has(chat.id)
+      ) {
+        affectedIds.add(chat.id);
+        changed = true;
+      }
+    }
+  }
+  return chats.filter((chat) => affectedIds.has(chat.id));
+}
 
 export const DrawerContent = memo(function DrawerContentComponent({
   active,
@@ -213,44 +232,50 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const handleDeleteChat = useCallback(
     async (chatId: string): Promise<boolean> => {
       const chat = chats.find((entry) => entry.id === chatId);
-      const agent = chat?.agentId
-        ? agents.find((candidate) => candidate.agentId === chat.agentId)
-        : undefined;
-      if (agent?.capabilities?.sessionDelete === false) {
-        Alert.alert(
-          'Deleting is not supported',
-          `${agent.displayName} does not support deleting sessions.`,
-        );
-        return false;
-      }
+      const affectedChats = chatDeletionFamily(chats, chatId);
+      const affectedChatIds = new Set([chatId, ...affectedChats.map((entry) => entry.id)]);
+      const descendantCount = affectedChats.filter((entry) => entry.id !== chatId).length;
       const chatTitle = chat?.title?.trim();
+      const deleteSubject = chatTitle ? `“${chatTitle}”` : 'This session';
+      const descendantSuffix =
+        descendantCount > 0
+          ? ` and ${String(descendantCount)} linked sub-${descendantCount === 1 ? 'session' : 'sessions'}`
+          : '';
       const confirmed = await confirmAction({
         title: 'Delete session?',
-        message: chatTitle
-          ? `“${chatTitle}” will be removed from this agent’s history.`
-          : 'This session will be removed from this agent’s history.',
+        message: `${deleteSubject}${descendantSuffix} will be removed from this agent’s history.`,
         confirmLabel: 'Delete',
         destructive: true,
       });
       if (!confirmed) {
         return false;
       }
-      removeChat(chatId);
+      for (const affectedChatId of affectedChatIds) {
+        removeChat(affectedChatId);
+      }
       try {
         await api.deleteChat(chatId);
-      } catch {
-        if (chat) {
-          restoreChat(chat);
+        for (const affectedChatId of affectedChatIds) {
+          if (affectedChatId !== chatId) {
+            api.forgetChat(affectedChatId);
+          }
         }
-        Alert.alert('Could not delete session', 'The agent refused to delete this session.');
+      } catch {
+        for (const affectedChat of affectedChats) {
+          restoreChat(affectedChat);
+        }
+        Alert.alert(
+          'Could not delete session',
+          'The session was restored. Check the bridge connection and try again.',
+        );
         return false;
       }
-      if (selectedChatId === chatId) {
+      if (selectedChatId && affectedChatIds.has(selectedChatId)) {
         onNewChat();
       }
       return true;
     },
-    [agents, api, chats, onNewChat, removeChat, restoreChat, selectedChatId],
+    [api, chats, onNewChat, removeChat, restoreChat, selectedChatId],
   );
 
   const handleNavigate = useCallback(

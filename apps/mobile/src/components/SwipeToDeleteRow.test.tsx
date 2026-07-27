@@ -1,4 +1,4 @@
-import { Pressable, Text } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
@@ -74,6 +74,36 @@ describe('SwipeToDeleteRow', () => {
     pressDelete(tree);
 
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the destructive layer behind an opaque native clipping surface', () => {
+    const { tree } = renderRow(jest.fn());
+    const clip = tree.root.findByProps({ testID: 'swipe-delete-clip' });
+    const actionLayer = tree.root.findByProps({ testID: 'swipe-delete-action-layer' });
+    const content = tree.root.findByProps({ testID: 'swipe-delete-content' });
+    const clipStyle = StyleSheet.flatten(clip.props.style);
+    const actionStyle = StyleSheet.flatten(actionLayer.props.style);
+    const contentStyle = StyleSheet.flatten(content.props.style);
+
+    expect(clip.props.collapsable).toBe(false);
+    expect(clipStyle).toMatchObject({
+      position: 'relative',
+      overflow: 'hidden',
+      backgroundColor: theme.colors.bgMain,
+    });
+    expect(actionStyle).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 0,
+      backgroundColor: theme.colors.error,
+    });
+    expect(contentStyle).toMatchObject({
+      zIndex: 1,
+      backgroundColor: theme.colors.bgMain,
+    });
   });
 
   it('lets right drags through while closed so the drawer keeps its own swipe', () => {
