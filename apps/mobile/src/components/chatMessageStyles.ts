@@ -4,8 +4,8 @@ import type { AppTheme } from '../theme';
 
 export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
-    messageWrapper: { maxWidth: '92%' },
-    messageWrapperUser: { alignSelf: 'flex-end' },
+    messageWrapper: { maxWidth: '100%' },
+    messageWrapperUser: { alignSelf: 'flex-end', maxWidth: '92%' },
     messageWrapperAssistant: { alignSelf: 'flex-start', width: '100%' },
     messageWrapperFullWidth: { alignSelf: 'stretch', maxWidth: '100%' },
     userBubble: {
@@ -128,6 +128,21 @@ export const createStyles = (theme: AppTheme) =>
       color: theme.colors.textMuted,
       marginTop: theme.spacing.xs,
     },
+    messageActionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      marginTop: theme.spacing.xs,
+      marginLeft: -theme.spacing.xs,
+    },
+    messageActionButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 30,
+      height: 30,
+      borderRadius: theme.radius.full,
+    },
+    messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {
       flexDirection: 'row',
@@ -199,7 +214,6 @@ export const createStyles = (theme: AppTheme) =>
     toolRowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     toolRowBody: {
       marginLeft: theme.spacing.sm + 16 + theme.spacing.sm,
-      marginRight: theme.spacing.sm,
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
       gap: theme.spacing.xs,
@@ -329,6 +343,7 @@ export const createStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     subAgentDetailWrap: { marginTop: theme.spacing.xs, paddingLeft: theme.spacing.lg + 2, gap: 2 },
+    subAgentLatestLine: { flexDirection: 'row', minWidth: 0 },
     subAgentDetailLine: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,

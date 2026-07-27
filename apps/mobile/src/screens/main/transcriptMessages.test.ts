@@ -319,7 +319,13 @@ describe('buildTranscriptDisplayItems', () => {
   it('drops a buffered tool message that carries no invocation at all', () => {
     const messages = [
       message('u1', 'user', 'Audit this'),
-      { id: 't1', role: 'tool', toolCallId: 't1', content: '', createdAt: '2026-03-19T00:00:00.000Z' } as ChatMessage,
+      {
+        id: 't1',
+        role: 'tool',
+        toolCallId: 't1',
+        content: '',
+        createdAt: '2026-03-19T00:00:00.000Z',
+      } as ChatMessage,
       message('a1', 'assistant', 'Done.'),
     ];
 

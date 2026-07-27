@@ -41,9 +41,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         ]}
         accessibilityRole="button"
         accessibilityLabel={invocation.title}
-        accessibilityHint={
-          expandable ? `${expanded ? 'Hides' : 'Shows'} tool output` : undefined
-        }
+        accessibilityHint={expandable ? `${expanded ? 'Hides' : 'Shows'} tool output` : undefined}
         accessibilityState={controlAccessibilityState({
           disabled: !expandable,
           expanded: expandable ? expanded : undefined,

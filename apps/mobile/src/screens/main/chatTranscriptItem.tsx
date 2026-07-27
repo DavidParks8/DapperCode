@@ -36,9 +36,7 @@ export function renderChatTranscriptItem({
         <ComputerUseTimeline
           entries={item.invocations.map((invocation) => ({
             id: invocation.id,
-            title: invocation.title.includes('`')
-              ? invocation.title
-              : `\`${invocation.title}\``,
+            title: invocation.title.includes('`') ? invocation.title : `\`${invocation.title}\``,
             details: invocation.textLines,
           }))}
           bridgeUrl={bridgeUrl}

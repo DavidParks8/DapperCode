@@ -27,7 +27,7 @@ export function ToolInvocationOutput({
     invocation.diffs.reduce((total, diff) => total + countLines(diff.newText), 0);
 
   const body = (
-    <View style={styles.toolRowBody}>
+    <View testID="tool-output-body" style={styles.toolRowBody}>
       {invocation.locations.length > 0 ? (
         <View style={styles.toolLocationChips}>
           {invocation.locations.map((location, index) => (
@@ -58,9 +58,7 @@ export function ToolInvocationOutput({
       ))}
       {invocation.images.map((image, index) => {
         const source = toMarkdownImageSource(image, bridgeUrl, bridgeToken);
-        return source ? (
-          <MarkdownImage key={`image-${String(index)}`} source={source} />
-        ) : null;
+        return source ? <MarkdownImage key={`image-${String(index)}`} source={source} /> : null;
       })}
       {invocation.textLines.length > 0 ? (
         <View style={styles.toolOutputSurface}>

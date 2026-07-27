@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Image,
@@ -46,6 +47,8 @@ type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
   systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
   subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
 };
+
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
 jest.mock('react-native-reanimated', () => {
   const reactNative = jest.requireActual('react-native');
@@ -314,6 +317,90 @@ describe('ChatMessage markdown formatting', () => {
   });
 });
 
+describe('ChatMessage copy action', () => {
+  beforeEach(() => {
+    jest.mocked(Clipboard.setStringAsync).mockClear();
+    jest.mocked(Clipboard.setStringAsync).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('copies the assistant response and shows a transient copied state', () => {
+    jest.useFakeTimers();
+    const tree = renderMessage({
+      id: 'assistant-copy',
+      role: 'assistant',
+      content: 'The bridge is running on port 4319.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const button = findCopyButton(root, 'assistant-copy');
+
+    expect(button.props.accessibilityLabel).toBe('Copy message');
+
+    act(() => readOnPress(button.props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('The bridge is running on port 4319.');
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copied message');
+
+    act(() => {
+      jest.advanceTimersByTime(2000);
+    });
+
+    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copy message');
+
+    act(() => tree.unmount());
+  });
+
+  it('joins ordered text parts and omits attachments from the copied text', () => {
+    const tree = renderMessage({
+      id: 'assistant-parts',
+      role: 'assistant',
+      content: 'ignored',
+      parts: [
+        { type: 'text', text: 'First paragraph.' },
+        { type: 'image', uri: 'https://example.test/shot.png' },
+        { type: 'text', text: 'Second paragraph.' },
+      ],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+
+    act(() => readOnPress(findCopyButton(root, 'assistant-parts').props)());
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith('First paragraph.\n\nSecond paragraph.');
+    act(() => tree.unmount());
+  });
+
+  it('hides the copy action while an assistant response is still empty', () => {
+    const tree = renderMessage({
+      id: 'assistant-streaming',
+      role: 'assistant',
+      content: '',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'assistant-streaming').length).toBe(
+      0,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('does not offer a copy action on user messages', () => {
+    const tree = renderMessage({
+      id: 'user-message',
+      role: 'user',
+      content: 'Restart the bridge',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(findCopyButtons(tree.root as QueryableTestInstance, 'user-message').length).toBe(0);
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatMessage command rows', () => {
   const theme = createAppTheme('dark');
 
@@ -344,6 +431,131 @@ describe('ChatMessage command rows', () => {
     expect(horizontalScroll.props.horizontal).toBe(true);
     expect(commandText.props.numberOfLines).toBeUndefined();
     expect(flattenRenderedText(commandText.props.children)).toContain('ChatMessage.test.tsx');
+  });
+});
+
+describe('ChatMessage transcript width', () => {
+  const theme = createAppTheme('dark');
+
+  const flattenRootStyle = (element: ReactElement) => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(<AppThemeProvider theme={theme}>{element}</AppThemeProvider>);
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+    const root = tree.toJSON() as { props: { style?: unknown } };
+    return (StyleSheet.flatten(root.props.style) ?? {}) as {
+      maxWidth?: number | string;
+      width?: number | string;
+    };
+  };
+
+  it.each([
+    {
+      name: 'assistant message',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'assistant-width',
+            role: 'assistant',
+            content: 'A fairly long assistant answer that should reach the transcript edge.',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'reasoning card',
+      element: (
+        <ChatMessage
+          message={{
+            id: 'reasoning-width',
+            role: 'reasoning',
+            content: 'Thinking through the change',
+            createdAt: '2026-04-17T00:00:00.000Z',
+          }}
+        />
+      ),
+    },
+    {
+      name: 'sub-agent card',
+      element: (
+        <ChatMessage
+          message={createActivityMessage(
+            'subagent-width',
+            SUBAGENT_ACTIVITY_TYPE,
+            { text: 'Delegated to explore agent' },
+            '2026-04-17T00:00:00.000Z',
+          )}
+        />
+      ),
+    },
+    {
+      name: 'tool card',
+      element: (
+        <ToolInvocationRow
+          invocation={onlyInvocation([
+            {
+              id: 'tool-width',
+              role: 'system',
+              systemKind: 'tool',
+              content: '• Ran npm test\n  output line',
+              createdAt: '2026-04-17T00:00:00.000Z',
+            },
+          ])}
+        />
+      ),
+    },
+  ])('stretches the $name to the full transcript width', ({ element }) => {
+    expect(flattenRootStyle(element).maxWidth).toBe('100%');
+  });
+
+  it('keeps user bubbles inset from the opposite edge', () => {
+    const style = flattenRootStyle(
+      <ChatMessage
+        message={{
+          id: 'user-width',
+          role: 'user',
+          content: 'A user message that stays visually distinct from the assistant column.',
+          createdAt: '2026-04-17T00:00:00.000Z',
+        }}
+      />,
+    );
+
+    expect(style.maxWidth).toBe('92%');
+  });
+
+  it('renders expanded tool output without a right inset', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ToolInvocationRow
+            invocation={onlyInvocation([
+              {
+                id: 'tool-body-width',
+                role: 'system',
+                systemKind: 'tool',
+                content: '• Ran npm test\n  output line',
+                createdAt: '2026-04-17T00:00:00.000Z',
+              },
+            ])}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const tree = expectValue(rendered) as QueryableRenderer;
+
+    act(() => {
+      readOnPress(tree.root.findByProps({ accessibilityRole: 'button' }).props)();
+    });
+
+    const body = tree.root.findByProps({ testID: 'tool-output-body' });
+    const bodyStyle = (StyleSheet.flatten(body.props.style as never) ?? {}) as {
+      marginRight?: number;
+    };
+
+    expect(bodyStyle.marginRight).toBeUndefined();
   });
 });
 
@@ -557,12 +769,18 @@ describe('ChatMessage system timeline matrices', () => {
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
-    const latestText = root
-      .findAllByType(Text)
+    const latestViewport = root.findAllByProps({ testID: 'subagent-latest-scroll' })[0];
+    const latestScroll = latestViewport?.findAllByType(ScrollView)[0];
+    const latestText = latestScroll
+      ?.findAllByType(Text)
       .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+    expect(latestScroll?.props).toMatchObject({
+      horizontal: true,
+      nestedScrollEnabled: true,
+      showsHorizontalScrollIndicator: false,
+    });
     expect(latestText?.props).toMatchObject({
       numberOfLines: 1,
-      ellipsizeMode: 'tail',
     });
     const control = root.findAll(
       (node) =>
@@ -599,19 +817,51 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('opens a known running agent even when stale metadata says it is not navigable', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'subagent-running',
+        role: 'system',
+        systemKind: 'subAgent',
+        content: '• Sub-agent working\n  Latest: Inspecting files',
+        createdAt: '2026-04-17T00:00:00.000Z',
+        subAgentMeta: {
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+          navigable: false,
+        },
+      },
+      { onOpenSubAgentThread },
+    );
+    const root = tree.root as QueryableTestInstance;
+    const control = root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === 'Sub-agent working' &&
+        typeof node.props.onPress === 'function',
+    )[0];
+    expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
+    act(() => tree.unmount());
+  });
+
   it('animates a running subagent card and stops after completion', () => {
     const running = createActivityMessage(
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: '• Sub-agent working\n  Latest: Reading repository',
+        text: '• Sub-agent working\n  Latest: Responding: The full streamed response',
         subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
       },
       '2026-04-17T00:00:00.000Z',
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
-    expect(hasRenderedText(tree.root as QueryableTestInstance, 'Open agent chat')).toBe(true);
+    const root = tree.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    expect(hasRenderedText(root, 'Latest: Responding...')).toBe(true);
+    expect(hasRenderedText(root, 'The full streamed response')).toBe(false);
 
     const completed = createActivityMessage(
       'subagent-live',
@@ -1007,6 +1257,22 @@ function readOnPress(props: Record<string, unknown>): () => void {
     throw new Error('Expected press handler');
   }
   return props.onPress as () => void;
+}
+
+function findCopyButtons(root: QueryableTestInstance, messageId: string): QueryableTestInstance[] {
+  return root.findAll(
+    (node) =>
+      node.props.testID === `chat-message-copy-${messageId}` &&
+      typeof node.props.onPress === 'function',
+  );
+}
+
+function findCopyButton(root: QueryableTestInstance, messageId: string): QueryableTestInstance {
+  const button = findCopyButtons(root, messageId)[0];
+  if (!button) {
+    throw new Error(`Expected a copy button for ${messageId}`);
+  }
+  return button;
 }
 
 function findTextNodes(root: QueryableTestInstance, text: string): QueryableTestInstance[] {

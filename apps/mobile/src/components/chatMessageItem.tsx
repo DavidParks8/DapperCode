@@ -13,6 +13,7 @@ import {
 import { extractLocalPreviewUrls } from '../browserPreview';
 import { useAppTheme } from '../theme';
 import { ComputerUseTimeline } from './chatMessageComputerUse';
+import { MessageCopyButton } from './chatMessageCopyButton';
 import {
   messagePartToBlocks,
   parseMessageBlocks,
@@ -24,6 +25,7 @@ import { createMarkdownStyles } from './chatMessageMarkdownStyles';
 import {
   MarkdownImage,
   renderUserTextWithMentions,
+  ScrollableRowText,
   SelectableMessageText,
 } from './chatMessagePrimitives';
 import { createStyles } from './chatMessageStyles';
@@ -110,6 +112,14 @@ function ChatMessageComponent({
         ? extractLocalPreviewUrls(messageText)
         : [],
     [message.role, messageText],
+  );
+  const copyText = useMemo(
+    () =>
+      messageBlocks
+        .flatMap((block) => (block.kind === 'text' ? [block.value] : []))
+        .join('\n\n')
+        .trim() || messageText.trim(),
+    [messageBlocks, messageText],
   );
 
   if (message.role === 'user')
@@ -202,6 +212,7 @@ function ChatMessageComponent({
           urls={localPreviewUrls}
           onOpen={onOpenLocalPreview}
         />
+        <MessageCopyButton text={copyText} testID={`chat-message-copy-${message.id}`} />
       </View>
     );
 
@@ -249,7 +260,9 @@ function ChatMessageComponent({
     const meta = getSubAgentMeta(message);
     const threadId = meta?.receiverThreadIds?.[0]?.trim() ?? '';
     const running = Boolean(meta?.agentStatus) && !isTerminalSubAgentStatus(meta?.agentStatus);
-    const canOpen = Boolean(threadId && meta?.navigable !== false && onOpenSubAgentThread);
+    const canOpen = Boolean(
+      threadId && onOpenSubAgentThread && (running || meta?.navigable !== false),
+    );
     return (
       <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
         <View style={styles.subAgentCardStack}>
@@ -281,16 +294,34 @@ function ChatMessageComponent({
                 </View>
                 {entry.details.length ? (
                   <View style={styles.subAgentDetailWrap}>
-                    {entry.details.map((line, lineIndex) => (
-                      <SelectableMessageText
-                        key={`${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`}
-                        style={styles.subAgentDetailLine}
-                        numberOfLines={line.trimStart().startsWith('Latest:') ? 1 : undefined}
-                        ellipsizeMode={line.trimStart().startsWith('Latest:') ? 'tail' : undefined}
-                      >
-                        {line}
-                      </SelectableMessageText>
-                    ))}
+                    {entry.details.map((line, lineIndex) => {
+                      const key = `${message.id}-subagent-${String(index)}-line-${String(lineIndex)}`;
+                      if (line.trimStart().startsWith('Latest:')) {
+                        const displayLine =
+                          running && /^\s*Latest:\s*Responding:/i.test(line)
+                            ? line.replace(/Responding:.*$/i, 'Responding...')
+                            : line;
+                        return (
+                          <View key={key} style={styles.subAgentLatestLine}>
+                            <ScrollableRowText
+                              style={styles.subAgentDetailLine}
+                              backgroundColor={
+                                visual.isError ? theme.colors.errorBg : theme.colors.warningBg
+                              }
+                              numberOfLines={1}
+                              testID="subagent-latest-scroll"
+                            >
+                              {displayLine}
+                            </ScrollableRowText>
+                          </View>
+                        );
+                      }
+                      return (
+                        <SelectableMessageText key={key} style={styles.subAgentDetailLine}>
+                          {line}
+                        </SelectableMessageText>
+                      );
+                    })}
                   </View>
                 ) : null}
                 <View style={styles.subAgentOpenHint}>

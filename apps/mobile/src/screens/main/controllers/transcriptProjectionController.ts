@@ -173,7 +173,8 @@ function carriesToolActivity(message: ChatMessage): boolean {
   return message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0;
 }
 
-function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {  return messages.filter((message, index) => {
+function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((message, index) => {
     if (!isTransientUserMessage(message)) return true;
     const content = normalizeChatMessageMatchContent(getMessageText(message));
     if (!content) return true;
