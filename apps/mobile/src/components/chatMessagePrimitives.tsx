@@ -199,6 +199,7 @@ export function ScrollableRowText({
   children,
   style,
   backgroundColor,
+  numberOfLines,
   testID,
 }: ScrollableRowTextProps) {
   const theme = useAppTheme();
@@ -236,7 +237,9 @@ export function ScrollableRowText({
         }}
         onScroll={(event) => updateFades(event.nativeEvent.contentOffset.x)}
       >
-        <Text style={[style, styles.scrollableRowText]}>{children}</Text>
+        <Text style={[style, styles.scrollableRowText]} numberOfLines={numberOfLines}>
+          {children}
+        </Text>
       </ScrollView>
       {showLeftFade ? (
         <LinearGradient

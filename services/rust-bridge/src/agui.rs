@@ -1942,15 +1942,15 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
         // meaningless "Starting" state until the child produces real work.
         CanonicalEvent::RunStarted { .. } => None,
         CanonicalEvent::MessageChunk { role, content, .. } if !content.trim().is_empty() => {
-            let action = match role {
-                MessageRole::Thought => "Thinking",
-                MessageRole::Agent => "Responding",
-                MessageRole::User => "Received input",
+            let (latest, revision) = match role {
+                MessageRole::Thought => (format!("Thinking: {}", bounded(content, 320)), None),
+                MessageRole::Agent => ("Responding...".to_string(), None),
+                MessageRole::User => (format!("Received input: {}", bounded(content, 320)), None),
             };
             Some(SubagentProgress {
                 status: "running",
-                latest: format!("{action}: {}", bounded(content, 320)),
-                revision: None,
+                latest,
+                revision,
             })
         }
         CanonicalEvent::Tool {
@@ -3221,6 +3221,48 @@ mod tests {
             meta["receiverThreadIds"].as_array().map(Vec::len),
             Some(1),
             "the first card must carry its child thread: {card}"
+        );
+    }
+
+    #[test]
+    fn streamed_sub_agent_responses_only_report_responding() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.project_canonical(&subagent_task_tool(
+            "task-1",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set("<task id=\"child-1\" state=\"running\">\n</task>".to_string()),
+        ));
+        let child_thread = AgentSessionId::new("alpha-agent", "child-1")
+            .expect("child identity")
+            .encode();
+        let mut response = canonical_message(
+            MessageRole::Agent,
+            "child-response",
+            "The full streamed response must stay in the child transcript.",
+        );
+        if let CanonicalEvent::MessageChunk { thread_id, .. } = &mut response {
+            child_thread.clone_into(thread_id);
+        }
+
+        let projection = projector.project_canonical(&response);
+        let card = projection
+            .events
+            .iter()
+            .filter_map(|event| serde_json::to_value(event).ok())
+            .find(|value| value["event"]["messageId"] == "subagent:task-1")
+            .expect("updated parent card");
+        let text = card["event"]["content"]["text"]
+            .as_str()
+            .expect("card text");
+        assert!(
+            text.contains("Latest: Responding..."),
+            "unexpected response progress: {text}"
+        );
+        assert!(
+            !text.contains("full streamed response"),
+            "parent card leaked response content: {text}"
         );
     }
 
