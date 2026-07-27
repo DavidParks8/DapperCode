@@ -134,50 +134,66 @@ export function SwipeToDeleteRow({
   }));
 
   return (
-    <View
-      style={[styles.container, style]}
-      onLayout={(event) => {
-        rowWidth.value = event.nativeEvent.layout.width;
-      }}
-    >
-      <View style={styles.actionLayer} pointerEvents="box-none">
-        <Pressable
-          accessibilityHint="Deletes this session."
-          accessibilityLabel={deleteAccessibilityLabel}
-          accessibilityRole="button"
-          onPress={commitDelete}
-          style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+    <View style={style}>
+      <View
+        collapsable={false}
+        onLayout={(event) => {
+          rowWidth.value = event.nativeEvent.layout.width;
+        }}
+        style={[styles.clip, { backgroundColor: contentBackgroundColor ?? theme.colors.bgMain }]}
+        testID="swipe-delete-clip"
+      >
+        <View
+          style={styles.actionLayer}
+          pointerEvents="box-none"
+          testID="swipe-delete-action-layer"
         >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="trash-outline"
-            size={18}
-            color={theme.colors.white}
-          />
-          <Text style={styles.actionLabel}>{deleteLabel}</Text>
-        </Pressable>
+          <Pressable
+            accessibilityHint="Deletes this session."
+            accessibilityLabel={deleteAccessibilityLabel}
+            accessibilityRole="button"
+            onPress={commitDelete}
+            style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="trash-outline"
+              size={18}
+              color={theme.colors.white}
+            />
+            <Text style={styles.actionLabel}>{deleteLabel}</Text>
+          </Pressable>
+        </View>
+        <GestureDetector gesture={panGesture}>
+          <Animated.View
+            style={[
+              styles.content,
+              { backgroundColor: contentBackgroundColor ?? theme.colors.bgMain },
+              contentStyle,
+            ]}
+            testID="swipe-delete-content"
+          >
+            {children}
+          </Animated.View>
+        </GestureDetector>
       </View>
-      <GestureDetector gesture={panGesture}>
-        <Animated.View
-          style={[{ backgroundColor: contentBackgroundColor ?? theme.colors.bgMain }, contentStyle]}
-        >
-          {children}
-        </Animated.View>
-      </GestureDetector>
     </View>
   );
 }
 
 function createSwipeToDeleteRowStyles(theme: AppTheme) {
   return StyleSheet.create({
-    container: {
+    clip: {
+      position: 'relative',
       overflow: 'hidden',
     },
     actionLayer: {
       ...StyleSheet.absoluteFillObject,
+      zIndex: 0,
       flexDirection: 'row',
       alignItems: 'stretch',
       justifyContent: 'flex-end',
+      backgroundColor: theme.colors.error,
     },
     action: {
       width: SWIPE_ACTION_WIDTH,
@@ -185,6 +201,9 @@ function createSwipeToDeleteRowStyles(theme: AppTheme) {
       justifyContent: 'center',
       gap: 4,
       backgroundColor: theme.colors.error,
+    },
+    content: {
+      zIndex: 1,
     },
     actionPressed: {
       opacity: 0.82,

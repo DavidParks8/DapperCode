@@ -6,15 +6,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    DeleteSessionRequest, ElicitationContentValue, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, ResumeSessionRequest, SessionConfigOptionValue, SessionId,
-    SetSessionConfigOptionRequest,
+    CloseSessionRequest, DeleteSessionRequest, ElicitationContentValue, ListSessionsRequest,
+    LoadSessionRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest,
+    SessionConfigOptionValue, SessionId, SetSessionConfigOptionRequest,
 };
 use async_process::Command as AsyncCommand;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{SecondsFormat, TimeZone, Utc};
-use reqwest::Url;
+use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -45,6 +45,7 @@ const MAX_SESSION_CWD_BYTES: usize = 4_096;
 const SESSION_INDEX_FILE: &str = "session-index.json";
 const OPENCODE_SESSION_CATALOG_TIMEOUT: Duration = Duration::from_secs(3);
 const OPENCODE_CHILD_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+const OPENCODE_SESSION_DELETE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_OPENCODE_CHILD_SESSIONS: usize = 32;
 const MAX_OPENCODE_SESSION_CATALOG_BYTES: usize = 256 * 1024;
 const OPENCODE_MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
@@ -76,6 +77,8 @@ pub enum AgentManagerError {
     InvalidCursor,
     #[error("failed to persist ACP session index: {0}")]
     SessionIndex(String),
+    #[error("OpenCode session delete failed: {0}")]
+    OpenCodeDelete(String),
     #[error(transparent)]
     Runtime(#[from] AcpRuntimeError),
 }
@@ -475,13 +478,15 @@ impl DurableSessionIndex {
         self.persist(staged).await
     }
 
-    async fn remove(&mut self, identity: &AgentSessionId) -> Result<(), AgentManagerError> {
+    async fn remove_all(&mut self, identities: &[AgentSessionId]) -> Result<(), AgentManagerError> {
         let staged = self
             .entries
             .iter()
             .filter(|entry| {
-                entry.agent_id != identity.agent_id
-                    || entry.acp_session_id != identity.acp_session_id
+                !identities.iter().any(|identity| {
+                    entry.agent_id == identity.agent_id
+                        && entry.acp_session_id == identity.acp_session_id
+                })
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -838,37 +843,39 @@ impl AgentManager {
     }
 
     pub fn list_agents(&self) -> Vec<AgentDescriptor> {
-        let mut descriptors = self
-            .agents
-            .values()
-            .map(|runtime| {
-                let failed = runtime
-                    .connection
-                    .as_ref()
-                    .and_then(AcpConnection::failure_message)
-                    .is_some();
-                AgentDescriptor {
-                    agent_id: runtime.manifest.resolved.agent_id.clone(),
-                    display_name: runtime.manifest.display_name.clone(),
-                    icon: runtime.manifest.icon.clone(),
-                    version: runtime.manifest.resolved.resolved_version.clone(),
-                    provenance: runtime.manifest.resolved.provenance.clone(),
-                    lifecycle: if self.stopped.load(Ordering::SeqCst) {
-                        AgentLifecycle::Stopped
-                    } else if failed {
-                        AgentLifecycle::Unavailable
-                    } else {
-                        runtime.lifecycle.clone()
-                    },
-                    last_error: if failed {
-                        Some("ACP agent connection failed (details redacted)".to_string())
-                    } else {
-                        runtime.last_error.clone()
-                    },
-                    capabilities: runtime.negotiated.as_ref().map(capabilities),
-                }
-            })
-            .collect::<Vec<_>>();
+        let mut descriptors =
+            self.agents
+                .values()
+                .map(|runtime| {
+                    let failed = runtime
+                        .connection
+                        .as_ref()
+                        .and_then(AcpConnection::failure_message)
+                        .is_some();
+                    AgentDescriptor {
+                        agent_id: runtime.manifest.resolved.agent_id.clone(),
+                        display_name: runtime.manifest.display_name.clone(),
+                        icon: runtime.manifest.icon.clone(),
+                        version: runtime.manifest.resolved.resolved_version.clone(),
+                        provenance: runtime.manifest.resolved.provenance.clone(),
+                        lifecycle: if self.stopped.load(Ordering::SeqCst) {
+                            AgentLifecycle::Stopped
+                        } else if failed {
+                            AgentLifecycle::Unavailable
+                        } else {
+                            runtime.lifecycle.clone()
+                        },
+                        last_error: if failed {
+                            Some("ACP agent connection failed (details redacted)".to_string())
+                        } else {
+                            runtime.last_error.clone()
+                        },
+                        capabilities: runtime.negotiated.as_ref().map(|negotiated| {
+                            capabilities(negotiated, can_delete_session(runtime))
+                        }),
+                    }
+                })
+                .collect::<Vec<_>>();
         descriptors.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
         descriptors
     }
@@ -1235,32 +1242,210 @@ impl AgentManager {
         self.read_session(thread_id).await
     }
 
-    /// Deletes a session through ACP `session/delete` and drops every local trace of it.
+    /// Deletes a session and drops every local trace of it.
     ///
-    /// The durable index is only updated once the agent confirms the delete, so a failed agent
-    /// call never hides a session that still exists in `session/list`.
-    pub async fn delete_session(&self, thread_id: &str) -> Result<(), AgentManagerError> {
+    /// Standards-compliant agents use ACP `session/delete`. OpenCode releases sessions through ACP
+    /// `session/close` but does not yet implement persistent ACP deletion, so its already-managed
+    /// loopback API is used as a compatibility path. The durable index is only updated once the
+    /// agent confirms the delete.
+    pub async fn delete_session(&self, thread_id: &str) -> Result<Vec<String>, AgentManagerError> {
+        self.flush_pending_durable_sessions().await?;
         let (identity, session_id, connection) = self.route_thread(thread_id)?;
-        if !connection.negotiated().supports_session_delete() {
+        let native_delete = connection.negotiated().supports_session_delete();
+        let opencode_delete = self
+            .agents
+            .get(&identity.agent_id)
+            .is_some_and(supports_opencode_session_delete);
+        if !native_delete && !opencode_delete {
             return Err(AcpRuntimeError::Unsupported("session/delete").into());
         }
-        if let Some(session) = connection.session(&session_id).await {
-            if session.snapshot().await.active_run_id.is_some() {
-                let _ = connection.cancel(session_id.clone()).await;
+        let affected = if opencode_delete {
+            self.indexed_deletion_family(&identity).await
+        } else {
+            vec![identity.clone()]
+        };
+        for affected_identity in &affected {
+            let affected_session_id = SessionId::new(affected_identity.acp_session_id.clone());
+            if let Some(session) = connection.session(&affected_session_id).await {
+                if session.snapshot().await.active_run_id.is_some() {
+                    let _ = connection.cancel(affected_session_id).await;
+                }
             }
         }
-        connection
-            .delete_session(DeleteSessionRequest::new(session_id))
-            .await?;
-        self.session_index.lock().await.remove(&identity).await?;
-        let thread_id = identity.encode();
-        self.pending_durable_sessions
+        if native_delete {
+            connection
+                .delete_session(DeleteSessionRequest::new(session_id))
+                .await?;
+        } else {
+            if connection.negotiated().supports_session_close() {
+                for affected_identity in &affected {
+                    connection
+                        .close_session(CloseSessionRequest::new(
+                            affected_identity.acp_session_id.clone(),
+                        ))
+                        .await?;
+                }
+            }
+            self.delete_opencode_session(&identity, &affected).await?;
+            for affected_identity in &affected {
+                connection
+                    .evict_session(&SessionId::new(affected_identity.acp_session_id.clone()))
+                    .await;
+            }
+        }
+        self.session_index
             .lock()
             .await
-            .remove(&thread_id);
-        self.tracked_sessions.lock().await.remove(&thread_id);
-        self.reconstruction_locks.lock().await.remove(&thread_id);
-        self.subagent_generations.lock().await.remove(&thread_id);
+            .remove_all(&affected)
+            .await?;
+        let deleted_thread_ids = affected
+            .iter()
+            .map(AgentSessionId::encode)
+            .collect::<Vec<_>>();
+        for deleted_thread_id in &deleted_thread_ids {
+            self.pending_durable_sessions
+                .lock()
+                .await
+                .remove(deleted_thread_id);
+            self.tracked_sessions.lock().await.remove(deleted_thread_id);
+            self.reconstruction_locks
+                .lock()
+                .await
+                .remove(deleted_thread_id);
+            self.subagent_generations
+                .lock()
+                .await
+                .remove(deleted_thread_id);
+        }
+        Ok(deleted_thread_ids)
+    }
+
+    async fn indexed_deletion_family(&self, root: &AgentSessionId) -> Vec<AgentSessionId> {
+        let entries = self.session_index.lock().await.entries.clone();
+        let mut affected = vec![root.clone()];
+        let mut seen = HashSet::from([root.acp_session_id.clone()]);
+        let mut parent_index = 0;
+        while parent_index < affected.len() {
+            let parent_id = affected[parent_index].acp_session_id.clone();
+            for entry in &entries {
+                if entry.agent_id == root.agent_id
+                    && entry.parent_acp_session_id.as_deref() == Some(parent_id.as_str())
+                    && seen.insert(entry.acp_session_id.clone())
+                {
+                    if let Ok(identity) =
+                        AgentSessionId::new(&entry.agent_id, &entry.acp_session_id)
+                    {
+                        affected.push(identity);
+                    }
+                }
+            }
+            parent_index += 1;
+        }
+        affected
+    }
+
+    async fn delete_opencode_session(
+        &self,
+        identity: &AgentSessionId,
+        affected: &[AgentSessionId],
+    ) -> Result<(), AgentManagerError> {
+        let http_base = self
+            .agents
+            .get(&identity.agent_id)
+            .filter(|runtime| supports_opencode_session_delete(runtime))
+            .and_then(|runtime| runtime.http_base.clone())
+            .ok_or(AcpRuntimeError::Unsupported("session/delete"))?;
+        let cwd = {
+            let index = self.session_index.lock().await;
+            index
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.agent_id == identity.agent_id
+                        && entry.acp_session_id == identity.acp_session_id
+                })
+                .map(|entry| entry.cwd.clone())
+        }
+        .ok_or_else(|| {
+            AgentManagerError::SessionIndex("session is not indexed for deletion".to_string())
+        })?;
+        let mut url = Url::parse(&http_base)
+            .map_err(|_| AgentManagerError::OpenCodeDelete("invalid loopback URL".to_string()))?;
+        {
+            let mut path = url.path_segments_mut().map_err(|_| {
+                AgentManagerError::OpenCodeDelete("invalid loopback URL".to_string())
+            })?;
+            path.pop_if_empty()
+                .push("session")
+                .push(&identity.acp_session_id);
+        }
+        url.query_pairs_mut()
+            .append_pair("directory", cwd.to_string_lossy().as_ref());
+        let response = tokio::time::timeout(
+            OPENCODE_SESSION_DELETE_TIMEOUT,
+            self.http.delete(url).send(),
+        )
+        .await
+        .map_err(|_| AgentManagerError::OpenCodeDelete("request timed out".to_string()))?
+        .map_err(|error| AgentManagerError::OpenCodeDelete(error.without_url().to_string()))?;
+        if !response.status().is_success() && response.status() != StatusCode::NOT_FOUND {
+            return Err(AgentManagerError::OpenCodeDelete(format!(
+                "agent returned HTTP {}",
+                response.status()
+            )));
+        }
+        let mut verification_url = Url::parse(&http_base)
+            .map_err(|_| AgentManagerError::OpenCodeDelete("invalid loopback URL".to_string()))?;
+        {
+            let mut path = verification_url.path_segments_mut().map_err(|_| {
+                AgentManagerError::OpenCodeDelete("invalid loopback URL".to_string())
+            })?;
+            path.pop_if_empty().push("session");
+        }
+        verification_url
+            .query_pairs_mut()
+            .append_pair("directory", cwd.to_string_lossy().as_ref())
+            .append_pair("limit", &MAX_SESSIONS.to_string());
+        let verification = tokio::time::timeout(
+            OPENCODE_SESSION_DELETE_TIMEOUT,
+            self.http.get(verification_url).send(),
+        )
+        .await
+        .map_err(|_| {
+            AgentManagerError::OpenCodeDelete("verification request timed out".to_string())
+        })?
+        .map_err(|error| AgentManagerError::OpenCodeDelete(error.without_url().to_string()))?;
+        if !verification.status().is_success() {
+            return Err(AgentManagerError::OpenCodeDelete(format!(
+                "verification returned HTTP {}",
+                verification.status()
+            )));
+        }
+        let bytes = tokio::time::timeout(OPENCODE_SESSION_DELETE_TIMEOUT, verification.bytes())
+            .await
+            .map_err(|_| {
+                AgentManagerError::OpenCodeDelete("verification body timed out".to_string())
+            })?
+            .map_err(|error| AgentManagerError::OpenCodeDelete(error.to_string()))?;
+        if bytes.len() > MAX_OPENCODE_EXPORT_BYTES {
+            return Err(AgentManagerError::OpenCodeDelete(
+                "verification response was too large".to_string(),
+            ));
+        }
+        let listed = serde_json::from_slice::<Vec<OpenCodeSessionCatalogRow>>(&bytes)
+            .map_err(|error| AgentManagerError::OpenCodeDelete(error.to_string()))?;
+        let affected_ids = affected
+            .iter()
+            .map(|identity| identity.acp_session_id.as_str())
+            .collect::<HashSet<_>>();
+        if listed
+            .iter()
+            .any(|session| affected_ids.contains(session.id.as_str()))
+        {
+            return Err(AgentManagerError::OpenCodeDelete(
+                "agent still lists the session after deletion".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -2688,13 +2873,25 @@ async fn forward_session_events(
     remove_session_event_registration(&mut tracked, &thread_id, instance_id);
 }
 
-fn capabilities(negotiated: &NegotiatedInitialize) -> AgentCapabilities {
+fn supports_opencode_session_delete(runtime: &AgentRuntime) -> bool {
+    runtime.http_base.is_some() && is_opencode_acp(&runtime.manifest.resolved)
+}
+
+fn can_delete_session(runtime: &AgentRuntime) -> bool {
+    runtime
+        .negotiated
+        .as_ref()
+        .is_some_and(NegotiatedInitialize::supports_session_delete)
+        || supports_opencode_session_delete(runtime)
+}
+
+fn capabilities(negotiated: &NegotiatedInitialize, session_delete: bool) -> AgentCapabilities {
     AgentCapabilities {
         session_list: negotiated.supports_session_list(),
         session_load: negotiated.supports_session_load(),
         session_resume: negotiated.supports_session_resume(),
         session_steer: negotiated.supports_session_steer(),
-        session_delete: negotiated.supports_session_delete(),
+        session_delete,
     }
 }
 
@@ -2729,13 +2926,17 @@ mod tests {
     use super::*;
 
     use agent_client_protocol::schema::v1::{
-        AgentCapabilities, CancelNotification, DeleteSessionResponse, InitializeRequest,
-        InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionResponse,
-        NewSessionResponse, PromptResponse, ResumeSessionResponse, SessionCapabilities,
-        SessionDeleteCapabilities, SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
-        StopReason, ToolCallStatus, ToolKind,
+        AgentCapabilities, CancelNotification, CloseSessionResponse, DeleteSessionResponse,
+        InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+        LoadSessionResponse, NewSessionResponse, PromptResponse, ResumeSessionResponse,
+        SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities, SessionInfo,
+        SessionListCapabilities, SessionResumeCapabilities, StopReason, ToolCallStatus, ToolKind,
     };
     use agent_client_protocol::Agent;
+    use axum::extract::{Path as AxumPath, Query, State};
+    use axum::http::StatusCode as AxumStatusCode;
+    use axum::routing::{delete, get};
+    use axum::{Json, Router};
     use sha2::{Digest, Sha256};
     use tokio::sync::mpsc;
 
@@ -2891,6 +3092,7 @@ mod tests {
     async fn deleting_connection(
         agent_id: &str,
         supports_delete: bool,
+        supports_close: bool,
         observed: mpsc::UnboundedSender<String>,
     ) -> (AcpConnection, NegotiatedInitialize) {
         let mut session_capabilities =
@@ -2898,9 +3100,13 @@ mod tests {
         if supports_delete {
             session_capabilities = session_capabilities.delete(SessionDeleteCapabilities::new());
         }
+        if supports_close {
+            session_capabilities = session_capabilities.close(SessionCloseCapabilities::new());
+        }
         let capabilities = AgentCapabilities::new().session_capabilities(session_capabilities);
         let listed_agent = agent_id.to_string();
         let delete_agent = agent_id.to_string();
+        let close_agent = agent_id.to_string();
         let agent = Agent
             .builder()
             .on_receive_request(
@@ -2931,10 +3137,87 @@ mod tests {
                     }
                 },
                 agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let observed = observed.clone();
+                    async move |request: CloseSessionRequest, responder, _| {
+                        let _ =
+                            observed.send(format!("close:{close_agent}:{}", request.session_id));
+                        responder.respond(CloseSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
             );
         AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
             .await
             .expect("deleting agent starts")
+    }
+
+    #[derive(Clone)]
+    struct OpenCodeDeleteServerState {
+        observed: mpsc::UnboundedSender<(String, Option<String>)>,
+        status: AxumStatusCode,
+        delete_removes: bool,
+        deleted: Arc<AtomicBool>,
+    }
+
+    async fn handle_opencode_delete(
+        AxumPath(session_id): AxumPath<String>,
+        Query(query): Query<HashMap<String, String>>,
+        State(state): State<OpenCodeDeleteServerState>,
+    ) -> AxumStatusCode {
+        let _ = state
+            .observed
+            .send((session_id, query.get("directory").cloned()));
+        if state.status.is_success() && state.delete_removes {
+            state.deleted.store(true, Ordering::SeqCst);
+        }
+        state.status
+    }
+
+    async fn handle_opencode_list(
+        State(state): State<OpenCodeDeleteServerState>,
+    ) -> Json<serde_json::Value> {
+        if state.deleted.load(Ordering::SeqCst) {
+            Json(serde_json::json!([]))
+        } else {
+            Json(serde_json::json!([{ "id": "opencode-listed" }]))
+        }
+    }
+
+    async fn opencode_delete_server(
+        status: AxumStatusCode,
+        delete_removes: bool,
+    ) -> (
+        String,
+        mpsc::UnboundedReceiver<(String, Option<String>)>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (observed, observed_rx) = mpsc::unbounded_channel();
+        let deleted = Arc::new(AtomicBool::new(false));
+        let app = Router::new()
+            .route("/session/{session_id}", delete(handle_opencode_delete))
+            .route("/session", get(handle_opencode_list))
+            .with_state(OpenCodeDeleteServerState {
+                observed,
+                status,
+                delete_removes,
+                deleted,
+            });
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind OpenCode delete fixture");
+        let base = format!(
+            "http://{}",
+            listener.local_addr().expect("fixture local address")
+        );
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve OpenCode delete fixture");
+        });
+        (base, observed_rx, task)
     }
 
     async fn reconstructing_connection(
@@ -4580,7 +4863,7 @@ mod tests {
     #[tokio::test]
     async fn manager_delete_removes_the_durable_entry_and_stops_listing_the_session() {
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
-        let connection = deleting_connection("delete-agent", true, observed_tx).await;
+        let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
         let manager = AgentManager::from_start_results(
             "delete-agent".to_string(),
             vec![(manifest("delete-agent", "Delete"), Ok(connection))],
@@ -4616,9 +4899,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manager_deletes_opencode_sessions_through_its_loopback_api() {
+        let (acp_observed_tx, mut acp_observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("opencode", false, true, acp_observed_tx).await;
+        for session_id in ["opencode-listed", "opencode-child", "opencode-grandchild"] {
+            connection
+                .0
+                .ensure_session(SessionId::new(session_id))
+                .await
+                .expect("load OpenCode session");
+        }
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager = AgentManager::from_start_results(
+            "opencode".to_string(),
+            vec![(opencode, Ok(connection))],
+        )
+        .await
+        .unwrap();
+        let (http_base, mut http_observed, server) =
+            opencode_delete_server(AxumStatusCode::OK, true).await;
+        manager
+            .agents
+            .get_mut("opencode")
+            .expect("OpenCode runtime")
+            .http_base = Some(http_base);
+        let identity = AgentSessionId::new("opencode", "opencode-listed").unwrap();
+        let child_identity = AgentSessionId::new("opencode", "opencode-child").unwrap();
+        let grandchild_identity = AgentSessionId::new("opencode", "opencode-grandchild").unwrap();
+        let mut child_entry = index_entry(child_identity.clone(), PathBuf::from("/tmp"));
+        child_entry.parent_acp_session_id = Some(identity.acp_session_id.clone());
+        let mut grandchild_entry = index_entry(grandchild_identity.clone(), PathBuf::from("/tmp"));
+        grandchild_entry.parent_acp_session_id = Some(child_identity.acp_session_id.clone());
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([
+                index_entry(identity.clone(), PathBuf::from("/tmp")),
+                child_entry,
+                grandchild_entry,
+            ])
+            .await
+            .unwrap();
+        let thread_id = identity.encode();
+
+        assert!(manager
+            .list_agents()
+            .into_iter()
+            .find(|agent| agent.agent_id == "opencode")
+            .and_then(|agent| agent.capabilities)
+            .is_some_and(|capabilities| capabilities.session_delete));
+
+        assert_eq!(
+            manager.delete_session(&thread_id).await.unwrap(),
+            vec![
+                identity.encode(),
+                child_identity.encode(),
+                grandchild_identity.encode()
+            ]
+        );
+
+        assert_eq!(
+            http_observed.recv().await,
+            Some(("opencode-listed".to_string(), Some("/tmp".to_string())))
+        );
+        assert_eq!(
+            acp_observed_rx.recv().await.as_deref(),
+            Some("close:opencode:opencode-listed")
+        );
+        assert_eq!(
+            acp_observed_rx.recv().await.as_deref(),
+            Some("close:opencode:opencode-child")
+        );
+        assert_eq!(
+            acp_observed_rx.recv().await.as_deref(),
+            Some("close:opencode:opencode-grandchild")
+        );
+        assert!(acp_observed_rx.try_recv().is_err());
+        assert!(manager.session_index.lock().await.entries.is_empty());
+        assert!(manager.loaded_session_ids().await.is_empty());
+        manager.shutdown().await;
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn manager_keeps_opencode_session_when_loopback_claims_success_without_deleting() {
+        let (acp_observed_tx, _acp_observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("opencode", false, true, acp_observed_tx).await;
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager = AgentManager::from_start_results(
+            "opencode".to_string(),
+            vec![(opencode, Ok(connection))],
+        )
+        .await
+        .unwrap();
+        let (http_base, _http_observed, server) =
+            opencode_delete_server(AxumStatusCode::OK, false).await;
+        manager
+            .agents
+            .get_mut("opencode")
+            .expect("OpenCode runtime")
+            .http_base = Some(http_base);
+        let identity = AgentSessionId::new("opencode", "opencode-listed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            manager.delete_session(&identity.encode()).await,
+            Err(AgentManagerError::OpenCodeDelete(_))
+        ));
+        assert_eq!(manager.session_index.lock().await.entries.len(), 1);
+        manager.shutdown().await;
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
     async fn manager_delete_is_rejected_and_keeps_the_session_when_the_agent_cannot_delete() {
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
-        let connection = deleting_connection("plain-agent", false, observed_tx).await;
+        let connection = deleting_connection("plain-agent", false, false, observed_tx).await;
         let manager = AgentManager::from_start_results(
             "plain-agent".to_string(),
             vec![(manifest("plain-agent", "Plain"), Ok(connection))],
@@ -4657,7 +5064,7 @@ mod tests {
     #[tokio::test]
     async fn manager_delete_rejects_an_unroutable_thread() {
         let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
-        let connection = deleting_connection("delete-agent", true, observed_tx).await;
+        let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
         let manager = AgentManager::from_start_results(
             "delete-agent".to_string(),
             vec![(manifest("delete-agent", "Delete"), Ok(connection))],

@@ -1605,7 +1605,11 @@ describe('DrawerContent session deletion', () => {
 
   it('puts the session back and warns when the agent refuses the delete', async () => {
     const harness = createHarness({
-      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+      chats: [
+        createChat({ id: 'a', title: 'Chat a' }),
+        createChat({ id: 'b', title: 'Chat b', parentThreadId: 'a' }),
+        createChat({ id: 'c', title: 'Chat c' }),
+      ],
     });
     (harness.api.deleteChat as jest.Mock).mockRejectedValue(new Error('delete unsupported'));
     const alert = answerConfirm('confirm');
@@ -1615,10 +1619,43 @@ describe('DrawerContent session deletion', () => {
 
     expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
     expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Chat c')).toBe(true);
     expect(alert).toHaveBeenLastCalledWith(
       'Could not delete session',
-      'The agent refused to delete this session.',
+      'The session was restored. Check the bridge connection and try again.',
     );
+    act(() => tree.unmount());
+  });
+
+  it('deletes linked sub-sessions and leaves a selected descendant', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Parent' }),
+        createChat({ id: 'b', title: 'Child', parentThreadId: 'a' }),
+        createChat({ id: 'c', title: 'Grandchild', parentThreadId: 'b' }),
+        createChat({ id: 'd', title: 'Unrelated' }),
+      ],
+    });
+    const alert = answerConfirm('confirm');
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'c' });
+    const tree = await renderDrawer(harness, { store, selectedChatId: 'c' });
+
+    await press(findDeleteAction(tree.root as Queryable, 'Parent'));
+
+    expect(alert).toHaveBeenCalledWith(
+      'Delete session?',
+      '“Parent” and 2 linked sub-sessions will be removed from this agent’s history.',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(harness.api.forgetChat).toHaveBeenCalledWith('b');
+    expect(harness.api.forgetChat).toHaveBeenCalledWith('c');
+    expect(hasText(tree.root as Queryable, 'Parent')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Child')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Grandchild')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Unrelated')).toBe(true);
+    expect(store.get(selectedChatIdAtom)).toBeNull();
     act(() => tree.unmount());
   });
 
@@ -1634,7 +1671,7 @@ describe('DrawerContent session deletion', () => {
     act(() => tree.unmount());
   });
 
-  it('explains that an agent without the delete capability cannot remove a session', async () => {
+  it('lets the bridge decide even when cached agent capabilities say delete is unsupported', async () => {
     const harness = createHarness({
       chats: [createChat({ id: 'a', title: 'Chat a', agentId: 'codex' })],
       agents: [
@@ -1659,12 +1696,15 @@ describe('DrawerContent session deletion', () => {
 
     await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
 
-    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(alert).toHaveBeenCalledTimes(1);
     expect(alert).toHaveBeenCalledWith(
-      'Deleting is not supported',
-      'Codex does not support deleting sessions.',
+      'Delete session?',
+      '“Chat a” will be removed from this agent’s history.',
+      expect.any(Array),
+      expect.any(Object),
     );
-    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
     act(() => tree.unmount());
   });
 

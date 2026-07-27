@@ -796,13 +796,19 @@ impl RuntimeBackend {
             }
             "thread/delete" => {
                 let thread_id = required_string(&params, "threadId")?;
-                self.manager
+                let deleted_thread_ids = self
+                    .manager
                     .delete_session(&thread_id)
                     .await
                     .map_err(|error| error.to_string())?;
-                self.hub
-                    .broadcast_notification("thread/deleted", json!({ "threadId": thread_id }))
-                    .await;
+                for deleted_thread_id in deleted_thread_ids {
+                    self.hub
+                        .broadcast_notification(
+                            "thread/deleted",
+                            json!({ "threadId": deleted_thread_id }),
+                        )
+                        .await;
+                }
                 Ok(json!({ "ok": true, "threadId": thread_id }))
             }
             "thread/snapshot/page" => {

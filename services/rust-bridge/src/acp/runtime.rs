@@ -5,13 +5,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ClientCapabilities, ContentBlock, CreateElicitationRequest,
-    DeleteSessionRequest, DeleteSessionResponse, ElicitationCapabilities, ElicitationContentValue,
-    ElicitationFormCapabilities, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, NewSessionRequest,
-    NewSessionResponse, PromptRequest, RequestPermissionRequest, ResumeSessionRequest,
-    ResumeSessionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse,
+    CancelNotification, ClientCapabilities, CloseSessionRequest, CloseSessionResponse,
+    ContentBlock, CreateElicitationRequest, DeleteSessionRequest, DeleteSessionResponse,
+    ElicitationCapabilities, ElicitationContentValue, ElicitationFormCapabilities,
+    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionId,
+    SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Client, ConnectTo, JsonRpcRequest, JsonRpcResponse};
@@ -168,6 +168,14 @@ impl NegotiatedInitialize {
             .agent_capabilities
             .session_capabilities
             .delete
+            .is_some()
+    }
+
+    pub fn supports_session_close(&self) -> bool {
+        self.response
+            .agent_capabilities
+            .session_capabilities
+            .close
             .is_some()
     }
 
@@ -458,6 +466,17 @@ impl AcpConnection {
             .await
     }
 
+    pub async fn close_session(
+        &self,
+        request: CloseSessionRequest,
+    ) -> Result<CloseSessionResponse, AcpRuntimeError> {
+        if !self.negotiated.supports_session_close() {
+            return Err(AcpRuntimeError::Unsupported("session/close"));
+        }
+        self.call(|response| Command::CloseSession { request, response })
+            .await
+    }
+
     pub async fn prompt(
         &self,
         request: PromptRequest,
@@ -663,6 +682,13 @@ impl AcpConnection {
         self.sessions.get(session_id).await
     }
 
+    pub(crate) async fn evict_session(
+        &self,
+        session_id: &agent_client_protocol::schema::v1::SessionId,
+    ) {
+        self.sessions.remove(session_id).await;
+    }
+
     #[cfg(test)]
     pub async fn ensure_session(
         &self,
@@ -672,11 +698,6 @@ impl AcpConnection {
             .register(&self.agent_id, session_id)
             .await
             .map_err(Into::into)
-    }
-
-    #[cfg(test)]
-    pub async fn evict_session(&self, session_id: &agent_client_protocol::schema::v1::SessionId) {
-        self.sessions.remove(session_id).await;
     }
 
     pub async fn loaded_sessions(&self) -> Vec<AcpSession> {
@@ -747,6 +768,10 @@ enum Command {
     DeleteSession {
         request: DeleteSessionRequest,
         response: oneshot::Sender<Result<DeleteSessionResponse, AcpRuntimeError>>,
+    },
+    CloseSession {
+        request: CloseSessionRequest,
+        response: oneshot::Sender<Result<CloseSessionResponse, AcpRuntimeError>>,
     },
     Prompt {
         request: PromptRequest,
@@ -840,6 +865,22 @@ impl Command {
                     RequestCancellation::default(),
                     response,
                     move |result: Result<DeleteSessionResponse, AcpRuntimeError>,
+                          sessions: SessionRegistry,
+                          _: String| async move {
+                        if result.is_ok() {
+                            sessions.remove(&session_id).await;
+                        }
+                        result
+                    }
+                );
+            }
+            Self::CloseSession { request, response } => {
+                let session_id = request.session_id.clone();
+                dispatch_ordinary!(
+                    request,
+                    RequestCancellation::default(),
+                    response,
+                    move |result: Result<CloseSessionResponse, AcpRuntimeError>,
                           sessions: SessionRegistry,
                           _: String| async move {
                         if result.is_ok() {
@@ -1103,9 +1144,10 @@ mod tests {
         IntegerPropertySchema, ListSessionsResponse, LoadSessionResponse,
         MultiSelectPropertySchema, NewSessionResponse, NumberPropertySchema, PermissionOption,
         PermissionOptionKind, PromptResponse, RequestPermissionOutcome, RequestPermissionResponse,
-        ResumeSessionResponse, SessionCapabilities, SessionDeleteCapabilities, SessionInfo,
-        SessionListCapabilities, SessionResumeCapabilities, SessionUpdate, StopReason,
-        StringPropertySchema, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        ResumeSessionResponse, SessionCapabilities, SessionCloseCapabilities,
+        SessionDeleteCapabilities, SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
+        SessionUpdate, StopReason, StringPropertySchema, ToolCallStatus, ToolCallUpdate,
+        ToolCallUpdateFields, ToolKind,
     };
 
     #[tokio::test]
@@ -1395,6 +1437,50 @@ mod tests {
             .expect("delete succeeds");
 
         assert_eq!(delete_calls.load(AtomicOrdering::SeqCst), 1);
+        assert!(connection.session(&session_id).await.is_none());
+        connection.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn close_session_uses_the_advertised_method_and_evicts_the_loaded_session() {
+        let close_calls = Arc::new(AtomicUsize::new(0));
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new().session_capabilities(
+                        SessionCapabilities::new().close(SessionCloseCapabilities::new()),
+                    )))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let close_calls = close_calls.clone();
+                    async move |_request: CloseSessionRequest, responder, _| {
+                        close_calls.fetch_add(1, AtomicOrdering::SeqCst);
+                        responder.respond(CloseSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("close-agent".into(), agent, Duration::from_secs(1))
+                .await
+                .expect("agent starts");
+        assert!(connection.negotiated().supports_session_close());
+        let session_id = SessionId::new("closable");
+        connection
+            .ensure_session(session_id.clone())
+            .await
+            .expect("session capacity");
+
+        connection
+            .close_session(CloseSessionRequest::new(session_id.clone()))
+            .await
+            .expect("close succeeds");
+
+        assert_eq!(close_calls.load(AtomicOrdering::SeqCst), 1);
         assert!(connection.session(&session_id).await.is_none());
         connection.shutdown().await.expect("shutdown");
     }
