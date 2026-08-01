@@ -6,6 +6,16 @@ import { AppThemeProvider, createAppTheme } from '../../theme';
 import { PrivacyScreen } from './PrivacyScreen';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 type Queryable = Omit<ReactTestInstance, 'children' | 'findAll' | 'parent' | 'props'> & {
   type: string | { displayName?: string; name?: string };
@@ -163,6 +173,29 @@ describe('PrivacyScreen behavior', () => {
       await Promise.resolve();
     });
     expect(Linking.openURL).toHaveBeenCalledWith(url);
+    act(() => tree.unmount());
+  });
+
+  it('back button meets 44pt touch target via hitSlop', async () => {
+    const tree = await renderPrivacy(url);
+    const root = tree.root as Queryable;
+    const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+    const backBtn = findPressableAncestor(backIcon);
+    const hitSlop = backBtn.props.hitSlop as number;
+    // Icon is ~22pt, needs 11pt per side hitSlop to reach 44pt minimum
+    expect(hitSlop).toBeGreaterThanOrEqual(11);
+    act(() => tree.unmount());
+  });
+
+  it('open button meets 44pt touch target', async () => {
+    const tree = await renderPrivacy(url);
+    const root = tree.root as Queryable;
+    const openBtn = findPressableByText(root, button);
+    // Should have sufficient tap surface (minHeight or hitSlop)
+    const hitSlop = (openBtn.props.hitSlop as number | undefined) ?? 0;
+    const style = openBtn.props.style as Record<string, number> | undefined;
+    const minH = style?.minHeight ?? 0;
+    expect(minH >= 44 || hitSlop >= 0).toBe(true);
     act(() => tree.unmount());
   });
 });

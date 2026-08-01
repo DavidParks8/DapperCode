@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { feedback } from '../../feedback';
 import { useAppTheme, type AppTheme } from '../../theme';
 
 export interface LegalSection {
@@ -47,7 +48,7 @@ export function LegalScreen({
     if (!documentUrl || openingDocument) {
       return;
     }
-
+    void feedback.selection();
     try {
       setOpeningDocument(true);
       const supported = await Linking.canOpenURL(documentUrl);
@@ -68,7 +69,7 @@ export function LegalScreen({
       <View style={styles.header}>
         <Pressable
           onPress={onBack}
-          hitSlop={8}
+          hitSlop={11}
           accessibilityRole="button"
           accessibilityLabel={`Back from ${title}`}
         >

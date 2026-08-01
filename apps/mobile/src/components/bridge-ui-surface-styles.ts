@@ -7,7 +7,7 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     surfaceCard: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
-      borderRadius: 12,
+      borderRadius: theme.radius.md,
       backgroundColor: theme.colors.bgItem,
       padding: theme.spacing.md,
       gap: theme.spacing.sm,
@@ -30,12 +30,12 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       alignItems: 'center',
     },
     headerPressable: {
-      borderRadius: 10,
+      borderRadius: theme.radius.sm,
     },
     headerIcon: {
       width: 22,
       height: 22,
-      borderRadius: 11,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.bgMain,
@@ -57,7 +57,7 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     dismissButton: {
       width: 26,
       height: 26,
-      borderRadius: 13,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.bgMain,
@@ -106,7 +106,7 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     keyValueGrid: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
-      borderRadius: 10,
+      borderRadius: theme.radius.sm,
       overflow: 'hidden',
     },
     keyValueGridCompact: {
@@ -136,7 +136,7 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     codeBlock: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.inlineCodeBorder,
-      borderRadius: 10,
+      borderRadius: theme.radius.sm,
       backgroundColor: theme.colors.inlineCodeBg,
       padding: theme.spacing.sm,
       gap: theme.spacing.xs,
@@ -146,7 +146,6 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0,
-      fontSize: 10,
     },
     codeText: {
       ...theme.typography.mono,
@@ -164,13 +163,13 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     },
     progressTrack: {
       height: 6,
-      borderRadius: 3,
+      borderRadius: theme.radius.full,
       backgroundColor: theme.colors.bgMain,
       overflow: 'hidden',
     },
     progressFill: {
       height: 6,
-      borderRadius: 3,
+      borderRadius: theme.radius.full,
       backgroundColor: theme.colors.accent,
     },
     actions: {
@@ -186,9 +185,11 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.bgMain,
-      borderRadius: 10,
+      borderRadius: theme.radius.sm,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm,
+      minHeight: 44,
+      justifyContent: 'center',
     },
     actionButtonPrimary: {
       borderColor: theme.colors.borderHighlight,

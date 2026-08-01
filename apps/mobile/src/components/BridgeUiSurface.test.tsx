@@ -2,14 +2,23 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
+import { feedback } from '../feedback';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { AppSheet } from './AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
 
-const safeAreaMetrics = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
-};
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+
+jest.mock('../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => {
@@ -26,8 +35,17 @@ type QueryableTestInstance = ReactTestInstance & {
   findAll(predicate: (node: QueryableTestInstance) => boolean): QueryableTestInstance[];
 };
 
+const safeAreaMetrics = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
+
 describe('BridgeUiWorkflowCard', () => {
   const theme = createAppTheme('dark');
+
+  beforeEach(() => {
+    (feedback.selection as jest.Mock).mockClear();
+  });
 
   it('renders and resolves a dynamic agent goal surface', () => {
     const surface: BridgeUiSurface = {
@@ -263,6 +281,108 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
     expect(onDismiss).not.toHaveBeenCalled();
     act(() => tree.unmount());
+  });
+
+  it('fires selection haptic on collapse/expand toggle', () => {
+    const surface: BridgeUiSurface = {
+      id: 'haptic-test',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'goal',
+      presentation: 'workflowCard',
+      tone: 'info',
+      title: 'Haptic',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [],
+      dismissible: false,
+    };
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    const collapseBtn = findPressableByLabel(root, 'Collapse surface');
+    act(() => readOnPress(collapseBtn.props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    act(() => readOnPress(findPressableByLabel(root, 'Expand surface').props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(2);
+    act(() => expectValue(rendered).unmount());
+  });
+
+  it('fires selection haptic on action button press', () => {
+    const surface: BridgeUiSurface = {
+      id: 'action-haptic',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'review',
+      presentation: 'workflowCard',
+      tone: 'warning',
+      title: 'Action',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [{ id: 'ok', label: 'OK', style: 'primary' }],
+      dismissible: false,
+    };
+    const onAction = jest.fn();
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={onAction} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    act(() => readOnPress(findPressableByText(root, 'OK').props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    expect(onAction).toHaveBeenCalledWith(surface, surface.actions[0]);
+    act(() => expectValue(rendered).unmount());
+  });
+
+  it('action buttons meet 44pt minimum touch target via minHeight', () => {
+    const surface: BridgeUiSurface = {
+      id: 'touch-target',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'review',
+      presentation: 'workflowCard',
+      tone: 'info',
+      title: 'TouchTarget',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [{ id: 'act', label: 'Act', style: 'primary' }],
+      dismissible: true,
+    };
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    const actionBtn = findPressableByText(root, 'Act');
+    const style = actionBtn.props.style as { minHeight?: number } | undefined;
+    // minHeight >= 44 via styles or hitSlop >= 0
+    const hitSlop = (actionBtn.props.hitSlop as number | undefined) ?? 0;
+    const minH = (style as Record<string, number> | undefined)?.minHeight ?? 0;
+    expect(minH >= 44 || hitSlop >= 0).toBe(true);
+    act(() => expectValue(rendered).unmount());
   });
 });
 

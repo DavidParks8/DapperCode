@@ -1,14 +1,28 @@
-import { Alert, TextInput } from 'react-native';
+import { AccessibilityInfo, Alert, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { RpcNotification, TerminalExecResponse } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
+import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { TerminalScreen } from './TerminalScreen';
 
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
+
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
+
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 type Queryable = Omit<ReactTestInstance, 'children' | 'findAll' | 'parent' | 'props'> & {
   children: unknown[];
@@ -119,6 +133,10 @@ describe('TerminalScreen behavior', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    (feedback.selection as jest.Mock).mockClear();
+    (feedback.warning as jest.Mock).mockClear();
+    (feedback.success as jest.Mock).mockClear();
+    (feedback.error as jest.Mock).mockClear();
   });
 
   it('blocks blank commands, confirms execution, supports cancel, and opens the drawer', async () => {
@@ -217,6 +235,67 @@ describe('TerminalScreen behavior', () => {
     expect(hasText(result.tree.root as Queryable, 'Run a command to see output.')).toBe(true);
     await triggerRun(result.tree.root as Queryable);
     expect(result.api.execTerminal).toHaveBeenCalledWith({ command: 'pwd' });
+    act(() => result.tree.unmount());
+  });
+
+  it('run button meets minimum touch target via hitSlop', async () => {
+    const result = await renderTerminal();
+    const root = result.tree.root as Queryable;
+    const runBtn = findRunButton(root);
+    const hitSlop = runBtn.props.hitSlop as number;
+    // Button is 30pt, needs 7pt per side to reach 44pt minimum.
+    expect(hitSlop).toBeGreaterThanOrEqual(7);
+    act(() => result.tree.unmount());
+  });
+
+  it('fires selection haptic on Run and warning haptic on Stop', async () => {
+    let resolveExec!: (value: TerminalExecResponse) => void;
+    const pendingResponse = new Promise<TerminalExecResponse>((resolve) => {
+      resolveExec = resolve;
+    });
+    const result = await renderTerminal({
+      execTerminal: jest.fn().mockReturnValue(pendingResponse),
+    });
+    const root = result.tree.root as Queryable;
+    const input = root.findAllByType(TextInput)[0] as Queryable;
+    act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
+
+    // Tap Run → confirm → selection haptic fires
+    await triggerRun(root);
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+
+    // While running, tap Stop → warning haptic fires
+    const stopBtn = findRunButton(root);
+    await act(async () => {
+      getCallback<PressCallback>(stopBtn, 'onPress')();
+    });
+    expect(feedback.warning as jest.Mock).toHaveBeenCalledTimes(1);
+
+    resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: '', stderr: '', timedOut: false, durationMs: 1 });
+    act(() => result.tree.unmount());
+  });
+
+  it('announces running state for accessibility', async () => {
+    const announceSpy = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(jest.fn());
+
+    let resolveExec!: (value: TerminalExecResponse) => void;
+    const pendingResponse = new Promise<TerminalExecResponse>((resolve) => {
+      resolveExec = resolve;
+    });
+    const result = await renderTerminal({
+      execTerminal: jest.fn().mockReturnValue(pendingResponse),
+    });
+    const root = result.tree.root as Queryable;
+    const input = root.findAllByType(TextInput)[0] as Queryable;
+    act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
+
+    await triggerRun(root);
+    expect(announceSpy).toHaveBeenCalledWith('Running command');
+
+    resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: 'hi', stderr: '', timedOut: false, durationMs: 1 });
+    await act(async () => { await Promise.resolve(); });
     act(() => result.tree.unmount());
   });
 });
