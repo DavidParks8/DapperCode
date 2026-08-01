@@ -11,6 +11,7 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../api/messages';
 import { extractLocalPreviewUrls } from '../browserPreview';
+import type { ChatMessagePart } from '../api/types';
 import { useAppTheme } from '../theme';
 import { ComputerUseTimeline } from './chatMessageComputerUse';
 import { MessageActions } from './chatMessageActions';
@@ -393,7 +394,68 @@ function ChatMessageComponent({
   );
 }
 
-function areChatMessagePropsEqual(
+/**
+ * Shallow field-by-field equality for a single message part, one level deep into the nested
+ * `resource` object for `{ type: 'resource' }` parts. Avoids `JSON.stringify`-based comparison,
+ * which reallocates and serializes the whole structure on every render — expensive on the hot
+ * path where `ChatMessage` re-renders on each streamed token.
+ */
+function arePartsEqual(previous?: ChatMessagePart[], next?: ChatMessagePart[]): boolean {
+  if (previous === next) return true;
+  if (!previous || !next || previous.length !== next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (!isPartEqual(previous[index], next[index])) return false;
+  }
+  return true;
+}
+
+function isPartEqual(previous: ChatMessagePart, next: ChatMessagePart): boolean {
+  if (previous === next) return true;
+  if (previous.type !== next.type) return false;
+  const previousRecord = previous as unknown as Record<string, unknown>;
+  const nextRecord = next as unknown as Record<string, unknown>;
+  const previousKeys = Object.keys(previousRecord);
+  const nextKeys = Object.keys(nextRecord);
+  if (previousKeys.length !== nextKeys.length) return false;
+  for (const key of previousKeys) {
+    const previousValue = previousRecord[key];
+    const nextValue = nextRecord[key];
+    if (previousValue === nextValue) continue;
+    // `{ type: 'resource' }` parts nest an inner plain object; compare it shallowly too rather
+    // than treating any object-valued field as an automatic mismatch.
+    if (
+      key === 'resource' &&
+      previousValue &&
+      nextValue &&
+      typeof previousValue === 'object' &&
+      typeof nextValue === 'object'
+    ) {
+      if (
+        isShallowRecordEqual(
+          previousValue as Record<string, unknown>,
+          nextValue as Record<string, unknown>,
+        )
+      ) {
+        continue;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
+function isShallowRecordEqual(
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): boolean {
+  const previousKeys = Object.keys(previous);
+  const nextKeys = Object.keys(next);
+  if (previousKeys.length !== nextKeys.length) return false;
+  return previousKeys.every((key) => previous[key] === next[key]);
+}
+
+/** Exported for direct unit testing of the memo comparator's field-aware equality. */
+export function areChatMessagePropsEqual(
   previousProps: ChatMessageProps,
   nextProps: ChatMessageProps,
 ): boolean {
@@ -403,11 +465,11 @@ function areChatMessagePropsEqual(
   return (
     previous.id === next.id &&
     previous.role === next.role &&
-    JSON.stringify(previous.content) === JSON.stringify(next.content) &&
+    previous.content === next.content &&
     previous.createdAt === next.createdAt &&
     // Ordered parts take priority over `content` when rendering, so a parts-only
     // change still has to repaint the bubble.
-    JSON.stringify(previous.parts) === JSON.stringify(next.parts) &&
+    arePartsEqual(previous.parts, next.parts) &&
     (previous.role !== 'activity' ||
       next.role !== 'activity' ||
       previous.activityType === next.activityType) &&
@@ -417,6 +479,7 @@ function areChatMessagePropsEqual(
     previousProps.onOpenSubAgentThread === nextProps.onOpenSubAgentThread
   );
 }
+
 
 export const ChatMessage = memo(ChatMessageComponent, areChatMessagePropsEqual);
 ChatMessage.displayName = 'ChatMessage';

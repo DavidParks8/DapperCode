@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
@@ -7,6 +8,12 @@ import { ScrollableRowText, SelectableMessageText } from './chatMessagePrimitive
 import type { TimelineEntry } from './chatMessageTypes';
 import { toSubAgentVisual } from './chatMessageTimelineHelpers';
 import { createStyles } from './chatMessageStyles';
+import { computeHitSlop } from './touchTarget';
+
+// The open-hint row hugs its "Open agent chat" label + chevron, so its rendered width is well
+// over the touch-target minimum; only the fixed, dense row height needs vertical hitSlop.
+const OPEN_HINT_VISIBLE_SIZE = { width: 120, height: 18 };
+
 
 /** Reads one labelled line out of a sub-agent card body, ignoring its indentation. */
 function findDetailLine(details: string[], label: string): string | undefined {
@@ -47,8 +54,9 @@ export function SubAgentCard({
   onOpen?: (threadId: string) => void;
 }) {
   const theme = useAppTheme();
-  const styles = createStyles(theme);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const canOpen = Boolean(threadId && onOpen);
+  const openHintHitSlop = useMemo(() => computeHitSlop(OPEN_HINT_VISIBLE_SIZE), []);
 
   return (
     <View style={styles.subAgentCardStack}>
@@ -96,7 +104,7 @@ export function SubAgentCard({
             <Pressable
               onPress={canOpen ? () => onOpen?.(threadId) : undefined}
               disabled={!canOpen}
-              hitSlop={8}
+              hitSlop={openHintHitSlop}
               style={({ pressed }) => [
                 styles.subAgentOpenHint,
                 pressed && canOpen && styles.subAgentOpenHintPressed,

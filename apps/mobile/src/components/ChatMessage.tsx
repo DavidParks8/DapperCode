@@ -1,2 +1,2 @@
-export { ChatMessage } from './chatMessageItem';
+export { ChatMessage, areChatMessagePropsEqual } from './chatMessageItem';
 export { ToolInvocationRow } from './chatMessageToolInvocation';

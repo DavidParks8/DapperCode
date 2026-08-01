@@ -23,7 +23,7 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../api/messages';
 import { createAppTheme, AppThemeProvider } from '../theme';
-import { ChatMessage, ToolInvocationRow } from './ChatMessage';
+import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
 import { resetHuggedTextWidthCache } from './chatMessageUserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 
@@ -247,6 +247,66 @@ describe('ChatMessage markdown formatting', () => {
     });
 
     expect(readText()).toContain('This needs a wider search.');
+  });
+
+  it('skips memoized re-render work when parts are deep-equal but a new array/object reference', () => {
+    // Regression test for replacing the JSON.stringify(parts) comparator with field-aware
+    // equality: streamed re-renders often produce brand-new part array/object references that
+    // are structurally identical to the previous ones, and those should still be treated as
+    // equal so ChatMessage does not repaint on every token.
+    const previous: ApiChatMessage = {
+      id: 'msg_stable_parts',
+      role: 'assistant',
+      content: 'Same content',
+      parts: [
+        { type: 'text', text: 'Same content' },
+        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+      ],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = {
+      ...previous,
+      parts: [
+        { type: 'text', text: 'Same content' },
+        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+      ],
+    };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(true);
+  });
+
+  it('detects a real change nested inside a resource part', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_resource_change',
+      role: 'assistant',
+      content: '',
+      parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'body' } }],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = {
+      ...previous,
+      parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'changed body' } }],
+    };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(false);
+  });
+
+  it('detects a content-only change even when parts are unchanged', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_content_change',
+      role: 'assistant',
+      content: 'before',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = { ...previous, content: 'after' };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(false);
   });
 
   it('renders markdown tables in a horizontal scroll area', () => {
