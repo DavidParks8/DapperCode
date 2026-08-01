@@ -137,20 +137,23 @@ describe('pushNotifications', () => {
     await expect(registerNotificationCategories()).resolves.toBeUndefined();
   });
 
-  it('suppresses foreground banners and enables background banners', async () => {
+  it('fully suppresses foreground notifications and presents later background notifications', async () => {
     setupNotificationHandler();
     const handler = mockNotifications.setNotificationHandler.mock.calls[0][0];
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
     await expect(handler.handleNotification()).resolves.toEqual({
       shouldShowBanner: false,
-      shouldShowList: true,
+      shouldShowList: false,
       shouldPlaySound: false,
       shouldSetBadge: false,
     });
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
-    await expect(handler.handleNotification()).resolves.toEqual(
-      expect.objectContaining({ shouldShowBanner: true, shouldPlaySound: true }),
-    );
+    await expect(handler.handleNotification()).resolves.toEqual({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    });
   });
 
   it('returns null on simulators, denied permissions, and empty tokens', async () => {

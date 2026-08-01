@@ -93,9 +93,9 @@ export const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
 };
 
 /**
- * While the app is foregrounded the user is already watching, so we suppress the
- * banner. When backgrounded the OS renders the push directly without consulting
- * this handler, so completion/approval alerts still arrive.
+ * While the app is foregrounded the user is already watching, so we suppress all
+ * presentation, including Notification Center. When backgrounded the OS renders
+ * the push directly without consulting this handler, so alerts still arrive.
  */
 export function setupNotificationHandler(): void {
   Notifications.setNotificationHandler({
@@ -103,7 +103,7 @@ export function setupNotificationHandler(): void {
       const active = AppState.currentState === 'active';
       return {
         shouldShowBanner: !active,
-        shouldShowList: true,
+        shouldShowList: !active,
         shouldPlaySound: !active,
         shouldSetBadge: false,
       };
