@@ -401,6 +401,7 @@ fn serde_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String 
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::acp::snapshot::{SnapshotMessage, SnapshotTimelineKind};
 
     #[tokio::test]
     async fn plan_entries_use_acp_wire_values_not_debug_formatting() {
@@ -568,5 +569,154 @@ mod tests {
 
         let capped = bounded_values(&(0..70).collect::<Vec<_>>(), MAX_STRUCTURED_ITEMS);
         assert_eq!(capped.len(), MAX_STRUCTURED_ITEMS);
+    }
+
+    fn live(update: SessionUpdate, generation: u64) -> ReceivedSessionNotification {
+        ReceivedSessionNotification {
+            notification: SessionNotification::new("session", update),
+            operation: Some(("run".to_string(), "turn".to_string(), generation)),
+            reconstruction: false,
+        }
+    }
+
+    fn thought(text: &str) -> SessionUpdate {
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": text}
+        }))
+        .expect("thought chunk")
+    }
+
+    fn agent_text(text: &str) -> SessionUpdate {
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": text}
+        }))
+        .expect("agent chunk")
+    }
+
+    fn tool_call(id: &str) -> SessionUpdate {
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": id,
+            "title": id,
+            "kind": "read",
+            "status": "pending"
+        }))
+        .expect("tool call")
+    }
+
+    fn tool_progress(id: &str, text: &str) -> SessionUpdate {
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": id,
+            "content": [{"type": "content", "content": {"type": "text", "text": text}}]
+        }))
+        .expect("tool update")
+    }
+
+    async fn timeline_of(
+        updates: Vec<SessionUpdate>,
+    ) -> (Vec<(SnapshotTimelineKind, String)>, Vec<SnapshotMessage>) {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let (generation, _) = session
+            .admit_prompt("run".into(), "turn".into())
+            .await
+            .expect("prompt admitted");
+        for update in updates {
+            handle_session_notification("agent", &session, live(update, generation)).await;
+        }
+        let snapshot = session.snapshot().await;
+        (
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| (entry.kind, entry.canonical_id.clone()))
+                .collect(),
+            snapshot.messages.iter().cloned().collect(),
+        )
+    }
+
+    fn text_of(message: &SnapshotMessage) -> String {
+        message
+            .parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn reasoning_resumed_after_a_tool_call_starts_a_new_message_below_it() {
+        let (timeline, messages) = timeline_of(vec![
+            thought("first thought"),
+            tool_call("tool-1"),
+            tool_progress("tool-1", "read"),
+            thought("second thought"),
+            agent_text("answer"),
+        ])
+        .await;
+
+        assert_eq!(
+            timeline.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            vec![
+                SnapshotTimelineKind::Reasoning,
+                SnapshotTimelineKind::Tool,
+                SnapshotTimelineKind::Reasoning,
+                SnapshotTimelineKind::Message,
+            ],
+            "reasoning that resumes after a tool call must render below it"
+        );
+        assert_ne!(
+            timeline[0].1, timeline[2].1,
+            "each reasoning block needs its own message id"
+        );
+        assert_eq!(
+            messages.iter().map(text_of).collect::<Vec<_>>(),
+            vec!["first thought", "second thought", "answer"],
+            "no block may be folded back into an earlier one"
+        );
+    }
+
+    #[tokio::test]
+    async fn consecutive_chunks_of_one_block_keep_streaming_into_the_same_message() {
+        let (timeline, messages) = timeline_of(vec![
+            thought("think"),
+            thought("ing"),
+            agent_text("ans"),
+            agent_text("wer"),
+        ])
+        .await;
+
+        assert_eq!(
+            timeline.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            vec![
+                SnapshotTimelineKind::Reasoning,
+                SnapshotTimelineKind::Message,
+            ]
+        );
+        assert_eq!(
+            messages.iter().map(text_of).collect::<Vec<_>>(),
+            vec!["thinking", "answer"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_tool_update_alone_does_not_split_the_streaming_message() {
+        let (timeline, messages) = timeline_of(vec![
+            tool_call("tool-1"),
+            agent_text("part one "),
+            tool_progress("tool-1", "still running"),
+            agent_text("part two"),
+        ])
+        .await;
+
+        assert_eq!(
+            timeline.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            vec![SnapshotTimelineKind::Tool, SnapshotTimelineKind::Message,]
+        );
+        assert_eq!(
+            messages.iter().map(text_of).collect::<Vec<_>>(),
+            vec!["part one part two"]
+        );
     }
 }

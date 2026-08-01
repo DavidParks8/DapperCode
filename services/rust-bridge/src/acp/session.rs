@@ -48,7 +48,11 @@ struct SessionState {
     reconstruction_history_cursor: Option<(Option<MessageRole>, u64)>,
     next_generation: u64,
     generation_state: GenerationState,
-    message_ids: HashMap<(Option<u64>, MessageRole), String>,
+    /// The message each live run is currently streaming into, keyed by generation.
+    /// Only one message per generation is ever open, so anything that interrupts the
+    /// stream -- the speaker changing or a tool call landing -- starts a new one.
+    open_messages: HashMap<u64, (MessageRole, String)>,
+    live_serial: u64,
     history_role: Option<MessageRole>,
     history_serial: u64,
     notification_receipts: VecDeque<RoutedSessionNotification>,
@@ -90,7 +94,8 @@ impl AcpSession {
                 reconstruction_history_cursor: None,
                 next_generation: 0,
                 generation_state: GenerationState::Terminal,
-                message_ids: HashMap::new(),
+                open_messages: HashMap::new(),
+                live_serial: 0,
                 history_role: None,
                 history_serial: 0,
                 notification_receipts: VecDeque::new(),
@@ -124,7 +129,7 @@ impl AcpSession {
         );
         fresh.history_reconstruction = true;
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
-        state.message_ids.clear();
+        state.open_messages.clear();
         state.reconstruction_history_cursor = Some((state.history_role, state.history_serial));
         state.history_role = None;
         state.history_serial = 0;
@@ -240,11 +245,7 @@ impl AcpSession {
                 MessageRole::Thought => format!("{id}::thought"),
             };
         }
-        let key = (generation, role);
-        if let Some(id) = state.message_ids.get(&key) {
-            return id.clone();
-        }
-        if generation.is_none() {
+        let Some(generation) = generation else {
             // Replayed history has no run generations, so start a new message every
             // time the speaker changes. Otherwise every past turn would collapse into
             // a single user message and a single agent message.
@@ -254,11 +255,23 @@ impl AcpSession {
             }
             let serial = state.history_serial;
             return format!("{}:history-{serial}:{role:?}", state.snapshot.thread_id);
+        };
+        // A turn is not one thought followed by one answer: an agent reasons, calls a
+        // tool, reasons again, and only then answers. Reusing a single id per role for
+        // the whole turn folds every later block back into the first one, so reasoning
+        // that is still streaming renders above the tool calls that already ran.
+        if let Some((open_role, id)) = state.open_messages.get(&generation) {
+            if *open_role == role {
+                return id.clone();
+            }
         }
-        let generation =
-            generation.map_or_else(|| "history".to_string(), |value| value.to_string());
-        let id = format!("{}:{generation}:{role:?}", state.snapshot.thread_id);
-        state.message_ids.insert(key, id.clone());
+        state.live_serial = state.live_serial.saturating_add(1);
+        let serial = state.live_serial;
+        let id = format!(
+            "{}:{generation}:{serial}:{role:?}",
+            state.snapshot.thread_id
+        );
+        state.open_messages.insert(generation, (role, id.clone()));
         id
     }
     pub async fn emit(&self, event: CanonicalEvent) {
@@ -273,8 +286,18 @@ impl AcpSession {
                 ) =>
             {
                 state.generation_state = GenerationState::Terminal;
+                state.open_messages.remove(generation);
             }
             CanonicalEvent::RunFinished { .. } | CanonicalEvent::RunFailed { .. } => return,
+            // A tool call ends whatever message was streaming: text that follows it
+            // belongs below the tool row, not appended to a bubble that sits above it.
+            CanonicalEvent::Tool {
+                generation: Some(generation),
+                tool_call_id,
+                ..
+            } if !state.snapshot.tools.contains_key(tool_call_id) => {
+                state.open_messages.remove(generation);
+            }
             _ => {}
         }
         state.snapshot.apply(&event);
@@ -1132,10 +1155,19 @@ mod tests {
             "supplied::thought"
         );
         let generated = session.message_id(MessageRole::Thought, None).await;
-        assert_eq!(generated, "thread:1:Thought");
+        assert_eq!(generated, "thread:1:1:Thought");
         assert_eq!(
             session.message_id(MessageRole::Thought, None).await,
             generated
+        );
+        // Switching speaker mid-turn opens a new message so the answer renders after
+        // the reasoning instead of being folded into a bubble that already streamed.
+        let answer = session.message_id(MessageRole::Agent, None).await;
+        assert_eq!(answer, "thread:1:2:Agent");
+        assert_eq!(
+            session.message_id(MessageRole::Thought, None).await,
+            "thread:1:3:Thought",
+            "reasoning that resumes after the answer must not reopen the first block"
         );
 
         session.fail_active("failed".to_string()).await;
