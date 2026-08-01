@@ -14,6 +14,10 @@ export const unstable_settings = {
 
 export default function DrawerLayout() {
   const { width } = useWindowDimensions();
+  return <ResponsiveDrawerLayout width={width} />;
+}
+
+export function ResponsiveDrawerLayout({ width }: { width: number }) {
   const permanent = width >= TABLET_LAYOUT_MIN_WIDTH;
 
   return (
@@ -24,7 +28,7 @@ export default function DrawerLayout() {
         headerShown: false,
         drawerType: permanent ? 'permanent' : 'front',
         swipeEnabled: !permanent,
-        drawerStyle: { width: TABLET_SIDEBAR_WIDTH },
+        drawerStyle: { width: permanent ? TABLET_SIDEBAR_WIDTH : width },
       }}
     />
   );
