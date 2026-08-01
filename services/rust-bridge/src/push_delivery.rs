@@ -367,8 +367,9 @@ impl PushService {
                     let status = response.status();
                     if status.as_u16() == 429 || status.is_server_error() {
                         if attempt >= PUSH_SEND_MAX_ATTEMPTS {
+                            let safe_url = redact_url_credentials(url);
                             eprintln!(
-                                "push request to {url} gave up after {attempt} attempts (status {status})"
+                                "push request to {safe_url} gave up after {attempt} attempts (status {status})"
                             );
                             return None;
                         }
@@ -393,7 +394,11 @@ impl PushService {
                 }
                 Err(error) => {
                     if attempt >= PUSH_SEND_MAX_ATTEMPTS {
-                        eprintln!("push request to {url} failed after {attempt} attempts: {error}");
+                        let safe_url = redact_url_credentials(url);
+                        let safe_error = redact_url_credentials(&error.to_string());
+                        eprintln!(
+                            "push request to {safe_url} failed after {attempt} attempts: {safe_error}"
+                        );
                         return None;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;

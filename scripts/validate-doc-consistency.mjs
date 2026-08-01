@@ -66,6 +66,13 @@ if (/content-free/i.test(push)) fail('push guide incorrectly describes payloads 
 
 const operations = readFileSync(path.join(root, 'docs/setup-and-operations.md'), 'utf8');
 for (const required of [
+  '`privateBearer`',
+  '`tailnetPinnedTls`',
+  '`BRIDGE_TRANSPORT_MODE`',
+  '`BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS`',
+  '`BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS`',
+  'never falls back to the current',
+  'never be exposed directly to the public internet',
   'dappercode-tree-v1',
   '`.dappercode-install.json`',
   '100,000 entries',
@@ -75,6 +82,19 @@ for (const required of [
   'immediately before constructing the SDK process transport',
 ]) {
   if (!operations.includes(required)) fail(`operations integrity policy is missing: ${required}`);
+}
+
+const security = readFileSync(path.join(root, 'SECURITY.md'), 'utf8');
+for (const required of [
+  '`privateBearer`',
+  '`tailnetPinnedTls`',
+  'intentionally unavailable',
+  '`BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS=true`',
+  '`BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS`',
+  'not implemented',
+]) {
+  if (!security.includes(required))
+    fail(`security policy is missing transport guidance: ${required}`);
 }
 const bridgeRoutes = extractBridgeHttpRoutes(readRustBridgeProductionSources(root));
 if (bridgeRoutes.length === 0) fail('Rust bridge HTTP route inventory is empty');

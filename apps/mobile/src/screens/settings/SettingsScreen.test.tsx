@@ -62,6 +62,7 @@ const profiles: BridgeProfile[] = [
   {
     id: 'profile-1',
     name: 'Primary',
+    transportMode: 'privateBearer',
     bridgeUrl: 'http://127.0.0.1:3001',
     bridgeToken: 'one',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -70,6 +71,7 @@ const profiles: BridgeProfile[] = [
   {
     id: 'profile-2',
     name: 'Secondary',
+    transportMode: 'privateBearer',
     bridgeUrl: 'http://127.0.0.1:3002',
     bridgeToken: 'two',
     createdAt: '2026-01-02T00:00:00.000Z',

@@ -1337,12 +1337,13 @@ fn normalize_forwarded_value_paths(
 mod tests {
     use super::*;
     use crate::config::{
-        WebSocketResourceLimits, DEFAULT_WS_GLOBAL_IN_FLIGHT, DEFAULT_WS_MAX_FRAME_BYTES,
-        DEFAULT_WS_MAX_MESSAGE_BYTES, DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
+        TransportMode, WebSocketResourceLimits, DEFAULT_WS_GLOBAL_IN_FLIGHT,
+        DEFAULT_WS_MAX_FRAME_BYTES, DEFAULT_WS_MAX_MESSAGE_BYTES, DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
     };
 
     fn protected_request_config() -> BridgeConfig {
         BridgeConfig {
+            transport_mode: TransportMode::PrivateBearer,
             host: "127.0.0.1".to_string(),
             port: 8787,
             preview_host: "127.0.0.1".to_string(),
@@ -1359,6 +1360,8 @@ mod tests {
             auth_enabled: true,
             allow_insecure_no_auth: false,
             no_auth_allowed_origins: HashSet::new(),
+            enforce_authenticated_origins: false,
+            authenticated_allowed_origins: HashSet::new(),
             allow_query_token_auth: true,
             allow_outside_root_cwd: false,
             terminal_exec_policies: HashSet::new(),

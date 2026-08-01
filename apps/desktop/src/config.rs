@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::{
     secrets::SecretBackend,
-    store::{AppConfig, AppPaths, Profile},
+    store::{AppConfig, AppPaths, Profile, TransportMode},
 };
 
 #[derive(Clone, Debug)]
@@ -139,6 +139,7 @@ pub struct BridgeRuntimeConfig {
     pub host: String,
     pub port: u16,
     pub connect_url: String,
+    pub transport_mode: TransportMode,
     pub auth_token: String,
     pub secret_backend: SecretBackend,
 }
@@ -150,6 +151,7 @@ impl BridgeRuntimeConfig {
         secret_backend: SecretBackend,
         paths: &AppPaths,
     ) -> Result<Self> {
+        profile.transport_mode.ensure_available()?;
         if token.trim().is_empty() {
             bail!("the stored bridge token for this workspace is empty; run setup again");
         }
@@ -188,6 +190,10 @@ impl BridgeRuntimeConfig {
             Ok(())
         };
 
+        insert(
+            "BRIDGE_TRANSPORT_MODE",
+            profile.transport_mode.as_str().to_string(),
+        )?;
         insert("BRIDGE_NETWORK_MODE", profile.network_mode.clone())?;
         insert("BRIDGE_HOST", profile.bridge_host.clone())?;
         insert("BRIDGE_PORT", profile.bridge_port.to_string())?;
@@ -199,6 +205,7 @@ impl BridgeRuntimeConfig {
             profile.preview_connect_url.clone(),
         )?;
         insert("BRIDGE_AUTH_TOKEN", token.to_string())?;
+        insert("BRIDGE_SHOW_PAIRING_QR", "false".to_string())?;
         insert(
             "BRIDGE_ALLOW_QUERY_TOKEN_AUTH",
             profile.allow_query_token_auth.to_string(),
@@ -224,6 +231,7 @@ impl BridgeRuntimeConfig {
             host: profile.bridge_host.clone(),
             port: profile.bridge_port,
             connect_url: profile.connect_url.trim_end_matches('/').to_string(),
+            transport_mode: profile.transport_mode,
             auth_token: token.to_string(),
             secret_backend,
         })
@@ -240,6 +248,7 @@ impl BridgeRuntimeConfig {
     pub fn pairing_payload(&self) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
             "type": "dappercode-bridge-pair",
+            "transportMode": self.transport_mode,
             "bridgeUrl": self.connect_url,
             "bridgeToken": self.auth_token,
         }))?)
@@ -376,6 +385,7 @@ mod tests {
         Profile {
             profile_id: profile_id.to_string(),
             workspace: workspace.to_path_buf(),
+            transport_mode: TransportMode::PrivateBearer,
             network_mode: "local".to_string(),
             bridge_host: "127.0.0.1".to_string(),
             bridge_port: port,
@@ -410,6 +420,8 @@ mod tests {
                 .unwrap();
 
         assert_eq!(config.values["BRIDGE_AUTH_TOKEN"], "secret");
+        assert_eq!(config.values["BRIDGE_SHOW_PAIRING_QR"], "false");
+        assert_eq!(config.values["BRIDGE_TRANSPORT_MODE"], "privateBearer");
         assert_eq!(config.values["BRIDGE_PORT"], "18787");
         assert_eq!(config.values["BRIDGE_PREVIEW_PORT"], "18788");
         assert_eq!(
@@ -444,6 +456,7 @@ mod tests {
             host: "::1".to_string(),
             port: 8787,
             connect_url: "http://[::1]:8787".to_string(),
+            transport_mode: TransportMode::PrivateBearer,
             auth_token: "secret".to_string(),
             secret_backend: SecretBackend::Keychain,
         };
@@ -452,6 +465,7 @@ mod tests {
         let payload: serde_json::Value =
             serde_json::from_str(&config.pairing_payload().unwrap()).unwrap();
         assert_eq!(payload["type"], "dappercode-bridge-pair");
+        assert_eq!(payload["transportMode"], "privateBearer");
         assert_eq!(payload["bridgeToken"], "secret");
     }
 
@@ -590,6 +604,7 @@ mod tests {
                 host: host.to_string(),
                 port: 8787,
                 connect_url: "http://example.invalid:8787/".to_string(),
+                transport_mode: TransportMode::PrivateBearer,
                 auth_token: "secret".to_string(),
                 secret_backend: SecretBackend::File,
             };
@@ -720,6 +735,12 @@ mod tests {
         let runtime = RuntimePaths::discover().unwrap();
         assert_ne!(runtime.package_root, temp.path());
 
+        std::fs::create_dir_all(temp.path().join("bin")).unwrap();
+        std::fs::write(temp.path().join("bin/dappercode-bridge"), b"x").unwrap();
+        let runtime = RuntimePaths::discover().unwrap();
+        assert_eq!(runtime.package_root, temp.path().canonicalize().unwrap());
+        std::fs::remove_dir_all(temp.path().join("bin")).unwrap();
+
         std::fs::create_dir_all(temp.path().join("services/rust-bridge")).unwrap();
         std::fs::write(temp.path().join("services/rust-bridge/Cargo.toml"), b"x").unwrap();
         let runtime = RuntimePaths::discover().unwrap();
@@ -750,6 +771,28 @@ mod tests {
             BridgeRuntimeConfig::from_profile(&profile, "secret", SecretBackend::File, &paths)
                 .unwrap_err();
         assert!(error.to_string().contains("control character"));
+    }
+
+    #[test]
+    fn refuses_to_materialize_a_pinned_profile_as_a_bearer_environment() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let mut profile = profile("alpha-000000000001", workspace.path(), 18792);
+        profile.transport_mode = TransportMode::TailnetPinnedTls;
+        profile.network_mode = "tailscale".to_string();
+        paths.prepare_profile(&profile.profile_id).unwrap();
+        std::fs::write(paths.manifest_path(&profile.profile_id), b"{}").unwrap();
+
+        let error = BridgeRuntimeConfig::from_profile(
+            &profile,
+            "legacy-token",
+            SecretBackend::File,
+            &paths,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("not yet available"));
     }
 
     #[test]

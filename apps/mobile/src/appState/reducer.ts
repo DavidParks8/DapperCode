@@ -55,8 +55,9 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         : null;
       const bridgeIdentityChanged = Boolean(
         existing &&
-        (existing.bridgeUrl !== normalizeBridgeUrlInput(action.draft.bridgeUrl) ||
-          existing.bridgeToken !== action.draft.bridgeToken.trim()),
+        (existing.transportMode !== (action.draft.transportMode ?? 'privateBearer') ||
+          existing.bridgeUrl !== normalizeBridgeUrlInput(action.draft.bridgeUrl) ||
+          existing.bridgeToken !== (action.draft.bridgeToken?.trim() || null)),
       );
       return {
         ...state,

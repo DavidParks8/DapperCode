@@ -483,6 +483,18 @@ mod tests {
         assert!(PathBuf::from(&uploaded.path).is_file());
         assert!(uploaded.path.contains("thread_one"));
 
+        let body = multipart_body(boundary, &[("file", None, None, b"plain")]);
+        let uploaded = save_multipart_attachment(multipart(body, boundary).await, &policy)
+            .await
+            .expect("save attachment without optional metadata");
+        assert_eq!(uploaded.file_name, "attachment");
+        assert_eq!(uploaded.mime_type, None);
+        assert_eq!(uploaded.kind, "file");
+        assert_eq!(
+            PathBuf::from(uploaded.path).parent(),
+            Some(policy.attachments_root().join("threads").as_path())
+        );
+
         let body = multipart_body(
             boundary,
             &[
@@ -492,10 +504,7 @@ mod tests {
         );
         let uploaded = save_multipart_attachment(multipart(body, boundary).await, &policy)
             .await
-            .expect("save attachment without optional metadata");
-        assert_eq!(uploaded.file_name, "attachment");
-        assert_eq!(uploaded.mime_type, None);
-        assert_eq!(uploaded.kind, "file");
+            .expect("save attachment with an empty sanitized thread id");
         assert_eq!(
             PathBuf::from(uploaded.path).parent(),
             Some(policy.attachments_root().join("threads").as_path())

@@ -1605,7 +1605,7 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
             if let Some(resource) = object.get("resource").and_then(Value::as_object) {
                 let mut lines = Vec::new();
                 if let Some(uri) = resource.get("uri").and_then(Value::as_str) {
-                    lines.push(format!("[resource: {uri}]"));
+                    lines.push(format!("[resource: {}]", redact_url_credentials(uri)));
                 }
                 if let Some(text) = resource.get("text").and_then(Value::as_str) {
                     lines.push(text.to_string());
@@ -1640,7 +1640,7 @@ fn snapshot_content_lines(value: &Value) -> Vec<String> {
                         .get("uri")
                         .and_then(Value::as_str)
                         .filter(|value| !value.is_empty())
-                        .map(|uri| format!("[file: {uri}]"))
+                        .map(|uri| format!("[file: {}]", redact_url_credentials(uri)))
                         .into_iter()
                         .collect();
                 }
@@ -2747,6 +2747,477 @@ mod tests {
             text.contains("npm test output"),
             "terminal output dropped in {text}"
         );
+    }
+
+    #[test]
+    fn snapshot_content_redacts_resource_credentials_and_preserves_readable_variants() {
+        let value = json!([
+            "",
+            "plain text",
+            {"type": "content", "content": [{"type": "text", "text": "nested"}]},
+            {"resource": {
+                "uri": "https://user:pass@example.test/file?token=hidden&view=full",
+                "text": "resource body"
+            }},
+            {"resource": {}},
+            {"type": "resource_link", "uri": "https://example.test/a?code=secret"},
+            {"type": "resourceLink", "uri": ""},
+            {"type": "image"},
+            {"type": "audio"},
+            {"type": "terminal", "output": "terminal output"},
+            {"type": "diff", "oldText": "old", "newText": "new"},
+            {"path": "src/lib.rs"},
+            {"unknown": true},
+            null,
+            true,
+            7
+        ]);
+
+        let lines = snapshot_content_lines(&value);
+        let text = lines.join("\n");
+        for secret in ["user", "pass", "hidden", "secret"] {
+            assert!(!text.contains(secret), "{text}");
+        }
+        for expected in [
+            "plain text",
+            "nested",
+            "[resource: https://[REDACTED]@example.test/file?token=[REDACTED]&view=full]",
+            "resource body",
+            "[file: https://example.test/a?code=[REDACTED]]",
+            "[image]",
+            "[audio]",
+            "[terminal]",
+            "terminal output",
+            "[diff: file]",
+            "old",
+            "new",
+            "[location: src/lib.rs]",
+            "{\"unknown\":true}",
+            "true",
+            "7",
+        ] {
+            assert!(
+                lines.iter().any(|line| line == expected),
+                "missing {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_snapshot_text_marks_empty_and_nonempty_content() {
+        let empty = SnapshotMessage {
+            id: "empty".to_string(),
+            role: MessageRole::Agent,
+            parts: Vec::new(),
+            truncated: true,
+        };
+        assert_eq!(snapshot_message_text(&empty), "[message content truncated]");
+
+        let nonempty = SnapshotMessage {
+            id: "nonempty".to_string(),
+            role: MessageRole::Agent,
+            parts: vec![json!("body")],
+            truncated: true,
+        };
+        assert_eq!(
+            snapshot_message_text(&nonempty),
+            "body\n[message content truncated]"
+        );
+
+        let mut tool = SnapshotTool {
+            id: "call".to_string(),
+            generation: None,
+            kind: ToolKind::Other,
+            status: ToolCallStatus::Completed,
+            title: "Tool".to_string(),
+            content: String::new(),
+            structured_content: vec![json!(" "), json!("result")],
+            locations: Vec::new(),
+            truncated: true,
+            subagent: false,
+        };
+        assert_eq!(
+            tool_snapshot_text(&tool),
+            "result\n[tool content truncated]"
+        );
+        tool.content = "result".to_string();
+        assert_eq!(
+            tool_snapshot_text(&tool),
+            "result\n[tool content truncated]"
+        );
+    }
+
+    #[test]
+    fn subagent_and_text_helpers_fail_closed_across_boundary_inputs() {
+        assert!(parse_task_header(r#"id="" state="running">"#).is_none());
+        assert!(
+            parse_task_header(&format!(r#"id="{}" state="running">"#, "x".repeat(1_025))).is_none()
+        );
+        assert!(parse_task_header(r#"id="child" state="">"#).is_none());
+        assert!(parse_task_header(&format!(r#"id="child" state="{}">"#, "x".repeat(65))).is_none());
+
+        let mut discovered = subagent_task_tool(
+            "task",
+            " ",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set(r#"<task id="child" state="completed">finished</task>"#.to_string()),
+        );
+        assert_eq!(
+            discovered_subagent_session(&discovered),
+            Some((TEST_THREAD, "child".to_string(), None, "task", true))
+        );
+        if let CanonicalEvent::Tool { content, kind, .. } = &mut discovered {
+            *content = FieldUpdate::Clear;
+            *kind = ToolKind::Think;
+        }
+        assert!(discovered_subagent_session(&discovered).is_none());
+        assert!(discovered_subagent_session(&canonical_run_started()).is_none());
+
+        assert_eq!(
+            task_progress_preview("before\n<task_result>\nsecret result\n</task_result>\nafter")
+                .as_deref(),
+            Some("after")
+        );
+        assert_eq!(
+            task_progress_preview("<task_result>\nvisible without a close").as_deref(),
+            Some("visible without a close")
+        );
+        assert!(task_progress_preview("starting-sub_agent...").is_none());
+        assert!(is_subagent_task_tool(ToolKind::Think, "delegate agent"));
+        assert!(!is_subagent_task_tool(ToolKind::Think, "plan"));
+
+        for (role, prefix) in [
+            (MessageRole::Thought, "Thinking"),
+            (MessageRole::Agent, "Responding"),
+            (MessageRole::User, "Received input"),
+        ] {
+            let progress =
+                subagent_progress(&canonical_message(role, "message", "payload")).unwrap();
+            assert!(progress.latest.starts_with(prefix), "{}", progress.latest);
+        }
+        assert!(subagent_progress(&canonical_message(MessageRole::Agent, "empty", " ")).is_none());
+
+        for (status, expected) in [
+            (ToolCallStatus::Failed, Some("Tool failed Using a tool")),
+            (ToolCallStatus::Completed, Some("Working on Using a tool")),
+            (ToolCallStatus::Pending, None),
+            (ToolCallStatus::InProgress, Some("Working on Using a tool")),
+        ] {
+            let tool = subagent_task_tool("tool", " ", status, FieldUpdate::Unchanged);
+            assert_eq!(
+                subagent_progress(&tool).map(|progress| progress.latest),
+                expected.map(str::to_string)
+            );
+        }
+
+        assert_eq!(bounded("éé", 3), "é");
+        assert_eq!(utf8_chunks("éé", 3).collect::<Vec<_>>(), ["é", "é"]);
+    }
+
+    #[test]
+    fn snapshot_group_removal_keeps_tool_calls_and_results_atomic() {
+        let tool_call = || ToolCall {
+            id: "call".to_string(),
+            tool_call_type: ToolCallType::Function,
+            function: Function {
+                name: "read".to_string(),
+                arguments: "{}".to_string(),
+            },
+            encrypted_value: None,
+        };
+        let message =
+            |id: &str, tool_calls: Option<Vec<ToolCall>>, tool_call_id: Option<&str>| Message {
+                id: id.to_string(),
+                role: AgUiMessageRole::Assistant,
+                content: Some(MessageContent::String(String::new())),
+                encrypted_value: None,
+                name: None,
+                tool_calls,
+                error: None,
+                tool_call_id: tool_call_id.map(str::to_string),
+                activity_type: None,
+            };
+
+        let mut call_first = vec![
+            message("call", Some(vec![tool_call()]), None),
+            message("result", None, Some("call")),
+            message("keep", None, None),
+        ];
+        remove_oldest_snapshot_message_group(&mut call_first);
+        assert_eq!(
+            call_first
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["keep"]
+        );
+
+        let mut result_first = vec![
+            message("result", None, Some("call")),
+            message("call", Some(vec![tool_call()]), None),
+            message("keep", None, None),
+        ];
+        remove_oldest_snapshot_message_group(&mut result_first);
+        assert_eq!(
+            result_first
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["keep"]
+        );
+    }
+
+    #[test]
+    fn subagent_correlation_rejects_stale_child_runs_and_missing_parents() {
+        let child_thread = "child";
+        let link =
+            |minimum_child_generation, child_generation, child_run_id| SubagentActivityLink {
+                parent_thread_id: "parent".to_string(),
+                parent_run_id: "parent-run".to_string(),
+                parent_source_turn_id: Some("parent-turn".to_string()),
+                tool_call_id: "task".to_string(),
+                child_thread_id: child_thread.to_string(),
+                child_run_id,
+                child_generation,
+                minimum_child_generation,
+                progress_revisions: HashSet::new(),
+            };
+        let child_message = |generation, run_id: &str| {
+            let mut event = canonical_message(MessageRole::Agent, "message", "working");
+            if let CanonicalEvent::MessageChunk {
+                thread_id,
+                run_id: event_run_id,
+                source_turn_id,
+                generation: event_generation,
+                ..
+            } = &mut event
+            {
+                *thread_id = child_thread.to_string();
+                *event_run_id = Some(run_id.to_string());
+                *source_turn_id = Some("child-turn".to_string());
+                *event_generation = Some(generation);
+            }
+            event
+        };
+
+        let mut projector = AgUiProjector::default();
+        projector
+            .subagent_links
+            .insert(child_thread.to_string(), link(Some(2), None, None));
+        let mut events = Vec::new();
+        projector.project_subagent_progress(&child_message(1, "child-run"), 1, &mut events);
+        assert!(events.is_empty());
+
+        projector
+            .subagent_links
+            .insert(child_thread.to_string(), link(None, Some(2), None));
+        projector.project_subagent_progress(&child_message(1, "child-run"), 1, &mut events);
+        assert!(events.is_empty());
+
+        projector.subagent_links.insert(
+            child_thread.to_string(),
+            link(None, Some(1), Some("other-run".to_string())),
+        );
+        projector.project_subagent_progress(&child_message(1, "child-run"), 1, &mut events);
+        assert!(events.is_empty());
+
+        projector.subagent_links.insert(
+            child_thread.to_string(),
+            link(None, Some(1), Some("child-run".to_string())),
+        );
+        projector.project_subagent_progress(
+            &CanonicalEvent::RunFinished {
+                agent_id: "alpha-agent".to_string(),
+                thread_id: child_thread.to_string(),
+                run_id: "child-run".to_string(),
+                source_turn_id: "child-turn".to_string(),
+                generation: 1,
+                stop_reason: StopReason::EndTurn,
+            },
+            1,
+            &mut events,
+        );
+        assert!(!projector.subagent_links.contains_key(child_thread));
+
+        let mut ignored = Vec::new();
+        projector.ensure_observed_run("explicit", Some("run"), None, 1, &mut ignored);
+        assert!(ignored.is_empty());
+        assert!(!projector.runs.contains_key("explicit"));
+        assert!(projector.observed_runs.is_empty());
+    }
+
+    #[test]
+    fn terminal_cleanup_and_structured_chunks_cover_partial_state() {
+        let mut projector = AgUiProjector::default();
+        let mut run = AgUiRunState {
+            run_id: "run".to_string(),
+            source_turn_id: Some("turn".to_string()),
+            open_user_id: Some("user".to_string()),
+            open_message_id: None,
+            open_reasoning_id: None,
+            message_bytes: HashMap::new(),
+            truncated_messages: HashSet::new(),
+            tools: HashMap::from([
+                (
+                    "subagent".to_string(),
+                    AgUiToolState {
+                        subagent_activity: true,
+                        subagent_terminal_status: Some("completed".to_string()),
+                        ..AgUiToolState::default()
+                    },
+                ),
+                (
+                    "ordinary".to_string(),
+                    AgUiToolState {
+                        started: true,
+                        ..AgUiToolState::default()
+                    },
+                ),
+            ]),
+        };
+        let mut events = Vec::new();
+        projector.terminalize_run_subagents("thread", &mut run, "completed", 1, &mut events);
+        close_run("thread", run, 1, &mut events, false);
+        let types = event_types(&events);
+        assert!(types.contains(&"TEXT_MESSAGE_END"));
+        assert!(types.contains(&"TOOL_CALL_END"));
+
+        let run = AgUiRunState {
+            run_id: "run".to_string(),
+            source_turn_id: Some("turn".to_string()),
+            open_user_id: None,
+            open_message_id: None,
+            open_reasoning_id: None,
+            message_bytes: HashMap::new(),
+            truncated_messages: HashSet::new(),
+            tools: HashMap::new(),
+        };
+        let mut chunks = Vec::new();
+        push_structured_chunks(
+            &mut chunks,
+            "thread",
+            &run,
+            "state",
+            "canonical",
+            json!({"payload": "x".repeat(STRUCTURED_CHUNK_BYTES + 1)}),
+            1,
+        );
+        assert!(chunks.len() > 1);
+    }
+
+    #[test]
+    fn snapshot_rendering_skips_stale_entries_and_handles_incomplete_tools() {
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        snapshot
+            .timeline
+            .push_back(crate::acp::snapshot::SnapshotTimelineEntry {
+                sequence: 1,
+                kind: crate::acp::snapshot::SnapshotTimelineKind::Message,
+                canonical_id: "missing-message".to_string(),
+            });
+        snapshot
+            .timeline
+            .push_back(crate::acp::snapshot::SnapshotTimelineEntry {
+                sequence: 2,
+                kind: crate::acp::snapshot::SnapshotTimelineKind::Tool,
+                canonical_id: "missing-tool".to_string(),
+            });
+        snapshot.apply(&subagent_task_tool(
+            "ordinary",
+            " ",
+            ToolCallStatus::Completed,
+            FieldUpdate::Set("result".to_string()),
+        ));
+        snapshot.apply(&subagent_task_tool(
+            "working-task",
+            "Task",
+            ToolCallStatus::InProgress,
+            FieldUpdate::Set(
+                r#"<task id="child" state="running">investigating</task>"#.to_string(),
+            ),
+        ));
+
+        let envelope = messages_snapshot_envelope(&snapshot, "run".to_string(), None);
+        let messages = envelope.event.messages.expect("snapshot messages");
+        let message_ids = messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>();
+        assert!(!message_ids.contains(&"missing-message"));
+        assert!(!message_ids.contains(&"missing-tool"));
+        assert_eq!(
+            message_ids,
+            [
+                "tool-meta:ordinary",
+                "tool-call:ordinary",
+                "tool-result:ordinary",
+                "subagent:working-task",
+            ]
+        );
+    }
+
+    #[test]
+    fn superseding_runs_retain_only_unrelated_subagent_links() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        projector.subagent_links.insert(
+            "unrelated".to_string(),
+            SubagentActivityLink {
+                parent_thread_id: "other-thread".to_string(),
+                parent_run_id: "other-run".to_string(),
+                parent_source_turn_id: None,
+                tool_call_id: "other-tool".to_string(),
+                child_thread_id: "unrelated".to_string(),
+                child_run_id: None,
+                child_generation: None,
+                minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
+            },
+        );
+        projector.subagent_links.insert(
+            "newer".to_string(),
+            SubagentActivityLink {
+                parent_thread_id: TEST_THREAD.to_string(),
+                parent_run_id: "newer-run".to_string(),
+                parent_source_turn_id: None,
+                tool_call_id: "newer-tool".to_string(),
+                child_thread_id: "newer".to_string(),
+                child_run_id: None,
+                child_generation: None,
+                minimum_child_generation: None,
+                progress_revisions: HashSet::new(),
+            },
+        );
+
+        projector.project_canonical(&CanonicalEvent::RunStarted {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-2".to_string(),
+            source_turn_id: "turn-2".to_string(),
+            generation: 2,
+        });
+        assert!(projector.subagent_links.contains_key("unrelated"));
+        assert!(projector.subagent_links.contains_key("newer"));
+
+        let run = AgUiRunState {
+            run_id: "run".to_string(),
+            source_turn_id: None,
+            open_user_id: None,
+            open_message_id: None,
+            open_reasoning_id: None,
+            message_bytes: HashMap::new(),
+            truncated_messages: HashSet::new(),
+            tools: HashMap::from([(
+                "subagent".to_string(),
+                AgUiToolState {
+                    subagent_activity: true,
+                    ..AgUiToolState::default()
+                },
+            )]),
+        };
+        let mut events = Vec::new();
+        close_run("thread", run, 1, &mut events, false);
+        assert!(events.is_empty());
     }
 
     #[test]

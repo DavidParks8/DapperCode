@@ -1301,6 +1301,25 @@ mod tests {
         (service, receivers)
     }
 
+    async fn wait_for_steer_dispatch_to_finish(service: &BridgeQueueService, thread_id: &str) {
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                let finished = service
+                    .threads
+                    .read()
+                    .await
+                    .get(thread_id)
+                    .is_none_or(|runtime| runtime.steer_dispatch_in_flight.is_none());
+                if finished {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("steer dispatch finished");
+    }
+
     #[test]
     fn runtime_blockers_report_each_busy_state() {
         let mut runtime = BridgeThreadQueueRuntime::default();
@@ -1995,6 +2014,14 @@ mod tests {
                 })
                 .await;
         }
+        service
+            .remember_submission_result(BridgeThreadQueueSendResponse {
+                submission_id: format!("submission-{SUBMISSION_DEDUPE_LIMIT}"),
+                disposition: BridgeThreadQueueDisposition::Sent,
+                queue: BridgeQueueService::snapshot_for_thread("thread", None),
+                turn_id: Some("turn".to_string()),
+            })
+            .await;
         let results = service.submission_results.lock().await;
         assert_eq!(results.len(), SUBMISSION_DEDUPE_LIMIT);
         assert!(!results.contains_key("submission-0"));
@@ -2708,5 +2735,535 @@ mod tests {
         }
         service.drain_pending_steers("thread".to_string()).await;
         assert!(calls.steer.try_recv().is_err());
+    }
+
+    #[test]
+    fn queue_runtime_blocker_predicate_checks_every_lane() {
+        let mut runtime = BridgeThreadQueueRuntime::default();
+        assert!(!BridgeQueueService::runtime_has_blockers(&runtime));
+        assert!(!BridgeQueueService::runtime_is_blocked_or_occupied(
+            &runtime
+        ));
+
+        runtime.thread_running = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.turn_start_in_flight = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.action_in_flight_item_id = Some("item".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.steer_prepare_in_flight = true;
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.steer_dispatch_in_flight = Some(PendingSteerDispatch {
+            entry: queued("steer"),
+            expected_turn_id: "turn".to_string(),
+            expected_run_id: "run".to_string(),
+            prompt_generation: 1,
+            crossed_completion_boundary: false,
+        });
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.pending_steers.push_back(queued("steer"));
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.pending_approval_ids.insert("approval".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.pending_user_input_ids.insert("input".to_string());
+        assert!(BridgeQueueService::runtime_has_blockers(&runtime));
+
+        runtime = BridgeThreadQueueRuntime::default();
+        runtime.items.push_back(queued("item"));
+        assert!(BridgeQueueService::runtime_is_blocked_or_occupied(&runtime));
+    }
+
+    #[tokio::test]
+    async fn pending_steer_preparation_checks_every_runtime_barrier() {
+        for barrier in 0..8 {
+            let (service, calls) = service_with_runtime(&["steer"], &[]).await;
+            {
+                let mut threads = service.threads.write().await;
+                let runtime = threads.get_mut("thread").unwrap();
+                runtime
+                    .pending_steers
+                    .push_back(runtime.items.pop_front().unwrap());
+                match barrier {
+                    0 => runtime.pending_steers.clear(),
+                    1 => runtime.steer_prepare_in_flight = true,
+                    2 => {
+                        runtime.steer_dispatch_in_flight = Some(PendingSteerDispatch {
+                            entry: queued("other"),
+                            expected_turn_id: "turn".to_string(),
+                            expected_run_id: "run".to_string(),
+                            prompt_generation: 7,
+                            crossed_completion_boundary: false,
+                        });
+                    }
+                    3 => runtime.turn_start_in_flight = true,
+                    4 => runtime.action_in_flight_item_id = Some("other".to_string()),
+                    5 => {
+                        runtime.active_tool_call_ids.insert("tool".to_string());
+                    }
+                    6 => runtime.live_generation_known = false,
+                    7 => runtime.thread_running = false,
+                    _ => unreachable!(),
+                }
+            }
+            service.drain_pending_steers("thread".to_string()).await;
+            assert!(calls.prepare.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_steer_dispatch_rechecks_every_runtime_barrier() {
+        for barrier in 0..12 {
+            let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+            calls.manual_epoch.store(true, Ordering::SeqCst);
+            {
+                let mut threads = service.threads.write().await;
+                let runtime = threads.get_mut("thread").unwrap();
+                runtime
+                    .pending_steers
+                    .push_back(runtime.items.pop_front().unwrap());
+            }
+            let draining = tokio::spawn({
+                let service = Arc::clone(&service);
+                async move {
+                    service.drain_pending_steers("thread".to_string()).await;
+                }
+            });
+            calls
+                .prepare
+                .recv()
+                .await
+                .expect("prepare call")
+                .response
+                .send(Ok(11))
+                .expect("prepare response");
+            let verify = calls.verify_epoch.recv().await.expect("verify call");
+            {
+                let mut threads = service.threads.write().await;
+                let runtime = threads.get_mut("thread").unwrap();
+                match barrier {
+                    0 => {
+                        runtime.steer_dispatch_in_flight = Some(PendingSteerDispatch {
+                            entry: queued("other"),
+                            expected_turn_id: "turn".to_string(),
+                            expected_run_id: "run".to_string(),
+                            prompt_generation: 7,
+                            crossed_completion_boundary: false,
+                        });
+                    }
+                    1 => runtime.turn_start_in_flight = true,
+                    2 => runtime.action_in_flight_item_id = Some("other".to_string()),
+                    3 => {
+                        runtime.active_tool_call_ids.insert("tool".to_string());
+                    }
+                    4 => runtime.live_generation_known = false,
+                    5 => runtime.thread_running = false,
+                    6 => {
+                        runtime.pending_approval_ids.insert("approval".to_string());
+                    }
+                    7 => {
+                        runtime.pending_user_input_ids.insert("input".to_string());
+                    }
+                    8 => runtime.active_turn_id = None,
+                    9 => runtime.active_run_id = None,
+                    10 => runtime.active_prompt_generation = None,
+                    11 => runtime.pending_steers.clear(),
+                    _ => unreachable!(),
+                }
+            }
+            verify.response.send(Ok(true)).expect("verify response");
+            draining.await.expect("drain task");
+            assert!(calls.steer.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn steer_dispatch_tolerates_runtime_disappearing_or_changing_ownership() {
+        let (service, calls) = service_with_runtime(&[], &[]).await;
+        service.drain_pending_steers("missing".to_string()).await;
+        assert!(calls.steer.is_empty());
+
+        let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime
+                .pending_steers
+                .push_back(runtime.items.pop_front().unwrap());
+        }
+        let draining = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service.drain_pending_steers("thread".to_string()).await;
+            }
+        });
+        let prepare = calls.prepare.recv().await.expect("prepare call");
+        service.threads.write().await.remove("thread");
+        prepare.response.send(Ok(1)).expect("prepare response");
+        draining.await.expect("drain task");
+        assert!(!service.threads.read().await.contains_key("thread"));
+        assert!(calls.verify_epoch.is_empty());
+        assert!(calls.steer.is_empty());
+
+        let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime
+                .pending_steers
+                .push_back(runtime.items.pop_front().unwrap());
+        }
+        let draining = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service.drain_pending_steers("thread".to_string()).await;
+            }
+        });
+        calls
+            .prepare
+            .recv()
+            .await
+            .expect("prepare call")
+            .response
+            .send(Ok(1))
+            .expect("prepare response");
+        let verify = calls.verify_epoch.recv().await.expect("verify call");
+        service.threads.write().await.remove("thread");
+        verify.response.send(Ok(true)).expect("verify response");
+        draining.await.expect("drain task");
+        assert!(!service.threads.read().await.contains_key("thread"));
+        assert!(calls.steer.is_empty());
+
+        for ownership in 0..4 {
+            let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+            {
+                let mut threads = service.threads.write().await;
+                let runtime = threads.get_mut("thread").unwrap();
+                runtime
+                    .pending_steers
+                    .push_back(runtime.items.pop_front().unwrap());
+            }
+            let draining = tokio::spawn({
+                let service = Arc::clone(&service);
+                async move {
+                    service.drain_pending_steers("thread".to_string()).await;
+                }
+            });
+            let steer = calls.steer.recv().await.expect("steer call");
+            {
+                let mut threads = service.threads.write().await;
+                match ownership {
+                    0 => {
+                        threads.remove("thread");
+                    }
+                    1 => {
+                        threads.get_mut("thread").unwrap().steer_dispatch_in_flight = None;
+                    }
+                    2 => {
+                        threads.get_mut("thread").unwrap().steer_dispatch_in_flight =
+                            Some(PendingSteerDispatch {
+                                entry: queued("other"),
+                                expected_turn_id: "turn".to_string(),
+                                expected_run_id: "run".to_string(),
+                                prompt_generation: 7,
+                                crossed_completion_boundary: false,
+                            });
+                    }
+                    3 => {
+                        threads
+                            .get_mut("thread")
+                            .unwrap()
+                            .steer_dispatch_in_flight
+                            .as_mut()
+                            .unwrap()
+                            .crossed_completion_boundary = true;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            steer
+                .response
+                .send(if ownership == 3 {
+                    Err("steer failed".to_string())
+                } else {
+                    Ok(())
+                })
+                .expect("steer response");
+            draining.await.expect("drain task");
+
+            let threads = service.threads.read().await;
+            match ownership {
+                0 => assert!(!threads.contains_key("thread")),
+                1 => {
+                    let runtime = threads.get("thread").expect("runtime remains");
+                    assert!(runtime.items.is_empty());
+                    assert!(runtime.pending_steers.is_empty());
+                    assert!(runtime.steer_dispatch_in_flight.is_none());
+                    assert!(runtime.last_error.is_none());
+                }
+                2 => {
+                    let runtime = threads.get("thread").expect("runtime remains");
+                    let foreign = runtime
+                        .steer_dispatch_in_flight
+                        .as_ref()
+                        .expect("foreign ownership is restored");
+                    assert_eq!(foreign.entry.id, "other");
+                    assert_eq!(foreign.expected_turn_id, "turn");
+                    assert_eq!(foreign.expected_run_id, "run");
+                    assert_eq!(foreign.prompt_generation, 7);
+                    assert!(!foreign.crossed_completion_boundary);
+                    assert!(runtime.items.is_empty());
+                    assert!(runtime.pending_steers.is_empty());
+                    assert!(runtime.last_error.is_none());
+                }
+                3 => {
+                    let runtime = threads.get("thread").expect("runtime remains");
+                    assert_eq!(
+                        runtime
+                            .items
+                            .iter()
+                            .map(|entry| entry.id.as_str())
+                            .collect::<Vec<_>>(),
+                        ["steer"]
+                    );
+                    assert!(runtime.pending_steers.is_empty());
+                    assert!(runtime.steer_dispatch_in_flight.is_none());
+                    let error = runtime.last_error.as_ref().expect("steer error recorded");
+                    assert_eq!(error.message, "steer failed");
+                    assert_eq!(error.operation, "steer");
+                    assert_eq!(error.item_id.as_deref(), Some("steer"));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn queue_send_and_failure_cleanup_tolerate_missing_runtime_state() {
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        service
+            .threads
+            .write()
+            .await
+            .insert("thread".to_string(), BridgeThreadQueueRuntime::default());
+        let sending = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service
+                    .send_message(send_request("thread", "submission", "content"))
+                    .await
+            }
+        });
+        let turn_start = calls.turn_start.recv().await.expect("turn start call");
+        service.threads.write().await.remove("thread");
+        turn_start
+            .response
+            .send(Err("turn failed".to_string()))
+            .expect("turn response");
+        assert!(sending.await.expect("send task").is_err());
+
+        service
+            .fail_steer_dispatch("missing", "item", "failed".to_string())
+            .await;
+        assert!(!service.threads.read().await.contains_key("missing"));
+        service
+            .threads
+            .write()
+            .await
+            .insert("thread".to_string(), BridgeThreadQueueRuntime::default());
+        service
+            .fail_steer_dispatch("thread", "item", "failed".to_string())
+            .await;
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains");
+            let error = runtime.last_error.as_ref().expect("failure recorded");
+            assert_eq!(error.message, "failed");
+            assert_eq!(error.operation, "steer");
+            assert_eq!(error.item_id.as_deref(), Some("item"));
+            assert!(runtime.items.is_empty());
+            assert!(runtime.pending_steers.is_empty());
+            assert!(runtime.steer_dispatch_in_flight.is_none());
+        }
+
+        let response = BridgeThreadQueueSendResponse {
+            submission_id: "same".to_string(),
+            disposition: BridgeThreadQueueDisposition::Queued,
+            queue: BridgeQueueService::snapshot_for_thread("thread", None),
+            turn_id: None,
+        };
+        service.remember_submission_result(response.clone()).await;
+        service.remember_submission_result(response).await;
+        assert_eq!(service.submission_order.lock().await.len(), 1);
+        let submission_results = service.submission_results.lock().await;
+        assert_eq!(submission_results.len(), 1);
+        assert!(submission_results
+            .get("same")
+            .is_some_and(|result| matches!(
+                &result.disposition,
+                BridgeThreadQueueDisposition::Queued
+            )));
+        drop(submission_results);
+
+        let mut inactive = active_runtime(&["item"], &[]);
+        inactive.thread_running = false;
+        service
+            .threads
+            .write()
+            .await
+            .insert("inactive".to_string(), inactive);
+        assert!(service
+            .steer_message(BridgeThreadQueueSteerRequest {
+                thread_id: "inactive".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .is_err());
+        let threads = service.threads.read().await;
+        let runtime = threads.get("inactive").expect("inactive runtime remains");
+        assert_eq!(
+            runtime
+                .items
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["item"]
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_completion_wait_and_interaction_resolution_cover_wakeups() {
+        let (service, mut calls) = service_with_runtime(&[], &[]).await;
+        assert_eq!(service.wait_for_completion_disposition(99).await, None);
+
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.pending_steers.push_back(queued("steer"));
+            runtime.pending_approval_ids.insert("approval".to_string());
+        }
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 50,
+                event: CanonicalEvent::PermissionResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "approval".to_string(),
+                    outcome: "cancelled".to_string(),
+                },
+            })
+            .await;
+        calls
+            .steer
+            .recv()
+            .await
+            .expect("permission release dispatched steer")
+            .response
+            .send(Ok(()))
+            .expect("steer response");
+        wait_for_steer_dispatch_to_finish(&service, "thread").await;
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains");
+            assert!(runtime.pending_approval_ids.is_empty());
+            assert!(runtime.pending_steers.is_empty());
+            assert!(runtime.steer_dispatch_in_flight.is_none());
+            assert!(runtime.last_error.is_none());
+        }
+
+        let (service, mut calls) = service_with_runtime(&[], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.pending_steers.push_back(queued("steer"));
+            runtime.pending_user_input_ids.insert("input".to_string());
+        }
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 51,
+                event: CanonicalEvent::ElicitationResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "input".to_string(),
+                    action: "cancelled".to_string(),
+                },
+            })
+            .await;
+        calls
+            .steer
+            .recv()
+            .await
+            .expect("elicitation release dispatched steer")
+            .response
+            .send(Ok(()))
+            .expect("steer response");
+        wait_for_steer_dispatch_to_finish(&service, "thread").await;
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains");
+            assert!(runtime.pending_user_input_ids.is_empty());
+            assert!(runtime.pending_steers.is_empty());
+            assert!(runtime.steer_dispatch_in_flight.is_none());
+            assert!(runtime.last_error.is_none());
+        }
+
+        service.drain_thread_queue("thread".to_string()).await;
+        let mismatch_waiter = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move { service.wait_for_completion_disposition(52).await }
+        });
+        tokio::task::yield_now().await;
+        let mut completion = CanonicalHubEvent {
+            event_id: 52,
+            event: CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation: 8,
+                stop_reason: StopReason::EndTurn,
+            },
+        };
+        service.handle_canonical_event(completion.clone()).await;
+        assert!(!mismatch_waiter.is_finished());
+        assert!(service.completion_dispositions.lock().await.is_empty());
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains active");
+            assert!(runtime.thread_running);
+            assert_eq!(runtime.active_turn_id.as_deref(), Some("turn"));
+            assert_eq!(runtime.active_run_id.as_deref(), Some("run"));
+            assert_eq!(runtime.active_prompt_generation, Some(7));
+            assert!(runtime.live_generation_known);
+        }
+
+        if let CanonicalEvent::RunFinished { generation, .. } = &mut completion.event {
+            *generation = 7;
+        }
+        completion.event_id = 53;
+        service.handle_canonical_event(completion).await;
+        assert_eq!(
+            service.wait_for_completion_disposition(53).await,
+            Some(QueueCompletionDisposition::Final)
+        );
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains tracked");
+            assert!(!runtime.thread_running);
+            assert!(runtime.active_turn_id.is_none());
+            assert!(runtime.active_run_id.is_none());
+            assert!(runtime.active_prompt_generation.is_none());
+            assert!(!runtime.live_generation_known);
+        }
+        assert_eq!(mismatch_waiter.await.expect("mismatch waiter"), None);
     }
 }

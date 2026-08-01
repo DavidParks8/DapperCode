@@ -88,6 +88,7 @@ pub(super) fn build_pairing_payload(config: &BridgeConfig) -> Option<String> {
     Some(
         json!({
             "type": "dappercode-bridge-pair",
+            "transportMode": config.transport_mode.as_str(),
             "bridgeUrl": bridge_url,
             "bridgeToken": bridge_token,
         })
@@ -101,6 +102,7 @@ pub(super) fn build_token_only_pairing_payload(config: &BridgeConfig) -> Option<
     Some(
         json!({
             "type": "dappercode-bridge-token",
+            "transportMode": config.transport_mode.as_str(),
             "bridgeToken": bridge_token,
         })
         .to_string(),

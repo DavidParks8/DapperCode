@@ -71,6 +71,7 @@ mod resource_limits;
 mod rpc;
 mod services;
 mod storage;
+mod url_redaction;
 
 use attachments::{
     infer_image_content_type_from_path, save_multipart_attachment, ATTACHMENT_MULTIPART_MAX_BYTES,
@@ -100,6 +101,7 @@ use resource_limits::{
     UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
 };
 use rpc::{is_forwarded_method, parse_client_request_id, parse_request, RpcRequestParseError};
+use url_redaction::redact_url_credentials;
 
 mod app_state;
 mod bridge_protocol;
@@ -261,7 +263,10 @@ async fn main() {
             config.port
         );
         if connect_url != bind_url {
-            println!("bridge connect URL: {connect_url}");
+            println!(
+                "bridge connect URL: {}",
+                redact_url_credentials(&connect_url)
+            );
         }
     }
     maybe_print_pairing_qr(&config);

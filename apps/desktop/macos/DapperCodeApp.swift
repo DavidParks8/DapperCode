@@ -27,6 +27,7 @@ private struct BridgeSnapshot: Decodable, Identifiable {
     let managedProcess: Bool
     let workspace: String
     let profileId: String
+    let transportMode: String?
     let bridgePort: UInt16?
     let pairingPayload: String?
     let logPath: String
@@ -44,6 +45,19 @@ private struct BridgeSnapshot: Decodable, Identifiable {
         ["running", "degraded", "unhealthy", "inaccessible"].contains(state)
     }
 
+    var transportModeLabel: String {
+        switch transportMode {
+        case "privateBearer":
+            "Private bearer"
+        case "tailnetPinnedTls":
+            "Tailnet pinned TLS"
+        case let mode?:
+            mode
+        case nil:
+            "Not configured"
+        }
+    }
+
     static let loading = BridgeSnapshot(
         state: "loading",
         headline: "Checking bridge",
@@ -57,6 +71,7 @@ private struct BridgeSnapshot: Decodable, Identifiable {
         managedProcess: false,
         workspace: "",
         profileId: "",
+        transportMode: nil,
         bridgePort: nil,
         pairingPayload: nil,
         logPath: "",
@@ -68,6 +83,7 @@ private struct BridgeSnapshot: Decodable, Identifiable {
 private struct SetupResult: Decodable {
     let workspace: String
     let profileId: String
+    let transportMode: String
     let bridgeUrl: String
     let bridgePort: UInt16
     let previewPort: UInt16
@@ -409,6 +425,7 @@ private struct DashboardView: View {
                 StatusLabel(snapshot: model.snapshot)
                 Text(model.snapshot.detail)
                     .foregroundStyle(.secondary)
+                LabeledContent("Transport", value: model.snapshot.transportModeLabel)
                 LabeledContent("Connected devices", value: "\(model.snapshot.connectedClients)")
                 LabeledContent("Agents ready", value: "\(model.snapshot.readyAgents) of \(model.snapshot.totalAgents)")
                 if let uptime = model.snapshot.uptimeSec {
@@ -502,8 +519,10 @@ private struct BridgeRow: View {
     }
 
     private var portLabel: String {
-        guard let port = bridge.bridgePort else { return bridge.headline }
-        return "\(bridge.headline) · port \(port)"
+        guard let port = bridge.bridgePort else {
+            return "\(bridge.headline) · \(bridge.transportModeLabel)"
+        }
+        return "\(bridge.headline) · \(bridge.transportModeLabel) · port \(port)"
     }
 }
 

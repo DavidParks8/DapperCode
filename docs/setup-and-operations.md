@@ -29,6 +29,25 @@ Styling and materials come from AppKit/SwiftUI on the installed macOS release.
 Tailscale mode requires the Tailscale app to be installed and connected. Local mode detects common
 macOS interfaces; a concrete LAN IP can also be entered manually.
 
+## Transport Modes
+
+Profiles use one canonical transport mode:
+
+- `privateBearer` is the current production mode. It preserves bearer headers, native/mobile
+  query-token compatibility when explicitly enabled, and the loopback-only no-auth development
+  exception. It is private-network software for a trusted LAN, VPN, or Tailscale network and must
+  never be exposed directly to the public internet.
+- `tailnetPinnedTls` represents the future Tailscale-reachable transport using mutual TLS 1.3 and
+  exact SHA-256 SPKI pins. Stage 0 only defines and validates this contract. The pinned listener,
+  bridge identity generation, device registry/enrollment, native iOS networking, and key rotation
+  are not implemented. Selecting this mode fails explicitly and never falls back to the current
+  HTTP/bearer router.
+
+Stored desktop and mobile profiles without `transportMode`, and bridge environments without
+`BRIDGE_TRANSPORT_MODE`, migrate to `privateBearer`. Desktop setup, status, and list JSON report the
+canonical non-secret mode. Mobile can preserve a future pinned profile without a bearer token, but
+cannot create or connect it until secure device pairing exists; web does not support pinned mode.
+
 ## Where Configuration Lives
 
 Nothing DapperCode owns is written into your repositories. Configuration, runtime state, and logs
@@ -60,6 +79,10 @@ The bridge bearer token is **not** in `config.json`. It is stored in the operati
 under service `dev.dappercode.desktop`, account `bridge-auth-token:<profileId>`. When no keychain is
 available (headless Linux, CI) the token falls back to a `0600` file under `secrets/`, and the app
 reports which backend is in use. Set `DAPPERCODE_SECRETS_BACKEND=file` to force the fallback.
+Desktop-managed bridge processes suppress terminal pairing QR output so the token is not appended
+to `bridge.log`; the native app renders pairing data directly. Existing logs from releases before
+this protection are preserved and may contain an encoded pairing credential. Treat those logs as
+sensitive. Credential rotation and historical-log rewriting are outside Stage 0.
 
 Because the macOS app is ad-hoc code-signed, every rebuild produces a new code signature and macOS
 asks for keychain access again. That is expected until the app is signed with a stable identity.
@@ -160,12 +183,19 @@ The operator builds the bridge environment in memory and passes it directly to t
 the token never reaches disk outside the keychain. The bridge itself is still configured purely by
 environment variables, which is what keeps `npm run bridge` working:
 
+- `BRIDGE_TRANSPORT_MODE`: `privateBearer` (default) or `tailnetPinnedTls` (currently unavailable)
 - `BRIDGE_NETWORK_MODE`
 - `BRIDGE_HOST`, `BRIDGE_PORT`
 - `BRIDGE_PREVIEW_HOST`, `BRIDGE_PREVIEW_PORT`
 - `BRIDGE_CONNECT_URL`, `BRIDGE_PREVIEW_CONNECT_URL`
 - `BRIDGE_AUTH_TOKEN`
 - `BRIDGE_ALLOW_QUERY_TOKEN_AUTH`
+- `BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS`: opt-in Origin enforcement for authenticated
+  `privateBearer` browser requests
+- `BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS`: comma-separated exact `http://` or `https://` origins
+- `BRIDGE_NO_AUTH_ALLOWED_ORIGINS`: exact compatibility origins for loopback-only no-auth development
+- `BRIDGE_PINNED_TLS_IDENTITY`, `BRIDGE_PINNED_TLS_DEVICE_REGISTRY`: reserved absolute paths required
+  by `tailnetPinnedTls`; providing them does not make the unimplemented mode available
 - `BRIDGE_WORKDIR`
 - `BRIDGE_STATE_DIR`: bridge-owned state; defaults to `<workdir>/.dappercode`
 - `BRIDGE_ATTACHMENTS_DIR`: mobile uploads; defaults to `<workdir>/.dappercode-attachments`
@@ -184,6 +214,17 @@ rejected requests and truncated responses include explicit resource metadata.
 The bridge is for authenticated private networks only. Do not expose it directly to the public
 internet. Query-token authentication exists for mobile compatibility; bearer authentication remains
 preferred.
+
+Authenticated `privateBearer` keeps its current Origin behavior unless
+`BRIDGE_ENFORCE_AUTHENTICATED_ORIGINS=true`. With enforcement enabled, browser requests must use an
+exact entry in `BRIDGE_AUTHENTICATED_ALLOWED_ORIGINS`; wildcard, `null`, malformed, and duplicate
+Origin headers are rejected. Native and operator requests that omit Origin remain allowed after
+bearer authentication. The future `tailnetPinnedTls` policy makes exact Origin enforcement
+mandatory rather than opt-in.
+
+Credential-shaped URL query values are redacted from bridge diagnostics, including `token`,
+`access_token`, `auth`, `authorization`, `key`, `secret`, `password`, `code`, and preview `st`
+parameters. Redaction affects rendered diagnostic text only, not request routing values.
 
 ## Bridge API Summary
 

@@ -390,6 +390,17 @@ describe('OnboardingScreen behavior', () => {
     JSON.stringify({ type: 42, bridgeUrl: 42, bridgeToken: 42 }),
     JSON.stringify({ type: 'other', bridgeToken: 'token' }),
     JSON.stringify({ type: 'dappercode-bridge-pair', bridgeToken: '   ' }),
+    JSON.stringify({
+      type: 'dappercode-bridge-pair',
+      transportMode: null,
+      bridgeToken: 'token',
+    }),
+    JSON.stringify({
+      type: 'dappercode-bridge-pair',
+      transportMode: 'tailnetPinnedTls',
+      bridgeUrl: 'https://bridge.example',
+      bridgeToken: 'legacy-token',
+    }),
     'https://example.com/?token=nope',
     'dappercode://pair',
   ])('rejects invalid QR form %p', async (data) => {

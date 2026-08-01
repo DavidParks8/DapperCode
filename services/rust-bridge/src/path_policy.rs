@@ -813,6 +813,12 @@ mod tests {
         std::io::Read::read_to_string(&mut file, &mut contents).expect("read attachment");
         assert_eq!(contents, "payload");
         assert_eq!(resolved, saved);
+        assert_eq!(
+            policy
+                .resolve_existing(saved.to_str().expect("utf-8 path"), PathKind::File)
+                .expect("resolve central attachment"),
+            saved
+        );
 
         // Widening access to the attachments root must not widen it to anything else.
         let escape = outside.join("secret.txt");
@@ -849,6 +855,14 @@ mod tests {
 
         // A directory is not a regular file.
         assert!(policy.open_regular_file_beneath("images").is_err());
+        fs::hard_link(
+            root.join("images/image.png"),
+            root.join("images/image-copy.png"),
+        )
+        .expect("create hard link");
+        assert!(policy
+            .open_regular_file_beneath("images/image.png")
+            .is_err());
         // Traversal cannot be laundered through an absolute workspace path.
         let traversal = root.join("images/../../escape");
         assert!(policy

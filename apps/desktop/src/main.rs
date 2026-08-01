@@ -16,7 +16,7 @@ use config::{validate_workspace, RuntimePaths};
 use platform_setup::NetworkMode;
 use secrets::SecretStore;
 use setup::{discover_agent_executable, setup_profile, SetupRequest};
-use store::{profile_id_for, AppPaths, Profile};
+use store::{profile_id_for, AppPaths, Profile, TransportMode};
 use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor};
 
 #[derive(Serialize)]
@@ -41,6 +41,7 @@ struct OperatorSnapshot {
     managed_process: bool,
     workspace: PathBuf,
     profile_id: String,
+    transport_mode: Option<TransportMode>,
     bridge_port: Option<u16>,
     pairing_payload: Option<String>,
     log_path: PathBuf,
@@ -175,6 +176,10 @@ fn run_setup(
     paths: &AppPaths,
     secrets: &SecretStore,
 ) -> Result<()> {
+    let transport_mode = TransportMode::parse(
+        &option(&mut args, "--transport-mode").unwrap_or_else(|| "privateBearer".into()),
+    )?;
+    transport_mode.ensure_available()?;
     let network_mode = option(&mut args, "--network").unwrap_or_else(|| "tailscale".into());
     let mode = match network_mode.as_str() {
         "local" => NetworkMode::Local,
@@ -205,6 +210,7 @@ fn run_setup(
     let result = setup_profile(
         SetupRequest {
             workspace,
+            transport_mode,
             network_mode,
             bridge_host: host,
             bridge_port,
@@ -356,6 +362,7 @@ fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorS
         managed_process: false,
         workspace,
         profile_id,
+        transport_mode: None,
         bridge_port: None,
         pairing_payload: None,
         log_path: PathBuf::new(),
@@ -403,6 +410,7 @@ fn profile_snapshot(
         managed_process: snapshot.managed_process,
         workspace: profile.workspace.clone(),
         profile_id: profile.profile_id.clone(),
+        transport_mode: Some(profile.transport_mode),
         bridge_port: Some(profile.bridge_port),
         pairing_payload,
         log_path: paths.log_path(&profile.profile_id),
@@ -510,7 +518,8 @@ Commands:\n\
   start [--owner-pid PID]\n\
   stop [--all]\n\
   restart [--owner-pid PID]\n\
-  setup --host HOST [--network local|tailscale] [--port 8787]\n\
+  setup --host HOST [--transport-mode privateBearer|tailnetPinnedTls]\n\
+        [--network local|tailscale] [--port 8787]\n\
         [--agent-id opencode] [--agent-executable PATH] [--agent-args 'acp']\n\
   forget\n\
   discover-agent [--agent-id opencode]\n\

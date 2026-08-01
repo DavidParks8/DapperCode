@@ -13,12 +13,13 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::{allocate_port_pair, format_host, validate_workspace},
     secrets::SecretStore,
-    store::{atomic_private_write, profile_id_for, AppPaths, Profile, ProfileAgent},
+    store::{atomic_private_write, profile_id_for, AppPaths, Profile, ProfileAgent, TransportMode},
 };
 
 #[derive(Clone, Debug)]
 pub struct SetupRequest {
     pub workspace: PathBuf,
+    pub transport_mode: TransportMode,
     pub network_mode: String,
     pub bridge_host: String,
     pub bridge_port: Option<u16>,
@@ -33,6 +34,7 @@ pub struct SetupRequest {
 pub struct SetupResult {
     pub workspace: PathBuf,
     pub profile_id: String,
+    pub transport_mode: TransportMode,
     pub bridge_url: String,
     pub bridge_port: u16,
     pub preview_port: u16,
@@ -80,6 +82,7 @@ pub fn setup_profile(
     paths: &AppPaths,
     secrets: &SecretStore,
 ) -> Result<SetupResult> {
+    request.transport_mode.ensure_available()?;
     if !valid_agent_id(&request.agent_id) {
         bail!("agent ID may contain only letters, numbers, dots, underscores, and dashes");
     }
@@ -154,6 +157,7 @@ pub fn setup_profile(
         let profile = Profile {
             profile_id: profile_id.clone(),
             workspace: workspace.clone(),
+            transport_mode: request.transport_mode,
             network_mode: request.network_mode.clone(),
             bridge_host: host.clone(),
             bridge_port,
@@ -179,6 +183,7 @@ pub fn setup_profile(
     Ok(SetupResult {
         workspace,
         profile_id,
+        transport_mode: profile.transport_mode,
         bridge_url: profile.connect_url,
         bridge_port: profile.bridge_port,
         preview_port: profile.preview_port,
@@ -315,6 +320,7 @@ mod tests {
     fn request(workspace: &Path, port: Option<u16>) -> SetupRequest {
         SetupRequest {
             workspace: workspace.to_path_buf(),
+            transport_mode: TransportMode::PrivateBearer,
             network_mode: "local".to_string(),
             bridge_host: "192.168.1.20".to_string(),
             bridge_port: port,
@@ -488,6 +494,23 @@ mod tests {
             );
         }
         assert!(paths.load_config().unwrap().profiles.is_empty());
+    }
+
+    #[test]
+    fn pinned_transport_fails_before_writing_profile_or_secret_state() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        let mut input = request(workspace.path(), Some(18842));
+        input.transport_mode = TransportMode::TailnetPinnedTls;
+        input.network_mode = "tailscale".to_string();
+
+        let error = setup_profile(input, &paths, &secrets).unwrap_err();
+
+        assert!(error.to_string().contains("not yet available"));
+        assert!(!paths.config_path().exists());
+        assert!(!paths.profile_dir("unused").exists());
     }
 
     #[test]
