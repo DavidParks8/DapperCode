@@ -230,6 +230,65 @@ describe('transcriptProjectionController', () => {
     expect(projection.messages.at(-1)?.createdAt).toBe('persisted');
   });
 
+  it('does not restore inherited parent messages from a live sub-agent snapshot', () => {
+    const parentMessages: Chat['messages'] = [
+      { id: 'parent-user', role: 'user', content: 'Parent question', createdAt: 'one' },
+      {
+        id: 'parent-answer',
+        role: 'assistant',
+        content: 'Parent answer',
+        createdAt: 'two',
+      },
+      createActivityMessage(
+        'spawn-child',
+        SUBAGENT_ACTIVITY_TYPE,
+        {
+          text: '• Spawned sub-agent',
+          subAgent: {
+            tool: 'spawn_agent',
+            prompt: 'Inspect the mobile transcript',
+            receiverThreadIds: ['child'],
+          },
+        },
+        'three',
+      ),
+    ];
+    const childMessages: Chat['messages'] = [
+      {
+        id: 'child-user',
+        role: 'user',
+        content: 'Inspect the mobile transcript',
+        createdAt: 'four',
+      },
+      {
+        id: 'child-answer',
+        role: 'assistant',
+        content: 'Found the projection bug',
+        createdAt: 'five',
+      },
+    ];
+    const snapshot = liveState([...parentMessages.slice(0, 2), ...childMessages]);
+    snapshot.authoritativeSnapshot = true;
+
+    const projection = projectTranscript({
+      chat: { ...chat, messages: childMessages },
+      parentChat: {
+        ...chat,
+        id: 'parent',
+        parentThreadId: undefined,
+        messages: parentMessages,
+      },
+      showToolCalls: false,
+      threadStatuses: new Map(),
+      liveMessageState: snapshot,
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      'child-user',
+      'child-answer',
+    ]);
+  });
+
   it('preserves resumed history before the first message shared with a current-run snapshot', () => {
     const snapshot = liveState([
       { id: 'current-user', role: 'user', content: 'Follow up', createdAt: 'three' },
