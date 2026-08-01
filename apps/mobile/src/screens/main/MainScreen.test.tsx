@@ -4019,9 +4019,9 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       ).toBe(true);
       expect(text(root, 'Turn completed')).toBe(true);
       expect(text(root, 'Working')).toBe(false);
-      expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
-      ).toHaveLength(0);
+      expect(root.findAll((node) => node.props.accessibilityLabel === 'Stop agent')).toHaveLength(
+        0,
+      );
       const onChangeText = input(root).props.onChangeText;
       if (typeof onChangeText !== 'function') throw new Error('Message input cannot be edited');
       act(() => onChangeText('Follow up after reasoning'));
@@ -4041,9 +4041,9 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         ),
       ).toBe(true);
       expect(text(root, 'Working')).toBe(false);
-      expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
-      ).toHaveLength(0);
+      expect(root.findAll((node) => node.props.accessibilityLabel === 'Stop agent')).toHaveLength(
+        0,
+      );
       harness.unmount();
     });
 
