@@ -7,6 +7,7 @@ import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '../../../../boots
 import { DrawerContent } from '../../../../navigation/DrawerContent';
 import { activeBridgeProfileAtom } from '../../../../state/bridge/atoms';
 import { drawerCommandsAtom } from '../../../../state/drawer/atoms';
+import { useAppTheme } from '../../../../theme';
 
 export const unstable_settings = {
   anchor: 'chats/[chatId]',
@@ -18,6 +19,7 @@ export default function DrawerLayout() {
 }
 
 export function ResponsiveDrawerLayout({ width }: { width: number }) {
+  const theme = useAppTheme();
   const permanent = width >= TABLET_LAYOUT_MIN_WIDTH;
 
   return (
@@ -29,6 +31,7 @@ export function ResponsiveDrawerLayout({ width }: { width: number }) {
         drawerType: permanent ? 'permanent' : 'front',
         swipeEnabled: !permanent,
         drawerStyle: { width: permanent ? TABLET_SIDEBAR_WIDTH : width },
+        sceneStyle: { backgroundColor: theme.colors.bgMain },
       }}
     />
   );

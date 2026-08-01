@@ -8,6 +8,7 @@ import { StatusBar, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
+import { createStackScreenOptions } from '../navigation/stackScreenOptions';
 import {
   appStateLoadedAtom,
   appStatePersistenceErrorAtom,
@@ -66,7 +67,7 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
 
   const hasProfiles = bridgeProfiles.length > 0;
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={createStackScreenOptions(theme)}>
       <Stack.Screen name="index" />
       <Stack.Protected guard={hasProfiles}>
         <Stack.Screen name="profiles/[profileId]" />

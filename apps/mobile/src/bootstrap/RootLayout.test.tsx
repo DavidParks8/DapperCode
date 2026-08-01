@@ -1,4 +1,19 @@
-jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
+let mockRootStackProps: Record<string, unknown> | null = null;
+
+jest.mock('expo-router', () => {
+  const routerMock = jest.requireActual('../testing/expoRouterMock');
+  const Stack = Object.assign(
+    (props: Record<string, unknown>) => {
+      mockRootStackProps = props;
+      return null;
+    },
+    {
+      Protected: () => null,
+      Screen: () => null,
+    },
+  );
+  return { ...routerMock, Stack };
+});
 jest.mock('react-native-gesture-handler', () =>
   jest.requireActual('../testing/gestureHandlerMock'),
 );
@@ -22,6 +37,7 @@ import { AppStatePersistenceError } from '../appState';
 import { appStateSnapshotAtom } from '../state/appState/atoms';
 import { chatSnapshotCacheAtom } from '../state/chat/atoms';
 import { createTestStore, withAppStore } from '../state/testing';
+import { themeAtom } from '../state/theme';
 import { RootLayout } from './RootLayout';
 
 function renderRoot(store = createTestStore()): ReactTestRenderer {
@@ -38,6 +54,10 @@ function jsonOf(tree: ReactTestRenderer): string {
 }
 
 describe('RootLayout', () => {
+  beforeEach(() => {
+    mockRootStackProps = null;
+  });
+
   it('shows the startup shell until persisted state and chat cache are ready', () => {
     const store = createTestStore({ loaded: false });
     const tree = renderRoot(store);
@@ -63,5 +83,18 @@ describe('RootLayout', () => {
     const writeTree = renderRoot(store);
     expect(jsonOf(writeTree)).not.toContain('Could not load saved app state');
     act(() => writeTree.unmount());
+  });
+
+  it('colors the root stack scene behind full-screen transitions', () => {
+    const store = createTestStore();
+    store.set(chatSnapshotCacheAtom, null);
+    const tree = renderRoot(store);
+    if (!mockRootStackProps) throw new Error('Expected root Stack props');
+
+    expect(mockRootStackProps.screenOptions).toMatchObject({
+      contentStyle: { backgroundColor: store.get(themeAtom).colors.bgMain },
+    });
+
+    act(() => tree.unmount());
   });
 });
