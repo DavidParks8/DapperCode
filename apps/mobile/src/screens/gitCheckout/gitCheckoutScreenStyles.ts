@@ -26,11 +26,10 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       borderColor: theme.colors.borderLight,
     },
     pressed: { opacity: 0.86 },
+    // Uses largeTitle (the largest available heading role) as the screen-title baseline.
+    // When theme.typography.title (20pt) lands, switch to that role.
     title: {
-      ...theme.typography.headline,
-      fontSize: 18,
-      fontWeight: '700',
-      color: theme.colors.textPrimary,
+      ...theme.typography.largeTitle,
       textAlign: 'center',
     },
     body: {
@@ -64,10 +63,10 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       paddingHorizontal: theme.spacing.md,
     },
     pathCopy: { flex: 1, minWidth: 0, gap: 2 },
+    // Uses caption role; update to theme.typography.metadata (11pt) when that role lands.
     pathLabel: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 11,
       textTransform: 'uppercase',
       letterSpacing: 0,
     },
@@ -83,6 +82,22 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     errorText: {
       ...theme.typography.caption,
       color: theme.colors.error,
+      backgroundColor: theme.colors.errorBg,
+      borderWidth: 1,
+      borderColor: theme.colors.errorBorder,
+      borderRadius: theme.radius.sm,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+    },
+    cloningRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingVertical: theme.spacing.sm,
+    },
+    cloningText: {
+      ...theme.typography.body,
+      color: theme.colors.textSecondary,
     },
     actions: {
       flexDirection: 'row',
