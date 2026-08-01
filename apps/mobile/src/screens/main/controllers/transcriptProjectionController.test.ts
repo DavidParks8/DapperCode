@@ -106,7 +106,6 @@ describe('transcriptProjectionController', () => {
               senderThreadId: chat.id,
               receiverThreadIds: ['child-thread'],
               agentStatus: 'running',
-              navigable: false,
             },
           },
           'now',

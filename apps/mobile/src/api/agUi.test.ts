@@ -875,7 +875,6 @@ describe('AG-UI bridge notifications', () => {
           senderThreadId: 'parent',
           receiverThreadIds: ['child'],
           agentStatus: 'running',
-          navigable: false,
         },
       },
     };
@@ -901,7 +900,6 @@ describe('AG-UI bridge notifications', () => {
       senderThreadId: 'parent',
       receiverThreadIds: ['child'],
       agentStatus: 'running',
-      navigable: false,
     });
     expect(message.content.text).toContain('Result: Inspected README.');
     const repeated = updateAgUiLiveAssistantMessages(state, {

@@ -48,7 +48,6 @@ function subAgentCard(
           senderThreadId: parentThreadId,
           receiverThreadIds: options.childThreadId ? [options.childThreadId] : [],
           agentStatus: options.status,
-          navigable: Boolean(options.childThreadId),
         },
       },
     } as unknown as AGUIEvent,

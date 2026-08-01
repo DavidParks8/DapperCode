@@ -57,7 +57,7 @@ instead:
    child that appears afterwards the one this tool call spawned. Without that, a parent that already
    owned an unclaimed child could never resolve its sub-agent while it ran.
 3. The discovered child is indexed and linked to the tool call that spawned it, immediately making
-   the parent card navigable.
+   the parent card openable.
 4. The child is resumed and announced with `thread/subagent/adopted`. Resuming starts its updates
    flowing only after the link exists, so replayed progress reaches the card and mobile transcript.
 

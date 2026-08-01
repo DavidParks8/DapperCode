@@ -81,7 +81,7 @@ describe('SubAgentDetailView starting state', () => {
   });
 
   it('drops the starting state the moment streamed text arrives', () => {
-    // The card becomes navigable before the child has said anything, so the page
+    // The card becomes openable before the child has said anything, so the page
     // has to switch to the transcript as soon as the bridge streams a token.
     const runtime = { streamingText: 'Reading package.json' } as unknown as ThreadRuntimeSnapshot;
     const tree = render({ runtime });

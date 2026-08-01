@@ -1427,7 +1427,6 @@ pub(super) fn messages_snapshot_envelope(
                     if let Some(result) = task_result_preview(&tool.content) {
                         lines.push(format!("  Latest: {result}"));
                     }
-                    let navigable = child_thread_id.is_some();
                     let content = json!({
                         "text": lines.join("\n"),
                         "subAgent": {
@@ -1436,7 +1435,6 @@ pub(super) fn messages_snapshot_envelope(
                             "senderThreadId": snapshot.thread_id,
                             "receiverThreadIds": child_thread_id.into_iter().collect::<Vec<_>>(),
                             "agentStatus": status,
-                            "navigable": navigable,
                         }
                     });
                     messages.push(activity_message(
@@ -1971,7 +1969,6 @@ fn subagent_activity_envelope(
                     "senderThreadId": context.parent_thread_id,
                     "receiverThreadIds": context.child_thread_id.into_iter().collect::<Vec<_>>(),
                     "agentStatus": status,
-                    "navigable": context.child_thread_id.is_some(),
                 }
             }),
             timestamp,
@@ -2002,7 +1999,7 @@ pub(super) fn linked_subagent_activity_envelope(
 
 fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
     match canonical {
-        // The task header already created a navigable working card. RunStarted is
+        // The task header already created an openable working card. RunStarted is
         // useful for correlation only; rendering it regresses the preview to a
         // meaningless "Starting" state until the child produces real work.
         CanonicalEvent::RunStarted { .. } => None,
@@ -3258,7 +3255,7 @@ mod tests {
     #[test]
     fn the_first_sub_agent_card_can_be_opened() {
         // The child thread id arrives with the task header, so the first card the
-        // user ever sees must already carry it and be navigable.
+        // user ever sees must already carry it and be openable.
         let mut projector = AgUiProjector::default();
         projector.project_canonical(&canonical_run_started());
         projector.project_canonical(&subagent_task_tool(
@@ -3286,11 +3283,7 @@ mod tests {
             .expect("a sub-agent card");
 
         let meta = &card["event"]["content"]["subAgent"];
-        assert_eq!(
-            meta["navigable"].as_bool(),
-            Some(true),
-            "the first card must be openable: {card}"
-        );
+        assert_eq!(meta.as_object().map(|object| object.len()), Some(5));
         assert_eq!(
             meta["receiverThreadIds"].as_array().map(Vec::len),
             Some(1),
@@ -4134,7 +4127,7 @@ mod tests {
                 Some(child_thread.as_str()),
                 "a status-only update must not drop the child thread link"
             );
-            assert_eq!(sub_agent["navigable"].as_bool(), Some(true));
+            assert_eq!(sub_agent.len(), 5);
         }
     }
 
@@ -5156,7 +5149,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn early_subagent_link_is_navigable_before_replay_and_projects_live_transcript() {
+    async fn early_subagent_link_is_openable_before_replay_and_projects_live_transcript() {
         let hub = ClientHub::with_replay_capacity(32);
         let parent_thread_id = "parent-thread";
         let child_thread_id = "child-thread";
@@ -5179,8 +5172,10 @@ mod tests {
             child_thread_id
         );
         assert_eq!(
-            initial[0]["params"]["event"]["content"]["subAgent"]["navigable"],
-            true
+            initial[0]["params"]["event"]["content"]["subAgent"]
+                .as_object()
+                .map(|object| object.len()),
+            Some(5)
         );
         assert!(
             !hub.link_subagent(

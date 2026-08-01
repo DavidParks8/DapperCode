@@ -975,7 +975,6 @@ jest.mock('../../components/BridgeUiSurface', () => ({
               senderThreadId: created.id,
               receiverThreadIds: ['thread-child'],
               agentStatus: 'running',
-              navigable: true,
             },
           },
         }),
@@ -3041,7 +3040,6 @@ jest.mock('../../components/BridgeUiSurface', () => ({
               senderThreadId: threadId,
               receiverThreadIds: [childThreadId],
               agentStatus: status,
-              navigable: true,
             },
           },
         });
@@ -3120,7 +3118,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       );
       await emit(subagentActivity('completed', 'Returned result'));
 
-      expect(getSubAgentMeta(liveMessage())?.navigable).toBe(true);
+      expect(getSubAgentMeta(liveMessage())?.receiverThreadIds).toContain(childThreadId);
       const openCompleted = liveCard().props.onOpenSubAgentThread;
       expect(typeof openCompleted).toBe('function');
       await act(async () => {

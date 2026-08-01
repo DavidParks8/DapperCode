@@ -20,7 +20,6 @@ export interface ChatMessageSubAgentMeta {
   senderThreadId?: string;
   receiverThreadIds?: string[];
   agentStatus?: string;
-  navigable?: boolean;
 }
 
 export type ChatMessagePart =

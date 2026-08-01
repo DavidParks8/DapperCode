@@ -77,7 +77,6 @@ export function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMess
                     senderThreadId: raw.id,
                     receiverThreadIds: taskSubagent?.threadId ? [taskSubagent.threadId] : [],
                     agentStatus: state,
-                    navigable: Boolean(taskSubagent?.threadId),
                   },
                 },
                 new Date(baseTs + index * 1000).toISOString(),

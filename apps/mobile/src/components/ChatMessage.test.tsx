@@ -1034,7 +1034,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps the agent chat affordance visible when the transcript is unavailable', () => {
+  it('opens a completed agent whenever its thread is known', () => {
     const onOpenSubAgentThread = jest.fn();
     const tree = renderMessage(
       {
@@ -1046,20 +1046,21 @@ describe('ChatMessage system timeline matrices', () => {
         subAgentMeta: {
           receiverThreadIds: ['child-internal'],
           agentStatus: 'completed',
-          navigable: false,
         },
       },
       { onOpenSubAgentThread },
     );
     const root = tree.root as QueryableTestInstance;
     const button = root.findAll((node) => node.props.accessibilityLabel === 'Open agent chat')[0];
-    expect(button?.props.accessibilityState).toMatchObject({ disabled: true });
+    expect(button?.props.accessibilityState).toMatchObject({ disabled: false });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
+    act(() => readOnPress(button.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-internal');
     act(() => tree.unmount());
   });
 
-  it('opens a known running agent even when stale metadata says it is not navigable', () => {
+  it('opens a known running agent', () => {
     const onOpenSubAgentThread = jest.fn();
     const tree = renderMessage(
       {
@@ -1071,7 +1072,6 @@ describe('ChatMessage system timeline matrices', () => {
         subAgentMeta: {
           receiverThreadIds: ['child-running'],
           agentStatus: 'running',
-          navigable: false,
         },
       },
       { onOpenSubAgentThread },

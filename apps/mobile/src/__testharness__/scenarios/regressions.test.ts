@@ -356,7 +356,6 @@ describe('Sub-agent card lifecycle', () => {
               senderThreadId: 'parent',
               receiverThreadIds: ['child'],
               agentStatus: 'error',
-              navigable: true,
             },
           },
         } as unknown as AGUIEvent,
@@ -418,7 +417,6 @@ describe('Sub-agent card lifecycle', () => {
               senderThreadId: 'parent',
               receiverThreadIds: ['child'],
               agentStatus: 'failed',
-              navigable: true,
             },
           },
         } as unknown as AGUIEvent,
@@ -444,7 +442,6 @@ describe('Sub-agent card lifecycle', () => {
                   senderThreadId: 'parent',
                   receiverThreadIds: ['child'],
                   agentStatus: 'completed',
-                  navigable: true,
                 },
               },
             },
@@ -478,7 +475,6 @@ describe('Sub-agent card lifecycle', () => {
               senderThreadId: 'parent',
               receiverThreadIds: ['child'],
               agentStatus: 'failed',
-              navigable: true,
             },
           },
         } as unknown as AGUIEvent,
@@ -503,7 +499,6 @@ describe('Sub-agent card lifecycle', () => {
                   senderThreadId: 'parent',
                   receiverThreadIds: ['child'],
                   agentStatus: 'running',
-                  navigable: true,
                 },
               },
             },
@@ -536,7 +531,6 @@ describe('Sub-agent card lifecycle', () => {
               senderThreadId: 'parent',
               receiverThreadIds: ['child'],
               agentStatus: 'failed',
-              navigable: true,
             },
           },
         } as unknown as AGUIEvent,
@@ -561,7 +555,6 @@ describe('Sub-agent card lifecycle', () => {
                   senderThreadId: 'parent',
                   receiverThreadIds: ['child'],
                   agentStatus: 'completed',
-                  navigable: true,
                 },
               },
             },
@@ -597,7 +590,6 @@ describe('Sub-agent card lifecycle', () => {
                   senderThreadId: 'parent',
                   receiverThreadIds: ['child'],
                   agentStatus: 'completed',
-                  navigable: true,
                 },
               },
             },
@@ -613,7 +605,7 @@ describe('Sub-agent card lifecycle', () => {
 
   it('never shows a sub-agent as starting, and shows it as openable', () => {
     // A card reading "starting" cannot be opened and looks stuck. The child thread
-    // arrives with the task header, so the first card is already navigable.
+    // arrives with the task header, so the first card is already openable.
     const state = new TestableThreadState();
     const { classified } = lateClassifiedSubAgent('parent', 'child');
     state.applySequence(classified);
@@ -709,8 +701,8 @@ describe('Sub-agent card lifecycle', () => {
 
     expect(state).toHaveSubAgentCard('parent', 'child', { status: 'running' });
     const [card] = state.getSubAgentActivities('parent');
-    const meta = (card.content as { subAgent?: { navigable?: boolean } }).subAgent;
-    expect(meta?.navigable).toBe(true);
+    const meta = (card.content as { subAgent?: { receiverThreadIds?: string[] } }).subAgent;
+    expect(meta?.receiverThreadIds).toContain('child');
   });
 
   it('keeps a completed sub-agent completed when its thread goes back to idle', () => {

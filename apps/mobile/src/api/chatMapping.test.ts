@@ -228,7 +228,7 @@ describe('chatMapping', () => {
     });
   });
 
-  it('maps persisted OpenCode task tools to one non-navigable subagent card', () => {
+  it('maps persisted OpenCode task tools with child identities to one subagent card', () => {
     const mapped = mapChat(
       toRawThread({
         id: 'parent-thread',
@@ -277,7 +277,6 @@ describe('chatMapping', () => {
       senderThreadId: 'parent-thread',
       receiverThreadIds: ['v1.b3BlbmNvZGU.Y2hpbGQtc2Vzc2lvbg'],
       agentStatus: 'completed',
-      navigable: true,
     });
   });
 
@@ -395,7 +394,7 @@ describe('chatMapping', () => {
 
     const message = mapped.messages[0];
     if (message.role !== 'activity') throw new Error('expected activity message');
-    expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed', navigable: true });
+    expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed' });
   });
 
   it('renders pending tools without an empty structured-content placeholder', () => {
