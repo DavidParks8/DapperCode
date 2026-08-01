@@ -83,3 +83,9 @@ enum ApplicationTermination {
         }
     }
 }
+
+enum BridgeLaunchPolicy {
+    static func shouldStart(autoStart: Bool, isRunning: Bool, state: String) -> Bool {
+        autoStart && !isRunning && state != "needsSetup"
+    }
+}

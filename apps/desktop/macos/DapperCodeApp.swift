@@ -25,6 +25,7 @@ private struct BridgeSnapshot: Decodable, Identifiable {
     let totalAgents: Int
     let recentErrorCount: Int
     let managedProcess: Bool
+    let autoStart: Bool
     let workspace: String
     let profileId: String
     let bridgePort: UInt16?
@@ -55,6 +56,7 @@ private struct BridgeSnapshot: Decodable, Identifiable {
         totalAgents: 0,
         recentErrorCount: 0,
         managedProcess: false,
+        autoStart: false,
         workspace: "",
         profileId: "",
         bridgePort: nil,
@@ -146,6 +148,7 @@ private final class BridgeModel: ObservableObject {
         Task {
             await discoverDefaultAgent()
             await refresh()
+            await autostartRememberedBridges()
             await poll()
         }
     }
@@ -310,6 +313,32 @@ private final class BridgeModel: ObservableObject {
         }
     }
 
+    private func autostartRememberedBridges() async {
+        let rememberedBridges = bridges.filter {
+            BridgeLaunchPolicy.shouldStart(
+                autoStart: $0.autoStart,
+                isRunning: $0.isRunning,
+                state: $0.state
+            )
+        }
+        guard !rememberedBridges.isEmpty else { return }
+
+        isBusy = true
+        defer { isBusy = false }
+        for bridge in rememberedBridges {
+            do {
+                _ = try await invoke(
+                    ["start", "--workspace", bridge.workspace],
+                    as: BridgeSnapshot.self,
+                    includeWorkspace: false
+                )
+            } catch {
+                errorMessage = "Could not start \(bridge.workspaceName): \(error.localizedDescription)"
+            }
+        }
+        await refresh()
+    }
+
     private func discoverDefaultAgent() async {
         guard agentExecutable.isEmpty else { return }
         do {
@@ -448,7 +477,7 @@ private struct DashboardView: View {
                 } header: {
                     Text("Bridges")
                 } footer: {
-                    Text("Each workspace gets its own port and token, so worktrees can run at the same time. Quitting DapperCode stops every bridge.")
+                    Text("Each workspace gets its own port and token, so worktrees can run at the same time. Quitting DapperCode stops every bridge and restores bridges that were running when it closed.")
                 }
             }
 

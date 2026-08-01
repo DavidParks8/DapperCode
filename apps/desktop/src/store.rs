@@ -180,6 +180,12 @@ impl AppConfig {
             .find(|profile| profile.profile_id == profile_id)
     }
 
+    pub fn find_mut(&mut self, profile_id: &str) -> Option<&mut Profile> {
+        self.profiles
+            .iter_mut()
+            .find(|profile| profile.profile_id == profile_id)
+    }
+
     pub fn upsert(&mut self, profile: Profile) {
         match self
             .profiles
@@ -225,6 +231,8 @@ pub struct Profile {
     pub preview_port: u16,
     pub connect_url: String,
     pub preview_connect_url: String,
+    #[serde(default)]
+    pub auto_start: bool,
     #[serde(default = "default_true")]
     pub allow_query_token_auth: bool,
     #[serde(default = "default_initialize_timeout_ms")]
@@ -420,6 +428,7 @@ mod tests {
             preview_port: port + 1,
             connect_url: format!("http://127.0.0.1:{port}"),
             preview_connect_url: format!("http://127.0.0.1:{}", port + 1),
+            auto_start: false,
             allow_query_token_auth: true,
             acp_initialize_timeout_ms: 15_000,
             agent: ProfileAgent {
@@ -495,6 +504,37 @@ mod tests {
         let config = paths.load_config().unwrap();
         assert_eq!(config.profiles.len(), 1);
         assert_eq!(config.profiles[0].bridge_port, 9001);
+    }
+
+    #[test]
+    fn persists_the_profile_autostart_intent_and_defaults_legacy_profiles_to_off() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths {
+            base: temp.path().to_path_buf(),
+        };
+
+        paths
+            .update_config(|config| {
+                let mut profile = sample_profile("alpha-000000000001", 8787);
+                profile.auto_start = true;
+                config.upsert(profile);
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(
+            paths
+                .load_config()
+                .unwrap()
+                .find("alpha-000000000001")
+                .unwrap()
+                .auto_start
+        );
+
+        let mut legacy = serde_json::to_value(sample_profile("legacy-000000000002", 8789)).unwrap();
+        legacy.as_object_mut().unwrap().remove("autoStart");
+        let decoded: Profile = serde_json::from_value(legacy).unwrap();
+        assert!(!decoded.auto_start);
     }
 
     #[test]

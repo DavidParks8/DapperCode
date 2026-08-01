@@ -382,6 +382,7 @@ mod tests {
             preview_port: port + 1,
             connect_url: format!("http://127.0.0.1:{port}"),
             preview_connect_url: format!("http://127.0.0.1:{}", port + 1),
+            auto_start: false,
             allow_query_token_auth: true,
             acp_initialize_timeout_ms: 15_000,
             agent: ProfileAgent {

@@ -70,5 +70,22 @@ private struct AppTerminationTests {
         } catch OperatorError.failed(let message) {
             try require(message == "DapperCode is quitting.", "unexpected rejection: \(message)")
         }
+
+        try require(
+            BridgeLaunchPolicy.shouldStart(autoStart: true, isRunning: false, state: "stopped"),
+            "a remembered stopped bridge should start"
+        )
+        try require(
+            !BridgeLaunchPolicy.shouldStart(autoStart: false, isRunning: false, state: "stopped"),
+            "an unremembered bridge should stay stopped"
+        )
+        try require(
+            !BridgeLaunchPolicy.shouldStart(autoStart: true, isRunning: true, state: "running"),
+            "a running bridge should not be started twice"
+        )
+        try require(
+            !BridgeLaunchPolicy.shouldStart(autoStart: true, isRunning: false, state: "needsSetup"),
+            "an unconfigured bridge should not be autostarted"
+        )
     }
 }

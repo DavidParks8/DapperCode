@@ -160,6 +160,10 @@ pub fn setup_profile(
             preview_port,
             connect_url: format!("http://{authority}:{bridge_port}"),
             preview_connect_url: format!("http://{authority}:{preview_port}"),
+            auto_start: config
+                .find(&profile_id)
+                .map(|profile| profile.auto_start)
+                .unwrap_or(false),
             allow_query_token_auth: true,
             acp_initialize_timeout_ms: 15_000,
             agent: ProfileAgent {

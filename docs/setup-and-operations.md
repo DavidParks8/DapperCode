@@ -124,7 +124,8 @@ npm run operator -- forget --workspace /path/to/repository
 - `--agent-args '<space-separated arguments>'`
 
 `start` and `restart` accept `--owner-pid <pid>`; the bridge exits when that process does. `list`
-returns one snapshot per configured workspace. `stop --all` stops every bridge this app owns.
+returns one snapshot per configured workspace. `stop --all` stops every bridge this app owns while
+preserving the remembered running state for the next macOS app launch.
 `forget` removes a workspace's profile, token, and profile directory once its bridge is stopped.
 
 ## Process Ownership
@@ -152,7 +153,8 @@ as `BRIDGE_OWNER_PID`. Quitting the app runs `dappercode stop --all`; if the app
 crashes, or is killed, each bridge notices its owner has exited and shuts itself down. On macOS this
 uses a `kqueue` `NOTE_EXIT` watch, which cannot be fooled by a recycled process ID; other platforms
 poll every two seconds. A bridge started without an owner (the `npm run bridge` development flow)
-keeps running as before.
+keeps running as before. The desktop operator remembers successful `start`/`restart` and `stop`
+actions per workspace; the macOS shell starts remembered profiles after its initial status refresh.
 
 ## Runtime Configuration
 

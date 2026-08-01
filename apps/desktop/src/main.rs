@@ -39,6 +39,7 @@ struct OperatorSnapshot {
     total_agents: usize,
     recent_error_count: usize,
     managed_process: bool,
+    auto_start: bool,
     workspace: PathBuf,
     profile_id: String,
     bridge_port: Option<u16>,
@@ -146,7 +147,10 @@ fn run_workspace_command(
                 "stop" => supervisor.stop()?,
                 _ => supervisor.restart()?,
             };
-            emit(operator_snapshot(&supervisor, snapshot, paths), human)
+            set_profile_auto_start(paths, &workspace, command != "stop")?;
+            let mut response = operator_snapshot(&supervisor, snapshot, paths);
+            response.auto_start = command != "stop";
+            emit(response, human)
         }
         "setup" => run_setup(workspace, args, human, paths, secrets),
         "forget" => {
@@ -285,9 +289,36 @@ fn list_profiles(
 /// different worktrees are all torn down. One failing profile does not abort the rest.
 fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
     let runtime = RuntimePaths::discover()?;
+    let profiles = paths.load_config()?.profiles;
+    let running_profile_ids: Vec<String> = profiles
+        .iter()
+        .filter_map(|profile| {
+            let supervisor = BridgeSupervisor::new(
+                profile.clone(),
+                paths.clone(),
+                secrets.clone(),
+                runtime.clone(),
+                None,
+            );
+            supervisor
+                .owns_running_process()
+                .then(|| profile.profile_id.clone())
+        })
+        .collect();
+    if !running_profile_ids.is_empty() {
+        paths.update_config(|config| {
+            for profile_id in &running_profile_ids {
+                if let Some(profile) = config.find_mut(profile_id) {
+                    profile.auto_start = true;
+                }
+            }
+            Ok(())
+        })?;
+    }
+
     let mut results = Vec::new();
     let mut stopped = 0;
-    for profile in paths.load_config()?.profiles {
+    for profile in profiles {
         let supervisor = BridgeSupervisor::new(
             profile.clone(),
             paths.clone(),
@@ -317,6 +348,18 @@ fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
         }
     }
     Ok(StopAllResult { stopped, results })
+}
+
+fn set_profile_auto_start(paths: &AppPaths, workspace: &Path, enabled: bool) -> Result<()> {
+    let workspace = validate_workspace(workspace)?;
+    let profile_id = profile_id_for(&workspace);
+    paths.update_config(|config| {
+        let profile = config.find_mut(&profile_id).with_context(|| {
+            format!("profile {profile_id} disappeared during bridge transition")
+        })?;
+        profile.auto_start = enabled;
+        Ok(())
+    })
 }
 
 fn supervisor(
@@ -354,6 +397,7 @@ fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorS
         total_agents: 0,
         recent_error_count: 0,
         managed_process: false,
+        auto_start: false,
         workspace,
         profile_id,
         bridge_port: None,
@@ -401,6 +445,7 @@ fn profile_snapshot(
         total_agents: snapshot.total_agents,
         recent_error_count: snapshot.recent_error_count,
         managed_process: snapshot.managed_process,
+        auto_start: profile.auto_start,
         workspace: profile.workspace.clone(),
         profile_id: profile.profile_id.clone(),
         bridge_port: Some(profile.bridge_port),
@@ -524,6 +569,33 @@ Bridge ports are allocated per workspace so several worktrees can run at once.\n
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::store::ProfileAgent;
+    use tempfile::tempdir;
+
+    fn test_profile(workspace: &Path) -> Profile {
+        Profile {
+            profile_id: profile_id_for(&workspace.canonicalize().unwrap()),
+            workspace: workspace.to_path_buf(),
+            network_mode: "local".to_string(),
+            bridge_host: "127.0.0.1".to_string(),
+            bridge_port: 8787,
+            preview_port: 8788,
+            connect_url: "http://127.0.0.1:8787".to_string(),
+            preview_connect_url: "http://127.0.0.1:8788".to_string(),
+            auto_start: false,
+            allow_query_token_auth: true,
+            acp_initialize_timeout_ms: 15_000,
+            agent: ProfileAgent {
+                agent_id: "opencode".to_string(),
+                display_name: "OpenCode".to_string(),
+                executable: PathBuf::from("/bin/echo"),
+                argv: vec!["acp".to_string()],
+                resolved_version: "local".to_string(),
+                verified_digest: "sha256:abc".to_string(),
+            },
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
 
     #[test]
     fn parses_options_and_default_agent_args() {
@@ -561,5 +633,39 @@ mod tests {
         );
         assert!(args.is_empty());
         assert!(!take_flag(&mut Vec::new(), "--all"));
+    }
+
+    #[test]
+    fn remembers_start_and_stop_transitions_for_a_workspace() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let profile_id = profile_id_for(&workspace.path().canonicalize().unwrap());
+        paths
+            .update_config(|config| {
+                config.upsert(test_profile(workspace.path()));
+                Ok(())
+            })
+            .unwrap();
+
+        set_profile_auto_start(&paths, workspace.path(), true).unwrap();
+        assert!(
+            paths
+                .load_config()
+                .unwrap()
+                .find(&profile_id)
+                .unwrap()
+                .auto_start
+        );
+
+        set_profile_auto_start(&paths, workspace.path(), false).unwrap();
+        assert!(
+            !paths
+                .load_config()
+                .unwrap()
+                .find(&profile_id)
+                .unwrap()
+                .auto_start
+        );
     }
 }
