@@ -516,4 +516,31 @@ describe('ChatHeader', () => {
     expect(textContent(queryRoot(tree))).toContain('Plain');
     act(() => tree.unmount());
   });
+
+  it('gives the menu, edit, and right-action buttons an effective touch target without inflating their visible chrome', () => {
+    const tree = render(
+      <ChatHeader
+        onOpenDrawer={jest.fn()}
+        title={LONG_TITLE}
+        onRenameTitle={jest.fn()}
+        rightIconName="git-branch-outline"
+        onRightActionPress={jest.fn()}
+      />,
+    );
+    const root = queryRoot(tree);
+
+    const expectMinimumHitSlop = (label: string) => {
+      const hitSlop = findPressable(root, label).props.hitSlop as
+        | { top: number; bottom: number; left: number; right: number }
+        | undefined;
+      expect(hitSlop).toBeDefined();
+      expect(hitSlop!.top).toBeGreaterThan(0);
+      expect(hitSlop!.bottom).toBeGreaterThan(0);
+    };
+
+    expectMinimumHitSlop('Open navigation drawer');
+    expectMinimumHitSlop('Edit session title');
+    expectMinimumHitSlop('Open Git');
+    act(() => tree.unmount());
+  });
 });

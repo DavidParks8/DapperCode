@@ -14,7 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { AgentDescriptor } from '../api/types';
 import { AgentIcon } from './AgentIcon';
 import { useAppTheme, type AppTheme } from '../theme';
+import { computeHitSlop } from './touchTarget';
 import { decorativeAccessibilityProps } from '../accessibility';
+
+const MENU_BUTTON_VISIBLE_SIZE = { width: 24, height: 24 };
+const RIGHT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
+const EDIT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
+
 
 interface ChatHeaderProps {
   onOpenDrawer?: () => void;
@@ -38,6 +44,9 @@ export function ChatHeader({
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const titleDisplay = title.trim() || 'New chat';
+  const menuHitSlop = useMemo(() => computeHitSlop(MENU_BUTTON_VISIBLE_SIZE), []);
+  const rightHitSlop = useMemo(() => computeHitSlop(RIGHT_BUTTON_VISIBLE_SIZE), []);
+  const editHitSlop = useMemo(() => computeHitSlop(EDIT_BUTTON_VISIBLE_SIZE), []);
 
   return (
     <View style={styles.headerContainer}>
@@ -46,7 +55,7 @@ export function ChatHeader({
           {onOpenDrawer ? (
             <Pressable
               onPress={onOpenDrawer}
-              hitSlop={8}
+              hitSlop={menuHitSlop}
               style={styles.menuBtn}
               accessibilityRole="button"
               accessibilityLabel="Open navigation drawer"
@@ -71,7 +80,7 @@ export function ChatHeader({
             {onRenameTitle ? (
               <Pressable
                 onPress={onRenameTitle}
-                hitSlop={10}
+                hitSlop={editHitSlop}
                 style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Edit session title"
@@ -91,7 +100,7 @@ export function ChatHeader({
             onRightActionPress ? (
               <Pressable
                 onPress={onRightActionPress}
-                hitSlop={8}
+                hitSlop={rightHitSlop}
                 style={styles.rightBtn}
                 accessibilityRole="button"
                 accessibilityLabel="Open Git"
@@ -209,7 +218,7 @@ const createStyles = (theme: AppTheme) =>
     },
     editBtn: {
       flexShrink: 0,
-      borderRadius: 8,
+      borderRadius: theme.radius.sm,
       padding: 4,
     },
     editBtnPressed: {
@@ -217,8 +226,6 @@ const createStyles = (theme: AppTheme) =>
     },
     modelName: {
       ...theme.typography.headline,
-      fontSize: 17,
-      color: theme.colors.textPrimary,
     },
     titleViewport: {
       position: 'relative',
