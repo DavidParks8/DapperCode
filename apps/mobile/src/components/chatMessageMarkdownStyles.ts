@@ -107,6 +107,23 @@ export const createMarkdownStyles = (theme: AppTheme) =>
       padding: theme.spacing.md,
       marginVertical: theme.spacing.sm,
     },
+    // The library defaults paint a near-white blockquote and a black rule, so every property it
+    // sets has to be restated here or it survives the shallow per-key style merge.
+    blockquote: {
+      backgroundColor: 'transparent',
+      borderColor: theme.colors.borderHighlight,
+      borderLeftColor: theme.colors.borderHighlight,
+      borderLeftWidth: 3,
+      marginLeft: 0,
+      marginVertical: theme.spacing.xs,
+      paddingHorizontal: 0,
+      paddingLeft: theme.spacing.sm,
+    },
+    hr: {
+      backgroundColor: theme.colors.borderLight,
+      height: StyleSheet.hairlineWidth,
+      marginVertical: theme.spacing.sm,
+    },
     link: {
       color: theme.colors.accent,
       textDecorationLine: 'underline',

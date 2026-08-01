@@ -110,12 +110,33 @@ export const createWorkflowMarkdownStyles = (theme: AppTheme) =>
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
     },
+    // The library defaults paint a near-white blockquote and a black rule, so every property it
+    // sets has to be restated here or it survives the shallow per-key style merge.
     blockquote: {
+      backgroundColor: 'transparent',
+      borderColor: theme.colors.borderHighlight,
       borderLeftWidth: 2,
       borderLeftColor: theme.colors.borderHighlight,
+      marginLeft: 0,
+      paddingHorizontal: 0,
       paddingLeft: theme.spacing.sm,
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
+    },
+    hr: {
+      backgroundColor: theme.colors.borderLight,
+      height: StyleSheet.hairlineWidth,
+      marginTop: theme.spacing.xs,
+      marginBottom: theme.spacing.xs,
+    },
+    table: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.borderHighlight,
+      borderRadius: theme.radius.sm,
+    },
+    tr: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.borderLight,
     },
     link: {
       color: theme.colors.accent,
