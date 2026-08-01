@@ -7,14 +7,8 @@ import type { Chat, RpcNotification } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
 import { liveAssistantByThreadAtom } from '../../state/mainScreen/turn';
 import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
-import {
-  agentRootThreadIdAtom,
-  relatedAgentThreadsAtom,
-} from '../../state/mainScreen/workspace';
-import {
-  navigationStackAtom,
-  pushNavigationRouteAtom,
-} from '../../state/navigation/atoms';
+import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
+import { navigationStackAtom, pushNavigationRouteAtom } from '../../state/navigation/atoms';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { createAppTheme, AppThemeProvider } from '../../theme';
@@ -59,9 +53,7 @@ async function render(options: RenderOptions = {}): Promise<{
     );
   const api = {
     getChat,
-    peekChat: jest.fn((threadId: string) =>
-      threadId === loadedChat.id ? cachedChat : null,
-    ),
+    peekChat: jest.fn((threadId: string) => (threadId === loadedChat.id ? cachedChat : null)),
     peekChatShell: jest.fn(() => null),
     peekChatSummary: jest.fn((threadId: string) =>
       threadId === loadedChat.id ? loadedChat : null,
@@ -122,9 +114,7 @@ function isStarting(tree: ReactTestRenderer): boolean {
 }
 
 function renderedText(tree: ReactTestRenderer): string {
-  return JSON.stringify(
-    (tree as unknown as { toJSON: () => unknown }).toJSON(),
-  );
+  return JSON.stringify((tree as unknown as { toJSON: () => unknown }).toJSON());
 }
 
 describe('SubAgentDetailView starting state', () => {
@@ -312,8 +302,7 @@ describe('SubAgentDetailView starting state', () => {
     });
     const transcript = tree.root.findByType(ChatTranscriptView);
     const openSubAgentThread = transcript.props.onOpenSubAgentThread as
-      | ((threadId: string) => void)
-      | undefined;
+      ((threadId: string) => void) | undefined;
 
     act(() => openSubAgentThread?.('grandchild'));
     expect(store.get(navigationStackAtom)).toEqual([
