@@ -158,7 +158,7 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
       maxWidth: 280,
     },
     stepperDock: {
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderHighlight,
       backgroundColor: tokens.glassDockBackground,
@@ -214,8 +214,10 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
       ...theme.typography.caption,
       color: theme.colors.textPrimary,
       fontWeight: '700',
-      fontSize: 10,
-      lineHeight: 12,
+      // Compact chip index: bumped to the 11pt readability floor (below theme.typography.caption's
+      // own 12pt) rather than the original 10pt.
+      fontSize: 11,
+      lineHeight: 14,
     },
     stepperPillIndexTextActive: {
       color: theme.colors.accentText,
@@ -224,8 +226,9 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
       fontWeight: '600',
-      fontSize: 10,
-      lineHeight: 12,
+      // Compact chip label: bumped to the 11pt readability floor rather than the original 10pt.
+      fontSize: 11,
+      lineHeight: 14,
     },
     stepperPillTitleActive: {
       color: theme.colors.textPrimary,

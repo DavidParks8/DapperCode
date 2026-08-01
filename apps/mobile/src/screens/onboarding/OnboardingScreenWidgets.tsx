@@ -3,10 +3,14 @@ import { useCallback, useMemo, useState } from 'react';
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { Platform, Pressable, Share, Text, View } from 'react-native';
+import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '../../accessibility';
+import { feedback } from '../../feedback';
 import { useAppTheme } from '../../theme';
 import { BRIDGE_SETUP_URL, SETUP_STAGES } from './onboardingScreenConstants';
+import { onboardingMotion } from './onboardingScreenMotion';
+import { hitSlopToMeetMinimum } from './onboardingScreenTouch';
 import { createOnboardingStyles } from './onboardingScreenStyles';
 
 export function OnboardingStepDock({ currentStage }: { currentStage: number }) {
@@ -22,6 +26,10 @@ export function OnboardingStepDock({ currentStage }: { currentStage: number }) {
           return (
             <View
               key={stage.title}
+              accessibilityLabel={`Step ${stepNumber} of ${SETUP_STAGES.length}: ${stage.title}${
+                isComplete ? ', completed' : isActive ? ', current step' : ''
+              }`}
+              accessibilityState={{ selected: isActive }}
               style={[
                 styles.stepperPill,
                 isActive && styles.stepperPillActive,
@@ -70,12 +78,14 @@ export function CommandSnippet({ label, command }: { label: string; command: str
   const handleCopy = useCallback(async () => {
     await Clipboard.setStringAsync(command);
     setCopied(true);
+    void feedback.success();
     setTimeout(() => {
       setCopied(false);
     }, 1400);
   }, [command]);
 
   const handleShareGuide = useCallback(() => {
+    void feedback.selection();
     const title = 'DapperCode bridge setup';
     void Share.share(
       Platform.OS === 'ios'
@@ -96,6 +106,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             accessibilityRole="button"
             accessibilityLabel="Share bridge setup guide"
             onPress={handleShareGuide}
+            hitSlop={hitSlopToMeetMinimum(30)}
             style={({ pressed }) => [
               styles.commandIconButton,
               pressed && styles.commandCopyButtonPressed,
@@ -107,6 +118,9 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             onPress={() => {
               void handleCopy();
             }}
+            hitSlop={hitSlopToMeetMinimum(30)}
+            accessibilityRole="button"
+            accessibilityLabel={copied ? 'Copied to clipboard' : 'Copy setup command'}
             style={({ pressed }) => [
               styles.commandCopyButton,
               copied && styles.commandCopyButtonCopied,
@@ -154,7 +168,10 @@ export function StatusBanner({
         : theme.colors.error;
 
   return (
-    <View
+    <Animated.View
+      entering={FadeIn.duration(onboardingMotion.duration.routine).reduceMotion(
+        ReduceMotion.System,
+      )}
       accessibilityRole={tone === 'error' ? 'alert' : undefined}
       accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'polite'}
       style={[
@@ -179,6 +196,6 @@ export function StatusBanner({
       >
         {message}
       </Text>
-    </View>
+    </Animated.View>
   );
 }

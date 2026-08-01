@@ -1,4 +1,5 @@
 import type { AppTheme } from '../theme';
+import { TOUCH_TARGET_MINIMUM } from './workspacePickerTouch';
 
 export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   screen: { flex: 1, backgroundColor: theme.colors.bgMain },
@@ -42,7 +43,7 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   },
   connectionText: { flex: 1, ...theme.typography.caption, color: theme.colors.textSecondary },
   defaultButton: {
-    minHeight: 32,
+    minHeight: TOUCH_TARGET_MINIMUM,
     paddingHorizontal: theme.spacing.md,
     borderRadius: theme.radius.full,
     borderWidth: 1,
@@ -74,7 +75,7 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   },
   searchInput: { flex: 1, ...theme.typography.body, paddingVertical: 0 },
   actionCard: {
-    minHeight: 44,
+    minHeight: TOUCH_TARGET_MINIMUM,
     borderRadius: theme.radius.lg,
     borderWidth: 1,
     borderColor: theme.colors.borderLight,
@@ -115,7 +116,7 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
     gap: theme.spacing.sm,
   },
   upButton: {
-    minHeight: 28,
+    minHeight: TOUCH_TARGET_MINIMUM,
     marginTop: 2,
     paddingHorizontal: theme.spacing.sm,
     borderRadius: theme.radius.full,
@@ -153,8 +154,8 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   },
   currentFolderPath: {
     ...theme.typography.mono,
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 14,
     color: theme.colors.textMuted,
   },
   sectionHeader: {

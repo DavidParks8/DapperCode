@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView } from 'expo-camera';
 import { Modal, Pressable, Text, View } from 'react-native';
+import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '../../accessibility';
 import type { AppTheme } from '../../theme';
+import { onboardingMotion } from './onboardingScreenMotion';
 import type { createOnboardingStyles } from './onboardingScreenStyles';
 
 interface ScannerModalProps {
@@ -90,13 +92,16 @@ export function OnboardingScannerModal({
           </View>
           <Text style={styles.scannerHintText}>Scan the pairing QR to fill the URL and token.</Text>
           {scannerError ? (
-            <Text
+            <Animated.Text
+              entering={FadeIn.duration(onboardingMotion.duration.immediate).reduceMotion(
+                ReduceMotion.System,
+              )}
               accessibilityRole="alert"
               accessibilityLiveRegion="assertive"
               style={styles.errorText}
             >
               {scannerError}
-            </Text>
+            </Animated.Text>
           ) : null}
           <Pressable
             accessibilityRole="button"
