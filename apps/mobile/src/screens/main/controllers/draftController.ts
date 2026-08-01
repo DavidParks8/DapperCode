@@ -1,17 +1,46 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
-import { CHAT_DRAFTS_VERSION, getChatDraftsPath, parseChatDrafts } from '../mainScreenHelpers';
+import {
+  CHAT_DRAFTS_VERSION,
+  ProfilePersistenceError,
+  type ProfilePersistenceStorage,
+  getChatDraftsPath,
+  getLegacyChatDraftsPath,
+  getPersistenceMigrationMarkerPath,
+  getWebPersistenceMigrationMarkerKey,
+  getWebProfilePersistenceKey,
+  migrateLegacyPersistenceEntry,
+  parseChatDrafts,
+} from '../mainScreenHelpers';
 import { submissionScopeKey, type SubmissionDraftSnapshot } from './submissionController';
 
-export interface DraftStorage {
-  read(path: string): Promise<string>;
-  write(path: string, value: string): Promise<void>;
-}
+export type DraftStorage = ProfilePersistenceStorage;
 
 const fileDraftStorage: DraftStorage = {
   read: FileSystem.readAsStringAsync,
   write: FileSystem.writeAsStringAsync,
+  exists: async (path) => (await FileSystem.getInfoAsync(path))?.exists === true,
+};
+
+interface WebStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+const webDraftStorage: DraftStorage = {
+  read: async (key) => {
+    const value = getWebStorage()?.getItem(key);
+    if (value == null) throw new Error('missing');
+    return value;
+  },
+  write: async (key, value) => {
+    const storage = getWebStorage();
+    if (!storage) throw new Error('Browser storage is unavailable.');
+    storage.setItem(key, value);
+  },
+  exists: async (key) => getWebStorage()?.getItem(key) != null,
 };
 
 export function updateDraftEntries(
@@ -32,8 +61,24 @@ export function serializeDraftEntries(entries: Readonly<Record<string, string>>)
   return JSON.stringify({ version: CHAT_DRAFTS_VERSION, entries });
 }
 
+export function migrateLegacyDraftEntries(raw: string, profileId: string): string {
+  const entries = parseChatDrafts(raw);
+  const profileEntries = Object.fromEntries(
+    Object.entries(entries).filter(([key]) => {
+      try {
+        const scope = JSON.parse(key) as unknown;
+        return Array.isArray(scope) && scope[0] === profileId;
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return serializeDraftEntries(profileEntries);
+}
+
 export interface DraftController {
   draft: string;
+  persistenceError: ProfilePersistenceError | null;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
   clearDraft: () => void;
   snapshot: () => SubmissionDraftSnapshot;
@@ -42,87 +87,170 @@ export interface DraftController {
 export function useDraftController(
   profileId: string,
   chatId: string | null,
-  storage: DraftStorage = fileDraftStorage,
+  storage?: DraftStorage,
+  onPersistenceError?: (error: ProfilePersistenceError) => void,
+  platform: string = Platform.OS,
 ): DraftController {
+  const resolvedStorage = storage ?? (platform === 'web' ? webDraftStorage : fileDraftStorage);
   const scopeKey = submissionScopeKey({ profileId, threadId: chatId });
   const [draft, setDraftState] = useState('');
   const [ownerKey, setOwnerKey] = useState(scopeKey);
+  // Mirrors `ownerKey` synchronously. React batches `setOwnerKey` into the next render, so an
+  // effect that runs later in the *same* commit (e.g. the persist-trigger effect below) would
+  // otherwise still observe the stale `ownerKey` state and could misattribute the current draft
+  // to the wrong scope. Reading this ref instead keeps every effect within a commit consistent.
+  const ownerKeyRef = useRef(scopeKey);
   const [loaded, setLoaded] = useState(false);
+  const [persistenceError, setPersistenceError] = useState<ProfilePersistenceError | null>(null);
   const entriesRef = useRef<Record<string, string>>({});
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef('');
+  const dirtyRef = useRef(false);
   const scopeKeyRef = useRef(scopeKey);
   const revisionRef = useRef(0);
+  // Tracks whether the *current* scope's draft has been edited since it became current.
+  // A delayed hydration read must never clobber such an edit, even if the read was already
+  // in flight when the edit happened (e.g. rapid typing right after opening a chat).
+  const unsyncedEditRef = useRef(false);
+  const normalizedProfileId = profileId.trim();
+  const paths = useMemo(
+    () =>
+      platform === 'web'
+        ? {
+            target: getWebProfilePersistenceKey('drafts.v2', normalizedProfileId),
+            legacy: 'dappercode.main-screen.drafts.v2',
+            marker: getWebPersistenceMigrationMarkerKey('drafts', normalizedProfileId),
+          }
+        : {
+            target: getChatDraftsPath(normalizedProfileId),
+            legacy: getLegacyChatDraftsPath(),
+            marker: getPersistenceMigrationMarkerPath('drafts', normalizedProfileId),
+          },
+    [normalizedProfileId, platform],
+  );
+
   if (scopeKeyRef.current !== scopeKey) {
     scopeKeyRef.current = scopeKey;
     revisionRef.current += 1;
+    // A new scope has no edits yet; any pending hydration read may safely apply once it lands.
+    unsyncedEditRef.current = false;
   }
+
+  const reportPersistenceError = useCallback(
+    (operation: 'migrate' | 'write', cause: unknown) => {
+      const error = new ProfilePersistenceError('chat drafts', operation, { cause });
+      setPersistenceError(error);
+      onPersistenceError?.(error);
+    },
+    [onPersistenceError],
+  );
 
   const setDraft = useCallback<React.Dispatch<React.SetStateAction<string>>>((next) => {
     const value = typeof next === 'function' ? next(draftRef.current) : next;
     if (value === draftRef.current) return;
     draftRef.current = value;
     revisionRef.current += 1;
+    unsyncedEditRef.current = true;
     setDraftState(value);
   }, []);
 
   const persist = useCallback(
     async (entries: Readonly<Record<string, string>>) => {
-      const path = getChatDraftsPath();
-      if (!path) return;
+      if (!dirtyRef.current) return;
+      if (!paths.target) {
+        reportPersistenceError('write', new Error('Persistence path is unavailable.'));
+        return;
+      }
       try {
-        await storage.write(path, serializeDraftEntries(entries));
-      } catch {
-        // Draft persistence is best effort.
+        await resolvedStorage.write(paths.target, serializeDraftEntries(entries));
+        if (entriesRef.current === entries) dirtyRef.current = false;
+        setPersistenceError(null);
+      } catch (cause) {
+        reportPersistenceError('write', cause);
       }
     },
-    [storage],
+    [paths.target, reportPersistenceError, resolvedStorage],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const path = getChatDraftsPath();
-    if (!path) {
-      setLoaded(true);
-      return;
-    }
-    void storage
-      .read(path)
-      .then((raw) => {
-        if (!cancelled) entriesRef.current = parseChatDrafts(raw);
-      })
-      .catch(() => {
-        if (!cancelled) entriesRef.current = {};
-      })
-      .finally(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [storage]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const nextDraft = entriesRef.current[scopeKey] ?? '';
-    scopeKeyRef.current = scopeKey;
-    draftRef.current = nextDraft;
-    revisionRef.current += 1;
-    setOwnerKey(scopeKey);
-    setDraftState((current) => (current === nextDraft ? current : nextDraft));
-  }, [loaded, scopeKey]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const previous = entriesRef.current[ownerKey] ?? '';
-    if (previous === draft) return;
-    entriesRef.current = updateDraftEntries(entriesRef.current, ownerKey, draft);
+  const schedulePersist = useCallback(() => {
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
       void persist(entriesRef.current);
     }, 180);
-  }, [draft, loaded, ownerKey, persist]);
+  }, [persist]);
+
+  const setOwner = useCallback((key: string) => {
+    ownerKeyRef.current = key;
+    setOwnerKey(key);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
+    entriesRef.current = {};
+
+    const load = async () => {
+      try {
+        await migrateLegacyPersistenceEntry({
+          storage: resolvedStorage,
+          profileId: normalizedProfileId,
+          targetPath: paths.target,
+          legacyPath: paths.legacy,
+          markerPath: paths.marker,
+          transform: (raw) => migrateLegacyDraftEntries(raw, normalizedProfileId),
+        });
+      } catch (cause) {
+        if (!cancelled) reportPersistenceError('migrate', cause);
+      }
+
+      if (paths.target) {
+        try {
+          const raw = await resolvedStorage.read(paths.target);
+          if (!cancelled) entriesRef.current = parseChatDrafts(raw);
+        } catch {
+          if (!cancelled) entriesRef.current = {};
+        }
+      }
+      if (!cancelled) setLoaded(true);
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedProfileId, paths, reportPersistenceError, resolvedStorage]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    scopeKeyRef.current = scopeKey;
+    // Persisted entries may have finished loading after the user already started typing into
+    // this same scope (e.g. rapid typing right after navigating, before the read resolved).
+    // Attribute the edit to `scopeKey` directly (always current) rather than the `ownerKey`
+    // state, which only catches up on the next render and would otherwise race with this one.
+    if (unsyncedEditRef.current) {
+      entriesRef.current = updateDraftEntries(entriesRef.current, scopeKey, draftRef.current);
+      dirtyRef.current = true;
+      setOwner(scopeKey);
+      schedulePersist();
+      return;
+    }
+    const nextDraft = entriesRef.current[scopeKey] ?? '';
+    draftRef.current = nextDraft;
+    revisionRef.current += 1;
+    setOwner(scopeKey);
+    setDraftState((current) => (current === nextDraft ? current : nextDraft));
+  }, [loaded, scopeKey, schedulePersist, setOwner]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const owner = ownerKeyRef.current;
+    const previous = entriesRef.current[owner] ?? '';
+    if (previous === draft) return;
+    entriesRef.current = updateDraftEntries(entriesRef.current, owner, draft);
+    dirtyRef.current = true;
+    schedulePersist();
+  }, [draft, loaded, ownerKey, schedulePersist]);
 
   useEffect(
     () => () => {
@@ -134,8 +262,9 @@ export function useDraftController(
 
   return {
     draft,
+    persistenceError,
     setDraft,
-    clearDraft: useCallback(() => setDraft(''), []),
+    clearDraft: useCallback(() => setDraft(''), [setDraft]),
     snapshot: useCallback(
       () => ({
         scopeKey: scopeKeyRef.current,
@@ -145,4 +274,13 @@ export function useDraftController(
       [],
     ),
   };
+}
+
+function getWebStorage(): WebStorageLike | null {
+  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
+    .localStorage;
+  return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
+    ? (storage as WebStorageLike)
+    : null;
 }

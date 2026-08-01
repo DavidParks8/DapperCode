@@ -42,13 +42,15 @@ export function GitScreen({ chat }: GitScreenProps) {
   useAccessibilityAnnouncement(
     controller.loading
       ? 'Loading Git status'
-      : controller.committing
-        ? 'Committing changes'
-        : controller.pushing
-          ? 'Pushing changes'
-          : controller.switchingBranch
-            ? 'Switching branch'
-            : null,
+      : controller.refreshing
+        ? 'Refreshing Git status'
+        : controller.committing
+          ? 'Committing changes'
+          : controller.pushing
+            ? 'Pushing changes'
+            : controller.switchingBranch
+              ? 'Switching branch'
+              : null,
   );
 
   return (

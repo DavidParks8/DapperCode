@@ -303,6 +303,23 @@ describe('SettingsScreen behavior', () => {
     act(() => tree.unmount());
   });
 
+  it('reuses cached agent metadata without blanking on a settings revisit', async () => {
+    const api = {
+      readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
+      registerPushDevice: jest.fn(),
+      unregisterPushDevice: jest.fn(),
+    };
+    const store = createSettingsStore();
+    const first = await renderSettings({ api, store });
+    expect(hasText(first.tree.root as Queryable, 'Codex')).toBe(true);
+    act(() => first.tree.unmount());
+
+    const second = await renderSettings({ api, store });
+    expect(hasText(second.tree.root as Queryable, 'Codex')).toBe(true);
+    expect(api.readBridgeCapabilities).toHaveBeenCalledTimes(1);
+    act(() => second.tree.unmount());
+  });
+
   it('surfaces a persistence failure and clears it after a retry', async () => {
     const store = createSettingsStore({
       persistenceError: new AppStatePersistenceError('write_failed', 'write', 'save failed'),

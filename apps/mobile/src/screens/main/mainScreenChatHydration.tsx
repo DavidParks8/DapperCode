@@ -4,15 +4,16 @@ import {
   selectedModelIdAtom,
   selectedServiceTierAtom,
 } from '../../state/mainScreen/models';
-import { favoriteWorkspacePathsAtom } from '../../state/mainScreen/workspace';
+import {
+  loadWorkspaceFavoritesAtom,
+  toggleWorkspaceFavoriteAtom,
+} from '../../state/mainScreen/workspaceActions';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiSurface, ReasoningEffort, ServiceTier } from '../../api/types';
 import {
   type ActivePlanState,
-  WORKSPACE_FAVORITES_LIMIT,
   type ChatModelPreference,
-  normalizeWorkspacePath,
   normalizeModelId,
   normalizeReasoningEffort,
   normalizeServiceTier,
@@ -39,7 +40,6 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
     saveBridgeUiSurfaceSnapshots,
     saveChatModelPreferences,
     saveChatPlanSnapshots,
-    saveWorkspaceFavorites,
     scheduleBridgeUiSurfaceSnapshotsPersist,
     setChatModelPreferencesLoaded,
   } = context;
@@ -47,43 +47,12 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setDefaultServiceTier = useSetAtom(defaultServiceTierAtom);
-  const setFavoriteWorkspacePaths = useSetAtom(favoriteWorkspacePathsAtom);
+  const loadWorkspaceFavorites = useSetAtom(loadWorkspaceFavoritesAtom);
+  const toggleWorkspaceFavorite = useSetAtom(toggleWorkspaceFavoriteAtom);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      const paths = await persistenceController.loadWorkspaceFavorites();
-      if (!cancelled) setFavoriteWorkspacePaths(paths);
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [persistenceController]);
-
-  const toggleWorkspaceFavorite = useCallback(
-    (path: string | null | undefined) => {
-      const normalizedPath = normalizeWorkspacePath(path);
-      if (!normalizedPath) {
-        return;
-      }
-
-      setFavoriteWorkspacePaths((current) => {
-        const exists = current.includes(normalizedPath);
-        const next = exists
-          ? current.filter((entry) => entry !== normalizedPath)
-          : [normalizedPath, ...current.filter((entry) => entry !== normalizedPath)].slice(
-              0,
-              WORKSPACE_FAVORITES_LIMIT,
-            );
-        void saveWorkspaceFavorites(next);
-        return next;
-      });
-    },
-    [saveWorkspaceFavorites],
-  );
+    void loadWorkspaceFavorites();
+  }, [loadWorkspaceFavorites]);
 
   useEffect(() => {
     return () => {
@@ -210,7 +179,11 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
     const load = async () => {
       const preferences = await persistenceController.loadModelPreferences();
       if (!cancelled) {
-        chatModelPreferencesRef.current = preferences;
+        // Selections made while the file was loading are newer than anything on disk.
+        chatModelPreferencesRef.current = {
+          ...preferences,
+          ...chatModelPreferencesRef.current,
+        };
         setChatModelPreferencesLoaded(true);
       }
     };

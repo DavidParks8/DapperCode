@@ -1,6 +1,11 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useCallback, useMemo, useRef } from 'react';
-import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  creatingAtom,
+  errorAtom,
+  sendingAtom,
+  stoppingTurnAtom,
+} from '../../state/mainScreen/turn';
 import {
   activeCommandsAtom,
   loadingWorkspaceRootsAtom,
@@ -24,6 +29,7 @@ import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
 import { useDraftController } from './controllers/draftController';
 import { SubmissionController } from './controllers/submissionController';
+import { SubmissionIdempotencyCache } from './controllers/submissionIdempotencyCache';
 import { TurnExecutionController } from './controllers/turnExecutionController';
 import { MainScreenPersistenceController } from './controllers/mainScreenPersistenceController';
 import {
@@ -48,12 +54,35 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const theme = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const setError = useSetAtom(errorAtom);
+  const reportPersistenceError = useCallback((error: Error) => setError(error.message), [setError]);
   const chatSyncController = useMemo(() => new ChatSyncController(api), [api]);
   const turnExecutionController = useMemo(() => new TurnExecutionController(api), [api]);
   const approvalController = useMemo(() => new ApprovalController(api), [api]);
   const agentThreadsController = useMemo(() => new AgentThreadsController(api), [api]);
-  const persistenceController = useMemo(() => new MainScreenPersistenceController(), []);
-  const submissionController = useMemo(() => new SubmissionController(), []);
+  const persistenceController = useMemo(
+    () =>
+      new MainScreenPersistenceController({
+        profileId: bridgeProfileId,
+        onPersistenceError: reportPersistenceError,
+      }),
+    [bridgeProfileId, reportPersistenceError],
+  );
+  const submissionIdempotencyCache = useMemo(
+    () =>
+      new SubmissionIdempotencyCache({
+        profileId: bridgeProfileId,
+        onPersistenceError: reportPersistenceError,
+      }),
+    [bridgeProfileId, reportPersistenceError],
+  );
+  useEffect(() => {
+    void submissionIdempotencyCache.load();
+  }, [submissionIdempotencyCache]);
+  const submissionController = useMemo(
+    () => new SubmissionController(undefined, submissionIdempotencyCache),
+    [submissionIdempotencyCache],
+  );
   const transcriptContinuationController = useMemo(
     () => new TranscriptContinuationController(api),
     [api],
@@ -93,7 +122,12 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const openingChatStartedAtRef = useRef<number>(
     initialPendingSnapshot || !pendingOpenChatId ? 0 : Date.now(),
   );
-  const draftController = useDraftController(bridgeProfileId, selectedChatId);
+  const draftController = useDraftController(
+    bridgeProfileId,
+    selectedChatId,
+    undefined,
+    reportPersistenceError,
+  );
   const { draft, setDraft } = draftController;
   const setActiveCommands = useSetAtom(activeCommandsAtom);
   const streamingTextRef = useRef<string | null>(null);

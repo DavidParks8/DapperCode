@@ -11,6 +11,13 @@ const mockPushControllers: Array<Record<string, jest.Mock>> = [];
 const mockWsStatusListeners: Array<(connected: boolean) => void> = [];
 const mockAppStateListeners: Array<(state: AppStateStatus) => void> = [];
 const mockNotificationResponseListeners: Array<(event: unknown) => void> = [];
+
+function emitAppState(state: AppStateStatus): void {
+  for (const listener of [...mockAppStateListeners]) {
+    listener(state);
+  }
+}
+
 interface MockGesture {
   testId?: string;
   enabled?: boolean;
@@ -147,6 +154,7 @@ jest.mock('./src/chatSnapshotCache', () => ({
     entries: [],
   }),
   deleteChatSnapshotCache: (...args: unknown[]) => mockDeleteChatSnapshotCache(...args),
+  getChatSnapshotCacheGeneration: () => 0,
   loadChatSnapshotCache: (...args: unknown[]) => mockLoadChatSnapshotCache(...args),
   saveChatSnapshotCache: (...args: unknown[]) => mockSaveChatSnapshotCache(...args),
   updateChatSnapshotCache: (cache: unknown, selectedChatId: string | null, chat: unknown) => ({
@@ -566,6 +574,7 @@ describe('App orchestration', () => {
     await flushTimers(250);
     expect(mockSaveChatSnapshotCache).toHaveBeenCalledWith(
       expect.objectContaining({ selectedChatId: cachedChat.id }),
+      expect.any(Number),
     );
     act(() => tree.unmount());
   });
@@ -1153,9 +1162,9 @@ describe('App orchestration', () => {
     await act(async () => {
       mockNotificationResponseListeners[0]({ notification: 'tap' });
       jest.setSystemTime(new Date(now.getTime() + 1000));
-      mockAppStateListeners[0]('background');
+      emitAppState('background');
       jest.setSystemTime(new Date(now.getTime() + 2000));
-      mockAppStateListeners[0]('active');
+      emitAppState('active');
       await Promise.resolve();
     });
     expect(mockPushControllers[0].handle).toHaveBeenCalledWith({ notification: 'tap' });
@@ -1190,7 +1199,7 @@ describe('App orchestration', () => {
     const tree = await renderApp();
     jest.setSystemTime(new Date(Date.now() + 1000));
     await act(async () => {
-      mockAppStateListeners[0]('background');
+      emitAppState('background');
       await Promise.resolve();
       await Promise.resolve();
     });

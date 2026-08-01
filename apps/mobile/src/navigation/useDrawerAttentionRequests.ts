@@ -11,6 +11,14 @@ const ATTENTION_REQUEST_EVENT_METHODS = new Set([
   'bridge/events/snapshotRequired',
 ]);
 
+/**
+ * A burst of approval/user-input events (e.g. several requests resolving back to back) would
+ * otherwise trigger one refresh per event. Coalescing them behind a short debounce keeps the
+ * fetch count proportional to the burst instead of the event count, while staying prompt enough
+ * that a lone event still refreshes almost immediately.
+ */
+const ATTENTION_EVENT_REFRESH_DEBOUNCE_MS = 200;
+
 export function useDrawerAttentionRequests(
   api: HostBridgeApiClient,
   ws: HostBridgeWsClient,
@@ -24,17 +32,26 @@ export function useDrawerAttentionRequests(
   const mountedRef = useRef(true);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshQueuedRef = useRef(false);
+  const scheduledRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
 
+  const clearScheduledRefresh = useCallback(() => {
+    if (scheduledRefreshRef.current) {
+      clearTimeout(scheduledRefreshRef.current);
+      scheduledRefreshRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       mountedRef.current = false;
       refreshQueuedRef.current = false;
+      clearScheduledRefresh();
     };
-  }, []);
+  }, [clearScheduledRefresh]);
 
   const refreshAttentionRequests = useCallback((): Promise<void> => {
     if (!activeRef.current || !mountedRef.current) {
@@ -85,11 +102,29 @@ export function useDrawerAttentionRequests(
     return request;
   }, [api]);
 
+  const scheduleAttentionRefresh = useCallback(
+    (delay: number = ATTENTION_EVENT_REFRESH_DEBOUNCE_MS) => {
+      if (!activeRef.current || !mountedRef.current) {
+        return;
+      }
+      if (scheduledRefreshRef.current) {
+        clearTimeout(scheduledRefreshRef.current);
+      }
+      scheduledRefreshRef.current = setTimeout(() => {
+        scheduledRefreshRef.current = null;
+        void refreshAttentionRequests();
+      }, delay);
+    },
+    [refreshAttentionRequests],
+  );
+
   useEffect(() => {
     if (active) {
       void refreshAttentionRequests();
+    } else {
+      clearScheduledRefresh();
     }
-  }, [active, refreshAttentionRequests]);
+  }, [active, clearScheduledRefresh, refreshAttentionRequests]);
 
   useEffect(() => {
     if (!active) {
@@ -97,10 +132,10 @@ export function useDrawerAttentionRequests(
     }
     return ws.onEvent((event: RpcNotification) => {
       if (ATTENTION_REQUEST_EVENT_METHODS.has(event.method)) {
-        void refreshAttentionRequests();
+        scheduleAttentionRefresh();
       }
     });
-  }, [active, refreshAttentionRequests, ws]);
+  }, [active, scheduleAttentionRefresh, ws]);
 
   useEffect(() => {
     if (!active) {

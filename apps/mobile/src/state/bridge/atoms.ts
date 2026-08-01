@@ -56,6 +56,7 @@ export const apiClientAtom = atom(
       ws,
       bridgeUrl: bridgeUrl ?? undefined,
       authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+      profileId: get(activeBridgeProfileAtom)?.id ?? null,
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

@@ -4,11 +4,7 @@ import { Animated as RNAnimated, Platform, type ScrollView, type Text } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { WebView } from 'react-native-webview';
 
-import type {
-  BrowserPreviewDiscoveryResponse,
-  BrowserPreviewSession,
-  BrowserPreviewTargetSuggestion,
-} from '../../api/types';
+import type { BrowserPreviewSession } from '../../api/types';
 import {
   applyBrowserPreviewShellMode,
   buildBrowserPreviewBootstrapUrl,
@@ -23,6 +19,8 @@ import { BrowserPreviewSessionLifecycle } from '../../browserPreviewSessionLifec
 import { useAccessibilityAnnouncement, useModalAccessibilityFocus } from '../../accessibility';
 import { recentBrowserTargetUrlsAtom } from '../../state/appState/settings';
 import { bridgeUrlAtom } from '../../state/bridge/atoms';
+import { useBrowserTargetsResource } from '../../state/bridge/browserTargets';
+import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { useBridgeApi } from '../../state/bridge/hooks';
 import { pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
 import type { AppTheme } from '../../theme';
@@ -36,6 +34,8 @@ import {
 
 export function useBrowserScreenModel(theme: AppTheme) {
   const api = useBridgeApi();
+  const bridgeCapabilities = useBridgeCapabilitiesResource();
+  const browserTargets = useBrowserTargetsResource();
   const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
   const [recentTargetUrls, onRecentTargetUrlsChange] = useAtom(recentBrowserTargetUrlsAtom);
   const [pendingTargetUrl, setPendingTargetUrl] = useAtom(pendingBrowserTargetUrlAtom);
@@ -63,10 +63,15 @@ export function useBrowserScreenModel(theme: AppTheme) {
   const [canGoForward, setCanGoForward] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [openingPreview, setOpeningPreview] = useState(false);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<BrowserPreviewTargetSuggestion[]>([]);
-  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
-  const [supportsBrowserPreview, setSupportsBrowserPreview] = useState(true);
+  const suggestionsLoading = browserTargets.refreshing && browserTargets.value === null;
+  const suggestions = browserTargets.value ?? [];
+  const [localCapabilitiesError, setCapabilitiesError] = useState<string | null>(null);
+  const capabilitiesError =
+    localCapabilitiesError ??
+    (bridgeCapabilities.error === 'Could not read bridge capabilities.'
+      ? 'Could not load bridge capabilities.'
+      : bridgeCapabilities.error);
+  const supportsBrowserPreview = bridgeCapabilities.value?.supports.browserPreview !== false;
   const [webReloadKey, setWebReloadKey] = useState(0);
   const [nativeReloadKey, setNativeReloadKey] = useState(0);
   const [bottomBarVisible, setBottomBarVisible] = useState(true);
@@ -208,29 +213,13 @@ export function useBrowserScreenModel(theme: AppTheme) {
   );
 
   const loadBrowserCapabilities = useCallback(async () => {
-    try {
-      const capabilities = await api.readBridgeCapabilities();
-      setSupportsBrowserPreview(capabilities.supports.browserPreview !== false);
-      setCapabilitiesError(null);
-    } catch (error) {
-      setSupportsBrowserPreview(true);
-      setCapabilitiesError(
-        error instanceof Error ? error.message : 'Could not load bridge capabilities.',
-      );
-    }
-  }, [api]);
+    setCapabilitiesError(null);
+    await bridgeCapabilities.revalidate();
+  }, [bridgeCapabilities.revalidate]);
 
   const loadSuggestions = useCallback(async () => {
-    setSuggestionsLoading(true);
-    try {
-      const response: BrowserPreviewDiscoveryResponse = await api.discoverBrowserPreviewTargets();
-      setSuggestions(response.suggestions);
-    } catch {
-      setSuggestions([]);
-    } finally {
-      setSuggestionsLoading(false);
-    }
-  }, [api]);
+    await browserTargets.refresh();
+  }, [browserTargets.refresh]);
 
   const openPreview = useCallback(
     async (rawTarget: string) => {

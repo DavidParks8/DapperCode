@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 
-import type { FileSystemListResponse } from '../../api/types';
+import type { HostBridgeApiClient } from '../../api/client';
+import type { FileSystemListResponse, WorkspaceListResponse } from '../../api/types';
 import { MainScreenPersistenceController } from '../../screens/main/controllers/mainScreenPersistenceController';
 import {
   deriveCloneDirectoryName,
@@ -14,7 +15,7 @@ import {
   type WorkspacePickerPurpose,
 } from '../../screens/main/mainScreenHelpers';
 import { defaultStartCwdAtom } from '../appState/settings';
-import { apiClientAtom } from '../bridge/atoms';
+import { activeBridgeProfileAtom, apiClientAtom } from '../bridge/atoms';
 import {
   currentScreenAtom,
   popNavigationRouteAtom,
@@ -30,8 +31,11 @@ import {
   resumeGitCheckoutAfterWorkspacePickerAtom,
 } from './gitCheckout';
 import {
-  favoriteWorkspacePathsAtom,
+  activeWorkspaceIdentityAtom,
+  workspaceFavoritesByProfileAtom,
+  workspaceFavoritesResourceAtom,
   workspaceBrowseCacheAtom,
+  workspaceBrowseDisplayIdentityKeyAtom,
   workspaceBrowseRequestIdAtom,
   loadingWorkspaceBrowseAtom,
   workspaceBridgeRootAtom,
@@ -41,7 +45,8 @@ import {
   workspaceBrowsePathAtom,
   workspaceBrowseTruncationAtom,
   workspacePickerPurposeAtom,
-  workspaceRootsAtom,
+  workspaceRootsByProfileAtom,
+  workspaceRootsResourceAtom,
 } from './workspace';
 
 /**
@@ -52,11 +57,97 @@ import {
  * WorkspacePickerScreen, and GitCheckoutScreen all drive the same implementation.
  */
 
-const favoritesPersistence = new MainScreenPersistenceController();
+const favoritesPersistenceByProfile = new Map<string, MainScreenPersistenceController>();
+type WorkspaceRootsResult = Omit<
+  Pick<WorkspaceListResponse, 'bridgeRoot' | 'workspaces'>,
+  'bridgeRoot'
+> & { bridgeRoot: string | null };
 
-export const loadWorkspaceFavoritesAtom = atom(null, async (get, set): Promise<void> => {
-  set(favoriteWorkspacePathsAtom, await favoritesPersistence.loadWorkspaceFavorites());
-});
+const rootsRequestsByApi = new WeakMap<object, Map<string, Promise<WorkspaceRootsResult | null>>>();
+const favoritesRequestsByPersistence = new WeakMap<
+  MainScreenPersistenceController,
+  Promise<void>
+>();
+
+export const WORKSPACE_RESOURCES_TTL_MS = 30_000;
+
+export interface WorkspaceResourceRevalidationOptions {
+  force?: boolean;
+  now?: number;
+  ttlMs?: number;
+}
+
+function shouldUseFreshResource(
+  fetchedAt: number | null,
+  { force = false, now = Date.now(), ttlMs = WORKSPACE_RESOURCES_TTL_MS }:
+    WorkspaceResourceRevalidationOptions,
+): boolean {
+  return !force && fetchedAt !== null && now - fetchedAt < ttlMs;
+}
+
+function getFavoritesPersistence(profileId: string): MainScreenPersistenceController {
+  let persistence = favoritesPersistenceByProfile.get(profileId);
+  if (!persistence) {
+    persistence = new MainScreenPersistenceController({ profileId });
+    favoritesPersistenceByProfile.set(profileId, persistence);
+  }
+  return persistence;
+}
+
+export const loadWorkspaceFavoritesAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    options: WorkspaceResourceRevalidationOptions = {},
+  ): Promise<void> => {
+    const profileId = get(activeBridgeProfileAtom)?.id;
+    if (!profileId) return;
+    const current = get(workspaceFavoritesResourceAtom);
+    if (shouldUseFreshResource(current.fetchedAt, options)) return;
+
+    const persistence = getFavoritesPersistence(profileId);
+    const existing = favoritesRequestsByPersistence.get(persistence);
+    if (existing) return existing;
+
+    const requestId = current.requestId + 1;
+    set(workspaceFavoritesByProfileAtom, (resources) => ({
+      ...resources,
+      [profileId]: { ...current, error: null, refreshing: true, requestId },
+    }));
+    const request = persistence
+      .loadWorkspaceFavorites()
+      .then((paths) => {
+        const latest = get(workspaceFavoritesByProfileAtom)[profileId];
+        if (!latest || latest.requestId !== requestId) return;
+        set(workspaceFavoritesByProfileAtom, (resources) => ({
+          ...resources,
+          [profileId]: {
+            ...latest,
+            data: paths,
+            error: null,
+            fetchedAt: options.now ?? Date.now(),
+            refreshing: false,
+          },
+        }));
+      })
+      .catch((error: Error) => {
+        const latest = get(workspaceFavoritesByProfileAtom)[profileId];
+        if (!latest || latest.requestId !== requestId) return;
+        set(workspaceFavoritesByProfileAtom, (resources) => ({
+          ...resources,
+          [profileId]: { ...latest, error: error.message, refreshing: false },
+        }));
+      })
+      .finally(() => {
+        if (favoritesRequestsByPersistence.get(persistence) === request) {
+          favoritesRequestsByPersistence.delete(persistence);
+        }
+      });
+    favoritesRequestsByPersistence.set(persistence, request);
+    return request;
+  },
+);
 
 export const toggleWorkspaceFavoriteAtom = atom(
   null,
@@ -66,51 +157,180 @@ export const toggleWorkspaceFavoriteAtom = atom(
       return;
     }
 
-    const current = get(favoriteWorkspacePathsAtom);
-    const next = current.includes(normalizedPath)
-      ? current.filter((entry) => entry !== normalizedPath)
-      : [normalizedPath, ...current.filter((entry) => entry !== normalizedPath)].slice(
+    const profileId = get(activeBridgeProfileAtom)?.id;
+    if (!profileId) return;
+    const current = get(workspaceFavoritesResourceAtom);
+    const next = current.data.includes(normalizedPath)
+      ? current.data.filter((entry) => entry !== normalizedPath)
+      : [normalizedPath, ...current.data.filter((entry) => entry !== normalizedPath)].slice(
           0,
           WORKSPACE_FAVORITES_LIMIT,
         );
-    set(favoriteWorkspacePathsAtom, next);
-    void favoritesPersistence.saveWorkspaceFavorites(next);
+    set(workspaceFavoritesByProfileAtom, (resources) => ({
+      ...resources,
+      [profileId]: {
+        ...current,
+        data: next,
+        error: null,
+        fetchedAt: Date.now(),
+        refreshing: false,
+        requestId: current.requestId + 1,
+      },
+    }));
+    const persistence = getFavoritesPersistence(profileId);
+    void persistence
+      .saveWorkspaceFavorites(next)
+      .catch((error: Error) =>
+        set(workspaceFavoritesByProfileAtom, (resources) => {
+          const resource = resources[profileId];
+          return resource
+            ? { ...resources, [profileId]: { ...resource, error: error.message } }
+            : resources;
+        }),
+      );
   },
 );
 
 export const refreshWorkspaceRootsAtom = atom(
   null,
-  async (get, set): Promise<{ bridgeRoot: string | null } | null> => {
-    const api = get(apiClientAtom);
-    if (!api) {
-      return null;
+  async (
+    get,
+    set,
+    options: WorkspaceResourceRevalidationOptions = {},
+  ): Promise<WorkspaceRootsResult | null> => {
+    const identity = get(activeWorkspaceIdentityAtom);
+    if (!identity) return null;
+    const { profileId, identityKey, client: api } = identity;
+
+    // `workspaceRootsResourceAtom` already returns the empty resource when the cached entry's
+    // identity doesn't match, so a bridge fetched under a previous identity can never look fresh.
+    const current = get(workspaceRootsResourceAtom);
+    if (shouldUseFreshResource(current.fetchedAt, options)) {
+      return { bridgeRoot: current.bridgeRoot, workspaces: current.data };
     }
-    try {
-      const response = await api.listWorkspaceRoots();
-      set(workspaceBridgeRootAtom, normalizeWorkspacePath(response.bridgeRoot));
-      set(workspaceRootsAtom, response.workspaces);
-      set(workspaceBrowseErrorAtom, null);
-      return response;
-    } catch (err) {
-      set(workspaceBrowseErrorAtom, (err as Error).message);
-      return null;
-    }
+
+    const requestsForApi = rootsRequestsByApi.get(api) ?? new Map();
+    rootsRequestsByApi.set(api, requestsForApi);
+    // Keyed by identity (not just profile ID) so an in-flight request from a bridge/token that
+    // was edited out from under it is never mistaken for the same-identity single-flight request.
+    const existing = requestsForApi.get(identityKey);
+    if (existing) return existing;
+
+    const requestId = current.requestId + 1;
+    set(workspaceRootsByProfileAtom, (resources) => ({
+      ...resources,
+      [profileId]: { ...current, identityKey, error: null, refreshing: true, requestId },
+    }));
+    const request = api
+      .listWorkspaceRoots()
+      .then((response) => {
+        const latest = get(workspaceRootsByProfileAtom)[profileId];
+        if (!latest || latest.identityKey !== identityKey || latest.requestId !== requestId) {
+          return response;
+        }
+        set(workspaceRootsByProfileAtom, (resources) => ({
+          ...resources,
+          [profileId]: {
+            ...latest,
+            bridgeRoot: normalizeWorkspacePath(response.bridgeRoot),
+            data: response.workspaces,
+            error: null,
+            fetchedAt: options.now ?? Date.now(),
+            refreshing: false,
+          },
+        }));
+        return response;
+      })
+      .catch((err: Error) => {
+        const latest = get(workspaceRootsByProfileAtom)[profileId];
+        if (latest?.identityKey === identityKey && latest.requestId === requestId) {
+          set(workspaceRootsByProfileAtom, (resources) => ({
+            ...resources,
+            [profileId]: { ...latest, error: err.message, refreshing: false },
+          }));
+        }
+        return null;
+      })
+      .finally(() => {
+        if (requestsForApi.get(identityKey) === request) {
+          requestsForApi.delete(identityKey);
+        }
+      });
+    requestsForApi.set(identityKey, request);
+    return request;
   },
 );
+
+export const revalidateWorkspacePickerResourcesAtom = atom(
+  null,
+  async (
+    get,
+    set,
+    options: WorkspaceResourceRevalidationOptions = {},
+  ): Promise<void> => {
+    await Promise.all([
+      set(loadWorkspaceFavoritesAtom, options),
+      set(refreshWorkspaceRootsAtom, options),
+    ]);
+  },
+);
+
+const browseRequestsByApi = new WeakMap<
+  HostBridgeApiClient,
+  Map<string, Promise<FileSystemListResponse>>
+>();
+
+/** Single-flights identical directory listings so concurrent callers (e.g. opening the picker
+ *  while a background revalidation is in flight) share one network request per bridge client. */
+function sharedBrowseRequest(
+  api: HostBridgeApiClient,
+  key: string,
+  fetcher: () => Promise<FileSystemListResponse>,
+): Promise<FileSystemListResponse> {
+  let requests = browseRequestsByApi.get(api);
+  if (!requests) {
+    requests = new Map();
+    browseRequestsByApi.set(api, requests);
+  }
+  const existing = requests.get(key);
+  if (existing) return existing;
+  const request = fetcher().finally(() => {
+    if (requests?.get(key) === request) {
+      requests.delete(key);
+    }
+  });
+  requests.set(key, request);
+  return request;
+}
 
 export const browseWorkspacePathAtom = atom(
   null,
   async (get, set, path: string | null | undefined): Promise<void> => {
-    const api = get(apiClientAtom);
-    if (!api) {
+    const identity = get(activeWorkspaceIdentityAtom);
+    if (!identity) {
       return;
     }
+    const { identityKey, client: api } = identity;
     const normalizedRequestPath = normalizeWorkspacePath(path);
     const cacheKey = getWorkspaceBrowseCacheKey(normalizedRequestPath);
     const cache = get(workspaceBrowseCacheAtom);
     const cached = cache[cacheKey];
     const requestId = get(workspaceBrowseRequestIdAtom) + 1;
     set(workspaceBrowseRequestIdAtom, requestId);
+    if (get(workspaceBrowseDisplayIdentityKeyAtom) !== identityKey) {
+      set(workspaceBrowseDisplayIdentityKeyAtom, identityKey);
+      if (!cached) {
+        set(workspaceBrowsePathAtom, normalizedRequestPath);
+        set(workspaceBrowseParentPathAtom, null);
+        set(workspaceBrowseEntriesAtom, []);
+        set(workspaceBrowseTruncationAtom, null);
+        set(workspaceBrowseErrorAtom, null);
+      }
+    }
+
+    const isCurrentRequest = () =>
+      get(workspaceBrowseRequestIdAtom) === requestId &&
+      get(activeWorkspaceIdentityAtom)?.identityKey === identityKey;
 
     const applyResponse = (response: FileSystemListResponse, responseCacheKey = cacheKey) => {
       const normalizedPath = normalizeWorkspacePath(response.path);
@@ -153,18 +373,22 @@ export const browseWorkspacePathAtom = atom(
 
     set(loadingWorkspaceBrowseAtom, true);
     try {
-      const response = await api.listFilesystemEntries({
-        path: normalizedRequestPath,
-        directoriesOnly: true,
-      });
-      if (get(workspaceBrowseRequestIdAtom) !== requestId) {
+      // The dedup key folds the identity in so a listing kicked off before a profile edit is
+      // never mistaken for (or returned to) a caller browsing under the new identity.
+      const response = await sharedBrowseRequest(api, `${identityKey}\u0000${cacheKey}`, () =>
+        api.listFilesystemEntries({
+          path: normalizedRequestPath,
+          directoriesOnly: true,
+        }),
+      );
+      if (!isCurrentRequest()) {
         return;
       }
 
       applyResponse(response);
       set(workspaceBrowseErrorAtom, null);
     } catch (err) {
-      if (get(workspaceBrowseRequestIdAtom) !== requestId) {
+      if (!isCurrentRequest()) {
         return;
       }
       const message = (err as Error).message;
@@ -176,11 +400,17 @@ export const browseWorkspacePathAtom = atom(
 
       if (missingRequestedWorkspace) {
         try {
-          const rootResponse = await api.listFilesystemEntries({
-            path: null,
-            directoriesOnly: true,
-          });
-          if (get(workspaceBrowseRequestIdAtom) !== requestId) {
+          const rootCacheKey = getWorkspaceBrowseCacheKey(null);
+          const rootResponse = await sharedBrowseRequest(
+            api,
+            `${identityKey}\u0000${rootCacheKey}`,
+            () =>
+              api.listFilesystemEntries({
+                path: null,
+                directoriesOnly: true,
+              }),
+          );
+          if (!isCurrentRequest()) {
             return;
           }
           applyResponse(
@@ -199,7 +429,7 @@ export const browseWorkspacePathAtom = atom(
 
       set(workspaceBrowseErrorAtom, message);
     } finally {
-      if (get(workspaceBrowseRequestIdAtom) === requestId) {
+      if (isCurrentRequest()) {
         set(loadingWorkspaceBrowseAtom, false);
       }
     }
@@ -219,7 +449,7 @@ export const openWorkspacePickerAtom = atom(
     set(pushNavigationRouteAtom, { screen: 'WorkspacePicker' });
     void set(browseWorkspacePathAtom, initialPath);
     scheduleIdleTask(() => {
-      void set(refreshWorkspaceRootsAtom);
+      void set(revalidateWorkspacePickerResourcesAtom);
     });
   },
 );

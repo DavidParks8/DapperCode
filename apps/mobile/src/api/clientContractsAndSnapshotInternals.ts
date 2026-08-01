@@ -18,6 +18,7 @@ export interface ApiClientOptions {
   ws: HostBridgeWsClient;
   bridgeUrl?: string;
   authToken?: string | null;
+  profileId?: string | null;
 }
 
 export interface AppServerListResponse {

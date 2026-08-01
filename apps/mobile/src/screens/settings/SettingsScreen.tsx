@@ -36,6 +36,7 @@ import {
   apiClientAtom,
   bridgeConnectedAtom,
 } from '../../state/bridge/atoms';
+import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
 import { openLegalScreenAtom } from '../../state/navigation/actions';
 import { settingsAllowsDrawerGestureAtom } from '../../state/navigation/atoms';
@@ -62,37 +63,18 @@ export function SettingsScreen() {
   const openLegalScreen = useSetAtom(openLegalScreenAtom);
   const setDrawerGestureEnabled = useSetAtom(settingsAllowsDrawerGestureAtom);
 
-  const [capabilities, setCapabilities] = useState<BridgeCapabilities | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    value: capabilities,
+    refreshing: capabilitiesRefreshing,
+    error: capabilitiesError,
+  } = useBridgeCapabilitiesResource();
+  const loading = capabilitiesRefreshing && !capabilities;
   const [error, setError] = useState<string | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
   useEffect(() => {
     setDrawerGestureEnabled(true);
-    if (!api) {
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    api
-      .readBridgeCapabilities()
-      .then((value) => {
-        if (!cancelled) setCapabilities(value);
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled)
-          setError(
-            reason instanceof Error ? reason.message : 'Could not read bridge capabilities.',
-          );
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [api, setDrawerGestureEnabled]);
+  }, [setDrawerGestureEnabled]);
 
   const updatePush = async (enabled: boolean) => {
     if (!api || !activeBridgeProfileId || pushBusy) return;
@@ -132,6 +114,7 @@ export function SettingsScreen() {
         {persistenceError ? (
           <Notice text={persistenceError.message} action="Retry" onPress={retryPersistence} />
         ) : null}
+        {capabilitiesError ? <Notice text={capabilitiesError} /> : null}
         {error ? <Notice text={error} /> : null}
 
         <Section title="Connection">

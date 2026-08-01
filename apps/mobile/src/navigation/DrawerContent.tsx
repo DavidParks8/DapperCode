@@ -1,10 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Alert, AppState } from 'react-native';
-import type { AgentDescriptor, ChatSummary } from '../api/types';
+import type { ChatSummary } from '../api/types';
 import { confirmAction } from '../components/confirm';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
+import { useBridgeCapabilitiesResource } from '../state/bridge/capabilities';
 import { selectedChatIdAtom } from '../state/chat/atoms';
 import { navigateAtom, selectChatAtom, startNewChatAtom } from '../state/navigation/actions';
 import { useAppTheme } from '../theme';
@@ -80,52 +81,20 @@ export const DrawerContent = memo(function DrawerContentComponent({
     restoreChat,
     retryDeepChatListRef,
     cancelChatListStream,
-    scheduleLoadChats,
+    resetPollTimer,
   } = useDrawerChatLoading(api, ws, active, priorityThreadIds);
-  const [agents, setAgents] = useState<AgentDescriptor[]>([]);
-  const [agentMetadataError, setAgentMetadataError] = useState<string | null>(null);
+  const {
+    value: bridgeCapabilities,
+    error: capabilitiesError,
+    refresh: refreshAgentMetadata,
+  } = useBridgeCapabilitiesResource();
+  const agents = bridgeCapabilities?.agents ?? [];
+  const agentMetadataError = capabilitiesError ? 'Could not refresh agent names.' : null;
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(new Set());
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
-  const mountedRef = useRef(true);
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
   const normalizedWorkspaceChatLimit = normalizeWorkspaceChatLimit(workspaceChatLimit);
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refreshAgentMetadata = useCallback(async () => {
-    try {
-      const capabilities = await api.readBridgeCapabilities();
-      if (!mountedRef.current) {
-        return;
-      }
-      setAgents(capabilities.agents);
-      setAgentMetadataError(null);
-    } catch {
-      if (mountedRef.current) {
-        setAgentMetadataError('Could not refresh agent names.');
-      }
-    }
-  }, [api]);
-
-  useEffect(() => {
-    void refreshAgentMetadata();
-  }, [refreshAgentMetadata]);
-
-  useEffect(() => {
-    if (!active) {
-      return;
-    }
-    return ws.onStatus((connected) => {
-      if (connected) {
-        void refreshAgentMetadata();
-      }
-    });
-  }, [active, refreshAgentMetadata, ws]);
 
   const attentionModel = useMemo(
     () =>
@@ -203,14 +172,14 @@ export const DrawerContent = memo(function DrawerContentComponent({
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         setCollapsedLaneKeys(new Set());
-        scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
+        resetPollTimer(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
         void refreshAttentionRequests();
       }
     });
     return () => {
       subscription.remove();
     };
-  }, [active, refreshAttentionRequests, scheduleLoadChats]);
+  }, [active, refreshAttentionRequests, resetPollTimer]);
 
   const handleSelectChat = useCallback(
     (chatId: string) => {

@@ -36,10 +36,12 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
       return;
     }
 
+    // Stale-while-revalidate: show the cached parent immediately (if we have
+    // one) so renamed/deleted parents don't blank useful stale data, but
+    // always revalidate in the background so renames eventually reconcile.
     const cachedParentChat = parentChatCacheRef.current[parentThreadId];
     if (cachedParentChat) {
       setSelectedParentChat(cachedParentChat);
-      return;
     }
 
     let cancelled = false;
@@ -53,7 +55,13 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
         }
       })
       .catch(() => {
-        if (!cancelled) {
+        if (cancelled) {
+          return;
+        }
+        // A failed revalidation (e.g. transient network error) shouldn't blank
+        // out stale-but-useful cached data. Only clear the parent when we had
+        // nothing cached to fall back on.
+        if (!cachedParentChat) {
           setSelectedParentChat(null);
         }
       });
@@ -165,7 +173,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
 
   const saveChatModelPreferences = useCallback(
     (nextPreferences: Record<string, ChatModelPreference>) =>
-      persistenceController.saveModelPreferences(nextPreferences),
+      persistenceController.saveModelPreferences(nextPreferences).catch(() => undefined),
     [persistenceController],
   );
 
@@ -196,11 +204,6 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     [saveBridgeUiSurfaceSnapshots],
   );
 
-  const saveWorkspaceFavorites = useCallback(
-    (paths: string[]) => persistenceController.saveWorkspaceFavorites(paths),
-    [persistenceController],
-  );
-
   return {
     scheduleRunWatchdogExpiry,
     bumpRunWatchdog,
@@ -210,7 +213,6 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     saveChatPlanSnapshots,
     saveBridgeUiSurfaceSnapshots,
     scheduleBridgeUiSurfaceSnapshotsPersist,
-    saveWorkspaceFavorites,
   };
 }
 

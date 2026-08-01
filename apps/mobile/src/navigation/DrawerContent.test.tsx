@@ -13,19 +13,33 @@ import type {
 } from '../api/types';
 import type { HostBridgeWsClient } from '../api/ws';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
-import { apiClientAtom, wsClientAtom } from '../state/bridge/atoms';
 import { selectedChatIdAtom } from '../state/chat/atoms';
 import { currentScreenAtom } from '../state/navigation/atoms';
-import { createTestStore, withAppStore } from '../state/testing';
+import { createBridgeTestStore, withAppStore } from '../state/testing';
 import type { AppStore } from '../state/types';
 import type { WorkspaceChatLimit } from '../appSettings';
+import { createEmptyChatSummaryCache, mergeChatSummaryCache } from '../chatSummaryCache';
+import * as ChatSummaryCache from '../chatSummaryCache';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from './useDrawerChatCollection';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 jest.mock('react-native-gesture-handler', () =>
   jest.requireActual('../testing/gestureHandlerMock'),
 );
+jest.mock('../chatSummaryCache', () => {
+  const actual = jest.requireActual('../chatSummaryCache');
+  return {
+    ...actual,
+    loadChatSummaryCache: jest.fn((profileId: string) =>
+      Promise.resolve(actual.createEmptyChatSummaryCache(profileId)),
+    ),
+    persistChatSummaries: jest.fn().mockResolvedValue(undefined),
+    reconcilePersistedChatSummaries: jest.fn().mockResolvedValue(undefined),
+    deletePersistedChatSummary: jest.fn().mockResolvedValue(undefined),
+  };
+});
 
 interface DrawerProbeProps {
   api: HostBridgeApiClient;
@@ -42,9 +56,7 @@ export function createDrawerStore(
   ws: HostBridgeWsClient,
   options: { selectedChatId?: string | null; workspaceChatLimit?: WorkspaceChatLimit } = {},
 ): AppStore {
-  const store = createTestStore();
-  store.set(apiClientAtom, api);
-  store.set(wsClientAtom, ws);
+  const store = createBridgeTestStore({ api, ws });
   store.set(selectedChatIdAtom, options.selectedChatId ?? null);
   if (options.workspaceChatLimit !== undefined) {
     store.set(workspaceChatLimitAtom, options.workspaceChatLimit);
@@ -199,6 +211,7 @@ function createHarness({
     ? jest.fn().mockRejectedValue(new Error('list failed'))
     : jest.fn().mockResolvedValue(chats);
   const api = {
+    profileId: 'profile-1',
     readBridgeCapabilities: jest.fn().mockResolvedValue({ agents, supportsByAgent: {} }),
     deleteChat: jest.fn().mockResolvedValue(undefined),
     forgetChat: jest.fn(),
@@ -327,8 +340,12 @@ async function exercisePressResponders(root: Queryable): Promise<void> {
 
 describe('DrawerContent render behavior matrix', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-07-20T00:30:00.000Z'));
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockImplementation((profileId: string) =>
+      Promise.resolve(createEmptyChatSummaryCache(profileId)),
+    );
   });
 
   afterEach(() => {
@@ -634,6 +651,9 @@ describe('DrawerContent render behavior matrix', () => {
 
     await act(async () => {
       harness.emitEvent({ method: 'bridge/approval.requested', params: { threadId: 'pending' } });
+      // Event-triggered attention refreshes are debounced to coalesce bursts; advance past the
+      // debounce window so the resulting refresh has a chance to land.
+      jest.advanceTimersByTime(200);
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -643,6 +663,7 @@ describe('DrawerContent render behavior matrix', () => {
 
     await act(async () => {
       harness.emitEvent({ method: 'bridge/approval.resolved', params: { threadId: 'pending' } });
+      jest.advanceTimersByTime(200);
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -727,7 +748,8 @@ describe('DrawerContent render behavior matrix', () => {
     (harness.api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
       new Error('capabilities failed'),
     );
-    const tree = await renderDrawer(harness);
+    const store = createBridgeTestStore({ api: harness.api, ws: harness.ws });
+    const tree = await renderDrawer(harness, { store });
     const root = tree.root as Queryable;
 
     expect(findByLabel(root, 'Custom agent session, custom, Custom Agent, Complete')).toBeDefined();
@@ -832,6 +854,160 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree.unmount());
   });
 
+  it('hydrates persisted summaries on a cold offline drawer and retains them on refresh failure', async () => {
+    const cached = mergeChatSummaryCache(
+      createEmptyChatSummaryCache('profile-1'),
+      [createChat({ id: 'offline', title: 'Available offline', cwd: '/repo/cache' })],
+      '2026-07-19T00:00:00.000Z',
+    );
+    const read = ChatSummaryCache.loadChatSummaryCache as jest.Mock;
+    read.mockResolvedValue(cached);
+    const harness = createHarness({ listFailure: true, streamFailure: true });
+    const store = createDrawerStore(harness.api, harness.ws);
+    const tree = await renderDrawer(harness, { store });
+
+    expect(read).toHaveBeenCalled();
+    expect(hasText(tree.root as Queryable, 'Available offline')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Loading sessions')).toBe(false);
+    expect(harness.api.listChats).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('retains stale summaries for a limited streamed refresh', async () => {
+    const stale = createChat({ id: 'stale', title: 'Stale retained', cwd: '/repo/cache' });
+    const fresh = createChat({
+      id: 'fresh',
+      title: 'Fresh streamed',
+      cwd: '/repo/cache',
+      updatedAt: '2026-07-20T00:29:00.000Z',
+    });
+    const cached = mergeChatSummaryCache(
+      createEmptyChatSummaryCache('profile-1'),
+      [stale],
+      '2026-07-19T00:00:00.000Z',
+    );
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockResolvedValue(cached);
+    const persist = ChatSummaryCache.persistChatSummaries as jest.Mock;
+    const harness = createHarness({ chats: [fresh] });
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      onBatch({ streamId: 'stream', limit: 1, done: true, chats: [fresh] });
+      return { streamId: 'stream', cancel: harness.cancelStream };
+    });
+    const tree = await renderDrawer(harness);
+
+    await act(async () => {
+      jest.advanceTimersByTime(DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS);
+      await Promise.resolve();
+    });
+
+    expect(hasText(tree.root as Queryable, 'Stale retained')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Fresh streamed')).toBe(true);
+    expect(persist).toHaveBeenCalledWith(
+      'profile-1',
+      expect.arrayContaining([fresh]),
+      undefined,
+      expect.any(Number),
+    );
+    act(() => tree.unmount());
+  });
+
+  it('coalesces rapid list batches into one persisted summary update', async () => {
+    const batches = [
+      createChat({ id: 'batch-a', title: 'Batch A' }),
+      createChat({ id: 'batch-b', title: 'Batch B' }),
+      createChat({ id: 'batch-c', title: 'Batch C' }),
+    ];
+    const harness = createHarness();
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      for (const [index, chat] of batches.entries()) {
+        onBatch({
+          streamId: 'stream',
+          limit: index + 1,
+          done: false,
+          chats: [chat],
+        });
+      }
+      return { streamId: 'stream', cancel: harness.cancelStream };
+    });
+    const persist = ChatSummaryCache.persistChatSummaries as jest.Mock;
+    const tree = await renderDrawer(harness);
+
+    expect(persist).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS - 1);
+      await Promise.resolve();
+    });
+    expect(persist).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledWith(
+      'profile-1',
+      expect.arrayContaining(batches.map((chat) => expect.objectContaining({ id: chat.id }))),
+      undefined,
+      expect.any(Number),
+    );
+    act(() => tree.unmount());
+  });
+
+  it('prunes offline summaries after an authoritative completed stream', async () => {
+    const stale = createChat({ id: 'deleted-on-host', title: 'Deleted on host' });
+    const current = createChat({
+      id: 'current',
+      title: 'Current session',
+      updatedAt: '2026-07-20T00:29:00.000Z',
+    });
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockResolvedValue(
+      mergeChatSummaryCache(
+        createEmptyChatSummaryCache('profile-1'),
+        [stale],
+        '2026-07-19T00:00:00.000Z',
+      ),
+    );
+    const reconcile = ChatSummaryCache.reconcilePersistedChatSummaries as jest.Mock;
+    const tree = await renderDrawer(createHarness({ chats: [current] }));
+
+    expect(hasText(tree.root as Queryable, 'Deleted on host')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Current session')).toBe(true);
+    expect(reconcile).toHaveBeenCalledWith('profile-1', [current]);
+    act(() => tree.unmount());
+  });
+
+  it('prunes offline summaries after a complete non-partial deep listing', async () => {
+    const stale = createChat({ id: 'deep-deleted', title: 'Deep deleted on host' });
+    const current = createChat({ id: 'deep-current', title: 'Deep current session' });
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockResolvedValue(
+      mergeChatSummaryCache(createEmptyChatSummaryCache('profile-1'), [stale]),
+    );
+    const harness = createHarness({ chats: [current] });
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      onBatch({ streamId: 'stream', limit: 1, done: true, chats: [current] });
+      return { streamId: 'stream', cancel: harness.cancelStream };
+    });
+    (harness.api.listAllChats as jest.Mock).mockResolvedValue({
+      chats: [current],
+      partial: false,
+      diagnostics: [],
+    });
+    const reconcile = ChatSummaryCache.reconcilePersistedChatSummaries as jest.Mock;
+    const tree = await renderDrawer(harness);
+    expect(hasText(tree.root as Queryable, 'Deep deleted on host')).toBe(true);
+
+    await act(async () => {
+      jest.advanceTimersByTime(2500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hasText(tree.root as Queryable, 'Deep deleted on host')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Deep current session')).toBe(true);
+    expect(reconcile).toHaveBeenCalledWith('profile-1', [current]);
+    act(() => tree.unmount());
+  });
+
   it.each([
     ['full', 20],
     ['fast', 5],
@@ -850,6 +1026,11 @@ describe('DrawerContent render behavior matrix', () => {
           ]
         : null,
     );
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      const chats = [createChat({ id: 'live-tier', title: 'Live tier', cwd: '/repo/tier' })];
+      onBatch({ streamId: 'stream', limit: chats.length, done: true, chats });
+      return { streamId: 'stream', cancel: harness.cancelStream };
+    });
     const tree = await renderDrawer(harness);
     const root = tree.root as Queryable;
 
@@ -1547,8 +1728,12 @@ describe('DrawerContent partial history diagnostics', () => {
 
 describe('DrawerContent session deletion', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-07-20T00:30:00.000Z'));
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockImplementation((profileId: string) =>
+      Promise.resolve(createEmptyChatSummaryCache(profileId)),
+    );
   });
 
   afterEach(() => {
@@ -1576,6 +1761,7 @@ describe('DrawerContent session deletion', () => {
   }
 
   it('removes the session from the list once the delete is confirmed', async () => {
+    const removePersisted = ChatSummaryCache.deletePersistedChatSummary as jest.Mock;
     const harness = createHarness({
       chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
     });
@@ -1588,6 +1774,7 @@ describe('DrawerContent session deletion', () => {
     expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
     expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
     expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    expect(removePersisted).toHaveBeenCalledWith('profile-1', 'a');
     act(() => tree.unmount());
   });
 

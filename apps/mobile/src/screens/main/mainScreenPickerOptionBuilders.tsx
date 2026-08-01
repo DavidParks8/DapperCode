@@ -2,8 +2,6 @@ import { errorAtom } from '../../state/mainScreen/turn';
 import {
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
-  selectedEffortAtom,
-  selectedModelIdAtom,
 } from '../../state/mainScreen/models';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
@@ -23,23 +21,25 @@ export type MainScreenPickerOptionBuildersContext = MainScreenComposerControlAct
 export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptionBuildersContext) {
   const {
     activeAgentId,
+    activeEffort,
     applyAcpConfigOption,
+    effectiveModelId,
+    effortConfig,
     effortPickerDefault,
     effortPickerModel,
     effortPickerOptions,
     modeConfig,
+    modelConfig,
     modelOptions,
     readyAgents,
     selectEffort,
     selectModel,
     selectPendingAgent,
-    selectedModel,
     serverDefaultModel,
+    selectedChatId,
     supportsPlanMode,
   } = context;
   const setError = useSetAtom(errorAtom);
-  const selectedModelId = useAtomValue(selectedModelIdAtom);
-  const selectedEffort = useAtomValue(selectedEffortAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
@@ -125,19 +125,23 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
 
   const modelPickerOptions = useMemo<SelectionSheetOption[]>(
     () => [
-      {
-        key: 'server-default',
-        title: 'Use server default',
-        description: serverDefaultModel
-          ? `Currently ${formatModelOptionLabel(serverDefaultModel)}.`
-          : 'Follow the bridge default model.',
-        icon: 'sparkles-outline',
-        badge: 'Auto',
-        selected: selectedModelId === null || selectedModel === null,
-        onPress: () => {
-          void selectModel(null);
-        },
-      },
+      ...(!selectedChatId || !modelConfig
+        ? [
+            {
+              key: 'server-default',
+              title: 'Use server default',
+              description: serverDefaultModel
+                ? `Currently ${formatModelOptionLabel(serverDefaultModel)}.`
+                : 'Follow the bridge default model.',
+              icon: 'sparkles-outline' as const,
+              badge: 'Auto',
+              selected: !effectiveModelId || effectiveModelId === serverDefaultModel?.id,
+              onPress: () => {
+                void selectModel(null);
+              },
+            },
+          ]
+        : []),
       ...modelOptions.map((model) => ({
         key: model.id,
         title: formatModelOptionLabel(model),
@@ -147,45 +151,57 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         meta: model.defaultReasoningEffort
           ? formatReasoningEffort(model.defaultReasoningEffort)
           : undefined,
-        selected: model.id === selectedModelId,
+        selected: model.id === effectiveModelId,
         onPress: () => {
           void selectModel(model.id);
         },
       })),
     ],
-    [modelOptions, selectModel, selectedModel, selectedModelId, serverDefaultModel],
+    [effectiveModelId, modelConfig, modelOptions, selectModel, selectedChatId, serverDefaultModel],
   );
 
   const effortPickerSheetOptions = useMemo<SelectionSheetOption[]>(
     () => [
-      {
-        key: 'model-default',
-        title: effortPickerDefault
-          ? `Use ${formatReasoningEffort(effortPickerDefault)}`
-          : 'Use model default',
-        description: effortPickerModel
-          ? `Follow ${formatModelOptionLabel(effortPickerModel)}'s default reasoning.`
-          : 'Follow the active model default.',
-        icon: 'sparkles-outline',
-        badge: 'Auto',
-        selected: selectedEffort === null,
-        onPress: () => {
-          void selectEffort(null);
-        },
-      },
+      ...(!selectedChatId || !effortConfig
+        ? [
+            {
+              key: 'model-default',
+              title: effortPickerDefault
+                ? `Use ${formatReasoningEffort(effortPickerDefault)}`
+                : 'Use model default',
+              description: effortPickerModel
+                ? `Follow ${formatModelOptionLabel(effortPickerModel)}'s default reasoning.`
+                : 'Follow the active model default.',
+              icon: 'sparkles-outline' as const,
+              badge: 'Auto',
+              selected: activeEffort === null,
+              onPress: () => {
+                void selectEffort(null);
+              },
+            },
+          ]
+        : []),
       ...effortPickerOptions.map((option) => ({
         key: option.effort,
         title: formatReasoningEffort(option.effort),
         description:
           option.description?.trim() || 'Override the model default for the next response.',
         icon: 'pulse-outline' as const,
-        selected: option.effort === selectedEffort,
+        selected: option.effort === activeEffort,
         onPress: () => {
           void selectEffort(option.effort);
         },
       })),
     ],
-    [effortPickerDefault, effortPickerModel, effortPickerOptions, selectEffort, selectedEffort],
+    [
+      activeEffort,
+      effortConfig,
+      effortPickerDefault,
+      effortPickerModel,
+      effortPickerOptions,
+      selectEffort,
+      selectedChatId,
+    ],
   );
 
   return {

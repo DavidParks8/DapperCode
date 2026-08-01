@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, useWindowDimensions } from 'react-native';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type {
@@ -21,6 +21,8 @@ interface UseGitScreenControllerArgs {
   onChatUpdated?: (chat: Chat) => void;
 }
 
+export const GIT_SCREEN_REFRESH_INTERVAL_MS = 15_000;
+
 export function useGitScreenController({
   api,
   chat,
@@ -38,6 +40,7 @@ export function useGitScreenController({
   const [commitMessage, setCommitMessage] = useState('chore: checkpoint');
   const [workspaceDraft, setWorkspaceDraft] = useState(chat.cwd ?? '');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [savingWorkspace, setSavingWorkspace] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -48,6 +51,10 @@ export function useGitScreenController({
   const [unstagingAll, setUnstagingAll] = useState(false);
   const [bodyScrollEnabled, setBodyScrollEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const hasLoadedRef = useRef(false);
+  const refreshRequestIdRef = useRef(0);
+  const refreshInFlightRef = useRef(false);
 
   const { height: windowHeight } = useWindowDimensions();
 
@@ -61,40 +68,135 @@ export function useGitScreenController({
   }, [chat]);
 
   const workspaceCwd = useMemo(() => activeChat.cwd?.trim() ?? '', [activeChat.cwd]);
-  const requestedCwd = useMemo(() => {
-    const draft = workspaceDraft.trim();
-    if (draft.length > 0) {
-      return draft;
-    }
-    return workspaceCwd.length > 0 ? workspaceCwd : undefined;
-  }, [workspaceCwd, workspaceDraft]);
+  // Git reads and mutations must always target the committed activeChat.cwd, never the
+  // editable workspaceDraft text. The draft only reflects in-progress typing until it is
+  // saved via saveWorkspace(), at which point activeChat.cwd (and thus workspaceCwd) updates.
+  const requestedCwd = useMemo(
+    () => (workspaceCwd.length > 0 ? workspaceCwd : undefined),
+    [workspaceCwd],
+  );
+  const requestedCwdRef = useRef(requestedCwd);
+  requestedCwdRef.current = requestedCwd;
 
   const refresh = useCallback(async () => {
-    try {
+    const requestId = ++refreshRequestIdRef.current;
+    const requestCwd = requestedCwd;
+    const initialLoad = !hasLoadedRef.current;
+    refreshInFlightRef.current = true;
+    if (initialLoad) {
       setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
+    try {
       const [nextStatus, nextDiff, nextHistory, nextBranches] = await Promise.all([
-        api.gitStatus(requestedCwd),
-        api.gitDiff(requestedCwd),
-        api.gitHistory(requestedCwd, 12),
-        api.gitBranches(requestedCwd).catch(() => null),
+        api.gitStatus(requestCwd),
+        api.gitDiff(requestCwd),
+        api.gitHistory(requestCwd, 12),
+        api.gitBranches(requestCwd).catch(() => null),
       ]);
+      if (
+        !mountedRef.current ||
+        requestId !== refreshRequestIdRef.current ||
+        requestCwd !== requestedCwdRef.current
+      ) {
+        return;
+      }
       setStatus(nextStatus);
       setDiff(nextDiff);
       setHistory(nextHistory.commits);
       setBranches(nextBranches?.branches ?? []);
       setBranchDraft(nextBranches?.current ?? nextStatus.branch ?? '');
+      hasLoadedRef.current = true;
       setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      if (
+        mountedRef.current &&
+        requestId === refreshRequestIdRef.current &&
+        requestCwd === requestedCwdRef.current
+      ) {
+        setError((err as Error).message);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === refreshRequestIdRef.current) {
+        refreshInFlightRef.current = false;
+        if (mountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
     }
   }, [api, requestedCwd]);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      refreshRequestIdRef.current += 1;
+      refreshInFlightRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    refreshRequestIdRef.current += 1;
+    hasLoadedRef.current = false;
+    setStatus(null);
+    setDiff(null);
+    setHistory([]);
+    setBranches([]);
+    setRefreshing(false);
     setLoading(true);
     void refresh();
-  }, [refresh]);
+  }, [refresh, requestedCwd]);
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let active = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
+
+    const stop = () => {
+      if (interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const start = () => {
+      if (interval === null) {
+        interval = setInterval(() => {
+          if (!refreshInFlightRef.current) {
+            void refreshRef.current();
+          }
+        }, GIT_SCREEN_REFRESH_INTERVAL_MS);
+      }
+    };
+
+    if (active) {
+      start();
+    }
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const nextActive = nextState === 'active';
+      if (nextActive) {
+        if (!active && !refreshInFlightRef.current) {
+          void refreshRef.current();
+        }
+        start();
+      } else {
+        stop();
+        refreshRequestIdRef.current += 1;
+        refreshInFlightRef.current = false;
+        setRefreshing(false);
+      }
+      active = nextActive;
+    });
+
+    return () => {
+      stop();
+      subscription?.remove();
+    };
+  }, []);
 
   const saveWorkspace = useCallback(async () => {
     const nextWorkspace = workspaceDraft.trim();
@@ -364,6 +466,7 @@ export function useGitScreenController({
     commitMessage,
     workspaceDraft,
     loading,
+    refreshing,
     savingWorkspace,
     committing,
     pushing,

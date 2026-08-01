@@ -30,6 +30,7 @@ export function useMainScreenModeConfigurationSession(
   const {
     activeAgentId,
     activeModelId,
+    effectiveModelId,
     activeServiceTier,
     api,
     chatModelPreferencesRef,
@@ -69,7 +70,10 @@ export function useMainScreenModeConfigurationSession(
           }));
         }
       } catch (err) {
-        if (modelOptionsRequestRef.current === requestId) {
+        // Silent/background refreshes keep serving whatever models are already
+        // cached and must not surface a global error; only explicit/manual
+        // refreshes (e.g. opening the model picker with nothing cached) should.
+        if (modelOptionsRequestRef.current === requestId && !options?.silent) {
           setError((err as Error).message);
         }
       } finally {
@@ -110,7 +114,7 @@ export function useMainScreenModeConfigurationSession(
 
   const openEffortModal = useCallback(
     (modelId?: string | null) => {
-      const resolvedModelId = normalizeModelId(modelId ?? activeModelId);
+      const resolvedModelId = normalizeModelId(modelId ?? effectiveModelId);
       if (!resolvedModelId) {
         setError('Select a model first');
         return;
@@ -120,7 +124,7 @@ export function useMainScreenModeConfigurationSession(
       setEffortModalVisible(true);
       setError(null);
     },
-    [activeModelId],
+    [effectiveModelId],
   );
 
   const closeEffortModal = useCallback(() => {
@@ -158,7 +162,7 @@ export function useMainScreenModeConfigurationSession(
       setEffortModalVisible(false);
       setError(null);
       if (selectedChatId) {
-        rememberChatModelPreference(selectedChatId, activeModelId, effort, activeServiceTier);
+        rememberChatModelPreference(selectedChatId, effectiveModelId, effort, activeServiceTier);
       } else if (activeAgentId) {
         const key = agentModelPreferenceKey(activeAgentId);
         const previous = chatModelPreferencesRef.current[key];
@@ -178,6 +182,7 @@ export function useMainScreenModeConfigurationSession(
     },
     [
       activeModelId,
+      effectiveModelId,
       activeServiceTier,
       activeAgentId,
       applyAcpConfigOption,

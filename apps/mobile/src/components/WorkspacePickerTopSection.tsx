@@ -31,6 +31,7 @@ interface Props {
   currentFolderTitle: string;
   currentFolderPath: string | null;
   error: string | null;
+  refreshError: string | null;
   truncationMessage: string | null;
 }
 
@@ -193,6 +194,11 @@ export function WorkspacePickerTopSection(props: Props) {
           style={styles.errorText}
         >
           {props.error}
+        </Text>
+      ) : null}
+      {props.refreshError ? (
+        <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+          {props.refreshError}
         </Text>
       ) : null}
       {props.truncationMessage ? (

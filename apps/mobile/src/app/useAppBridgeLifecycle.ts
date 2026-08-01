@@ -3,10 +3,15 @@ import { useEffect, useRef } from 'react';
 
 import {
   createEmptyChatSnapshotCache,
+  getChatSnapshotCacheGeneration,
   loadChatSnapshotCache,
   saveChatSnapshotCache,
   updateChatSnapshotCache,
 } from '../chatSnapshotCache';
+import {
+  bindChatSnapshotBackgroundFlush,
+  createChatSnapshotPersistScheduler,
+} from './chatSnapshotPersistLifecycle';
 import { bindAppWebSocketLifecycle } from '../appWebSocketLifecycle';
 import { syncPushRegistration } from '../pushController';
 import { getActiveBridgeProfile } from '../bridgeProfiles';
@@ -20,7 +25,17 @@ import {
   bridgeConnectedAtom,
   wsClientAtom,
 } from '../state/bridge/atoms';
+import {
+  BRIDGE_CAPABILITIES_TTL_MS,
+  revalidateBridgeCapabilitiesAtom,
+} from '../state/bridge/capabilities';
+import { bindBridgeCapabilitiesRevalidation } from '../state/bridge/capabilitiesLifecycle';
 import { currentScreenAtom } from '../state/navigation/atoms';
+import {
+  revalidateWorkspacePickerResourcesAtom,
+  WORKSPACE_RESOURCES_TTL_MS,
+} from '../state/mainScreen/workspaceActions';
+import { bindWorkspaceResourcesRevalidation } from '../state/mainScreen/workspaceLifecycle';
 import {
   APP_PREFETCH_CHAT_LIMIT,
   APP_PREFETCH_DELAY_MS,
@@ -37,7 +52,13 @@ export function useAppBridgeLifecycle(): void {
   const selectedChatId = useAtomValue(selectedChatIdAtom);
   const activeChat = useAtomValue(activeChatAtom);
   const chatSnapshotCache = useAtomValue(chatSnapshotCacheAtom);
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistSchedulerRef = useRef<ReturnType<typeof createChatSnapshotPersistScheduler> | null>(
+    null,
+  );
+  if (!persistSchedulerRef.current) {
+    persistSchedulerRef.current = createChatSnapshotPersistScheduler();
+  }
+  const persistScheduler = persistSchedulerRef.current;
 
   useEffect(() => {
     if (!ws) {
@@ -47,6 +68,33 @@ export function useAppBridgeLifecycle(): void {
 
     return bindAppWebSocketLifecycle(ws);
   }, [store, ws]);
+
+  useEffect(() => {
+    if (!api || !ws || !activeBridgeProfileId) {
+      return;
+    }
+    return bindBridgeCapabilitiesRevalidation(ws, () => {
+      void store.set(revalidateBridgeCapabilitiesAtom, {
+        ttlMs: BRIDGE_CAPABILITIES_TTL_MS,
+      });
+    });
+  }, [activeBridgeProfileId, api, store, ws]);
+
+  useEffect(() => {
+    if (
+      !api ||
+      !ws ||
+      !activeBridgeProfileId ||
+      currentScreen !== 'WorkspacePicker'
+    ) {
+      return;
+    }
+    return bindWorkspaceResourcesRevalidation(ws, () => {
+      void store.set(revalidateWorkspacePickerResourcesAtom, {
+        ttlMs: WORKSPACE_RESOURCES_TTL_MS,
+      });
+    });
+  }, [activeBridgeProfileId, api, currentScreen, store, ws]);
 
   useEffect(() => {
     if (!ws) {
@@ -187,31 +235,40 @@ export function useAppBridgeLifecycle(): void {
     }
   }, [activeBridgeProfileId, api, chatSnapshotCache]);
 
+  // Declared before the debounce-scheduling effect below so its cleanup runs
+  // first on unmount (React runs effect cleanups in declaration order): the
+  // newest pending snapshot is flushed to disk before the debounce effect's
+  // own cleanup (which only cancels, to let a fresher reschedule replace it)
+  // gets a chance to run. This is what guarantees the last transcript update
+  // before backgrounding/unmount is never silently dropped.
+  useEffect(() => {
+    return bindChatSnapshotBackgroundFlush(persistScheduler);
+  }, [persistScheduler]);
+
   useEffect(() => {
     if (!activeBridgeProfileId || !settingsLoaded || chatSnapshotCache === undefined) {
       return;
     }
 
-    if (persistTimerRef.current) {
-      clearTimeout(persistTimerRef.current);
-    }
-    persistTimerRef.current = setTimeout(() => {
-      persistTimerRef.current = null;
+    const generation = getChatSnapshotCacheGeneration(activeBridgeProfileId);
+    persistScheduler.schedule(() => {
       const previous = store.get(chatSnapshotCacheAtom);
       const base =
         previous?.profileId === activeBridgeProfileId
           ? previous
           : createEmptyChatSnapshotCache(activeBridgeProfileId);
       const next = updateChatSnapshotCache(base, selectedChatId, activeChat);
-      void saveChatSnapshotCache(next).catch(() => {});
+      void saveChatSnapshotCache(next, generation).catch(() => {});
       store.set(chatSnapshotCacheAtom, next);
     }, CHAT_SNAPSHOT_PERSIST_DELAY_MS);
 
+    // A dependency change re-runs this effect immediately with the fresher
+    // selectedChatId/activeChat, so canceling here (rather than flushing) is
+    // safe: the reschedule above replaces the canceled write in the same
+    // synchronous pass. Only the background/unmount flush above needs to
+    // guarantee execution.
     return () => {
-      if (persistTimerRef.current) {
-        clearTimeout(persistTimerRef.current);
-        persistTimerRef.current = null;
-      }
+      persistScheduler.cancel();
     };
-  }, [activeBridgeProfileId, activeChat, selectedChatId, settingsLoaded, store]);
+  }, [activeBridgeProfileId, activeChat, persistScheduler, selectedChatId, settingsLoaded, store]);
 }

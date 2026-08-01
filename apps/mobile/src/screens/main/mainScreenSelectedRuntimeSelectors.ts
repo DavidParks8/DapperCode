@@ -8,18 +8,17 @@ import {
   userInputDraftsAtom,
   userInputErrorAtom,
 } from '../../state/mainScreen/turn';
-import {
-  bridgeCapabilitiesAtom,
-  selectedCollaborationModeAtom,
-} from '../../state/mainScreen/models';
+import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
+import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { activityAtom } from '../../state/mainScreen/composer';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import {
   buildUserInputDrafts,
   resolveSnapshotCollaborationMode,
   appendRunEventHistory,
   upsertBridgeUiSurfaceList,
+  mergePersistedPlanSnapshots,
 } from './mainScreenHelpers';
 import type {
   MainScreenThreadRuntimeMutationsContext,
@@ -61,8 +60,7 @@ export function useMainScreenSelectedRuntimeSelectors(
   const setActivePlan = useSetAtom(activePlanAtom);
   const setActiveBridgeUiSurfaces = useSetAtom(activeBridgeUiSurfacesAtom);
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
-  const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
-  const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
+  const { value: bridgeCapabilities } = useBridgeCapabilitiesResource();
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
 
@@ -149,8 +147,18 @@ export function useMainScreenSelectedRuntimeSelectors(
     const load = async () => {
       const snapshots = await persistenceController.loadPlanSnapshots();
       if (cancelled) return;
-      chatPlanSnapshotsRef.current = snapshots;
-      for (const [threadId, plan] of Object.entries(snapshots)) {
+      // A live plan event (including an explicit clear when a turn settles or
+      // starts anew) may already have reached a thread's runtime snapshot
+      // while this persisted load was in flight; that live state is newer and
+      // must win rather than being replaced wholesale by a stale disk
+      // snapshot, mirroring how the bridge UI surface hydration below folds
+      // live entries over what was persisted.
+      const mergedSnapshots = mergePersistedPlanSnapshots(
+        snapshots,
+        threadRuntimeSnapshotsRef.current,
+      );
+      chatPlanSnapshotsRef.current = mergedSnapshots;
+      for (const [threadId, plan] of Object.entries(mergedSnapshots)) {
         upsertThreadRuntimeSnapshot(threadId, () => ({ plan }));
       }
       if (chatIdRef.current) applyThreadRuntimeSnapshot(chatIdRef.current);
@@ -230,28 +238,6 @@ export function useMainScreenSelectedRuntimeSelectors(
   useEffect(() => {
     onChatOpeningStateChange?.(openingChatId);
   }, [onChatOpeningStateChange, openingChatId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBridgeCapabilities = async () => {
-      try {
-        const capabilities = await api.readBridgeCapabilities();
-        if (!cancelled) {
-          setBridgeCapabilities(capabilities);
-        }
-      } catch {
-        if (!cancelled) {
-          setBridgeCapabilities(null);
-        }
-      }
-    };
-
-    void loadBridgeCapabilities();
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
 
   return {
     applyThreadRuntimeSnapshot,

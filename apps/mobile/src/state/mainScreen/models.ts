@@ -1,15 +1,13 @@
 import type {
   AgentId,
-  BridgeCapabilities,
   CollaborationMode,
   ModelOption,
   ReasoningEffort,
   ServiceTier,
 } from '../../api/types';
 import type { SelectedServiceTier } from '../../screens/main/mainScreenHelpers';
+export { bridgeCapabilitiesAtom } from '../bridge/capabilities';
 import { screenAtom } from './registry';
-
-export const bridgeCapabilitiesAtom = screenAtom<BridgeCapabilities | null>(null);
 
 export const modelOptionsByAgentAtom = screenAtom<Record<AgentId, ModelOption[]>>(
   (): Record<AgentId, ModelOption[]> => ({}),

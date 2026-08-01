@@ -10,6 +10,7 @@ export interface WorkspacePickerProps {
   entries: FileSystemEntry[];
   loadingEntries?: boolean;
   error?: string | null;
+  refreshError?: string | null;
   truncationMessage?: string | null;
   onBrowsePath: (path: string | null) => void;
   onSelectPath: (path: string | null) => void;

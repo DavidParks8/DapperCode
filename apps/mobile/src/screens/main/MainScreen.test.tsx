@@ -42,10 +42,13 @@ import { activityAtom } from '../../state/mainScreen/composer';
 import {
   agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
+  favoriteWorkspacePathsAtom,
   relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
+import { toggleWorkspaceFavoriteAtom } from '../../state/mainScreen/workspaceActions';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
+import { refreshBridgeCapabilitiesAtom } from '../../state/bridge/capabilities';
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
@@ -1655,6 +1658,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
   describe('MainScreen controls and modals', () => {
     beforeEach(() => {
       jest.useFakeTimers();
+      (FileSystem.readAsStringAsync as jest.Mock).mockRejectedValue(new Error('missing'));
       (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
         exists: true,
         isDirectory: false,
@@ -1682,6 +1686,43 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       jest.clearAllTimers();
       jest.useRealTimers();
       jest.clearAllMocks();
+    });
+
+    it('does not let stale Main hydration revert a newly saved workspace favorite', async () => {
+      let resolveFavorites: ((raw: string) => void) | null = null;
+      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+        if (path.endsWith('workspace-favorites.json')) {
+          return new Promise<string>((resolve) => {
+            resolveFavorites = resolve;
+          });
+        }
+        return Promise.reject(new Error('missing'));
+      });
+      const { tree, store } = await renderMain();
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+      expect(resolveFavorites).not.toBeNull();
+
+      act(() => {
+        store.set(toggleWorkspaceFavoriteAtom, '/workspace/new');
+      });
+      await act(async () => {
+        await flush();
+      });
+      expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/workspace/new']);
+      expect(FileSystem.writeAsStringAsync).toHaveBeenCalledWith(
+        expect.stringContaining('workspace-favorites.json'),
+        JSON.stringify({ version: 1, paths: ['/workspace/new'] }),
+      );
+
+      await act(async () => {
+        resolveFavorites?.(JSON.stringify({ version: 1, paths: ['/workspace/stale'] }));
+        await flush();
+      });
+      expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/workspace/new']);
+      act(() => tree.unmount());
     });
 
     it('drives ready, multiple, unavailable, mode, default-model, and fast controls', async () => {
@@ -1746,6 +1787,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         api,
         selectedChat: { ...rootChat, messages: [] },
       });
+
       const root = rootOf(tree);
 
       await press(byLabelPrefix(root, 'Agent mode, '));
@@ -1757,6 +1799,26 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => tree.unmount());
     });
 
+    it('retains capability-driven controls when metadata revalidation fails', async () => {
+      const api = createApi();
+      const { tree, store } = await renderMain({ api });
+      const root = rootOf(tree);
+      const modeControlLabel = byLabelPrefix(root, 'Agent mode, ').props
+        .accessibilityLabel as string;
+      expect(byLabel(root, 'Fast mode')).toBeTruthy();
+
+      (api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
+        new Error('capabilities unavailable'),
+      );
+      await act(async () => {
+        await store.set(refreshBridgeCapabilitiesAtom);
+      });
+
+      expect(byLabel(root, modeControlLabel)).toBeTruthy();
+      expect(byLabel(root, 'Fast mode')).toBeTruthy();
+      act(() => tree.unmount());
+    });
+
     it('uses the most recently persisted model for a new chat', async () => {
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
         if (path.endsWith('chat-model-preferences.json')) {
@@ -1764,13 +1826,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
             JSON.stringify({
               version: 1,
               entries: {
-                older: {
-                  modelId: 'opencode/big-pickle',
-                  effort: null,
-                  serviceTier: null,
-                  updatedAt: '2026-07-20T00:00:00.000Z',
-                },
-                newest: {
+                '__agent_model__:codex': {
                   modelId: 'github-copilot/gpt-5.4',
                   effort: 'high',
                   serviceTier: null,
@@ -1807,6 +1863,82 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       expect(byLabel(root, 'Model, GitHub Copilot · GPT-5.4')).toBeTruthy();
       expect(byLabel(root, 'Thinking level, High')).toBeTruthy();
+      act(() => tree.unmount());
+    });
+
+    it('keeps an unavailable remembered model legible without assuming effort support', async () => {
+      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+        if (path.endsWith('chat-model-preferences.json')) {
+          return Promise.resolve(
+            JSON.stringify({
+              version: 1,
+              entries: {
+                '__agent_model__:codex': {
+                  modelId: 'retired/model-x',
+                  effort: 'high',
+                  serviceTier: null,
+                  updatedAt: '2026-07-22T00:00:00.000Z',
+                },
+              },
+            }),
+          );
+        }
+        return Promise.reject(new Error('missing'));
+      });
+      const api = createApi();
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'current/model',
+          displayName: 'Current',
+          isDefault: true,
+          reasoningEffort: [{ effort: 'high' }],
+        },
+      ]);
+
+      const { tree } = await renderMain({ api });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      expect(byLabel(root, 'Model, retired/model-x')).toBeTruthy();
+      await press(byLabel(root, 'Model, retired/model-x'));
+      expect(byLabel(root, 'Use server default').props.accessibilityState).toEqual(
+        expect.objectContaining({ selected: false }),
+      );
+      expect(
+        root.findAll((node) =>
+          String(node.props.accessibilityLabel ?? '').startsWith('Thinking level, '),
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    });
+
+    it('does not send the displayed bridge defaults as explicit new-chat overrides', async () => {
+      const api = createApi();
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'server/default-model',
+          displayName: 'Default Model',
+          isDefault: true,
+          defaultReasoningEffort: 'high',
+          reasoningEffort: [{ effort: 'high' }],
+        },
+      ]);
+      const { tree } = await renderMain({ api });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        textInput(root, 'Message').props.onChangeText('Use bridge defaults');
+        await flush();
+      });
+      await press(byLabel(root, 'Send message'));
+
+      expect((api.createChatIdempotent as jest.Mock).mock.calls[0][0].model).toBeUndefined();
+      expect((api.createChatIdempotent as jest.Mock).mock.calls[0][0].effort).toBeUndefined();
+      expect((api.sendChatMessageIdempotent as jest.Mock).mock.calls[0][1].model).toBeUndefined();
+      expect((api.sendChatMessageIdempotent as jest.Mock).mock.calls[0][1].effort).toBeUndefined();
       act(() => tree.unmount());
     });
 
@@ -1908,12 +2040,17 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       const { tree } = await renderMain({ api, selectedChat: configuredChat });
       const root = rootOf(tree);
 
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5.4')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, High')).toBeTruthy();
       await press(byLabelPrefix(root, 'Model, '));
       await act(async () => {
         await flush();
         await flush();
       });
       expect(byLabel(root, 'Choose a model')).toBeTruthy();
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Use server default'),
+      ).toHaveLength(0);
       expect(byLabel(root, 'GitHub Copilot · GPT-5.4')).toBeTruthy();
       await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(
@@ -1934,6 +2071,81 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       await press(byLabel(root, 'None'));
       expect(api.setThreadConfigOption).toHaveBeenCalledWith(configuredChat.id, 'effort', 'none');
 
+      act(() => tree.unmount());
+    });
+
+    it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
+      let resolvePreferences: ((value: string) => void) | null = null;
+      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+        if (!path.endsWith('chat-model-preferences.json')) {
+          return Promise.reject(new Error('missing'));
+        }
+        return new Promise<string>((resolve) => {
+          resolvePreferences = resolve;
+        });
+      });
+      const configured = (
+        id: string,
+        model: string,
+        modelName: string,
+        effort: 'low' | 'high',
+      ): Chat => ({
+        ...rootChat,
+        id,
+        acpConfig: [
+          {
+            id: 'model',
+            value: model,
+            category: 'model',
+            options: [{ value: model, name: modelName }],
+          },
+          {
+            id: 'effort',
+            value: effort,
+            category: 'thought_level',
+            options: [
+              { value: 'low', name: 'Low' },
+              { value: 'high', name: 'High' },
+            ],
+          },
+        ],
+      });
+      const first = configured('thread-first-config', 'provider/alpha', 'Provider/Alpha', 'low');
+      const second = configured('thread-second-config', 'provider/beta', 'Provider/Beta', 'high');
+      const api = createApi();
+      (api.getChat as jest.Mock).mockImplementation((id: string) =>
+        Promise.resolve(id === second.id ? second : first),
+      );
+      const { tree, store } = await renderMain({ api, selectedChat: first });
+      const root = rootOf(tree);
+
+      expect(byLabel(root, 'Model, Provider · Alpha')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, Low')).toBeTruthy();
+      await act(async () => {
+        store.get(mainScreenCommandsAtom)?.openChat(second.id, second);
+        await flush();
+      });
+      expect(byLabel(root, 'Model, Provider · Beta')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, High')).toBeTruthy();
+
+      await act(async () => {
+        resolvePreferences?.(
+          JSON.stringify({
+            version: 1,
+            entries: {
+              [second.id]: {
+                modelId: 'stale/model',
+                effort: 'low',
+                serviceTier: null,
+                updatedAt: '2026-01-01T00:00:00.000Z',
+              },
+            },
+          }),
+        );
+        await flush();
+      });
+      expect(byLabel(root, 'Model, Provider · Beta')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, High')).toBeTruthy();
       act(() => tree.unmount());
     });
 
@@ -2656,9 +2868,11 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return root.findAll((node) => node.children.includes(text)).length > 0;
   }
 
-  function transcript(tree: ReactTestRenderer): Array<{ message: { content: string } }> {
+  function transcript(
+    tree: ReactTestRenderer,
+  ): Array<{ message: { content: string; role: Chat['messages'][number]['role'] } }> {
     return ((tree.root as Queryable).findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
-      message: { content: string };
+      message: { content: string; role: Chat['messages'][number]['role'] };
     }>;
   }
 
@@ -3454,9 +3668,15 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return result;
   }
 
-  function transcript(root: Queryable): Array<{ message: { id: string; content: string } }> {
+  function transcript(
+    root: Queryable,
+  ): Array<{ message: { id: string; content: string; role: Chat['messages'][number]['role'] } }> {
     return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
-      message: { id: string; content: string };
+      message: {
+        id: string;
+        content: string;
+        role: Chat['messages'][number]['role'];
+      };
     }>;
   }
 
@@ -3733,6 +3953,102 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       expect(stopControlCount).toBe(0);
     });
 
+    it('settles a reasoning-only turn and later reconciles a delayed assistant response', async () => {
+      const prompt = {
+        id: 'reasoning-prompt',
+        role: 'user' as const,
+        content: 'Check the constraints.',
+        createdAt: now,
+      };
+      const reasoning = {
+        id: 'reasoning-only',
+        role: 'reasoning' as const,
+        content: 'Checked the requested constraints.',
+        createdAt: now,
+      };
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-reasoning-only',
+        messages: [prompt, reasoning],
+      };
+      const settled: Chat = {
+        ...running,
+        status: 'complete',
+        activeTurnId: null,
+      };
+      const answered: Chat = {
+        ...settled,
+        lastMessagePreview: 'All constraints are satisfied.',
+        messages: [
+          ...settled.messages,
+          {
+            id: 'delayed-answer',
+            role: 'assistant',
+            content: 'All constraints are satisfied.',
+            createdAt: now,
+          },
+        ],
+      };
+      let latest = running;
+      const api = createApi({ chat: running });
+      api.getChat.mockImplementation(() => Promise.resolve(latest));
+      const harness = await renderMain({ api, chat: running });
+      const root = harness.tree.root as Queryable;
+
+      expect(
+        transcript(root).some(
+          ({ message }) => message.id === reasoning.id && message.role === 'reasoning',
+        ),
+      ).toBe(true);
+      expect(text(root, 'Working')).toBe(true);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).not.toHaveLength(0);
+
+      latest = settled;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        transcript(root).some(
+          ({ message }) => message.id === reasoning.id && message.role === 'reasoning',
+        ),
+      ).toBe(true);
+      expect(text(root, 'Turn completed')).toBe(true);
+      expect(text(root, 'Working')).toBe(false);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      const onChangeText = input(root).props.onChangeText;
+      if (typeof onChangeText !== 'function') throw new Error('Message input cannot be edited');
+      act(() => onChangeText('Follow up after reasoning'));
+      expect(input(root).props.value).toBe('Follow up after reasoning');
+
+      latest = answered;
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        transcript(root).some(
+          ({ message }) => message.id === 'delayed-answer' && message.role === 'assistant',
+        ),
+      ).toBe(true);
+      expect(text(root, 'Working')).toBe(false);
+      expect(
+        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+      ).toHaveLength(0);
+      harness.unmount();
+    });
+
     it('projects queue, approval, input, context, plan, and bridge surfaces from live runtime events', async () => {
       const harness = await renderMain({
         chat: { ...baseChat, status: 'running', activeTurnId: 'turn-runtime' },
@@ -3815,6 +4131,64 @@ jest.mock('../../components/BridgeUiSurface', () => ({
         }),
       );
       expect(text(root, 'Runtime bridge surface')).toBe(true);
+      harness.unmount();
+    });
+
+    it('keeps a live plan update authoritative over a slower persisted hydration', async () => {
+      let resolvePersistedPlanRead: ((value: string) => void) | null = null;
+      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+        // Only the profile-scoped plan snapshot file is held pending here; the
+        // legacy migration path and every other persisted collection must
+        // still resolve immediately (as "missing") so mounting isn't blocked.
+        if (path.includes('dappercode-profile-') && path.endsWith('chat-plan-snapshots.json')) {
+          return new Promise<string>((resolve) => {
+            resolvePersistedPlanRead = resolve;
+          });
+        }
+        return Promise.reject(new Error('missing'));
+      });
+
+      const harness = await renderMain({
+        chat: { ...baseChat, status: 'running', activeTurnId: 'turn-runtime' },
+      });
+      const root = harness.tree.root as Queryable;
+
+      // A live plan event lands for the selected thread while the persisted
+      // plan-snapshot read above is still pending.
+      await harness.emit(
+        runtimeEvent('turn/plan/updated', {
+          explanation: 'Live runtime plan',
+          plan: [{ step: 'Live step', status: 'in_progress' }],
+        }),
+      );
+      expect(text(root, 'Live runtime plan')).toBe(true);
+
+      // The delayed hydration read now resolves with a stale, older plan for
+      // the same thread. It must not clobber the live plan that already
+      // landed first.
+      await act(async () => {
+        resolvePersistedPlanRead?.(
+          JSON.stringify({
+            version: 1,
+            entries: {
+              [baseChat.id]: {
+                threadId: baseChat.id,
+                turnId: 'turn-stale',
+                explanation: 'Stale persisted plan',
+                steps: [{ step: 'Stale step', status: 'pending' }],
+                deltaText: '',
+                updatedAt: '2020-01-01T00:00:00.000Z',
+              },
+            },
+          }),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(text(root, 'Live runtime plan')).toBe(true);
+      expect(text(root, 'Stale persisted plan')).toBe(false);
       harness.unmount();
     });
 

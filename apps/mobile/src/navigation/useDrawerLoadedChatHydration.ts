@@ -30,7 +30,11 @@ export function useDrawerLoadedChatHydration({
       try {
         const listedChatIds = new Set(listedChats.map((chat) => chat.id));
         const loadedIds = await api.listLoadedChatIds();
-        const missingIds = loadedIds.filter((threadId) => !listedChatIds.has(threadId));
+        // Dedupe before filtering so a bridge response with repeated ids (or
+        // overlap across successive hydration calls) doesn't grow the missing
+        // list and redundantly re-fetch/re-apply the same chat summaries.
+        const uniqueLoadedIds = Array.from(new Set(loadedIds));
+        const missingIds = uniqueLoadedIds.filter((threadId) => !listedChatIds.has(threadId));
         if (missingIds.length === 0) {
           updateDiagnostic(false);
           return;

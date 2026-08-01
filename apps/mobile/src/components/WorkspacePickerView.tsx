@@ -37,6 +37,7 @@ export interface WorkspacePickerViewProps {
   currentFolderTitle: string;
   currentFolderPath: string | null;
   error: string | null;
+  refreshError: string | null;
   truncationMessage: string | null;
   footerPath: string | null;
   footerTitle: string;

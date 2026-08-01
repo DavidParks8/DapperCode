@@ -22,7 +22,10 @@ export class AgentThreadsController {
       this.api.listLoadedChatIds().catch(() => []),
     ]);
     const listedIds = new Set(listed.map((chat) => chat.id));
-    const missing = loadedIds.filter((id) => !listedIds.has(id));
+    // Dedupe before filtering so a bridge response with repeated loaded ids
+    // doesn't grow the missing list and redundantly re-fetch the same chats.
+    const uniqueLoadedIds = Array.from(new Set(loadedIds));
+    const missing = uniqueLoadedIds.filter((id) => !listedIds.has(id));
     const loadedOnly = await this.api.getChatSummaries(missing);
     const chats = [...listed, ...loadedOnly];
     const focus = chats.find((chat) => chat.id === focusChatId) ?? fallback ?? null;

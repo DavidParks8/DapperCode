@@ -34,6 +34,14 @@ export function screenAtom<Value>(initialValue: Value | (() => Value)): Primitiv
   return created;
 }
 
+/**
+ * Creates a derived screen atom whose stored dependencies are registered screen atoms.
+ *
+ * Derived atoms hold no state of their own, so resetting their registered dependencies resets the
+ * complete value while preserving Jotai's read/write overloads.
+ */
+export const derivedScreenAtom = atom;
+
 /** Exposed so tests can assert the registry covers every screen atom. */
 export function listScreenAtomEntries(): readonly ScreenAtomEntry[] {
   return entries;

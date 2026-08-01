@@ -8,6 +8,7 @@ import type { BridgeCapabilities, BrowserPreviewSession } from '../../api/types'
 import { createDefaultAppStateData } from '../../appState';
 import { recentBrowserTargetUrlsAtom } from '../../state/appState/settings';
 import { apiClientAtom } from '../../state/bridge/atoms';
+import { refreshBridgeCapabilitiesAtom } from '../../state/bridge/capabilities';
 import { browserScreenCommandsAtom, type BrowserScreenCommands } from '../../state/commands';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
 import { pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
@@ -154,6 +155,7 @@ async function renderBrowser(
     pendingTargetUrl?: string | null;
     handlePendingTarget?: boolean;
     bottomInset?: number;
+    store?: AppStore;
   } = {},
 ): Promise<{
   tree: ReactTestRenderer;
@@ -162,22 +164,25 @@ async function renderBrowser(
   ref: { current: BrowserScreenCommands | null };
 }> {
   const api = options.api ?? createApi();
-  const data = createDefaultAppStateData();
-  data.settings = { ...data.settings, recentBrowserTargetUrls: options.recentTargetUrls ?? [] };
-  data.bridgeProfiles = {
-    activeProfileId: 'profile-1',
-    profiles: [
-      {
-        id: 'profile-1',
-        name: 'Bridge',
-        bridgeUrl: 'http://bridge:3001',
-        bridgeToken: 'token',
-        createdAt: '2026-01-01T00:00:00.000Z',
-        updatedAt: '2026-01-01T00:00:00.000Z',
-      },
-    ],
-  };
-  const store = createTestStore({ data });
+  let store = options.store;
+  if (!store) {
+    const data = createDefaultAppStateData();
+    data.settings = { ...data.settings, recentBrowserTargetUrls: options.recentTargetUrls ?? [] };
+    data.bridgeProfiles = {
+      activeProfileId: 'profile-1',
+      profiles: [
+        {
+          id: 'profile-1',
+          name: 'Bridge',
+          bridgeUrl: 'http://bridge:3001',
+          bridgeToken: 'token',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    };
+    store = createTestStore({ data });
+  }
   store.set(apiClientAtom, api);
   store.set(drawerCommandsAtom, { closeDrawer: jest.fn(), toggleNavigation: jest.fn() });
   store.set(pendingBrowserTargetUrlAtom, options.pendingTargetUrl ?? null);
@@ -238,6 +243,7 @@ describe('BrowserScreen behavior', () => {
         discoveryError: true,
       }),
     });
+
     expect(
       hasText(unavailable.tree.root as Queryable, 'No local web servers responded right now.'),
     ).toBe(true);
@@ -257,6 +263,45 @@ describe('BrowserScreen behavior', () => {
     });
     expect(hasText(failed.tree.root as Queryable, 'capabilities offline')).toBe(true);
     act(() => failed.tree.unmount());
+  });
+
+  it('shows cached target suggestions immediately when Browser is reopened', async () => {
+    const api = createApi();
+    const first = await renderBrowser({ api });
+    expect(hasText(first.tree.root as Queryable, 'Vite')).toBe(true);
+    act(() => first.tree.unmount());
+
+    (api.discoverBrowserPreviewTargets as jest.Mock).mockResolvedValueOnce({
+      scannedAt: '2026-07-31T00:00:00.000Z',
+      suggestions: [{ targetUrl: 'http://127.0.0.1:3000', port: 3000, label: 'Next' }],
+    });
+    const reopened = await renderBrowser({ api, store: first.store });
+    expect(hasText(reopened.tree.root as Queryable, 'Vite')).toBe(true);
+    expect(api.discoverBrowserPreviewTargets).toHaveBeenCalledTimes(1);
+    act(() => reopened.tree.unmount());
+  });
+
+  it('keeps cached preview support disabled when revalidation fails', async () => {
+    const api = createApi({
+      capabilities: {
+        ...capabilities,
+        supports: { ...capabilities.supports, browserPreview: false },
+      },
+    });
+    const result = await renderBrowser({ api });
+    const root = result.tree.root as Queryable;
+    expect(findByLabel(root, 'Open preview').props.disabled).toBe(true);
+
+    (api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
+      new Error('capabilities offline'),
+    );
+    await act(async () => {
+      await result.store.set(refreshBridgeCapabilitiesAtom);
+    });
+
+    expect(findByLabel(root, 'Open preview').props.disabled).toBe(true);
+    expect(hasText(root, 'capabilities offline')).toBe(true);
+    act(() => result.tree.unmount());
   });
 
   it('normalizes, opens, navigates, reloads, and closes a native preview', async () => {

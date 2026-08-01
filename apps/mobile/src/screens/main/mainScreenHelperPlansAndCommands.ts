@@ -106,6 +106,34 @@ export function resolveDisplayedThreadPlan(
   return hasActivePlanningSnapshot ? snapshotPlan : persistedPlan;
 }
 
+export function mergePersistedPlanSnapshots(
+  persistedSnapshots: Record<string, ActivePlanState>,
+  liveSnapshots: Record<string, ThreadRuntimeSnapshot>,
+): Record<string, ActivePlanState> {
+  const merged: Record<string, ActivePlanState> = { ...persistedSnapshots };
+  for (const [threadId, snapshot] of Object.entries(liveSnapshots)) {
+    // A snapshot whose `plan` key was never set means no live plan event has
+    // reached this thread yet, so a persisted value (if any) is still
+    // authoritative.
+    if (!snapshot || !('plan' in snapshot)) {
+      continue;
+    }
+
+    if (snapshot.plan) {
+      // A live update already landed for this thread while the persisted
+      // snapshots were still loading from disk; it is newer than anything on
+      // disk and must win.
+      merged[threadId] = snapshot.plan;
+    } else {
+      // The plan was explicitly cleared/settled live (for example when a new
+      // turn starts or a plan is implemented); don't resurrect a stale
+      // persisted snapshot for it.
+      delete merged[threadId];
+    }
+  }
+  return merged;
+}
+
 export function toPersistedActivePlanState(
   plan: Chat['latestPlan'],
   fallbackUpdatedAt: string | null | undefined,

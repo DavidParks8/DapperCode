@@ -141,12 +141,15 @@ export function useMainScreenComposerControlActions(
   );
 
   useEffect(() => {
+    // Connection-driven refreshes are background/automatic, not an explicit
+    // user action, so failures should stay silent and keep serving whatever
+    // models are already cached instead of surfacing a global error.
     if (ws.isConnected) {
-      void refreshModelOptions();
+      void refreshModelOptions({ silent: true });
     }
     return ws.onStatus((connected) => {
       if (connected) {
-        void refreshModelOptions();
+        void refreshModelOptions({ silent: true });
       }
     });
   }, [refreshModelOptions, ws]);

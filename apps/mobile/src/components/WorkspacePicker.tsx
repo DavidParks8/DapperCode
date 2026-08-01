@@ -17,6 +17,7 @@ export function WorkspacePicker({
   entries,
   loadingEntries = false,
   error = null,
+  refreshError = null,
   truncationMessage = null,
   onBrowsePath,
   onSelectPath,
@@ -73,6 +74,7 @@ export function WorkspacePicker({
   const currentFolderTitle = currentFolderPath ? toPathBasename(currentFolderPath) : 'Loading';
   const screenFocusRef = useModalAccessibilityFocus(true);
   useAccessibilityAnnouncement(error ?? truncationMessage);
+  useAccessibilityAnnouncement(refreshError);
   useAccessibilityAnnouncement(loadingEntries ? `Loading folders in ${currentFolderTitle}` : null);
 
   const handleBrowsePath = (path: string | null) => {
@@ -107,6 +109,7 @@ export function WorkspacePicker({
       currentFolderTitle={currentFolderTitle}
       currentFolderPath={currentFolderPath}
       error={error}
+      refreshError={refreshError}
       truncationMessage={truncationMessage}
       footerPath={footerPath}
       footerTitle={footerTitle}

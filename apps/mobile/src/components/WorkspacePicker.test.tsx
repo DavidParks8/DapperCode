@@ -168,6 +168,7 @@ describe('WorkspacePicker', () => {
           entries: [],
           loadingEntries: true,
           error: 'Bridge unavailable',
+          refreshError: "Recent workspaces couldn't be refreshed. You can keep browsing folders.",
           truncationMessage: 'Showing the first 100 folders.',
           actionLabel: 'Clone here',
           onActionPress,
@@ -177,6 +178,9 @@ describe('WorkspacePicker', () => {
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('Bridge unavailable');
+    expect(flattenTreeText(root)).toContain(
+      "Recent workspaces couldn't be refreshed. You can keep browsing folders.",
+    );
     expect(flattenTreeText(root)).toContain('Showing the first 100 folders.');
     expect(
       root.findAll((node) => node.props.accessibilityLabel === 'Loading folders...').length,

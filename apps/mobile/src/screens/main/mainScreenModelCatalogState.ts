@@ -9,11 +9,13 @@ import {
 } from '../../state/mainScreen/models';
 import { activityAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { CollaborationMode } from '../../api/types';
 import { selectAgentId } from '../../agents';
 import { formatModelOptionLabel } from '../../modelOptions';
 import {
+  normalizeModelId,
+  normalizeReasoningEffort,
   normalizeServiceTier,
   toSelectedServiceTier,
   resolveSelectedServiceTier,
@@ -33,7 +35,9 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const {
     chatModelPreferencesLoaded,
     chatModelPreferencesRef,
+    effortConfig,
     modeConfig,
+    modelConfig,
     modelOptions,
     pendingAgentId,
     preferredAgentId,
@@ -59,6 +63,8 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const activity = useAtomValue(activityAtom);
   const setActivity = useSetAtom(activityAtom);
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
+  const selectionChatIdRef = useRef(selectedChatId);
+  const selectionBelongsToCurrentChat = selectionChatIdRef.current === selectedChatId;
 
   useEffect(() => {
     if (selectedChatId) {
@@ -81,10 +87,17 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     }
 
     const preference = chatModelPreferencesRef.current[chatId];
-    setSelectedModelId(preference?.modelId ?? null);
-    setSelectedEffort(preference?.effort ?? null);
     setSelectedServiceTier(toSelectedServiceTier(preference?.serviceTier ?? null));
   }, [chatModelPreferencesLoaded, selectedChatId]);
+
+  useEffect(() => {
+    if (selectionChatIdRef.current === selectedChatId) {
+      return;
+    }
+    selectionChatIdRef.current = selectedChatId;
+    setSelectedModelId(null);
+    setSelectedEffort(null);
+  }, [selectedChatId]);
 
   useEffect(() => {
     if (selectedChatId) {
@@ -105,25 +118,30 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     selectedChatId,
   ]);
 
+  const authoritativeModelId = selectedChatId ? normalizeModelId(modelConfig?.value) : null;
+  const authoritativeEffort = selectedChatId ? normalizeReasoningEffort(effortConfig?.value) : null;
+  const localSelectedModelId = selectionBelongsToCurrentChat ? selectedModelId : null;
+  const localSelectedEffort = selectionBelongsToCurrentChat ? selectedEffort : null;
+  const requestedModelId = selectedChatId
+    ? (authoritativeModelId ?? localSelectedModelId)
+    : (localSelectedModelId ?? preferredDefaultModelId);
   const serverDefaultModel = modelOptions.find((model) => model.isDefault) ?? null;
   const serverDefaultModelId = serverDefaultModel?.id ?? null;
-  const selectedModel = selectedModelId
-    ? (modelOptions.find((model) => model.id === selectedModelId) ?? null)
+  const selectedModel = requestedModelId
+    ? (modelOptions.find((model) => model.id === requestedModelId) ?? null)
     : null;
   const preferredDefaultModel =
     !selectedChatId && preferredDefaultModelId
       ? (modelOptions.find((model) => model.id === preferredDefaultModelId) ?? null)
       : null;
-  const activeModel = selectedModel ?? preferredDefaultModel ?? serverDefaultModel ?? null;
-  const unresolvedDefaultModelId =
-    !selectedChatId && modelOptions.length === 0
-      ? (selectedModelId ?? preferredDefaultModelId)
-      : null;
-  const activeModelId =
-    selectedModel?.id ??
-    preferredDefaultModel?.id ??
-    unresolvedDefaultModelId ??
-    serverDefaultModelId;
+  const activeModel =
+    selectedModel ??
+    (requestedModelId ? null : (preferredDefaultModel ?? serverDefaultModel)) ??
+    null;
+  const unresolvedDefaultModelId = requestedModelId && !activeModel ? requestedModelId : null;
+  // Defaults are effective display values, not explicit turn overrides.
+  const activeModelId = requestedModelId;
+  const effectiveModelId = requestedModelId ?? serverDefaultModelId;
   const effortPickerModel = effortPickerModelId
     ? (modelOptions.find((model) => model.id === effortPickerModelId) ?? null)
     : activeModel;
@@ -131,7 +149,8 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const effortPickerDefault = effortPickerModel?.defaultReasoningEffort ?? null;
   const activeModelEffortOptions = activeModel?.reasoningEffort ?? [];
   const activeModelDefaultEffort = activeModel?.defaultReasoningEffort ?? null;
-  const requestedEffort = selectedEffort ?? (!selectedChatId ? preferredDefaultEffort : null);
+  const requestedEffort =
+    authoritativeEffort ?? localSelectedEffort ?? (!selectedChatId ? preferredDefaultEffort : null);
   const appliedServiceTierForSelectedChat = toSelectedServiceTier(
     selectedChatId
       ? normalizeServiceTier(chatModelPreferencesRef.current[selectedChatId]?.serviceTier ?? null)
@@ -141,26 +160,21 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     ? resolveSelectedServiceTier(selectedServiceTier, selectedChatId ? null : defaultServiceTier)
     : null;
   const fastModeEnabled = activeServiceTier === 'fast';
-  const supportsSelectedEffort =
+  const supportsSelectedEffort = Boolean(
     requestedEffort &&
-    (!activeModel ||
-      activeModelEffortOptions.length === 0 ||
-      !selectedModelId ||
-      activeModelEffortOptions.some((option) => option.effort === requestedEffort));
-  const activeEffort = supportsSelectedEffort ? requestedEffort : activeModelDefaultEffort;
-  const activeModelLabel = selectedModel
-    ? formatModelOptionLabel(selectedModel)
-    : activeModel
-      ? `Default (${formatModelOptionLabel(activeModel)})`
-      : 'Default model';
-  const activeEffortLabel =
-    requestedEffort && activeEffort
-      ? formatReasoningEffort(activeEffort)
-      : activeModelDefaultEffort
-        ? `Default (${formatReasoningEffort(activeModelDefaultEffort)})`
-        : activeEffort
-          ? formatReasoningEffort(activeEffort)
-          : 'Model default';
+    (authoritativeEffort ||
+      activeModelEffortOptions.some((option) => option.effort === requestedEffort)),
+  );
+  const activeEffort = supportsSelectedEffort ? requestedEffort : null;
+  const effectiveEffort = activeEffort ?? activeModelDefaultEffort;
+  const activeModelLabel = activeModel
+    ? formatModelOptionLabel(activeModel)
+    : effectiveModelId
+      ? effectiveModelId
+      : 'Server default model';
+  const activeEffortLabel = effectiveEffort
+    ? formatReasoningEffort(effectiveEffort)
+    : 'Model default';
   const collaborationModeLabel =
     modeConfig?.options?.find((option) => option.value === modeConfig.value)?.name ??
     modeConfig?.value ??
@@ -187,11 +201,11 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   }, [activity.tone]);
 
   useEffect(() => {
-    if (!selectedEffort) {
+    if (!localSelectedEffort) {
       return;
     }
 
-    if (!selectedModelId) {
+    if (!localSelectedModelId) {
       return;
     }
 
@@ -204,11 +218,13 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
       return;
     }
 
-    const supportsSelectedEffort = effortOptions.some((option) => option.effort === selectedEffort);
+    const supportsSelectedEffort = effortOptions.some(
+      (option) => option.effort === localSelectedEffort,
+    );
     if (!supportsSelectedEffort) {
       setSelectedEffort(null);
     }
-  }, [activeModel, selectedEffort, selectedModelId]);
+  }, [activeModel, localSelectedEffort, localSelectedModelId]);
 
   return {
     serverDefaultModel,
@@ -218,6 +234,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     activeModel,
     unresolvedDefaultModelId,
     activeModelId,
+    effectiveModelId,
     effortPickerModel,
     effortPickerOptions,
     effortPickerDefault,
@@ -229,6 +246,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     fastModeEnabled,
     supportsSelectedEffort,
     activeEffort,
+    effectiveEffort,
     activeModelLabel,
     activeEffortLabel,
     collaborationModeLabel,

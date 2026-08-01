@@ -3,7 +3,6 @@ import type { AcpConfigOption, Chat, ChatMessage, ChatSummary, ModelOption } fro
 import {
   countUserMessages,
   hasRecentUnansweredUserTurn,
-  normalizeModelId,
   normalizeReasoningEffort,
 } from './mainScreenHelpers';
 
@@ -225,7 +224,6 @@ export function modelOptionsFromAcpConfig(config: AcpConfigOption[]): ModelOptio
   if (!model?.options?.length) {
     return EMPTY_MODEL_OPTIONS;
   }
-  const selectedId = normalizeModelId(model.value);
   const reasoningEffort = (effort?.options ?? [])
     .map((option) => {
       const normalized = normalizeReasoningEffort(option.value);
@@ -246,7 +244,6 @@ export function modelOptionsFromAcpConfig(config: AcpConfigOption[]): ModelOptio
       description: option.description,
       providerId: modelParts.length > 0 ? providerId : undefined,
       providerName: modelParts.length > 0 ? option.name.split('/')[0] : undefined,
-      isDefault: option.value === selectedId,
       defaultReasoningEffort: defaultReasoningEffort ?? undefined,
       reasoningEffort: reasoningEffort.length > 0 ? reasoningEffort : undefined,
     } satisfies ModelOption;

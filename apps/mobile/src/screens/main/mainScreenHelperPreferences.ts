@@ -19,17 +19,7 @@ export function lastUsedModelPreference(
 ): ChatModelPreference | null {
   const normalizedAgentId = agentId?.trim() ?? '';
   if (!normalizedAgentId) return null;
-  const explicit = preferences[agentModelPreferenceKey(normalizedAgentId)];
-  if (explicit) return explicit;
-  return (
-    Object.entries(preferences)
-      .filter(
-        ([key, preference]) =>
-          !key.startsWith(AGENT_MODEL_PREFERENCE_PREFIX) && Boolean(preference.modelId),
-      )
-      .map(([, preference]) => preference)
-      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0] ?? null
-  );
+  return preferences[agentModelPreferenceKey(normalizedAgentId)] ?? null;
 }
 
 export function withLastUsedModelPreference(

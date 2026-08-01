@@ -913,10 +913,7 @@ describe('mainScreenHelpers branch behavior', () => {
         updatedAt: '2026-07-23T00:00:00.000Z',
       },
     };
-    expect(lastUsedModelPreference(preferences, 'opencode')).toMatchObject({
-      modelId: 'new',
-      effort: 'high',
-    });
+    expect(lastUsedModelPreference(preferences, 'opencode')).toBeNull();
 
     const updated = withLastUsedModelPreference(preferences, 'opencode', {
       modelId: 'gpt-5.4',
@@ -1025,6 +1022,52 @@ describe('mainScreenHelpers branch behavior', () => {
       deltaText: '',
       updatedAt: new Date(0).toISOString(),
     });
+  });
+
+  it('merges persisted plan snapshots without clobbering newer live plan state', () => {
+    // No live snapshot exists for this thread yet, so the persisted value applies.
+    expect(
+      helpers.mergePersistedPlanSnapshots({ 'thread-1': plan }, {}),
+    ).toEqual({ 'thread-1': plan });
+
+    // A live plan event landed for this thread before the persisted read
+    // resolved (its `plan` key is set); that live plan must win over the
+    // stale persisted one instead of being replaced wholesale.
+    const livePlan = { ...plan, turnId: 'turn-2', explanation: 'Live update' };
+    expect(
+      helpers.mergePersistedPlanSnapshots(
+        { 'thread-1': plan },
+        { 'thread-1': { updatedAtMs: 2, plan: livePlan } },
+      ),
+    ).toEqual({ 'thread-1': livePlan });
+
+    // A live event explicitly cleared/settled the plan (e.g. a new turn
+    // started or the plan finished); the stale persisted plan must not be
+    // resurrected.
+    expect(
+      helpers.mergePersistedPlanSnapshots(
+        { 'thread-1': plan },
+        { 'thread-1': { updatedAtMs: 2, plan: null } },
+      ),
+    ).toEqual({});
+
+    // A live snapshot exists for the thread but has never touched `plan`
+    // (e.g. only streaming text arrived); the persisted plan still applies.
+    expect(
+      helpers.mergePersistedPlanSnapshots(
+        { 'thread-1': plan },
+        { 'thread-1': { updatedAtMs: 2, streamingText: 'partial' } },
+      ),
+    ).toEqual({ 'thread-1': plan });
+
+    // Unrelated threads are untouched by either side.
+    const otherPlan = { ...plan, threadId: 'thread-2', turnId: 'turn-other' };
+    expect(
+      helpers.mergePersistedPlanSnapshots(
+        { 'thread-1': plan },
+        { 'thread-2': { updatedAtMs: 2, plan: otherPlan } },
+      ),
+    ).toEqual({ 'thread-1': plan, 'thread-2': otherPlan });
   });
 
   it('resolves plan implementation prompts and statuses', () => {

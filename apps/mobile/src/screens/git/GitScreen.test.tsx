@@ -1,4 +1,4 @@
-import { ScrollView, TextInput } from 'react-native';
+import { AppState, ScrollView, TextInput, type AppStateStatus } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -6,6 +6,7 @@ import type { HostBridgeApiClient } from '../../api/client';
 import type { Chat, GitStatusResponse } from '../../api/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { GitScreen } from './GitScreen';
+import { GIT_SCREEN_REFRESH_INTERVAL_MS } from './gitScreenController';
 import { apiClientAtom } from '../../state/bridge/atoms';
 import {
   chatTransitionChatIdAtom,
@@ -158,6 +159,16 @@ function createApi(status: GitStatusResponse | Error = dirtyStatus): HostBridgeA
   return methods as unknown as HostBridgeApiClient;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function hasText(root: Queryable, text: string): boolean {
   return root.findAll((node) => node.children.map(String).join('').includes(text)).length > 0;
 }
@@ -231,6 +242,7 @@ describe('GitScreen behavior', () => {
   afterEach(() => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   it.each([
@@ -388,6 +400,220 @@ describe('GitScreen behavior', () => {
     await press(rawRoot, 'Publish branch');
     expect(rawApi.gitPush).toHaveBeenCalled();
     act(() => rawTree.unmount());
+  });
+
+  it('refreshes external Git changes on the visible-screen interval', async () => {
+    const api = createApi();
+    (api.gitStatus as jest.Mock).mockResolvedValueOnce(dirtyStatus).mockResolvedValue(cleanStatus);
+    (api.gitDiff as jest.Mock).mockResolvedValueOnce({
+      diff: unifiedDiff,
+      cwd: '/workspace',
+      truncated: false,
+      originalBytes: 1024,
+      returnedBytes: 1024,
+      maxBytes: 1024,
+    });
+    (api.gitDiff as jest.Mock).mockResolvedValue({
+      diff: '',
+      cwd: '/workspace',
+      truncated: false,
+      originalBytes: 0,
+      returnedBytes: 0,
+      maxBytes: 1024,
+    });
+    (api.gitHistory as jest.Mock).mockResolvedValueOnce({
+      commits: [
+        {
+          hash: 'before',
+          shortHash: 'before',
+          subject: 'Before external change',
+          authorName: 'Developer',
+          authoredAt: '2026-07-20T00:00:00.000Z',
+          refNames: [],
+          isHead: true,
+        },
+      ],
+    });
+    (api.gitHistory as jest.Mock).mockResolvedValue({ commits: [] });
+
+    const tree = await renderGit(api);
+    expect(hasText(tree.root as Queryable, 'Ready to commit')).toBe(true);
+
+    await act(async () => {
+      jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hasText(tree.root as Queryable, 'Clean')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Before external change')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('retains visible repository data and marks a manual refresh as busy', async () => {
+    const api = createApi();
+    const nextStatus = deferred<GitStatusResponse>();
+    (api.gitStatus as jest.Mock).mockImplementationOnce(() => Promise.resolve(dirtyStatus));
+
+    const tree = await renderGit(api);
+    (api.gitStatus as jest.Mock).mockImplementationOnce(() => nextStatus.promise);
+    const root = tree.root as Queryable;
+
+    await act(async () => {
+      (findByLabel(root, 'Refresh Git status').props.onPress as () => void)();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.gitStatus).toHaveBeenCalledTimes(2);
+    expect(hasText(root, 'Ready to commit')).toBe(true);
+    expect(hasText(root, 'Test commit')).toBe(true);
+    expect(hasText(root, 'staged.ts')).toBe(true);
+    expect(hasText(root, 'feature/coverage')).toBe(true);
+    expect(findByLabel(root, 'Refresh Git status').props.accessibilityState).toEqual(
+      expect.objectContaining({ busy: true, disabled: true }),
+    );
+
+    await act(async () => {
+      nextStatus.resolve(cleanStatus);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(hasText(root, 'Clean')).toBe(true);
+    expect(api.gitStatus).toHaveBeenCalledTimes(2);
+    act(() => tree.unmount());
+  });
+
+  it('does not re-read or clear visible data while the workspace input is typed but not saved', async () => {
+    const api = createApi();
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+    const initialStatusCalls = (api.gitStatus as jest.Mock).mock.calls.length;
+
+    act(() => {
+      findByLabel(root, 'Git workspace path').props.onChangeText('/typed-not-saved');
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Typing an intermediate, uncommitted path must not trigger new git reads...
+    expect(api.gitStatus).toHaveBeenCalledTimes(initialStatusCalls);
+    expect(api.gitStatus).not.toHaveBeenCalledWith('/typed-not-saved');
+    // ...and must not clear the previously loaded, still-usable repository state.
+    expect(hasText(root, 'Ready to commit')).toBe(true);
+    expect(hasText(root, 'staged.ts')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('ignores an older refresh that finishes after the committed workspace changes', async () => {
+    const api = createApi();
+    const staleStatus = deferred<GitStatusResponse>();
+    const staleDiff = deferred<Awaited<ReturnType<HostBridgeApiClient['gitDiff']>>>();
+    const staleHistory = deferred<Awaited<ReturnType<HostBridgeApiClient['gitHistory']>>>();
+    const staleBranches = deferred<Awaited<ReturnType<HostBridgeApiClient['gitBranches']>>>();
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+    (api.gitStatus as jest.Mock)
+      .mockImplementationOnce(() => staleStatus.promise)
+      .mockResolvedValueOnce(cleanStatus);
+    (api.gitDiff as jest.Mock)
+      .mockImplementationOnce(() => staleDiff.promise)
+      .mockResolvedValueOnce({
+        diff: '',
+        cwd: '/next',
+        truncated: false,
+        originalBytes: 0,
+        returnedBytes: 0,
+        maxBytes: 1024,
+      });
+    (api.gitHistory as jest.Mock)
+      .mockImplementationOnce(() => staleHistory.promise)
+      .mockResolvedValueOnce({ commits: [] });
+    (api.gitBranches as jest.Mock)
+      .mockImplementationOnce(() => staleBranches.promise)
+      .mockResolvedValueOnce({
+        current: 'main',
+        branches: [{ name: 'main', remote: false, current: true }],
+      });
+
+    act(() => {
+      (findByLabel(root, 'Refresh Git status').props.onPress as () => void)();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // The stale refresh (still targeting the committed '/workspace' cwd) is in flight.
+    expect(api.gitStatus).toHaveBeenLastCalledWith('/workspace');
+
+    const workspace = findByLabel(root, 'Git workspace path');
+    act(() => {
+      workspace.props.onChangeText('/next');
+    });
+    await act(async () => {
+      workspace.props.onBlur();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next');
+    // Once the workspace is actually committed, reads target the new cwd.
+    expect(api.gitStatus).toHaveBeenLastCalledWith('/next');
+    expect(hasText(root, 'Clean')).toBe(true);
+
+    await act(async () => {
+      staleStatus.resolve(dirtyStatus);
+      staleDiff.resolve({
+        diff: unifiedDiff,
+        cwd: '/workspace',
+        truncated: false,
+        originalBytes: 1024,
+        returnedBytes: 1024,
+        maxBytes: 1024,
+      });
+      staleHistory.resolve({ commits: [] });
+      staleBranches.resolve({ current: 'feature/coverage', branches: [] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(hasText(root, 'Clean')).toBe(true);
+    expect(hasText(root, 'Ready to commit')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('pauses scheduled refreshes while inactive and removes the lifecycle on unmount', async () => {
+    let appStateListener: ((state: AppStateStatus) => void) | undefined;
+    const remove = jest.fn();
+    const addEventListener = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockImplementation((_type, listener) => {
+        appStateListener = listener;
+        return { remove };
+      });
+    const api = createApi();
+    const tree = await renderGit(api);
+    expect(api.gitStatus).toHaveBeenCalledTimes(1);
+
+    act(() => appStateListener?.('background'));
+    await act(async () => {
+      jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS * 2);
+      await Promise.resolve();
+    });
+    expect(api.gitStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      appStateListener?.('active');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.gitStatus).toHaveBeenCalledTimes(2);
+
+    act(() => tree.unmount());
+    jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS * 2);
+    expect(api.gitStatus).toHaveBeenCalledTimes(2);
+    expect(remove).toHaveBeenCalledTimes(1);
+    addEventListener.mockRestore();
   });
 
   it.each([

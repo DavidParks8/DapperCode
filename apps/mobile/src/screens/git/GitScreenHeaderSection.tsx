@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
@@ -42,22 +42,30 @@ export function GitScreenHeaderSection({
         style={({ pressed }) => [
           styles.refreshBtn,
           pressed && styles.refreshBtnPressed,
-          controller.loading && styles.refreshBtnDisabled,
+          (controller.loading || controller.refreshing) && styles.refreshBtnDisabled,
         ]}
-        disabled={controller.loading}
+        disabled={controller.loading || controller.refreshing}
         accessibilityRole="button"
         accessibilityLabel="Refresh Git status"
         accessibilityState={controlAccessibilityState({
-          disabled: controller.loading,
-          busy: controller.loading,
+          disabled: controller.loading || controller.refreshing,
+          busy: controller.loading || controller.refreshing,
         })}
       >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="refresh"
-          size={16}
-          color={theme.colors.textMuted}
-        />
+        {controller.refreshing ? (
+          <ActivityIndicator
+            {...decorativeAccessibilityProps}
+            size="small"
+            color={theme.colors.textMuted}
+          />
+        ) : (
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="refresh"
+            size={16}
+            color={theme.colors.textMuted}
+          />
+        )}
       </Pressable>
     </View>
   );

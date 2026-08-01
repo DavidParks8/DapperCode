@@ -30,6 +30,7 @@ export interface DrawerChatLoadingState {
   retryDeepChatListRef: RefObject<() => Promise<void>>;
   cancelChatListStream: () => void;
   scheduleLoadChats: (delay?: number, forceRefresh?: boolean) => void;
+  resetPollTimer: (delay?: number, forceRefresh?: boolean) => void;
   setRunIndicatorsByThread: Dispatch<SetStateAction<DrawerRunIndicatorMap>>;
 }
 

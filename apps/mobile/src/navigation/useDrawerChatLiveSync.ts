@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { HostBridgeWsClient } from '../api/ws';
 import {
   DRAWER_EVENT_REFRESH_DEBOUNCE_MS,
@@ -23,6 +23,17 @@ interface DrawerChatLiveSyncOptions {
   wsConnected: boolean;
 }
 
+export interface DrawerChatLiveSyncControls {
+  /**
+   * Restarts the periodic chat-list poll timer so its next tick lands `delay` ms from now instead
+   * of whenever it was already going to fire, and schedules an expedited load through the same
+   * `scheduleLoadChats` debounce the timer itself uses. Callers (e.g. an AppState foreground
+   * handler) should call this instead of issuing their own fetch, so a foreground resume never
+   * races the poll timer into a second, competing request right on top of a WebSocket resume.
+   */
+  resetPollTimer: (delay?: number, forceRefresh?: boolean) => void;
+}
+
 export function useDrawerChatLiveSync({
   active,
   onThreadDeleted,
@@ -31,7 +42,7 @@ export function useDrawerChatLiveSync({
   setWsConnected,
   ws,
   wsConnected,
-}: DrawerChatLiveSyncOptions): void {
+}: DrawerChatLiveSyncOptions): DrawerChatLiveSyncControls {
   useEffect(() => {
     return ws.onEvent((event) => {
       if (event.method === 'bridge/events/snapshotRequired') {
@@ -68,16 +79,56 @@ export function useDrawerChatLiveSync({
     return () => clearInterval(timer);
   }, [setRunIndicators]);
 
+  const wsConnectedRef = useRef(wsConnected);
+  useEffect(() => {
+    wsConnectedRef.current = wsConnected;
+  }, [wsConnected]);
+
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPollTimer = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // A recursive setTimeout (rather than setInterval) so an external reset can cancel exactly the
+  // pending tick and requeue a fresh one, without leaving a second timer running alongside it.
+  const schedulePoll = useCallback(
+    (delay: number) => {
+      clearPollTimer();
+      pollTimerRef.current = setTimeout(() => {
+        pollTimerRef.current = null;
+        scheduleLoadChats();
+        schedulePoll(
+          wsConnectedRef.current ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
+        );
+      }, delay);
+    },
+    [clearPollTimer, scheduleLoadChats],
+  );
+
   useEffect(() => {
     if (!active) {
+      clearPollTimer();
       return;
     }
-    const timer = setInterval(
-      () => {
-        scheduleLoadChats();
-      },
-      wsConnected ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
-    );
-    return () => clearInterval(timer);
-  }, [active, scheduleLoadChats, wsConnected]);
+    schedulePoll(wsConnected ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS);
+    return clearPollTimer;
+  }, [active, clearPollTimer, schedulePoll, wsConnected]);
+
+  const resetPollTimer = useCallback(
+    (delay: number = DRAWER_EVENT_REFRESH_DEBOUNCE_MS, forceRefresh = true) => {
+      if (!active) {
+        return;
+      }
+      scheduleLoadChats(delay, forceRefresh);
+      schedulePoll(
+        wsConnectedRef.current ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
+      );
+    },
+    [active, scheduleLoadChats, schedulePoll],
+  );
+
+  return { resetPollTimer };
 }

@@ -15,7 +15,6 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
     pendingTargetUrl,
     onPendingTargetHandled,
     loadBrowserCapabilities,
-    loadSuggestions,
     openPreview,
     sessionLifecycle,
     previewRequestIdRef,
@@ -26,12 +25,11 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
 
   useEffect(() => {
     void loadBrowserCapabilities();
-    void loadSuggestions();
     return () => {
       previewRequestIdRef.current += 1;
       sessionLifecycle.dispose();
     };
-  }, [loadBrowserCapabilities, loadSuggestions, previewRequestIdRef, sessionLifecycle]);
+  }, [loadBrowserCapabilities, previewRequestIdRef, sessionLifecycle]);
 
   useEffect(() => {
     if (!pendingTargetUrl) {

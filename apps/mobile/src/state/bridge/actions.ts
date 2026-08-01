@@ -8,6 +8,7 @@ import {
   loadChatSnapshotCache,
   type ChatSnapshotCache,
 } from '../../chatSnapshotCache';
+import { deleteChatSummaryCache } from '../../chatSummaryCache';
 import type { OnboardingBridgeProfileDraft } from '../../screens/onboarding/OnboardingScreen';
 import { bridgeProfilesAtom, bridgeProfileStoreAtom } from '../appState/atoms';
 import { dispatchDurableAppStateAtom } from '../appState/actions';
@@ -62,7 +63,10 @@ export const saveBridgeProfileAtom = atom(
     });
     const nextStore = nextState.bridgeProfiles;
     if (bridgeIdentityChanged && nextStore.activeProfileId) {
-      await deleteChatSnapshotCache(nextStore.activeProfileId);
+      await Promise.all([
+        deleteChatSnapshotCache(nextStore.activeProfileId),
+        deleteChatSummaryCache(nextStore.activeProfileId),
+      ]);
     }
 
     set(resetChatSessionStateAtom);
@@ -144,7 +148,7 @@ export const deleteBridgeProfileAtom = atom(
       profileId,
     });
     const nextStore = nextState.bridgeProfiles;
-    await deleteChatSnapshotCache(profileId);
+    await Promise.all([deleteChatSnapshotCache(profileId), deleteChatSummaryCache(profileId)]);
 
     if (deletingActiveProfile) {
       set(resetChatSessionStateAtom);
@@ -163,7 +167,12 @@ export const deleteBridgeProfileAtom = atom(
 export const clearSavedBridgesAtom = atom(null, async (get, set): Promise<void> => {
   const profiles = get(bridgeProfilesAtom);
   await set(dispatchDurableAppStateAtom, { type: 'profiles/clear' });
-  await Promise.all(profiles.map((profile) => deleteChatSnapshotCache(profile.id)));
+  await Promise.all(
+    profiles.flatMap((profile) => [
+      deleteChatSnapshotCache(profile.id),
+      deleteChatSummaryCache(profile.id),
+    ]),
+  );
   set(resetChatSessionStateAtom);
   set(resetToOnboardingAtom);
 });

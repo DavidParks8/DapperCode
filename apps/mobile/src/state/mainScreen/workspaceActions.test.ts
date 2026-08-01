@@ -1,5 +1,9 @@
+import * as FileSystem from 'expo-file-system/legacy';
+
 import type { HostBridgeApiClient } from '../../api/client';
 import type { AppStore } from '../types';
+import { appStateSnapshotAtom } from '../appState/atoms';
+import { apiClientAtom } from '../bridge/atoms';
 import { createBridgeTestStore } from '../testing';
 import { defaultStartCwdAtom } from '../appState/settings';
 import { currentScreenAtom, navigationStackAtom } from '../navigation/atoms';
@@ -16,13 +20,17 @@ import {
   favoriteWorkspacePathsAtom,
   loadingWorkspaceBrowseAtom,
   workspaceBridgeRootAtom,
+  workspaceBrowseCacheAtom,
   workspaceBrowseEntriesAtom,
   workspaceBrowseErrorAtom,
   workspaceBrowseParentPathAtom,
   workspaceBrowsePathAtom,
   workspaceBrowseTruncationAtom,
+  workspaceFavoritesResourceAtom,
   workspacePickerPurposeAtom,
   workspaceRootsAtom,
+  workspaceRootsRefreshErrorAtom,
+  workspaceRootsResourceAtom,
 } from './workspace';
 import {
   browseWorkspacePathAtom,
@@ -30,6 +38,7 @@ import {
   changeGitCheckoutRepoUrlAtom,
   closeGitCheckoutAtom,
   closeWorkspacePickerAtom,
+  loadWorkspaceFavoritesAtom,
   openGitCheckoutAtom,
   openGitCheckoutDestinationPickerAtom,
   openWorkspaceModalAtom,
@@ -37,6 +46,7 @@ import {
   selectWorkspaceAtom,
   submitGitCheckoutAtom,
   toggleWorkspaceFavoriteAtom,
+  WORKSPACE_RESOURCES_TTL_MS,
 } from './workspaceActions';
 
 jest.mock('expo-file-system/legacy', () => ({
@@ -74,22 +84,355 @@ function listing(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function switchProfile(store: AppStore, profileId: string): void {
+  const snapshot = store.get(appStateSnapshotAtom);
+  store.set(appStateSnapshotAtom, {
+    ...snapshot,
+    data: {
+      ...snapshot.data,
+      bridgeProfiles: {
+        ...snapshot.data.bridgeProfiles,
+        activeProfileId: profileId,
+        profiles: [
+          ...snapshot.data.bridgeProfiles.profiles,
+          {
+            id: profileId,
+            name: profileId,
+            bridgeUrl: `https://${profileId}.test`,
+            bridgeToken: 'token',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ].filter((profile, index, profiles) => profiles.findIndex(({ id }) => id === profile.id) === index),
+      },
+    },
+  });
+}
+
+/**
+ * Edits the currently active bridge profile in place: same ID, but a new bridge URL (and,
+ * realistically, a bumped `updatedAt`) — simulating a user re-pointing an existing profile at a
+ * different bridge instance, or a reconnect that rotates credentials, without deleting and
+ * recreating the profile.
+ */
+function editActiveProfile(
+  store: AppStore,
+  updates: { bridgeUrl?: string; bridgeToken?: string; updatedAt?: string },
+): void {
+  const snapshot = store.get(appStateSnapshotAtom);
+  const { activeProfileId } = snapshot.data.bridgeProfiles;
+  store.set(appStateSnapshotAtom, {
+    ...snapshot,
+    data: {
+      ...snapshot.data,
+      bridgeProfiles: {
+        ...snapshot.data.bridgeProfiles,
+        profiles: snapshot.data.bridgeProfiles.profiles.map((profile) =>
+          profile.id === activeProfileId
+            ? {
+                ...profile,
+                bridgeUrl: updates.bridgeUrl ?? profile.bridgeUrl,
+                bridgeToken: updates.bridgeToken ?? profile.bridgeToken,
+                updatedAt: updates.updatedAt ?? '2026-02-01T00:00:00.000Z',
+              }
+            : profile,
+        ),
+      },
+    },
+  });
+}
+
 describe('workspace actions', () => {
-  it('publishes roots and reports a failed refresh', async () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(FileSystem.readAsStringAsync).mockRejectedValue(new Error('missing'));
+    jest.mocked(FileSystem.writeAsStringAsync).mockResolvedValue(undefined);
+  });
+
+  it('keeps cached roots visible while stale data revalidates and survives failure', async () => {
     const { store, api } = createStore();
     api.listWorkspaceRoots
       .mockResolvedValueOnce({
         bridgeRoot: '/workspace',
         workspaces: [{ path: '/a', chatCount: 1 }],
       })
+      .mockResolvedValueOnce({
+        bridgeRoot: '/workspace',
+        workspaces: [{ path: '/b', chatCount: 2 }],
+      })
       .mockRejectedValueOnce(new Error('roots unavailable'));
 
-    await store.set(refreshWorkspaceRootsAtom);
+    await store.set(refreshWorkspaceRootsAtom, { now: 100 });
     expect(store.get(workspaceBridgeRootAtom)).toBe('/workspace');
     expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/a', chatCount: 1 }]);
+    expect(store.get(workspaceRootsResourceAtom)).toMatchObject({
+      error: null,
+      fetchedAt: 100,
+      refreshing: false,
+    });
 
-    expect(await store.set(refreshWorkspaceRootsAtom)).toBeNull();
-    expect(store.get(workspaceBrowseErrorAtom)).toBe('roots unavailable');
+    await store.set(refreshWorkspaceRootsAtom, {
+      now: 100 + WORKSPACE_RESOURCES_TTL_MS - 1,
+    });
+    expect(api.listWorkspaceRoots).toHaveBeenCalledTimes(1);
+
+    const refresh = store.set(refreshWorkspaceRootsAtom, {
+      now: 100 + WORKSPACE_RESOURCES_TTL_MS,
+    });
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/a', chatCount: 1 }]);
+    expect(store.get(workspaceRootsResourceAtom).refreshing).toBe(true);
+    await refresh;
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/b', chatCount: 2 }]);
+
+    expect(await store.set(refreshWorkspaceRootsAtom, { force: true })).toBeNull();
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/b', chatCount: 2 }]);
+    expect(store.get(workspaceRootsRefreshErrorAtom)).toBe('roots unavailable');
+    expect(store.get(workspaceBrowseErrorAtom)).toBeNull();
+  });
+
+  it('deduplicates root requests and ignores an older client response', async () => {
+    const first = deferred<{
+      bridgeRoot: string;
+      allowOutsideRootCwd: boolean;
+      workspaces: { path: string; chatCount: number }[];
+    }>();
+    const second = deferred<{
+      bridgeRoot: string;
+      allowOutsideRootCwd: boolean;
+      workspaces: { path: string; chatCount: number }[];
+    }>();
+    const { store, api } = createStore();
+    api.listWorkspaceRoots.mockReturnValue(first.promise);
+
+    const firstRefresh = store.set(refreshWorkspaceRootsAtom, { force: true });
+    const duplicateRefresh = store.set(refreshWorkspaceRootsAtom, { force: true });
+    expect(api.listWorkspaceRoots).toHaveBeenCalledTimes(1);
+
+    const nextApi = {
+      ...api,
+      listWorkspaceRoots: jest.fn().mockReturnValue(second.promise),
+    };
+    store.set(apiClientAtom, nextApi as unknown as HostBridgeApiClient);
+    const newerRefresh = store.set(refreshWorkspaceRootsAtom, { force: true });
+    second.resolve({
+      bridgeRoot: '/new',
+      allowOutsideRootCwd: false,
+      workspaces: [{ path: '/new/repo', chatCount: 2 }],
+    });
+    await newerRefresh;
+
+    first.resolve({
+      bridgeRoot: '/old',
+      allowOutsideRootCwd: false,
+      workspaces: [{ path: '/old/repo', chatCount: 1 }],
+    });
+    await Promise.all([firstRefresh, duplicateRefresh]);
+    expect(store.get(workspaceBridgeRootAtom)).toBe('/new');
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/new/repo', chatCount: 2 }]);
+  });
+
+  it('isolates cached roots and favorites by active bridge profile', async () => {
+    const { store, api } = createStore();
+    jest.mocked(FileSystem.readAsStringAsync).mockImplementation(async (path) =>
+      JSON.stringify({
+        version: 1,
+        paths: String(path).includes('profile-2') ? ['/two/favorite'] : ['/one/favorite'],
+      }),
+    );
+    api.listWorkspaceRoots
+      .mockResolvedValueOnce({
+        bridgeRoot: '/one',
+        workspaces: [{ path: '/one/repo', chatCount: 1 }],
+      })
+      .mockResolvedValueOnce({
+        bridgeRoot: '/two',
+        workspaces: [{ path: '/two/repo', chatCount: 2 }],
+      });
+
+    await Promise.all([
+      store.set(refreshWorkspaceRootsAtom, { force: true }),
+      store.set(loadWorkspaceFavoritesAtom, { force: true }),
+    ]);
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/one/repo', chatCount: 1 }]);
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/one/favorite']);
+
+    switchProfile(store, 'profile-2');
+    expect(store.get(workspaceRootsAtom)).toEqual([]);
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual([]);
+    await Promise.all([
+      store.set(refreshWorkspaceRootsAtom, { force: true }),
+      store.set(loadWorkspaceFavoritesAtom, { force: true }),
+    ]);
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/two/repo', chatCount: 2 }]);
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/two/favorite']);
+
+    switchProfile(store, 'profile-1');
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/one/repo', chatCount: 1 }]);
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/one/favorite']);
+    expect(store.get(workspaceFavoritesResourceAtom).fetchedAt).not.toBeNull();
+  });
+
+  it('clears cached roots and browse data (but keeps favorites) when a profile is edited in place', async () => {
+    const { store, api } = createStore();
+    jest.mocked(FileSystem.readAsStringAsync).mockResolvedValue(
+      JSON.stringify({ version: 1, paths: ['/one/favorite'] }),
+    );
+    api.listWorkspaceRoots.mockResolvedValueOnce({
+      bridgeRoot: '/old-bridge',
+      workspaces: [{ path: '/old-bridge/repo', chatCount: 1 }],
+    });
+    api.listFilesystemEntries.mockResolvedValueOnce(
+      listing({
+        bridgeRoot: '/old-bridge',
+        path: '/old-bridge',
+        entries: [{ name: 'old', path: '/old-bridge/old', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+
+    await store.set(refreshWorkspaceRootsAtom, { now: 100 });
+    await store.set(loadWorkspaceFavoritesAtom, { now: 100 });
+    await store.set(browseWorkspacePathAtom, '/old-bridge');
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/old-bridge/repo', chatCount: 1 }]);
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('old');
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/one/favorite']);
+
+    // Same profile ID, new bridge URL: the user repointed the profile without deleting it.
+    editActiveProfile(store, { bridgeUrl: 'https://new-bridge.test' });
+
+    // The stale roots/browse cache from the previous bridge must not leak into the edited
+    // profile, but locally-stored favorites are keyed by profile ID only and survive.
+    expect(store.get(workspaceRootsResourceAtom)).toMatchObject({ data: [], fetchedAt: null });
+    expect(store.get(workspaceRootsAtom)).toEqual([]);
+    expect(store.get(workspaceBrowseCacheAtom)['/old-bridge']).toBeUndefined();
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/one/favorite']);
+
+    api.listWorkspaceRoots.mockResolvedValueOnce({
+      bridgeRoot: '/new-bridge',
+      workspaces: [{ path: '/new-bridge/repo', chatCount: 5 }],
+    });
+    await store.set(refreshWorkspaceRootsAtom, { now: 200 });
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/new-bridge/repo', chatCount: 5 }]);
+
+    // Browsing the same path string after the edit must hit the new bridge, not stale cache.
+    api.listFilesystemEntries.mockResolvedValueOnce(
+      listing({
+        bridgeRoot: '/new-bridge',
+        path: '/old-bridge',
+        entries: [{ name: 'fresh', path: '/old-bridge/fresh', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+    await store.set(browseWorkspacePathAtom, '/old-bridge');
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('fresh');
+  });
+
+  it('ignores a roots response for a previous identity even if a coincidental requestId matches', async () => {
+    const staleFetch = deferred<{
+      bridgeRoot: string;
+      workspaces: { path: string; chatCount: number }[];
+    }>();
+    const { store, api } = createStore();
+    api.listWorkspaceRoots.mockReturnValueOnce(staleFetch.promise);
+
+    const staleRefresh = store.set(refreshWorkspaceRootsAtom, { force: true });
+    expect(store.get(workspaceRootsResourceAtom).refreshing).toBe(true);
+
+    // The profile is edited (or the bridge reconnects with a new identity) while the request from
+    // the old identity is still in flight. Reading the resource immediately reflects the new,
+    // empty identity rather than the previous bridge's refreshing state.
+    editActiveProfile(store, { bridgeUrl: 'https://reconnected-bridge.test' });
+    expect(store.get(workspaceRootsResourceAtom)).toMatchObject({
+      data: [],
+      fetchedAt: null,
+      refreshing: false,
+    });
+
+    // A fresh refresh under the new identity starts from the same baseline requestId as the old
+    // one did, so its requestId can coincidentally match the still-pending old request.
+    const freshFetch = deferred<{
+      bridgeRoot: string;
+      workspaces: { path: string; chatCount: number }[];
+    }>();
+    api.listWorkspaceRoots.mockReturnValueOnce(freshFetch.promise);
+    const freshRefresh = store.set(refreshWorkspaceRootsAtom, { force: true });
+    expect(store.get(workspaceRootsResourceAtom).refreshing).toBe(true);
+
+    // The stale response from the previous identity resolves after the new request has already
+    // started; it must not overwrite the new identity's in-flight/committed state.
+    staleFetch.resolve({
+      bridgeRoot: '/old-bridge',
+      workspaces: [{ path: '/old-bridge/repo', chatCount: 1 }],
+    });
+    await staleRefresh;
+    expect(store.get(workspaceRootsResourceAtom).refreshing).toBe(true);
+    expect(store.get(workspaceRootsAtom)).toEqual([]);
+
+    freshFetch.resolve({
+      bridgeRoot: '/reconnected-bridge',
+      workspaces: [{ path: '/reconnected-bridge/repo', chatCount: 3 }],
+    });
+    await freshRefresh;
+    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/reconnected-bridge/repo', chatCount: 3 }]);
+    expect(store.get(workspaceBridgeRootAtom)).toBe('/reconnected-bridge');
+  });
+
+  it('drops a stale browse response left over from a previous identity, with no leaked entries', async () => {
+    const { store, api } = createStore();
+    api.listFilesystemEntries.mockResolvedValueOnce(
+      listing({
+        path: '/workspace',
+        entries: [{ name: 'first', path: '/workspace/first', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+    await store.set(browseWorkspacePathAtom, '/workspace');
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('first');
+
+    const staleListing = deferred<ReturnType<typeof listing>>();
+    api.listFilesystemEntries.mockReturnValueOnce(staleListing.promise);
+    const staleBrowse = store.set(browseWorkspacePathAtom, '/workspace');
+    expect(store.get(loadingWorkspaceBrowseAtom)).toBe(true);
+
+    // Edit the profile in place while the revalidation for the previous identity is in flight.
+    // The cache for the previous identity is invalidated immediately, even before the in-flight
+    // request settles.
+    editActiveProfile(store, { bridgeUrl: 'https://reconnected-bridge.test' });
+    expect(store.get(workspaceBrowseCacheAtom)['/workspace']).toBeUndefined();
+
+    staleListing.resolve(
+      listing({
+        path: '/workspace',
+        entries: [{ name: 'stale', path: '/workspace/stale', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+    await staleBrowse;
+
+    // The stale, previous-identity response must not repopulate the cache or overwrite the
+    // currently displayed listing with data from the old bridge.
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('first');
+    expect(store.get(workspaceBrowseCacheAtom)['/workspace']).toBeUndefined();
+  });
+
+  it('does not let an older favorites load overwrite a local toggle', async () => {
+    const { store } = createStore();
+    const loadedFavorites = deferred<string>();
+    jest.mocked(FileSystem.readAsStringAsync).mockReturnValueOnce(loadedFavorites.promise);
+
+    const load = store.set(loadWorkspaceFavoritesAtom, { force: true });
+    await Promise.resolve();
+    store.set(toggleWorkspaceFavoriteAtom, '/workspace/local');
+    loadedFavorites.resolve(JSON.stringify({ version: 1, paths: ['/workspace/stale'] }));
+    await load;
+
+    expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/workspace/local']);
   });
 
   it('serves the browse cache before the network and reports truncation', async () => {
@@ -106,6 +449,52 @@ describe('workspace actions', () => {
     api.listFilesystemEntries.mockResolvedValue(listing({ truncated: false }));
     await store.set(browseWorkspacePathAtom, '/workspace');
     expect(store.get(workspaceBrowseTruncationAtom)).toBeNull();
+  });
+
+  it('keeps cached browse entries visible during revalidation and ignores older navigation', async () => {
+    const { store, api } = createStore();
+    api.listFilesystemEntries.mockResolvedValueOnce(
+      listing({
+        entries: [
+          { name: 'cached', path: '/workspace/cached', isDirectory: true, isGitRepo: false },
+        ],
+      }),
+    );
+    await store.set(browseWorkspacePathAtom, '/workspace');
+
+    const refreshed = deferred<ReturnType<typeof listing>>();
+    api.listFilesystemEntries.mockReturnValueOnce(refreshed.promise);
+    const refresh = store.set(browseWorkspacePathAtom, '/workspace');
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('cached');
+    expect(store.get(loadingWorkspaceBrowseAtom)).toBe(true);
+
+    const navigated = deferred<ReturnType<typeof listing>>();
+    api.listFilesystemEntries.mockReturnValueOnce(navigated.promise);
+    const navigate = store.set(browseWorkspacePathAtom, '/workspace/next');
+    navigated.resolve(
+      listing({
+        path: '/workspace/next',
+        entries: [{ name: 'new', path: '/workspace/next/new', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+    await navigate;
+    refreshed.resolve(
+      listing({
+        entries: [{ name: 'stale', path: '/workspace/stale', isDirectory: true, isGitRepo: false }],
+      }),
+    );
+    await refresh;
+    expect(store.get(workspaceBrowsePathAtom)).toBe('/workspace/next');
+    expect(store.get(workspaceBrowseEntriesAtom)[0]?.name).toBe('new');
+  });
+
+  it('never persists directory listings', async () => {
+    const { store, api } = createStore();
+    api.listFilesystemEntries.mockResolvedValue(listing());
+
+    await store.set(browseWorkspacePathAtom, '/workspace');
+
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
   });
 
   it('falls back to the start folder when the saved workspace is gone', async () => {

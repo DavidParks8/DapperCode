@@ -23,6 +23,30 @@ describe('agentThreadsController', () => {
     expect(result.threads.map((thread) => thread.id)).toEqual(['root', 'child']);
   });
 
+  it('dedupes repeated loaded-chat ids before requesting summaries', async () => {
+    // Regression: a bridge response with duplicate loaded ids (or overlap across
+    // repeated calls) must not grow the missing-id list and redundantly re-fetch
+    // the same chat summary more than once.
+    const root = {
+      id: 'root',
+      title: 'Root',
+      status: 'running',
+      createdAt: '',
+      updatedAt: '',
+      statusUpdatedAt: '',
+      lastMessagePreview: '',
+    };
+    const child = { ...root, id: 'child', title: 'Child', parentThreadId: 'root' };
+    const api = {
+      listChats: jest.fn().mockResolvedValue([root]),
+      listLoadedChatIds: jest.fn().mockResolvedValue(['child', 'child', 'root']),
+      getChatSummaries: jest.fn().mockResolvedValue([child]),
+    };
+    const controller = new AgentThreadsController(api as never);
+    await controller.loadRelated('root');
+    expect(api.getChatSummaries).toHaveBeenCalledWith(['child']);
+  });
+
   it('falls back to the supplied focus and tolerates loaded-id lookup failure', async () => {
     const fallback = {
       id: 'fallback',

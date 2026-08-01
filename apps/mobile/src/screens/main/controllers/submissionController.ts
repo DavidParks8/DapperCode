@@ -1,5 +1,10 @@
 import * as Crypto from 'expo-crypto';
 
+import {
+  hashSubmissionRequest,
+  type SubmissionIdempotencyStore,
+} from './submissionIdempotencyCache';
+
 export interface SubmissionScope {
   profileId: string;
   threadId: string | null;
@@ -30,7 +35,14 @@ export class SubmissionController {
   private readonly failed = new Map<string, ComposerSubmission>();
   private counter = 0;
 
-  constructor(private readonly createId: () => string = () => '') {}
+  constructor(
+    private readonly createId: () => string = () => '',
+    // Optional cross-restart idempotency store. Only ever consulted/updated for submissions that
+    // have actually failed (see `fail`) — a submission that never fails, and this session's
+    // in-memory retry map, are never persisted here. Nothing is read from it except in response to
+    // a user-initiated `begin()` call, so a restart never causes an automatic resend.
+    private readonly idempotencyStore?: SubmissionIdempotencyStore,
+  ) {}
 
   begin(
     snapshot: SubmissionDraftSnapshot,
@@ -42,6 +54,19 @@ export class SubmissionController {
       this.failed.delete(retryKey);
       retry.clearedRevision = null;
       return retry;
+    }
+
+    const requestHash = hashSubmissionRequest(snapshot.value, attachments);
+    const persistedId = this.idempotencyStore?.lookup(snapshot.scopeKey, requestHash) ?? null;
+    if (persistedId) {
+      return {
+        id: persistedId,
+        scopeKey: snapshot.scopeKey,
+        draft: snapshot.value,
+        mentions: [...attachments.mentions],
+        localImages: [...attachments.localImages],
+        clearedRevision: null,
+      };
     }
 
     const generated = this.createId().trim();
@@ -69,6 +94,11 @@ export class SubmissionController {
       if (!oldest) break;
       this.failed.delete(oldest);
     }
+    this.idempotencyStore?.record(
+      submission.scopeKey,
+      hashSubmissionRequest(submission.draft, submission),
+      submission.id,
+    );
     return (
       submission.clearedRevision !== null &&
       current.scopeKey === submission.scopeKey &&
@@ -79,6 +109,10 @@ export class SubmissionController {
 
   succeed(submission: ComposerSubmission): void {
     this.failed.delete(this.retryKey(submission.scopeKey, submission.draft, submission));
+    this.idempotencyStore?.clear(
+      submission.scopeKey,
+      hashSubmissionRequest(submission.draft, submission),
+    );
   }
 
   private retryKey(

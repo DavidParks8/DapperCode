@@ -78,6 +78,7 @@ import type {
 import type { HostBridgeWsClient } from './ws';
 
 export abstract class HostBridgeApiClientCore {
+  readonly profileId: string | null;
   protected readonly ws: HostBridgeWsClient;
   protected readonly bridgeUrl: string | null;
   protected readonly authToken: string | null;
@@ -91,6 +92,7 @@ export abstract class HostBridgeApiClientCore {
   protected readonly modelListCache = new Map<string, CacheEntry<ModelOption[]>>();
   protected readonly modelListInFlight = new Map<string, Promise<ModelOption[]>>();
   constructor(options: ApiClientOptions) {
+    this.profileId = options.profileId?.trim() || null;
     this.ws = options.ws;
     this.bridgeUrl = options.bridgeUrl?.replace(/\/$/, '') ?? null;
     this.authToken = options.authToken?.trim() || null;
