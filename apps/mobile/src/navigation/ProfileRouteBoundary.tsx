@@ -7,7 +7,7 @@ import { switchBridgeProfileAtom } from '../state/bridge/actions';
 import { activeBridgeProfileAtom, bridgeProfileTransitioningAtom } from '../state/bridge/atoms';
 import { useAppTheme } from '../theme';
 import { RouteErrorScreen } from './RouteErrorScreen';
-import { dismissNestedRoutes } from './routeNavigation';
+import { dismissAllPresentedRoutes } from './routeNavigation';
 
 interface ProfileRouteBoundaryProps {
   profileId: string;
@@ -39,7 +39,7 @@ export function ProfileRouteBoundary({ profileId, children }: ProfileRouteBounda
     }
     let cancelled = false;
     setActivationError(null);
-    dismissNestedRoutes();
+    dismissAllPresentedRoutes();
     void switchProfile(profileId).catch((error: unknown) => {
       if (!cancelled) {
         setActivationError(
