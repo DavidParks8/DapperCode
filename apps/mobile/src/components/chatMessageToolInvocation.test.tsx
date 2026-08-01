@@ -119,6 +119,46 @@ describe('ToolInvocationRow', () => {
 
     act(() => tree.unmount());
   });
+
+  it('keeps a collapsed row on one line for multi-line titles', () => {
+    const command = 'cd apps/mobile\ngrep -rn "tool" src\necho done';
+    const value = invocation({
+      id: 'tool-multiline-command',
+      kind: 'execute',
+      monospaceTitle: true,
+      title: command,
+      textLines: ['ok'],
+    });
+    const tree = render(value);
+
+    const collapsedTitle = tree.root
+      .findAllByType(Text)
+      .find((node) => typeof node.props.children === 'string');
+    expect(collapsedTitle?.props.numberOfLines).toBe(1);
+    expect(collapsedTitle?.props.children).toBe('cd apps/mobile grep -rn "tool" src echo done');
+
+    expand(tree, command);
+    const expandedTitle = tree.root
+      .findAllByType(Text)
+      .find((node) => node.props.children === command);
+    expect(expandedTitle?.props.numberOfLines).toBe(3);
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps a collapsed prose row on one line', () => {
+    const title = 'Read a file\nwith a wrapped description';
+    const value = invocation({ id: 'tool-multiline-prose', title, textLines: ['ok'] });
+    const tree = render(value);
+
+    const collapsedTitle = tree.root
+      .findAllByType(Text)
+      .find((node) => typeof node.props.children === 'string');
+    expect(collapsedTitle?.props.numberOfLines).toBe(1);
+    expect(collapsedTitle?.props.children).toBe('Read a file with a wrapped description');
+
+    act(() => tree.unmount());
+  });
 });
 
 describe('ToolInvocationOutput', () => {

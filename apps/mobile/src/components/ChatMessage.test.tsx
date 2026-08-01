@@ -518,7 +518,7 @@ describe('ChatMessage text selection', () => {
 describe('ChatMessage command rows', () => {
   const theme = createAppTheme('dark');
 
-  it('renders long command titles in horizontal scroll viewports without ellipsis', () => {
+  it('renders long command titles in single-line horizontal scroll viewports', () => {
     const messages: LegacyTestMessage[] = [
       {
         id: 'tool_command',
@@ -543,7 +543,9 @@ describe('ChatMessage command rows', () => {
     const commandText = horizontalScroll.findByType(Text);
 
     expect(horizontalScroll.props.horizontal).toBe(true);
-    expect(commandText.props.numberOfLines).toBeUndefined();
+    // The row is one line tall until it is expanded, and the scroll viewport
+    // leaves the text unconstrained so the whole command stays reachable.
+    expect(commandText.props.numberOfLines).toBe(1);
     expect(flattenRenderedText(commandText.props.children)).toContain('ChatMessage.test.tsx');
   });
 });

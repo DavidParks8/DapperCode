@@ -25,6 +25,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   const [expandedIds, setExpandedIds] = useAtom(expandedToolInvocationIdsAtom);
   const expanded = expandedIds[invocation.id] === true;
   const expandable = !invocation.empty || invocation.truncated;
+  const collapsedTitle = useMemo(() => toSingleLine(invocation.title), [invocation.title]);
   const toggle = useCallback(() => {
     setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
   }, [invocation.id, setExpandedIds]);
@@ -63,9 +64,10 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
               invocation.isError && styles.toolRowTitleError,
             ]}
             backgroundColor={theme.colors.bgMain}
+            numberOfLines={1}
             testID="tool-command-scroll"
           >
-            {invocation.title}
+            {collapsedTitle}
           </ScrollableRowText>
         ) : (
           <Text
@@ -76,7 +78,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
             ]}
             numberOfLines={expanded ? 3 : 1}
           >
-            {invocation.title}
+            {expanded ? invocation.title : collapsedTitle}
           </Text>
         )}
         <View style={styles.toolRowTrailing}>
@@ -102,6 +104,15 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   );
 });
 ToolInvocationRow.displayName = 'ToolInvocationRow';
+
+/**
+ * A collapsed row is one line tall, so a title that spans several lines — a
+ * chained or heredoc shell command, mostly — is flattened. `numberOfLines`
+ * alone would hide everything after the first line even while scrolling.
+ */
+function toSingleLine(title: string): string {
+  return title.replace(/\s*\r?\n\s*/g, ' ').trim();
+}
 
 function ToolStatusAffordance({ invocation }: { invocation: ToolInvocation }) {
   const theme = useAppTheme();
