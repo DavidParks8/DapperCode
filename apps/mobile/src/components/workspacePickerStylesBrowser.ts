@@ -28,6 +28,16 @@ export const createWorkspacePickerBrowserStyles = (theme: AppTheme) => ({
     borderColor: theme.colors.borderHighlight,
     backgroundColor: theme.colors.bgInput,
   },
+  workspaceTileSelectedOverlay: {
+    position: 'absolute' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: theme.radius.lg,
+    borderColor: theme.colors.borderHighlight,
+    backgroundColor: theme.colors.bgInput,
+  },
   workspaceTileContent: {
     flex: 1,
     paddingHorizontal: theme.spacing.sm,

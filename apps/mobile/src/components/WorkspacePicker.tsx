@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Text } from 'react-native';
 
 import { useAccessibilityAnnouncement, useModalAccessibilityFocus } from '../accessibility';
+import { feedback } from '../feedback';
 import { useAppTheme } from '../theme';
 import { matchesSearch, toPathBasename } from './workspacePickerHelpers';
 import { WorkspacePickerView } from './WorkspacePickerView';
@@ -78,31 +79,56 @@ export function WorkspacePicker({
   useAccessibilityAnnouncement(refreshError);
   useAccessibilityAnnouncement(loadingEntries ? `Loading folders in ${currentFolderTitle}` : null);
 
+  const handleClose = () => {
+    void feedback.selection();
+    onClose();
+  };
+
   const handleBrowsePath = (path: string | null) => {
+    void feedback.selection();
     setPendingSelectionPath(path);
     onBrowsePath(path);
   };
+
+  const handleSelectPath = (path: string | null) => {
+    void feedback.selection();
+    onSelectPath(path);
+  };
+
+  const handleToggleFavorite = onToggleFavorite
+    ? (path: string | null) => {
+        void feedback.selection();
+        onToggleFavorite(path);
+      }
+    : undefined;
+
+  const handleActionPress = onActionPress
+    ? () => {
+        void feedback.selection();
+        onActionPress(footerPath);
+      }
+    : undefined;
 
   return (
     <WorkspacePickerView
       styles={styles}
       theme={theme}
       screenFocusRef={screenFocusRef}
-      onClose={onClose}
+      onClose={handleClose}
       selectedPath={selectedPath}
       bridgeRoot={bridgeRoot}
       searchQuery={searchQuery}
       setSearchQuery={setSearchQuery}
-      onSelectPath={onSelectPath}
+      onSelectPath={handleSelectPath}
       actionLabel={actionLabel}
       actionDescription={actionDescription}
       actionDisabled={actionDisabled}
-      onActionPress={onActionPress ? () => onActionPress(footerPath) : undefined}
+      onActionPress={handleActionPress}
       favoriteWorkspaces={favoriteWorkspaces}
       favoritePathSet={favoritePathSet}
       pendingSelectionPath={pendingSelectionPath}
       onBrowsePath={handleBrowsePath}
-      onToggleFavorite={onToggleFavorite}
+      onToggleFavorite={handleToggleFavorite}
       parentPath={parentPath}
       loadingEntries={loadingEntries}
       filteredEntries={filteredEntries}
