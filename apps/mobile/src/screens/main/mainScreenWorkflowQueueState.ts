@@ -11,11 +11,6 @@ import {
 } from '../../state/mainScreen/turn';
 import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import {
-  agentDetailThreadIdAtom,
-  agentRootThreadIdAtom,
-  relatedAgentThreadsAtom,
-} from '../../state/mainScreen/workspace';
-import {
   androidKeyboardInsetAtom,
   composerHeightAtom,
   keyboardVisibleAtom,
@@ -28,7 +23,6 @@ import { useAtomValue } from 'jotai';
 import { Platform } from 'react-native';
 import { useAccessibilityAnnouncement } from '../../accessibility';
 import { isSettledIdleActivity } from './mainScreenActivityIndicator';
-import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { hasStructuredPlanCardContent, resolveWorkflowCardMode } from './planCardState';
 import {
   canOfferQueuedMessageSteer,
@@ -37,7 +31,6 @@ import {
   toPersistedActivePlanState,
   resolveUndismissedPlanImplementationPrompt,
   resolvePersistedPlanImplementationPrompt,
-  formatAgentThreadOptionTitle,
 } from './mainScreenHelpers';
 import type {
   MainScreenHeaderActivityViewModelContext,
@@ -56,8 +49,6 @@ export type MainScreenWorkflowQueueStateContext = MainScreenHeaderActivityViewMo
 export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueueStateContext) {
   const {
     activeAgentSupports,
-    agentThreadRows,
-    api,
     attachmentMenuVisible,
     attachmentModalVisible,
     chatPlanSnapshotsRef,
@@ -66,7 +57,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     draft,
     isOpeningChat,
     pendingOptimisticQueuedMessagesRef,
-    runWatchdogNow,
     safeAreaInsets,
     selectedChat,
     selectedChatId,
@@ -87,9 +77,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   const activeBridgeUiSurfaces = useAtomValue(activeBridgeUiSurfacesAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
-  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
-  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const androidKeyboardInset = useAtomValue(androidKeyboardInsetAtom);
   const composerHeight = useAtomValue(composerHeightAtom);
@@ -102,23 +89,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   const effortModalVisible = useAtomValue(effortModalVisibleAtom);
   const gitCheckoutError = useAtomValue(gitCheckoutErrorAtom);
 
-  const agentDetailSummary = agentDetailThreadId
-    ? (relatedAgentThreads.find((chat) => chat.id === agentDetailThreadId) ??
-      api.peekChatSummary(agentDetailThreadId))
-    : null;
-  const agentDetailRuntime = agentDetailThreadId
-    ? (threadRuntimeSnapshotsRef.current[agentDetailThreadId] ?? null)
-    : null;
-  const agentDetailDisplay = agentDetailSummary
-    ? buildAgentThreadDisplayState(agentDetailSummary, agentDetailRuntime, runWatchdogNow)
-    : null;
-  const agentDetailTitle = agentDetailSummary
-    ? formatAgentThreadOptionTitle(
-        agentDetailSummary,
-        agentRootThreadId,
-        agentThreadRows.find((row) => row.chat.id === agentDetailSummary.id)?.ordinal ?? null,
-      )
-    : 'Sub-agent';
   const selectedThreadRuntimeSnapshot = selectedChat
     ? (threadRuntimeSnapshotsRef.current[selectedChat.id] ?? null)
     : null;
@@ -254,10 +224,6 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     : chatBottomInset;
 
   return {
-    agentDetailSummary,
-    agentDetailRuntime,
-    agentDetailDisplay,
-    agentDetailTitle,
     selectedThreadRuntimeSnapshot,
     selectedBridgeUiSurfaces,
     workflowBridgeUiSurfaces,

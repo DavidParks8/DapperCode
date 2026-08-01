@@ -12,6 +12,7 @@ import {
 import { cancelChatTransitionAtom, openChatWithTransitionAtom } from '../chat/actions';
 import { mainScreenCommandsAtom } from '../commands';
 import { closeDrawerAtom } from '../drawer/atoms';
+import { agentRootThreadIdAtom } from '../mainScreen/workspace';
 import {
   currentScreenAtom,
   pendingBrowserTargetUrlAtom,
@@ -63,6 +64,19 @@ export const openChatGitAtom = atom(null, (get, set, chat: Chat): void => {
   set(gitChatAtom, chat);
   set(selectedChatIdAtom, chat.id);
   set(pushNavigationRouteAtom, { screen: 'ChatGit' });
+});
+
+export const openSubAgentAtom = atom(null, (get, set, threadId: string): void => {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) {
+    return;
+  }
+  set(cancelChatTransitionAtom);
+  if (normalizedThreadId === get(agentRootThreadIdAtom)) {
+    set(currentScreenAtom, 'Main');
+    return;
+  }
+  set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: normalizedThreadId });
 });
 
 export const chatContextChangedAtom = atom(null, (get, set, chat: Chat | null): void => {

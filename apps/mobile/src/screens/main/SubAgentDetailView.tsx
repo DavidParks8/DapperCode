@@ -1,116 +1,226 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
   type FlatList,
   Pressable,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { Chat, RunEvent } from '../../api/types';
-import type { AutoScrollState, ThreadRuntimeSnapshot } from './mainScreenHelpers';
-import type { AgentThreadDisplayState } from './agentThreadDisplay';
-import type { AgUiThreadMessageState } from '../../api/agUiMessages';
+import type { Chat, RpcNotification } from '../../api/types';
+import { showToolCallsAtom } from '../../state/appState/settings';
+import { bridgeTokenAtom, bridgeUrlAtom } from '../../state/bridge/atoms';
+import { useBridgeApi, useBridgeWs } from '../../state/bridge/hooks';
+import { liveAssistantByThreadAtom } from '../../state/mainScreen/turn';
+import { runWatchdogNowAtom } from '../../state/mainScreen/session';
+import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
+import {
+  agentRootThreadIdAtom,
+  agentRuntimeRevisionAtom,
+  relatedAgentThreadsAtom,
+} from '../../state/mainScreen/workspace';
+import { openBrowserAtom, openSubAgentAtom } from '../../state/navigation/actions';
+import {
+  popNavigationRouteAtom,
+} from '../../state/navigation/atoms';
+import type { AutoScrollState } from './mainScreenHelpers';
+import { extractNotificationThreadId } from './mainScreenHelpers';
+import { formatAgentThreadOptionTitle } from './mainScreenHelperPlansAndCommands';
+import { indexAgentThreadOrdinals } from './agentThreads';
+import { AgentThreadsController } from './controllers/agentThreadsController';
+import { buildAgentThreadDisplayState } from './agentThreadDisplay';
+import { areChatStatusMapsEquivalent, resolveEquivalentChat } from './mainScreenChatState';
 import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { ChatTranscriptView } from './ChatTranscriptView';
 import { useAppTheme, type AppTheme } from '../../theme';
 import {
   decorativeAccessibilityProps,
+  useAccessibilityFocus,
   useAccessibilityAnnouncement,
-  useModalAccessibilityFocus,
 } from '../../accessibility';
 
 interface SubAgentDetailViewProps {
-  visible: boolean;
-  chat: Chat | null;
-  parentChat: Chat | null;
-  runtime: ThreadRuntimeSnapshot | null;
-  liveMessageState: AgUiThreadMessageState | null;
-  display: AgentThreadDisplayState | null;
-  title: string;
-  role?: string | null;
-  loading: boolean;
-  error: string | null;
-  bridgeUrl: string;
-  bridgeToken: string | null;
-  showToolCalls: boolean;
-  onOpenSubAgentThread?: (threadId: string) => void;
-  agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
-  onOpenLocalPreview?: (targetUrl: string) => void;
-  onClose: () => void;
+  threadId: string;
 }
 
 export function SubAgentDetailView({
-  visible,
-  chat,
-  parentChat,
-  runtime,
-  liveMessageState,
-  display,
-  title,
-  role,
-  loading,
-  error,
-  bridgeUrl,
-  bridgeToken,
-  showToolCalls,
-  onOpenSubAgentThread,
-  agentThreadStatusById,
-  onOpenLocalPreview,
-  onClose,
+  threadId,
 }: SubAgentDetailViewProps) {
+  const api = useBridgeApi();
+  const ws = useBridgeWs();
+  const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
+  const bridgeToken = useAtomValue(bridgeTokenAtom);
+  const showToolCalls = useAtomValue(showToolCallsAtom);
+  const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
+  const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
+  const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
+  const runWatchdogNow = useAtomValue(runWatchdogNowAtom);
+  const threadRuntimeSnapshots = useAtomValue(threadRuntimeSnapshotsAtom);
+  const openBrowser = useSetAtom(openBrowserAtom);
+  const openSubAgent = useSetAtom(openSubAgentAtom);
+  const popNavigationRoute = useSetAtom(popNavigationRouteAtom);
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const { width: viewportWidth } = useWindowDimensions();
-  const transition = useRef(new Animated.Value(1)).current;
-  const [mounted, setMounted] = useState(visible);
-  const closingRef = useRef(false);
+  const controller = useMemo(() => new AgentThreadsController(api), [api]);
+  const requestRef = useRef(0);
+  const detailChatRef = useRef<Chat | null>(null);
+  const hydrationFailedRef = useRef(false);
+  const foregroundHydrationRef = useRef(false);
+  const [detail, setDetail] = useState(() => ({
+    chat: api.peekChat(threadId) ?? api.peekChatShell(threadId),
+    parentChat: null as Chat | null,
+    loading: true,
+    error: null as string | null,
+  }));
   const scrollRef = useRef<FlatList<TranscriptDisplayItem>>(null);
   const autoScrollStateRef = useRef<AutoScrollState>({
     shouldStickToBottom: true,
     isUserInteracting: false,
     isMomentumScrolling: false,
   });
-  const latestCommand: RunEvent | null =
-    runtime?.latestCommand ?? runtime?.activeCommands?.at(-1) ?? null;
-  const resolvedLiveMessageState =
-    liveMessageState ??
-    (runtime?.streamingText?.trim()
-      ? {
-          messages: [
-            {
-              id: `live-assistant-${chat?.id ?? 'sub-agent'}`,
-              role: 'assistant' as const,
-              content: runtime.streamingText,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          authoritativeSnapshot: false,
-          runByMessageId: {},
-          terminalMessageIds: [],
-          replacesMessageIdByMessageId: {},
-          toolCallMessageIdByCallId: {},
-          toolResultMessageIdByCallId: {},
-          subagentToolCallIds: {},
-          toolTextRevisionByCallId: {},
-          toolMetaByCallId: {},
-          structuredRevisionByCallId: {},
-          structuredTextByCallId: {},
-          chunkAssemblies: {},
-          state: null,
-          steps: {},
-          rawEvents: [],
-          customMetadata: {},
-          customMetadataOrder: [],
+  detailChatRef.current = detail.chat;
+  const hydrate = useCallback(
+    async (showLoading: boolean) => {
+      const requestId = requestRef.current + 1;
+      requestRef.current = requestId;
+      if (showLoading) {
+        foregroundHydrationRef.current = true;
+        setDetail((current) => (current.loading ? current : { ...current, loading: true }));
+      }
+
+      try {
+        const { chat, parent } = await controller.loadDetail(threadId);
+        if (requestRef.current !== requestId) return;
+        hydrationFailedRef.current = false;
+        setDetail((current) => {
+          const resolvedChat =
+            current.chat?.id === chat.id ? resolveEquivalentChat(current.chat, chat) : chat;
+          if (
+            resolvedChat === current.chat &&
+            parent === current.parentChat &&
+            !current.loading &&
+            current.error === null
+          ) {
+            return current;
+          }
+          return {
+            chat: resolvedChat,
+            parentChat: parent,
+            loading: false,
+            error: null,
+          };
+        });
+      } catch (error) {
+        if (requestRef.current !== requestId) return;
+        hydrationFailedRef.current = true;
+        setDetail((current) => ({
+          ...current,
+          loading: false,
+          error: !showLoading && current.chat ? current.error : (error as Error).message,
+        }));
+      } finally {
+        if (showLoading && requestRef.current === requestId) {
+          foregroundHydrationRef.current = false;
         }
-      : null);
+      }
+    },
+    [controller, threadId],
+  );
+
+  useEffect(() => {
+    requestRef.current += 1;
+    hydrationFailedRef.current = false;
+    void hydrate(true);
+    return () => {
+      requestRef.current += 1;
+    };
+  }, [api, hydrate, threadId]);
+
+  useEffect(
+    () =>
+      ws.onEvent((event: RpcNotification) => {
+        if (event.method === 'bridge/events/snapshotRequired') {
+          if (foregroundHydrationRef.current) return;
+          void hydrate(false);
+          return;
+        }
+        if (
+          event.method === 'thread/subagent/adopted' &&
+          extractNotificationThreadId(event.params) === threadId &&
+          (!detailChatRef.current || hydrationFailedRef.current)
+        ) {
+          void hydrate(true);
+        }
+      }),
+    [hydrate, threadId, ws],
+  );
+
+  useEffect(() => {
+    const remembered = api.peekChat(threadId);
+    if (!remembered) return;
+    setDetail((current) => {
+      const chat =
+        current.chat?.id === remembered.id
+          ? resolveEquivalentChat(current.chat, remembered)
+          : remembered;
+      return chat === current.chat ? current : { ...current, chat };
+    });
+  }, [agentRuntimeRevision, api, threadId]);
+
+  const summary = useMemo(
+    () =>
+      relatedAgentThreads.find((candidate) => candidate.id === threadId) ??
+      api.peekChatSummary(threadId) ??
+      detail.chat,
+    [agentRuntimeRevision, api, detail.chat, relatedAgentThreads, threadId],
+  );
+  const chat = useMemo(() => {
+    if (!detail.chat || !summary || summary === detail.chat) return detail.chat;
+    if (
+      detail.chat.status === summary.status &&
+      detail.chat.statusUpdatedAt === summary.statusUpdatedAt &&
+      detail.chat.lastError === summary.lastError
+    ) {
+      return detail.chat;
+    }
+    return {
+      ...detail.chat,
+      status: summary.status,
+      statusUpdatedAt: summary.statusUpdatedAt,
+      lastError: summary.lastError,
+    };
+  }, [detail.chat, summary]);
+  const statusMapRef = useRef<ReadonlyMap<string, Chat['status']>>(new Map());
+  const agentThreadStatusById = useMemo(() => {
+    const statuses = new Map(
+      relatedAgentThreads.map((candidate) => [candidate.id, candidate.status] as const),
+    );
+    if (chat) statuses.set(chat.id, chat.status);
+    if (areChatStatusMapsEquivalent(statusMapRef.current, statuses)) {
+      return statusMapRef.current;
+    }
+    statusMapRef.current = statuses;
+    return statuses;
+  }, [chat, relatedAgentThreads]);
+  const agentThreadOrdinals = useMemo(
+    () => indexAgentThreadOrdinals(relatedAgentThreads, agentRootThreadId),
+    [agentRootThreadId, relatedAgentThreads],
+  );
+  const ordinal = agentThreadOrdinals.get(threadId) ?? null;
+  const runtime = threadRuntimeSnapshots[threadId] ?? null;
+  const display = summary
+    ? buildAgentThreadDisplayState(summary, runtime, runWatchdogNow)
+    : null;
+  const title = summary
+    ? formatAgentThreadOptionTitle(summary, agentRootThreadId, ordinal)
+    : 'Sub-agent';
+  const liveMessageState = liveAssistantByThread[threadId] ?? null;
 
   // A sub-agent that has just been spawned has no transcript yet. Rendering an
   // empty scroll view makes a live agent look dead, so it gets an explicit
@@ -119,86 +229,34 @@ export function SubAgentDetailView({
     if (!chat) return 0;
     return projectTranscript({
       chat,
-      parentChat,
+      parentChat: detail.parentChat,
       showToolCalls,
       threadStatuses: agentThreadStatusById,
-      liveMessageState: resolvedLiveMessageState,
+      liveMessageState,
     }).messages.length;
-  }, [agentThreadStatusById, chat, parentChat, resolvedLiveMessageState, showToolCalls]);
+  }, [agentThreadStatusById, chat, detail.parentChat, liveMessageState, showToolCalls]);
 
   // A sub-agent that has already stopped is never "starting", even when it left no
   // transcript behind -- otherwise opening a finished agent spins forever.
   const isStarting = Boolean(chat) && chat?.status === 'running' && projectedMessageCount === 0;
   const isEmpty = Boolean(chat) && !isStarting && projectedMessageCount === 0;
 
-  const activityDetail = display?.detail ?? latestCommand?.detail ?? role?.trim() ?? null;
-  const modalFocusRef = useModalAccessibilityFocus(visible);
-  useAccessibilityAnnouncement(
-    visible ? (error ?? (loading ? 'Loading agent transcript' : null)) : null,
-  );
-
-  useEffect(() => {
-    if (visible) {
-      closingRef.current = false;
-      setMounted(true);
-      transition.stopAnimation();
-      transition.setValue(1);
-      Animated.timing(transition, {
-        toValue: 0,
-        duration: 240,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-      return;
-    }
-    if (mounted && !closingRef.current) {
-      Animated.timing(transition, {
-        toValue: 1,
-        duration: 200,
-        easing: Easing.in(Easing.cubic),
-        useNativeDriver: true,
-      }).start(() => setMounted(false));
-    }
-  }, [mounted, transition, visible]);
+  const activityDetail =
+    display?.detail ?? runtime?.latestCommand?.detail ?? summary?.agentRole?.trim() ?? null;
+  const headingFocusRef = useAccessibilityFocus(true);
+  useAccessibilityAnnouncement(detail.error ?? (detail.loading ? 'Loading agent transcript' : null));
 
   const navigateBack = useCallback(() => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    Animated.timing(transition, {
-      toValue: 1,
-      duration: 200,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
-      setMounted(false);
-      closingRef.current = false;
-      onClose();
-    });
-  }, [onClose, transition]);
+    popNavigationRoute();
+  }, [popNavigationRoute]);
 
-  if (!mounted) return null;
+  const openSubAgentThread = useCallback(
+    (nextThreadId: string) => openSubAgent(nextThreadId),
+    [openSubAgent],
+  );
 
   return (
-    <Animated.View
-      style={[
-        styles.page,
-        {
-          transform: [
-            {
-              translateX: transition.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, Math.max(viewportWidth, 1)],
-              }),
-            },
-          ],
-        },
-      ]}
-    >
-      <SafeAreaView
-        accessibilityViewIsModal
-        importantForAccessibility="yes"
-        style={styles.container}
-      >
+    <SafeAreaView style={styles.page}>
         <View style={styles.header}>
           <Pressable
             onPress={navigateBack}
@@ -217,7 +275,7 @@ export function SubAgentDetailView({
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>Sub-agent</Text>
             <Text
-              ref={modalFocusRef}
+              ref={headingFocusRef}
               accessibilityRole="header"
               style={styles.title}
               numberOfLines={1}
@@ -247,7 +305,7 @@ export function SubAgentDetailView({
                   { color: display?.statusColor ?? theme.colors.textMuted },
                 ]}
               >
-                {display?.label ?? (loading ? 'Loading' : 'Idle')}
+                {display?.label ?? (detail.loading ? 'Loading' : 'Idle')}
               </Text>
             </View>
             {activityDetail ? (
@@ -258,13 +316,13 @@ export function SubAgentDetailView({
           </View>
         </View>
 
-        {error ? (
+        {detail.error ? (
           <Text
             accessibilityRole="alert"
             accessibilityLiveRegion="assertive"
             style={styles.errorText}
           >
-            {error}
+            {detail.error}
           </Text>
         ) : null}
 
@@ -297,12 +355,12 @@ export function SubAgentDetailView({
           ) : chat ? (
             <ChatTranscriptView
               chat={chat}
-              parentChat={parentChat}
+              parentChat={detail.parentChat}
               bridgeUrl={bridgeUrl}
               bridgeToken={bridgeToken}
-              onOpenLocalPreview={onOpenLocalPreview}
+              onOpenLocalPreview={openBrowser}
               showToolCalls={showToolCalls}
-              onOpenSubAgentThread={onOpenSubAgentThread}
+              onOpenSubAgentThread={openSubAgentThread}
               agentThreadStatusById={agentThreadStatusById}
               scrollRef={scrollRef}
               inlineChoicesEnabled={false}
@@ -318,7 +376,7 @@ export function SubAgentDetailView({
               onScrollInteractionStart={() => {}}
               autoScrollStateRef={autoScrollStateRef}
               bottomInset={0}
-              liveMessageState={resolvedLiveMessageState}
+              liveMessageState={liveMessageState}
             />
           ) : (
             <View
@@ -331,20 +389,13 @@ export function SubAgentDetailView({
             </View>
           )}
         </View>
-      </SafeAreaView>
-    </Animated.View>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     page: {
-      ...StyleSheet.absoluteFill,
-      zIndex: 100,
-      elevation: 24,
-      backgroundColor: theme.colors.bgMain,
-    },
-    container: {
       flex: 1,
       backgroundColor: theme.colors.bgMain,
     },

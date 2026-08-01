@@ -1,5 +1,4 @@
 import { pendingApprovalAtom, pendingUserInputRequestAtom } from '../../state/mainScreen/turn';
-import { agentDetailThreadIdAtom } from '../../state/mainScreen/workspace';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
 import { processAgUiRunEvents } from './mainScreenAgUiRunEvents';
 import { processThreadStateEvents } from './mainScreenThreadStateEvents';
@@ -32,14 +31,12 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     cacheThreadPendingApproval,
     cacheThreadPendingUserInputRequest,
     cacheThreadPlan,
-    cacheThreadStreamingDelta,
     cacheThreadTurnState,
     chatIdRef,
     clearDeferredDisconnectActivity,
     clearLiveReasoningMessage,
     clearPendingPlanImplementationPrompt,
     clearRunWatchdog,
-    loadAgentDetail,
     loadChat,
     pushActiveCommand,
     readThreadContextUsage,
@@ -58,7 +55,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
   } = context;
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
   const setActivity = useSetAtom(activityAtom);
 
   useEffect(() => {
@@ -75,7 +71,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
         event.method === 'bridge/events/snapshotRequired' ||
         event.method === 'thread/name/updated' ||
         event.method === 'thread/deleted' ||
-        event.method === 'thread/subagent/adopted' ||
         event.method === 'thread/tokenUsage/updated' ||
         event.method === 'item/started'
       ) {
@@ -128,10 +123,8 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     pendingUserInputRequest?.requestId,
     recoverReplayGap,
     loadChat,
-    loadAgentDetail,
     scheduleAgentThreadsRefresh,
     appendStopSystemMessageIfNeeded,
-    agentDetailThreadId,
     bumpRunWatchdog,
     bumpAgentRuntimeRevision,
     clearDeferredDisconnectActivity,
@@ -142,7 +135,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     cacheThreadPendingApproval,
     cacheThreadPendingUserInputRequest,
     cacheThreadPlan,
-    cacheThreadStreamingDelta,
     cacheThreadTurnState,
     clearPendingPlanImplementationPrompt,
     clearLiveReasoningMessage,

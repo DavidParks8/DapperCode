@@ -119,6 +119,10 @@ export const switchBridgeProfileAtom = atom(
     await set(dispatchDurableAppStateAtom, { type: 'profiles/switch', profileId });
     set(resetChatSessionStateAtom);
     set(applyRestoredCacheAtom, nextCache);
+    const currentScreen = get(currentScreenAtom);
+    if (currentScreen === 'SubAgent' || currentScreen === 'ChatGit') {
+      set(currentScreenAtom, 'Main');
+    }
   },
 );
 
@@ -156,6 +160,10 @@ export const deleteBridgeProfileAtom = atom(
         ? await loadChatSnapshotCache(nextStore.activeProfileId)
         : null;
       set(applyRestoredCacheAtom, nextCache);
+      const currentScreen = get(currentScreenAtom);
+      if (currentScreen === 'SubAgent' || currentScreen === 'ChatGit') {
+        set(currentScreenAtom, 'Main');
+      }
     }
 
     if (nextStore.profiles.length === 0) {

@@ -8,6 +8,7 @@ import { BrowserScreen } from '../screens/browser/BrowserScreen';
 import { GitCheckoutScreen } from '../screens/gitCheckout/GitCheckoutScreen';
 import { GitScreen } from '../screens/git/GitScreen';
 import { MainScreen } from '../screens/main/MainScreen';
+import { SubAgentDetailView } from '../screens/main/SubAgentDetailView';
 import { PrivacyScreen } from '../screens/legal/PrivacyScreen';
 import { SettingsScreen } from '../screens/settings/SettingsScreen';
 import { TermsScreen } from '../screens/legal/TermsScreen';
@@ -15,7 +16,7 @@ import { WorkspacePickerScreen } from '../screens/workspacePicker/WorkspacePicke
 import { activeBridgeProfileAtom } from '../state/bridge/atoms';
 import { gitChatAtom } from '../state/chat/atoms';
 import { drawerCommandsAtom } from '../state/drawer/atoms';
-import { currentScreenAtom } from '../state/navigation/atoms';
+import { currentNavigationRouteAtom, currentScreenAtom } from '../state/navigation/atoms';
 
 type AnimatedViewStyle = ComponentProps<typeof Animated.View>['style'];
 
@@ -72,6 +73,7 @@ export function AppScreenRenderer({
   backSwipePushedScreenAnimatedStyle,
 }: AppScreenRendererProps = {}) {
   const currentScreen = useAtomValue(currentScreenAtom);
+  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
   const gitChat = useAtomValue(gitChatAtom);
   const onOpenDrawer = useOpenDrawer();
   const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
@@ -84,9 +86,15 @@ export function AppScreenRenderer({
 
   // MainScreen still owns per-profile session state, so it is remounted per bridge profile.
   const mainScreen = <MainScreen key={activeBridgeProfileId} />;
+  const animatesPushedThread = currentScreen === 'ChatGit' || currentScreen === 'SubAgent';
 
   const pushedScreen =
-    currentScreen === 'ChatGit' && gitChat ? (
+    currentNavigationRoute.screen === 'SubAgent' ? (
+      <SubAgentDetailView
+        key={currentNavigationRoute.threadId}
+        threadId={currentNavigationRoute.threadId}
+      />
+    ) : currentScreen === 'ChatGit' && gitChat ? (
       <GitScreen chat={gitChat} />
     ) : currentScreen === 'WorkspacePicker' ? (
       <WorkspacePickerScreen />
@@ -115,10 +123,10 @@ export function AppScreenRenderer({
         <ScreenStack
           pushed={pushedScreen}
           underlayAnimatedStyle={
-            currentScreen === 'ChatGit' ? backSwipeUnderlayAnimatedStyle : undefined
+            animatesPushedThread ? backSwipeUnderlayAnimatedStyle : undefined
           }
           pushedScreenAnimatedStyle={
-            currentScreen === 'ChatGit' ? backSwipePushedScreenAnimatedStyle : undefined
+            animatesPushedThread ? backSwipePushedScreenAnimatedStyle : undefined
           }
         >
           {mainScreen}

@@ -1,6 +1,5 @@
 import { errorAtom } from '../../state/mainScreen/turn';
 import {
-  agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   agentRuntimeRevisionAtom,
   relatedAgentThreadsAtom,
@@ -13,18 +12,20 @@ import { mainScreenCommandsAtom } from '../../state/commands';
 import {
   describeAgentThreadSource,
   findMatchingAgentThread,
+  indexAgentThreadOrdinals,
   resolveAgentActivitySummary,
 } from './agentThreads';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
 import { formatAgentThreadOptionTitle, iconForAgentThread } from './mainScreenHelpers';
 import type {
-  MainScreenChatNavigationAndAgentDetailContext,
-  MainScreenChatNavigationAndAgentDetailResult,
-} from './mainScreenChatNavigationAndAgentDetail';
+  MainScreenChatNavigationContext,
+  MainScreenChatNavigationResult,
+} from './mainScreenChatNavigation';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
+import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 
 export type MainScreenAgentThreadSelectorStateContext =
-  MainScreenChatNavigationAndAgentDetailContext & MainScreenChatNavigationAndAgentDetailResult;
+  MainScreenChatNavigationContext & MainScreenChatNavigationResult;
 
 export function useMainScreenAgentThreadSelectorState(
   context: MainScreenAgentThreadSelectorStateContext,
@@ -48,7 +49,9 @@ export function useMainScreenAgentThreadSelectorState(
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
+  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
+  const agentDetailThreadId =
+    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
   const openAgentThreadSelector = useCallback(
@@ -95,12 +98,14 @@ export function useMainScreenAgentThreadSelectorState(
   );
   openAgentThreadSelectorRef.current = openAgentThreadSelector;
 
+  const agentThreadOrdinals = useMemo(
+    () => indexAgentThreadOrdinals(relatedAgentThreads, agentRootThreadId),
+    [agentRootThreadId, relatedAgentThreads],
+  );
   const agentThreadRows = useMemo(() => {
-    let subAgentOrdinal = 0;
-
     return relatedAgentThreads.map((chat) => {
       const isRootThread = Boolean(agentRootThreadId) && chat.id === agentRootThreadId;
-      const ordinal = isRootThread ? null : (subAgentOrdinal += 1);
+      const ordinal = agentThreadOrdinals.get(chat.id) ?? null;
       const snapshot = threadRuntimeSnapshotsRef.current[chat.id] ?? null;
       const runtime = buildAgentThreadDisplayState(chat, snapshot, runWatchdogNow);
       const latestCommand = snapshot?.latestCommand ?? snapshot?.activeCommands?.at(-1) ?? null;
@@ -124,6 +129,7 @@ export function useMainScreenAgentThreadSelectorState(
     });
   }, [
     agentRootThreadId,
+    agentThreadOrdinals,
     agentRuntimeRevision,
     relatedAgentThreads,
     runWatchdogNow,

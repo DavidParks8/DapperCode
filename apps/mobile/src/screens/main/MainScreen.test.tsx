@@ -24,12 +24,14 @@ import type { ChatMessageProps } from '../../components/chatMessageTypes';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { useAtomValue } from 'jotai';
 import { MainScreen } from './MainScreen';
+import { SubAgentDetailView } from './SubAgentDetailView';
 import { GitCheckoutScreen } from '../gitCheckout/GitCheckoutScreen';
 import { WorkspacePickerScreen } from '../workspacePicker/WorkspacePickerScreen';
 import { mainScreenCommandsAtom, type MainScreenCommands } from '../../state/commands';
 import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
 import {
+  currentNavigationRouteAtom,
   currentScreenAtom,
   navigationStackAtom,
   pendingBrowserTargetUrlAtom,
@@ -40,7 +42,6 @@ import { selectedChatAtom } from '../../state/mainScreen/session';
 import { activeTurnIdAtom } from '../../state/mainScreen/turn';
 import { activityAtom } from '../../state/mainScreen/composer';
 import {
-  agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   favoriteWorkspacePathsAtom,
   relatedAgentThreadsAtom,
@@ -161,6 +162,21 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     return props.surface.title;
   },
 }));
+
+function MainRouteShell() {
+  const route = useAtomValue(currentNavigationRouteAtom);
+  const subAgentRoute = route.screen === 'SubAgent' ? route : null;
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={StyleSheet.absoluteFill} pointerEvents={subAgentRoute ? 'none' : 'auto'}>
+        <MainScreen />
+      </View>
+      {subAgentRoute ? (
+        <SubAgentDetailView key={subAgentRoute.threadId} threadId={subAgentRoute.threadId} />
+      ) : null}
+    </View>
+  );
+}
 
 (() => {
   type Queryable = ReactTestInstance & {
@@ -448,7 +464,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
             }}
           >
             <AppThemeProvider theme={theme}>
-              <MainScreen />
+              <MainRouteShell />
             </AppThemeProvider>
           </SafeAreaProvider>,
         ),
@@ -1699,7 +1715,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
             }}
           >
             <AppThemeProvider theme={theme}>
-              <MainScreen />
+              <MainRouteShell />
             </AppThemeProvider>
           </SafeAreaProvider>,
         ),
@@ -2689,7 +2705,6 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       // Back returns to the sub-agent that spawned it, not to the main thread.
       await press(byLabel(root, 'Back from sub-agent transcript'));
-      await advance(250);
       expect(
         root
           .findAllByType(ChatMessage)
@@ -2702,7 +2717,6 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 
       act(() => store.set(popNavigationRouteAtom));
       expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
-      expect(store.get(agentDetailThreadIdAtom)).toBeNull();
       act(() => tree.unmount());
     });
 
@@ -2822,6 +2836,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => rootMessage.props.onOpenLocalPreview('http://127.0.0.1:5173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
       expect(store.get(currentScreenAtom)).toBe('Browser');
+      act(() => store.set(popNavigationRouteAtom));
 
       await act(async () => {
         await flush();
@@ -2842,8 +2857,12 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       ).toHaveLength(0);
       act(() => detailMessage?.props.onOpenLocalPreview('http://localhost:4173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://localhost:4173');
+      expect(store.get(currentScreenAtom)).toBe('Browser');
+      act(() => store.set(popNavigationRouteAtom));
+      await act(async () => {
+        await flush();
+      });
       await press(byLabel(root, 'Back from sub-agent transcript'));
-      await advance(250);
 
       act(() => tree.unmount());
     });
@@ -3015,7 +3034,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
             }}
           >
             <AppThemeProvider theme={theme}>
-              <MainScreen />
+              <MainRouteShell />
             </AppThemeProvider>
           </SafeAreaProvider>,
         ),

@@ -11,11 +11,6 @@ import {
   userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
-  agentDetailChatAtom,
-  agentDetailErrorAtom,
-  agentDetailLoadingAtom,
-  agentDetailParentChatAtom,
-  agentDetailThreadIdAtom,
   agentRootThreadIdAtom,
   relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
@@ -24,32 +19,23 @@ import {
   queueActionItemIdAtom,
   queueActionKindAtom,
 } from '../../state/mainScreen/composer';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { useCallback, useLayoutEffect } from 'react';
+import { useSetAtom } from 'jotai';
+import { useCallback } from 'react';
 import type { Chat } from '../../api/types';
-import { resolveEquivalentChat } from './mainScreenChatState';
 import { OPENING_CHAT_ACTIVITY_TITLE } from './mainScreenHelpers';
 import type {
   MainScreenChatLoadPipelineContext,
   MainScreenChatLoadPipelineResult,
 } from './mainScreenChatLoadPipeline';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
-import {
-  currentNavigationRouteAtom,
-  currentScreenAtom,
-  popNavigationRouteAtom,
-  pushNavigationRouteAtom,
-} from '../../state/navigation/atoms';
+import { openSubAgentAtom } from '../../state/navigation/actions';
+import { currentScreenAtom } from '../../state/navigation/atoms';
 
-export type MainScreenChatNavigationAndAgentDetailContext = MainScreenChatLoadPipelineContext &
+export type MainScreenChatNavigationContext = MainScreenChatLoadPipelineContext &
   MainScreenChatLoadPipelineResult;
 
-export function useMainScreenChatNavigationAndAgentDetail(
-  context: MainScreenChatNavigationAndAgentDetailContext,
-) {
+export function useMainScreenChatNavigation(context: MainScreenChatNavigationContext) {
   const {
-    agentDetailRequestRef,
-    agentThreadsController,
     api,
     applyThreadRuntimeSnapshot,
     attachmentController,
@@ -80,23 +66,14 @@ export function useMainScreenChatNavigationAndAgentDetail(
   const setActivePlan = useSetAtom(activePlanAtom);
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
-  const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const setAgentRootThreadId = useSetAtom(agentRootThreadIdAtom);
   const setRelatedAgentThreads = useSetAtom(relatedAgentThreadsAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
-  const setAgentDetailThreadId = useSetAtom(agentDetailThreadIdAtom);
-  const setAgentDetailChat = useSetAtom(agentDetailChatAtom);
-  const setAgentDetailParentChat = useSetAtom(agentDetailParentChatAtom);
-  const setAgentDetailLoading = useSetAtom(agentDetailLoadingAtom);
-  const setAgentDetailError = useSetAtom(agentDetailErrorAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
-  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
   const setCurrentScreen = useSetAtom(currentScreenAtom);
-  const pushNavigationRoute = useSetAtom(pushNavigationRouteAtom);
-  const popNavigationRoute = useSetAtom(popNavigationRouteAtom);
+  const openSubAgent = useSetAtom(openSubAgentAtom);
 
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
@@ -190,111 +167,24 @@ export function useMainScreenChatNavigationAndAgentDetail(
     ],
   );
 
-  const clearAgentDetailState = useCallback(() => {
-    agentDetailRequestRef.current += 1;
-    setAgentDetailThreadId(null);
-    setAgentDetailChat(null);
-    setAgentDetailParentChat(null);
-    setAgentDetailLoading(false);
-    setAgentDetailError(null);
-  }, []);
-
   const closeAgentDetail = useCallback(() => {
-    clearAgentDetailState();
     setCurrentScreen('Main');
-  }, [clearAgentDetailState, setCurrentScreen]);
-
-  const loadAgentDetail = useCallback(
-    async (threadId: string, showLoading = false) => {
-      const requestId = agentDetailRequestRef.current + 1;
-      agentDetailRequestRef.current = requestId;
-      if (showLoading) {
-        setAgentDetailLoading(true);
-      }
-
-      try {
-        const { chat, parent } = await agentThreadsController.loadDetail(threadId);
-        if (agentDetailRequestRef.current !== requestId) {
-          return;
-        }
-        setAgentDetailChat((previous) =>
-          previous?.id === chat.id ? resolveEquivalentChat(previous, chat) : chat,
-        );
-        setAgentDetailParentChat(parent);
-        setAgentDetailError(null);
-      } catch (err) {
-        if (agentDetailRequestRef.current === requestId) {
-          setAgentDetailError((err as Error).message);
-        }
-      } finally {
-        if (agentDetailRequestRef.current === requestId) {
-          setAgentDetailLoading(false);
-        }
-      }
-    },
-    [agentThreadsController],
-  );
-
-  const showAgentDetail = useCallback(
-    (threadId: string) => {
-      setAgentThreadMenuVisible(false);
-      setAgentDetailThreadId(threadId);
-      setAgentDetailChat(api.peekChat(threadId) ?? api.peekChatShell(threadId));
-      setAgentDetailParentChat(null);
-      setAgentDetailError(null);
-      void loadAgentDetail(threadId, true);
-    },
-    [
-      api,
-      loadAgentDetail,
-      setAgentDetailChat,
-      setAgentDetailError,
-      setAgentDetailParentChat,
-      setAgentDetailThreadId,
-      setAgentThreadMenuVisible,
-    ],
-  );
+  }, [setCurrentScreen]);
 
   const openAgentDetail = useCallback(
     (threadId: string) => {
-      if (!threadId || threadId === agentRootThreadId) {
-        closeAgentDetail();
-        return;
-      }
-      showAgentDetail(threadId);
-      pushNavigationRoute({ screen: 'SubAgent', threadId });
+      setAgentThreadMenuVisible(false);
+      openSubAgent(threadId);
     },
-    [agentRootThreadId, closeAgentDetail, pushNavigationRoute, showAgentDetail],
+    [openSubAgent, setAgentThreadMenuVisible],
   );
-
-  const popAgentDetail = useCallback(() => {
-    popNavigationRoute();
-  }, [popNavigationRoute]);
-
-  useLayoutEffect(() => {
-    const routeThreadId =
-      currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
-    if (!routeThreadId) {
-      if (agentDetailThreadId) {
-        clearAgentDetailState();
-      }
-      return;
-    }
-    if (agentDetailThreadId !== routeThreadId) {
-      showAgentDetail(routeThreadId);
-    }
-  }, [agentDetailThreadId, clearAgentDetailState, currentNavigationRoute, showAgentDetail]);
 
   return {
     handleLoadEarlier,
     openChatThread,
     closeAgentDetail,
-    popAgentDetail,
-    loadAgentDetail,
     openAgentDetail,
   };
 }
 
-export type MainScreenChatNavigationAndAgentDetailResult = ReturnType<
-  typeof useMainScreenChatNavigationAndAgentDetail
->;
+export type MainScreenChatNavigationResult = ReturnType<typeof useMainScreenChatNavigation>;

@@ -1,4 +1,5 @@
 import { activityAtom } from '../../state/mainScreen/composer';
+import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect } from 'react';
 import type { PendingApproval, PendingUserInputRequest } from '../../api/types';
@@ -6,7 +7,6 @@ import { env } from '../../config';
 import {
   type ActivityState,
   type ThreadRuntimeSnapshot,
-  mergeStreamingDelta,
   appendRunEventHistory,
   isChatLikelyRunning,
 } from './mainScreenHelpers';
@@ -31,9 +31,9 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     externalStatusFullSyncTimerRef,
     mergeChatWithPendingOptimisticMessages,
     setSelectedChat,
-    threadRuntimeSnapshotsRef,
   } = context;
   const setActivity = useSetAtom(activityAtom);
+  const setThreadRuntimeSnapshots = useSetAtom(threadRuntimeSnapshotsAtom);
 
   const clearExternalStatusFullSync = useCallback(() => {
     const timer = externalStatusFullSyncTimerRef.current;
@@ -131,41 +131,28 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
         return;
       }
 
-      const previous =
-        threadRuntimeSnapshotsRef.current[threadId] ??
-        ({
-          updatedAtMs: Date.now(),
-        } as ThreadRuntimeSnapshot);
-      const nextPatch = updater(previous);
-
-      threadRuntimeSnapshotsRef.current[threadId] = {
-        ...previous,
-        ...nextPatch,
-        updatedAtMs: Date.now(),
-      };
+      setThreadRuntimeSnapshots((current) => {
+        const previous =
+          current[threadId] ??
+          ({
+            updatedAtMs: Date.now(),
+          } as ThreadRuntimeSnapshot);
+        return {
+          ...current,
+          [threadId]: {
+            ...previous,
+            ...updater(previous),
+            updatedAtMs: Date.now(),
+          },
+        };
+      });
     },
-    [],
+    [setThreadRuntimeSnapshots],
   );
 
   const cacheThreadActivity = useCallback(
     (threadId: string, nextActivity: ActivityState) => {
       upsertThreadRuntimeSnapshot(threadId, () => ({ activity: nextActivity }));
-      bumpAgentRuntimeRevision();
-    },
-    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
-  );
-
-  const cacheThreadStreamingDelta = useCallback(
-    (threadId: string, delta: string) => {
-      const normalized = delta.trim();
-      if (!normalized) {
-        return;
-      }
-
-      upsertThreadRuntimeSnapshot(threadId, (previous) => {
-        const merged = mergeStreamingDelta(previous.streamingText ?? null, delta);
-        return { streamingText: merged };
-      });
       bumpAgentRuntimeRevision();
     },
     [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
@@ -217,7 +204,6 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     scheduleExternalStatusFullSync,
     upsertThreadRuntimeSnapshot,
     cacheThreadActivity,
-    cacheThreadStreamingDelta,
     cacheThreadActiveCommand,
     cacheThreadPendingApproval,
     cacheThreadPendingUserInputRequest,

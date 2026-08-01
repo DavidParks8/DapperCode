@@ -75,6 +75,20 @@ export function findMatchingAgentThread(threads: ChatSummary[], query: string): 
   );
 }
 
+export function indexAgentThreadOrdinals(
+  threads: ChatSummary[],
+  rootThreadId: string | null,
+): ReadonlyMap<string, number> {
+  const ordinals = new Map<string, number>();
+  let ordinal = 0;
+  for (const thread of threads) {
+    if (thread.id === rootThreadId) continue;
+    ordinal += 1;
+    ordinals.set(thread.id, ordinal);
+  }
+  return ordinals;
+}
+
 export function describeAgentThreadSource(chat: ChatSummary, rootThreadId: string | null): string {
   if (rootThreadId && chat.id === rootThreadId) {
     return 'Main thread';

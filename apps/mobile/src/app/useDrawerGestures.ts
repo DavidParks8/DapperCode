@@ -192,7 +192,7 @@ export function useDrawerGestures({
     // Settings is entered from the drawer and its header affordance is the drawer toggle, so its
     // edge swipe drags the session list back into view instead of popping to the chat screen.
     const opensDrawer = currentScreen === 'Settings' && !usesTabletLayout;
-    const animatesCurrentScreen = currentScreen === 'ChatGit';
+    const animatesCurrentScreen = currentScreen === 'ChatGit' || currentScreen === 'SubAgent';
     const enabled = opensDrawer ? settingsAllowsDrawerGesture : navigationCanGoBack;
     return Gesture.Pan()
       .withTestId('app-back-swipe')

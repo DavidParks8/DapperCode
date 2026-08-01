@@ -4,20 +4,13 @@ import {
   pendingApprovalAtom,
   pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
-import {
-  agentDetailChatAtom,
-  agentDetailErrorAtom,
-  agentDetailLoadingAtom,
-  agentDetailParentChatAtom,
-  loadingAgentThreadsAtom,
-} from '../../state/mainScreen/workspace';
+import { loadingAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { keyboardVisibleAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { ActivityBar } from '../../components/ActivityBar';
 import { SelectionSheet } from '../../components/SelectionSheet';
 import { ChatTranscriptView } from './ChatTranscriptView';
-import { SubAgentDetailView } from './SubAgentDetailView';
 import { ComposeView } from './MainScreenPresentation';
 import { ChatOpeningView } from './MainScreenPresentation';
 import type {
@@ -29,11 +22,10 @@ import {
   agentThreadMenuVisibleAtom,
   collaborationModeMenuVisibleAtom,
 } from '../../state/mainScreen/modals';
-import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
 
-export function MainScreenTranscriptAndAgentDetail({ context }: { context: Context }) {
+export function MainScreenTranscriptAndSheets({ context }: { context: Context }) {
   const {
     selectedChat,
     isOpeningChat,
@@ -78,11 +70,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
     showFloatingActivity,
     displayedActivity,
     activityDetail,
-    agentDetailRuntime,
-    agentDetailDisplay,
-    agentDetailTitle,
-    agentDetailSummary,
-    popAgentDetail,
     attachmentMenuVisible,
     attachmentMenuOptions,
     attachmentController,
@@ -96,13 +83,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
   const loadingAgentThreads = useAtomValue(loadingAgentThreadsAtom);
-  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
-  const agentDetailThreadId =
-    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
-  const agentDetailChat = useAtomValue(agentDetailChatAtom);
-  const agentDetailParentChat = useAtomValue(agentDetailParentChatAtom);
-  const agentDetailLoading = useAtomValue(agentDetailLoadingAtom);
-  const agentDetailError = useAtomValue(agentDetailErrorAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   const agentThreadMenuVisible = useAtomValue(agentThreadMenuVisibleAtom);
   const agentModalVisible = useAtomValue(agentModalVisibleAtom);
@@ -245,27 +225,6 @@ export function MainScreenTranscriptAndAgentDetail({ context }: { context: Conte
           {shouldShowComposer ? renderComposer(false) : null}
         </KeyboardAvoidingView>
       )}
-      <SubAgentDetailView
-        visible={Boolean(agentDetailThreadId)}
-        chat={agentDetailChat}
-        parentChat={agentDetailParentChat}
-        runtime={agentDetailRuntime}
-        liveMessageState={
-          agentDetailThreadId ? (liveAssistantByThread[agentDetailThreadId] ?? null) : null
-        }
-        display={agentDetailDisplay}
-        title={agentDetailTitle}
-        role={agentDetailSummary?.agentRole}
-        loading={agentDetailLoading}
-        error={agentDetailError}
-        bridgeUrl={bridgeUrl}
-        bridgeToken={bridgeToken ?? null}
-        showToolCalls={showToolCalls ?? true}
-        agentThreadStatusById={agentThreadStatusById}
-        onOpenLocalPreview={onOpenLocalPreview}
-        onOpenSubAgentThread={openAgentDetail}
-        onClose={popAgentDetail}
-      />
       <SelectionSheet
         visible={attachmentMenuVisible}
         eyebrow="Attachments"

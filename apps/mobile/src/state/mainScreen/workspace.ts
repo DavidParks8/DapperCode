@@ -3,7 +3,6 @@ import type { SetStateAction } from 'react';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type {
-  Chat,
   ChatSummary,
   FileSystemEntry,
   FileSystemListResponse,
@@ -20,16 +19,6 @@ export const agentRootThreadIdAtom = screenAtom<string | null>(null);
 export const agentRuntimeRevisionAtom = screenAtom(0);
 
 export const loadingAgentThreadsAtom = screenAtom(false);
-
-export const agentDetailThreadIdAtom = screenAtom<string | null>(null);
-
-export const agentDetailChatAtom = screenAtom<Chat | null>(null);
-
-export const agentDetailParentChatAtom = screenAtom<Chat | null>(null);
-
-export const agentDetailLoadingAtom = screenAtom(false);
-
-export const agentDetailErrorAtom = screenAtom<string | null>(null);
 
 export const workspacePickerPurposeAtom = screenAtom<WorkspacePickerPurpose>('default-start');
 

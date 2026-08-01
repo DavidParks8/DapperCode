@@ -10,7 +10,13 @@ import {
   pendingMainChatSnapshotAtom,
   selectedChatIdAtom,
 } from '../chat/atoms';
-import { chatContextChangedAtom, closeGitAtom, openChatGitAtom } from './actions';
+import { openChatWithTransitionAtom } from '../chat/actions';
+import {
+  chatContextChangedAtom,
+  closeGitAtom,
+  openChatGitAtom,
+  openSubAgentAtom,
+} from './actions';
 import {
   currentNavigationRouteAtom,
   currentScreenAtom,
@@ -92,6 +98,31 @@ describe('navigation actions', () => {
     store.set(popNavigationRouteAtom);
     expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
     expect(store.get(navigationCanGoBackAtom)).toBe(false);
+  });
+
+  it('keeps a sub-agent route open when a delayed chat transition settles', async () => {
+    jest.useFakeTimers();
+    try {
+      const api = {
+        peekChatShell: jest.fn().mockReturnValue(null),
+      } as unknown as HostBridgeApiClient;
+      const store = createBridgeTestStore({ api });
+
+      const pendingTransition = store.set(openChatWithTransitionAtom, 'next-thread');
+      expect(store.get(chatTransitionChatIdAtom)).toBe('next-thread');
+
+      store.set(openSubAgentAtom, 'child');
+      jest.runAllTimers();
+      await pendingTransition;
+
+      expect(store.get(currentNavigationRouteAtom)).toEqual({
+        screen: 'SubAgent',
+        threadId: 'child',
+      });
+      expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('resets parameterless screens to their canonical stack', () => {

@@ -11,7 +11,9 @@ import {
 } from '../../state/mainScreen/turn';
 import { activityAtom } from '../../state/mainScreen/composer';
 import { bridgeCapabilitiesAtom } from '../../state/mainScreen/models';
-import { agentDetailThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
+import { relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
+import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
+import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgUiLiveAssistantMessages } from '../../api/agUi';
@@ -79,7 +81,9 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const setActivity = useSetAtom(activityAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
-  const agentDetailThreadId = useAtomValue(agentDetailThreadIdAtom);
+  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
+  const agentDetailThreadId =
+    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
 
   const installReplayRecoverySnapshot = useCallback(
     (snapshot: ReplayRecoverySnapshot, guard: ReplayRecoveryInstallGuard) => {
@@ -125,35 +129,38 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
           runtimeAdvancedThreadIds.add(chat.id);
           continue;
         }
-        threadRuntimeSnapshotsRef.current[chat.id] = {
-          activity: pendingThreadApproval
-            ? { tone: 'idle', title: 'Waiting for approval' }
-            : pendingThreadUserInput
-              ? { tone: 'idle', title: 'Waiting for input' }
-              : running
-                ? { tone: 'running', title: 'Working' }
-                : chat.status === 'error'
-                  ? { tone: 'error', title: 'Turn failed', detail: chat.lastError }
-                  : chat.status === 'complete'
-                    ? { tone: 'complete', title: 'Turn completed' }
-                    : { tone: 'idle', title: 'Ready' },
-          activeCommands: [],
-          latestCommand: null,
-          streamingText: null,
-          pendingApproval: pendingThreadApproval,
-          pendingUserInputRequest: pendingThreadUserInput,
-          bridgeUiSurfaces: [],
-          queuedMessages: [...queue.pendingSteers, ...queue.items],
-          pendingSteerMessageIds: queue.pendingSteers.map((item) => item.id),
-          waitingForToolCalls: queue.waitingForToolCalls,
-          steeringInFlight: queue.steeringInFlight,
-          queuedMessageError: queue.lastError,
-          contextUsage: readThreadContextUsage(chat.acpUsage),
-          plan,
-          activeTurnId: chat.activeTurnId ?? chat.acpActive?.sourceTurnId ?? null,
-          runWatchdogUntil: running ? Date.now() + RUN_WATCHDOG_MS : 0,
-          updatedAtMs: Date.now(),
-        };
+        store.set(threadRuntimeSnapshotsAtom, (current) => ({
+          ...current,
+          [chat.id]: {
+            activity: pendingThreadApproval
+              ? { tone: 'idle', title: 'Waiting for approval' }
+              : pendingThreadUserInput
+                ? { tone: 'idle', title: 'Waiting for input' }
+                : running
+                  ? { tone: 'running', title: 'Working' }
+                  : chat.status === 'error'
+                    ? { tone: 'error', title: 'Turn failed', detail: chat.lastError }
+                    : chat.status === 'complete'
+                      ? { tone: 'complete', title: 'Turn completed' }
+                      : { tone: 'idle', title: 'Ready' },
+            activeCommands: [],
+            latestCommand: null,
+            streamingText: null,
+            pendingApproval: pendingThreadApproval,
+            pendingUserInputRequest: pendingThreadUserInput,
+            bridgeUiSurfaces: [],
+            queuedMessages: [...queue.pendingSteers, ...queue.items],
+            pendingSteerMessageIds: queue.pendingSteers.map((item) => item.id),
+            waitingForToolCalls: queue.waitingForToolCalls,
+            steeringInFlight: queue.steeringInFlight,
+            queuedMessageError: queue.lastError,
+            contextUsage: readThreadContextUsage(chat.acpUsage),
+            plan,
+            activeTurnId: chat.activeTurnId ?? chat.acpActive?.sourceTurnId ?? null,
+            runWatchdogUntil: running ? Date.now() + RUN_WATCHDOG_MS : 0,
+            updatedAtMs: Date.now(),
+          },
+        }));
         if (plan) {
           chatPlanSnapshotsRef.current[chat.id] = plan;
         } else {

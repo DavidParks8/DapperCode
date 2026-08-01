@@ -27,11 +27,11 @@ export function useAccessibilityAnnouncement(message: string | null | undefined)
   }, [message]);
 }
 
-export function useModalAccessibilityFocus(visible: boolean, delayMs = 350) {
+export function useAccessibilityFocus(active: boolean, delayMs = 350) {
   const focusRef = useRef<View>(null);
 
   useEffect(() => {
-    if (!visible) {
+    if (!active) {
       return;
     }
 
@@ -50,10 +50,12 @@ export function useModalAccessibilityFocus(visible: boolean, delayMs = 350) {
     }, delayMs);
 
     return () => clearTimeout(timeout);
-  }, [delayMs, visible]);
+  }, [active, delayMs]);
 
   return focusRef;
 }
+
+export const useModalAccessibilityFocus = useAccessibilityFocus;
 
 export function controlAccessibilityState({
   disabled = false,

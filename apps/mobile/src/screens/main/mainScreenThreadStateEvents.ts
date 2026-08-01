@@ -7,10 +7,10 @@ import {
   pendingUserInputRequestAtom,
 } from '../../state/mainScreen/turn';
 import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
-import { agentDetailChatAtom, agentDetailThreadIdAtom } from '../../state/mainScreen/workspace';
 import { screenSetter } from '../../state/mainScreen/registry';
 import { startNewChatAtom } from '../../state/navigation/actions';
 import { activityAtom } from '../../state/mainScreen/composer';
+import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 import type { RpcNotification } from '../../api/types';
 import {
   RUN_WATCHDOG_MS,
@@ -38,7 +38,6 @@ export function processThreadStateEvents(
     scheduleAgentThreadsRefresh,
     setSelectedChat,
     loadChat,
-    loadAgentDetail,
     readThreadContextUsage,
     cacheThreadContextUsage,
     planItemTurnIdByThreadRef,
@@ -57,8 +56,9 @@ export function processThreadStateEvents(
   const setLiveAssistantByThread = screenSetter(store, liveAssistantByThreadAtom);
   const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
-  const agentDetailThreadId = store.get(agentDetailThreadIdAtom);
-  const agentDetailChat = store.get(agentDetailChatAtom);
+  const currentNavigationRoute = store.get(currentNavigationRouteAtom);
+  const agentDetailThreadId =
+    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
   const setActivity = screenSetter(store, activityAtom);
 
   if (event.method === 'bridge/events/snapshotRequired') {
@@ -117,15 +117,6 @@ export function processThreadStateEvents(
     }
     // The thread is gone on the agent, so keeping it open would only surface stale history.
     store.set(startNewChatAtom);
-    return;
-  }
-
-  if (event.method === 'thread/subagent/adopted') {
-    const params = toRecord(event.params);
-    const threadId = extractNotificationThreadId(params);
-    if (threadId && threadId === agentDetailThreadId && !agentDetailChat) {
-      void loadAgentDetail(threadId, true);
-    }
     return;
   }
 

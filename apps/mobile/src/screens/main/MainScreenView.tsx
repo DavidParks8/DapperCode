@@ -1,5 +1,5 @@
 import { MainScreenHeaderAndWorkflow } from './MainScreenHeaderAndWorkflow';
-import { MainScreenTranscriptAndAgentDetail } from './MainScreenTranscriptAndAgentDetail';
+import { MainScreenTranscriptAndSheets } from './MainScreenTranscriptAndSheets';
 import { MainScreenRenameSheet } from './MainScreenRenameSheet';
 import { MainScreenAttachmentModals } from './MainScreenAttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from './MainScreenApprovalAndBridgePrompts';
@@ -19,7 +19,7 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
   return (
     <View style={styles.container}>
       <MainScreenHeaderAndWorkflow context={context} />
-      <MainScreenTranscriptAndAgentDetail context={context} />
+      <MainScreenTranscriptAndSheets context={context} />
       <MainScreenModelAndEffortSheets context={context} />
       <MainScreenRenameSheet context={context} />
       <MainScreenAttachmentModals context={context} />

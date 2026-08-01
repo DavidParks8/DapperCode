@@ -118,6 +118,7 @@ jest.mock('./src/api/ws', () => ({
     isConnected = true;
     connect = jest.fn();
     disconnect = jest.fn();
+    onEvent = jest.fn().mockReturnValue(jest.fn());
     onStatus = jest.fn((listener: (connected: boolean) => void) => {
       mockWsStatusListeners.push(listener);
       return jest.fn();
@@ -134,7 +135,19 @@ jest.mock('./src/api/ws', () => ({
 jest.mock('./src/api/client', () => ({
   HostBridgeApiClient: class {
     primeChats = jest.fn().mockResolvedValue([]);
+    peekChat = jest.fn().mockReturnValue(null);
     peekChatShell = jest.fn().mockReturnValue(null);
+    peekChatSummary = jest.fn().mockReturnValue(null);
+    getChat = jest.fn().mockResolvedValue({
+      id: 'child-thread',
+      title: 'Sub-agent',
+      status: 'running',
+      createdAt: '2026-07-20T00:00:00.000Z',
+      updatedAt: '2026-07-20T00:00:00.000Z',
+      statusUpdatedAt: '2026-07-20T00:00:00.000Z',
+      lastMessagePreview: '',
+      messages: [],
+    });
     rememberChat = jest.fn();
     mockOptions: unknown;
     constructor(mockOptions: unknown) {
@@ -1046,6 +1059,54 @@ describe('App orchestration', () => {
     ).toBe(false);
 
     act(() => expect(mockBackHandler?.()).toBe(true));
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+    act(() => tree.unmount());
+  });
+
+  it('leaves a sub-agent route when switching bridge profiles', async () => {
+    const secondProfile = {
+      ...profile,
+      id: 'profile-2',
+      name: 'Remote bridge',
+      bridgeUrl: 'https://bridge.example',
+    };
+    mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
+    const tree = await renderApp();
+    await dispatch((s) =>
+      s.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'old-profile-thread' }),
+    );
+    mockLoadChatSnapshotCache.mockResolvedValueOnce(null);
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [profile, secondProfile] },
+    });
+
+    await dispatch((s) => s.set(switchBridgeProfileAtom, secondProfile.id));
+
+    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+    act(() => tree.unmount());
+  });
+
+  it('leaves a sub-agent route when deleting the active bridge profile', async () => {
+    const secondProfile = {
+      ...profile,
+      id: 'profile-2',
+      name: 'Remote bridge',
+      bridgeUrl: 'https://bridge.example',
+    };
+    mockSnapshot = snapshot({ profiles: [profile, secondProfile] });
+    const tree = await renderApp();
+    await dispatch((s) =>
+      s.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'deleted-profile-thread' }),
+    );
+    mockLoadChatSnapshotCache.mockResolvedValueOnce(null);
+    mockStore.dispatchDurable.mockResolvedValueOnce({
+      bridgeProfiles: { activeProfileId: secondProfile.id, profiles: [secondProfile] },
+    });
+
+    await dispatch((s) => s.set(deleteBridgeProfileAtom, profile.id));
+
     expect(store.get(currentScreenAtom)).toBe('Main');
     expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
     act(() => tree.unmount());

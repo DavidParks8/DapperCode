@@ -25,7 +25,7 @@ import { useMainScreenReasoningAndInterrupt } from './mainScreenReasoningAndInte
 import { useMainScreenTurnStopControl } from './mainScreenTurnStopControl';
 import { useMainScreenSlashCommandHandler } from './mainScreenSlashCommandHandler';
 import { useMainScreenChatLoadPipeline } from './mainScreenChatLoadPipeline';
-import { useMainScreenChatNavigationAndAgentDetail } from './mainScreenChatNavigationAndAgentDetail';
+import { useMainScreenChatNavigation } from './mainScreenChatNavigation';
 import { useMainScreenAgentThreadSelectorState } from './mainScreenAgentThreadSelectorState';
 import { useMainScreenAgentThreadEventBootstrap } from './mainScreenAgentThreadEventBootstrap';
 import { useMainScreenChatCreationFlow } from './mainScreenChatCreationFlow';
@@ -154,17 +154,16 @@ export function MainScreen() {
   const slashCommandHandlerContext = { ...turnStopControlContext, ...slashCommandHandlerResult };
   const chatLoadPipelineResult = useMainScreenChatLoadPipeline(slashCommandHandlerContext);
   const chatLoadPipelineContext = { ...slashCommandHandlerContext, ...chatLoadPipelineResult };
-  const chatNavigationAndAgentDetailResult =
-    useMainScreenChatNavigationAndAgentDetail(chatLoadPipelineContext);
-  const chatNavigationAndAgentDetailContext = {
+  const chatNavigationResult = useMainScreenChatNavigation(chatLoadPipelineContext);
+  const chatNavigationContext = {
     ...chatLoadPipelineContext,
-    ...chatNavigationAndAgentDetailResult,
+    ...chatNavigationResult,
   };
   const agentThreadSelectorStateResult = useMainScreenAgentThreadSelectorState(
-    chatNavigationAndAgentDetailContext,
+    chatNavigationContext,
   );
   const agentThreadSelectorStateContext = {
-    ...chatNavigationAndAgentDetailContext,
+    ...chatNavigationContext,
     ...agentThreadSelectorStateResult,
   };
   const agentThreadEventBootstrapResult = useMainScreenAgentThreadEventBootstrap(

@@ -85,7 +85,7 @@ Assert on store state rather than on callback props: screens no longer receive t
 
 Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState` left in the
 `mainScreen*` modules. Atoms are grouped by domain (`session`, `turn`, `models`, `workspace`,
-`composer`, `modals`, `gitCheckout`, `toolInvocations`).
+`composer`, `modals`, `gitCheckout`, `runtime`, `toolInvocations`).
 
 - **Always create them with `screenAtom`,** never `atom`. `screenAtom` registers the atom with
   `resetMainScreenStateAtom`, which `MainScreen` runs once per mount. Screen atoms outlive the
@@ -105,14 +105,16 @@ Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState
   use `store.get(atom)` / `screenSetter(store, atom)`.
 - **Prefer `screenRefView` over mirroring state into a ref.** Jotai reads are already live, so
   `screenRefView(store, someAtom)` gives a read-only `{ current }` view with no duplicated state.
+  Thread runtime snapshots use this pattern: MainScreen helpers keep synchronous `.current` reads
+  while the pushed sub-agent route subscribes to the same resettable atom.
 
 ### Why `MainScreen` is still keyed by bridge profile
 
 `AppScreenRenderer` renders `<MainScreen key={activeBridgeProfileId} />`. That remount is what clears
 the component-local state the atoms deliberately do not cover:
 
-- ~38 `useRef` caches in the hook chain (thread runtime snapshots, reasoning buffers, model
-  preferences, parent-chat cache) and their pending timers.
+- Dozens of `useRef` caches in the hook chain (reasoning buffers, model preferences, parent-chat
+  cache) and their pending timers.
 - The feature controllers under `screens/controllers/` (`useDraftController`,
   `useAttachmentController`), which own their own `useState` and persistence and are tested
   standalone.

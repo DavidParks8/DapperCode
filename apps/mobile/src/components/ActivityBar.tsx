@@ -5,8 +5,9 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { LoadingGlyph } from './LoadingGlyph';
 import { useAppTheme, type AppTheme } from '../theme';
+import type { ActivityTone } from '../state/mainScreen/runtime';
 
-export type ActivityTone = 'running' | 'complete' | 'error' | 'idle';
+export type { ActivityTone } from '../state/mainScreen/runtime';
 
 interface ActivityBarProps {
   title: string;

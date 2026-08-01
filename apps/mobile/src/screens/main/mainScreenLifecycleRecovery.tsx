@@ -50,7 +50,6 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   const loadChatRequestRef = useRef(0);
   const modelOptionsRequestRef = useRef(0);
   const agentThreadsRequestRef = useRef(0);
-  const agentDetailRequestRef = useRef(0);
   const agentThreadsRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const replayRecoveryGenerationRef = useRef(0);
   const replayRecoveryRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,7 +232,6 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
     loadChatRequestRef,
     modelOptionsRequestRef,
     agentThreadsRequestRef,
-    agentDetailRequestRef,
     agentThreadsRefreshTimerRef,
     replayRecoveryGenerationRef,
     replayRecoveryRetryTimerRef,

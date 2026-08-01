@@ -11,12 +11,12 @@ import {
   selectedChatIdAtom,
 } from '../../state/mainScreen/session';
 import { screenRefView } from '../../state/mainScreen/registry';
+import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../../agents';
 import type { BridgeUiSurface, Chat } from '../../api/types';
 import {
   type ActivePlanState,
-  type ThreadRuntimeSnapshot,
   type PendingOptimisticUserMessage,
   type PendingOptimisticQueuedMessage,
   type ChatModelPreference,
@@ -135,7 +135,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const externalStatusFullSyncInFlightRef = useRef(false);
   const externalStatusFullSyncQueuedThreadRef = useRef<string | null>(null);
   const externalStatusFullSyncNextAllowedAtRef = useRef(0);
-  const threadRuntimeSnapshotsRef = useRef<Record<string, ThreadRuntimeSnapshot>>({});
+  const threadRuntimeSnapshotsRef = screenRefView(store, threadRuntimeSnapshotsAtom);
   const threadReasoningBuffersRef = useRef<Record<string, string>>({});
   const pendingOptimisticUserMessagesRef = useRef<Record<string, PendingOptimisticUserMessage[]>>(
     {},

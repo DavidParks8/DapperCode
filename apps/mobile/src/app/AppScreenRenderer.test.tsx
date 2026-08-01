@@ -3,7 +3,7 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { AppScreenRenderer } from './AppScreenRenderer';
 import { createBridgeTestStore, withAppStore } from '../state/testing';
 import { gitChatAtom } from '../state/chat/atoms';
-import { currentScreenAtom } from '../state/navigation/atoms';
+import { currentScreenAtom, pushNavigationRouteAtom } from '../state/navigation/atoms';
 import type { Chat } from '../api/types';
 import type { HostBridgeApiClient } from '../api/client';
 import type { AppStore } from '../state/types';
@@ -25,6 +25,14 @@ jest.mock('../screens/main/MainScreen', () => {
       }, []);
       return mockReact.createElement(MockText, null, 'MAIN');
     },
+  };
+});
+jest.mock('../screens/main/SubAgentDetailView', () => {
+  const mockReact = jest.requireActual('react');
+  const { Text: MockText } = jest.requireActual('react-native');
+  return {
+    SubAgentDetailView: ({ threadId }: { threadId: string }) =>
+      mockReact.createElement(MockText, null, `SUBAGENT:${threadId}`),
   };
 });
 jest.mock('../screens/workspacePicker/WorkspacePickerScreen', () => {
@@ -97,6 +105,11 @@ describe('AppScreenRenderer', () => {
       store.set(currentScreenAtom, 'ChatGit');
     });
     expect(textOf(tree)).toContain('GIT');
+    expect(textOf(tree)).toContain('MAIN');
+    expect(mainMountCount).toBe(1);
+
+    act(() => store.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: 'child-1' }));
+    expect(textOf(tree)).toContain('SUBAGENT:child-1');
     expect(textOf(tree)).toContain('MAIN');
     expect(mainMountCount).toBe(1);
 
