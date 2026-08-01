@@ -1,8 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import Animated, { Easing, FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
+
+const MOTION_ROUTINE_MS = 200;
+const EASING_STANDARD = [0.4, 0, 0.2, 1] as const;
 import { useAppTheme } from '../../theme';
 import { createBrowserScreenStyles } from './browserScreenStyles';
 import { VIEWPORT_MODES, type ViewportPreset } from './browserScreenShared';
@@ -14,7 +18,10 @@ export function StatusBanner({ tone, message }: { tone: 'warning' | 'error'; mes
   const color = tone === 'warning' ? theme.colors.warning : theme.colors.error;
 
   return (
-    <View
+    <Animated.View
+      entering={FadeIn.duration(MOTION_ROUTINE_MS)
+        .easing(Easing.bezier(...EASING_STANDARD))
+        .reduceMotion(ReduceMotion.System)}
       accessibilityRole={tone === 'error' ? 'alert' : undefined}
       accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'polite'}
       style={[
@@ -31,7 +38,7 @@ export function StatusBanner({ tone, message }: { tone: 'warning' | 'error'; mes
       >
         {message}
       </Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -98,7 +105,7 @@ export function BrowserTopBar({
         {inputValue.length > 0 ? (
           <Pressable
             onPress={() => setInputValue('')}
-            hitSlop={6}
+            hitSlop={10}
             style={({ pressed }) => [styles.omniboxIconButton, pressed && styles.iconButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel="Clear preview address"
@@ -114,6 +121,7 @@ export function BrowserTopBar({
         <Pressable
           onPress={handleSubmitInput}
           disabled={submitDisabled}
+          hitSlop={6}
           style={({ pressed }) => [
             styles.submitButton,
             submitDisabled && styles.submitButtonDisabled,
@@ -183,6 +191,7 @@ export function ViewportTray({
             <Pressable
               key={mode.key}
               onPress={() => applyViewportSelection(mode.key)}
+              hitSlop={{ top: 7, bottom: 7 }}
               style={({ pressed }) => [
                 styles.viewportPresetChip,
                 viewportPreset === mode.key && styles.viewportPresetChipActive,
@@ -205,6 +214,7 @@ export function ViewportTray({
         </ScrollView>
         <Pressable
           onPress={handleOpenViewportMenu}
+          hitSlop={{ top: 7, bottom: 7 }}
           style={({ pressed }) => [
             styles.viewportSettingsButton,
             (desktopModeEnabled || showViewportMenu) && styles.viewportPresetChipActive,

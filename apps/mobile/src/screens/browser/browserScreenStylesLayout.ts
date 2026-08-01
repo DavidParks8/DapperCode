@@ -173,7 +173,7 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
     chromeButton: {
       width: 40,
       height: 40,
-      borderRadius: 20,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
@@ -203,14 +203,14 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
     omniboxIconButton: {
       width: 24,
       height: 24,
-      borderRadius: 12,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
     },
     submitButton: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.accent,
@@ -330,7 +330,7 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      borderRadius: 24,
+      borderRadius: theme.radius.full,
       borderWidth: 1,
       borderColor: theme.colors.borderLight,
       backgroundColor: theme.colors.bgItem,
@@ -340,7 +340,7 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
     bottomNavButton: {
       width: 46,
       height: 38,
-      borderRadius: 19,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -352,7 +352,7 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
     bottomNavButtonPrimary: {
       width: 46,
       height: 46,
-      borderRadius: 23,
+      borderRadius: theme.radius.full,
       backgroundColor: theme.colors.bgItem,
       borderWidth: 1,
       borderColor: theme.colors.borderLight,

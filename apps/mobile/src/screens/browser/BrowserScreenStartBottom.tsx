@@ -175,6 +175,7 @@ export function BrowserBottomBar({
       <Pressable
         onPress={handleGoBackPress}
         disabled={Platform.OS === 'web' || !canGoBack}
+        hitSlop={{ top: 5, bottom: 5 }}
         style={({ pressed }) => [
           styles.bottomNavButton,
           (Platform.OS === 'web' || !canGoBack) && styles.navButtonDisabled,
@@ -196,6 +197,7 @@ export function BrowserBottomBar({
       <Pressable
         onPress={handleGoForwardPress}
         disabled={Platform.OS === 'web' || !canGoForward}
+        hitSlop={{ top: 5, bottom: 5 }}
         style={({ pressed }) => [
           styles.bottomNavButton,
           (Platform.OS === 'web' || !canGoForward) && styles.navButtonDisabled,
@@ -216,6 +218,7 @@ export function BrowserBottomBar({
       </Pressable>
       <Pressable
         onPress={handleReload}
+        hitSlop={{ top: 5, bottom: 5 }}
         style={({ pressed }) => [
           styles.bottomNavButton,
           styles.bottomNavButtonPrimary,
@@ -240,6 +243,7 @@ export function BrowserBottomBar({
       </Pressable>
       <Pressable
         onPress={previewUrl ? handleShowStartPage : () => void loadSuggestions()}
+        hitSlop={{ top: 5, bottom: 5 }}
         style={({ pressed }) => [styles.bottomNavButton, pressed && styles.iconButtonPressed]}
         accessibilityRole="button"
         accessibilityLabel={previewUrl ? 'Show preview start page' : 'Scan for local previews'}

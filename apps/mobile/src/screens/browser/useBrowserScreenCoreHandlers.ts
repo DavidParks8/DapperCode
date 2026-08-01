@@ -7,6 +7,7 @@ import {
   isSameOriginUrl,
   mapBrowserPreviewNavigationUrlToTargetUrl,
 } from '../../browserPreview';
+import { feedback } from '../../feedback';
 import type { DesktopFrameMessage, WebViewScrollEvent } from './browserScreenShared';
 import type { BrowserScreenModel } from './useBrowserScreenModel';
 
@@ -157,10 +158,12 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
   );
 
   const handleSubmitInput = useCallback(() => {
+    void feedback.selection();
     void model.openPreview(model.inputValue);
   }, [model]);
 
   const handleReload = useCallback(() => {
+    void feedback.selection();
     if (!model.previewUrl) {
       void model.loadSuggestions();
       return;
@@ -182,6 +185,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
   }, [executeDesktopFrameCommand, model]);
 
   const handleGoBackPress = useCallback(() => {
+    void feedback.selection();
     if (model.nativeShellMode) {
       executeDesktopFrameCommand('goBack');
       return;
@@ -191,6 +195,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
   }, [executeDesktopFrameCommand, model]);
 
   const handleGoForwardPress = useCallback(() => {
+    void feedback.selection();
     if (model.nativeShellMode) {
       executeDesktopFrameCommand('goForward');
       return;

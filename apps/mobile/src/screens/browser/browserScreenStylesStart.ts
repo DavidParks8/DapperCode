@@ -21,7 +21,7 @@ export function createBrowserScreenStartStyles(theme: AppTheme) {
     startHeroIcon: {
       width: 48,
       height: 48,
-      borderRadius: 24,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
@@ -31,7 +31,6 @@ export function createBrowserScreenStartStyles(theme: AppTheme) {
     startHeroTitle: {
       ...theme.typography.largeTitle,
       color: theme.colors.textPrimary,
-      fontSize: 22,
     },
     startHeroSubtitle: {
       ...theme.typography.body,
@@ -88,7 +87,7 @@ export function createBrowserScreenStartStyles(theme: AppTheme) {
     quickTileIcon: {
       width: 28,
       height: 28,
-      borderRadius: 14,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.bgItem,

@@ -16,6 +16,59 @@ import { createTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { BrowserScreen } from './BrowserScreen';
+import { createBrowserScreenStyles } from './browserScreenStyles';
+import { feedback } from '../../feedback';
+
+jest.mock('react-native-reanimated', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { View, Text, Image, ScrollView } = jest.requireActual('react-native') as any;
+  function makeChain() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chain: Record<string, any> = {};
+    for (const m of [
+      'duration',
+      'delay',
+      'easing',
+      'reduceMotion',
+      'springify',
+      'withInitialValues',
+    ]) {
+      chain[m] = () => chain;
+    }
+    return chain;
+  }
+  const Animated = { View, Text, Image, ScrollView, createAnimatedComponent: <T,>(c: T) => c };
+  return {
+    __esModule: true,
+    default: Animated,
+    Easing: { bezier: () => 'bezier', linear: 'linear', in: (v: unknown) => v, out: (v: unknown) => v, inOut: (v: unknown) => v, ease: 'ease', cubic: 'cubic' },
+    FadeIn: makeChain(),
+    FadeOut: makeChain(),
+    FadeInDown: makeChain(),
+    FadeInUp: makeChain(),
+    ReduceMotion: { System: 'system', Always: 'always', Never: 'never' },
+    useReducedMotion: () => false,
+    useAnimatedStyle: (factory: () => unknown) => factory(),
+    withTiming: (value: unknown) => value,
+    withSpring: (value: unknown) => value,
+    withDelay: (_delay: unknown, anim: unknown) => anim,
+    useSharedValue: (init: unknown) => ({ value: init }),
+    runOnJS: (fn: unknown) => fn,
+    cancelAnimation: () => undefined,
+  };
+});
+
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+  isReduceMotionPreferred: jest.fn().mockResolvedValue(false),
+}));
 
 const mockWebViewMethods = {
   reload: jest.fn(),
@@ -768,4 +821,134 @@ describe('BrowserScreen behavior', () => {
     expect(hasText(root, 'Loading preview')).toBe(true);
     act(() => result.tree.unmount());
   });
+
+  it('uses theme.radius tokens for all rounded elements (no raw literals)', () => {
+    const styles = createBrowserScreenStyles(theme);
+    // Toolbar circular buttons use full
+    expect(styles.chromeButton.borderRadius).toBe(theme.radius.full);
+    expect(styles.omniboxIconButton.borderRadius).toBe(theme.radius.full);
+    expect(styles.submitButton.borderRadius).toBe(theme.radius.full);
+    // Bottom bar pill uses full (999) for robust rounding
+    expect(styles.bottomBar.borderRadius).toBe(theme.radius.full);
+    // Bottom nav buttons use full
+    expect(styles.bottomNavButton.borderRadius).toBe(theme.radius.full);
+    expect(styles.bottomNavButtonPrimary.borderRadius).toBe(theme.radius.full);
+    // Start page icon circles use full
+    expect(styles.startHeroIcon.borderRadius).toBe(theme.radius.full);
+    expect(styles.quickTileIcon.borderRadius).toBe(theme.radius.full);
+  });
+
+  it('uses theme.typography for startHeroTitle (no raw fontSize override)', () => {
+    const styles = createBrowserScreenStyles(theme);
+    // startHeroTitle should derive fontSize from largeTitle (24), not a raw 22 override
+    expect(styles.startHeroTitle.fontSize).toBe(theme.typography.largeTitle.fontSize);
+  });
+
+  it('has adequate hitSlop on toolbar and nav buttons', async () => {
+    const result = await renderBrowser();
+    const root = result.tree.root as Queryable;
+
+    // Drawer chrome button already has hitSlop={8}
+    const drawerBtn = findByLabel(root, 'Open navigation drawer');
+    expect(drawerBtn.props.hitSlop).toBeTruthy();
+
+    // Submit / open-preview button has hitSlop
+    const submitBtn = findByLabel(root, 'Open preview');
+    expect(submitBtn.props.hitSlop).toBeTruthy();
+
+    // Bottom nav buttons have hitSlop to reach minimum touch target
+    const backBtn = findByLabel(root, 'Back');
+    expect(backBtn.props.hitSlop).toBeTruthy();
+    const forwardBtn = findByLabel(root, 'Forward');
+    expect(forwardBtn.props.hitSlop).toBeTruthy();
+    const reloadBtn = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Scan for local previews',
+    )[0];
+    expect(reloadBtn?.props.hitSlop).toBeTruthy();
+
+    act(() => result.tree.unmount());
+  });
+
+  it('has hitSlop on viewport mode chips and settings button after opening a preview', async () => {
+    const result = await renderBrowser();
+    const root = result.tree.root as Queryable;
+    await invoke(findByLabel(root, 'Open preview'));
+
+    const mobileChip = findByLabel(root, 'Mobile viewport');
+    expect(mobileChip.props.hitSlop).toBeTruthy();
+
+    const viewportSettings = root.findAll(
+      (node) =>
+        typeof node.props.accessibilityLabel === 'string' &&
+        (node.props.accessibilityLabel as string).startsWith('Viewport size,'),
+    )[0];
+    expect(viewportSettings?.props.hitSlop).toBeTruthy();
+
+    act(() => result.tree.unmount());
+  });
+
+  it('distinguishes loading state (progressbar role) from error state (alert role)', async () => {
+    const result = await renderBrowser();
+    const root = result.tree.root as Queryable;
+    await invoke(findByLabel(root, 'Open preview'));
+    const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    if (!webView) throw new Error('Missing WebView');
+
+    // Trigger loading
+    await invoke(webView, 'onLoadStart');
+    const loadingNodes = root.findAll((node) => node.props.accessibilityRole === 'progressbar');
+    expect(loadingNodes.length).toBeGreaterThan(0);
+    expect(hasText(root, 'Loading preview')).toBe(true);
+
+    // Trigger an error — error banner uses 'alert' role, loading overlay still present
+    await invoke(webView, 'onError', { nativeEvent: { description: 'net::ERR_CONNECTION' } });
+    const errorNodes = root.findAll((node) => node.props.accessibilityRole === 'alert');
+    expect(errorNodes.length).toBeGreaterThan(0);
+
+    // Loading overlay and error banner are distinct nodes with distinct roles
+    const progressbarRole = loadingNodes[0]?.props.accessibilityRole;
+    const alertRole = errorNodes[0]?.props.accessibilityRole;
+    expect(progressbarRole).toBe('progressbar');
+    expect(alertRole).toBe('alert');
+    expect(progressbarRole).not.toBe(alertRole);
+
+    act(() => result.tree.unmount());
+  });
+
+  it('fires selection haptic on navigate, back, forward, and reload', async () => {
+    const mockSelection = feedback.selection as jest.Mock;
+
+    const result = await renderBrowser();
+    const root = result.tree.root as Queryable;
+
+    // Navigating to a URL fires haptic
+    await invoke(findByLabel(root, 'Open preview'));
+    expect(mockSelection).toHaveBeenCalledTimes(1);
+
+    // Set navigation state so Back/Forward become active
+    const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    if (!webView) throw new Error('Missing WebView');
+    await invoke(webView, 'onNavigationStateChange', {
+      url: 'http://bridge:4173/preview/session-1/page',
+      title: 'Page',
+      canGoBack: true,
+      canGoForward: true,
+      loading: false,
+    });
+
+    // Back fires haptic
+    await invoke(findByLabel(root, 'Back'));
+    expect(mockSelection).toHaveBeenCalledTimes(2);
+
+    // Forward fires haptic
+    await invoke(findByLabel(root, 'Forward'));
+    expect(mockSelection).toHaveBeenCalledTimes(3);
+
+    // Reload fires haptic
+    await invoke(findByLabel(root, 'Reload preview'));
+    expect(mockSelection).toHaveBeenCalledTimes(4);
+
+    act(() => result.tree.unmount());
+  });
+
 });
