@@ -15,7 +15,9 @@ import {
 
 import { resolveComposerBottomSpacing } from './chat-input-layout';
 import { createChatInputStyles } from './chat-input-styles';
+import { computeHitSlop } from './touchTarget';
 import { useAppTheme } from '../theme';
+import { feedback } from '../feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 
 interface ChatInputProps {
@@ -60,8 +62,19 @@ export function ChatInput({
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createChatInputStyles(theme), [theme]);
-  const ACTION_BUTTON_HIT_SLOP = 6;
   const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
+  const ACTION_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
+  const actionButtonHitSlop = useMemo(
+    () => computeHitSlop(ACTION_BUTTON_VISIBLE_SIZE),
+    [],
+  );
+  // Attachment chips vary in width with their label; the removal affordance shares the chip's
+  // full Pressable area, so only vertical slop is needed and horizontal is capped to avoid
+  // overlapping a neighboring chip in the tightly packed scroll row.
+  const attachmentChipHitSlop = useMemo(
+    () => computeHitSlop({ width: 44, height: 28 }, { maxHorizontal: theme.spacing.xs / 2 }),
+    [theme],
+  );
   const INPUT_TEXT_LINE_HEIGHT = 20;
   const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
   const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
@@ -96,6 +109,22 @@ export function ChatInput({
     keyboardVisible,
   );
 
+  const handleSubmit = () => {
+    if (!canSend) {
+      return;
+    }
+    void feedback.send();
+    onSubmit();
+  };
+
+  const handleStop = () => {
+    if (!onStop) {
+      return;
+    }
+    void feedback.destructive();
+    onStop();
+  };
+
   return (
     <View style={styles.shell}>
       <View
@@ -118,6 +147,7 @@ export function ChatInput({
                 <Pressable
                   key={`${attachment.id}-${String(index)}`}
                   onPress={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined}
+                  hitSlop={attachmentChipHitSlop}
                   style={({ pressed }) => [
                     styles.attachmentChip,
                     pressed && styles.attachmentChipPressed,
@@ -154,7 +184,7 @@ export function ChatInput({
             <Pressable
               disabled={attachDisabled}
               onPress={onAttachPress}
-              hitSlop={ACTION_BUTTON_HIT_SLOP}
+              hitSlop={actionButtonHitSlop}
               style={({ pressed }) => [
                 styles.plusBtn,
                 attachDisabled && styles.plusBtnDisabled,
@@ -222,7 +252,7 @@ export function ChatInput({
                   };
                   if (Platform.OS === 'web' && keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
                     e.preventDefault();
-                    if (canSend) onSubmit();
+                    handleSubmit();
                   }
                 }}
               />
@@ -230,10 +260,10 @@ export function ChatInput({
                 <View style={styles.actionButtons}>
                   {canStop ? (
                     <Pressable
-                      onPress={onStop}
+                      onPress={handleStop}
                       style={styles.sendBtn}
                       disabled={isStopping}
-                      hitSlop={ACTION_BUTTON_HIT_SLOP}
+                      hitSlop={actionButtonHitSlop}
                       pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
                       accessibilityRole="button"
                       accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
@@ -244,26 +274,25 @@ export function ChatInput({
                       })}
                     >
                       <View style={styles.stopButtonContent}>
-                        <Ionicons
-                          {...decorativeAccessibilityProps}
-                          name="square"
-                          size={10}
-                          color={colors.textPrimary}
-                        />
-                        <ActivityIndicator
-                          size="small"
-                          color={colors.textMuted}
-                          style={styles.stopButtonSpinner}
-                        />
+                        {isStopping ? (
+                          <ActivityIndicator size="small" color={colors.textMuted} />
+                        ) : (
+                          <Ionicons
+                            {...decorativeAccessibilityProps}
+                            name="square"
+                            size={10}
+                            color={colors.textPrimary}
+                          />
+                        )}
                       </View>
                     </Pressable>
                   ) : null}
                   {showSendButton ? (
                     <Pressable
-                      onPress={canSend ? onSubmit : undefined}
+                      onPress={canSend ? handleSubmit : undefined}
                       style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
                       disabled={!canSend}
-                      hitSlop={ACTION_BUTTON_HIT_SLOP}
+                      hitSlop={actionButtonHitSlop}
                       pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
                       accessibilityRole="button"
                       accessibilityLabel={

@@ -1,4 +1,4 @@
-import { Platform, StyleSheet, TextInput, type TextInputProps } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, TextInput, type TextInputProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -6,6 +6,19 @@ import { AppThemeProvider, createAppTheme } from '../theme';
 import { ChatInput } from './ChatInput';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
+
+jest.mock('expo-haptics', () => ({
+  __esModule: true,
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+  selectionAsync: jest.fn().mockResolvedValue(undefined),
+  impactAsync: jest.fn().mockResolvedValue(undefined),
+  notificationAsync: jest.fn().mockResolvedValue(undefined),
+}));
+
+import * as Haptics from 'expo-haptics';
+
+const mockHaptics = Haptics as unknown as { impactAsync: jest.Mock };
 
 type Queryable = ReactTestInstance & {
   children: unknown[];
@@ -79,6 +92,7 @@ describe('ChatInput behavior', () => {
     expect(base.onChangeText).toHaveBeenCalledWith('changed');
     expect(base.onSubmit).toHaveBeenCalled();
     expect(base.onRemoveAttachment).toHaveBeenCalledWith('a1');
+    expect(mockHaptics.impactAsync).toHaveBeenCalledWith('light');
 
     act(() =>
       rendered.update(
@@ -95,6 +109,7 @@ describe('ChatInput behavior', () => {
     );
     act(() => byLabel(root, 'Stop agent').props.onPress());
     expect(base.onStop).toHaveBeenCalled();
+    expect(mockHaptics.impactAsync).toHaveBeenCalledWith('heavy');
     act(() =>
       rendered.update(
         wrap(
@@ -223,5 +238,87 @@ describe('ChatInput behavior', () => {
     expect(base.onSubmit).toHaveBeenCalledTimes(1);
     act(() => rendered.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
+  });
+
+  it('shows only the stop glyph or the spinner, never both, based on isStopping', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        wrap(
+          <ChatInput
+            {...base}
+            value=""
+            isLoading
+            showStopButton
+            onAttachPress={base.onAttachPress}
+          />,
+        ),
+      );
+    });
+    const rendered = tree as ReactTestRenderer;
+    const root = rendered.root as Queryable;
+
+    // Not stopping yet: only the square glyph renders, no spinner underneath it.
+    const stopButton = byLabel(root, 'Stop agent');
+    expect(stopButton.findAll((node) => node.props.name === 'square')).toHaveLength(1);
+    expect(stopButton.findAllByType(ActivityIndicator)).toHaveLength(0);
+
+    act(() =>
+      rendered.update(
+        wrap(
+          <ChatInput
+            {...base}
+            value=""
+            isLoading
+            isStopping
+            showStopButton
+            onAttachPress={base.onAttachPress}
+          />,
+        ),
+      ),
+    );
+
+    // Stopping: only the spinner renders, the square glyph is gone (regression guard for the
+    // overlap bug where both were shown simultaneously).
+    const stoppingButton = byLabel(root, 'Stopping agent');
+    expect(stoppingButton.findAll((node) => node.props.name === 'square')).toHaveLength(0);
+    expect(stoppingButton.findAllByType(ActivityIndicator)).toHaveLength(1);
+    act(() => rendered.unmount());
+  });
+
+  it('sizes plus, send/stop, and attachment-remove hitSlop to the platform minimum touch target', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        wrap(
+          <ChatInput
+            {...base}
+            value="hi"
+            isLoading={false}
+            showStopButton
+            onAttachPress={base.onAttachPress}
+            attachments={[{ id: 'a1', label: 'error.log' }]}
+          />,
+        ),
+      );
+    });
+    const rendered = tree as ReactTestRenderer;
+    const root = rendered.root as Queryable;
+
+    const addAttachment = byLabel(root, 'Add attachment');
+    const sendMessage = byLabel(root, 'Send message');
+    const removeAttachment = byLabel(root, 'error.log, remove attachment');
+
+    for (const control of [addAttachment, sendMessage, removeAttachment]) {
+      const hitSlop = control.props.hitSlop as {
+        top: number;
+        bottom: number;
+        left: number;
+        right: number;
+      };
+      expect(hitSlop.top).toBeGreaterThan(0);
+      expect(hitSlop.bottom).toBeGreaterThan(0);
+    }
+    act(() => rendered.unmount());
   });
 });

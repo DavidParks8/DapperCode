@@ -13,7 +13,7 @@ export const createChatInputStyles = (theme: AppTheme) =>
       paddingTop: theme.spacing.xs + 2,
     },
     composerBar: {
-      borderRadius: 28,
+      borderRadius: theme.radius.full,
       borderCurve: 'continuous',
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderHighlight,
@@ -45,7 +45,7 @@ export const createChatInputStyles = (theme: AppTheme) =>
     },
     attachmentChip: {
       height: 28,
-      borderRadius: 14,
+      borderRadius: theme.radius.full,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderHighlight,
       backgroundColor: theme.colors.bgElevated,
@@ -66,7 +66,7 @@ export const createChatInputStyles = (theme: AppTheme) =>
     plusBtn: {
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -111,7 +111,7 @@ export const createChatInputStyles = (theme: AppTheme) =>
     sendBtn: {
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: theme.radius.full,
       backgroundColor: theme.colors.bgElevated,
       alignItems: 'center',
       justifyContent: 'center',
@@ -124,8 +124,5 @@ export const createChatInputStyles = (theme: AppTheme) =>
       height: 24,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    stopButtonSpinner: {
-      position: 'absolute',
     },
   });
