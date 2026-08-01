@@ -69,6 +69,9 @@ export const createOnboardingLayoutStyles = (theme: AppTheme) =>
     connectRoot: {
       flex: 1,
     },
+    connectAnimatedRoot: {
+      flex: 1,
+    },
     connectFooter: {
       paddingHorizontal: theme.spacing.lg,
       paddingTop: theme.spacing.sm,

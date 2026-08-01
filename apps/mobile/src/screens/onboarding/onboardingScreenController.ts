@@ -3,6 +3,7 @@ import { useCameraPermissions } from 'expo-camera';
 
 import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from '../../bridgeUrl';
 import { useAccessibilityAnnouncement } from '../../accessibility';
+import { feedback } from '../../feedback';
 import {
   useOnboardingIntroAnimations,
   type OnboardingHeroAnimatedStyle,
@@ -172,12 +173,14 @@ export function useOnboardingScreenController(
             ? 'Connected. Authenticated RPC verified; /health endpoint did not return 200.'
             : 'Connected. URL and token both verified.',
         });
+        void feedback.success();
         return true;
       } catch {
         setConnectionCheck({
           kind: 'error',
           message: 'Connection error. Check the URL and token, then try again.',
         });
+        void feedback.error();
         return false;
       } finally {
         setCheckingConnection(false);
@@ -189,11 +192,20 @@ export function useOnboardingScreenController(
   const handleSave = useCallback(async () => {
     const validated = validateInput();
     if (!validated) {
+      void feedback.warning();
       return;
     }
 
     const normalizedToken = normalizeTokenInput(validated.bridgeToken);
-    const ok = await runConnectionCheck(validated.bridgeUrl, normalizedToken);
+    // A prior, unchanged "Test Connection" already verified these exact inputs: every input
+    // edit (setUrlInput/setTokenInput/applyPairingPayload/openScanner) resets connectionCheck
+    // back to idle, so a lingering `success` here is guaranteed to still match urlInput/tokenInput.
+    // Re-running the ~7s probe in that case only duplicates network/WS traffic the user already
+    // waited through once.
+    const ok =
+      connectionCheck.kind === 'success'
+        ? true
+        : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
     if (!ok) {
       return;
     }
@@ -205,13 +217,15 @@ export function useOnboardingScreenController(
         kind: 'error',
         message: (error as Error).message || 'Saving the connection failed.',
       });
+      void feedback.error();
     }
-  }, [normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
+  }, [connectionCheck.kind, normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
 
   const handleConnectionCheck = useCallback(async () => {
     const validated = validateInput();
     if (!validated) {
       setConnectionCheck({ kind: 'idle' });
+      void feedback.warning();
       return;
     }
 
@@ -220,16 +234,19 @@ export function useOnboardingScreenController(
   }, [normalizeTokenInput, runConnectionCheck, validateInput]);
 
   const goToConnectStep = useCallback(() => {
+    void feedback.selection();
     setOnboardingStep('connect');
   }, []);
 
   const goBackToIntro = useCallback(() => {
+    void feedback.selection();
     setOnboardingStep('intro');
     setFormError(null);
     setConnectionCheck({ kind: 'idle' });
   }, []);
 
   const closeScanner = useCallback(() => {
+    void feedback.selection();
     setScannerVisible(false);
     setScannerLocked(false);
     setScannerError(null);
@@ -244,10 +261,12 @@ export function useOnboardingScreenController(
       const result = await requestCameraPermission();
       if (!result.granted) {
         setFormError('Camera permission is required to scan the pairing QR.');
+        void feedback.error();
         return;
       }
     }
 
+    void feedback.selection();
     setScannerLocked(false);
     setScannerVisible(true);
   }, [cameraPermission?.granted, requestCameraPermission]);
@@ -277,12 +296,14 @@ export function useOnboardingScreenController(
       const pairing = parsePairingPayload(data);
       if (!pairing) {
         setScannerError('QR code is not a valid DapperCode bridge pairing code.');
+        void feedback.warning();
         setTimeout(() => {
           setScannerLocked(false);
         }, 1200);
         return;
       }
 
+      void feedback.success();
       applyPairingPayload(pairing);
     },
     [applyPairingPayload, scannerLocked],
@@ -325,7 +346,10 @@ export function useOnboardingScreenController(
       setTokenInputState(value);
       setConnectionCheck({ kind: 'idle' });
     },
-    setTokenHidden,
+    setTokenHidden: (updater: (previous: boolean) => boolean) => {
+      void feedback.selection();
+      setTokenHidden(updater);
+    },
     handleSave,
     handleConnectionCheck,
     goToConnectStep,

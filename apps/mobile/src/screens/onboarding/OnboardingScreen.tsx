@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View, type Text } from 'react-native';
+import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { decorativeAccessibilityProps, useModalAccessibilityFocus } from '../../accessibility';
@@ -9,6 +10,7 @@ import { OnboardingConnectSection } from './OnboardingConnectSection';
 import { OnboardingIntroSection } from './OnboardingIntroSection';
 import { OnboardingScannerModal } from './OnboardingScannerModal';
 import { useOnboardingScreenController } from './onboardingScreenController';
+import { onboardingMotion } from './onboardingScreenMotion';
 import { createOnboardingStyles } from './onboardingScreenStyles';
 import type { OnboardingScreenProps } from './onboardingScreenTypes';
 
@@ -58,7 +60,7 @@ export function OnboardingScreen({
       </View>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
-          behavior={Platform.select({ ios: 'padding', default: undefined })}
+          behavior={Platform.select({ ios: 'padding', android: 'height', default: undefined })}
           style={styles.keyboardAvoiding}
         >
           {controller.showIntroStep ? (
@@ -70,37 +72,45 @@ export function OnboardingScreen({
               onContinue={controller.goToConnectStep}
             />
           ) : (
-            <OnboardingConnectSection
-              styles={styles}
-              theme={theme}
-              mode={mode}
-              onCancel={onCancel}
-              showOnboardingDock={controller.showOnboardingDock}
-              currentSetupStage={controller.currentSetupStage}
-              continueLabel={controller.continueLabel}
-              urlInput={controller.urlInput}
-              tokenInput={controller.tokenInput}
-              tokenHidden={controller.tokenHidden}
-              formError={controller.formError}
-              checkingConnection={controller.checkingConnection}
-              connectionCheck={controller.connectionCheck}
-              insecureRemoteWarning={controller.insecureRemoteWarning}
-              onBack={controller.goBackToIntro}
-              onOpenScanner={() => {
-                void controller.openScanner();
-              }}
-              onUrlChange={controller.setUrlInput}
-              onTokenChange={controller.setTokenInput}
-              onToggleTokenHidden={() => {
-                controller.setTokenHidden((previous) => !previous);
-              }}
-              onSubmitPrimary={() => {
-                void controller.handleSave();
-              }}
-              onTestConnection={() => {
-                void controller.handleConnectionCheck();
-              }}
-            />
+            <Animated.View
+              key="connect"
+              entering={FadeIn.duration(onboardingMotion.duration.routine).reduceMotion(
+                ReduceMotion.System,
+              )}
+              style={styles.connectAnimatedRoot}
+            >
+              <OnboardingConnectSection
+                styles={styles}
+                theme={theme}
+                mode={mode}
+                onCancel={onCancel}
+                showOnboardingDock={controller.showOnboardingDock}
+                currentSetupStage={controller.currentSetupStage}
+                continueLabel={controller.continueLabel}
+                urlInput={controller.urlInput}
+                tokenInput={controller.tokenInput}
+                tokenHidden={controller.tokenHidden}
+                formError={controller.formError}
+                checkingConnection={controller.checkingConnection}
+                connectionCheck={controller.connectionCheck}
+                insecureRemoteWarning={controller.insecureRemoteWarning}
+                onBack={controller.goBackToIntro}
+                onOpenScanner={() => {
+                  void controller.openScanner();
+                }}
+                onUrlChange={controller.setUrlInput}
+                onTokenChange={controller.setTokenInput}
+                onToggleTokenHidden={() => {
+                  controller.setTokenHidden((previous) => !previous);
+                }}
+                onSubmitPrimary={() => {
+                  void controller.handleSave();
+                }}
+                onTestConnection={() => {
+                  void controller.handleConnectionCheck();
+                }}
+              />
+            </Animated.View>
           )}
 
           <OnboardingScannerModal

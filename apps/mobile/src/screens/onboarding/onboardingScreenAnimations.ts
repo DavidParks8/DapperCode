@@ -1,85 +1,69 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { Animated, Easing } from 'react-native';
+import {
+  ReduceMotion,
+  interpolate,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+  type AnimatedStyle,
+} from 'react-native-reanimated';
+import { useEffect } from 'react';
+import type { ViewStyle } from 'react-native';
 
-export interface OnboardingHeroAnimatedStyle {
-  opacity: Animated.Value;
-  transform: [
-    { translateY: Animated.AnimatedInterpolation<string | number> },
-    { scale: Animated.AnimatedInterpolation<string | number> },
-  ];
-}
+import { onboardingMotion } from './onboardingScreenMotion';
 
-export interface OnboardingTranslateAnimatedStyle {
-  opacity: Animated.Value;
-  transform: [{ translateY: Animated.AnimatedInterpolation<string | number> }];
-}
+export type OnboardingHeroAnimatedStyle = AnimatedStyle<ViewStyle>;
+export type OnboardingTranslateAnimatedStyle = AnimatedStyle<ViewStyle>;
 
+/**
+ * Drives the one-time intro -> connect handoff: the hero art settles in first, then the
+ * "Private connection" action follows a beat later. Restrained (no bounce, single pass) and
+ * skipped entirely under Reduce Motion, where both pieces simply appear in their resting state.
+ */
 export function useOnboardingIntroAnimations(
   showIntroStep: boolean,
   mode: 'initial' | 'edit' | 'add' | 'reconnect',
 ) {
-  const introHeroMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
-  const introActionsMotion = useRef(new Animated.Value(mode === 'initial' ? 0 : 1)).current;
+  const reduceMotion = useReducedMotion();
+  const heroProgress = useSharedValue(mode === 'initial' ? 0 : 1);
+  const actionsProgress = useSharedValue(mode === 'initial' ? 0 : 1);
 
   useEffect(() => {
-    if (!showIntroStep) {
-      introHeroMotion.setValue(1);
-      introActionsMotion.setValue(1);
+    if (!showIntroStep || reduceMotion) {
+      heroProgress.value = 1;
+      actionsProgress.value = 1;
       return;
     }
 
-    introHeroMotion.setValue(0);
-    introActionsMotion.setValue(0);
-    Animated.sequence([
-      Animated.timing(introHeroMotion, {
-        toValue: 1,
-        duration: 420,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(introActionsMotion, {
-        toValue: 1,
-        duration: 340,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [introActionsMotion, introHeroMotion, showIntroStep]);
+    heroProgress.value = 0;
+    actionsProgress.value = 0;
+    const timingConfig = {
+      reduceMotion: ReduceMotion.System,
+      easing: onboardingMotion.easing.decelerate,
+    };
+    heroProgress.value = withTiming(1, {
+      ...timingConfig,
+      duration: onboardingMotion.duration.layout,
+    });
+    actionsProgress.value = withDelay(
+      onboardingMotion.duration.layout,
+      withTiming(1, { ...timingConfig, duration: onboardingMotion.duration.routine }),
+    );
+  }, [actionsProgress, heroProgress, reduceMotion, showIntroStep]);
 
-  const introHeroAnimatedStyle = useMemo<OnboardingHeroAnimatedStyle>(
-    () => ({
-      opacity: introHeroMotion,
-      transform: [
-        {
-          translateY: introHeroMotion.interpolate({
-            inputRange: [0, 1],
-            outputRange: [26, 0],
-          }),
-        },
-        {
-          scale: introHeroMotion.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0.98, 1],
-          }),
-        },
-      ],
-    }),
-    [introHeroMotion],
-  );
-  const introActionsAnimatedStyle = useMemo<OnboardingTranslateAnimatedStyle>(
-    () => ({
-      opacity: introActionsMotion,
-      transform: [
-        {
-          translateY: introActionsMotion.interpolate({
-            inputRange: [0, 1],
-            outputRange: [18, 0],
-          }),
-        },
-      ],
-    }),
-    [introActionsMotion],
-  );
+  const introHeroAnimatedStyle = useAnimatedStyle<ViewStyle>(() => ({
+    opacity: heroProgress.value,
+    transform: [
+      { translateY: interpolate(heroProgress.value, [0, 1], [26, 0]) },
+      { scale: interpolate(heroProgress.value, [0, 1], [0.98, 1]) },
+    ],
+  }));
+  const introActionsAnimatedStyle = useAnimatedStyle<ViewStyle>(() => ({
+    opacity: actionsProgress.value,
+    transform: [{ translateY: interpolate(actionsProgress.value, [0, 1], [18, 0]) }],
+  }));
+
   return {
     introHeroAnimatedStyle,
     introActionsAnimatedStyle,

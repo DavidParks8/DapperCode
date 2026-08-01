@@ -12,6 +12,7 @@ const passthroughEntering = {
   easing: () => passthroughEntering,
   springify: () => passthroughEntering,
   withInitialValues: () => passthroughEntering,
+  reduceMotion: () => passthroughEntering,
 };
 
 export default {
@@ -33,6 +34,15 @@ export const Easing = {
 };
 
 export const ReduceMotion = { System: 'system', Always: 'always', Never: 'never' };
+/**
+ * Mutable so individual tests can simulate the device's Reduce Motion setting; defaults to off
+ * so existing suites keep seeing the normal (animated) code path.
+ */
+let mockReducedMotionEnabled = false;
+export function setMockReducedMotionEnabled(enabled: boolean): void {
+  mockReducedMotionEnabled = enabled;
+}
+export const useReducedMotion = () => mockReducedMotionEnabled;
 export const LinearTransition = passthroughEntering;
 export const FadeIn = passthroughEntering;
 export const FadeInUp = passthroughEntering;
@@ -42,7 +52,17 @@ export const FadeOut = passthroughEntering;
 export const cancelAnimation = () => {};
 export const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
-export const interpolate = (value: number) => value;
+export const interpolate = (
+  value: number,
+  input: readonly [number, number],
+  output: readonly [number, number],
+) => {
+  const [inputMin, inputMax] = input;
+  const [outputMin, outputMax] = output;
+  if (inputMax === inputMin) return outputMin;
+  const ratio = (value - inputMin) / (inputMax - inputMin);
+  return outputMin + ratio * (outputMax - outputMin);
+};
 export const runOnJS =
   <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
   (...args: Args) =>
