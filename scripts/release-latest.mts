@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,13 +23,41 @@ function info(message: string): void {
   process.stdout.write(`${message}\n`);
 }
 
+function formatCommand(command: string, args: ReadonlyArray<string>): string {
+  return `${command} ${args.join(' ')}`;
+}
+
 function run(command: string, args: ReadonlyArray<string>, cwd = ROOT): void {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const status = result.status === null ? 'signal' : String(result.status);
-    fail(`${command} ${args.join(' ')} exited with status ${status}`);
+    fail(`${formatCommand(command, args)} exited with status ${status}`);
   }
+}
+
+function runAsync(
+  command: string,
+  args: ReadonlyArray<string>,
+  cwd = ROOT,
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd, signal, stdio: 'inherit' });
+
+    child.once('error', reject);
+    child.once('close', (status, signalName) => {
+      if (status === 0) {
+        resolve();
+        return;
+      }
+      if (signalName !== null) {
+        reject(new Error(`${formatCommand(command, args)} exited due to signal ${signalName}`));
+        return;
+      }
+      reject(new Error(`${formatCommand(command, args)} exited with status ${status ?? 'signal'}`));
+    });
+  });
 }
 
 function capture(command: string, args: ReadonlyArray<string>, cwd = ROOT): string {
@@ -54,8 +82,8 @@ function parseOptions(argv: ReadonlyArray<string>): Options {
           [
             'Usage: npm run release:latest',
             '',
-            'Fast-forward origin/main, rebuild and launch the macOS tray app, then submit a local',
-            'iOS production archive to TestFlight.',
+            'Fast-forward origin/main, then in parallel rebuild and launch the macOS tray app',
+            'while preparing and submitting a local iOS production archive to TestFlight.',
             '',
             'Options:',
             '  --dry-run  Print the release steps without changing the checkout or building',
@@ -103,22 +131,22 @@ function syncMain(): string {
   return head;
 }
 
-function buildAndLaunchTray(): void {
-  run('npm', ['run', 'desktop:build:macos']);
-  run('open', [TRAY_APP]);
-  run('sleep', ['2']);
+async function buildAndLaunchTray(signal: AbortSignal): Promise<void> {
+  await runAsync('npm', ['run', 'desktop:build:macos'], ROOT, signal);
+  await runAsync('open', [TRAY_APP], ROOT, signal);
+  await runAsync('sleep', ['2'], ROOT, signal);
 
   const pids = capture('pgrep', ['-x', 'DapperCode']);
   if (!pids) fail('DapperCode tray app did not start');
   info(`Tray app running (${pids.split('\n').join(', ')})`);
 }
 
-function publishTestFlight(): void {
+async function publishTestFlight(signal: AbortSignal): Promise<void> {
   const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'dappercode-testflight-'));
   const archivePath = path.join(temporaryDirectory, 'DapperCode.ipa');
 
   try {
-    run(
+    await runAsync(
       'npx',
       [
         '--yes',
@@ -134,12 +162,13 @@ function publishTestFlight(): void {
         archivePath,
       ],
       MOBILE_DIR,
+      signal,
     );
     if (!existsSync(archivePath)) {
       fail(`local EAS build completed without creating ${archivePath}`);
     }
 
-    run(
+    await runAsync(
       'npx',
       [
         '--yes',
@@ -154,6 +183,7 @@ function publishTestFlight(): void {
         '--non-interactive',
       ],
       MOBILE_DIR,
+      signal,
     );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -166,14 +196,40 @@ function printDryRun(): void {
       'Dry run. Would:',
       '  1. Verify tracked changes are clean.',
       '  2. Fetch and fast-forward to origin/main.',
-      '  3. Run npm run desktop:build:macos and open the tray app.',
-      '  4. Run a local iOS production EAS build.',
-      '  5. Submit the generated IPA to TestFlight.',
+      '  3. In parallel, run npm run desktop:build:macos, open the tray app, and start',
+      '     a local iOS production EAS build.',
+      '  4. Submit the generated IPA to TestFlight.',
     ].join('\n'),
   );
 }
 
-function main(): void {
+async function runReleaseTasksInParallel(): Promise<void> {
+  const controller = new AbortController();
+  let failure: unknown;
+
+  const wrapTask = async (task: Promise<void>): Promise<void> => {
+    try {
+      await task;
+    } catch (error) {
+      if (failure === undefined) {
+        failure = error;
+        controller.abort();
+      }
+      throw error;
+    }
+  };
+
+  await Promise.allSettled([
+    wrapTask(buildAndLaunchTray(controller.signal)),
+    wrapTask(publishTestFlight(controller.signal)),
+  ]);
+
+  if (failure !== undefined) {
+    throw failure;
+  }
+}
+
+async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   if (options.dryRun) {
     printDryRun();
@@ -182,14 +238,13 @@ function main(): void {
 
   ensureSupportedPlatform();
   syncMain();
-  buildAndLaunchTray();
-  publishTestFlight();
+  await runReleaseTasksInParallel();
   info('TestFlight submission scheduled; Apple processing may take several minutes.');
 }
 
 try {
-  main();
-} catch (error) {
+  await main();
+} catch (error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`error: ${message}\n`);
   process.exitCode = 1;
