@@ -764,6 +764,186 @@ jest.mock('../../components/BridgeUiSurface', () => ({
       act(() => tree.unmount());
     });
 
+    it('keeps resumed history and one follow-up while a partial resumed turn streams', async () => {
+      const resumedChat: Chat = {
+        ...chat,
+        messages: [
+          {
+            id: 'earlier-user',
+            role: 'user',
+            content: 'Earlier question',
+            createdAt: '2026-07-20T00:00:00.000Z',
+          },
+          {
+            id: 'earlier-answer',
+            role: 'assistant',
+            content: 'Earlier answer',
+            createdAt: '2026-07-20T00:00:01.000Z',
+          },
+        ],
+      };
+      const followUp = {
+        id: 'server-follow-up',
+        role: 'user' as const,
+        content: 'Follow up after update',
+        createdAt: '2026-07-20T00:00:02.000Z',
+      };
+      const partialRunningChat: Chat = {
+        ...resumedChat,
+        status: 'running',
+        activeTurnId: 'turn-resumed',
+        messages: [followUp],
+      };
+      const finalChat: Chat = {
+        ...resumedChat,
+        status: 'complete',
+        activeTurnId: null,
+        messages: [
+          ...resumedChat.messages,
+          followUp,
+          {
+            id: 'reasoning-resumed',
+            role: 'reasoning',
+            content: 'Checking the resumed context',
+            createdAt: '2026-07-20T00:00:03.000Z',
+          },
+          {
+            id: 'answer-resumed',
+            role: 'assistant',
+            content: 'Resumed answer',
+            createdAt: '2026-07-20T00:00:04.000Z',
+          },
+        ],
+      };
+      const api = createApi({ loadedChat: resumedChat, cachedChat: resumedChat });
+      (api.sendOrQueueChatMessage as jest.Mock).mockResolvedValue({
+        disposition: 'sent',
+        queue: emptyQueue,
+        turnId: 'turn-resumed',
+        chat: partialRunningChat,
+      });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: resumedChat.id,
+        pendingOpenChatSnapshot: resumedChat,
+      });
+      const root = tree.root as Queryable;
+      const transcriptItems = () =>
+        (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+          kind: string;
+          message?: Chat['messages'][number];
+        }>;
+      const transcriptMessages = () =>
+        transcriptItems().flatMap(({ message }) => (message ? [message] : []));
+      const transcriptContents = () =>
+        transcriptMessages()
+          .map((message) => message.content)
+          .reverse();
+      const agUi = (event: Record<string, unknown>) => ({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: resumedChat.id,
+          runId: 'run-resumed',
+          sourceTurnId: 'turn-resumed',
+          event,
+        },
+      });
+
+      expect(transcriptContents()).toEqual(['Earlier question', 'Earlier answer']);
+      act(() => messageInput(root).props.onChangeText(followUp.content));
+      await pressLabel(root, 'Send message');
+
+      expect(transcriptContents()).toEqual([
+        'Earlier question',
+        'Earlier answer',
+        followUp.content,
+      ]);
+      expect(
+        transcriptMessages().filter(
+          (message) => message.role === 'user' && message.content === followUp.content,
+        ),
+      ).toHaveLength(1);
+
+      await emitWs(
+        agUi({
+          type: 'MESSAGES_SNAPSHOT',
+          messages: [
+            followUp,
+            {
+              id: 'reasoning-resumed',
+              role: 'reasoning',
+              content: 'Checking the resumed context',
+            },
+            {
+              id: 'tool-resumed',
+              role: 'assistant',
+              content: '',
+              toolCalls: [
+                {
+                  id: 'tool-call-resumed',
+                  type: 'function',
+                  function: { name: 'terminal', arguments: '{"command":"npm test"}' },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      expect(transcriptContents()).toEqual([
+        'Earlier question',
+        'Earlier answer',
+        followUp.content,
+        'Checking the resumed context',
+      ]);
+      expect(
+        transcriptMessages().filter(
+          (message) => message.role === 'user' && message.content === followUp.content,
+        ),
+      ).toHaveLength(1);
+      expect(transcriptItems().some((item) => item.kind === 'toolInvocation')).toBe(true);
+
+      await emitWs(
+        agUi({
+          type: 'MESSAGES_SNAPSHOT',
+          messages: [
+            followUp,
+            {
+              id: 'reasoning-resumed',
+              role: 'reasoning',
+              content: 'Checking the resumed context',
+            },
+            {
+              id: 'answer-resumed',
+              role: 'assistant',
+              content: 'Resumed answer',
+            },
+          ],
+        }),
+      );
+      (api.getChat as jest.Mock).mockResolvedValue(finalChat);
+      await emitWs(agUi({ type: 'RUN_FINISHED', threadId: resumedChat.id, runId: 'run-resumed' }));
+      await act(async () => {
+        for (let index = 0; index < 6; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(transcriptContents()).toEqual([
+        'Earlier question',
+        'Earlier answer',
+        followUp.content,
+        'Checking the resumed context',
+        'Resumed answer',
+      ]);
+      expect(
+        transcriptMessages().filter(
+          (message) => message.role === 'user' && message.content === followUp.content,
+        ),
+      ).toHaveLength(1);
+      act(() => tree.unmount());
+    });
+
     it('creates a new thread and sends its first message with the selected controls', async () => {
       const api = createApi();
       const { tree } = await renderMain({ api });

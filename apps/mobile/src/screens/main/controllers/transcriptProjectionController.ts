@@ -71,10 +71,17 @@ export function projectTranscript({
     // The snapshot is only authoritative for the runs it was built from. A prompt
     // sent after it is already persisted but not in the snapshot yet, so keep the
     // trailing persisted messages instead of dropping them until the next one.
+    const firstCoveredIndex = messages.findIndex((message) => liveIds.has(message.id));
     const lastCoveredIndex = messages.reduce(
       (last, message, index) => (liveIds.has(message.id) ? index : last),
       -1,
     );
+    const leading =
+      firstCoveredIndex >= 0
+        ? messages
+            .slice(0, firstCoveredIndex)
+            .filter((message) => !replacedMessageIds.has(message.id))
+        : [];
     const trailing =
       lastCoveredIndex >= 0
         ? messages.slice(lastCoveredIndex + 1).filter((message) => !liveIds.has(message.id))
@@ -95,7 +102,7 @@ export function projectTranscript({
       );
       messages = [...leading, ...projected];
     } else {
-      messages = [...projected, ...trailing];
+      messages = [...leading, ...projected, ...trailing];
     }
   }
   for (const liveAssistantMessage of liveMessages) {

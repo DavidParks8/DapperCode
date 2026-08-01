@@ -230,6 +230,51 @@ describe('transcriptProjectionController', () => {
     expect(projection.messages.at(-1)?.createdAt).toBe('persisted');
   });
 
+  it('preserves resumed history before the first message shared with a current-run snapshot', () => {
+    const snapshot = liveState([
+      { id: 'current-user', role: 'user', content: 'Follow up', createdAt: 'three' },
+      { id: 'current-reasoning', role: 'reasoning', content: 'Thinking', createdAt: 'four' },
+      { id: 'current-answer', role: 'assistant', content: 'Answer', createdAt: 'five' },
+    ]);
+    snapshot.authoritativeSnapshot = true;
+
+    const projection = projectTranscript({
+      chat: {
+        ...chat,
+        parentThreadId: undefined,
+        messages: [
+          { id: 'earlier-user', role: 'user', content: 'Earlier question', createdAt: 'one' },
+          {
+            id: 'earlier-answer',
+            role: 'assistant',
+            content: 'Earlier answer',
+            createdAt: 'two',
+          },
+          { id: 'current-user', role: 'user', content: 'Follow up', createdAt: 'three' },
+          {
+            id: 'current-reasoning',
+            role: 'reasoning',
+            content: 'Thinking',
+            createdAt: 'four',
+          },
+          { id: 'current-answer', role: 'assistant', content: 'Answer', createdAt: 'five' },
+        ],
+      },
+      parentChat: null,
+      showToolCalls: true,
+      threadStatuses: new Map(),
+      liveMessageState: snapshot,
+    });
+
+    expect(projection.messages.map((message) => message.id)).toEqual([
+      'earlier-user',
+      'earlier-answer',
+      'current-user',
+      'current-reasoning',
+      'current-answer',
+    ]);
+  });
+
   it('replaces changing live text and suppresses it after persistence catches up', () => {
     const first = projectTranscript({
       chat: { ...chat, parentThreadId: undefined },

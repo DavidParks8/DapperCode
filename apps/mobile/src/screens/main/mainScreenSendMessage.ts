@@ -18,6 +18,7 @@ import {
 } from '../../state/mainScreen/composer';
 import type {
   BridgeUiSurface,
+  Chat,
   ChatMessage as ChatTranscriptMessage,
   CollaborationMode,
   LocalImageInput,
@@ -35,6 +36,7 @@ import {
 } from './mainScreenHelpers';
 import type { MainScreenSendMessageHandlerContext } from './mainScreenSendMessageHandler';
 import type { ComposerSubmission } from './controllers/submissionController';
+import { resolveEquivalentChat } from './mainScreenChatState';
 
 export interface SendMessageOptions {
   allowSlashCommands?: boolean;
@@ -261,7 +263,7 @@ export async function executeSendMessage(
           return prev;
         }
         const nowIso = new Date().toISOString();
-        return {
+        const updated: Chat = {
           ...baseChat,
           status: 'running',
           updatedAt: nowIso,
@@ -272,6 +274,8 @@ export async function executeSendMessage(
             baseChat.lastMessagePreview,
           messages: [...baseChat.messages, optimisticSentMessage],
         };
+        selectedChatRef.current = updated;
+        return updated;
       });
       scrollToBottomReliable(true);
     }
@@ -345,7 +349,10 @@ export async function executeSendMessage(
       setUserInputError(null);
       setResolvingUserInput(false);
     }
-    const resolvedUpdated = mergeChatWithPendingOptimisticMessages(result.chat);
+    const currentChat = selectedChatRef.current?.id === targetChatId ? selectedChatRef.current : null;
+    const resolvedUpdated = mergeChatWithPendingOptimisticMessages(
+      currentChat ? resolveEquivalentChat(currentChat, result.chat) : result.chat,
+    );
     const autoEnabledPlan =
       !options?.suppressPlanModeAutoEnable &&
       shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
