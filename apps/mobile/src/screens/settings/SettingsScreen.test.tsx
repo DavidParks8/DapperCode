@@ -1,4 +1,6 @@
 import { Switch } from 'react-native';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+import { router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -17,15 +19,11 @@ import {
 } from '../../state/appState/settings';
 import { apiClientAtom, bridgeConnectedAtom } from '../../state/bridge/atoms';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
-import {
-  currentScreenAtom,
-  onboardingModeAtom,
-  settingsAllowsDrawerGestureAtom,
-} from '../../state/navigation/atoms';
 import { createMemoryPersistence, createTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { SettingsScreen } from './SettingsScreen';
+import { routes } from '../../navigation/routes';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('../../pushNotifications', () => ({ requestPushRegistration: jest.fn() }));
@@ -267,13 +265,11 @@ describe('SettingsScreen behavior', () => {
     const drawerToggle = jest.fn();
     const persistenceError = new AppStatePersistenceError('write_failed', 'write', 'save failed');
     const store = createSettingsStore({ workspaceChatLimit: 5, persistenceError });
-    store.set(settingsAllowsDrawerGestureAtom, false);
     const { tree } = await renderSettings({ store, drawerToggle });
     const root = tree.root as Queryable;
     expect(hasText(root, 'Codex')).toBe(true);
     expect(hasText(root, 'Preferred · Active · ready · 1.2.3 · managed')).toBe(true);
     expect(hasText(root, 'Agent unavailable (details redacted)')).toBe(true);
-    expect(store.get(settingsAllowsDrawerGestureAtom)).toBe(true);
 
     await changeToggle(findToggle(root, 'Require approvals'), false);
     await changeToggle(findToggle(root, 'Show tool calls'), false);
@@ -283,17 +279,21 @@ describe('SettingsScreen behavior', () => {
     expect(store.get(workspaceChatLimitAtom)).toBe(10);
 
     await press(findPressableByText(root, 'Primary'));
-    expect(store.get(currentScreenAtom)).toBe('Onboarding');
-    expect(store.get(onboardingModeAtom)).toBe('edit');
+    expect(router.push).toHaveBeenCalledWith(routes.connection('profile-1', 'new', 'edit'), {
+      withAnchor: true,
+    });
     await press(findPressableByText(root, 'Add bridge'));
-    expect(store.get(onboardingModeAtom)).toBe('add');
-    await press(findPressableByText(root, 'Secondary'));
-    expect(store.get(appStateSnapshotAtom).data.bridgeProfiles.activeProfileId).toBe('profile-2');
+    expect(router.push).toHaveBeenCalledWith(routes.connection('profile-1', 'new', 'add'), {
+      withAnchor: true,
+    });
 
     await press(findPressableByText(root, 'Privacy policy'));
-    expect(store.get(currentScreenAtom)).toBe('Privacy');
+    expect(router.push).toHaveBeenCalledWith(routes.privacy('profile-1'));
     await press(findPressableByText(root, 'Terms of service'));
-    expect(store.get(currentScreenAtom)).toBe('Terms');
+    expect(router.push).toHaveBeenCalledWith(routes.terms('profile-1'));
+
+    await press(findPressableByText(root, 'Secondary'));
+    expect(router.replace).toHaveBeenCalledWith(routes.newChat('profile-2'));
 
     const drawer = root.findAll(
       (node) => node.props.accessibilityLabel === 'Open navigation drawer',

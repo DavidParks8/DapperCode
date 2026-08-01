@@ -22,16 +22,16 @@ import type {
   MainScreenChatNavigationResult,
 } from './mainScreenChatNavigation';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
-import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 
-export type MainScreenAgentThreadSelectorStateContext =
-  MainScreenChatNavigationContext & MainScreenChatNavigationResult;
+export type MainScreenAgentThreadSelectorStateContext = MainScreenChatNavigationContext &
+  MainScreenChatNavigationResult;
 
 export function useMainScreenAgentThreadSelectorState(
   context: MainScreenAgentThreadSelectorStateContext,
 ) {
   const {
     chatIdRef,
+    agentDetailThreadId,
     closeAgentDetail,
     onPendingOpenChatHandled,
     openAgentDetail,
@@ -49,9 +49,6 @@ export function useMainScreenAgentThreadSelectorState(
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const agentRootThreadId = useAtomValue(agentRootThreadIdAtom);
   const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
-  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
-  const agentDetailThreadId =
-    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
 
   const openAgentThreadSelector = useCallback(

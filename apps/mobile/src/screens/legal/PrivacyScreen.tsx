@@ -2,7 +2,7 @@ import { LegalScreen, type LegalSection } from './LegalScreen';
 
 interface PrivacyScreenProps {
   policyUrl: string | null;
-  onOpenDrawer: () => void;
+  onBack: () => void;
 }
 
 const privacySections: readonly LegalSection[] = [
@@ -28,7 +28,7 @@ const privacySections: readonly LegalSection[] = [
   },
 ];
 
-export function PrivacyScreen({ policyUrl, onOpenDrawer }: PrivacyScreenProps) {
+export function PrivacyScreen({ policyUrl, onBack }: PrivacyScreenProps) {
   return (
     <LegalScreen
       title="Privacy"
@@ -40,7 +40,7 @@ export function PrivacyScreen({ policyUrl, onOpenDrawer }: PrivacyScreenProps) {
       openButtonLabel="Open privacy policy"
       unsupportedDocumentMessage="The privacy policy URL is not supported on this device."
       openFailureMessage="Please open the policy URL manually."
-      onOpenDrawer={onOpenDrawer}
+      onBack={onBack}
     />
   );
 }

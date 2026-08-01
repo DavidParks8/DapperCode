@@ -1,4 +1,6 @@
 import { AppState, ScrollView, TextInput, type AppStateStatus } from 'react-native';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+import { router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -7,14 +9,9 @@ import type { Chat, GitStatusResponse } from '../../api/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { GitScreen } from './GitScreen';
 import { GIT_SCREEN_REFRESH_INTERVAL_MS } from './gitScreenController';
-import { apiClientAtom } from '../../state/bridge/atoms';
-import {
-  chatTransitionChatIdAtom,
-  mainOpeningChatIdAtom,
-  pendingMainChatIdAtom,
-} from '../../state/chat/atoms';
-import { currentScreenAtom } from '../../state/navigation/atoms';
-import { createTestStore, withAppStore } from '../../state/testing';
+import { mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
+import { createBridgeTestStore, withAppStore } from '../../state/testing';
+import { routes } from '../../navigation/routes';
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => name,
@@ -203,10 +200,7 @@ async function press(root: Queryable, text: string): Promise<void> {
 }
 
 function createGitStore(api: HostBridgeApiClient) {
-  const store = createTestStore();
-  store.set(apiClientAtom, api);
-  store.set(currentScreenAtom, 'ChatGit');
-  return store;
+  return createBridgeTestStore({ api });
 }
 
 async function renderGit(
@@ -356,8 +350,7 @@ describe('GitScreen behavior', () => {
         content: expect.stringContaining('Please preserve this behavior.'),
       }),
     );
-    expect(store.get(currentScreenAtom)).toBe('Main');
-    expect(store.get(chatTransitionChatIdAtom)).toBeNull();
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.chat('profile-1', chat.id));
     expect(store.get(mainOpeningChatIdAtom)).toBeNull();
     expect(store.get(pendingMainChatIdAtom)).toBeNull();
     act(() => tree?.unmount());

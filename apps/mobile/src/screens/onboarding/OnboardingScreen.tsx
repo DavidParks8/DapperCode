@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, View, type Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { decorativeAccessibilityProps, useModalAccessibilityFocus } from '../../accessibility';
@@ -33,7 +33,7 @@ export function OnboardingScreen({
     allowQueryTokenAuth,
     onSave,
   });
-  const scannerFocusRef = useModalAccessibilityFocus(controller.scannerVisible);
+  const scannerFocusRef = useModalAccessibilityFocus<Text>(controller.scannerVisible);
 
   const onboardingBackgroundGradient = theme.isDark
     ? (['#020304', '#05070C', '#0A0E16'] as const)

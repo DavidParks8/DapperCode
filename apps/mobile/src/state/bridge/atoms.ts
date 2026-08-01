@@ -66,3 +66,6 @@ export const apiClientAtom = atom(
 
 /** Connection status published by the active WebSocket client. */
 export const bridgeConnectedAtom = atom(false);
+
+/** True while the active profile, clients, and profile-scoped caches are changing together. */
+export const bridgeProfileTransitioningAtom = atom(false);

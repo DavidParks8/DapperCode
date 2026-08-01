@@ -7,7 +7,7 @@ import type { Chat } from '../../api/types';
 import { useAccessibilityAnnouncement } from '../../accessibility';
 import { approvalModeAtom } from '../../state/appState/settings';
 import { useBridgeApi } from '../../state/bridge/hooks';
-import { closeGitAtom, gitChatUpdatedAtom } from '../../state/navigation/actions';
+import { closeGitAtom, gitChatUpdatedAtom } from '../../navigation/actions';
 import { useAppTheme } from '../../theme';
 import { GitScreenBranchSummarySection } from './GitScreenBranchSummarySection';
 import { GitScreenCommitHistorySection } from './GitScreenCommitHistorySection';

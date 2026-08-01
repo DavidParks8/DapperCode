@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { FileSystemListResponse, WorkspaceListResponse } from '../../api/types';
@@ -16,11 +17,8 @@ import {
 } from '../../screens/main/mainScreenHelpers';
 import { defaultStartCwdAtom } from '../appState/settings';
 import { activeBridgeProfileAtom, apiClientAtom } from '../bridge/atoms';
-import {
-  currentScreenAtom,
-  popNavigationRouteAtom,
-  pushNavigationRouteAtom,
-} from '../navigation/atoms';
+import { routes } from '../../navigation/routes';
+import { getWorkspaceRouteIds, returnToChat } from './workspaceRouteNavigation';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -79,8 +77,11 @@ export interface WorkspaceResourceRevalidationOptions {
 
 function shouldUseFreshResource(
   fetchedAt: number | null,
-  { force = false, now = Date.now(), ttlMs = WORKSPACE_RESOURCES_TTL_MS }:
-    WorkspaceResourceRevalidationOptions,
+  {
+    force = false,
+    now = Date.now(),
+    ttlMs = WORKSPACE_RESOURCES_TTL_MS,
+  }: WorkspaceResourceRevalidationOptions,
 ): boolean {
   return !force && fetchedAt !== null && now - fetchedAt < ttlMs;
 }
@@ -96,11 +97,7 @@ function getFavoritesPersistence(profileId: string): MainScreenPersistenceContro
 
 export const loadWorkspaceFavoritesAtom = atom(
   null,
-  async (
-    get,
-    set,
-    options: WorkspaceResourceRevalidationOptions = {},
-  ): Promise<void> => {
+  async (get, set, options: WorkspaceResourceRevalidationOptions = {}): Promise<void> => {
     const profileId = get(activeBridgeProfileAtom)?.id;
     if (!profileId) return;
     const current = get(workspaceFavoritesResourceAtom);
@@ -178,16 +175,14 @@ export const toggleWorkspaceFavoriteAtom = atom(
       },
     }));
     const persistence = getFavoritesPersistence(profileId);
-    void persistence
-      .saveWorkspaceFavorites(next)
-      .catch((error: Error) =>
-        set(workspaceFavoritesByProfileAtom, (resources) => {
-          const resource = resources[profileId];
-          return resource
-            ? { ...resources, [profileId]: { ...resource, error: error.message } }
-            : resources;
-        }),
-      );
+    void persistence.saveWorkspaceFavorites(next).catch((error: Error) =>
+      set(workspaceFavoritesByProfileAtom, (resources) => {
+        const resource = resources[profileId];
+        return resource
+          ? { ...resources, [profileId]: { ...resource, error: error.message } }
+          : resources;
+      }),
+    );
   },
 );
 
@@ -263,11 +258,7 @@ export const refreshWorkspaceRootsAtom = atom(
 
 export const revalidateWorkspacePickerResourcesAtom = atom(
   null,
-  async (
-    get,
-    set,
-    options: WorkspaceResourceRevalidationOptions = {},
-  ): Promise<void> => {
+  async (get, set, options: WorkspaceResourceRevalidationOptions = {}): Promise<void> => {
     await Promise.all([
       set(loadWorkspaceFavoritesAtom, options),
       set(refreshWorkspaceRootsAtom, options),
@@ -439,6 +430,11 @@ export const browseWorkspacePathAtom = atom(
 export const openWorkspacePickerAtom = atom(
   null,
   (get, set, purpose: WorkspacePickerPurpose, initialPathOverride?: string | null): void => {
+    const { profileId, chatId } = getWorkspaceRouteIds(get);
+    if (!profileId) {
+      router.replace(routes.onboarding);
+      return;
+    }
     const initialPath =
       normalizeWorkspacePath(initialPathOverride) ??
       normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
@@ -446,7 +442,7 @@ export const openWorkspacePickerAtom = atom(
       get(workspaceBridgeRootAtom) ??
       null;
     set(workspacePickerPurposeAtom, purpose);
-    set(pushNavigationRouteAtom, { screen: 'WorkspacePicker' });
+    router.push(routes.workspacePicker(profileId, chatId));
     void set(browseWorkspacePathAtom, initialPath);
     scheduleIdleTask(() => {
       void set(revalidateWorkspacePickerResourcesAtom);
@@ -465,10 +461,10 @@ export const closeWorkspacePickerAtom = atom(null, (get, set): void => {
     get(resumeGitCheckoutAfterWorkspacePickerAtom)
   ) {
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(popNavigationRouteAtom);
+    router.back();
     return;
   }
-  set(popNavigationRouteAtom);
+  returnToChat(get);
 });
 
 export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): void => {
@@ -478,17 +474,22 @@ export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): vo
   if (get(workspacePickerPurposeAtom) === 'git-checkout-destination') {
     set(gitCheckoutParentPathAtom, normalizedPath);
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(popNavigationRouteAtom);
+    router.back();
     return;
   }
 
   set(defaultStartCwdAtom, normalizedPath);
-  set(popNavigationRouteAtom);
+  returnToChat(get);
 });
 
 export const openGitCheckoutAtom = atom(
   null,
   (get, set, initialParentPath?: string | null): void => {
+    const { profileId, chatId } = getWorkspaceRouteIds(get);
+    if (!profileId) {
+      router.replace(routes.onboarding);
+      return;
+    }
     const defaultParentPath =
       normalizeWorkspacePath(initialParentPath) ??
       normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
@@ -502,7 +503,7 @@ export const openGitCheckoutAtom = atom(
     set(gitCheckoutErrorAtom, null);
     set(gitCheckoutCloningAtom, false);
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-    set(pushNavigationRouteAtom, { screen: 'GitCheckout' });
+    router.push(routes.gitCheckout(profileId, chatId));
     void set(refreshWorkspaceRootsAtom).then((response) => {
       const bridgeRoot = normalizeWorkspacePath(response?.bridgeRoot);
       if (bridgeRoot) {
@@ -518,7 +519,7 @@ export const closeGitCheckoutAtom = atom(null, (get, set): void => {
   }
   set(gitCheckoutErrorAtom, null);
   set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
-  set(popNavigationRouteAtom);
+  router.back();
 });
 
 export const openGitCheckoutDestinationPickerAtom = atom(null, (get, set): void => {
@@ -586,7 +587,10 @@ export const submitGitCheckoutAtom = atom(null, async (get, set): Promise<void> 
     set(workspaceBrowsePathAtom, clonedPath);
     set(workspaceBrowseParentPathAtom, parentPath);
     set(workspaceBrowseErrorAtom, null);
-    set(currentScreenAtom, 'Main');
+    const { profileId, chatId } = getWorkspaceRouteIds(get);
+    if (profileId) {
+      router.dismissTo(routes.chat(profileId, chatId));
+    }
   } catch (err) {
     set(gitCheckoutErrorAtom, (err as Error).message);
   } finally {

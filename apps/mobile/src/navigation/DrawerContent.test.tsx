@@ -1,4 +1,6 @@
 import { useMemo } from 'react';
+jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
+import { router } from 'expo-router';
 import { Alert, AppState, RefreshControl } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -14,7 +16,6 @@ import type {
 import type { HostBridgeWsClient } from '../api/ws';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { selectedChatIdAtom } from '../state/chat/atoms';
-import { currentScreenAtom } from '../state/navigation/atoms';
 import { createBridgeTestStore, withAppStore } from '../state/testing';
 import type { AppStore } from '../state/types';
 import type { WorkspaceChatLimit } from '../appSettings';
@@ -22,6 +23,7 @@ import { createEmptyChatSummaryCache, mergeChatSummaryCache } from '../chatSumma
 import * as ChatSummaryCache from '../chatSummaryCache';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+import { routes } from './routes';
 import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from './useDrawerChatCollection';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
@@ -559,7 +561,7 @@ describe('DrawerContent render behavior matrix', () => {
     await press(findByLabel(root, 'Open settings'));
     await press(findByLabel(root, 'Needs your attention, 3 sessions'));
 
-    expect(store.get(currentScreenAtom)).toBe('Settings');
+    expect(router.navigate).toHaveBeenCalledWith(routes.settings('profile-1'));
     expect(store.get(selectedChatIdAtom)).toBeNull();
     expect(hasText(root, 'Approval chat')).toBe(false);
     act(() => tree.unmount());

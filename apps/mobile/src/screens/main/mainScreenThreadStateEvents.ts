@@ -8,9 +8,8 @@ import {
 } from '../../state/mainScreen/turn';
 import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { screenSetter } from '../../state/mainScreen/registry';
-import { startNewChatAtom } from '../../state/navigation/actions';
+import { startNewChatAtom } from '../../navigation/actions';
 import { activityAtom } from '../../state/mainScreen/composer';
-import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 import type { RpcNotification } from '../../api/types';
 import {
   RUN_WATCHDOG_MS,
@@ -48,6 +47,7 @@ export function processThreadStateEvents(
     pushActiveCommand,
     upsertLiveReasoningMessage,
     store,
+    agentDetailThreadId,
   } = context;
   const setPendingApproval = screenSetter(store, pendingApprovalAtom);
   const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
@@ -56,9 +56,6 @@ export function processThreadStateEvents(
   const setLiveAssistantByThread = screenSetter(store, liveAssistantByThreadAtom);
   const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
-  const currentNavigationRoute = store.get(currentNavigationRouteAtom);
-  const agentDetailThreadId =
-    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
   const setActivity = screenSetter(store, activityAtom);
 
   if (event.method === 'bridge/events/snapshotRequired') {

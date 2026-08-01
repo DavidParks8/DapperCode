@@ -17,6 +17,7 @@ import {
   queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import type { Chat } from '../../api/types';
 import { OPENING_CHAT_ACTIVITY_TITLE } from './mainScreenHelpers';
@@ -25,13 +26,18 @@ import type {
   MainScreenChatLoadPipelineResult,
 } from './mainScreenChatLoadPipeline';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
-import { openSubAgentAtom } from '../../state/navigation/actions';
-import { currentScreenAtom } from '../../state/navigation/atoms';
+import { openSubAgentAtom } from '../../navigation/actions';
+import { routes } from '../../navigation/routes';
 
 export type MainScreenChatNavigationContext = MainScreenChatLoadPipelineContext &
   MainScreenChatLoadPipelineResult;
 
 export function useMainScreenChatNavigation(context: MainScreenChatNavigationContext) {
+  const router = useRouter();
+  const { chatId, profileId } = useLocalSearchParams<{
+    chatId?: string;
+    profileId?: string;
+  }>();
   const {
     api,
     applyThreadRuntimeSnapshot,
@@ -69,7 +75,6 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
   const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
-  const setCurrentScreen = useSetAtom(currentScreenAtom);
   const openSubAgent = useSetAtom(openSubAgentAtom);
 
   const handleLoadEarlier = useCallback(async () => {
@@ -165,8 +170,10 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
   );
 
   const closeAgentDetail = useCallback(() => {
-    setCurrentScreen('Main');
-  }, [setCurrentScreen]);
+    if (profileId && chatId) {
+      router.dismissTo(routes.chat(profileId, chatId));
+    }
+  }, [chatId, profileId, router]);
 
   const openAgentDetail = useCallback(
     (threadId: string) => {

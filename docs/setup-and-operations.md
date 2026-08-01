@@ -211,6 +211,12 @@ The Expo bootstrap reads the bridge host from the central `config.json`, falling
 `.env.secure` for the `npm run bridge` development flow. Real phones must use a LAN or Tailscale
 bridge URL, not localhost.
 
+The mobile app uses Expo Router with the `dappercode` scheme. Canonical links include
+`dappercode://profiles/<profile-id>/chats/<thread-id>` and
+`/profiles/<profile-id>/chats/<thread-id>` on web. Web output is a client-rendered single-page app;
+any production host must rewrite unmatched paths to `index.html` so profile and chat URLs survive a
+direct load or browser refresh.
+
 ## Distribution
 
 `npm run desktop:build:macos` creates:

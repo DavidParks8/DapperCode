@@ -1,5 +1,7 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import { createAgUiThreadMessageState } from '../../api/agUi';
@@ -8,12 +10,12 @@ import type { HostBridgeWsClient } from '../../api/ws';
 import { liveAssistantByThreadAtom } from '../../state/mainScreen/turn';
 import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
-import { navigationStackAtom, pushNavigationRouteAtom } from '../../state/navigation/atoms';
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { createAppTheme, AppThemeProvider } from '../../theme';
 import { ChatTranscriptView } from './ChatTranscriptView';
 import { SubAgentDetailView } from './SubAgentDetailView';
+import { routes } from '../../navigation/routes';
 
 const theme = createAppTheme('dark');
 
@@ -71,7 +73,6 @@ async function render(options: RenderOptions = {}): Promise<{
   const store = createBridgeTestStore({ api, ws });
   store.set(agentRootThreadIdAtom, 'root');
   store.set(relatedAgentThreadsAtom, [loadedChat]);
-  store.set(pushNavigationRouteAtom, { screen: 'SubAgent', threadId: loadedChat.id });
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
@@ -290,7 +291,7 @@ describe('SubAgentDetailView starting state', () => {
   });
 
   it('pushes nested sub-agent routes and pops back one route', async () => {
-    const { store, tree } = await render({
+    const { tree } = await render({
       loadedChat: chat([
         {
           id: 'message-1',
@@ -305,21 +306,14 @@ describe('SubAgentDetailView starting state', () => {
       ((threadId: string) => void) | undefined;
 
     act(() => openSubAgentThread?.('grandchild'));
-    expect(store.get(navigationStackAtom)).toEqual([
-      { screen: 'Main' },
-      { screen: 'SubAgent', threadId: 'child' },
-      { screen: 'SubAgent', threadId: 'grandchild' },
-    ]);
+    expect(router.push).toHaveBeenCalledWith(routes.agent('profile-1', 'new', 'grandchild'));
 
     const back = (tree.root as Queryable).findAll(
       (node) => node.props.accessibilityLabel === 'Back from sub-agent transcript',
     )[0];
     const pressBack = back.props.onPress as () => void;
     act(() => pressBack());
-    expect(store.get(navigationStackAtom)).toEqual([
-      { screen: 'Main' },
-      { screen: 'SubAgent', threadId: 'child' },
-    ]);
+    expect(router.back).toHaveBeenCalled();
     act(() => tree.unmount());
   });
 });

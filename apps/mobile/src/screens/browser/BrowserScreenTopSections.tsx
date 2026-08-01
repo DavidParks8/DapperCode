@@ -45,7 +45,7 @@ export function BrowserTopBar({
   openingPreview,
   handleSubmitInput,
 }: {
-  onOpenDrawer: () => void;
+  onOpenDrawer?: () => void;
   inputValue: string;
   setInputValue: (value: string) => void;
   previewUrl: string | null;
@@ -60,20 +60,22 @@ export function BrowserTopBar({
 
   return (
     <View style={styles.topBar}>
-      <Pressable
-        onPress={onOpenDrawer}
-        hitSlop={8}
-        style={styles.chromeButton}
-        accessibilityRole="button"
-        accessibilityLabel="Open navigation drawer"
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="menu"
-          size={20}
-          color={colors.textPrimary}
-        />
-      </Pressable>
+      {onOpenDrawer ? (
+        <Pressable
+          onPress={onOpenDrawer}
+          hitSlop={8}
+          style={styles.chromeButton}
+          accessibilityRole="button"
+          accessibilityLabel="Open navigation drawer"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="menu"
+            size={20}
+            color={colors.textPrimary}
+          />
+        </Pressable>
+      ) : null}
       <View style={styles.omnibox}>
         <Ionicons
           {...decorativeAccessibilityProps}

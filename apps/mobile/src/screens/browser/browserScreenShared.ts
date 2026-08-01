@@ -1,9 +1,5 @@
 import type { NativeSyntheticEvent } from 'react-native';
 
-export interface BrowserScreenHandle {
-  handleHardwareBackPress: () => boolean;
-}
-
 export type ViewportPreset = 'mobile' | 'desktop' | 'desktop2';
 
 export type WebViewScrollEvent = NativeSyntheticEvent<

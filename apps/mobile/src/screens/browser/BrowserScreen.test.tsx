@@ -1,5 +1,6 @@
 import * as mockReact from 'react';
-import { Platform } from 'react-native';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+import { BackHandler, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -9,9 +10,8 @@ import { createDefaultAppStateData } from '../../appState';
 import { recentBrowserTargetUrlsAtom } from '../../state/appState/settings';
 import { apiClientAtom } from '../../state/bridge/atoms';
 import { refreshBridgeCapabilitiesAtom } from '../../state/bridge/capabilities';
-import { browserScreenCommandsAtom, type BrowserScreenCommands } from '../../state/commands';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
-import { pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
+import { pendingBrowserTargetUrlAtom } from '../../state/browser';
 import { createTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { AppThemeProvider, createAppTheme } from '../../theme';
@@ -23,6 +23,7 @@ const mockWebViewMethods = {
   goForward: jest.fn(),
   injectJavaScript: jest.fn(),
 };
+let hardwareBackHandler: (() => boolean) | null = null;
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('react-native-webview', () => {
@@ -161,7 +162,7 @@ async function renderBrowser(
   tree: ReactTestRenderer;
   api: HostBridgeApiClient;
   store: AppStore;
-  ref: { current: BrowserScreenCommands | null };
+  ref: { current: { handleHardwareBackPress: () => boolean } | null };
 }> {
   const api = options.api ?? createApi();
   let store = options.store;
@@ -187,8 +188,8 @@ async function renderBrowser(
   store.set(drawerCommandsAtom, { closeDrawer: jest.fn(), toggleNavigation: jest.fn() });
   store.set(pendingBrowserTargetUrlAtom, options.pendingTargetUrl ?? null);
   const ref = {
-    get current(): BrowserScreenCommands | null {
-      return store.get(browserScreenCommandsAtom);
+    get current(): { handleHardwareBackPress: () => boolean } | null {
+      return hardwareBackHandler ? { handleHardwareBackPress: hardwareBackHandler } : null;
     },
   };
   let tree: ReactTestRenderer | undefined;
@@ -219,10 +220,20 @@ describe('BrowserScreen behavior', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    hardwareBackHandler = null;
+    jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, handler) => {
+      hardwareBackHandler = () => Boolean(handler({} as never));
+      return {
+        remove: jest.fn(() => {
+          hardwareBackHandler = null;
+        }),
+      };
+    });
   });
   afterEach(() => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
+    jest.restoreAllMocks();
     setPlatform('ios');
   });
 

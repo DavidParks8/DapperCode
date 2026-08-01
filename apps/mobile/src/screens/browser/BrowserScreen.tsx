@@ -1,6 +1,7 @@
-import { useAtomValue, useSetAtom } from 'jotai';
-import { useEffect, useMemo } from 'react';
-import { Animated as RNAnimated, View } from 'react-native';
+import { useAtomValue } from 'jotai';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useMemo } from 'react';
+import { Animated as RNAnimated, BackHandler, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '../../theme';
@@ -9,44 +10,39 @@ import { BrowserBottomBar, BrowserStartPage } from './BrowserScreenStartBottom';
 import { BrowserTopBar, StatusBanner, ViewportTray } from './BrowserScreenTopSections';
 import { ViewportMenu } from './BrowserScreenViewportMenu';
 import { createBrowserScreenStyles } from './browserScreenStyles';
-import { browserScreenCommandsAtom } from '../../state/commands';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
 import { useBrowserScreenCoreHandlers } from './useBrowserScreenCoreHandlers';
 import { useBrowserScreenModel } from './useBrowserScreenModel';
 import { useBrowserScreenViewport } from './useBrowserScreenViewport';
-
-export { type BrowserScreenHandle } from './browserScreenShared';
 
 export function BrowserScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createBrowserScreenStyles(theme), [theme]);
   const model = useBrowserScreenModel(theme);
   const handlers = useBrowserScreenCoreHandlers(model);
+  const handleGoBackPress = handlers.handleGoBackPress;
   const viewport = useBrowserScreenViewport(model);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
-  const setBrowserCommands = useSetAtom(browserScreenCommandsAtom);
 
-  useEffect(() => {
-    setBrowserCommands({
-      handleHardwareBackPress: () => {
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
         if (!model.previewUrl || !model.canGoBack) {
           return false;
         }
-        handlers.handleGoBackPress();
+        handleGoBackPress();
         return true;
-      },
-    });
-    return () => {
-      setBrowserCommands(null);
-    };
-  }, [handlers, model.canGoBack, model.previewUrl, setBrowserCommands]);
+      });
+      return () => subscription.remove();
+    }, [handleGoBackPress, model.canGoBack, model.previewUrl]),
+  );
 
   return (
     <View style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <View style={styles.chrome}>
           <BrowserTopBar
-            onOpenDrawer={() => drawerCommands?.toggleNavigation()}
+            onOpenDrawer={drawerCommands?.toggleNavigation}
             inputValue={model.inputValue}
             setInputValue={model.setInputValue}
             previewUrl={model.previewUrl}

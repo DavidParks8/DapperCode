@@ -1,11 +1,9 @@
-import type { ViewStyle, TextStyle } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import type { AppTheme } from '../../theme';
 
-type BrowserScreenStyleRecord = Record<string, ViewStyle | TextStyle>;
-
-export function createBrowserScreenLayoutStyles(theme: AppTheme): BrowserScreenStyleRecord {
-  return {
+export function createBrowserScreenLayoutStyles(theme: AppTheme) {
+  return StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: theme.colors.bgMain,
@@ -362,5 +360,5 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme): BrowserScreenS
     bottomNavButtonPrimaryPressed: {
       backgroundColor: theme.colors.bgCanvasAccent,
     },
-  };
+  });
 }

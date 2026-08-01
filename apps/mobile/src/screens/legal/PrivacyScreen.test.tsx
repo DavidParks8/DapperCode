@@ -51,10 +51,7 @@ function getPressCallback(node: Queryable): PressCallback {
   return callback as PressCallback;
 }
 
-async function renderPrivacy(
-  url: string | null,
-  onOpenDrawer = jest.fn(),
-): Promise<ReactTestRenderer> {
+async function renderPrivacy(url: string | null, onBack = jest.fn()): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
@@ -65,7 +62,7 @@ async function renderPrivacy(
         }}
       >
         <AppThemeProvider theme={theme}>
-          <PrivacyScreen policyUrl={url} onOpenDrawer={onOpenDrawer} />
+          <PrivacyScreen policyUrl={url} onBack={onBack} />
         </AppThemeProvider>
       </SafeAreaProvider>,
     );
@@ -94,18 +91,18 @@ describe('PrivacyScreen behavior', () => {
     jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
   });
 
-  it('renders configured and missing states, opens the drawer, and opens supported links', async () => {
+  it('renders configured and missing states, navigates back, and opens supported links', async () => {
     jest.spyOn(Linking, 'canOpenURL').mockResolvedValue(true);
     jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-    const drawer = jest.fn();
-    const configured = await renderPrivacy(url, drawer);
+    const onBack = jest.fn();
+    const configured = await renderPrivacy(url, onBack);
     const root = configured.root as Queryable;
     await press(findPressableByText(root, button));
     expect(Linking.canOpenURL).toHaveBeenCalledWith(url);
     expect(Linking.openURL).toHaveBeenCalledWith(url);
-    const menuIcon = root.findAll((node) => node.children.includes('menu'))[0];
-    await press(findPressableAncestor(menuIcon));
-    expect(drawer).toHaveBeenCalled();
+    const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+    await press(findPressableAncestor(backIcon));
+    expect(onBack).toHaveBeenCalled();
     act(() => configured.unmount());
 
     const absent = await renderPrivacy(null);

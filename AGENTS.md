@@ -45,7 +45,7 @@ distributions.
 
 ### Mobile
 
-- `apps/mobile/App.tsx`: app shell and custom navigation
+- `apps/mobile/src/app/_layout.tsx`: Expo Router app shell and root providers
 - `src/api`: bridge client, WebSocket transport, typed contracts
 - `src/state`: jotai atoms for cross-component state (see `docs/mobile-state.md`)
 - `src/screens`: main product surfaces

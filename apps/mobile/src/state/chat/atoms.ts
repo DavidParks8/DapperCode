@@ -9,8 +9,6 @@ export const activeChatAtom = atom<Chat | null>(null);
 
 export const gitChatAtom = atom<Chat | null>(null);
 
-export const chatTransitionChatIdAtom = atom<string | null>(null);
-
 export const mainOpeningChatIdAtom = atom<string | null>(null);
 
 export const pendingMainChatIdAtom = atom<string | null>(null);

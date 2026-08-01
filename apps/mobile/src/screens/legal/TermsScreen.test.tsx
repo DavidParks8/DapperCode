@@ -51,10 +51,7 @@ function getPressCallback(node: Queryable): PressCallback {
   return callback as PressCallback;
 }
 
-async function renderTerms(
-  url: string | null,
-  onOpenDrawer = jest.fn(),
-): Promise<ReactTestRenderer> {
+async function renderTerms(url: string | null, onBack = jest.fn()): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
@@ -65,7 +62,7 @@ async function renderTerms(
         }}
       >
         <AppThemeProvider theme={theme}>
-          <TermsScreen termsUrl={url} onOpenDrawer={onOpenDrawer} />
+          <TermsScreen termsUrl={url} onBack={onBack} />
         </AppThemeProvider>
       </SafeAreaProvider>,
     );
@@ -94,18 +91,18 @@ describe('TermsScreen behavior', () => {
     jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
   });
 
-  it('renders configured and missing states, opens the drawer, and opens supported links', async () => {
+  it('renders configured and missing states, navigates back, and opens supported links', async () => {
     jest.spyOn(Linking, 'canOpenURL').mockResolvedValue(true);
     jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-    const drawer = jest.fn();
-    const configured = await renderTerms(url, drawer);
+    const onBack = jest.fn();
+    const configured = await renderTerms(url, onBack);
     const root = configured.root as Queryable;
     await press(findPressableByText(root, button));
     expect(Linking.canOpenURL).toHaveBeenCalledWith(url);
     expect(Linking.openURL).toHaveBeenCalledWith(url);
-    const menuIcon = root.findAll((node) => node.children.includes('menu'))[0];
-    await press(findPressableAncestor(menuIcon));
-    expect(drawer).toHaveBeenCalled();
+    const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+    await press(findPressableAncestor(backIcon));
+    expect(onBack).toHaveBeenCalled();
     act(() => configured.unmount());
 
     const absent = await renderTerms(null);

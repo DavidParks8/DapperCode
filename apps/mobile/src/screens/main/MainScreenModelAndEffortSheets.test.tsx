@@ -100,9 +100,9 @@ describe('MainScreenModelAndEffortSheets', () => {
   it('keeps the model selector padded below its close button on a device with no bottom inset', () => {
     const { tree, root } = openModelSelector({ top: 0, left: 0, right: 0, bottom: 0 });
 
-    const content = root.findAll((node) => node.props.accessibilityViewIsModal === true)[0];
+    const content = root.findAll((node) => node.props.testID === 'app-sheet-content')[0];
     if (!content) throw new Error('Missing model selector content');
-    const contentStyle = flattenStyle(content.props.contentContainerStyle ?? content.props.style);
+    const contentStyle = flattenStyle(content.props.style);
     expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,
     );

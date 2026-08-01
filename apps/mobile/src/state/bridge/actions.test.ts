@@ -6,13 +6,8 @@ import {
   loadChatSummaryCache,
   persistChatSummaries,
 } from '../../chatSummaryCache';
-import { onboardingModeAtom } from '../navigation/atoms';
 import { createTestStore } from '../testing';
-import {
-  clearSavedBridgesAtom,
-  deleteBridgeProfileAtom,
-  saveBridgeProfileAtom,
-} from './actions';
+import { clearSavedBridgesAtom, deleteBridgeProfileAtom, saveBridgeProfileAtom } from './actions';
 import { activeBridgeProfileAtom } from './atoms';
 
 /**
@@ -133,7 +128,6 @@ describe('bridge profile purge coordinates with pending summary writes', () => {
       const staleGeneration = getChatSummaryCacheGeneration(profileId);
 
       const store = storeWithProfile(profileId);
-      store.set(onboardingModeAtom, 'edit');
       expect(store.get(activeBridgeProfileAtom)?.id).toBe(profileId);
 
       // Edit the bridge URL/token in place - the profile id is preserved,
@@ -141,8 +135,12 @@ describe('bridge profile purge coordinates with pending summary writes', () => {
       // purged even though the cache file path (keyed by profileId) does
       // not change.
       await store.set(saveBridgeProfileAtom, {
-        bridgeUrl: 'https://bridge-two.test',
-        bridgeToken: 'token-two',
+        mode: 'edit',
+        profileId,
+        draft: {
+          bridgeUrl: 'https://bridge-two.test',
+          bridgeToken: 'token-two',
+        },
       });
 
       // A pending write captured before the edit (old-identity chats) must

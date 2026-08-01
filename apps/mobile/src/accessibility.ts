@@ -3,6 +3,7 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   type AccessibilityState,
+  type Text,
   type View,
 } from 'react-native';
 
@@ -27,8 +28,11 @@ export function useAccessibilityAnnouncement(message: string | null | undefined)
   }, [message]);
 }
 
-export function useAccessibilityFocus(active: boolean, delayMs = 350) {
-  const focusRef = useRef<View>(null);
+export function useAccessibilityFocus<T extends View | Text = View>(
+  active: boolean,
+  delayMs = 350,
+) {
+  const focusRef = useRef<T>(null);
 
   useEffect(() => {
     if (!active) {

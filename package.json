@@ -57,7 +57,7 @@
     "test:acp": "cargo test --locked --manifest-path services/rust-bridge/Cargo.toml 'acp::' -- --test-threads=1",
     "agui:generate": "node scripts/generate-agui-bindings.mjs",
     "agui:check": "node scripts/generate-agui-bindings.mjs --check",
-    "duplicates:mobile": "jscpd apps/mobile/App.tsx apps/mobile/src --config .jscpd.mobile.json",
+    "duplicates:mobile": "jscpd apps/mobile/src --config .jscpd.mobile.json",
     "duplicates:native": "jscpd apps/desktop/src apps/desktop/macos services/rust-bridge/src --config .jscpd.native.json",
     "duplicates:check": "npm run duplicates:mobile && npm run duplicates:native",
     "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",

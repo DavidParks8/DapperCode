@@ -243,7 +243,7 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
   };
 }
 
-function normalizeBridgeToken(value: unknown): string | null {
+export function normalizeBridgeToken(value: unknown): string | null {
   const normalized = normalizeNonEmptyString(value);
   return normalized && normalized.length > 0 ? normalized : null;
 }

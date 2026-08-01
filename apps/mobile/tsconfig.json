@@ -8,23 +8,15 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "lib": [
-      "ES2022",
-      "DOM"
-    ],
-    "types": [
-      "node",
-      "jest"
-    ],
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "jest"],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@/*": ["./src/*"]
     }
   },
   "include": [
-    "App.tsx",
-    "App.test.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.d.ts"

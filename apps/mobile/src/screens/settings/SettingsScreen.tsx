@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -27,41 +28,38 @@ import {
   workspaceChatLimitAtom,
 } from '../../state/appState/settings';
 import {
-  addBridgeProfileAtom,
-  editBridgeProfileAtom,
-  switchBridgeProfileAtom,
-} from '../../state/bridge/actions';
-import {
   activeBridgeProfileAtom,
   apiClientAtom,
   bridgeConnectedAtom,
 } from '../../state/bridge/atoms';
 import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
-import { openLegalScreenAtom } from '../../state/navigation/actions';
-import { settingsAllowsDrawerGestureAtom } from '../../state/navigation/atoms';
+import { routes } from '../../navigation/routes';
+import { replaceRoot } from '../../navigation/routeNavigation';
+import { selectedChatIdAtom } from '../../state/chat/atoms';
 import { useAppTheme } from '../../theme';
 
 export function SettingsScreen() {
   const theme = useAppTheme();
+  const router = useRouter();
+  const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
   const store = useStore();
   const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
   const api = useAtomValue(apiClientAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
   const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
   const activeBridgeProfileId = activeBridgeProfile?.id ?? null;
+  const profileId = routeProfileId ?? activeBridgeProfileId ?? '';
   const bridgeProfiles = useAtomValue(bridgeProfilesAtom);
+  const selectedChatId = useAtomValue(selectedChatIdAtom);
+  const chatId = selectedChatId ?? 'new';
   const pushSettings = useAtomValue(pushSettingsAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
+  const drawerCommands = useAtomValue(drawerCommandsAtom);
   const [approvalMode, setApprovalMode] = useAtom(approvalModeAtom);
   const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
   const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
   const retryPersistence = useSetAtom(retryPersistenceAtom);
-  const editBridgeProfile = useSetAtom(editBridgeProfileAtom);
-  const addBridgeProfile = useSetAtom(addBridgeProfileAtom);
-  const switchBridgeProfile = useSetAtom(switchBridgeProfileAtom);
-  const openLegalScreen = useSetAtom(openLegalScreenAtom);
-  const setDrawerGestureEnabled = useSetAtom(settingsAllowsDrawerGestureAtom);
 
   const {
     value: capabilities,
@@ -71,10 +69,6 @@ export function SettingsScreen() {
   const loading = capabilitiesRefreshing && !capabilities;
   const [error, setError] = useState<string | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
-
-  useEffect(() => {
-    setDrawerGestureEnabled(true);
-  }, [setDrawerGestureEnabled]);
 
   const updatePush = async (enabled: boolean) => {
     if (!api || !activeBridgeProfileId || pushBusy) return;
@@ -101,13 +95,15 @@ export function SettingsScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => store.get(drawerCommandsAtom)?.toggleNavigation()}
-          accessibilityRole="button"
-          accessibilityLabel="Open navigation drawer"
-        >
-          <Ionicons name="menu" size={22} color={theme.colors.textPrimary} />
-        </Pressable>
+        {drawerCommands?.toggleNavigation ? (
+          <Pressable
+            onPress={drawerCommands.toggleNavigation}
+            accessibilityRole="button"
+            accessibilityLabel="Open navigation drawer"
+          >
+            <Ionicons name="menu" size={22} color={theme.colors.textPrimary} />
+          </Pressable>
+        ) : null}
         <Text style={styles.title}>Settings</Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
@@ -121,15 +117,26 @@ export function SettingsScreen() {
           <Row
             label={activeBridgeProfile?.name ?? 'Current bridge'}
             value={bridgeConnected ? 'Connected' : 'Disconnected'}
-            onPress={editBridgeProfile}
+            onPress={() =>
+              router.push(routes.connection(profileId, chatId, 'edit'), {
+                withAnchor: true,
+              })
+            }
           />
-          <Row label="Add bridge" onPress={addBridgeProfile} />
+          <Row
+            label="Add bridge"
+            onPress={() =>
+              router.push(routes.connection(profileId, chatId, 'add'), {
+                withAnchor: true,
+              })
+            }
+          />
           {bridgeProfiles.map((profile) => (
             <Row
               key={profile.id}
               label={profile.name}
               value={profile.id === activeBridgeProfileId ? 'Active' : undefined}
-              onPress={() => void switchBridgeProfile(profile.id)}
+              onPress={() => replaceRoot(routes.newChat(profile.id))}
             />
           ))}
         </Section>
@@ -188,8 +195,8 @@ export function SettingsScreen() {
         </Section>
 
         <Section title="Legal">
-          <Row label="Privacy policy" onPress={() => openLegalScreen('Privacy')} />
-          <Row label="Terms of service" onPress={() => openLegalScreen('Terms')} />
+          <Row label="Privacy policy" onPress={() => router.push(routes.privacy(profileId))} />
+          <Row label="Terms of service" onPress={() => router.push(routes.terms(profileId))} />
         </Section>
       </ScrollView>
     </SafeAreaView>

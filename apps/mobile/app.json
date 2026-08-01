@@ -31,7 +31,9 @@
       "package": "com.dappermagna.dappercode"
     },
     "web": {
-      "favicon": "./assets/brand/favicon.png"
+      "bundler": "metro",
+      "favicon": "./assets/brand/favicon.png",
+      "output": "single"
     },
     "platforms": [
       "ios",
@@ -39,7 +41,8 @@
       "web"
     ],
     "experiments": {
-      "reactCompiler": true
+      "reactCompiler": true,
+      "typedRoutes": true
     },
     "plugins": [
       "./plugins/withAndroidCleartextTraffic",
@@ -67,7 +70,8 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-router"
     ],
     "extra": {
       "eas": {

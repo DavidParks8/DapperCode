@@ -1,4 +1,4 @@
-export type DrawerScreen = 'Main' | 'Browser' | 'Settings' | 'Privacy' | 'Terms';
+export type DrawerScreen = 'Main' | 'Browser' | 'Settings';
 
 export interface DrawerContentProps {
   active: boolean;

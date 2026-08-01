@@ -1,4 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { AppStore } from '../types';
@@ -6,7 +8,7 @@ import { appStateSnapshotAtom } from '../appState/atoms';
 import { apiClientAtom } from '../bridge/atoms';
 import { createBridgeTestStore } from '../testing';
 import { defaultStartCwdAtom } from '../appState/settings';
-import { currentScreenAtom, navigationStackAtom } from '../navigation/atoms';
+import { routes } from '../../navigation/routes';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -113,7 +115,9 @@ function switchProfile(store: AppStore, profileId: string): void {
             createdAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-01T00:00:00.000Z',
           },
-        ].filter((profile, index, profiles) => profiles.findIndex(({ id }) => id === profile.id) === index),
+        ].filter(
+          (profile, index, profiles) => profiles.findIndex(({ id }) => id === profile.id) === index,
+        ),
       },
     },
   });
@@ -284,9 +288,9 @@ describe('workspace actions', () => {
 
   it('clears cached roots and browse data (but keeps favorites) when a profile is edited in place', async () => {
     const { store, api } = createStore();
-    jest.mocked(FileSystem.readAsStringAsync).mockResolvedValue(
-      JSON.stringify({ version: 1, paths: ['/one/favorite'] }),
-    );
+    jest
+      .mocked(FileSystem.readAsStringAsync)
+      .mockResolvedValue(JSON.stringify({ version: 1, paths: ['/one/favorite'] }));
     api.listWorkspaceRoots.mockResolvedValueOnce({
       bridgeRoot: '/old-bridge',
       workspaces: [{ path: '/old-bridge/repo', chatCount: 1 }],
@@ -328,7 +332,9 @@ describe('workspace actions', () => {
       listing({
         bridgeRoot: '/new-bridge',
         path: '/old-bridge',
-        entries: [{ name: 'fresh', path: '/old-bridge/fresh', isDirectory: true, isGitRepo: false }],
+        entries: [
+          { name: 'fresh', path: '/old-bridge/fresh', isDirectory: true, isGitRepo: false },
+        ],
       }),
     );
     await store.set(browseWorkspacePathAtom, '/old-bridge');
@@ -381,7 +387,9 @@ describe('workspace actions', () => {
       workspaces: [{ path: '/reconnected-bridge/repo', chatCount: 3 }],
     });
     await freshRefresh;
-    expect(store.get(workspaceRootsAtom)).toEqual([{ path: '/reconnected-bridge/repo', chatCount: 3 }]);
+    expect(store.get(workspaceRootsAtom)).toEqual([
+      { path: '/reconnected-bridge/repo', chatCount: 3 },
+    ]);
     expect(store.get(workspaceBridgeRootAtom)).toBe('/reconnected-bridge');
   });
 
@@ -474,7 +482,9 @@ describe('workspace actions', () => {
     navigated.resolve(
       listing({
         path: '/workspace/next',
-        entries: [{ name: 'new', path: '/workspace/next/new', isDirectory: true, isGitRepo: false }],
+        entries: [
+          { name: 'new', path: '/workspace/next/new', isDirectory: true, isGitRepo: false },
+        ],
       }),
     );
     await navigate;
@@ -533,19 +543,12 @@ describe('workspace actions', () => {
     const { store, api } = createStore();
     api.listFilesystemEntries.mockResolvedValue(listing());
     api.listWorkspaceRoots.mockResolvedValue({ bridgeRoot: '/workspace', workspaces: [] });
-    store.set(currentScreenAtom, 'Main');
-
     store.set(openWorkspaceModalAtom);
-    expect(store.get(currentScreenAtom)).toBe('WorkspacePicker');
-    expect(store.get(navigationStackAtom)).toEqual([
-      { screen: 'Main' },
-      { screen: 'WorkspacePicker' },
-    ]);
+    expect(router.push).toHaveBeenCalledWith(routes.workspacePicker('profile-1', 'new'));
     expect(store.get(workspacePickerPurposeAtom)).toBe('default-start');
 
     store.set(closeWorkspacePickerAtom);
-    expect(store.get(currentScreenAtom)).toBe('Main');
-    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
   });
 
   it('returns to git checkout after choosing a destination', async () => {
@@ -554,27 +557,21 @@ describe('workspace actions', () => {
     api.listWorkspaceRoots.mockResolvedValue({ bridgeRoot: '/workspace', workspaces: [] });
 
     store.set(openGitCheckoutAtom, '/workspace');
-    expect(store.get(currentScreenAtom)).toBe('GitCheckout');
+    expect(router.push).toHaveBeenCalledWith(routes.gitCheckout('profile-1', 'new'));
     expect(store.get(gitCheckoutParentPathAtom)).toBe('/workspace');
 
     store.set(openGitCheckoutDestinationPickerAtom);
-    expect(store.get(currentScreenAtom)).toBe('WorkspacePicker');
-    expect(store.get(navigationStackAtom)).toEqual([
-      { screen: 'Main' },
-      { screen: 'GitCheckout' },
-      { screen: 'WorkspacePicker' },
-    ]);
+    expect(router.push).toHaveBeenCalledWith(routes.workspacePicker('profile-1', 'new'));
     expect(store.get(resumeGitCheckoutAfterWorkspacePickerAtom)).toBe(true);
 
     // Backing out of the picker resumes the checkout it interrupted.
     store.set(closeWorkspacePickerAtom);
-    expect(store.get(currentScreenAtom)).toBe('GitCheckout');
-    expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }, { screen: 'GitCheckout' }]);
+    expect(router.back).toHaveBeenCalledTimes(1);
     expect(store.get(resumeGitCheckoutAfterWorkspacePickerAtom)).toBe(false);
 
     store.set(openGitCheckoutDestinationPickerAtom);
     store.set(selectWorkspaceAtom, '/workspace/destination');
-    expect(store.get(currentScreenAtom)).toBe('GitCheckout');
+    expect(router.back).toHaveBeenCalledTimes(2);
     expect(store.get(gitCheckoutParentPathAtom)).toBe('/workspace/destination');
   });
 
@@ -584,20 +581,31 @@ describe('workspace actions', () => {
 
     store.set(selectWorkspaceAtom, '/workspace/app');
     expect(store.get(defaultStartCwdAtom)).toBe('/workspace/app');
-    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
   });
 
   it('keeps the checkout open while a clone is running', () => {
     const { store } = createStore();
-    store.set(currentScreenAtom, 'GitCheckout');
     store.set(gitCheckoutCloningAtom, true);
 
     store.set(closeGitCheckoutAtom);
-    expect(store.get(currentScreenAtom)).toBe('GitCheckout');
+    expect(router.dismissTo).not.toHaveBeenCalled();
 
     store.set(gitCheckoutCloningAtom, false);
     store.set(closeGitCheckoutAtom);
-    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns from checkout to the workspace picker that opened it', () => {
+    const { store, api } = createStore();
+    api.listWorkspaceRoots.mockResolvedValue({ bridgeRoot: '/workspace', workspaces: [] });
+    api.listFilesystemEntries.mockResolvedValue(listing());
+
+    store.set(openWorkspaceModalAtom);
+    store.set(openGitCheckoutAtom, '/workspace');
+    store.set(closeGitCheckoutAtom);
+
+    expect(router.back).toHaveBeenCalledTimes(1);
   });
 
   it('derives the directory name until the field is edited', () => {
@@ -640,7 +648,6 @@ describe('workspace actions', () => {
     store.set(gitCheckoutRepoUrlAtom, ' git@github.com:org/repo.git ');
     store.set(gitCheckoutDirectoryNameAtom, 'repo');
     store.set(gitCheckoutParentPathAtom, '/workspace');
-    store.set(currentScreenAtom, 'GitCheckout');
     api.gitClone
       .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'permission denied', cloned: false })
       .mockRejectedValueOnce(new Error('clone transport failed'))
@@ -648,7 +655,7 @@ describe('workspace actions', () => {
 
     await store.set(submitGitCheckoutAtom);
     expect(store.get(gitCheckoutErrorAtom)).toContain('permission denied');
-    expect(store.get(currentScreenAtom)).toBe('GitCheckout');
+    expect(router.dismissTo).not.toHaveBeenCalled();
 
     await store.set(submitGitCheckoutAtom);
     expect(store.get(gitCheckoutErrorAtom)).toBe('clone transport failed');
@@ -662,7 +669,7 @@ describe('workspace actions', () => {
     expect(store.get(defaultStartCwdAtom)).toBe('/workspace/repo');
     expect(store.get(workspaceBrowsePathAtom)).toBe('/workspace/repo');
     expect(store.get(workspaceBrowseParentPathAtom)).toBe('/workspace');
-    expect(store.get(currentScreenAtom)).toBe('Main');
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
     expect(store.get(gitCheckoutCloningAtom)).toBe(false);
   });
 

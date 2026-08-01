@@ -22,7 +22,7 @@ for (const dependencyName of dependencyNames) {
 const sourceFiles = [
   path.join(root, 'package-lock.json'),
   path.join(mobileRoot, '.env.example'),
-  path.join(mobileRoot, 'App.tsx'),
+  path.join(mobileRoot, 'src/app/_layout.tsx'),
   path.join(mobileRoot, 'app.json'),
   path.join(mobileRoot, 'eas.json'),
   ...walkSourceFiles(path.join(mobileRoot, 'src')),

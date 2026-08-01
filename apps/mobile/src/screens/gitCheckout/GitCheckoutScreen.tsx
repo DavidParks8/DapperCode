@@ -1,4 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import { Stack } from 'expo-router';
+import { usePreventRemove } from 'expo-router/react-navigation';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import {
@@ -54,9 +56,11 @@ export function GitCheckoutScreen() {
       ? joinWorkspacePath(parentPath, normalizedDirectoryName)
       : null;
   const submitDisabled = !repoUrl.trim() || !normalizedDirectoryName || cloning;
+  usePreventRemove(cloning, () => undefined);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <Stack.Screen options={{ gestureEnabled: !cloning }} />
       <KeyboardAvoidingView
         style={styles.keyboardLayer}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

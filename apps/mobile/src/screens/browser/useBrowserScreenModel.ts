@@ -22,7 +22,7 @@ import { bridgeUrlAtom } from '../../state/bridge/atoms';
 import { useBrowserTargetsResource } from '../../state/bridge/browserTargets';
 import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { useBridgeApi } from '../../state/bridge/hooks';
-import { pendingBrowserTargetUrlAtom } from '../../state/navigation/atoms';
+import { pendingBrowserTargetUrlAtom } from '../../state/browser';
 import type { AppTheme } from '../../theme';
 import {
   DEFAULT_DESKTOP_VIEWPORT,

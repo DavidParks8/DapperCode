@@ -5,22 +5,24 @@ lives under `apps/mobile/src/state`.
 
 ## Layout
 
-| Path | Contents |
-| --- | --- |
-| `state/store.ts` | `createAppStore()` and the `AppStateProvider` mounted in `App.tsx` |
-| `state/types.ts` | The `AppStore` type alias |
-| `state/appState/atoms.ts` | Persisted app-state snapshot plus derived settings/profile/push selectors |
-| `state/appState/actions.ts` | `initialize` / `dispatch` / `dispatchDurable` / `retryPersistence` / `flushPersistence` write atoms |
-| `state/appState/settings.ts` | Read/write atoms for individual settings (`approvalModeAtom`, …) |
-| `state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms |
-| `state/bridge/*` | Active bridge profile, WS/API clients, profile lifecycle actions |
-| `state/navigation/*` | Typed app route stack, current route/screen selectors, and navigation actions |
-| `state/chat/*` | Selected/active/pending chat routing and the chat-open transition |
-| `state/drawer/atoms.ts` | Drawer visibility plus the imperative drawer commands |
-| `state/commands.ts` | Screen-registered imperative entry points (replaces `useImperativeHandle` refs) |
-| `state/theme.ts` | Theme derived from settings and the system colour scheme |
-| `state/mainScreen/*` | MainScreen screen state, grouped by domain, plus the reset registry |
-| `state/testing.ts` | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`) |
+| Path                                       | Contents                                                                                            |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `state/store.ts`                           | `createAppStore()` and the `AppStateProvider` mounted in `src/app/_layout.tsx`                      |
+| `state/types.ts`                           | The `AppStore` type alias                                                                           |
+| `state/appState/atoms.ts`                  | Persisted app-state snapshot plus derived settings/profile/push selectors                           |
+| `state/appState/actions.ts`                | `initialize` / `dispatch` / `dispatchDurable` / `retryPersistence` / `flushPersistence` write atoms |
+| `state/appState/settings.ts`               | Read/write atoms for individual settings (`approvalModeAtom`, …)                                    |
+| `state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms                                                  |
+| `state/bridge/*`                           | Active bridge profile, WS/API clients, profile lifecycle actions                                    |
+| `src/app/*`                                | Expo Router layouts and thin route adapters; URL paths are navigation state                         |
+| `navigation/routes.ts`                     | Typed builders for canonical profile, chat, settings, and pushed-screen URLs                        |
+| `navigation/actions.ts`                    | Router-backed application commands that also coordinate related domain atoms                        |
+| `state/chat/*`                             | Selected/active/pending chat data and the chat-open transition                                      |
+| `state/drawer/atoms.ts`                    | Imperative access to the Router drawer from custom in-screen headers                                |
+| `state/commands.ts`                        | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
+| `state/theme.ts`                           | Theme derived from settings and the system colour scheme                                            |
+| `state/mainScreen/*`                       | MainScreen screen state, grouped by domain, plus the reset registry                                 |
+| `state/testing.ts`                         | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
 
 ## Conventions
 
@@ -29,24 +31,25 @@ lives under `apps/mobile/src/state`.
 - **Actions are write-only atoms.** Anything that used to be a `useCallback` handler passed down as a
   prop should be an `atom(null, (get, set, …) => …)` so any component can trigger it with `useSetAtom`.
 - **Read synchronously with `useStore()`** when a callback needs the current value without
-  subscribing (for example the hardware back handler). This replaces the old "mirror state into a ref"
-  pattern.
+  subscribing. This replaces the old "mirror state into a ref" pattern.
 - **Never put a thenable in an atom.** jotai suspends on any value with a `then` method, which renders
   the subtree as `null` with no error. Test doubles built from `Proxy` must return `undefined` for
   `then`.
 - **`wsClientAtom` / `apiClientAtom` are derived but writable.** Writing installs an override; that is
   the injection seam used by tests.
 
-## Navigation stack
+## Navigation
 
-`navigationStackAtom` is the source of truth for app navigation. Push screens with
-`pushNavigationRouteAtom`, return with `popNavigationRouteAtom`, and use `currentScreenAtom` only
-when intentionally resetting to a canonical root stack. `navigationCanGoBackAtom` drives both
-hardware back and the left-edge gesture, so drawer opening is available only at a root route.
+Expo Router is the only source of truth for navigation. Every screen has a profile-aware URL under
+`/profiles/[profileId]`; chats and sub-agent transcripts use dynamic path parameters. Use the typed
+builders in `navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
+use `router.push` for hierarchical drill-in screens, and use `router.back` for one-level dismissal.
 
-Sub-agent transcripts are parameterized routes (`{ screen: 'SubAgent', threadId }`). Drilling into a
-nested sub-agent pushes another route; back pops exactly one route before returning to the main
-session. Do not create a second feature-local navigation stack.
+Do not put route names, path parameters, current-screen selectors, back-stack state, or drawer
+visibility in Jotai. Ephemeral data needed by a destination may remain in atoms when it is not safe
+or meaningful in a URL, such as a local browser-preview target. The anchored Expo Router chat Stack
+keeps its index MainScreen mounted beneath Git, workspace, checkout, and nested sub-agent routes,
+including on cold deep links.
 
 ## App-state persistence
 
@@ -70,7 +73,7 @@ One coordinator exists per store, resolved through a `WeakMap` keyed by the stor
 ```ts
 const store = createBridgeTestStore({ api, ws });
 render(withAppStore(store, <SomeScreen />));
-expect(store.get(currentScreenAtom)).toBe('Settings');
+expect(store.get(selectedChatIdAtom)).toBe('thread-1');
 ```
 
 - `createTestStore({ data })` returns a store that is already loaded, backed by in-memory persistence.
@@ -78,6 +81,8 @@ expect(store.get(currentScreenAtom)).toBe('Settings');
   the bridge clients.
 - `createAppStateHarness(persistence)` exposes the coordinator through a small store-like facade for
   persistence tests.
+- Use `expo-router/testing-library` and `renderRouter` for path, deep-link, stack, and back-navigation
+  assertions. Component tests may use `testing/expoRouterMock` when the URL itself is not under test.
 
 Assert on store state rather than on callback props: screens no longer receive their wiring as props.
 
@@ -108,10 +113,10 @@ Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState
   Thread runtime snapshots use this pattern: MainScreen helpers keep synchronous `.current` reads
   while the pushed sub-agent route subscribes to the same resettable atom.
 
-### Why `MainScreen` is still keyed by bridge profile
+### Why `MainScreen` remounts with route identity
 
-`AppScreenRenderer` renders `<MainScreen key={activeBridgeProfileId} />`. That remount is what clears
-the component-local state the atoms deliberately do not cover:
+The chat index keys MainScreen by bridge profile. Switching profile identity remounts MainScreen and
+clears the component-local state the atoms deliberately do not cover:
 
 - Dozens of `useRef` caches in the hook chain (reasoning buffers, model preferences, parent-chat
   cache) and their pending timers.
@@ -120,7 +125,7 @@ the component-local state the atoms deliberately do not cover:
   standalone.
 
 Remounting is the cheapest correct way to reset that state, and it is the mechanism those pieces were
-already designed around. Atoms needed an explicit registry precisely *because* they cannot be cleared
+already designed around. Atoms needed an explicit registry precisely _because_ they cannot be cleared
 by remounting. Both mechanisms are in place, and both are covered by tests.
 
 ## What is intentionally not in atoms

@@ -7,7 +7,7 @@ import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
 import { useBridgeCapabilitiesResource } from '../state/bridge/capabilities';
 import { selectedChatIdAtom } from '../state/chat/atoms';
-import { navigateAtom, selectChatAtom, startNewChatAtom } from '../state/navigation/actions';
+import { navigateAtom, selectChatAtom, startNewChatAtom } from './actions';
 import { useAppTheme } from '../theme';
 import { buildDrawerAttentionModel, type DrawerAttentionLane } from './drawerAttention';
 import { createDrawerContentStyles } from './drawerContentStyles';

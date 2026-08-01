@@ -1,19 +1,19 @@
 import { resolveComposerBottomSpacing } from './chat-input-layout';
 
 describe('resolveComposerBottomSpacing', () => {
-  it('keeps a small fixed reserve for iPhones with a home indicator', () => {
+  it('keeps the composer above the full iPhone home-indicator inset', () => {
     expect(resolveComposerBottomSpacing('ios', 34, false)).toEqual({
       baseBottomPadding: 6,
-      extraBottomInset: 8,
-      totalBottomPadding: 14,
+      extraBottomInset: 34,
+      totalBottomPadding: 40,
     });
   });
 
   it('collapses the bottom reserve while the keyboard is visible on iOS', () => {
     expect(resolveComposerBottomSpacing('ios', 34, true)).toEqual({
-      baseBottomPadding: 2,
+      baseBottomPadding: 8,
       extraBottomInset: 0,
-      totalBottomPadding: 2,
+      totalBottomPadding: 8,
     });
   });
 
@@ -66,6 +66,6 @@ describe('resolveComposerBottomSpacing', () => {
 
   it('adds the iOS reserve only at the home-indicator threshold', () => {
     expect(resolveComposerBottomSpacing('ios', 19, false).extraBottomInset).toBe(0);
-    expect(resolveComposerBottomSpacing('ios', 20, false).extraBottomInset).toBe(8);
+    expect(resolveComposerBottomSpacing('ios', 20, false).extraBottomInset).toBe(20);
   });
 });

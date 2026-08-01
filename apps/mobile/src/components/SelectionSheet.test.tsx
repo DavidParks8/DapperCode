@@ -236,10 +236,10 @@ describe('SelectionSheet', () => {
     });
     if (!tree) throw new Error('Component did not render');
     const content = queryRoot(tree).findAll(
-      (node) => node.props.accessibilityViewIsModal === true,
+      (node) => node.props.testID === 'app-sheet-content',
     )[0];
     if (!content) throw new Error('Missing sheet content');
-    const contentStyle = flattenStyle(content.props.contentContainerStyle ?? content.props.style);
+    const contentStyle = flattenStyle(content.props.style);
     expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,
     );

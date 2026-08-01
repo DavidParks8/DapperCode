@@ -1,11 +1,9 @@
-import type { ViewStyle, TextStyle } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import type { AppTheme } from '../../theme';
 
-type BrowserScreenStyleRecord = Record<string, ViewStyle | TextStyle>;
-
-export function createBrowserScreenStartStyles(theme: AppTheme): BrowserScreenStyleRecord {
-  return {
+export function createBrowserScreenStartStyles(theme: AppTheme) {
+  return StyleSheet.create({
     startPage: {
       flex: 1,
     },
@@ -108,5 +106,5 @@ export function createBrowserScreenStartStyles(theme: AppTheme): BrowserScreenSt
       color: theme.colors.textMuted,
       paddingHorizontal: theme.spacing.xs,
     },
-  };
+  });
 }

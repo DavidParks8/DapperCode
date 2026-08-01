@@ -17,7 +17,7 @@ import { useAppTheme, type AppTheme } from '../theme';
 import { decorativeAccessibilityProps } from '../accessibility';
 
 interface ChatHeaderProps {
-  onOpenDrawer: () => void;
+  onOpenDrawer?: () => void;
   title: string;
   agent?: AgentDescriptor | null;
   /** Opens the rename sheet. Rendered as a dedicated button so the title stays draggable. */
@@ -43,20 +43,22 @@ export function ChatHeader({
     <View style={styles.headerContainer}>
       <SafeAreaView edges={['top', 'left', 'right']}>
         <View style={styles.header}>
-          <Pressable
-            onPress={onOpenDrawer}
-            hitSlop={8}
-            style={styles.menuBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Open navigation drawer"
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="menu"
-              size={20}
-              color={colors.textPrimary}
-            />
-          </Pressable>
+          {onOpenDrawer ? (
+            <Pressable
+              onPress={onOpenDrawer}
+              hitSlop={8}
+              style={styles.menuBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Open navigation drawer"
+            >
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="menu"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+          ) : null}
           {/*
             The title is a horizontally scrollable surface so a long session name can be read in
             full. It must not sit inside a Pressable: a press wrapper swallows the drag gesture on

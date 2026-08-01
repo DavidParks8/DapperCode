@@ -1,0 +1,6 @@
+export const TABLET_LAYOUT_MIN_WIDTH = 700;
+export const TABLET_SIDEBAR_WIDTH = 312;
+export const APP_PREFETCH_DELAY_MS = 0;
+export const APP_PREFETCH_CHAT_LIMIT = 5;
+export const CHAT_SNAPSHOT_PERSIST_DELAY_MS = 250;
+export const AUTO_STORE_REVIEW_RETRY_MS = 24 * 60 * 60 * 1000;

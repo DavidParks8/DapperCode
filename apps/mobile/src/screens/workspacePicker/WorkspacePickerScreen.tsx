@@ -3,7 +3,10 @@ import { useEffect } from 'react';
 
 import { WorkspacePicker } from '../../components/WorkspacePicker';
 import { defaultStartCwdAtom } from '../../state/appState/settings';
-import { gitCheckoutParentPathAtom } from '../../state/mainScreen/gitCheckout';
+import {
+  gitCheckoutParentPathAtom,
+  resumeGitCheckoutAfterWorkspacePickerAtom,
+} from '../../state/mainScreen/gitCheckout';
 import {
   browseWorkspacePathAtom,
   closeWorkspacePickerAtom,
@@ -49,10 +52,12 @@ export function WorkspacePickerScreen() {
   const revalidateResources = useSetAtom(revalidateWorkspacePickerResourcesAtom);
   const openGitCheckout = useSetAtom(openGitCheckoutAtom);
   const closePicker = useSetAtom(closeWorkspacePickerAtom);
+  const setResumeGitCheckout = useSetAtom(resumeGitCheckoutAfterWorkspacePickerAtom);
 
   useEffect(() => {
     void revalidateResources();
-  }, [revalidateResources]);
+    return () => setResumeGitCheckout(false);
+  }, [revalidateResources, setResumeGitCheckout]);
 
   const isGitCheckoutDestination = purpose === 'git-checkout-destination';
 

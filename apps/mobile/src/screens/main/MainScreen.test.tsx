@@ -1,6 +1,9 @@
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
+import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -22,7 +25,6 @@ import type { HostBridgeWsClient } from '../../api/ws';
 import { ChatMessage } from '../../components/ChatMessage';
 import type { ChatMessageProps } from '../../components/chatMessageTypes';
 import { AppThemeProvider, createAppTheme } from '../../theme';
-import { useAtomValue } from 'jotai';
 import { MainScreen } from './MainScreen';
 import { SubAgentDetailView } from './SubAgentDetailView';
 import { GitCheckoutScreen } from '../gitCheckout/GitCheckoutScreen';
@@ -30,13 +32,7 @@ import { WorkspacePickerScreen } from '../workspacePicker/WorkspacePickerScreen'
 import { mainScreenCommandsAtom, type MainScreenCommands } from '../../state/commands';
 import { defaultStartCwdAtom } from '../../state/appState/settings';
 import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
-import {
-  currentNavigationRouteAtom,
-  currentScreenAtom,
-  navigationStackAtom,
-  pendingBrowserTargetUrlAtom,
-  popNavigationRouteAtom,
-} from '../../state/navigation/atoms';
+import { pendingBrowserTargetUrlAtom } from '../../state/browser';
 import { agentThreadMenuVisibleAtom } from '../../state/mainScreen/modals';
 import { selectedChatAtom } from '../../state/mainScreen/session';
 import { activeTurnIdAtom } from '../../state/mainScreen/turn';
@@ -50,6 +46,7 @@ import { toggleWorkspaceFavoriteAtom } from '../../state/mainScreen/workspaceAct
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { refreshBridgeCapabilitiesAtom } from '../../state/bridge/capabilities';
+import { routes } from '../../navigation/routes';
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
@@ -164,16 +161,13 @@ jest.mock('../../components/BridgeUiSurface', () => ({
 }));
 
 function MainRouteShell() {
-  const route = useAtomValue(currentNavigationRouteAtom);
-  const subAgentRoute = route.screen === 'SubAgent' ? route : null;
+  const { threadId } = useGlobalSearchParams<{ threadId?: string }>();
   return (
     <View style={{ flex: 1 }}>
-      <View style={StyleSheet.absoluteFill} pointerEvents={subAgentRoute ? 'none' : 'auto'}>
+      <View style={StyleSheet.absoluteFill} pointerEvents={threadId ? 'none' : 'auto'}>
         <MainScreen />
       </View>
-      {subAgentRoute ? (
-        <SubAgentDetailView key={subAgentRoute.threadId} threadId={subAgentRoute.threadId} />
-      ) : null}
+      {threadId ? <SubAgentDetailView key={threadId} threadId={threadId} /> : null}
     </View>
   );
 }
@@ -1727,17 +1721,16 @@ function MainRouteShell() {
   }
 
   /**
-   * The subset of the app's screen switch these flows navigate between, stacked the same way
-   * `AppScreenRenderer` stacks them so the chat stays mounted underneath.
+   * The subset of the Router chat stack these flows navigate between, preserving the mounted chat
+   * underneath pushed workspace screens.
    */
   function WorkspaceFlowShell() {
-    const screen = useAtomValue(currentScreenAtom);
-    const pushed =
-      screen === 'WorkspacePicker' ? (
-        <WorkspacePickerScreen />
-      ) : screen === 'GitCheckout' ? (
-        <GitCheckoutScreen />
-      ) : null;
+    const pathname = usePathname();
+    const pushed = pathname.endsWith('/workspace-picker') ? (
+      <WorkspacePickerScreen />
+    ) : pathname.endsWith('/git-checkout') ? (
+      <GitCheckoutScreen />
+    ) : null;
     return (
       <View style={{ flex: 1 }}>
         <View style={StyleSheet.absoluteFill} pointerEvents={pushed ? 'none' : 'auto'}>
@@ -2658,7 +2651,7 @@ function MainRouteShell() {
           id === grandChild.id ? grandChild : id === nestedParent.id ? nestedParent : rootChat,
         ),
       );
-      const { tree, store } = await renderMain({ api, selectedChat: rootChat });
+      const { tree } = await renderMain({ api, selectedChat: rootChat });
       const root = rootOf(tree);
       await advance();
       await act(async () => {
@@ -2676,10 +2669,9 @@ function MainRouteShell() {
           .findAllByType(ChatMessage)
           .some((node) => node.props.message.id === 'message-sub-nested'),
       ).toBe(true);
-      expect(store.get(navigationStackAtom)).toEqual([
-        { screen: 'Main' },
-        { screen: 'SubAgent', threadId: nestedParent.id },
-      ]);
+      expect(router.push).toHaveBeenCalledWith(
+        routes.agent('profile-1', rootChat.id, nestedParent.id),
+      );
 
       // Depth 2: the nested card is openable from inside the detail view.
       const nestedNode = root
@@ -2697,11 +2689,9 @@ function MainRouteShell() {
       expect(
         root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-subsub'),
       ).toBe(true);
-      expect(store.get(navigationStackAtom)).toEqual([
-        { screen: 'Main' },
-        { screen: 'SubAgent', threadId: nestedParent.id },
-        { screen: 'SubAgent', threadId: grandChild.id },
-      ]);
+      expect(router.push).toHaveBeenCalledWith(
+        routes.agent('profile-1', rootChat.id, grandChild.id),
+      );
 
       // Back returns to the sub-agent that spawned it, not to the main thread.
       await press(byLabel(root, 'Back from sub-agent transcript'));
@@ -2710,13 +2700,8 @@ function MainRouteShell() {
           .findAllByType(ChatMessage)
           .some((node) => node.props.message.id === 'message-sub-nested'),
       ).toBe(true);
-      expect(store.get(navigationStackAtom)).toEqual([
-        { screen: 'Main' },
-        { screen: 'SubAgent', threadId: nestedParent.id },
-      ]);
-
-      act(() => store.set(popNavigationRouteAtom));
-      expect(store.get(navigationStackAtom)).toEqual([{ screen: 'Main' }]);
+      expect(router.back).toHaveBeenCalled();
+      act(() => router.back());
       act(() => tree.unmount());
     });
 
@@ -2835,8 +2820,8 @@ function MainRouteShell() {
       expect(rootMessage).toBeTruthy();
       act(() => rootMessage.props.onOpenLocalPreview('http://127.0.0.1:5173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
-      expect(store.get(currentScreenAtom)).toBe('Browser');
-      act(() => store.set(popNavigationRouteAtom));
+      expect(router.navigate).toHaveBeenCalledWith(routes.browser('profile-1'));
+      act(() => router.back());
 
       await act(async () => {
         await flush();
@@ -2857,12 +2842,7 @@ function MainRouteShell() {
       ).toHaveLength(0);
       act(() => detailMessage?.props.onOpenLocalPreview('http://localhost:4173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://localhost:4173');
-      expect(store.get(currentScreenAtom)).toBe('Browser');
-      act(() => store.set(popNavigationRouteAtom));
-      await act(async () => {
-        await flush();
-      });
-      await press(byLabel(root, 'Back from sub-agent transcript'));
+      expect(router.navigate).toHaveBeenCalledWith(routes.browser('profile-1'));
 
       act(() => tree.unmount());
     });

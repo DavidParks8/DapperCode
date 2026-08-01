@@ -56,10 +56,10 @@ function findModal(tree: ReactTestRenderer): Queryable {
 
 function findContentContainerStyle(tree: ReactTestRenderer): FlatStyle {
   const match = (tree.root as unknown as Queryable).findAll(
-    (node) => node.props.accessibilityViewIsModal === true,
+    (node) => node.props.testID === 'app-sheet-content',
   )[0];
   if (!match) throw new Error('Expected sheet content');
-  return flatten(match.props.contentContainerStyle ?? match.props.style);
+  return flatten(match.props.style);
 }
 
 function renderBackdrop(tree: ReactTestRenderer): { props: Record<string, unknown> } {

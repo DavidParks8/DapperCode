@@ -147,18 +147,22 @@ export function AppSheet({
           accessibilityLabel={accessibilityLabel}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.content, styles.contentInner, contentEdgeInsets]}
+          contentContainerStyle={styles.content}
         >
-          {children}
+          <View testID="app-sheet-content" style={[styles.contentInner, contentEdgeInsets]}>
+            {children}
+          </View>
         </BottomSheetScrollView>
       ) : (
         <BottomSheetView
           accessibilityViewIsModal
           importantForAccessibility="yes"
           accessibilityLabel={accessibilityLabel}
-          style={[styles.content, contentEdgeInsets]}
+          style={styles.content}
         >
-          <View style={styles.contentInner}>{children}</View>
+          <View testID="app-sheet-content" style={[styles.contentInner, contentEdgeInsets]}>
+            {children}
+          </View>
         </BottomSheetView>
       )}
     </BottomSheetModal>

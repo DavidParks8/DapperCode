@@ -31,7 +31,7 @@ export function resolveComposerBottomSpacing(
 
 function resolveBaseBottomPadding(platform: string, keyboardVisible: boolean): number {
   if (platform === 'ios') {
-    return keyboardVisible ? 2 : spacing.xs + 2;
+    return keyboardVisible ? spacing.sm : spacing.xs + 2;
   }
 
   if (platform === 'android') {
@@ -43,7 +43,7 @@ function resolveBaseBottomPadding(platform: string, keyboardVisible: boolean): n
 
 function resolveRestingBottomInset(platform: string, safeAreaBottomInset: number): number {
   if (platform === 'ios') {
-    return safeAreaBottomInset >= IOS_HOME_INDICATOR_THRESHOLD ? spacing.sm : 0;
+    return safeAreaBottomInset >= IOS_HOME_INDICATOR_THRESHOLD ? safeAreaBottomInset : 0;
   }
 
   if (platform === 'android') {

@@ -7,3 +7,4 @@ build/
 apps/mobile/ios/
 apps/mobile/android/
 apps/mobile/local-builds/
+apps/mobile/expo-env.d.ts

@@ -1,4 +1,5 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 
 import type { HostBridgeApiClient } from '../../api/client';
@@ -19,20 +20,17 @@ import {
   rememberThreadSettingsAtom,
   showToolCallsAtom,
 } from '../../state/appState/settings';
-import { openBridgeRecoveryGuideAtom } from '../../state/bridge/actions';
 import { activeBridgeProfileAtom, bridgeTokenAtom, bridgeUrlAtom } from '../../state/bridge/atoms';
 import { useBridgeApi, useBridgeWs } from '../../state/bridge/hooks';
 import {
   mainOpeningChatIdAtom,
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
+  selectedChatIdAtom,
 } from '../../state/chat/atoms';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
-import {
-  chatContextChangedAtom,
-  openBrowserAtom,
-  openChatGitAtom,
-} from '../../state/navigation/actions';
+import { chatContextChangedAtom, openBrowserAtom, openChatGitAtom } from '../../navigation/actions';
+import { routes } from '../../navigation/routes';
 
 export interface MainScreenBaseContext {
   /** Lets non-React helpers read and write MainScreen atoms. */
@@ -42,7 +40,7 @@ export interface MainScreenBaseContext {
   bridgeUrl: string;
   bridgeToken: string | null;
   bridgeProfileId: string;
-  onOpenDrawer: () => void;
+  onOpenDrawer?: () => void;
   onOpenGit: (chat: Chat) => void;
   onOpenLocalPreview: (targetUrl: string) => void;
   onOpenBridgeRecoveryGuide: () => void;
@@ -58,24 +56,43 @@ export interface MainScreenBaseContext {
   pendingOpenChatId: string | null;
   pendingOpenChatSnapshot: Chat | null;
   onPendingOpenChatHandled: () => void;
+  agentDetailThreadId: string | null;
 }
 
 /** Resolves everything MainScreen used to receive through props from the app-state atoms. */
 export function useMainScreenBaseContext(): MainScreenBaseContext {
+  const router = useRouter();
+  const routeParams = useLocalSearchParams<{
+    chatId?: string;
+    profileId?: string;
+  }>();
+  const { threadId } = useGlobalSearchParams<{ threadId?: string }>();
   const api = useBridgeApi();
   const ws = useBridgeWs();
   const drawerCommands = useAtomValue(drawerCommandsAtom);
+  const pendingOpenChatId = useAtomValue(pendingMainChatIdAtom);
+  const selectedChatId = useAtomValue(selectedChatIdAtom);
   const setPendingChatId = useSetAtom(pendingMainChatIdAtom);
   const setPendingChatSnapshot = useSetAtom(pendingMainChatSnapshotAtom);
 
-  const onOpenDrawer = useCallback(() => {
-    drawerCommands?.toggleNavigation();
-  }, [drawerCommands]);
+  const onOpenDrawer = drawerCommands?.toggleNavigation;
 
   const onPendingOpenChatHandled = useCallback(() => {
     setPendingChatId(null);
     setPendingChatSnapshot(null);
   }, [setPendingChatId, setPendingChatSnapshot]);
+
+  const onOpenBridgeRecoveryGuide = useCallback(() => {
+    const profileId = routeParams.profileId;
+    if (profileId) {
+      router.push(routes.connection(profileId, routeParams.chatId ?? 'new', 'reconnect'), {
+        withAnchor: true,
+      });
+    }
+  }, [routeParams.chatId, routeParams.profileId, router]);
+
+  const routeChatId =
+    routeParams.chatId && routeParams.chatId !== 'new' ? routeParams.chatId : null;
 
   return {
     store: useStore(),
@@ -87,7 +104,7 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
     onOpenDrawer,
     onOpenGit: useSetAtom(openChatGitAtom),
     onOpenLocalPreview: useSetAtom(openBrowserAtom),
-    onOpenBridgeRecoveryGuide: useSetAtom(openBridgeRecoveryGuideAtom),
+    onOpenBridgeRecoveryGuide,
     defaultStartCwd: useAtomValue(defaultStartCwdAtom),
     preferredAgentId: useAtomValue(preferredAgentIdAtom),
     agentSettings: useAtomValue(agentSettingsAtom),
@@ -97,8 +114,10 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
     onLastUsedThreadSettingsChange: useSetAtom(rememberThreadSettingsAtom),
     onChatContextChange: useSetAtom(chatContextChangedAtom),
     onChatOpeningStateChange: useSetAtom(mainOpeningChatIdAtom),
-    pendingOpenChatId: useAtomValue(pendingMainChatIdAtom),
+    pendingOpenChatId:
+      routeChatId && routeChatId !== selectedChatId ? routeChatId : pendingOpenChatId,
     pendingOpenChatSnapshot: useAtomValue(pendingMainChatSnapshotAtom),
     onPendingOpenChatHandled,
+    agentDetailThreadId: threadId ?? null,
   };
 }

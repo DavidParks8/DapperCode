@@ -20,7 +20,7 @@ interface LegalScreenProps {
   openButtonLabel: string;
   unsupportedDocumentMessage: string;
   openFailureMessage: string;
-  onOpenDrawer: () => void;
+  onBack: () => void;
 }
 
 type Styles = ReturnType<typeof createStyles>;
@@ -35,7 +35,7 @@ export function LegalScreen({
   openButtonLabel,
   unsupportedDocumentMessage,
   openFailureMessage,
-  onOpenDrawer,
+  onBack,
 }: LegalScreenProps) {
   const theme = useAppTheme();
   const { colors } = theme;
@@ -67,12 +67,12 @@ export function LegalScreen({
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <Pressable
-          onPress={onOpenDrawer}
+          onPress={onBack}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Open navigation drawer"
+          accessibilityLabel={`Back from ${title}`}
         >
-          <Ionicons name="menu" size={22} color={colors.textPrimary} />
+          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </Pressable>
         <Text style={styles.headerTitle}>{title}</Text>
       </View>

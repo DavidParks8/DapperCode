@@ -1,14 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  type FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, type FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Chat, RpcNotification } from '../../api/types';
@@ -23,10 +17,8 @@ import {
   agentRuntimeRevisionAtom,
   relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
-import { openBrowserAtom, openSubAgentAtom } from '../../state/navigation/actions';
-import {
-  popNavigationRouteAtom,
-} from '../../state/navigation/atoms';
+import { openBrowserAtom, openSubAgentAtom } from '../../navigation/actions';
+import { routes } from '../../navigation/routes';
 import type { AutoScrollState } from './mainScreenHelpers';
 import { extractNotificationThreadId } from './mainScreenHelpers';
 import { formatAgentThreadOptionTitle } from './mainScreenHelperPlansAndCommands';
@@ -48,9 +40,12 @@ interface SubAgentDetailViewProps {
   threadId: string;
 }
 
-export function SubAgentDetailView({
-  threadId,
-}: SubAgentDetailViewProps) {
+export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
+  const router = useRouter();
+  const { chatId, profileId } = useLocalSearchParams<{
+    chatId?: string;
+    profileId?: string;
+  }>();
   const api = useBridgeApi();
   const ws = useBridgeWs();
   const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
@@ -64,7 +59,6 @@ export function SubAgentDetailView({
   const threadRuntimeSnapshots = useAtomValue(threadRuntimeSnapshotsAtom);
   const openBrowser = useSetAtom(openBrowserAtom);
   const openSubAgent = useSetAtom(openSubAgentAtom);
-  const popNavigationRoute = useSetAtom(popNavigationRouteAtom);
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const controller = useMemo(() => new AgentThreadsController(api), [api]);
@@ -214,9 +208,7 @@ export function SubAgentDetailView({
   );
   const ordinal = agentThreadOrdinals.get(threadId) ?? null;
   const runtime = threadRuntimeSnapshots[threadId] ?? null;
-  const display = summary
-    ? buildAgentThreadDisplayState(summary, runtime, runWatchdogNow)
-    : null;
+  const display = summary ? buildAgentThreadDisplayState(summary, runtime, runWatchdogNow) : null;
   const title = summary
     ? formatAgentThreadOptionTitle(summary, agentRootThreadId, ordinal)
     : 'Sub-agent';
@@ -243,12 +235,18 @@ export function SubAgentDetailView({
 
   const activityDetail =
     display?.detail ?? runtime?.latestCommand?.detail ?? summary?.agentRole?.trim() ?? null;
-  const headingFocusRef = useAccessibilityFocus(true);
-  useAccessibilityAnnouncement(detail.error ?? (detail.loading ? 'Loading agent transcript' : null));
+  const headingFocusRef = useAccessibilityFocus<Text>(true);
+  useAccessibilityAnnouncement(
+    detail.error ?? (detail.loading ? 'Loading agent transcript' : null),
+  );
 
   const navigateBack = useCallback(() => {
-    popNavigationRoute();
-  }, [popNavigationRoute]);
+    if (router.canGoBack()) {
+      router.back();
+    } else if (profileId && chatId) {
+      router.dismissTo(routes.chat(profileId, chatId));
+    }
+  }, [chatId, profileId, router]);
 
   const openSubAgentThread = useCallback(
     (nextThreadId: string) => openSubAgent(nextThreadId),
@@ -257,138 +255,138 @@ export function SubAgentDetailView({
 
   return (
     <SafeAreaView style={styles.page}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={navigateBack}
-            hitSlop={8}
-            style={styles.iconButton}
-            accessibilityRole="button"
-            accessibilityLabel="Back from sub-agent transcript"
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="chevron-back"
-              size={22}
-              color={theme.colors.textPrimary}
-            />
-          </Pressable>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Sub-agent</Text>
-            <Text
-              ref={headingFocusRef}
-              accessibilityRole="header"
-              style={styles.title}
-              numberOfLines={1}
-            >
-              {title}
-            </Text>
-          </View>
-          <View style={styles.iconButton} />
-        </View>
-
-        <View style={styles.statusBar} accessibilityLiveRegion="polite">
-          <View style={styles.statusCopy}>
-            <View style={styles.statusTitleRow}>
-              {display?.isActive ? (
-                <ActivityIndicator size="small" color={display.statusColor} />
-              ) : (
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name={display?.icon ?? 'ellipse-outline'}
-                  size={15}
-                  color={display?.statusColor ?? theme.colors.textMuted}
-                />
-              )}
-              <Text
-                style={[
-                  styles.statusLabel,
-                  { color: display?.statusColor ?? theme.colors.textMuted },
-                ]}
-              >
-                {display?.label ?? (detail.loading ? 'Loading' : 'Idle')}
-              </Text>
-            </View>
-            {activityDetail ? (
-              <Text style={styles.activityDetail} numberOfLines={2}>
-                {activityDetail}
-              </Text>
-            ) : null}
-          </View>
-        </View>
-
-        {detail.error ? (
+      <View style={styles.header}>
+        <Pressable
+          onPress={navigateBack}
+          hitSlop={8}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel="Back from sub-agent transcript"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-back"
+            size={22}
+            color={theme.colors.textPrimary}
+          />
+        </Pressable>
+        <View style={styles.headerCopy}>
+          <Text style={styles.eyebrow}>Sub-agent</Text>
           <Text
-            accessibilityRole="alert"
-            accessibilityLiveRegion="assertive"
-            style={styles.errorText}
+            ref={headingFocusRef}
+            accessibilityRole="header"
+            style={styles.title}
+            numberOfLines={1}
           >
-            {detail.error}
+            {title}
           </Text>
-        ) : null}
+        </View>
+        <View style={styles.iconButton} />
+      </View>
 
-        <View style={styles.transcript}>
-          {isStarting ? (
-            <View
-              style={styles.loadingShell}
-              accessibilityRole="progressbar"
-              accessibilityLabel="Sub-agent starting"
-            >
-              <ActivityIndicator color={theme.colors.warning} />
-              <Text style={styles.loadingText}>Starting…</Text>
-              <Text style={styles.startingHint}>
-                This agent has not reported anything yet. Its work will stream in here.
-              </Text>
-            </View>
-          ) : isEmpty ? (
-            <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
+      <View style={styles.statusBar} accessibilityLiveRegion="polite">
+        <View style={styles.statusCopy}>
+          <View style={styles.statusTitleRow}>
+            {display?.isActive ? (
+              <ActivityIndicator size="small" color={display.statusColor} />
+            ) : (
               <Ionicons
                 {...decorativeAccessibilityProps}
-                name="document-text-outline"
-                size={20}
-                color={theme.colors.textMuted}
+                name={display?.icon ?? 'ellipse-outline'}
+                size={15}
+                color={display?.statusColor ?? theme.colors.textMuted}
               />
-              <Text style={styles.loadingText}>No transcript</Text>
-              <Text style={styles.startingHint}>
-                This agent reported back through its parent instead of streaming its own session.
-              </Text>
-            </View>
-          ) : chat ? (
-            <ChatTranscriptView
-              chat={chat}
-              parentChat={detail.parentChat}
-              bridgeUrl={bridgeUrl}
-              bridgeToken={bridgeToken}
-              onOpenLocalPreview={openBrowser}
-              showToolCalls={showToolCalls}
-              onOpenSubAgentThread={openSubAgentThread}
-              agentThreadStatusById={agentThreadStatusById}
-              scrollRef={scrollRef}
-              inlineChoicesEnabled={false}
-              onInlineOptionSelect={() => {}}
-              onPinnedAutoScroll={() => {
-                if (autoScrollStateRef.current.shouldStickToBottom) {
-                  scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
-                }
-              }}
-              onJumpToLatest={() => {
-                scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
-              }}
-              onScrollInteractionStart={() => {}}
-              autoScrollStateRef={autoScrollStateRef}
-              bottomInset={0}
-              liveMessageState={liveMessageState}
-            />
-          ) : (
-            <View
-              style={styles.loadingShell}
-              accessibilityRole="progressbar"
-              accessibilityLabel="Loading agent transcript"
+            )}
+            <Text
+              style={[
+                styles.statusLabel,
+                { color: display?.statusColor ?? theme.colors.textMuted },
+              ]}
             >
-              <ActivityIndicator color={theme.colors.textMuted} />
-              <Text style={styles.loadingText}>Loading agent transcript…</Text>
-            </View>
-          )}
+              {display?.label ?? (detail.loading ? 'Loading' : 'Idle')}
+            </Text>
+          </View>
+          {activityDetail ? (
+            <Text style={styles.activityDetail} numberOfLines={2}>
+              {activityDetail}
+            </Text>
+          ) : null}
         </View>
+      </View>
+
+      {detail.error ? (
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+          style={styles.errorText}
+        >
+          {detail.error}
+        </Text>
+      ) : null}
+
+      <View style={styles.transcript}>
+        {isStarting ? (
+          <View
+            style={styles.loadingShell}
+            accessibilityRole="progressbar"
+            accessibilityLabel="Sub-agent starting"
+          >
+            <ActivityIndicator color={theme.colors.warning} />
+            <Text style={styles.loadingText}>Starting…</Text>
+            <Text style={styles.startingHint}>
+              This agent has not reported anything yet. Its work will stream in here.
+            </Text>
+          </View>
+        ) : isEmpty ? (
+          <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="document-text-outline"
+              size={20}
+              color={theme.colors.textMuted}
+            />
+            <Text style={styles.loadingText}>No transcript</Text>
+            <Text style={styles.startingHint}>
+              This agent reported back through its parent instead of streaming its own session.
+            </Text>
+          </View>
+        ) : chat ? (
+          <ChatTranscriptView
+            chat={chat}
+            parentChat={detail.parentChat}
+            bridgeUrl={bridgeUrl}
+            bridgeToken={bridgeToken}
+            onOpenLocalPreview={openBrowser}
+            showToolCalls={showToolCalls}
+            onOpenSubAgentThread={openSubAgentThread}
+            agentThreadStatusById={agentThreadStatusById}
+            scrollRef={scrollRef}
+            inlineChoicesEnabled={false}
+            onInlineOptionSelect={() => {}}
+            onPinnedAutoScroll={() => {
+              if (autoScrollStateRef.current.shouldStickToBottom) {
+                scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
+              }
+            }}
+            onJumpToLatest={() => {
+              scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
+            }}
+            onScrollInteractionStart={() => {}}
+            autoScrollStateRef={autoScrollStateRef}
+            bottomInset={0}
+            liveMessageState={liveMessageState}
+          />
+        ) : (
+          <View
+            style={styles.loadingShell}
+            accessibilityRole="progressbar"
+            accessibilityLabel="Loading agent transcript"
+          >
+            <ActivityIndicator color={theme.colors.textMuted} />
+            <Text style={styles.loadingText}>Loading agent transcript…</Text>
+          </View>
+        )}
+      </View>
     </SafeAreaView>
   );
 }

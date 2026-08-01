@@ -7,7 +7,7 @@ import { AppSheet } from '../../components/AppSheet';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 
 export function GitScreenReviewSection({ controller, styles, theme }: GitSectionCommonProps) {
-  const reviewModalFocusRef = useModalAccessibilityFocus(controller.reviewTarget !== null);
+  const reviewModalFocusRef = useModalAccessibilityFocus<Text>(controller.reviewTarget !== null);
 
   return (
     <>

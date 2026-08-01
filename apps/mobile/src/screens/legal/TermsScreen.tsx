@@ -2,7 +2,7 @@ import { LegalScreen, type LegalSection } from './LegalScreen';
 
 interface TermsScreenProps {
   termsUrl: string | null;
-  onOpenDrawer: () => void;
+  onBack: () => void;
 }
 
 const termsSections: readonly LegalSection[] = [
@@ -28,7 +28,7 @@ const termsSections: readonly LegalSection[] = [
   },
 ];
 
-export function TermsScreen({ termsUrl, onOpenDrawer }: TermsScreenProps) {
+export function TermsScreen({ termsUrl, onBack }: TermsScreenProps) {
   return (
     <LegalScreen
       title="Terms"
@@ -40,7 +40,7 @@ export function TermsScreen({ termsUrl, onOpenDrawer }: TermsScreenProps) {
       openButtonLabel="Open terms"
       unsupportedDocumentMessage="The terms URL is not supported on this device."
       openFailureMessage="Please open the terms URL manually."
-      onOpenDrawer={onOpenDrawer}
+      onBack={onBack}
     />
   );
 }

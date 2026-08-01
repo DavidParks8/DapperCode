@@ -83,7 +83,8 @@ not sent. Approval notifications never include reply content.
 - Preferences and per-profile registration identities persist in the canonical
   app-state store. `optedOut` records an explicit user opt-out.
 - The shared registration logic lives in `src/pushController.ts`, used by both
-  the auto path (`App.tsx`) and the Settings toggle so they cannot drift.
+  the root Router lifecycle (`src/bootstrap/useAppBridgeLifecycle.ts`) and the Settings toggle so
+  they cannot drift.
 - **Foreground:** while the app is active the banner is suppressed (you are
   already watching, and the result also streams in over the WebSocket).
 - **Backgrounded but not quit / killed:** the OS delivers and displays the push.

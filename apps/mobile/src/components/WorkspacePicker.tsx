@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Text } from 'react-native';
 
 import { useAccessibilityAnnouncement, useModalAccessibilityFocus } from '../accessibility';
 import { useAppTheme } from '../theme';
@@ -72,7 +73,7 @@ export function WorkspacePicker({
   const footerTitle = footerPath ? toPathBasename(footerPath) : 'Default workspace';
   const currentFolderPath = currentPath ?? bridgeRoot ?? null;
   const currentFolderTitle = currentFolderPath ? toPathBasename(currentFolderPath) : 'Loading';
-  const screenFocusRef = useModalAccessibilityFocus(true);
+  const screenFocusRef = useModalAccessibilityFocus<Text>(true);
   useAccessibilityAnnouncement(error ?? truncationMessage);
   useAccessibilityAnnouncement(refreshError);
   useAccessibilityAnnouncement(loadingEntries ? `Loading folders in ${currentFolderTitle}` : null);

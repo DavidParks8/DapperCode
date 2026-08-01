@@ -12,7 +12,6 @@ import {
 import { activityAtom } from '../../state/mainScreen/composer';
 import { bridgeCapabilitiesAtom } from '../../state/mainScreen/models';
 import { relatedAgentThreadsAtom } from '../../state/mainScreen/workspace';
-import { currentNavigationRouteAtom } from '../../state/navigation/atoms';
 import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
@@ -47,6 +46,7 @@ interface ReplayRecoveryInstallGuard {
 export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecoveryEngineContext) {
   const {
     agentRootThreadIdRef,
+    agentDetailThreadId,
     api,
     applyThreadRuntimeSnapshot,
     bridgeUiSurfaceSnapshotsRef,
@@ -81,10 +81,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const setActivity = useSetAtom(activityAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
-  const currentNavigationRoute = useAtomValue(currentNavigationRouteAtom);
-  const agentDetailThreadId =
-    currentNavigationRoute.screen === 'SubAgent' ? currentNavigationRoute.threadId : null;
-
   const installReplayRecoverySnapshot = useCallback(
     (snapshot: ReplayRecoverySnapshot, guard: ReplayRecoveryInstallGuard) => {
       const approvalsByThread = new Map(
