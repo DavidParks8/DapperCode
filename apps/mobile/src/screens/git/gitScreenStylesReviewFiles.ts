@@ -60,8 +60,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
     reviewStatLabel: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 13,
     },
     reviewStatValue: {
       ...theme.typography.body,
@@ -87,6 +85,7 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       width: 24,
       color: theme.colors.textMuted,
       fontSize: 11,
+      lineHeight: 14,
     },
     reviewFilePath: {
       ...theme.typography.caption,
@@ -98,6 +97,7 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       ...theme.typography.mono,
       color: theme.colors.textMuted,
       fontSize: 11,
+      lineHeight: 14,
     },
     bulkActionBtn: {
       borderRadius: theme.radius.sm,
@@ -157,6 +157,7 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       ...theme.typography.mono,
       color: theme.colors.textSecondary,
       fontSize: 11,
+      lineHeight: 14,
     },
     historyRefRow: {
       flexDirection: 'row',
@@ -212,8 +213,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       ...theme.typography.mono,
       color: theme.colors.textMuted,
       width: 24,
-      fontSize: 12,
-      lineHeight: 18,
     },
     filePath: {
       ...theme.typography.body,
@@ -271,12 +270,10 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
     fileAdded: {
       ...theme.typography.mono,
       color: theme.colors.statusComplete,
-      fontSize: 12,
     },
     fileRemoved: {
       ...theme.typography.mono,
       color: theme.colors.statusError,
-      fontSize: 12,
     },
     emptyFilesText: {
       ...theme.typography.caption,

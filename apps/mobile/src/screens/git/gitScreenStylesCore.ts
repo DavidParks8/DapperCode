@@ -144,7 +144,6 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
     branchSwitchButtonText: {
       ...theme.typography.headline,
       color: theme.colors.accentText,
-      fontSize: 14,
     },
     branchList: {
       maxHeight: 260,
@@ -230,7 +229,6 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
     statTileValue: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 16,
     },
     sectionLabel: {
       ...theme.typography.caption,
@@ -244,6 +242,7 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
       marginBottom: 0,
     },
     input: {
+      ...theme.typography.headline,
       backgroundColor: theme.colors.bgInput,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
@@ -251,14 +250,12 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
       color: theme.colors.textPrimary,
-      fontSize: 15,
+      fontWeight: '400',
     },
     workspaceInput: {
       minHeight: 44,
       paddingTop: 7,
       paddingBottom: 7,
-      fontSize: 14,
-      lineHeight: 20,
       includeFontPadding: false,
     },
     actionBtn: {
@@ -281,7 +278,6 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
     actionBtnText: {
       ...theme.typography.headline,
       color: theme.colors.accentText,
-      fontSize: 15,
     },
     actionBtnTextDisabled: {
       color: theme.colors.textMuted,
@@ -332,7 +328,6 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
     latestCommitHash: {
       ...theme.typography.mono,
       color: theme.colors.textMuted,
-      fontSize: 12,
     },
     latestCommitSubject: {
       ...theme.typography.body,
@@ -342,6 +337,29 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
     latestCommitMeta: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
+    },
+    cleanStateContainer: {
+      flex: 1,
+      alignItems: 'center' as const,
+      justifyContent: 'center',
+      padding: theme.spacing.xl,
+      gap: theme.spacing.sm,
+    },
+    cleanStateText: {
+      ...theme.typography.headline,
+      color: theme.colors.textPrimary,
+      textAlign: 'center' as const,
+    },
+    cleanStateSubtext: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      textAlign: 'center' as const,
+    },
+    truncationNotice: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+      textAlign: 'center' as const,
+      padding: theme.spacing.sm,
     },
   });
 }

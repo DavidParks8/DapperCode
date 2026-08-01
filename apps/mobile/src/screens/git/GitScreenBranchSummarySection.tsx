@@ -35,6 +35,7 @@ export function GitScreenBranchSummarySection({
           </View>
           <Pressable
             onPress={controller.openBranchPanel}
+            hitSlop={5}
             style={({ pressed }) => [
               styles.branchSwitchToggle,
               branchPanelOpen && styles.branchSwitchToggleActive,
