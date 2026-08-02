@@ -2250,7 +2250,10 @@ impl AgentManager {
         }
         self.adopt_snapshot_subagents(&snapshot, &entry.cwd).await?;
         self.adopt_exported_subagents(&identity, &entry.cwd).await?;
-        if snapshot.messages.is_empty() {
+        // A session that already recorded anything -- a streamed message or a tool a
+        // sub-agent ran before it said a word -- has a transcript of its own, and the
+        // export would restate it under exported ids instead of hydrating it.
+        if snapshot.timeline.is_empty() {
             self.seed_exported_session(&identity, &entry.cwd, &session)
                 .await;
             snapshot = session.snapshot().await;
@@ -2372,9 +2375,9 @@ impl AgentManager {
         let Some(document) = self.opencode_export(identity, cwd).await else {
             return;
         };
-        for event in exported_session_events(identity, document) {
-            session.emit(event).await;
-        }
+        session
+            .seed_history(exported_session_events(identity, document))
+            .await;
     }
 }
 
@@ -2608,6 +2611,8 @@ mod catalog_tests {
     use agent_client_protocol::schema::v1::ToolCallStatus;
 
     use super::*;
+    use crate::acp::session::AcpSession;
+    use crate::acp::snapshot::{BridgeThreadSnapshot, SnapshotTimelineKind};
 
     #[test]
     fn parses_opencode_verbose_model_catalog() {
@@ -2741,6 +2746,172 @@ mod catalog_tests {
                 ..
             }
         ));
+    }
+
+    /// A sub-agent opened while it is still working reproduces the reported defect: the read
+    /// finds an empty transcript and starts `opencode export`, the agent streams its thought
+    /// and its answer during the seconds that subprocess takes, and the export -- captured
+    /// mid-answer, so it carries the prompt and the same reasoning but no answer yet -- lands
+    /// afterwards. Replaying it restated the reasoning under a second, exported id and filed
+    /// the prompt below the answer it produced, which is what the sub-agent chat rendered.
+    #[tokio::test]
+    async fn keeps_a_live_subagent_transcript_chronological_and_unduplicated() {
+        let identity = AgentSessionId::new("opencode", "child-session").unwrap();
+        let thread_id = identity.encode();
+        let session = AcpSession::new("opencode".to_string(), thread_id.clone());
+        let reasoning = "The user is asking for a harness test confirmation.";
+        let answer = "Confirmed - read-only smoke test, no files modified.";
+        let prompt = "This is a harness test. Please respond with a brief confirmation message.";
+
+        for (role, message_id, content) in [
+            (MessageRole::Thought, "msg_answer::thought", reasoning),
+            (MessageRole::Agent, "msg_answer::agent", answer),
+        ] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: identity.agent_id.clone(),
+                    thread_id: thread_id.clone(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role,
+                    message_id: message_id.to_string(),
+                    content: content.to_string(),
+                    content_block: None,
+                })
+                .await;
+        }
+
+        let document = serde_json::from_value::<OpenCodeExportDocument>(serde_json::json!({
+            "messages": [
+                {
+                    "info": { "id": "msg_prompt", "role": "user" },
+                    "parts": [{ "id": "prt_prompt", "type": "text", "text": prompt }]
+                },
+                {
+                    "info": { "id": "msg_answer", "role": "assistant" },
+                    "parts": [{ "id": "prt_thought", "type": "reasoning", "text": reasoning }]
+                }
+            ]
+        }))
+        .unwrap();
+        assert!(
+            !session
+                .seed_history(exported_session_events(&identity, document))
+                .await
+        );
+
+        let snapshot = BridgeThreadSnapshot::from(session.snapshot().await);
+        let texts = snapshot
+            .messages
+            .iter()
+            .map(|message| {
+                (
+                    message.id.clone(),
+                    message.role,
+                    message
+                        .parts
+                        .iter()
+                        .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+                        .collect::<String>(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        // Every reasoning turn keeps exactly one identity: the same thought must never be
+        // restated under a second id.
+        let reasoning_ids = texts
+            .iter()
+            .filter(|(_, role, text)| *role == MessageRole::Thought && text == reasoning)
+            .map(|(id, _, _)| id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(reasoning_ids, vec!["msg_answer::thought".to_string()]);
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .filter(|entry| entry.kind == SnapshotTimelineKind::Reasoning)
+                .count(),
+            1
+        );
+
+        // The rendered order is the timeline order, and it must stay chronological: nothing
+        // may be filed after the answer that already streamed.
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| (entry.kind, entry.canonical_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (SnapshotTimelineKind::Reasoning, "msg_answer::thought"),
+                (SnapshotTimelineKind::Message, "msg_answer::agent"),
+            ]
+        );
+        assert!(snapshot
+            .timeline
+            .windows(2)
+            .all(|pair| pair[0].sequence < pair[1].sequence));
+        assert!(!texts.iter().any(|(id, _, _)| id.starts_with("export:")));
+    }
+
+    #[tokio::test]
+    async fn seeds_exported_history_into_a_transcript_that_has_none() {
+        let identity = AgentSessionId::new("opencode", "cold-session").unwrap();
+        let session = AcpSession::new("opencode".to_string(), identity.encode());
+        let document = serde_json::from_value::<OpenCodeExportDocument>(serde_json::json!({
+            "messages": [
+                {
+                    "info": { "id": "msg_prompt", "role": "user" },
+                    "parts": [{ "id": "prt_prompt", "type": "text", "text": "Summarize" }]
+                },
+                {
+                    "info": { "id": "msg_answer", "role": "assistant" },
+                    "parts": [
+                        { "id": "prt_first", "type": "reasoning", "text": "Reading" },
+                        { "id": "prt_answer", "type": "text", "text": "Done" },
+                        { "id": "prt_second", "type": "reasoning", "text": "Checking" }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(
+            session
+                .seed_history(exported_session_events(&identity, document))
+                .await
+        );
+
+        let snapshot = BridgeThreadSnapshot::from(session.snapshot().await);
+        // Two distinct reasoning turns in one message stay two rows, in the order the
+        // export recorded them.
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                SnapshotTimelineKind::Message,
+                SnapshotTimelineKind::Reasoning,
+                SnapshotTimelineKind::Message,
+                SnapshotTimelineKind::Reasoning,
+            ]
+        );
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.canonical_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "export:msg_prompt:prt_prompt",
+                "export:msg_answer:prt_first",
+                "export:msg_answer:prt_answer",
+                "export:msg_answer:prt_second",
+            ]
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import { createAgUiThreadMessageState } from '../../api/agUi';
+import { mapChat } from '../../api/chatMapping';
 import type { Chat, RpcNotification } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
 import { liveAssistantByThreadAtom } from '../../state/mainScreen/turn';
@@ -15,6 +16,7 @@ import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../state/main
 import { createBridgeTestStore, withAppStore } from '../../state/testing';
 import type { AppStore } from '../../state/types';
 import { createAppTheme, AppThemeProvider } from '../../theme';
+import { ReasoningEntryCard } from '../../components/chatMessageReasoningCard';
 import { ChatTranscriptView } from './ChatTranscriptView';
 import { SubAgentDetailView } from './SubAgentDetailView';
 import { routes } from '../../navigation/routes';
@@ -473,6 +475,169 @@ describe('SubAgentDetailView starting state', () => {
     const pressBack = back.props.onPress as () => void;
     act(() => pressBack());
     expect(router.back).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+});
+
+describe('SubAgentDetailView transcript ordering', () => {
+  // The bridge hands the sub-agent chat an ACP snapshot whose `timeline` carries the
+  // source sequence of every entry. A sub-agent adopted mid-run is the case that broke:
+  // the reader hydrated it from an `opencode export` while the agent was still streaming,
+  // and the replay both restated the reasoning under a second id and filed the prompt
+  // after the answer it produced. The bridge now declines that replay, and this locks the
+  // client half of the contract: one row per reasoning identity, rendered in source
+  // sequence order rather than the order entries happen to sit in the payload.
+  function snapshotThread(
+    timeline: Array<{ sequence: number; kind: 'message' | 'reasoning'; canonicalId: string }>,
+    messages: Array<{ id: string; role: 'user' | 'agent' | 'thought'; text: string }>,
+  ) {
+    return {
+      id: 'child',
+      name: 'Harness smoke test',
+      createdAt: 1784505600,
+      updatedAt: 1784505600,
+      acpSnapshot: {
+        version: 2,
+        timeline,
+        messages: messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          parts: [{ type: 'text', text: message.text }],
+          truncated: false,
+        })),
+        tools: [],
+        plan: [],
+        usage: { used: null, size: null, cost: null },
+        mode: null,
+        config: [],
+        commands: [],
+        session: {
+          agentId: 'opencode',
+          threadId: 'child',
+          title: 'Harness smoke test',
+          updatedAt: '2026-07-20T00:00:00.000Z',
+          historyReconstruction: false,
+        },
+        active: { runId: null, sourceTurnId: null, generation: null, toolIds: [] },
+      },
+    };
+  }
+
+  const PROMPT = 'This is a harness test. Please respond with a brief confirmation message.';
+  const REASONING = 'The user is asking for a harness test confirmation.';
+  const ANSWER = 'Confirmed - read-only smoke test, no files modified.';
+
+  function reasoningCards(tree: ReactTestRenderer): Queryable[] {
+    return (tree.root as Queryable).findAllByType(ReasoningEntryCard);
+  }
+
+  /** The transcript list is inverted, so the newest row is rendered first. */
+  function chronologicalOrder(tree: ReactTestRenderer, needles: string[]): string[] {
+    const rendered = renderedText(tree);
+    return needles
+      .map((needle) => [needle, rendered.indexOf(needle)] as const)
+      .filter(([, index]) => index >= 0)
+      .sort((left, right) => right[1] - left[1])
+      .map(([needle]) => needle);
+  }
+
+  it('renders one card per reasoning identity in source sequence order', async () => {
+    // The payload deliberately lists the prompt last, the way a late-filed history entry
+    // arrives, so array order and sequence order disagree.
+    const raw = snapshotThread(
+      [
+        { sequence: 4, kind: 'reasoning', canonicalId: 'msg_answer::thought' },
+        { sequence: 5, kind: 'message', canonicalId: 'msg_answer::agent' },
+        { sequence: 3, kind: 'message', canonicalId: 'prompt' },
+      ],
+      [
+        { id: 'prompt', role: 'user', text: PROMPT },
+        { id: 'msg_answer::thought', role: 'thought', text: REASONING },
+        { id: 'msg_answer::agent', role: 'agent', text: ANSWER },
+      ],
+    );
+    const loadedChat = mapChat(raw);
+    const { tree } = await render({ loadedChat });
+
+    expect(reasoningCards(tree)).toHaveLength(1);
+    expect(chronologicalOrder(tree, [PROMPT, REASONING, ANSWER])).toEqual([
+      PROMPT,
+      REASONING,
+      ANSWER,
+    ]);
+    act(() => tree.unmount());
+  });
+
+  it('keeps a streaming reasoning turn to one card as it completes', async () => {
+    const raw = snapshotThread(
+      [
+        { sequence: 3, kind: 'message', canonicalId: 'prompt' },
+        { sequence: 4, kind: 'reasoning', canonicalId: 'msg_answer::thought' },
+      ],
+      [
+        { id: 'prompt', role: 'user', text: PROMPT },
+        { id: 'msg_answer::thought', role: 'thought', text: 'The user is asking' },
+      ],
+    );
+    const loadedChat = mapChat(raw);
+    const { store, tree } = await render({ loadedChat });
+    expect(reasoningCards(tree)).toHaveLength(1);
+
+    // The same reasoning identity streams to completion and then the answer lands. A
+    // partial-to-completed update must grow the card it already owns, never add a second.
+    act(() => {
+      store.set(liveAssistantByThreadAtom, {
+        child: {
+          ...createAgUiThreadMessageState(),
+          messages: [
+            {
+              id: 'msg_answer::thought',
+              role: 'reasoning',
+              content: REASONING,
+              createdAt: '2026-07-20T00:00:04.000Z',
+            },
+            {
+              id: 'msg_answer::agent',
+              role: 'assistant',
+              content: ANSWER,
+              createdAt: '2026-07-20T00:00:05.000Z',
+            },
+          ],
+        },
+      });
+    });
+
+    expect(reasoningCards(tree)).toHaveLength(1);
+    expect(renderedText(tree)).toContain(REASONING);
+    expect(chronologicalOrder(tree, [PROMPT, REASONING, ANSWER])).toEqual([
+      PROMPT,
+      REASONING,
+      ANSWER,
+    ]);
+    act(() => tree.unmount());
+  });
+
+  it('keeps two genuine reasoning turns as two cards', async () => {
+    const raw = snapshotThread(
+      [
+        { sequence: 0, kind: 'reasoning', canonicalId: 'msg_answer::thought' },
+        { sequence: 1, kind: 'message', canonicalId: 'msg_answer::agent' },
+        { sequence: 2, kind: 'reasoning', canonicalId: 'msg_followup::thought' },
+      ],
+      [
+        { id: 'msg_answer::thought', role: 'thought', text: REASONING },
+        { id: 'msg_answer::agent', role: 'agent', text: ANSWER },
+        { id: 'msg_followup::thought', role: 'thought', text: 'Now verifying the result.' },
+      ],
+    );
+    const { tree } = await render({ loadedChat: mapChat(raw) });
+
+    expect(reasoningCards(tree)).toHaveLength(2);
+    expect(chronologicalOrder(tree, [REASONING, ANSWER, 'Now verifying the result.'])).toEqual([
+      REASONING,
+      ANSWER,
+      'Now verifying the result.',
+    ]);
     act(() => tree.unmount());
   });
 });

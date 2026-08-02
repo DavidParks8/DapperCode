@@ -307,6 +307,37 @@ impl AcpSession {
             eprintln!("ACP session canonical event mailbox closed during event delivery");
         }
     }
+
+    /// Replays exported history into a transcript that still has none.
+    ///
+    /// The export is produced by a subprocess that takes seconds, and a sub-agent adopted
+    /// while it is still working streams into the same session during that window. Replaying
+    /// then restates the turn the live stream already recorded under a second, exported id and
+    /// files the older prompt after the newer answer, so the emptiness test and the replay have
+    /// to be one indivisible step rather than two awaits with a subprocess between them.
+    /// History a declined replay would have carried is recovered whole the next time the
+    /// session is loaded cold, which is strictly better than a duplicated, out-of-order one.
+    pub async fn seed_history(&self, events: Vec<CanonicalEvent>) -> bool {
+        let mut state = self.inner.lock().await;
+        if !state.snapshot.timeline.is_empty() {
+            return false;
+        }
+        for event in &events {
+            state.snapshot.apply(event);
+        }
+        let live = !state.snapshot.history_reconstruction;
+        drop(state);
+        if live {
+            for event in events {
+                if self.events.send(event).await.is_err() {
+                    eprintln!("ACP session canonical event mailbox closed during history seeding");
+                    break;
+                }
+            }
+        }
+        true
+    }
+
     pub async fn fail_active(&self, message: String) {
         let Some((run_id, source_turn_id, generation)) = self.operation().await else {
             return;
