@@ -42,6 +42,7 @@ export function processTurnLifecycleEvents(
     setActiveCommands,
     setStreamingText,
     reasoningBufferRef,
+    clearLiveReasoningMessage,
     scheduleExternalStatusFullSync,
     refreshPendingApprovalsForThread,
     store,
@@ -235,6 +236,9 @@ export function processTurnLifecycleEvents(
         tone: failed ? 'error' : 'running',
         title: failed ? 'Turn failed' : 'Working',
       });
+    }
+    if (itemType === 'reasoning') {
+      clearLiveReasoningMessage(threadId);
     }
     if (itemType === 'toolCall') {
     }

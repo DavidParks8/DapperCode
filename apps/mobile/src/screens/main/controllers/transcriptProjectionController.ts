@@ -137,20 +137,28 @@ export function projectTranscript({
       // already contains text the live stream has not caught up with yet).
       const liveExtendsPersisted = liveText.startsWith(persistedText);
       const persistedExtendsLive = persistedText.startsWith(liveText);
-      if (
+      const useLiveContent =
         !liveMessageState?.terminalMessageIds.includes(liveAssistantMessage.id) &&
         liveAssistantMessage.role !== 'user' &&
         liveText !== persistedText &&
-        (liveExtendsPersisted || !persistedExtendsLive)
-      ) {
+        (liveExtendsPersisted || !persistedExtendsLive);
+      const useLivePending =
+        liveAssistantMessage.pending !== undefined &&
+        liveAssistantMessage.pending !== persistedLiveMessage.pending;
+      if (useLiveContent || useLivePending) {
         messages = messages.map((message) =>
           message === persistedLiveMessage
             ? ({
                 ...message,
-                ...(message.role === 'activity'
-                  ? { content: { ...message.content, text: liveText } }
-                  : { content: liveText }),
-                parts: liveAssistantMessage.parts ?? message.parts,
+                ...(useLiveContent
+                  ? {
+                      ...(message.role === 'activity'
+                        ? { content: { ...message.content, text: liveText } }
+                        : { content: liveText }),
+                      parts: liveAssistantMessage.parts ?? message.parts,
+                    }
+                  : {}),
+                ...(useLivePending ? { pending: liveAssistantMessage.pending } : {}),
               } as ChatMessage)
             : message,
         );

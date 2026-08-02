@@ -90,6 +90,7 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
       state,
       envelope({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: 'r1', delta: 'step-1' }),
     );
+    expect(state.messages.find((entry) => entry.id === 'r1')?.pending).toBe(true);
 
     const chunkNoDelta = reduceThreadState(
       state,
@@ -115,6 +116,25 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
     );
 
     expect(state.terminalMessageIds).toEqual(expect.arrayContaining(['r1', `${RUN_ID}:reasoning`]));
+    expect(
+      state.messages.filter((entry) => entry.role === 'reasoning').map((entry) => entry.pending),
+    ).toEqual([false, false]);
+  });
+
+  it('settles unfinished reasoning when the run terminates', () => {
+    let state = reduceThreadState(
+      createAgUiThreadMessageState(),
+      envelope({ type: EventType.REASONING_MESSAGE_CONTENT, messageId: 'r1', delta: 'step-1' }),
+    );
+    expect(state.messages[0]?.pending).toBe(true);
+
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.RUN_ERROR, message: 'cancelled', code: 'cancelled' }),
+    );
+
+    expect(state.messages[0]?.pending).toBe(false);
+    expect(state.terminalMessageIds).toContain('r1');
   });
 
   it('updates encrypted values for message and tool-call subtypes', () => {

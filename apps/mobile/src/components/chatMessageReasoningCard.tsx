@@ -24,7 +24,13 @@ interface PreviewMeasurement {
   clipped: boolean;
 }
 
-export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
+export function ReasoningEntryCard({
+  entry,
+  pending,
+}: {
+  entry: TimelineEntry;
+  pending: boolean;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [expanded, setExpanded] = useState(false);
@@ -37,7 +43,7 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
     measurement !== null && measurement.text === preview
       ? measurement.clipped
       : (measurement?.clipped ?? false);
-  const canToggle = preview !== null && clipped;
+  const canToggle = preview !== null && (!pending || clipped);
   const showDetails = expanded && canToggle;
 
   const onPreviewTextLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
@@ -89,7 +95,7 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
             />
           ) : null}
         </View>
-        {!showDetails && preview ? (
+        {pending && !showDetails && preview ? (
           <View>
             <SelectableMessageText
               style={styles.reasoningPreview}
@@ -122,7 +128,7 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
             ))}
           </Animated.View>
         ) : null}
-        {canToggle ? (
+        {pending && canToggle ? (
           <Text style={styles.reasoningToggleText}>
             {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}
           </Text>

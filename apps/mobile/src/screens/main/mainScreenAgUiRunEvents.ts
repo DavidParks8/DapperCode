@@ -158,6 +158,11 @@ export function processAgUiRunEvents(
                 updatedAt: terminalStatusAt,
                 statusUpdatedAt: terminalStatusAt,
                 lastError: failed && !interruptedByUser ? agUiEvent.message : undefined,
+                messages: previous.messages.map((message) =>
+                  message.role === 'reasoning' && message.pending === true
+                    ? { ...message, pending: false }
+                    : message,
+                ),
               }
             : previous,
         );

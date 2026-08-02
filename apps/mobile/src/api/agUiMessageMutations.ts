@@ -131,7 +131,15 @@ export function appendText(
   }
   const content = `${existing ? getMessageText(existing) : ''}${delta}`;
   if (existing) {
-    return upsertMessage(current, withText(existing, content), runId, timestamp);
+    return upsertMessage(
+      current,
+      {
+        ...withText(existing, content),
+        ...(existing.role === 'reasoning' ? { pending: true } : {}),
+      } as ChatMessage,
+      runId,
+      timestamp,
+    );
   }
   if (defaultRole === 'reasoning') {
     return upsertMessage(
@@ -141,6 +149,7 @@ export function appendText(
         role: 'reasoning',
         content,
         createdAt: timestampIso(timestamp),
+        pending: true,
       },
       runId,
       timestamp,

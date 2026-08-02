@@ -243,7 +243,11 @@ function ChatMessageComponent({
       <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
         <View style={styles.reasoningStack}>
           {entries.map((entry, index) => (
-            <ReasoningEntryCard key={`${message.id}-reasoning-${String(index)}`} entry={entry} />
+            <ReasoningEntryCard
+              key={`${message.id}-reasoning-${String(index)}`}
+              entry={entry}
+              pending={message.pending === true}
+            />
           ))}
         </View>
       </View>
@@ -481,6 +485,7 @@ export function areChatMessagePropsEqual(
     previous.role === next.role &&
     previous.content === next.content &&
     previous.createdAt === next.createdAt &&
+    previous.pending === next.pending &&
     // Ordered parts take priority over `content` when rendering, so a parts-only
     // change still has to repaint the bubble.
     arePartsEqual(previous.parts, next.parts) &&

@@ -417,6 +417,23 @@ describe('ChatMessage markdown formatting', () => {
     ).toBe(false);
   });
 
+  it('detects when a reasoning message settles', () => {
+    const previous: ApiChatMessage = {
+      id: 'reasoning-pending-change',
+      role: 'reasoning',
+      content: '• Reasoning\n  └ Checking constraints',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
+    };
+
+    expect(
+      areChatMessagePropsEqual(
+        { message: previous },
+        { message: { ...previous, pending: false } },
+      ),
+    ).toBe(false);
+  });
+
   it('renders markdown tables in a horizontal scroll area', () => {
     const message: ApiChatMessage = {
       id: 'msg_table',
@@ -1208,7 +1225,7 @@ describe('ChatMessage system timeline matrices', () => {
       kind: 'reasoning' as const,
       content: '• Plan\n  └ First thought\n  └ Second thought',
       label: 'Plan',
-      hint: 'Tap to show thinking',
+      hint: null,
     },
     {
       kind: 'tool' as const,
@@ -1225,11 +1242,15 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     const root = tree.root as QueryableTestInstance;
-    if (kind === 'reasoning') simulateTextLayout(root, 5);
     expect(root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(
       0,
     );
-    expect(hasRenderedText(root, hint)).toBe(true);
+    if (hint) {
+      expect(hasRenderedText(root, hint)).toBe(true);
+    } else {
+      expect(hasRenderedText(root, 'First thought')).toBe(false);
+      expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
+    }
     const control = root.findAll(
       (node) => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function',
     )[0];
@@ -1265,13 +1286,13 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => toolTree.unmount());
   });
 
-  it('hides the reasoning toggle when the preview already shows every line', () => {
+  it('keeps a short pending reasoning preview visible without a toggle', () => {
     const tree = renderMessage({
       id: 'reasoning-short',
-      role: 'system',
-      systemKind: 'reasoning',
+      role: 'reasoning',
       content: '• Plan\n  └ Short thought',
       createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
     });
     const root = tree.root as QueryableTestInstance;
     simulateTextLayout(root, 2);

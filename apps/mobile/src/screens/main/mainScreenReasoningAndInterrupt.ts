@@ -70,6 +70,7 @@ export function useMainScreenReasoningAndInterrupt(
             ...message,
             role: 'reasoning' as const,
             content,
+            pending: true,
           };
         });
 
@@ -86,6 +87,7 @@ export function useMainScreenReasoningAndInterrupt(
                   role: 'reasoning',
                   content,
                   createdAt,
+                  pending: true,
                 },
               ],
         };
@@ -96,13 +98,33 @@ export function useMainScreenReasoningAndInterrupt(
     [schedulePinnedScrollToBottom],
   );
 
-  const clearLiveReasoningMessage = useCallback((threadId: string | null | undefined) => {
-    if (!threadId) {
-      return;
-    }
-    delete liveReasoningBuffersRef.current[threadId];
-    delete liveReasoningMessageIdsRef.current[threadId];
-  }, []);
+  const clearLiveReasoningMessage = useCallback(
+    (threadId: string | null | undefined) => {
+      if (!threadId) {
+        return;
+      }
+      const messageId = liveReasoningMessageIdsRef.current[threadId];
+      if (messageId) {
+        setSelectedChat((previous) => {
+          if (!previous || previous.id !== threadId) {
+            return previous;
+          }
+          let changed = false;
+          const messages = previous.messages.map((message) => {
+            if (message.id !== messageId || message.pending !== true) {
+              return message;
+            }
+            changed = true;
+            return { ...message, pending: false };
+          });
+          return changed ? { ...previous, messages } : previous;
+        });
+      }
+      delete liveReasoningBuffersRef.current[threadId];
+      delete liveReasoningMessageIdsRef.current[threadId];
+    },
+    [setSelectedChat],
+  );
 
   const appendStopSystemMessageIfNeeded = useCallback(() => {
     if (stopSystemMessageLoggedRef.current) {

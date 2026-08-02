@@ -144,6 +144,32 @@ describe('transcriptProjectionController', () => {
     }
   });
 
+  it('carries live reasoning state through a matching persisted snapshot message', () => {
+    const persistedReasoning: Chat['messages'][number] = {
+      id: 'reasoning',
+      role: 'reasoning',
+      content: 'Inspecting the active transcript',
+      createdAt: 'persisted',
+    };
+    const projection = projectTranscript({
+      chat: {
+        ...chat,
+        parentThreadId: undefined,
+        messages: [persistedReasoning],
+      },
+      parentChat: null,
+      showToolCalls: true,
+      threadStatuses: new Map(),
+      liveMessageState: liveState([
+        { ...persistedReasoning, createdAt: 'live', pending: true },
+      ]),
+    });
+
+    expect(projection.messages).toEqual([
+      expect.objectContaining({ id: 'reasoning', pending: true }),
+    ]);
+  });
+
   it('collapses optimistic, live, and persisted copies across user and reasoning rows', () => {
     const projection = projectTranscript({
       chat: {
