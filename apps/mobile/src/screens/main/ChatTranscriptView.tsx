@@ -183,6 +183,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           index,
           animated: false,
           viewPosition: 1,
+          viewOffset: -theme.spacing.lg,
         });
       },
       scrollToOffset: (offset) => {
@@ -331,9 +332,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       return;
     }
     const viewportHeight = viewportHeightRef.current;
-    if (viewportHeight <= 0) {
-      return;
-    }
+    if (viewportHeight <= 0) return;
     if (contentHeightRef.current - viewportHeight > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX) {
       return;
     }

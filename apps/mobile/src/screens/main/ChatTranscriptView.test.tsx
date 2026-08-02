@@ -209,6 +209,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
       index: expect.any(Number),
       animated: false,
       viewPosition: 1,
+      viewOffset: -theme.spacing.lg,
     });
 
     act(() => {
@@ -380,6 +381,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
       index: expect.any(Number),
       animated: false,
       viewPosition: 1,
+      viewOffset: -theme.spacing.lg,
     });
     expect((scrollToIndex.mock.calls[0]?.[0] as { index: number }).index).toBeLessThan(20);
     act(() => gesture.onFinalize?.({ y: 148 }));
