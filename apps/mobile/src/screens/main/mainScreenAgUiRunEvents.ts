@@ -14,6 +14,7 @@ import {
   pendingPlanImplementationPromptsAtom,
 } from '../../state/mainScreen/composer';
 import { parseAgUiEventNotification, updateAgUiLiveAssistantMessages } from '../../api/agUi';
+import type { AgUiEventEnvelope } from '../../api/agUi';
 import type { RpcNotification } from '../../api/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
@@ -183,4 +184,48 @@ export function processAgUiRunEvents(
     }
     return;
   }
+}
+
+export function processAgUiTextContentEvents(
+  context: MainScreenWsEventRouterContext,
+  envelopes: AgUiEventEnvelope[],
+  currentId: string | null,
+): void {
+  if (envelopes.length === 0) return;
+  const setLiveAssistantByThread = screenSetter(context.store, liveAssistantByThreadAtom);
+  const coalesced = coalesceAgUiTextContentEvents(envelopes);
+  setLiveAssistantByThread((previous) =>
+    coalesced.reduce(updateAgUiLiveAssistantMessages, previous),
+  );
+  if (coalesced.some((envelope) => envelope.threadId === currentId)) {
+    context.schedulePinnedScrollToBottom(true);
+  }
+}
+
+export function coalesceAgUiTextContentEvents(
+  envelopes: AgUiEventEnvelope[],
+): AgUiEventEnvelope[] {
+  const coalesced: AgUiEventEnvelope[] = [];
+  for (const envelope of envelopes) {
+    const event = envelope.event;
+    const previous = coalesced.at(-1);
+    if (
+      event.type === 'TEXT_MESSAGE_CONTENT' &&
+      previous?.event.type === 'TEXT_MESSAGE_CONTENT' &&
+      previous.threadId === envelope.threadId &&
+      previous.runId === envelope.runId &&
+      previous.event.messageId === event.messageId
+    ) {
+      coalesced[coalesced.length - 1] = {
+        ...envelope,
+        event: {
+          ...event,
+          delta: `${previous.event.delta}${event.delta}`,
+        },
+      };
+    } else {
+      coalesced.push(envelope);
+    }
+  }
+  return coalesced;
 }

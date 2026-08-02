@@ -7,6 +7,7 @@ import {
 import { loadingAgentThreadsAtom } from '../../state/mainScreen/workspace';
 import { keyboardVisibleAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useCallback } from 'react';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
 import { ActivityBar } from '../../components/ActivityBar';
 import { SelectionSheet } from '../../components/SelectionSheet';
@@ -89,6 +90,9 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const handleLoadEarlierPress = useCallback(() => {
+    void handleLoadEarlier();
+  }, [handleLoadEarlier]);
 
   return (
     <>
@@ -116,9 +120,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
                 bottomInset={androidComposerReservedInset}
                 liveMessageState={liveAssistantByThread[selectedChat.id] ?? null}
                 continuationState={transcriptContinuationState}
-                onLoadEarlier={() => {
-                  void handleLoadEarlier();
-                }}
+                onLoadEarlier={handleLoadEarlierPress}
               />
             ) : isOpeningChat ? (
               <ChatOpeningView />
@@ -179,9 +181,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
               bottomInset={chatBottomInset}
               liveMessageState={liveAssistantByThread[selectedChat.id] ?? null}
               continuationState={transcriptContinuationState}
-              onLoadEarlier={() => {
-                void handleLoadEarlier();
-              }}
+              onLoadEarlier={handleLoadEarlierPress}
             />
           ) : isOpeningChat ? (
             <ChatOpeningView />

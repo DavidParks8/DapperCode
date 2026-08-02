@@ -11,8 +11,12 @@ pub(super) struct ClientHub {
     pub(super) notification_replay: NotificationReplay,
     pub(super) canonical_subscribers: std::sync::Mutex<Vec<mpsc::Sender<CanonicalHubEvent>>>,
     pub(super) client_queue_drops: AtomicU64,
-    pub(super) notification_emit_lock: Mutex<()>,
+    pub(super) canonical_emit_lock: Mutex<()>,
+    pub(super) notification_publish_lock: Mutex<()>,
+    pub(super) latest_published_event_id: AtomicU64,
     pub(super) ag_ui_projector: Mutex<AgUiProjector>,
+    #[cfg(test)]
+    notification_serializations: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
@@ -73,8 +77,12 @@ impl ClientHub {
             notification_replay: NotificationReplay::new(replay_capacity, REPLAY_MAX_BYTES),
             canonical_subscribers: std::sync::Mutex::new(Vec::new()),
             client_queue_drops: AtomicU64::new(0),
-            notification_emit_lock: Mutex::new(()),
+            canonical_emit_lock: Mutex::new(()),
+            notification_publish_lock: Mutex::new(()),
+            latest_published_event_id: AtomicU64::new(0),
             ag_ui_projector: Mutex::new(AgUiProjector::default()),
+            #[cfg(test)]
+            notification_serializations: AtomicU64::new(0),
         }
     }
 
@@ -176,14 +184,18 @@ impl ClientHub {
         }
     }
 
+    #[cfg(test)]
     pub(super) async fn broadcast_json(&self, value: Value) {
-        let text = serde_json::to_string(&value).expect("JSON Value is serializable");
+        let message = Message::Text(self.serialize_notification(&value).into());
+        self.broadcast_message(message).await;
+    }
 
+    async fn broadcast_message(&self, message: Message) {
         let mut stale_clients = Vec::new();
         {
             let clients = self.clients.read().await;
             for (client_id, tx) in clients.iter() {
-                match tx.try_send(Message::Text(text.clone().into())) {
+                match tx.try_send(message.clone()) {
                     Ok(()) => {}
                     Err(mpsc::error::TrySendError::Closed(_)) => {
                         stale_clients.push(*client_id);
@@ -211,12 +223,11 @@ impl ClientHub {
     }
 
     pub(super) async fn broadcast_notification(&self, method: &str, params: Value) {
-        let _emit_guard = self.notification_emit_lock.lock().await;
         self.broadcast_external_notification(method, params).await;
     }
 
     pub(super) async fn broadcast_canonical_event(&self, event: &CanonicalEvent) {
-        let _emit_guard = self.notification_emit_lock.lock().await;
+        let _emit_guard = self.canonical_emit_lock.lock().await;
         let event_id = self.next_canonical_event_id.fetch_add(1, Ordering::Relaxed);
         let canonical = CanonicalHubEvent {
             event_id,
@@ -246,7 +257,6 @@ impl ClientHub {
     }
 
     pub(super) async fn broadcast_ag_ui_envelope(&self, envelope: AgUiEventEnvelope) {
-        let _emit_guard = self.notification_emit_lock.lock().await;
         let params = serde_json::to_value(envelope).unwrap_or(Value::Null);
         self.broadcast_external_notification(AG_UI_EVENT_METHOD, params)
             .await;
@@ -282,6 +292,7 @@ impl ClientHub {
     }
 
     async fn broadcast_external_notification(&self, method: &str, params: Value) -> u64 {
+        let publish_guard = self.notification_publish_lock.lock().await;
         let event_id = self.next_event_id.fetch_add(1, Ordering::Relaxed);
         let mut payload = json!({
             "method": method,
@@ -290,9 +301,8 @@ impl ClientHub {
             "eventId": event_id,
             "params": params
         });
-        let mut payload_bytes = serde_json::to_vec(&payload)
-            .map(|value| value.len())
-            .unwrap_or(0);
+        let mut serialized = self.serialize_notification(&payload);
+        let mut payload_bytes = serialized.len();
         if payload_bytes > NOTIFICATION_MAX_BYTES {
             payload = json!({
                 "method": "bridge/notification.truncated",
@@ -306,15 +316,25 @@ impl ClientHub {
                     "maxBytes": NOTIFICATION_MAX_BYTES,
                 }
             });
-            payload_bytes = serde_json::to_vec(&payload)
-                .map(|value| value.len())
-                .unwrap_or(0);
+            serialized = self.serialize_notification(&payload);
+            payload_bytes = serialized.len();
         }
+        let message = Message::Text(serialized.into());
         self.notification_replay
-            .push(event_id, payload.clone(), payload_bytes)
+            .push(event_id, message.clone(), payload_bytes)
             .await;
-        self.broadcast_json(payload).await;
+        self.latest_published_event_id
+            .store(event_id, Ordering::Release);
+        drop(publish_guard);
+        self.broadcast_message(message).await;
         event_id
+    }
+
+    fn serialize_notification(&self, payload: &Value) -> String {
+        #[cfg(test)]
+        self.notification_serializations
+            .fetch_add(1, Ordering::Relaxed);
+        serde_json::to_string(payload).expect("JSON Value is serializable")
     }
 
     pub(super) async fn replay_snapshot(
@@ -322,7 +342,7 @@ impl ClientHub {
         after_event_id: Option<u64>,
         limit: usize,
     ) -> HubReplaySnapshot {
-        let _emit_guard = self.notification_emit_lock.lock().await;
+        let _publish_guard = self.notification_publish_lock.lock().await;
         let (events, has_more, returned_bytes) = self
             .notification_replay
             .since(after_event_id, limit, REPLAY_RESPONSE_MAX_BYTES)
@@ -348,7 +368,7 @@ impl ClientHub {
     }
 
     pub(super) fn latest_event_id(&self) -> u64 {
-        self.next_event_id.load(Ordering::Relaxed).saturating_sub(1)
+        self.latest_published_event_id.load(Ordering::Acquire)
     }
 
     pub(super) async fn replay_status(&self) -> replay::ReplayStatus {
@@ -424,6 +444,91 @@ mod canonical_mailbox_tests {
             .lock()
             .expect("subscriber lock")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn canonical_backpressure_does_not_block_notifications_or_replay() {
+        let hub = Arc::new(ClientHub::new());
+        let mut events = hub.subscribe_canonical_events();
+        for index in 0..INTERNAL_NOTIFICATION_CHANNEL_CAPACITY {
+            hub.broadcast_canonical_event(&CanonicalEvent::Ignored {
+                agent_id: "agent".into(),
+                thread_id: Some("thread".into()),
+                kind: format!("filler-{index}"),
+            })
+            .await;
+        }
+        let blocked = {
+            let hub = Arc::clone(&hub);
+            tokio::spawn(async move {
+                hub.broadcast_canonical_event(&CanonicalEvent::RunFinished {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: "run".into(),
+                    source_turn_id: "turn".into(),
+                    generation: 1,
+                    stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                })
+                .await;
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(!blocked.is_finished());
+
+        timeout(
+            Duration::from_millis(100),
+            hub.broadcast_notification("bridge/test", json!({"ready": true})),
+        )
+        .await
+        .expect("canonical mailbox backpressure must not block client notifications");
+        let replay = timeout(Duration::from_millis(100), hub.replay_snapshot(None, 8))
+            .await
+            .expect("canonical mailbox backpressure must not block replay reads");
+        assert_eq!(replay.events[0]["method"], "bridge/test");
+
+        for _ in 0..INTERNAL_NOTIFICATION_CHANNEL_CAPACITY {
+            events.recv().await.expect("queued canonical event");
+        }
+        blocked.await.expect("blocked canonical producer");
+    }
+
+    #[tokio::test]
+    async fn notification_is_serialized_once_for_replay_and_all_clients() {
+        let hub = ClientHub::new();
+        let (first_sender, mut first_receiver) = mpsc::channel(1);
+        let (second_sender, mut second_receiver) = mpsc::channel(1);
+        hub.add_client_with_metadata(first_sender, ClientConnectionMetadata::default())
+            .await;
+        hub.add_client_with_metadata(second_sender, ClientConnectionMetadata::default())
+            .await;
+
+        hub.broadcast_notification("bridge/test", json!({"value": 7}))
+            .await;
+
+        assert_eq!(hub.notification_serializations.load(Ordering::Relaxed), 1);
+        let first = first_receiver.recv().await.expect("first client message");
+        let second = second_receiver.recv().await.expect("second client message");
+        assert_eq!(first, second);
+        let replay = hub.replay_snapshot(None, 8).await;
+        assert_eq!(replay.events[0]["params"]["value"], 7);
+    }
+
+    #[tokio::test]
+    async fn replay_snapshot_waits_for_an_in_flight_publication() {
+        let hub = Arc::new(ClientHub::new());
+        let publish_guard = hub.notification_publish_lock.lock().await;
+        let replay = {
+            let hub = Arc::clone(&hub);
+            tokio::spawn(async move { hub.replay_snapshot(None, 8).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!replay.is_finished());
+
+        drop(publish_guard);
+        timeout(Duration::from_millis(100), replay)
+            .await
+            .expect("replay should resume after publication")
+            .expect("replay task");
     }
 
     #[tokio::test]

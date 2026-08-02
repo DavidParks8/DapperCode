@@ -25,6 +25,7 @@ import { startToolCall, upsertMessage } from './agUiMessageMutations';
 import { type AGUIEvent, EventType, type Message, type ToolMessage } from '@ag-ui/core';
 import { type AgUiEventEnvelope } from './agUi';
 import {
+  indexMessages,
   type AgUiThreadMessageState,
   MAX_CUSTOM_METADATA_ENTRIES,
   MAX_MESSAGES_PER_THREAD,
@@ -210,6 +211,7 @@ export function applyMessagesSnapshot(
   return {
     ...current,
     messages: kept,
+    messageIndexById: indexMessages(kept),
     authoritativeSnapshot: true,
     runByMessageId: Object.fromEntries(nextMessages.map((message) => [message.id, runId])),
     terminalMessageIds: nextMessages.map((message) => message.id),

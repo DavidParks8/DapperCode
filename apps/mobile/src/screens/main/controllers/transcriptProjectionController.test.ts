@@ -50,7 +50,7 @@ describe('transcriptProjectionController', () => {
       content: 'live answer',
       createdAt: 'now',
     });
-    expect(projection.items).toHaveLength(projection.messages.length);
+    expect(projection).not.toHaveProperty('items');
   });
 
   it('uses only child messages when no parent is available', () => {

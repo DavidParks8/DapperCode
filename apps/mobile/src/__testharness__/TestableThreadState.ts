@@ -3,7 +3,10 @@ import type { Chat, ChatMessage, ChatStatus } from '../api/types';
 import { type AgUiEventEnvelope, updateAgUiLiveAssistantMessages } from '../api/agUi';
 import type { AgUiMessageState, AgUiThreadMessageState } from '../api/agUiMessagesState';
 import { projectTranscript } from '../screens/main/controllers/transcriptProjectionController';
-import type { TranscriptDisplayItem } from '../screens/main/transcriptMessages';
+import {
+  buildTranscriptDisplayItems,
+  type TranscriptDisplayItem,
+} from '../screens/main/transcriptMessages';
 import { getMessageText, getSubAgentMeta } from '../api/messages';
 
 export interface EventRecord {
@@ -106,13 +109,17 @@ export class TestableThreadState {
     const parentChat = options?.parentThreadId
       ? (this.chats.get(options.parentThreadId) ?? this.buildSyntheticChat(options.parentThreadId))
       : null;
-    return projectTranscript({
+    const projection = projectTranscript({
       chat,
       parentChat,
       showToolCalls: options?.showToolCalls ?? true,
       threadStatuses: this.threadStatuses,
       liveMessageState: this.state[threadId],
     });
+    return {
+      ...projection,
+      items: buildTranscriptDisplayItems(projection.messages),
+    };
   }
 
   /** Get all message IDs in projection order for a thread. */

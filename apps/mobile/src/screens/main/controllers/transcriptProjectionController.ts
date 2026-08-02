@@ -5,15 +5,12 @@ import { partsMatchMessageContent } from '../../../api/agUiContent';
 import { filterReasoningMessages, normalizeChatMessageMatchContent } from '../mainScreenHelpers';
 import { trimInheritedParentMessages } from '../subAgentTranscript';
 import {
-  buildTranscriptDisplayItems,
   getVisibleTranscriptMessages,
   syncVisibleSubAgentStatuses,
-  type TranscriptDisplayItem,
 } from '../transcriptMessages';
 
 export interface TranscriptProjection {
   messages: ChatMessage[];
-  items: TranscriptDisplayItem[];
   hiddenInheritedMessageCount: number;
 }
 
@@ -176,7 +173,6 @@ export function projectTranscript({
   }
   return {
     messages,
-    items: buildTranscriptDisplayItems(messages),
     hiddenInheritedMessageCount: inherited.hiddenInheritedMessageCount,
   };
 }

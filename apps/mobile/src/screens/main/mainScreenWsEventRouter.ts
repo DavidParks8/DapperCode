@@ -1,6 +1,9 @@
 import { pendingApprovalAtom, pendingUserInputRequestAtom } from '../../state/mainScreen/turn';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
-import { processAgUiRunEvents } from './mainScreenAgUiRunEvents';
+import {
+  processAgUiRunEvents,
+  processAgUiTextContentEvents,
+} from './mainScreenAgUiRunEvents';
 import { processThreadStateEvents } from './mainScreenThreadStateEvents';
 import { processPlanAndReasoningEvents } from './mainScreenPlanAndReasoningEvents';
 import { processBridgeInteractionEvents } from './mainScreenBridgeInteractionEvents';
@@ -9,7 +12,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
-import { parseAgUiEventNotification } from '../../api/agUi';
+import { parseAgUiEventNotification, type AgUiEventEnvelope } from '../../api/agUi';
 import type {
   MainScreenReplayRecoveryEngineContext,
   MainScreenReplayRecoveryEngineResult,
@@ -60,10 +63,32 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
   useEffect(() => {
     const pendingApprovalId = pendingApproval?.requestId;
     const pendingUserInputRequestId = pendingUserInputRequest?.requestId;
+    const pendingTextEvents: AgUiEventEnvelope[] = [];
+    let animationFrame: number | null = null;
+    const flushTextEvents = () => {
+      animationFrame = null;
+      if (pendingTextEvents.length === 0) return;
+      const events = pendingTextEvents.splice(0);
+      processAgUiTextContentEvents(context, events, chatIdRef.current);
+    };
+    const flushTextEventsNow = () => {
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      flushTextEvents();
+    };
 
-    return ws.onEvent((event: RpcNotification) => {
+    const unsubscribe = ws.onEvent((event: RpcNotification) => {
       const currentId = chatIdRef.current;
-      if (parseAgUiEventNotification(event)) {
+      const agUiEnvelope = parseAgUiEventNotification(event);
+      if (agUiEnvelope?.event.type === 'TEXT_MESSAGE_CONTENT') {
+        pendingTextEvents.push(agUiEnvelope);
+        animationFrame ??= requestAnimationFrame(flushTextEvents);
+        return;
+      }
+      flushTextEventsNow();
+      if (agUiEnvelope) {
         processAgUiRunEvents(context, event, currentId);
         return;
       }
@@ -116,6 +141,10 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
         );
       }
     });
+    return () => {
+      flushTextEventsNow();
+      unsubscribe();
+    };
   }, [
     ws,
     api,

@@ -7,7 +7,11 @@ import {
 import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { renderAgUiCustomContent, structuredTextRemainder } from './agUiContent';
 import { type AgUiEventEnvelope } from './agUi';
-import { type AgUiThreadMessageState } from './agUiMessagesState';
+import {
+  findMessageIndex,
+  indexMessages,
+  type AgUiThreadMessageState,
+} from './agUiMessagesState';
 import { type ChatMessage, type ChatMessageSubAgentMeta } from './types';
 import { type ToolCall } from '@ag-ui/core';
 import { upsertMessage } from './agUiMessageMutations';
@@ -192,6 +196,7 @@ export function reduceSubagentActivity(
     {
       ...current,
       messages,
+      messageIndexById: indexMessages(messages),
       subagentToolCallIds: {
         ...current.subagentToolCallIds,
         [toolCallId]: true,
@@ -292,7 +297,8 @@ export function updateEncryptedValue(
 }
 
 export function findMessage(current: AgUiThreadMessageState, id: string): ChatMessage | undefined {
-  return current.messages.find((message) => message.id === id);
+  const index = findMessageIndex(current, id);
+  return index >= 0 ? current.messages[index] : undefined;
 }
 
 export function toolCall(id: string, name: string, args: string): ToolCall {

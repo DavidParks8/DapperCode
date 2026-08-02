@@ -801,21 +801,25 @@ impl SessionSnapshot {
                 continue;
             }
             let header = self.subagent_headers.get(tool_call_id).cloned();
-            let Some(tool) = self
+            let Some(index) = self
                 .history
-                .iter_mut()
+                .iter()
+                .enumerate()
                 .rev()
-                .find(|entry| entry.canonical_id == *tool_call_id)
-                .and_then(|entry| entry.tool.as_mut())
+                .find_map(|(index, entry)| (entry.canonical_id == *tool_call_id).then_some(index))
             else {
                 continue;
             };
-            tool.status = status;
-            if let Some(header) = header {
-                Self::ensure_durable_subagent_header(tool, &header);
-            }
+            self.mutate_history_entry_at(index, |entry| {
+                let Some(tool) = entry.tool.as_mut() else {
+                    return;
+                };
+                tool.status = status;
+                if let Some(header) = header {
+                    Self::ensure_durable_subagent_header(tool, &header);
+                }
+            });
         }
-        self.remeasure_history();
         for tool_call_id in active_tool_ids {
             if !self.tools.contains_key(&tool_call_id) {
                 self.subagent_headers.remove(&tool_call_id);
@@ -926,18 +930,22 @@ impl SessionSnapshot {
         });
         if let Some(current) = current {
             self.attach_or_update_history_tool(current);
-        } else if let Some(tool) = self
+        } else if let Some(index) = self
             .history
-            .iter_mut()
+            .iter()
+            .enumerate()
             .rev()
-            .find(|entry| entry.canonical_id == tool_call_id)
-            .and_then(|entry| entry.tool.as_mut())
+            .find_map(|(index, entry)| (entry.canonical_id == tool_call_id).then_some(index))
         {
-            tool.status = tool_status;
-            if let Some(header) = &header {
-                Self::ensure_durable_subagent_header(tool, header);
-            }
-            self.remeasure_history();
+            self.mutate_history_entry_at(index, |entry| {
+                let Some(tool) = entry.tool.as_mut() else {
+                    return;
+                };
+                tool.status = tool_status;
+                if let Some(header) = &header {
+                    Self::ensure_durable_subagent_header(tool, header);
+                }
+            });
         }
         self.active_tool_ids.remove(tool_call_id);
         if !self.tools.contains_key(tool_call_id) {
@@ -972,22 +980,26 @@ impl SessionSnapshot {
                 break;
             };
             let header = self.subagent_headers.get(&expired).cloned();
-            if let Some(tool) = self
+            if let Some(index) = self
                 .history
-                .iter_mut()
+                .iter()
+                .enumerate()
                 .rev()
-                .find(|entry| entry.canonical_id == expired)
-                .and_then(|entry| entry.tool.as_mut())
+                .find_map(|(index, entry)| (entry.canonical_id == expired).then_some(index))
             {
-                tool.status = ToolCallStatus::Failed;
-                if let Some(header) = header {
-                    Self::ensure_durable_subagent_header(tool, &header);
-                }
+                self.mutate_history_entry_at(index, |entry| {
+                    let Some(tool) = entry.tool.as_mut() else {
+                        return;
+                    };
+                    tool.status = ToolCallStatus::Failed;
+                    if let Some(header) = header {
+                        Self::ensure_durable_subagent_header(tool, &header);
+                    }
+                });
             }
             self.active_tool_ids.remove(&expired);
             self.subagent_headers.remove(&expired);
         }
-        self.remeasure_history();
     }
 
     fn is_retained_tool_tombstone(&self, tool_call_id: &str) -> bool {
@@ -1036,37 +1048,43 @@ impl SessionSnapshot {
     }
 
     fn update_history_message(&mut self, message: &SnapshotMessage) {
-        if let Some(entry) = self
+        let index = self
             .history
-            .iter_mut()
+            .iter()
+            .enumerate()
             .rev()
-            .find(|entry| entry.canonical_id == message.id && entry.message.is_some())
-        {
-            entry.message = Some(message.clone());
-        } else if let Some(entry) = self
-            .history
-            .iter_mut()
-            .rev()
-            .find(|entry| entry.canonical_id == message.id)
-        {
-            entry.message = Some(message.clone());
+            .find_map(|(index, entry)| {
+                (entry.canonical_id == message.id && entry.message.is_some()).then_some(index)
+            })
+            .or_else(|| {
+                self.history
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(index, entry)| (entry.canonical_id == message.id).then_some(index))
+            });
+        if let Some(index) = index {
+            self.mutate_history_entry_at(index, |entry| {
+                entry.message = Some(message.clone());
+            });
         }
-        self.remeasure_history();
     }
 
     fn attach_or_update_history_tool(&mut self, mut tool: SnapshotTool) {
         if let Some(header) = self.subagent_headers.get(&tool.id).cloned() {
             Self::ensure_durable_subagent_header(&mut tool, &header);
         }
-        if let Some(entry) = self
+        if let Some(index) = self
             .history
-            .iter_mut()
+            .iter()
+            .enumerate()
             .rev()
-            .find(|entry| entry.canonical_id == tool.id)
+            .find_map(|(index, entry)| (entry.canonical_id == tool.id).then_some(index))
         {
-            entry.tool = Some(tool);
+            self.mutate_history_entry_at(index, |entry| {
+                entry.tool = Some(tool);
+            });
         }
-        self.remeasure_history();
     }
 
     fn push_history(&mut self, entry: SnapshotHistoryEntry) {
@@ -1077,8 +1095,36 @@ impl SessionSnapshot {
         self.enforce_history_bounds();
     }
 
+    #[cfg(test)]
     fn remeasure_history(&mut self) {
         self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
+        self.enforce_history_bounds();
+    }
+
+    fn mutate_history_entry_at(
+        &mut self,
+        index: usize,
+        update: impl FnOnce(&mut SnapshotHistoryEntry),
+    ) {
+        let old_bytes = history_entry_bytes(
+            self.history
+                .get(index)
+                .expect("history mutation index is valid"),
+        );
+        update(
+            self.history
+                .get_mut(index)
+                .expect("history mutation index is valid"),
+        );
+        let new_bytes = history_entry_bytes(
+            self.history
+                .get(index)
+                .expect("history mutation index is valid"),
+        );
+        self.history_bytes = self
+            .history_bytes
+            .saturating_sub(old_bytes)
+            .saturating_add(new_bytes);
         self.enforce_history_bounds();
     }
 
@@ -1215,9 +1261,18 @@ impl SessionSnapshot {
 }
 
 fn history_entry_bytes(entry: &SnapshotHistoryEntry) -> usize {
+    #[cfg(test)]
+    HISTORY_ENTRY_MEASUREMENTS.with(|measurements| {
+        measurements.set(measurements.get().saturating_add(1));
+    });
     serde_json::to_vec(entry)
         .expect("snapshot history DTO is serializable")
         .len()
+}
+
+#[cfg(test)]
+thread_local! {
+    static HISTORY_ENTRY_MEASUREMENTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 fn append_message_text(parts: &mut Vec<serde_json::Value>, content: String) -> bool {
@@ -2974,6 +3029,38 @@ mod tests {
     }
 
     #[test]
+    fn streaming_message_updates_only_remeasure_the_changed_history_entry() {
+        let mut snapshot = SessionSnapshot::new("agent".into(), "thread".into());
+        for index in 0..64 {
+            snapshot.append_message(
+                format!("message-{index}"),
+                MessageRole::Agent,
+                "seed".into(),
+                None,
+            );
+        }
+
+        HISTORY_ENTRY_MEASUREMENTS.with(|measurements| measurements.set(0));
+        snapshot.append_message(
+            "message-63".into(),
+            MessageRole::Agent,
+            " delta".into(),
+            None,
+        );
+
+        let measurements = HISTORY_ENTRY_MEASUREMENTS.with(std::cell::Cell::get);
+        assert_eq!(measurements, 2);
+        assert_eq!(
+            snapshot.history_bytes,
+            snapshot
+                .history
+                .iter()
+                .map(history_entry_bytes)
+                .sum::<usize>()
+        );
+    }
+
+    #[test]
     fn snapshot_bounds_collections_fields_and_unicode_text() {
         let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         for index in 0..=MAX_MESSAGES {
@@ -2989,6 +3076,7 @@ mod tests {
                 content_block: None,
             });
         }
+
         for index in 0..=MAX_TOOLS {
             snapshot.apply(&tool(
                 &format!("tool-{index:03}"),

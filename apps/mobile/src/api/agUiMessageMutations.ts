@@ -8,7 +8,12 @@ import {
 } from './agUiReducerUtilities';
 import { createActivityMessage, getMessageText, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { findMessage, toolCall } from './agUiStructuredAndTerminalReducers';
-import { type AgUiThreadMessageState, MAX_MESSAGES_PER_THREAD } from './agUiMessagesState';
+import {
+  findMessageIndex,
+  indexMessages,
+  type AgUiThreadMessageState,
+  MAX_MESSAGES_PER_THREAD,
+} from './agUiMessagesState';
 import { type AssistantMessage } from '@ag-ui/core';
 import { type ChatMessage } from './types';
 import { upsertToolResult } from './agUiToolAndCustomEventReducers';
@@ -58,20 +63,30 @@ export function upsertMessage(
   runId: string,
   timestamp?: number,
 ): AgUiThreadMessageState {
-  const index = current.messages.findIndex((entry) => entry.id === message.id);
+  const index = findMessageIndex(current, message.id);
   const existing = index >= 0 ? current.messages[index] : undefined;
   const nextMessage: ChatMessage = {
     ...message,
     createdAt: existing?.createdAt ?? timestampIso(timestamp),
   } as ChatMessage;
-  const messages =
-    index >= 0
-      ? current.messages.map((entry, entryIndex) => (entryIndex === index ? nextMessage : entry))
-      : [...current.messages, nextMessage];
+  const messages = current.messages.slice();
+  if (index >= 0) {
+    messages[index] = nextMessage;
+  } else {
+    messages.push(nextMessage);
+  }
   const kept = messages.slice(-MAX_MESSAGES_PER_THREAD);
   const runByMessageId = { ...current.runByMessageId, [message.id]: runId };
   if (kept.length === messages.length) {
-    return { ...current, messages: kept, runByMessageId };
+    return {
+      ...current,
+      messages: kept,
+      messageIndexById:
+        index >= 0 && current.messageIndexById[message.id] === index
+          ? current.messageIndexById
+          : { ...current.messageIndexById, [message.id]: index >= 0 ? index : kept.length - 1 },
+      runByMessageId,
+    };
   }
   // Trimming the head must also forget the bookkeeping for the dropped
   // messages, otherwise later events resurrect them at the end of the
@@ -82,6 +97,7 @@ export function upsertMessage(
   return {
     ...current,
     messages: kept,
+    messageIndexById: indexMessages(kept),
     runByMessageId: withoutMessageIds(runByMessageId, dropped),
     replacesMessageIdByMessageId: withoutMessageIds(current.replacesMessageIdByMessageId, dropped),
     toolCallMessageIdByCallId: withoutMessageValues(current.toolCallMessageIdByCallId, dropped),
@@ -116,11 +132,13 @@ export function appendText(
 ): AgUiThreadMessageState {
   const existing = findMessage(current, messageId);
   if (defaultRole !== 'reasoning' && existing?.role !== 'reasoning') {
-    const parts = appendOrderedPart(existing?.parts ?? [], {
-      type: 'text',
-      text: delta,
-    });
-    const content = renderOrderedParts(parts);
+    const existingParts = existing?.parts ?? [];
+    const onlyTextParts = existingParts.every((part) => part.type === 'text');
+    const appendedContent = `${existing ? getMessageText(existing) : ''}${delta}`;
+    const parts = onlyTextParts
+      ? [{ type: 'text' as const, text: appendedContent }]
+      : appendOrderedPart(existingParts, { type: 'text', text: delta });
+    const content = onlyTextParts ? appendedContent : renderOrderedParts(parts);
     const message = existing
       ? ({ ...withText(existing, content), parts } as ChatMessage)
       : ({
@@ -171,10 +189,14 @@ export function appendToolResult(
   const previousText = previous?.role === 'tool' ? previous.content : '';
   const withoutPrevious =
     previousId && previousId !== messageId
-      ? {
-          ...current,
-          messages: current.messages.filter((message) => message.id !== previousId),
-        }
+      ? (() => {
+          const messages = current.messages.filter((message) => message.id !== previousId);
+          return {
+            ...current,
+            messages,
+            messageIndexById: indexMessages(messages),
+          };
+        })()
       : current;
   return upsertToolResult(
     withoutPrevious,
@@ -197,14 +219,18 @@ export function reduceActivitySnapshot(
   const subAgent = activityType === SUBAGENT_ACTIVITY_TYPE ? record(content.subAgent) : null;
   const toolCallId = nonEmptyString(subAgent?.toolCallId);
   const withoutGenericTool = toolCallId
-    ? {
-        ...current,
-        messages: current.messages.filter(
+    ? (() => {
+        const messages = current.messages.filter(
           (message) =>
             message.id !== current.toolCallMessageIdByCallId[toolCallId] &&
             message.id !== current.toolResultMessageIdByCallId[toolCallId],
-        ),
-      }
+        );
+        return {
+          ...current,
+          messages,
+          messageIndexById: indexMessages(messages),
+        };
+      })()
     : current;
   const withSuppressedTool = toolCallId
     ? {

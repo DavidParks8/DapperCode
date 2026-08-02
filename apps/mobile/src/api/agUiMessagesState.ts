@@ -8,6 +8,7 @@ export interface AgUiChunkAssembly {
 
 export interface AgUiThreadMessageState {
   messages: ChatMessage[];
+  messageIndexById: Record<string, number>;
   authoritativeSnapshot: boolean;
   runByMessageId: Record<string, string>;
   terminalMessageIds: string[];
@@ -67,6 +68,7 @@ export const SUPPORTED_AG_UI_EVENT_TYPES = new Set<EventType>([
 export function createAgUiThreadMessageState(): AgUiThreadMessageState {
   return {
     messages: [],
+    messageIndexById: {},
     authoritativeSnapshot: false,
     runByMessageId: {},
     terminalMessageIds: [],
@@ -85,4 +87,16 @@ export function createAgUiThreadMessageState(): AgUiThreadMessageState {
     customMetadata: {},
     customMetadataOrder: [],
   };
+}
+
+export function findMessageIndex(current: AgUiThreadMessageState, id: string): number {
+  const indexed = current.messageIndexById[id];
+  if (indexed !== undefined && current.messages[indexed]?.id === id) {
+    return indexed;
+  }
+  return current.messages.findIndex((message) => message.id === id);
+}
+
+export function indexMessages(messages: readonly ChatMessage[]): Record<string, number> {
+  return Object.fromEntries(messages.map((message, index) => [message.id, index]));
 }
