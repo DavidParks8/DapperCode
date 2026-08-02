@@ -6,13 +6,17 @@ import {
   queueActionKindAtom,
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useMemo } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { ActivityBar } from '../../components/ActivityBar';
 import { ApprovalBanner } from '../../components/ApprovalBanner';
 import { BridgeUiBanner } from '../../components/BridgeUiSurface';
 import { ChatInput } from '../../components/ChatInput';
 import { decorativeAccessibilityProps } from '../../accessibility';
+import { computeHitSlop } from '../../components/touchTarget';
+import { motionDuration } from '../../components/motion';
 import { toPathBasename } from './mainScreenHelpers';
 import { QueuedMessageDock } from './MainScreenWorkflow';
 import type {
@@ -78,6 +82,10 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const queueActionKind = useAtomValue(queueActionKindAtom);
   const setComposerHeight = useSetAtom(composerHeightAtom);
+  const bridgeRecoveryBannerButtonHitSlop = useMemo(
+    () => computeHitSlop({ width: 160, height: 32 }),
+    [],
+  );
 
   const renderComposer = (overlay: boolean) => (
     <View
@@ -106,7 +114,9 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         </Text>
       ) : null}
       {showBridgeRecoveryBanner ? (
-        <View
+        <Animated.View
+          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
           style={styles.bridgeRecoveryBanner}
           accessibilityRole="alert"
           accessibilityLiveRegion="assertive"
@@ -130,6 +140,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
           {onOpenBridgeRecoveryGuide ? (
             <Pressable
               onPress={onOpenBridgeRecoveryGuide}
+              hitSlop={bridgeRecoveryBannerButtonHitSlop}
               style={({ pressed }) => [
                 styles.bridgeRecoveryBannerButton,
                 pressed && styles.bridgeRecoveryBannerButtonPressed,
@@ -138,7 +149,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
               <Text style={styles.bridgeRecoveryBannerButtonText}>How to start bridge</Text>
             </Pressable>
           ) : null}
-        </View>
+        </Animated.View>
       ) : null}
       {!showBridgeRecoveryBanner
         ? bannerBridgeUiSurfaces.map((surface) => (
@@ -180,7 +191,9 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         />
       ) : null}
       {showSlashSuggestions ? (
-        <ScrollView
+        <Animated.ScrollView
+          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
           style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
           contentContainerStyle={styles.slashSuggestionsContent}
           keyboardShouldPersistTaps="handled"
@@ -205,17 +218,23 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
               </Pressable>
             );
           })}
-        </ScrollView>
+        </Animated.ScrollView>
       ) : null}
       {!showSlashSuggestions && mentionQuery !== null ? (
         loadingAttachmentFileCandidates && mentionPathSuggestions.length === 0 ? (
-          <View style={styles.inlineMentionStatus}>
+          <Animated.View
+            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+            style={styles.inlineMentionStatus}
+          >
             <Text accessibilityLiveRegion="polite" style={styles.workspaceModalLoading}>
               Indexing files…
             </Text>
-          </View>
+          </Animated.View>
         ) : mentionPathSuggestions.length > 0 ? (
-          <ScrollView
+          <Animated.ScrollView
+            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
             style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
             contentContainerStyle={styles.slashSuggestionsContent}
             keyboardShouldPersistTaps="handled"
@@ -239,11 +258,15 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
                 </Text>
               </Pressable>
             ))}
-          </ScrollView>
+          </Animated.ScrollView>
         ) : mentionQuery.trim().length > 0 ? (
-          <View style={styles.inlineMentionStatus}>
+          <Animated.View
+            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+            style={styles.inlineMentionStatus}
+          >
             <Text style={styles.workspaceModalLoading}>No matching files found.</Text>
-          </View>
+          </Animated.View>
         ) : null
       ) : null}
       {overlay && showFloatingActivity ? (
