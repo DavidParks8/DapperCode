@@ -206,6 +206,10 @@ export function ScrollableRowText({
 }: ScrollableRowTextProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const transparentBackgroundColor = useMemo(
+    () => withTransparentAlpha(backgroundColor),
+    [backgroundColor],
+  );
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -248,17 +252,42 @@ export function ScrollableRowText({
       {showLeftFade ? (
         <LinearGradient
           pointerEvents="none"
-          colors={[backgroundColor, theme.colors.transparent]}
+          colors={[backgroundColor, transparentBackgroundColor]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
           style={[styles.scrollableRowTextFade, styles.scrollableRowTextFadeLeft]}
         />
       ) : null}
       {showRightFade ? (
         <LinearGradient
           pointerEvents="none"
-          colors={[theme.colors.transparent, backgroundColor]}
+          colors={[transparentBackgroundColor, backgroundColor]}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
           style={[styles.scrollableRowTextFade, styles.scrollableRowTextFadeRight]}
         />
       ) : null}
     </View>
   );
+}
+
+export function withTransparentAlpha(color: string): string {
+  const value = color.trim();
+  if (/^#[0-9a-f]{6}$/i.test(value)) {
+    return `${value}00`;
+  }
+  if (/^#[0-9a-f]{8}$/i.test(value)) {
+    return `${value.slice(0, 7)}00`;
+  }
+  const shortHex = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(value);
+  if (shortHex) {
+    return `#${shortHex[1]}${shortHex[1]}${shortHex[2]}${shortHex[2]}${shortHex[3]}${shortHex[3]}00`;
+  }
+  const functionalColor = /^rgba?\(\s*([^,]+),\s*([^,]+),\s*([^,\s)]+)(?:,\s*[^)]+)?\s*\)$/i.exec(
+    value,
+  );
+  if (functionalColor) {
+    return `rgba(${functionalColor[1]}, ${functionalColor[2]}, ${functionalColor[3]}, 0)`;
+  }
+  return 'transparent';
 }
