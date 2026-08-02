@@ -343,6 +343,13 @@ describe('attachmentController', () => {
     });
     await runAction(harness.current, 'phone-camera');
     expect(manipulate.mock.results.at(-1)?.value.resize).toHaveBeenCalledWith({ height: 2048 });
+    expect(harness.api.uploadAttachment).toHaveBeenLastCalledWith({
+      uri: 'file:///prepared.jpg',
+      fileName: 'camera-photo.jpg',
+      mimeType: 'image/jpeg',
+      threadId: 'thread-1',
+      kind: 'image',
+    });
     expect(harness.current.composerAttachments.some((entry) => entry.id.startsWith('image:'))).toBe(
       true,
     );

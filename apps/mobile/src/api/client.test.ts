@@ -3,13 +3,27 @@ import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { mapChat, mapChatSummary, type RawAcpSnapshot } from './chatMapping';
 import type { Chat, ChatSummary } from './types';
 import { RpcRequestError, type HostBridgeWsClient } from './ws';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fetch as expoFetch } from 'expo/fetch';
+import { File } from 'expo-file-system';
 
-jest.mock('expo-file-system/legacy', () => ({
-  uploadAsync: jest.fn(),
-  FileSystemUploadType: { MULTIPART: 1 },
-  FileSystemSessionType: { FOREGROUND: 1 },
+jest.mock('expo/fetch', () => ({
+  fetch: jest.fn(),
 }));
+jest.mock('expo-file-system', () => ({
+  File: jest.fn().mockImplementation((uri: string) => ({
+    uri,
+    name: uri.split('/').pop() || 'attachment',
+  })),
+}));
+
+const uploadFetch = expoFetch as jest.MockedFunction<typeof expoFetch>;
+
+function mockUploadResponse(status: number, body: string) {
+  uploadFetch.mockResolvedValueOnce({
+    status,
+    text: jest.fn().mockResolvedValue(body),
+  } as unknown as Awaited<ReturnType<typeof expoFetch>>);
+}
 
 function createWsMock() {
   type WsLike = Pick<HostBridgeWsClient, 'request' | 'waitForTurnCompletion' | 'onEvent'>;
@@ -1901,23 +1915,18 @@ describe('HostBridgeApiClient', () => {
     );
   });
 
-  it('uploadAttachment() uses authenticated file-backed multipart upload', async () => {
+  it('uploadAttachment() sends a camera cache file with authenticated multipart fetch', async () => {
     const ws = createWsMock();
-    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
-      typeof FileSystem.uploadAsync
-    >;
-    uploadAsync.mockResolvedValue({
-      status: 201,
-      headers: {},
-      mimeType: 'application/json',
-      body: JSON.stringify({
-        path: '.dappercode-attachments/file.txt',
-        fileName: 'file.txt',
-        mimeType: 'text/plain',
+    mockUploadResponse(
+      201,
+      JSON.stringify({
+        path: '.dappercode-attachments/camera-photo.jpg',
+        fileName: 'camera-photo.jpg',
+        mimeType: 'image/jpeg',
         sizeBytes: 10,
-        kind: 'file',
+        kind: 'image',
       }),
-    });
+    );
 
     const client = new HostBridgeApiClient({
       ws: ws as unknown as HostBridgeWsClient,
@@ -1925,27 +1934,25 @@ describe('HostBridgeApiClient', () => {
       authToken: 'secret',
     });
     const uploaded = await client.uploadAttachment({
-      uri: 'file:///cache/file.txt',
-      fileName: 'file.txt',
-      mimeType: 'text/plain',
-      kind: 'file',
+      uri: 'file:///cache/ImageManipulator/camera-photo.jpg',
+      fileName: 'camera-photo.jpg',
+      mimeType: 'image/jpeg',
+      kind: 'image',
     });
 
-    expect(uploadAsync).toHaveBeenCalledWith(
-      'http://bridge:8787/attachments',
-      'file:///cache/file.txt',
-      {
-        fieldName: 'file',
-        headers: { Authorization: 'Bearer secret' },
-        httpMethod: 'POST',
-        mimeType: 'text/plain',
-        parameters: { fileName: 'file.txt', kind: 'file', mimeType: 'text/plain' },
-        sessionType: 1,
-        uploadType: 1,
-      },
-    );
+    expect(File).toHaveBeenCalledWith('file:///cache/ImageManipulator/camera-photo.jpg');
+    expect(uploadFetch).toHaveBeenCalledWith('http://bridge:8787/attachments', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer secret' },
+      body: expect.any(FormData),
+    });
+    const formData = uploadFetch.mock.calls.at(-1)?.[1]?.body as FormData;
+    expect(formData.get('kind')).toBe('image');
+    expect(formData.get('fileName')).toBe('camera-photo.jpg');
+    expect(formData.get('mimeType')).toBe('image/jpeg');
+    expect(formData.get('file')).not.toBeNull();
     expect(ws.request).not.toHaveBeenCalled();
-    expect(uploaded.path).toBe('.dappercode-attachments/file.txt');
+    expect(uploaded.path).toBe('.dappercode-attachments/camera-photo.jpg');
   });
 
   it('interruptTurn() calls turn/interrupt with thread and turn id', async () => {
@@ -2412,15 +2419,7 @@ describe('HostBridgeApiClient', () => {
       'Bridge URL is required',
     );
 
-    const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
-      typeof FileSystem.uploadAsync
-    >;
-    uploadAsync.mockResolvedValueOnce({
-      status: 500,
-      headers: {},
-      mimeType: 'text/plain',
-      body: 'not json',
-    });
+    mockUploadResponse(500, 'not json');
     const uploadClient = new HostBridgeApiClient({
       ws: ws as unknown as HostBridgeWsClient,
       bridgeUrl: 'http://bridge',
@@ -2428,12 +2427,7 @@ describe('HostBridgeApiClient', () => {
     await expect(
       uploadClient.uploadAttachment({ uri: 'file://x', kind: 'image', threadId: ' thr ' }),
     ).rejects.toThrow('Attachment upload failed (500)');
-    uploadAsync.mockResolvedValueOnce({
-      status: 400,
-      headers: {},
-      mimeType: 'application/json',
-      body: JSON.stringify({ message: 'too large' }),
-    });
+    mockUploadResponse(400, JSON.stringify({ message: 'too large' }));
     await expect(uploadClient.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow(
       'too large',
     );
@@ -3654,19 +3648,12 @@ describe('HostBridgeApiClient', () => {
         withoutUrl.uploadAttachment({ uri: 'file:///a', kind: 'image' }),
       ).rejects.toThrow('Bridge URL');
 
-      const uploadAsync = FileSystem.uploadAsync as jest.MockedFunction<
-        typeof FileSystem.uploadAsync
-      >;
       const client = new HostBridgeApiClient({
         ws: ws as unknown as HostBridgeWsClient,
         bridgeUrl: 'https://bridge.example/',
         authToken: ' token ',
       });
-      uploadAsync.mockResolvedValueOnce({
-        status: 200,
-        body: '{"id":"attachment"}',
-        headers: {},
-      } as never);
+      mockUploadResponse(200, '{"id":"attachment"}');
       await expect(
         client.uploadAttachment({
           uri: 'file:///a',
@@ -3676,29 +3663,21 @@ describe('HostBridgeApiClient', () => {
           threadId: ' thread ',
         }),
       ).resolves.toMatchObject({ id: 'attachment' });
-      expect(uploadAsync).toHaveBeenCalledWith(
+      expect(File).toHaveBeenCalledWith('file:///a');
+      expect(uploadFetch).toHaveBeenCalledWith(
         'https://bridge.example/attachments',
-        'file:///a',
         expect.objectContaining({
-          parameters: {
-            kind: 'image',
-            fileName: 'a.png',
-            mimeType: 'image/png',
-            threadId: 'thread',
-          },
+          method: 'POST',
           headers: { Authorization: 'Bearer token' },
+          body: expect.any(FormData),
         }),
       );
 
-      uploadAsync.mockResolvedValueOnce({
-        status: 400,
-        body: '{"message":"too large"}',
-        headers: {},
-      } as never);
+      mockUploadResponse(400, '{"message":"too large"}');
       await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow(
         'too large',
       );
-      uploadAsync.mockResolvedValueOnce({ status: 500, body: 'not json', headers: {} } as never);
+      mockUploadResponse(500, 'not json');
       await expect(client.uploadAttachment({ uri: 'file:///a', kind: 'file' })).rejects.toThrow(
         'Attachment upload failed (500)',
       );
