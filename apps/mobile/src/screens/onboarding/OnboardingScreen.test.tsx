@@ -7,6 +7,7 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
+import { computeHitSlop } from '../../components/touchTarget';
 import { setMockReducedMotionEnabled } from '../../testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
 
@@ -896,6 +897,48 @@ describe('OnboardingScreen behavior', () => {
     expect(30 + cancelHitSlop.left + cancelHitSlop.right).toBeGreaterThanOrEqual(minimum);
 
     act(() => direct.tree.unmount());
+  });
+
+  it('caps Share/Copy hitSlop so adjacent sides never overlap the commandCardActions gap', async () => {
+    // commandCardActions gap is spacing.xs (4). Each button's horizontal slop must stay within
+    // half that gap so the two adjacent hit areas meet without stealing taps from one another,
+    // on both iOS's 44pt and Android's 48dp minimum effective touch target.
+    for (const platformOS of ['ios', 'android'] as const) {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: platformOS });
+      const slop = computeHitSlop({ width: 30, height: 30 }, { maxHorizontal: 2 });
+      expect(slop.left).toBeLessThanOrEqual(2);
+      expect(slop.right).toBeLessThanOrEqual(2);
+      expect(slop.left + slop.right).toBeLessThanOrEqual(4);
+      // Vertical slop stays uncapped so the full platform minimum is preserved on that axis.
+      const minimum = platformOS === 'android' ? 48 : 44;
+      expect(30 + slop.top + slop.bottom).toBeGreaterThanOrEqual(minimum);
+    }
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+
+    const result = await renderOnboarding({ mode: 'add' });
+    const root = result.tree.root as Queryable;
+    const shareButton = findByLabel(root, 'Share bridge setup guide');
+    const copyButton = findByLabel(root, 'Copy setup command');
+    const shareHitSlop = shareButton.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    const copyHitSlop = copyButton.props.hitSlop as typeof shareHitSlop;
+
+    // Share sits left of Copy in commandCardActions: Share's right slop plus Copy's left slop
+    // must not exceed the 4px gap between them, or one button's hit area reaches into the
+    // other's visible chrome.
+    expect(shareHitSlop.right).toBeLessThanOrEqual(2);
+    expect(copyHitSlop.left).toBeLessThanOrEqual(2);
+    expect(shareHitSlop.right + copyHitSlop.left).toBeLessThanOrEqual(4);
+    // Vertical (top/bottom) slop is unaffected by the horizontal cap and still meets the 44pt
+    // iOS minimum effective touch target.
+    expect(30 + shareHitSlop.top + shareHitSlop.bottom).toBeGreaterThanOrEqual(44);
+    expect(30 + copyHitSlop.top + copyHitSlop.bottom).toBeGreaterThanOrEqual(44);
+
+    act(() => result.tree.unmount());
   });
 
   it('renders StatusBanner without a Reanimated entrance when Reduce Motion is enabled', async () => {

@@ -9,9 +9,20 @@ import { decorativeAccessibilityProps } from '../../accessibility';
 import { computeHitSlop } from '../../components/touchTarget';
 import { motionDuration } from '../../components/motion';
 import { feedback } from '../../feedback';
-import { useAppTheme } from '../../theme';
+import { spacing, useAppTheme } from '../../theme';
 import { BRIDGE_SETUP_URL, SETUP_STAGES } from './onboardingScreenConstants';
 import { createOnboardingStyles } from './onboardingScreenStyles';
+
+// Share and Copy sit side by side in `commandCardActions` (gap: spacing.xs = 4). Each button's
+// own hitSlop must not exceed half that gap on the horizontal axis, or its slop reaches past the
+// gap's midpoint and starts stealing taps meant for its neighbor's visible chrome. Vertical slop
+// is left uncapped so both buttons still resolve to the full 44pt (iOS) / 48dp (Android) minimum
+// effective touch target on that axis. Hoisted to module scope since neither the visible size nor
+// the platform-derived minimum touch target changes across renders.
+const COMMAND_ACTION_VISIBLE_SIZE = { width: 30, height: 30 };
+const COMMAND_ACTION_HIT_SLOP = computeHitSlop(COMMAND_ACTION_VISIBLE_SIZE, {
+  maxHorizontal: spacing.xs / 2,
+});
 
 export function OnboardingStepDock({ currentStage }: { currentStage: number }) {
   const theme = useAppTheme();
@@ -106,7 +117,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             accessibilityRole="button"
             accessibilityLabel="Share bridge setup guide"
             onPress={handleShareGuide}
-            hitSlop={computeHitSlop({ width: 30, height: 30 })}
+            hitSlop={COMMAND_ACTION_HIT_SLOP}
             style={({ pressed }) => [
               styles.commandIconButton,
               pressed && styles.commandCopyButtonPressed,
@@ -118,7 +129,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             onPress={() => {
               void handleCopy();
             }}
-            hitSlop={computeHitSlop({ width: 30, height: 30 })}
+            hitSlop={COMMAND_ACTION_HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel={copied ? 'Copied to clipboard' : 'Copy setup command'}
             style={({ pressed }) => [
