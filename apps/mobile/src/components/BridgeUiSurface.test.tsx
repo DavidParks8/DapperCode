@@ -7,6 +7,7 @@ import { feedback } from '../feedback';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { AppSheet } from './AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
+import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 
@@ -421,6 +422,17 @@ describe('BridgeUiWorkflowCard', () => {
     } finally {
       Platform.OS = originalOS;
     }
+  });
+});
+
+describe('bridge-ui-surface-styles typography mapping', () => {
+  it('codeText uses the full mono role (size/lineHeight/fontFamily), no raw fontSize override', () => {
+    const theme = createAppTheme('dark');
+    const styles = createBridgeUiSurfaceStyles(theme);
+    const codeText = StyleSheet.flatten(styles.codeText);
+    expect(codeText.fontSize).toBe(theme.typography.mono.fontSize);
+    expect(codeText.lineHeight).toBe(theme.typography.mono.lineHeight);
+    expect(codeText.fontFamily).toBe(theme.typography.mono.fontFamily);
   });
 });
 

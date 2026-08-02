@@ -150,8 +150,6 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
     codeText: {
       ...theme.typography.mono,
       color: theme.colors.inlineCodeText,
-      fontSize: 12,
-      lineHeight: 17,
     },
     progressBlock: {
       gap: theme.spacing.xs,

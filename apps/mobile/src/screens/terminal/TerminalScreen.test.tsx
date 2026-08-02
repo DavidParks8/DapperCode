@@ -1,4 +1,4 @@
-import { AccessibilityInfo, Alert, TextInput } from 'react-native';
+import { AccessibilityInfo, Alert, StyleSheet, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -7,7 +7,7 @@ import type { RpcNotification, TerminalExecResponse } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
 import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
-import { TerminalScreen } from './TerminalScreen';
+import { createStyles, TerminalScreen } from './TerminalScreen';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 
@@ -329,5 +329,16 @@ describe('TerminalScreen behavior', () => {
     resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: 'hi', stderr: '', timedOut: false, durationMs: 1 });
     await act(async () => { await Promise.resolve(); });
     act(() => result.tree.unmount());
+  });
+});
+
+describe('TerminalScreen typography mapping', () => {
+  it('outputText uses the full mono role font size/family, with only lineHeight intentionally overridden for scrollback density', () => {
+    const styles = createStyles(theme);
+    const outputText = StyleSheet.flatten(styles.outputText);
+    expect(outputText.fontSize).toBe(theme.typography.mono.fontSize);
+    expect(outputText.fontFamily).toBe(theme.typography.mono.fontFamily);
+    // Intentional scrollback readability tweak, not a raw ad hoc literal replacing the role.
+    expect(outputText.lineHeight).toBe(20);
   });
 });

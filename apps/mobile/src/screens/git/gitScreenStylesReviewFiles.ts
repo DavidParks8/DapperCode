@@ -81,11 +81,10 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
     },
     reviewFileCode: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       width: 24,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     reviewFilePath: {
       ...theme.typography.caption,
@@ -94,10 +93,9 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       fontWeight: '600',
     },
     reviewFileStats: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     bulkActionBtn: {
       borderRadius: theme.radius.sm,
@@ -154,10 +152,9 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       borderColor: theme.colors.borderLight,
     },
     historyHashBadgeText: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       color: theme.colors.textSecondary,
-      fontSize: 11,
-      lineHeight: 14,
     },
     historyRefRow: {
       flexDirection: 'row',

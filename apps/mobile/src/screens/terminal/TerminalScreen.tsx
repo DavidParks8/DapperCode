@@ -195,7 +195,7 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   );
 }
 
-const createStyles = (theme: AppTheme) =>
+export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.isDark ? '#000000' : theme.colors.bgMain },
     header: {
@@ -253,7 +253,7 @@ const createStyles = (theme: AppTheme) =>
     outputText: {
       ...theme.typography.mono,
       color: theme.colors.textPrimary,
-      fontSize: 13,
+      // Slightly taller than the base mono line height for legible scrollback density.
       lineHeight: 20,
     },
     runningIndicator: {

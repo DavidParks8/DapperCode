@@ -159,7 +159,7 @@ function toBlocks(body: string): LegalBlock[] {
     );
 }
 
-const createStyles = (theme: AppTheme) =>
+export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.colors.bgMain },
     header: {
@@ -169,7 +169,7 @@ const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.lg,
       paddingHorizontal: 18,
     },
-    headerTitle: { ...theme.typography.largeTitle, fontSize: 20 },
+    headerTitle: { ...theme.typography.title },
     body: { flex: 1 },
     content: { padding: 18, gap: theme.spacing.xxl, paddingBottom: 48 },
     section: { gap: theme.spacing.sm },
@@ -181,21 +181,15 @@ const createStyles = (theme: AppTheme) =>
     },
     paragraph: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       color: theme.colors.textSecondary,
     },
     bulletRow: { flexDirection: 'row', gap: theme.spacing.sm },
     bulletGlyph: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       color: theme.colors.textMuted,
     },
     bulletText: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       flex: 1,
       color: theme.colors.textSecondary,
     },
@@ -209,7 +203,7 @@ const createStyles = (theme: AppTheme) =>
       borderBottomColor: theme.colors.borderLight,
     },
     linkRowPressed: { opacity: 0.6 },
-    linkLabel: { ...theme.typography.body, fontSize: 15, color: theme.colors.textPrimary },
+    linkLabel: { ...theme.typography.body, color: theme.colors.textPrimary },
     linkLabelDisabled: { color: theme.colors.textMuted },
     documentLabel: { ...theme.typography.caption, color: theme.colors.textMuted },
     documentUrl: { ...theme.typography.mono, color: theme.colors.textSecondary },
