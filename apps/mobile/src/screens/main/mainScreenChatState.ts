@@ -307,6 +307,7 @@ function areChatMessagesEquivalent(previous: ChatMessage[], next: ChatMessage[])
       left.role !== right.role ||
       JSON.stringify(left.content) !== JSON.stringify(right.content) ||
       left.createdAt !== right.createdAt ||
+      left.pending !== right.pending ||
       (left.role === 'activity' &&
         right.role === 'activity' &&
         left.activityType !== right.activityType) ||

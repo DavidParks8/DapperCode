@@ -3004,6 +3004,7 @@ function MainRouteShell() {
   ): Promise<{
     tree: ReactTestRenderer;
     api: HostBridgeApiClient;
+    store: AppStore;
     ws: HostBridgeWsClient;
   }> {
     const api = options.api ?? createApi();
@@ -3040,7 +3041,7 @@ function MainRouteShell() {
     if (!tree) {
       throw new Error('MainScreen did not render');
     }
-    return { tree, api, ws };
+    return { tree, api, store, ws };
   }
 
   async function emit(event: unknown): Promise<void> {
@@ -3062,11 +3063,21 @@ function MainRouteShell() {
     return root.findAll((node) => node.children.includes(text)).length > 0;
   }
 
-  function transcript(
-    tree: ReactTestRenderer,
-  ): Array<{ message: { content: string; role: Chat['messages'][number]['role'] } }> {
+  function transcript(tree: ReactTestRenderer): Array<{
+    message: {
+      content: string;
+      id: string;
+      pending?: boolean;
+      role: Chat['messages'][number]['role'];
+    };
+  }> {
     return ((tree.root as Queryable).findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
-      message: { content: string; role: Chat['messages'][number]['role'] };
+      message: {
+        content: string;
+        id: string;
+        pending?: boolean;
+        role: Chat['messages'][number]['role'];
+      };
     }>;
   }
 
@@ -3169,6 +3180,91 @@ function MainRouteShell() {
           'run-other',
         ),
       );
+      await unmount(tree);
+    });
+
+    it('compacts a live reasoning message when its item finishes', async () => {
+      const { tree, api, store } = await renderMain();
+      await emit(agUi({ type: 'RUN_STARTED', threadId, runId: 'run-reasoning' }));
+      await emit({
+        method: 'item/reasoning/textDelta',
+        params: { threadId, delta: 'Checking constraints before editing' },
+      });
+
+      expect(transcript(tree).find((item) => item.message.role === 'reasoning')?.message).toEqual(
+        expect.objectContaining({
+          content: expect.stringContaining('Checking constraints before editing'),
+          pending: true,
+        }),
+      );
+
+      await emit({
+        method: 'item/completed',
+        params: { threadId, item: { type: 'reasoning' } },
+      });
+      expect(
+        transcript(tree).find((item) => item.message.role === 'reasoning')?.message.pending,
+      ).toBe(false);
+
+      (api.getChat as jest.Mock).mockResolvedValue({
+        ...chat,
+        status: 'complete',
+        messages: [
+          ...chat.messages,
+          {
+            id: 'server-reasoning',
+            role: 'reasoning',
+            content: '• Reasoning\n  └ Checking constraints before editing',
+            createdAt: '2026-07-20T00:00:01.000Z',
+          },
+        ],
+      });
+      await emit(agUi({ type: 'RUN_FINISHED', threadId, runId: 'run-reasoning' }));
+      await act(async () => {
+        for (let index = 0; index < 8; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      const reasoningMessages = transcript(tree).filter(
+        (item) => item.message.role === 'reasoning',
+      );
+      expect(reasoningMessages).toHaveLength(1);
+      expect(reasoningMessages[0]?.message.pending).not.toBe(true);
+      expect(api.getChat).toHaveBeenCalledWith(threadId, { forceRefresh: true });
+      await unmount(tree);
+    });
+
+    it('marks AG-UI reasoning pending only until the message ends', async () => {
+      const { tree } = await renderMain();
+      await emit(agUi({ type: 'RUN_STARTED', threadId, runId: 'run-agui-reasoning' }));
+      await emit(
+        agUi({
+          type: 'REASONING_MESSAGE_START',
+          messageId: 'agui-reasoning',
+          role: 'reasoning',
+        }),
+      );
+      await emit(
+        agUi({
+          type: 'REASONING_MESSAGE_CONTENT',
+          messageId: 'agui-reasoning',
+          delta: 'Inspecting the active transcript',
+        }),
+      );
+
+      expect(
+        transcript(tree).find((item) => item.message.role === 'reasoning')?.message.pending,
+      ).toBe(true);
+
+      await emit(agUi({ type: 'REASONING_MESSAGE_END', messageId: 'agui-reasoning' }));
+
+      expect(
+        transcript(tree)
+          .filter((item) => item.message.role === 'reasoning')
+          .map((item) => ({ id: item.message.id, pending: item.message.pending })),
+      ).toEqual([{ id: 'agui-reasoning', pending: false }]);
       await unmount(tree);
     });
 

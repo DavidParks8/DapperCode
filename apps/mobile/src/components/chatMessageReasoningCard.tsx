@@ -70,16 +70,18 @@ function ReasoningCardHeader({
 
 function ReasoningCardPreview({
   preview,
+  pending,
   showDetails,
   onPreviewTextLayout,
   styles,
 }: {
   preview: string | null;
+  pending: boolean;
   showDetails: boolean;
   onPreviewTextLayout: (event: NativeSyntheticEvent<TextLayoutEventData>) => void;
   styles: ReturnType<typeof createStyles>;
 }) {
-  if (showDetails || !preview) {
+  if (!pending || showDetails || !preview) {
     return null;
   }
   return (
@@ -131,7 +133,7 @@ function ReasoningCardDetails({
   );
 }
 
-export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
+export function ReasoningEntryCard({ entry, pending }: { entry: TimelineEntry; pending: boolean }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [expanded, setExpanded] = useState(false);
@@ -141,7 +143,7 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
   // While a changed preview is re-measured, keep the previous result so the
   // toggle affordance does not flicker mid-stream.
   const clipped = resolveReasoningClipped(measurement, preview);
-  const canToggle = preview !== null && clipped;
+  const canToggle = preview !== null && (!pending || clipped);
   const showDetails = expanded && canToggle;
 
   const onPreviewTextLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
@@ -187,12 +189,13 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
         />
         <ReasoningCardPreview
           preview={preview}
+          pending={pending}
           showDetails={showDetails}
           onPreviewTextLayout={onPreviewTextLayout}
           styles={styles}
         />
         <ReasoningCardDetails entry={entry} showDetails={showDetails} styles={styles} />
-        {canToggle ? (
+        {pending && canToggle ? (
           <Text style={styles.reasoningToggleText}>
             {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}
           </Text>

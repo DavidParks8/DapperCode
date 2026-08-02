@@ -186,6 +186,7 @@ export function areChatMessagePropsEqual(
     previous.role === next.role &&
     previous.content === next.content &&
     previous.createdAt === next.createdAt &&
+    previous.pending === next.pending &&
     // Ordered parts take priority over `content` when rendering, so a parts-only
     // change still has to repaint the bubble.
     arePartsEqual(previous.parts, next.parts) &&

@@ -130,6 +130,38 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
       }),
     );
   });
+
+  it('replaces local reasoning with the server reasoning message without duplication', () => {
+    const reasoningContent = '• Reasoning\n  └ Checking constraints';
+    const previous = chat({
+      status: 'running',
+      messages: [
+        ...chat().messages,
+        {
+          id: 'local-reasoning-1',
+          role: 'reasoning',
+          content: reasoningContent,
+          createdAt: '2026-07-25T00:00:01.000Z',
+          pending: false,
+        },
+      ],
+    });
+    const serverReasoning: Chat['messages'][number] = {
+      id: 'server-reasoning-1',
+      role: 'reasoning',
+      content: reasoningContent,
+      createdAt: '2026-07-25T00:00:01.000Z',
+    };
+
+    const resolved = resolveEquivalentChat(
+      previous,
+      chat({ messages: [...chat().messages, serverReasoning] }),
+    );
+
+    expect(resolved.messages.filter((message) => message.role === 'reasoning')).toEqual([
+      serverReasoning,
+    ]);
+  });
 });
 
 describe('modelOptionsFromAcpConfig', () => {

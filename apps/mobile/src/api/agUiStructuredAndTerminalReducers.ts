@@ -33,6 +33,7 @@ export function reduceStructuredMessageContent(
           content: text,
           createdAt: timestampIso(envelope.event.timestamp),
           parts,
+          pending: true,
         }
       : role === 'user'
         ? {
@@ -251,12 +252,16 @@ export function markTerminal(
   current: AgUiThreadMessageState,
   messageId: string,
 ): AgUiThreadMessageState {
-  if (current.terminalMessageIds.includes(messageId)) {
+  const messages = settleReasoningMessages(current.messages, new Set([messageId]));
+  if (current.terminalMessageIds.includes(messageId) && messages === current.messages) {
     return current;
   }
   return {
     ...current,
-    terminalMessageIds: [...current.terminalMessageIds, messageId],
+    messages,
+    terminalMessageIds: current.terminalMessageIds.includes(messageId)
+      ? current.terminalMessageIds
+      : [...current.terminalMessageIds, messageId],
   };
 }
 
@@ -270,10 +275,27 @@ export function markRunTerminal(
   if (ids.length === 0) {
     return current;
   }
+  const idSet = new Set(ids);
   return {
     ...current,
+    messages: settleReasoningMessages(current.messages, idSet),
     terminalMessageIds: Array.from(new Set([...current.terminalMessageIds, ...ids])),
   };
+}
+
+function settleReasoningMessages(
+  messages: ChatMessage[],
+  terminalIds: ReadonlySet<string>,
+): ChatMessage[] {
+  let changed = false;
+  const settled = messages.map((message) => {
+    if (message.role !== 'reasoning' || message.pending !== true || !terminalIds.has(message.id)) {
+      return message;
+    }
+    changed = true;
+    return { ...message, pending: false };
+  });
+  return changed ? settled : messages;
 }
 
 export function updateEncryptedValue(

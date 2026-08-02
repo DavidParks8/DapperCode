@@ -294,14 +294,20 @@ function mergeLiveMessage(
     ];
   }
 
-  return shouldReplacePersistedLiveMessage(
+  const useLiveContent = shouldReplacePersistedLiveMessage(
     persistedMessage,
     liveMessage,
     liveText,
     liveMessageState,
-  )
-    ? replacePersistedLiveMessage(messages, persistedMessage, liveMessage, liveText)
-    : messages;
+  );
+  const useLivePending = shouldAdoptLivePendingState(persistedMessage, liveMessage);
+  if (!useLiveContent && !useLivePending) {
+    return messages;
+  }
+  return replacePersistedLiveMessage(messages, persistedMessage, liveMessage, liveText, {
+    useLiveContent,
+    useLivePending,
+  });
 }
 
 function findPersistedLiveMessage(
@@ -350,20 +356,37 @@ function shouldReplacePersistedLiveMessage(
   );
 }
 
+/**
+ * The live copy owns the reasoning `pending` flag, so a settled run has to hand that
+ * state to the persisted message even when the text itself is already up to date.
+ */
+function shouldAdoptLivePendingState(
+  persistedMessage: ChatMessage,
+  liveMessage: ChatMessage,
+): boolean {
+  return liveMessage.pending !== undefined && liveMessage.pending !== persistedMessage.pending;
+}
+
 function replacePersistedLiveMessage(
   messages: ChatMessage[],
   persistedMessage: ChatMessage,
   liveMessage: ChatMessage,
   liveText: string,
+  { useLiveContent, useLivePending }: { useLiveContent: boolean; useLivePending: boolean },
 ): ChatMessage[] {
   return messages.map((message) =>
     message === persistedMessage
       ? ({
           ...message,
-          ...(message.role === 'activity'
-            ? { content: { ...message.content, text: liveText } }
-            : { content: liveText }),
-          parts: liveMessage.parts ?? message.parts,
+          ...(useLiveContent
+            ? {
+                ...(message.role === 'activity'
+                  ? { content: { ...message.content, text: liveText } }
+                  : { content: liveText }),
+                parts: liveMessage.parts ?? message.parts,
+              }
+            : {}),
+          ...(useLivePending ? { pending: liveMessage.pending } : {}),
         } as ChatMessage)
       : message,
   );

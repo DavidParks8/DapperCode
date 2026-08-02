@@ -242,7 +242,14 @@ function handleCurrentItemCompleted(
     context.pushActiveCommand(threadId, completedToolEvent.eventType, completedToolEvent.detail);
   }
 
-  if (readString(item?.type) !== 'commandExecution') {
+  const itemType = readString(item?.type);
+  if (itemType === 'reasoning') {
+    // The completed item carries the settled reasoning, so the live buffer stops
+    // owning the message and the card collapses to its compact form.
+    context.clearLiveReasoningMessage(threadId);
+  }
+
+  if (itemType !== 'commandExecution') {
     return;
   }
 

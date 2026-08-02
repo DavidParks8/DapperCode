@@ -279,6 +279,47 @@ describe('ChatMessage markdown formatting', () => {
     act(() => tree.unmount());
   });
 
+  it('highlights fenced code and copies the exact snippet from its own button', async () => {
+    const code = 'const port: number = 4319;';
+    const message: ApiChatMessage = {
+      id: 'msg_highlighted_code',
+      role: 'assistant',
+      content: `\`\`\`typescript\n${code}\n\`\`\``,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    jest.mocked(Clipboard.setStringAsync).mockClear();
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    expect(root.findByProps({ testID: 'chat-code-block' })).toBeTruthy();
+    expect(
+      root
+        .findAll((node) => node.type === Text)
+        .some((node) => flattenRenderedText(node.props.children) === 'TypeScript'),
+    ).toBe(true);
+
+    const keyword = root
+      .findAll((node) => node.type === Text)
+      .find((node) => flattenRenderedText(node.props.children) === 'const');
+    if (!keyword) {
+      throw new Error('Expected TypeScript keyword highlighting');
+    }
+    expect(StyleSheet.flatten(keyword.props.style as never)).toMatchObject({
+      color: theme.colors.codeSyntaxKeyword,
+    });
+
+    await act(async () => {
+      readOnPress(root.findByProps({ testID: 'chat-code-block-copy' }).props)();
+      await Promise.resolve();
+    });
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledTimes(1);
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith(code);
+    expect(root.findByProps({ accessibilityLabel: 'Code copied' })).toBeTruthy();
+
+    act(() => tree.unmount());
+  });
+
   it('repaints when only the ordered parts change', () => {
     const base: ApiChatMessage = {
       id: 'msg_parts',
@@ -376,6 +417,20 @@ describe('ChatMessage markdown formatting', () => {
     const next: ApiChatMessage = { ...previous, content: 'after' };
 
     expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(false);
+  });
+
+  it('detects when a reasoning message settles', () => {
+    const previous: ApiChatMessage = {
+      id: 'reasoning-pending-change',
+      role: 'reasoning',
+      content: '• Reasoning\n  └ Checking constraints',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
+    };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: { ...previous, pending: false } }),
+    ).toBe(false);
   });
 
   it('renders markdown tables in a horizontal scroll area', () => {
@@ -1173,7 +1228,7 @@ describe('ChatMessage system timeline matrices', () => {
       kind: 'reasoning' as const,
       content: '• Plan\n  └ First thought\n  └ Second thought',
       label: 'Plan',
-      hint: 'Tap to show thinking',
+      hint: null,
     },
     {
       kind: 'tool' as const,
@@ -1190,13 +1245,15 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     const root = tree.root as QueryableTestInstance;
-    if (kind === 'reasoning') {
-      simulateTextLayout(root, 5);
-    }
     expect(root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(
       0,
     );
-    expect(hasRenderedText(root, hint)).toBe(true);
+    if (hint) {
+      expect(hasRenderedText(root, hint)).toBe(true);
+    } else {
+      expect(hasRenderedText(root, 'First thought')).toBe(false);
+      expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
+    }
     const control = root.findAll(
       (node) => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function',
     )[0];
@@ -1232,13 +1289,13 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => toolTree.unmount());
   });
 
-  it('hides the reasoning toggle when the preview already shows every line', () => {
+  it('keeps a short pending reasoning preview visible without a toggle', () => {
     const tree = renderMessage({
       id: 'reasoning-short',
-      role: 'system',
-      systemKind: 'reasoning',
+      role: 'reasoning',
       content: '• Plan\n  └ Short thought',
       createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
     });
     const root = tree.root as QueryableTestInstance;
     simulateTextLayout(root, 2);

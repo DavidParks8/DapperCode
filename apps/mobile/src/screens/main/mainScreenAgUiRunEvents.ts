@@ -20,7 +20,7 @@ import {
   parseAgUiEventNotification,
   updateAgUiLiveAssistantMessages,
 } from '../../api/agUi';
-import type { RpcNotification } from '../../api/types';
+import type { ChatMessage, RpcNotification } from '../../api/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
 
@@ -180,6 +180,7 @@ export function processAgUiRunEvents(
             updatedAt: terminalStatusAt,
             statusUpdatedAt: terminalStatusAt,
             lastError: failed && !interruptedByUser ? resolveRunErrorMessage(envelope) : undefined,
+            messages: settlePendingReasoningMessages(previous.messages),
           }
         : previous,
     );
@@ -198,6 +199,18 @@ export function processAgUiRunEvents(
   }
 
   handlers[agUiEnvelope.event.type]?.();
+}
+
+/**
+ * A run that reached a terminal state can no longer extend its reasoning, so every
+ * still-pending reasoning message collapses to its completed presentation.
+ */
+function settlePendingReasoningMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) =>
+    message.role === 'reasoning' && message.pending === true
+      ? { ...message, pending: false }
+      : message,
+  );
 }
 
 function isSubagentCustomEvent(envelope: AgUiEventEnvelope): boolean {

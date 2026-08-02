@@ -239,7 +239,11 @@ function renderReasoningChatMessage(ctx: ChatMessageRenderContext) {
     <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
       <View style={styles.reasoningStack}>
         {entries.map((entry, index) => (
-          <ReasoningEntryCard key={`${message.id}-reasoning-${String(index)}`} entry={entry} />
+          <ReasoningEntryCard
+            key={`${message.id}-reasoning-${String(index)}`}
+            entry={entry}
+            pending={message.pending === true}
+          />
         ))}
       </View>
     </View>
