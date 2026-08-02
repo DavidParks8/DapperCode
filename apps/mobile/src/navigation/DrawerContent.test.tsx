@@ -617,6 +617,10 @@ describe('DrawerContent render behavior matrix', () => {
     expect(hasText(root, 'Beta session')).toBe(true);
     expect(findByLabel(root, 'Filter sessions by folder, beta')).toBeDefined();
 
+    await press(findByLabel(root, 'New chat'));
+    expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(router.dismissTo).not.toHaveBeenCalledWith(routes.newChat('profile-1'));
+
     await press(findByLabel(root, 'Filter sessions by folder, beta'));
     await press(findByLabel(root, 'All folders'));
     expect(hasText(root, 'Alpha session')).toBe(true);

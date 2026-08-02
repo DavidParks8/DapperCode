@@ -78,7 +78,13 @@ export const startNewChatAtom = atom(null, (get, set): void => {
   set(gitChatAtom, null);
   get(mainScreenCommandsAtom)?.startNewChat();
   set(closeDrawerAtom);
-  navigateRoot(profileId ? routes.newChat(profileId) : routes.onboarding);
+  if (profileId) {
+    // `new` is commonly absent from the current stack. Do not call navigateRoot here: its
+    // dismissTo preflight can replace the current route when the destination is not in history.
+    router.navigate(routes.newChat(profileId));
+  } else {
+    replaceRoot(routes.onboarding);
+  }
 });
 
 export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null): void => {

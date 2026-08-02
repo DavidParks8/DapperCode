@@ -92,6 +92,33 @@ describe('router-backed navigation actions', () => {
       routes.agent('profile-1', 'next-thread', 'child-thread'),
     );
     expect(mockRouter.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(mockRouter.dismissTo).not.toHaveBeenCalledWith(routes.newChat('profile-1'));
+  });
+
+  it('still navigates to a new chat when dismissTo cannot resolve the new route', () => {
+    const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
+    mockRouter.dismissTo.mockImplementationOnce(() => {
+      throw new Error('new chat is not in navigation history');
+    });
+
+    try {
+      store.set(startNewChatAtom);
+    } finally {
+      // The direct navigation path intentionally leaves the one-shot failure queued; reset it so
+      // the next test does not inherit a failure that was never consumed.
+      mockRouter.dismissTo.mockReset();
+    }
+
+    expect(mockRouter.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+  });
+
+  it('routes starting a new chat to onboarding without a bridge profile', () => {
+    const store = createTestStore();
+
+    store.set(startNewChatAtom);
+
+    expect(mockRouter.replace).toHaveBeenCalledWith(routes.onboarding);
+    expect(mockRouter.navigate).not.toHaveBeenCalled();
   });
 
   it('does not let chat loading overwrite a pushed sub-agent route', () => {
