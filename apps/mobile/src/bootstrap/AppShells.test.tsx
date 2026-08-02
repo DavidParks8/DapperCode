@@ -27,12 +27,13 @@ import { ConnectionScreen } from './AppShells';
 function renderConnection(
   mode: 'initial' | 'add' | 'edit' | 'reconnect',
   withProfile = true,
+  extraProps: Partial<{ onSaved: (nextProfileId: string) => void }> = {},
 ): ReactTestRenderer {
   const store = withProfile ? createBridgeTestStore({ api: {} as never }) : createTestStore();
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
-      withAppStore(store, <ConnectionScreen mode={mode} profileId="profile-1" />),
+      withAppStore(store, <ConnectionScreen mode={mode} profileId="profile-1" {...extraProps} />),
     );
   });
   if (!tree) throw new Error('Expected connection screen');
@@ -92,6 +93,22 @@ describe('ConnectionScreen', () => {
       )({ bridgeUrl: 'https://two.test', bridgeToken: 'two' });
     });
     expect(router.replace).toHaveBeenCalledWith(routes.newChat('profile-2'));
+    act(() => tree.unmount());
+  });
+
+  it('hands off to onSaved instead of the default root replace when the route owns its own completion navigation', async () => {
+    const onSaved = jest.fn();
+    const tree = renderConnection('edit', true, { onSaved });
+    await act(async () => {
+      await (
+        mockOnboardingProps?.onSave as (draft: {
+          bridgeUrl: string;
+          bridgeToken: string;
+        }) => Promise<void>
+      )({ bridgeUrl: 'https://two.test', bridgeToken: 'two' });
+    });
+    expect(onSaved).toHaveBeenCalledWith('profile-2');
+    expect(router.replace).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 });

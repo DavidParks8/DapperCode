@@ -17,6 +17,14 @@ jest.mock('react-native-drawer-layout', () => {
 jest.mock('./DrawerContent', () => ({ DrawerContent: () => null }));
 jest.mock('react-native-webview', () => ({ WebView: () => null }));
 
+let mockConnectionScreenProps: Record<string, unknown> | null = null;
+jest.mock('../bootstrap/AppShells', () => ({
+  ConnectionScreen: (props: Record<string, unknown>) => {
+    mockConnectionScreenProps = props;
+    return null;
+  },
+}));
+
 import { act, renderRouter, screen, waitFor } from 'expo-router/testing-library';
 import {
   useEffect,
@@ -199,6 +207,7 @@ describe('Expo Router route topology', () => {
     mainRenders.length = 0;
     formLifecycle.length = 0;
     promoteChat = null;
+    mockConnectionScreenProps = null;
     const data = createDefaultAppStateData();
     data.bridgeProfiles = {
       activeProfileId: 'profile-1',
@@ -670,5 +679,58 @@ describe('Expo Router route topology', () => {
     // remounted, only the Drawer's focus moved away.
     expect(countNamedRoutes(result.getRouterState(), 'connection')).toBe(1);
     expect(formLifecycle).toEqual(['mount']);
+  });
+
+  it('unwinds the Settings connection modal on Save before switching to the new chat root, so re-entering Settings never resurrects it', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': ChatFooterConnectionLauncher,
+          'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
+          'profiles/[profileId]/(drawer)/settings/privacy': () => <Text>{routeLabels.privacy}</Text>,
+          // `settings/connection` is intentionally NOT overridden — the real route file (with
+          // its `onSaved` wiring) must be exercised for this regression to be meaningful.
+        },
+      },
+      {
+        initialUrl: '/profiles/profile-1/chats/chat-1',
+        wrapper: defaultWrapper,
+      },
+    );
+
+    // The drawer footer's anchored push lands on the modal, same as the sibling test above.
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
+    expect(mockConnectionScreenProps?.onSaved).toEqual(expect.any(Function));
+
+    // Simulate a successful Save completing for the profile already active in this Settings
+    // instance (edit mode keeps the same profile id).
+    act(() => (mockConnectionScreenProps?.onSaved as (nextProfileId: string) => void)('profile-1'));
+
+    // Root navigation switches the Drawer to the newly (re)activated chat root...
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
+    // ...and the connection modal must be gone from the tree entirely, not merely unfocused
+    // underneath the new root.
+    expect(countNamedRoutes(result.getRouterState(), 'connection')).toBe(0);
+
+    // Re-entering Settings (e.g. tapping the drawer's Settings item again) must land cleanly
+    // on Settings' own index.
+    act(() => navigateRoot(routes.settings('profile-1')));
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings');
+    expect(screen.getByText(routeLabels.settings)).toBeTruthy();
+
+    // Prove Settings' own nested Stack was actually unwound to a single `index` entry — not
+    // `[index, connection, index]`, the vendored StackRouter's duplicate-push symptom — by
+    // pushing a real, distinct Settings screen and inspecting the full stack beneath it.
+    act(() => router.push(routes.privacy('profile-1')));
+    const settingsStack = findStackContaining(result.getRouterState(), 'privacy');
+    expect(settingsStack?.routes.map((route) => route.name)).toEqual(['index', 'privacy']);
+
+    // Back must return to Settings' own index, never resurrect the saved connection editor —
+    // the exact symptom this fix addresses.
+    act(() => router.back());
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings');
+    expect(screen.getByText(routeLabels.settings)).toBeTruthy();
   });
 });
