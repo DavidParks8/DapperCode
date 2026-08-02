@@ -1,5 +1,6 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
+import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
 import { feedback } from '../feedback';
@@ -350,7 +351,7 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => expectValue(rendered).unmount());
   });
 
-  it('action buttons meet 44pt minimum touch target via minHeight', () => {
+  it('action buttons meet the platform touch target minimum via resolved minHeight', () => {
     const surface: BridgeUiSurface = {
       id: 'touch-target',
       threadId: 'thread-1',
@@ -377,12 +378,49 @@ describe('BridgeUiWorkflowCard', () => {
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     const actionBtn = findPressableByText(root, 'Act');
-    const style = actionBtn.props.style as { minHeight?: number } | undefined;
-    // minHeight >= 44 via styles or hitSlop >= 0
-    const hitSlop = (actionBtn.props.hitSlop as number | undefined) ?? 0;
-    const minH = (style as Record<string, number> | undefined)?.minHeight ?? 0;
-    expect(minH >= 44 || hitSlop >= 0).toBe(true);
+    const minH = resolvePressableMinHeight(actionBtn);
+    expect(minH).toBeGreaterThanOrEqual(theme.touchTarget.minimum);
     act(() => expectValue(rendered).unmount());
+  });
+
+  it('action buttons meet the 48dp Android touch target minimum', () => {
+    const originalOS = Platform.OS;
+    Platform.OS = 'android';
+    try {
+      const androidTheme = createAppTheme('dark');
+      expect(androidTheme.touchTarget.minimum).toBe(48);
+      const surface: BridgeUiSurface = {
+        id: 'touch-target-android',
+        threadId: 'thread-1',
+        turnId: null,
+        kind: 'review',
+        presentation: 'workflowCard',
+        tone: 'info',
+        title: 'TouchTarget',
+        subtitle: null,
+        bodyMarkdown: null,
+        blocks: [],
+        actions: [{ id: 'act', label: 'Act', style: 'primary' }],
+        dismissible: true,
+      };
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={androidTheme}>
+              <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = expectValue(rendered).root as QueryableTestInstance;
+      const actionBtn = findPressableByText(root, 'Act');
+      const minH = resolvePressableMinHeight(actionBtn);
+      expect(minH).toBeGreaterThanOrEqual(48);
+      act(() => expectValue(rendered).unmount());
+    } finally {
+      Platform.OS = originalOS;
+    }
   });
 });
 
@@ -428,6 +466,14 @@ function readOnPress(props: { onPress?: unknown }): () => void {
     throw new Error('Expected onPress to be a function');
   }
   return props.onPress as () => void;
+}
+
+/** Resolves a Pressable's (possibly function-form) style prop and returns its effective minHeight. */
+function resolvePressableMinHeight(node: QueryableTestInstance): number {
+  const rawStyle = node.props.style as unknown;
+  const resolved = typeof rawStyle === 'function' ? rawStyle({ pressed: false }) : rawStyle;
+  const flattened = StyleSheet.flatten(resolved) as { minHeight?: number } | undefined;
+  return flattened?.minHeight ?? 0;
 }
 
 function expectValue<T>(value: T | undefined): T {

@@ -3,8 +3,11 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { computeHitSlop } from '../../components/touchTarget';
 import { feedback } from '../../feedback';
 import { useAppTheme, type AppTheme } from '../../theme';
+
+const BACK_ICON_VISIBLE_SIZE = { width: 22, height: 22 };
 
 export interface LegalSection {
   title: string;
@@ -41,6 +44,7 @@ export function LegalScreen({
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const backHitSlop = useMemo(() => computeHitSlop(BACK_ICON_VISIBLE_SIZE), []);
   const [openingDocument, setOpeningDocument] = useState(false);
   const openDocumentDisabled = !documentUrl || openingDocument;
 
@@ -69,7 +73,7 @@ export function LegalScreen({
       <View style={styles.header}>
         <Pressable
           onPress={onBack}
-          hitSlop={11}
+          hitSlop={backHitSlop}
           accessibilityRole="button"
           accessibilityLabel={`Back from ${title}`}
         >

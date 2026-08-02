@@ -253,7 +253,7 @@ export function createGitScreenCoreStyles(theme: AppTheme) {
       fontWeight: '400',
     },
     workspaceInput: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       paddingTop: 7,
       paddingBottom: 7,
       includeFontPadding: false,

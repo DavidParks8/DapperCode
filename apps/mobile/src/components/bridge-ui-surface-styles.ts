@@ -188,7 +188,7 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.sm,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm,
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       justifyContent: 'center',
     },
     actionButtonPrimary: {

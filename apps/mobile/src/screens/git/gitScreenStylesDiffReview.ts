@@ -283,7 +283,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.textPrimary,
     },
     submitReviewButton: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.sm,
       backgroundColor: theme.colors.accent,
       flexDirection: 'row',
@@ -336,7 +336,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
     },
     reviewModalCancel: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       justifyContent: 'center',
       paddingHorizontal: theme.spacing.md,
     },
@@ -346,7 +346,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       fontWeight: '600',
     },
     reviewModalSave: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       justifyContent: 'center',
       borderRadius: theme.radius.sm,
       backgroundColor: theme.colors.accent,
