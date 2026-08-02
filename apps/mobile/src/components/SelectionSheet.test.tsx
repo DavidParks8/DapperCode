@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -140,6 +140,44 @@ describe('SelectionSheet', () => {
     expect(optionPresses[0]).toHaveBeenCalled();
     act(() => invokeProp(findPressable(root, 'Done'), 'onPress'));
     expect(onClose).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the eyebrow and badge text readable at theme.typography.metadata size', () => {
+    const onClose = jest.fn();
+    const tree = render(
+      <SelectionSheet
+        visible
+        title="Choose one"
+        eyebrow="Workspace"
+        options={[{ key: 'selected', title: 'Selected', badge: 'Active', onPress: jest.fn() }]}
+        onClose={onClose}
+        presentation="expanded"
+      />,
+    );
+    const root = queryRoot(tree);
+
+    const eyebrowText = root.findAll(
+      (node) => node.type === Text && textContent(node) === 'Workspace',
+    )[0];
+    if (!eyebrowText) throw new Error('Missing eyebrow text');
+    const eyebrowStyle = flattenStyle(eyebrowText.props.style);
+    const badgeText = root.findAll(
+      (node) => node.type === Text && textContent(node) === 'Active',
+    )[0];
+    if (!badgeText) throw new Error('Missing badge text');
+    const badgeTextStyle = flattenStyle(badgeText.props.style);
+
+    // Both styles must adopt theme.typography.metadata (11/14) instead of the old sub-11pt
+    // literal override (10/12), while keeping their uppercase/bold/muted presentation.
+    for (const style of [eyebrowStyle, badgeTextStyle]) {
+      expect(Number(style.fontSize)).toBe(11);
+      expect(Number(style.lineHeight)).toBe(14);
+      expect(style.fontWeight).toBe('700');
+      expect(style.textTransform).toBe('uppercase');
+      expect(style.color).toBe(theme.colors.textMuted);
+    }
+
     act(() => tree.unmount());
   });
 

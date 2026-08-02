@@ -418,10 +418,8 @@ const createStyles = (theme: AppTheme) =>
       minWidth: 0,
     },
     eyebrow: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
     },

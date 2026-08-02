@@ -7,10 +7,8 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
   StyleSheet.create({
     header: { gap: 4 },
     eyebrow: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0,
@@ -106,10 +104,8 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
       paddingVertical: 2,
     },
     badgeText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0,
