@@ -41,7 +41,11 @@ import { computeHitSlop } from './touchTarget';
 
 // The chip's visible height is padding (theme.spacing.sm * 2) plus its icon/text row; its width
 // varies with the URL label, so only the vertical axis is padded up to the platform minimum.
+// Chips stack in a column with a 4px gap (localPreviewLinkList's `gap: theme.spacing.xs`), so
+// vertical slop is capped at half that gap (2px) — otherwise one chip's bottom slop and the next
+// chip's top slop would overlap and steal taps meant for the neighboring chip.
 const LOCAL_PREVIEW_LINK_VISIBLE_SIZE = { width: 160, height: 32 };
+const LOCAL_PREVIEW_LINK_HIT_SLOP_OPTIONS = { maxVertical: 2 };
 
 function LocalPreviewLinks({
   messageId,
@@ -54,7 +58,10 @@ function LocalPreviewLinks({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const hitSlop = useMemo(() => computeHitSlop(LOCAL_PREVIEW_LINK_VISIBLE_SIZE), []);
+  const hitSlop = useMemo(
+    () => computeHitSlop(LOCAL_PREVIEW_LINK_VISIBLE_SIZE, LOCAL_PREVIEW_LINK_HIT_SLOP_OPTIONS),
+    [],
+  );
   if (!onOpen || urls.length === 0) return null;
   return (
     <View style={styles.localPreviewLinkList}>

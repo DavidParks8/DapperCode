@@ -385,6 +385,59 @@ describe('ChatMessage markdown formatting', () => {
     act(() => tree.unmount());
   });
 
+  it('caps local-preview chip hitSlop so stacked chips cannot steal a neighbor’s tap', () => {
+    const onOpenLocalPreview = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'local-preview-chip-stack',
+        role: 'assistant',
+        content: 'Servers ready on http://localhost:3000 and http://localhost:4000',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    const root = tree.root as QueryableTestInstance;
+
+    const chips = root
+      .findAllByProps({ accessibilityRole: 'button' })
+      .filter(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          typeof node.props.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel as string).startsWith('Open http://localhost:'),
+      );
+    expect(chips).toHaveLength(2);
+
+    // The chips stack in a column with a 4px gap (localPreviewLinkList's `gap: theme.spacing.xs`
+    // in chatMessageStyles.ts). Each chip's vertical hitSlop must be capped at half that gap (2)
+    // so one chip's bottom slop plus the next chip's top slop never exceeds the real 4px gap
+    // between them — anything larger would let the earlier chip's expanded hit area steal a tap
+    // aimed at the chip below it.
+    const GAP = 4;
+    const HALF_GAP = GAP / 2;
+    for (const chip of chips) {
+      const hitSlop = chip.props.hitSlop as
+        | { top: number; bottom: number; left: number; right: number }
+        | undefined;
+      expect(hitSlop).toBeDefined();
+      expect(hitSlop!.top).toBeLessThanOrEqual(HALF_GAP);
+      expect(hitSlop!.bottom).toBeLessThanOrEqual(HALF_GAP);
+    }
+
+    // Exact effective-geometry check: the first chip's expanded bottom edge and the second
+    // chip's expanded top edge must not cross the midpoint of the gap between them, i.e. they
+    // must not overlap at all.
+    const [firstHitSlop, secondHitSlop] = chips.map(
+      (chip) =>
+        chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
+    );
+    const firstChipExpandedBottomOffset = firstHitSlop.bottom;
+    const secondChipExpandedTopOffset = secondHitSlop.top;
+    expect(firstChipExpandedBottomOffset + secondChipExpandedTopOffset).toBeLessThanOrEqual(GAP);
+
+    act(() => tree.unmount());
+  });
+
   it('renders markdown images only when their source is usable', () => {
     const tree = renderMessage({
       id: 'markdown-images',

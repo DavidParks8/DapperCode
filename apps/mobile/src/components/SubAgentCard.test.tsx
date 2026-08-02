@@ -89,7 +89,7 @@ describe('SubAgentCard', () => {
     expect(createStylesSpy.mock.calls.length).toBe(callsAfterMount);
   });
 
-  it('gives the open-agent-chat affordance an effective touch target without inflating its visible chrome', () => {
+  it('caps the open-agent-chat hitSlop so it cannot overlap the scrollable Latest row above it', () => {
     const tree = render(
       <SubAgentCard
         idPrefix="sub-1"
@@ -108,9 +108,14 @@ describe('SubAgentCard', () => {
       left: number;
       right: number;
     };
-    // The row is a fixed 18px tall footer; hitSlop should pad it up toward the 44pt minimum.
-    expect(hitSlop.top).toBeGreaterThanOrEqual(13);
-    expect(hitSlop.bottom).toBeGreaterThanOrEqual(13);
+    // The footer row sits `marginTop: 4` below the "Latest" detail row (see subAgentOpenHint /
+    // subAgentDetailRow in chatMessageStyles.ts). The row is only 18pt tall, so an uncapped
+    // hitSlop would pad ~13-15pt toward the 44pt/48dp minimum and eat well into (56-69% of) that
+    // scrollable row's own touch/scroll area. Capping at 4 keeps the expanded hit area's top edge
+    // flush with — never past — the boundary between the two rows.
+    expect(hitSlop.top).toBe(4);
+    expect(hitSlop.bottom).toBe(4);
+    expect(hitSlop.top).toBeLessThanOrEqual(4);
   });
 
   it('disables the open affordance and omits onPress when there is no thread to open', () => {

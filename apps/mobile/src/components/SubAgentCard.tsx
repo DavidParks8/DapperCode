@@ -11,8 +11,12 @@ import { createStyles } from './chatMessageStyles';
 import { computeHitSlop } from './touchTarget';
 
 // The open-hint row hugs its "Open agent chat" label + chevron, so its rendered width is well
-// over the touch-target minimum; only the fixed, dense row height needs vertical hitSlop.
+// over the touch-target minimum; only the fixed, dense row height needs vertical hitSlop. The
+// footer sits `marginTop: 4` below the "Latest" detail row (see subAgentOpenHint /
+// subAgentDetailRow in chatMessageStyles.ts), so vertical slop is capped at that same 4px — any
+// more would eat into the scrollable "Latest" row's own touch/scroll area above it.
 const OPEN_HINT_VISIBLE_SIZE = { width: 120, height: 18 };
+const OPEN_HINT_HIT_SLOP_OPTIONS = { maxVertical: 4 };
 
 
 /** Reads one labelled line out of a sub-agent card body, ignoring its indentation. */
@@ -56,7 +60,10 @@ export function SubAgentCard({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const canOpen = Boolean(threadId && onOpen);
-  const openHintHitSlop = useMemo(() => computeHitSlop(OPEN_HINT_VISIBLE_SIZE), []);
+  const openHintHitSlop = useMemo(
+    () => computeHitSlop(OPEN_HINT_VISIBLE_SIZE, OPEN_HINT_HIT_SLOP_OPTIONS),
+    [],
+  );
 
   return (
     <View style={styles.subAgentCardStack}>
