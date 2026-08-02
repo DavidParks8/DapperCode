@@ -26,6 +26,7 @@ import { createAppTheme, AppThemeProvider } from '../theme';
 import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
 import { resetHuggedTextWidthCache } from './chatMessageUserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
+import { LinearTransition, ReduceMotion } from '../testing/reanimatedMock';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -55,20 +56,7 @@ type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
-jest.mock('react-native-reanimated', () => {
-  const reactNative = jest.requireActual('react-native');
-
-  return {
-    __esModule: true,
-    default: {
-      Image: reactNative.Image,
-    },
-    clamp: (value: number, min: number, max: number) => Math.min(Math.max(value, min), max),
-    useAnimatedStyle: (updater: () => unknown) => updater(),
-    useSharedValue: <T,>(value: T) => ({ value }),
-    withTiming: <T,>(value: T) => value,
-  };
-});
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 
 jest.mock('react-native-gesture-handler', () => {
   const React = jest.requireActual('react');
@@ -1023,6 +1011,31 @@ describe('ChatMessage system timeline matrices', () => {
       true,
     );
     act(() => tree.unmount());
+  });
+
+  it('wires the reasoning and tool timeline layout transitions to honor system Reduce Motion', () => {
+    const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
+
+    const reasoningTree = renderMessage({
+      id: 'timeline-reduce-motion-reasoning',
+      role: 'system',
+      systemKind: 'reasoning',
+      content: '• Plan\n  └ First thought\n  └ Second thought',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const toolTree = renderMessage({
+      id: 'timeline-reduce-motion-tool',
+      role: 'system',
+      systemKind: 'tool',
+      content: '• Called tool `search`\n  └ query=coverage\n  └ 3 results',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    reduceMotionSpy.mockRestore();
+    act(() => reasoningTree.unmount());
+    act(() => toolTree.unmount());
   });
 
   it('hides the reasoning toggle when the preview already shows every line', () => {

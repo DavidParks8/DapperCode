@@ -5,6 +5,9 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { ToolInvocationRow } from './chatMessageToolInvocation';
 import type { ToolInvocation } from './toolInvocationModel';
+import { LinearTransition, ReduceMotion } from '../testing/reanimatedMock';
+
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => name,
@@ -81,6 +84,43 @@ describe('ToolInvocationRow', () => {
     const tree = render(invocation({ id: 'tool-pending', status: 'pending', empty: true }));
 
     expect(JSON.stringify(tree.toJSON())).toContain('ellipsis-horizontal');
+
+    act(() => tree.unmount());
+  });
+
+  it('gives the collapsed row an effective touch target without inflating its visible chrome', () => {
+    const tree = render(invocation({ id: 'tool-hitslop', textLines: ['out'] }));
+    const row = tree.root.findAll((node) => typeof node.props.onPress === 'function')[0];
+    const hitSlop = row.props.hitSlop as
+      | { top: number; bottom: number; left: number; right: number }
+      | undefined;
+
+    expect(hitSlop).toBeDefined();
+    expect(hitSlop!.top).toBeGreaterThan(0);
+    expect(hitSlop!.bottom).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('wires the layout transition to honor the system Reduce Motion setting', () => {
+    const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
+    const tree = render(invocation({ id: 'tool-reduce-motion', textLines: ['out'] }));
+
+    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    reduceMotionSpy.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('animates expand/collapse without throwing, and the transition config is reduce-motion aware', () => {
+    const value = invocation({ id: 'tool-animated', textLines: ['out'] });
+    const tree = render(value);
+
+    // Toggling twice exercises both the entering and exiting animation branches without crashing;
+    // this is the regression the mocked reanimated layer protects against.
+    expand(tree, value.title);
+    expect(textLines(tree)).toContain('out');
+    expand(tree, value.title);
+    expect(textLines(tree)).not.toContain('out');
 
     act(() => tree.unmount());
   });

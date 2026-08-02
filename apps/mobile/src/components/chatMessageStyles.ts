@@ -116,7 +116,6 @@ export const createStyles = (theme: AppTheme) =>
     reasoningTitle: {
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
-      fontSize: 12,
       letterSpacing: 0,
       textTransform: 'none',
       flex: 1,
@@ -254,7 +253,7 @@ export const createStyles = (theme: AppTheme) =>
       flex: 1,
       lineHeight: 16,
     },
-    toolRowTitleMono: { fontFamily: theme.fonts.monoRegular, fontSize: 12 },
+    toolRowTitleMono: { fontFamily: theme.fonts.monoRegular },
     toolRowTitleError: { color: theme.colors.statusError },
     toolRowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     toolRowBody: {
