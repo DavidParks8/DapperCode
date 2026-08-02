@@ -14,10 +14,19 @@ const requestRegistration = requestPushRegistration as jest.MockedFunction<
   typeof requestPushRegistration
 >;
 
+type PushAction = Extract<AppStateAction, { type: `push/${string}` }>;
+
+function isPushAction(action: AppStateAction): action is PushAction {
+  return action.type.startsWith('push/');
+}
+
 function createStore(initial: Partial<AppStateData['push']> = {}) {
   const data = createDefaultAppStateData();
   data.push = { ...data.push, ...initial };
   const dispatchDurable = jest.fn(async (action: AppStateAction) => {
+    if (!isPushAction(action)) {
+      return data;
+    }
     switch (action.type) {
       case 'push/update':
         data.push = { ...data.push, ...action.patch };

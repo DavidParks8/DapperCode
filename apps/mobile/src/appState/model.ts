@@ -171,20 +171,20 @@ export function normalizePushSettings(
 ): PushSettingsState {
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const events =
-    record.events && typeof record.events === 'object'
-      ? (record.events as Record<string, unknown>)
+    record['events'] && typeof record['events'] === 'object'
+      ? (record['events'] as Record<string, unknown>)
       : {};
-  const registrations = normalizePushRegistrations(record.registrations, profiles);
+  const registrations = normalizePushRegistrations(record['registrations'], profiles);
   return {
-    optedOut: record.optedOut === true,
+    optedOut: record['optedOut'] === true,
     events: {
       turnCompleted:
-        typeof events.turnCompleted === 'boolean'
-          ? events.turnCompleted
+        typeof events['turnCompleted'] === 'boolean'
+          ? events['turnCompleted']
           : DEFAULT_PUSH_EVENT_PREFERENCES.turnCompleted,
       approvalRequested:
-        typeof events.approvalRequested === 'boolean'
-          ? events.approvalRequested
+        typeof events['approvalRequested'] === 'boolean'
+          ? events['approvalRequested']
           : DEFAULT_PUSH_EVENT_PREFERENCES.approvalRequested,
     },
     registrations,
@@ -217,8 +217,8 @@ function toPushRegistration(
     return null;
   }
   const registration = value as Record<string, unknown>;
-  const profileId = normalizeNullableString(registration.profileId);
-  const registrationId = normalizeNullableString(registration.registrationId);
+  const profileId = normalizeNullableString(registration['profileId']);
+  const registrationId = normalizeNullableString(registration['registrationId']);
   if (
     !profileId ||
     !registrationId ||
@@ -230,7 +230,7 @@ function toPushRegistration(
   }
   seenProfiles.add(profileId);
   seenRegistrations.add(registrationId);
-  return { profileId, registrationId, token: normalizeNullableString(registration.token) };
+  return { profileId, registrationId, token: normalizeNullableString(registration['token']) };
 }
 
 export function updatePushRegistration(
@@ -272,15 +272,15 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
   const parsed = parseAppSettings(
     JSON.stringify({
       version: APP_SETTINGS_VERSION,
-      defaultStartCwd: record.defaultStartCwd,
-      preferredAgentId: record.preferredAgentId,
-      agentSettings: record.agentSettings,
-      approvalMode: record.approvalMode,
-      showToolCalls: record.showToolCalls,
-      workspaceChatLimit: record.workspaceChatLimit,
-      appearancePreference: record.appearancePreference,
-      darkUiPalette: record.darkUiPalette,
-      recentBrowserTargetUrls: record.recentBrowserTargetUrls,
+      defaultStartCwd: record['defaultStartCwd'],
+      preferredAgentId: record['preferredAgentId'],
+      agentSettings: record['agentSettings'],
+      approvalMode: record['approvalMode'],
+      showToolCalls: record['showToolCalls'],
+      workspaceChatLimit: record['workspaceChatLimit'],
+      appearancePreference: record['appearancePreference'],
+      darkUiPalette: record['darkUiPalette'],
+      recentBrowserTargetUrls: record['recentBrowserTargetUrls'],
     }),
   );
   return {

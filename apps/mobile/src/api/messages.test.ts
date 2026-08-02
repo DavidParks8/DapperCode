@@ -31,6 +31,21 @@ describe('messages', () => {
       'Tool result',
       'Working',
     ]);
+    expect(
+      getMessageText({
+        id: 'malformed-assistant',
+        role: 'assistant',
+        content: { unexpected: true },
+      }),
+    ).toBe('');
+    expect(
+      getMessageText({
+        id: 'malformed-tool',
+        role: 'tool',
+        content: { unexpected: true },
+        toolCallId: 'tool-2',
+      }),
+    ).toBe('');
   });
 
   it('reads sub-agent metadata only from matching activity messages', () => {
@@ -48,8 +63,24 @@ describe('messages', () => {
       'now',
     );
 
-    expect(getSubAgentMeta(activity)).toEqual(subAgent);
+    const firstMeta = getSubAgentMeta(activity);
+    expect(firstMeta).toBe(subAgent);
+    expect(getSubAgentMeta(activity)).toBe(firstMeta);
     expect(getSubAgentMeta(otherActivity)).toBeUndefined();
+    const metaWithExplicitUndefined = {
+      tool: 'spawnAgent',
+      prompt: undefined,
+      senderThreadId: undefined,
+      receiverThreadIds: ['child'],
+      agentStatus: undefined,
+    };
+    const activityWithExplicitUndefined = createActivityMessage(
+      'subagent-with-undefined',
+      SUBAGENT_ACTIVITY_TYPE,
+      { text: 'Spawned reviewer', subAgent: metaWithExplicitUndefined },
+      'now',
+    );
+    expect(getSubAgentMeta(activityWithExplicitUndefined)).toBe(metaWithExplicitUndefined);
     expect(
       getSubAgentMeta({
         id: 'assistant',
@@ -58,6 +89,21 @@ describe('messages', () => {
         createdAt: 'now',
       }),
     ).toBeUndefined();
+
+    const malformedMeta = getSubAgentMeta({
+      id: 'malformed-subagent',
+      role: 'activity',
+      activityType: SUBAGENT_ACTIVITY_TYPE,
+      content: {
+        text: 'Spawned reviewer',
+        subAgent: {
+          tool: 42,
+          receiverThreadIds: ['child', 7],
+          agentStatus: 'running',
+        },
+      },
+    });
+    expect(malformedMeta).toBeUndefined();
   });
 
   it('formats assistant tool calls and omits empty arguments', () => {

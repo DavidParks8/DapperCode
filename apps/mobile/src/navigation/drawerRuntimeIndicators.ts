@@ -1,6 +1,7 @@
 import type { ChatSummary, RpcNotification } from '../api/types';
 import { parseAgUiEventNotification, type AgUiEventEnvelope } from '../api/agUi';
 import type { ChatWorkspaceSection } from './chatThreadTree';
+import { EventType } from '@ag-ui/core';
 
 export interface DrawerRunIndicator {
   source: 'heartbeat' | 'lifecycle';
@@ -134,13 +135,13 @@ function updateDrawerRunIndicatorsForAgUiEvent(
   agUi: AgUiEventEnvelope,
   now: number,
 ): DrawerRunIndicatorMap {
-  if (agUi.event.type === 'RUN_STARTED') {
+  if (agUi.event.type === EventType.RUN_STARTED) {
     return setRunningIndicator(previous, agUi.threadId, 'lifecycle', now);
   }
-  if (agUi.event.type === 'TEXT_MESSAGE_CONTENT') {
+  if (agUi.event.type === EventType.TEXT_MESSAGE_CONTENT) {
     return setRunningIndicator(previous, agUi.threadId, 'heartbeat', now);
   }
-  if (agUi.event.type === 'RUN_FINISHED' || agUi.event.type === 'RUN_ERROR') {
+  if (agUi.event.type === EventType.RUN_FINISHED || agUi.event.type === EventType.RUN_ERROR) {
     return clearRunningIndicator(previous, agUi.threadId);
   }
   return previous;
@@ -201,17 +202,17 @@ function resolveDrawerThreadRecord(
   msg: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
   return (
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread)
+    toRecord(params?.['thread']) ??
+    toRecord(params?.['threadState']) ??
+    toRecord(params?.['thread_state']) ??
+    toRecord(msg?.['thread'])
   );
 }
 
 function resolveDrawerSubagentSpawnRecord(
   source: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
-  return toRecord(toRecord(source?.subagent ?? source?.subAgent)?.thread_spawn);
+  return toRecord(toRecord(source?.['subagent'] ?? source?.['subAgent'])?.['thread_spawn']);
 }
 
 interface DrawerThreadIdContext {
@@ -228,11 +229,11 @@ function buildDrawerThreadIdContext(
   params: Record<string, unknown> | null,
   msgArg?: Record<string, unknown> | null,
 ): DrawerThreadIdContext {
-  const msg = msgArg ?? toRecord(params?.msg);
+  const msg = msgArg ?? toRecord(params?.['msg']);
   const threadRecord = resolveDrawerThreadRecord(params, msg);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
+  const threadSourceRecord = toRecord(threadRecord?.['source']);
+  const turnRecord = toRecord(params?.['turn']) ?? toRecord(msg?.['turn']);
+  const sourceRecord = toRecord(params?.['source']) ?? toRecord(msg?.['source']);
   return {
     msg,
     threadRecord,
@@ -246,20 +247,20 @@ function buildDrawerThreadIdContext(
 
 function extractThreadIdFromMsg(msg: Record<string, unknown> | null): string | null {
   return (
-    readNonEmptyString(msg?.thread_id) ??
-    readNonEmptyString(msg?.threadId) ??
-    readNonEmptyString(msg?.conversation_id) ??
-    readNonEmptyString(msg?.conversationId) ??
+    readNonEmptyString(msg?.['thread_id']) ??
+    readNonEmptyString(msg?.['threadId']) ??
+    readNonEmptyString(msg?.['conversation_id']) ??
+    readNonEmptyString(msg?.['conversationId']) ??
     null
   );
 }
 
 function extractThreadIdFromParams(params: Record<string, unknown> | null): string | null {
   return (
-    readNonEmptyString(params?.thread_id) ??
-    readNonEmptyString(params?.threadId) ??
-    readNonEmptyString(params?.conversation_id) ??
-    readNonEmptyString(params?.conversationId) ??
+    readNonEmptyString(params?.['thread_id']) ??
+    readNonEmptyString(params?.['threadId']) ??
+    readNonEmptyString(params?.['conversation_id']) ??
+    readNonEmptyString(params?.['conversationId']) ??
     null
   );
 }
@@ -268,18 +269,20 @@ function extractThreadIdFromThreadRecord(
   threadRecord: Record<string, unknown> | null,
 ): string | null {
   return (
-    readNonEmptyString(threadRecord?.id) ??
-    readNonEmptyString(threadRecord?.thread_id) ??
-    readNonEmptyString(threadRecord?.threadId) ??
-    readNonEmptyString(threadRecord?.conversation_id) ??
-    readNonEmptyString(threadRecord?.conversationId) ??
+    readNonEmptyString(threadRecord?.['id']) ??
+    readNonEmptyString(threadRecord?.['thread_id']) ??
+    readNonEmptyString(threadRecord?.['threadId']) ??
+    readNonEmptyString(threadRecord?.['conversation_id']) ??
+    readNonEmptyString(threadRecord?.['conversationId']) ??
     null
   );
 }
 
 function extractThreadIdFromTurnRecord(turnRecord: Record<string, unknown> | null): string | null {
   return (
-    readNonEmptyString(turnRecord?.thread_id) ?? readNonEmptyString(turnRecord?.threadId) ?? null
+    readNonEmptyString(turnRecord?.['thread_id']) ??
+    readNonEmptyString(turnRecord?.['threadId']) ??
+    null
   );
 }
 
@@ -287,20 +290,20 @@ function extractThreadIdFromSourceRecord(
   sourceRecord: Record<string, unknown> | null,
 ): string | null {
   return (
-    readNonEmptyString(sourceRecord?.thread_id) ??
-    readNonEmptyString(sourceRecord?.threadId) ??
-    readNonEmptyString(sourceRecord?.conversation_id) ??
-    readNonEmptyString(sourceRecord?.conversationId) ??
-    readNonEmptyString(sourceRecord?.parent_thread_id) ??
-    readNonEmptyString(sourceRecord?.parentThreadId) ??
+    readNonEmptyString(sourceRecord?.['thread_id']) ??
+    readNonEmptyString(sourceRecord?.['threadId']) ??
+    readNonEmptyString(sourceRecord?.['conversation_id']) ??
+    readNonEmptyString(sourceRecord?.['conversationId']) ??
+    readNonEmptyString(sourceRecord?.['parent_thread_id']) ??
+    readNonEmptyString(sourceRecord?.['parentThreadId']) ??
     null
   );
 }
 
 function extractParentThreadId(record: Record<string, unknown> | null): string | null {
   return (
-    readNonEmptyString(record?.parent_thread_id) ??
-    readNonEmptyString(record?.parentThreadId) ??
+    readNonEmptyString(record?.['parent_thread_id']) ??
+    readNonEmptyString(record?.['parentThreadId']) ??
     null
   );
 }
@@ -333,7 +336,9 @@ function resolveDrawerStatusRecord(
   msg: Record<string, unknown> | null,
   threadRecord: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
-  return toRecord(params.status) ?? toRecord(msg?.status) ?? toRecord(threadRecord?.status);
+  return (
+    toRecord(params['status']) ?? toRecord(msg?.['status']) ?? toRecord(threadRecord?.['status'])
+  );
 }
 
 function resolveDrawerStatusToken(
@@ -343,11 +348,11 @@ function resolveDrawerStatusToken(
   threadRecord: Record<string, unknown> | null,
 ): string | null {
   return (
-    readString(params.status) ??
-    readString(msg?.status) ??
-    readString(statusRecord?.type) ??
-    readString(statusRecord?.status) ??
-    readString(threadRecord?.status)
+    readString(params['status']) ??
+    readString(msg?.['status']) ??
+    readString(statusRecord?.['type']) ??
+    readString(statusRecord?.['status']) ??
+    readString(threadRecord?.['status'])
   );
 }
 
@@ -356,7 +361,7 @@ export function extractDrawerStatusHint(params: Record<string, unknown> | null):
     return null;
   }
 
-  const msg = toRecord(params.msg);
+  const msg = toRecord(params['msg']);
   const threadRecord = resolveDrawerThreadRecord(params, msg);
   const statusRecord = resolveDrawerStatusRecord(params, msg, threadRecord);
 

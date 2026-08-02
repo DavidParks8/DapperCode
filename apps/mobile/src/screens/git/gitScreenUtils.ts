@@ -64,7 +64,11 @@ export function parseAheadCount(rawStatus: string): number {
     return 0;
   }
 
-  const value = Number.parseInt(match[1], 10);
+  const count = match[1];
+  if (!count) {
+    return 0;
+  }
+  const value = Number.parseInt(count, 10);
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
@@ -79,7 +83,11 @@ export function parseBehindCount(rawStatus: string): number {
     return 0;
   }
 
-  const value = Number.parseInt(match[1], 10);
+  const count = match[1];
+  if (!count) {
+    return 0;
+  }
+  const value = Number.parseInt(count, 10);
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 

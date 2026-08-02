@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,6 +49,10 @@ import type { AppStore } from '../../state/types';
 import { refreshBridgeCapabilitiesAtom } from '../../state/bridge/capabilities';
 import { routes } from '../../navigation/routes';
 
+function accessibilityLabel(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
@@ -94,7 +99,7 @@ jest.mock('../../components/ApprovalBanner', () => ({
   ApprovalBanner: (props: Record<string, unknown>) => {
     approvalBannerProps = props;
     mockApprovalProps = props;
-    const approval = props.approval as
+    const approval = props['approval'] as
       { reason?: unknown; message?: unknown; title?: unknown } | undefined;
     return (
       (typeof approval?.reason === 'string' && approval.reason) ||
@@ -128,7 +133,7 @@ jest.mock('../../components/BridgeUiSurface', () => ({
     onDismiss: (surface: BridgeUiSurface) => void;
   }) => {
     mockBridgeUiProps.push(props);
-    bridgeModalProps = props as unknown as Record<string, unknown>;
+    bridgeModalProps = props;
     return props.surface.title;
   },
   BridgeUiWorkflowCard: (props: {
@@ -332,12 +337,12 @@ function MainRouteShell() {
   }
 
   async function pressLabel(root: Queryable, label: string): Promise<void> {
-    const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+    const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
     if (!node) {
       throw new Error(`Missing label: ${label}`);
     }
     await act(async () => {
-      (node.props.onPress as () => void)();
+      node.props.onPress();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -354,7 +359,7 @@ function MainRouteShell() {
   function messageInput(root: Queryable): Queryable {
     const input = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Message');
+      .find((node) => node.props['accessibilityLabel'] === 'Message');
     if (!input) {
       throw new Error('Missing composer');
     }
@@ -465,6 +470,10 @@ function MainRouteShell() {
   describe('MainScreen shell behavior', () => {
     beforeEach(() => {
       jest.useFakeTimers();
+      Object.defineProperty(AppState, 'currentState', {
+        configurable: true,
+        value: 'active',
+      });
     });
 
     it.each([{ connected: true }, { connected: false }])(
@@ -477,7 +486,7 @@ function MainRouteShell() {
         expect(
           root
             .findAllByType(TextInput)
-            .some((node) => node.props.placeholder === 'Message Codex...'),
+            .some((node) => node.props['placeholder'] === 'Message Codex...'),
         ).toBe(true);
         act(() => tree.unmount());
       },
@@ -491,7 +500,7 @@ function MainRouteShell() {
       const root = tree.root as Queryable;
 
       expect(hasText(root, 'Real thread')).toBe(true);
-      expect(root.findAllByType(FlatList)[0]?.props.data).toEqual(
+      expect(root.findAllByType(FlatList)[0]?.props['data']).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             message: expect.objectContaining({ content: 'Rendered answer' }),
@@ -499,7 +508,7 @@ function MainRouteShell() {
         ]),
       );
       expect(
-        root.findAllByType(TextInput).some((node) => node.props.placeholder === 'Reply...'),
+        root.findAllByType(TextInput).some((node) => node.props['placeholder'] === 'Reply...'),
       ).toBe(true);
       act(() => tree.unmount());
     });
@@ -518,7 +527,7 @@ function MainRouteShell() {
       });
       const root = tree.root as Queryable;
 
-      expect(root.findAllByType(FlatList)[0]?.props.data).toEqual(
+      expect(root.findAllByType(FlatList)[0]?.props['data']).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             message: expect.objectContaining({ content: 'Rendered answer' }),
@@ -539,7 +548,7 @@ function MainRouteShell() {
       });
 
       expect(hasText(root, 'Refreshed thread')).toBe(true);
-      expect(root.findAllByType(FlatList)[0]?.props.data).toEqual(
+      expect(root.findAllByType(FlatList)[0]?.props['data']).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             message: expect.objectContaining({ content: 'Rendered answer' }),
@@ -547,7 +556,7 @@ function MainRouteShell() {
         ]),
       );
       expect(
-        root.findAllByType(TextInput).some((node) => node.props.placeholder === 'Reply...'),
+        root.findAllByType(TextInput).some((node) => node.props['placeholder'] === 'Reply...'),
       ).toBe(true);
       act(() => tree.unmount());
     });
@@ -565,7 +574,7 @@ function MainRouteShell() {
       });
 
       expect(api.getChat as jest.Mock).toHaveBeenCalledWith(chat.id);
-      expect((tree.root as Queryable).findAllByType(FlatList)[0]?.props.data).toEqual(
+      expect((tree.root as Queryable).findAllByType(FlatList)[0]?.props['data']).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             message: expect.objectContaining({ content: 'Rendered answer' }),
@@ -589,7 +598,7 @@ function MainRouteShell() {
       expect(
         (tree.root as Queryable)
           .findAllByType(TextInput)
-          .some((node) => node.props.placeholder === 'Message Codex...'),
+          .some((node) => node.props['placeholder'] === 'Message Codex...'),
       ).toBe(true);
       act(() => tree.unmount());
     });
@@ -622,14 +631,13 @@ function MainRouteShell() {
           ],
         },
       });
-      expect(approvalBannerProps?.approval).toEqual(
+      expect(approvalBannerProps?.['approval']).toEqual(
         expect.objectContaining({ requestId: 'approval-1' }),
       );
       await act(async () => {
-        await (approvalBannerProps?.onResolve as (id: string, decision: string) => Promise<void>)(
-          'approval-1',
-          'allow-once',
-        );
+        await (
+          approvalBannerProps?.['onResolve'] as (id: string, decision: string) => Promise<void>
+        )('approval-1', 'allow-once');
       });
       expect(api.resolveApproval).toHaveBeenCalledWith(
         'approval-1',
@@ -685,7 +693,7 @@ function MainRouteShell() {
       await pressLabel(root, 'Atomic');
       const retries = root
         .findAllByType(TextInput)
-        .find((node) => node.props.accessibilityLabel === 'Retries');
+        .find((node) => node.props['accessibilityLabel'] === 'Retries');
       if (!retries) {
         throw new Error('Missing retries input');
       }
@@ -693,7 +701,7 @@ function MainRouteShell() {
       const submitText = root.findAll((node) => node.children.includes('Submit answers'))[0];
       let submit = submitText as Queryable | null;
       while (submit && typeof submit.props.onPress !== 'function') {
-        submit = submit.parent as Queryable | null;
+        submit = submit.parent;
       }
       await act(async () => {
         (submit?.props.onPress as () => void)();
@@ -754,7 +762,7 @@ function MainRouteShell() {
       const root = tree.root as Queryable;
       const message = root
         .findAllByType(TextInput)
-        .find((node) => node.props.accessibilityLabel === 'Message');
+        .find((node) => node.props['accessibilityLabel'] === 'Message');
       if (!message) {
         throw new Error('Missing composer');
       }
@@ -835,7 +843,7 @@ function MainRouteShell() {
       });
       const root = tree.root as Queryable;
       const transcriptItems = () =>
-        (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+        (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as Array<{
           kind: string;
           message?: Chat['messages'][number];
         }>;
@@ -957,7 +965,7 @@ function MainRouteShell() {
 
       await pressLabel(root, 'Fast mode');
       act(() => messageInput(root).props.onChangeText('Build the release checklist'));
-      expect(messageInput(root).props.value).toBe('Build the release checklist');
+      expect(messageInput(root).props['value']).toBe('Build the release checklist');
       expect(api.createChatIdempotent).not.toHaveBeenCalled();
       expect(hasText(root, "Let's build")).toBe(true);
       await pressLabel(root, 'Send message');
@@ -1011,7 +1019,7 @@ function MainRouteShell() {
       let sendPromise: Promise<void> | undefined;
       await act(async () => {
         sendPromise = (
-          root.findAll((candidate) => candidate.props.accessibilityLabel === 'Send message')[0]
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
             ?.props.onPress as () => Promise<void>
         )();
         await Promise.resolve();
@@ -1089,7 +1097,7 @@ function MainRouteShell() {
         params: { threadId, runId, sourceTurnId: 'turn-first', event },
       });
       const transcriptItems = () =>
-        (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+        (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as Array<{
           kind: string;
           message?: Chat['messages'][number];
           invocation?: { id: string; title: string };
@@ -1110,7 +1118,7 @@ function MainRouteShell() {
       let sendPromise: Promise<void> | undefined;
       await act(async () => {
         sendPromise = (
-          root.findAll((candidate) => candidate.props.accessibilityLabel === 'Send message')[0]
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
             ?.props.onPress as () => Promise<void>
         )();
         await Promise.resolve();
@@ -1205,7 +1213,7 @@ function MainRouteShell() {
       expect(store.get(activeTurnIdAtom)).toBe('turn-first');
       expect(store.get(activityAtom).tone).toBe('running');
       expect(
-        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+        root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
 
       await act(async () => {
@@ -1218,7 +1226,7 @@ function MainRouteShell() {
       expect(store.get(activeTurnIdAtom)).toBeNull();
       expect(store.get(activityAtom).tone).not.toBe('running');
       expect(
-        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+        root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
       expect(hasText(root, 'Other answer')).toBe(true);
 
@@ -1253,7 +1261,7 @@ function MainRouteShell() {
       expect(store.get(activeTurnIdAtom)).toBe('turn-first');
       expect(store.get(activityAtom).tone).toBe('running');
       expect(
-        root.findAll((candidate) => candidate.props.accessibilityLabel === 'Stop agent'),
+        root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
       expect(transcriptMessages()).toEqual(
         expect.arrayContaining([
@@ -1305,7 +1313,7 @@ function MainRouteShell() {
 
       await pressLabel(root, 'Send message');
 
-      expect(messageInput(root).props.value).toBe('Keep this draft');
+      expect(messageInput(root).props['value']).toBe('Keep this draft');
       expect(hasText(root, `${method} failed`)).toBe(true);
       if (stage === 'create') {
         expect(textCount(root, 'Keep this draft')).toBe(0);
@@ -1350,7 +1358,7 @@ function MainRouteShell() {
       expect(hasText(root, 'Clarification needed')).toBe(false);
 
       await emitWs(approvalRequested());
-      expect(approvalBannerProps?.approval).toEqual(
+      expect(approvalBannerProps?.['approval']).toEqual(
         expect.objectContaining({ requestId: 'approval-1' }),
       );
       await emitWs({ method: 'bridge/approval.resolved', params: { id: 'approval-1' } });
@@ -1386,7 +1394,7 @@ function MainRouteShell() {
         pendingOpenChatSnapshot: chat,
       });
       await emitWs(approvalRequested('approval-retry'));
-      const resolve = approvalBannerProps?.onResolve as (
+      const resolve = approvalBannerProps?.['onResolve'] as (
         id: string,
         decision: string,
       ) => Promise<void>;
@@ -1425,11 +1433,11 @@ function MainRouteShell() {
 
       await pressLabel(root, 'Send message');
       expect(hasText(root, 'Queue this')).toBe(true);
-      expect(messageInput(root).props.value).toBe('');
+      expect(messageInput(root).props['value']).toBe('');
 
       act(() => messageInput(root).props.onChangeText('Retry this queue'));
       await pressLabel(root, 'Send message');
-      expect(messageInput(root).props.value).toBe('Retry this queue');
+      expect(messageInput(root).props['value']).toBe('Retry this queue');
       expect(hasText(root, 'queue unavailable')).toBe(true);
       act(() => tree.unmount());
     });
@@ -1795,7 +1803,7 @@ function MainRouteShell() {
   }
 
   function byLabel(root: Queryable, label: string): Queryable {
-    const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+    const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
     if (!node) {
       throw new Error(`Missing accessibility label: ${label}`);
     }
@@ -1804,7 +1812,7 @@ function MainRouteShell() {
 
   function byLabelPrefix(root: Queryable, prefix: string): Queryable {
     const node = root.findAll((candidate) =>
-      String(candidate.props.accessibilityLabel ?? '').startsWith(prefix),
+      accessibilityLabel(candidate.props['accessibilityLabel']).startsWith(prefix),
     )[0];
     if (!node) {
       throw new Error(`Missing accessibility label prefix: ${prefix}`);
@@ -1815,7 +1823,7 @@ function MainRouteShell() {
   function textInput(root: Queryable, label: string): Queryable {
     const input = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === label);
+      .find((node) => node.props['accessibilityLabel'] === label);
     if (!input) {
       throw new Error(`Missing input: ${label}`);
     }
@@ -1843,7 +1851,7 @@ function MainRouteShell() {
 
   async function press(node: Queryable): Promise<void> {
     await act(async () => {
-      (node.props.onPress as () => void)();
+      node.props.onPress();
       await flush();
     });
   }
@@ -1956,7 +1964,9 @@ function MainRouteShell() {
 
       await press(byLabel(root, 'Agent, Codex'));
       expect(hasText(root, 'Select agent')).toBe(true);
-      expect(root.findAll((node) => node.props.accessibilityLabel === 'Offline')).toHaveLength(0);
+      expect(root.findAll((node) => node.props['accessibilityLabel'] === 'Offline')).toHaveLength(
+        0,
+      );
       await press(byLabel(root, 'Claude'));
       expect(byLabel(root, 'Agent, Claude')).toBeTruthy();
 
@@ -1965,7 +1975,7 @@ function MainRouteShell() {
       await press(byLabel(root, 'Plan mode'));
       expect(byLabel(root, 'Agent mode, Plan mode')).toBeTruthy();
       await press(byLabel(root, 'Fast mode'));
-      expect(byLabel(root, 'Fast mode').props.accessibilityState).toEqual(
+      expect(byLabel(root, 'Fast mode').props['accessibilityState']).toEqual(
         expect.objectContaining({ checked: true }),
       );
 
@@ -1976,7 +1986,7 @@ function MainRouteShell() {
       });
       expect(byLabelPrefix(rootOf(failed.tree), 'Agent mode, Default')).toBeTruthy();
       expect(
-        rootOf(failed.tree).findAll((node) => node.props.accessibilityLabel === 'Fast mode'),
+        rootOf(failed.tree).findAll((node) => node.props['accessibilityLabel'] === 'Fast mode'),
       ).toHaveLength(0);
       act(() => failed.tree.unmount());
     });
@@ -2003,8 +2013,9 @@ function MainRouteShell() {
       const api = createApi();
       const { tree, store } = await renderMain({ api });
       const root = rootOf(tree);
-      const modeControlLabel = byLabelPrefix(root, 'Agent mode, ').props
-        .accessibilityLabel as string;
+      const modeControlLabel = byLabelPrefix(root, 'Agent mode, ').props[
+        'accessibilityLabel'
+      ] as string;
       expect(byLabel(root, 'Fast mode')).toBeTruthy();
 
       (api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
@@ -2104,12 +2115,12 @@ function MainRouteShell() {
 
       expect(byLabel(root, 'Model, retired/model-x')).toBeTruthy();
       await press(byLabel(root, 'Model, retired/model-x'));
-      expect(byLabel(root, 'Use server default').props.accessibilityState).toEqual(
+      expect(byLabel(root, 'Use server default').props['accessibilityState']).toEqual(
         expect.objectContaining({ selected: false }),
       );
       expect(
         root.findAll((node) =>
-          String(node.props.accessibilityLabel ?? '').startsWith('Thinking level, '),
+          accessibilityLabel(node.props['accessibilityLabel']).startsWith('Thinking level, '),
         ),
       ).toHaveLength(0);
       act(() => tree.unmount());
@@ -2249,7 +2260,7 @@ function MainRouteShell() {
       });
       expect(byLabel(root, 'Choose a model')).toBeTruthy();
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Use server default'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Use server default'),
       ).toHaveLength(0);
       expect(byLabel(root, 'GitHub Copilot · GPT-5.4')).toBeTruthy();
       await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
@@ -2356,10 +2367,14 @@ function MainRouteShell() {
       const root = rootOf(tree);
 
       // The title itself is a scrollable surface, so nothing around it may be pressable.
-      const titleScroll = root.findAll(
-        (node) =>
-          node.props.accessibilityLabel === rootChat.title && node.props.horizontal === true,
-      )[0];
+      const titleScroll = requireTestValue(
+        root.findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === rootChat.title &&
+            node.props['horizontal'] === true,
+        )[0],
+        'indexed test value',
+      );
       expect(titleScroll).toBeTruthy();
       let ancestor = titleScroll.parent;
       while (ancestor) {
@@ -2404,7 +2419,7 @@ function MainRouteShell() {
 
       await press(byLabelPrefix(root, 'Workspace, '));
       expect(
-        root.findAll((node) => node.props.accessibilityRole === 'progressbar').length,
+        root.findAll((node) => node.props['accessibilityRole'] === 'progressbar').length,
       ).toBeGreaterThan(0);
       await act(async () => {
         resolveBrowse?.({
@@ -2476,7 +2491,7 @@ function MainRouteShell() {
         textInput(root, 'Repository URL').props.onChangeText('git@github.com:org/repo.git');
         await flush();
       });
-      expect(textInput(root, 'Clone directory name').props.value).toBe('repo');
+      expect(textInput(root, 'Clone directory name').props['value']).toBe('repo');
       await press(byLabelPrefix(root, 'Clone into '));
       await press(byLabel(root, 'Open folder destination'));
       await press(byLabel(root, 'Use destination workspace'));
@@ -2566,7 +2581,7 @@ function MainRouteShell() {
       await press(byLabel(root, 'retry · broken.txt, remove attachment'));
       expect(
         root.findAll(
-          (node) => node.props.accessibilityLabel === 'retry · broken.txt, remove attachment',
+          (node) => node.props['accessibilityLabel'] === 'retry · broken.txt, remove attachment',
         ),
       ).toHaveLength(0);
 
@@ -2594,7 +2609,7 @@ function MainRouteShell() {
       await press(byLabel(root, '1 agent'));
       await press(byLabel(root, 'Sub-agent 1'));
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Sub-agent starting').length,
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Sub-agent starting').length,
       ).toBeGreaterThan(0);
       expect(hasText(root, 'Starting…')).toBe(true);
       act(() => tree.unmount());
@@ -2613,7 +2628,7 @@ function MainRouteShell() {
       await press(byLabel(root, '1 agent'));
       await press(byLabel(root, 'Sub-agent 1'));
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Sub-agent starting'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Sub-agent starting'),
       ).toHaveLength(0);
       expect(
         root.findAllByType(ChatMessage).some((node) => node.props.message.id === 'message-sub'),
@@ -2670,9 +2685,10 @@ function MainRouteShell() {
         await flush();
       });
 
-      const agentChip = root.findAll((node) =>
-        /^\d+ agents?$/.test(String(node.props.accessibilityLabel)),
-      )[0];
+      const agentChip = requireTestValue(
+        root.findAll((node) => /^\d+ agents?$/.test(String(node.props['accessibilityLabel'])))[0],
+        'indexed test value',
+      );
       expect(agentChip).toBeTruthy();
       await press(agentChip);
       await press(byLabel(root, 'Sub-agent 1'));
@@ -2689,7 +2705,7 @@ function MainRouteShell() {
       const nestedNode = root
         .findAllByType(ChatMessage)
         .find((node) => node.props.message.id === 'message-sub-nested');
-      const openNested = nestedNode?.props.onOpenSubAgentThread as
+      const openNested = nestedNode?.props['onOpenSubAgentThread'] as
         ((threadId: string) => void) | undefined;
       expect(typeof openNested).toBe('function');
       await act(async () => {
@@ -2752,12 +2768,12 @@ function MainRouteShell() {
       });
 
       expect(
-        root.findAll((node) => String(node.props.accessibilityLabel).startsWith('Agents, ')),
+        root.findAll((node) => String(node.props['accessibilityLabel']).startsWith('Agents, ')),
       ).toHaveLength(0);
       expect(hasText(root, 'running now')).toBe(false);
       // The agent thread picker is still reachable from the header.
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === '1 agent').length,
+        root.findAll((node) => node.props['accessibilityLabel'] === '1 agent').length,
       ).toBeGreaterThan(0);
       act(() => tree.unmount());
     });
@@ -2828,7 +2844,10 @@ function MainRouteShell() {
       const root = rootOf(tree);
       await advance();
 
-      const rootMessage = root.findAllByType(ChatMessage)[0];
+      const rootMessage = requireTestValue(
+        root.findAllByType(ChatMessage)[0],
+        'indexed test value',
+      );
       expect(rootMessage).toBeTruthy();
       act(() => rootMessage.props.onOpenLocalPreview('http://127.0.0.1:5173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
@@ -2847,10 +2866,10 @@ function MainRouteShell() {
         .find((node) => node.props.message.id === 'message-sub');
       expect(detailMessage).toBeTruthy();
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Refresh sub-agent transcript'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Refresh sub-agent transcript'),
       ).toHaveLength(0);
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Open sub-agent as chat'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Open sub-agent as chat'),
       ).toHaveLength(0);
       act(() => detailMessage?.props.onOpenLocalPreview('http://localhost:4173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://localhost:4173');
@@ -3071,7 +3090,7 @@ function MainRouteShell() {
       role: Chat['messages'][number]['role'];
     };
   }> {
-    return ((tree.root as Queryable).findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+    return ((tree.root as Queryable).findAllByType(FlatList)[0]?.props['data'] ?? []) as Array<{
       message: {
         content: string;
         id: string;
@@ -3293,7 +3312,7 @@ function MainRouteShell() {
       const isChatMessageProps = (
         props: Record<string, unknown>,
       ): props is Record<string, unknown> & ChatMessageProps => {
-        const message = props.message;
+        const message = props['message'];
         return (
           typeof message === 'object' &&
           message !== null &&
@@ -3302,8 +3321,8 @@ function MainRouteShell() {
           'role' in message &&
           typeof message.role === 'string' &&
           'content' in message &&
-          (props.onOpenSubAgentThread === undefined ||
-            typeof props.onOpenSubAgentThread === 'function')
+          (props['onOpenSubAgentThread'] === undefined ||
+            typeof props['onOpenSubAgentThread'] === 'function')
         );
       };
       const messageProps = (node: Queryable) => {
@@ -3312,7 +3331,7 @@ function MainRouteShell() {
         }
         return node.props;
       };
-      const renderedMessages = () => root.findAllByType(ChatMessage) as Queryable[];
+      const renderedMessages = () => root.findAllByType(ChatMessage);
       const renderedMessage = (messageId: string) => {
         const node = renderedMessages().find(
           (candidate) => messageProps(candidate).message.id === messageId,
@@ -3390,11 +3409,14 @@ function MainRouteShell() {
       const childMessage = () => renderedMessage('child-live-answer').props.message;
       expect(getMessageText(childMessage())).toBe('Streaming child transcript');
 
-      const back = root.findAll(
-        (node) => node.props.accessibilityLabel === 'Back from sub-agent transcript',
-      )[0];
+      const back = requireTestValue(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Back from sub-agent transcript',
+        )[0],
+        'indexed test value',
+      );
       await act(async () => {
-        (back.props.onPress as () => void)();
+        (back.props['onPress'] as () => void)();
         jest.advanceTimersByTime(250);
         await Promise.resolve();
       });
@@ -3643,7 +3665,7 @@ function MainRouteShell() {
       for (const event of validEvents) {
         await emit(event);
       }
-      expect(mockApprovalProps?.approval).toEqual(
+      expect(mockApprovalProps?.['approval']).toEqual(
         expect.objectContaining({ requestId: 'approval-current' }),
       );
 
@@ -3756,7 +3778,12 @@ function MainRouteShell() {
       if (!updated) {
         throw new Error('Updated bridge UI surface was not rendered');
       }
-      await act(async () => updated.onAction(updated.surface, updated.surface.actions[0]));
+      await act(async () =>
+        updated.onAction(
+          updated.surface,
+          requireTestValue(updated.surface.actions[0], 'indexed test value'),
+        ),
+      );
       expect(api.resolveBridgeUiSurface).toHaveBeenCalledWith('surface-1', {
         threadId,
         turnId: 'turn-events',
@@ -3959,7 +3986,7 @@ function MainRouteShell() {
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
-    }) as unknown as MockApi;
+    });
   }
 
   function text(root: Queryable, value: string): boolean {
@@ -3974,7 +4001,7 @@ function MainRouteShell() {
   function input(root: Queryable): ReactTestInstance {
     const result = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Message');
+      .find((node) => node.props['accessibilityLabel'] === 'Message');
     if (!result) {
       throw new Error('Message input not rendered');
     }
@@ -3984,7 +4011,7 @@ function MainRouteShell() {
   function transcript(
     root: Queryable,
   ): Array<{ message: { id: string; content: string; role: Chat['messages'][number]['role'] } }> {
-    return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+    return (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as Array<{
       message: {
         id: string;
         content: string;
@@ -3995,20 +4022,20 @@ function MainRouteShell() {
 
   async function press(root: Queryable, label: string): Promise<void> {
     const result = root.findAll(
-      (node) => node.props.accessibilityLabel === label || node.children.includes(label),
+      (node) => node.props['accessibilityLabel'] === label || node.children.includes(label),
     )[0];
     if (!result) {
       throw new Error(`Control not rendered: ${label}`);
     }
     let target: Queryable | null = result;
-    while (target && typeof target.props.onPress !== 'function') {
+    while (target && typeof target.props['onPress'] !== 'function') {
       target = target.parent;
     }
     if (!target) {
       throw new Error(`Control is not pressable: ${label}`);
     }
     await act(async () => {
-      (target?.props.onPress as () => void)();
+      (target?.props['onPress'] as () => void)();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -4149,7 +4176,7 @@ function MainRouteShell() {
       expect(onRecovery).toHaveBeenCalledTimes(1);
 
       await harness.setConnected(true);
-      expect(root.findAll((node) => node.props.title === 'Bridge disconnected')).toHaveLength(0);
+      expect(root.findAll((node) => node.props['title'] === 'Bridge disconnected')).toHaveLength(0);
       harness.unmount();
     });
 
@@ -4161,13 +4188,15 @@ function MainRouteShell() {
       { value: new Error('capabilities unavailable'), expectedAgentLabel: 'Codex' },
     ])('renders unavailable agent capability state', async ({ value, expectedAgentLabel }) => {
       const harness = await renderMain({ api: createApi({ capabilities: value }) });
-      expect(input(harness.tree.root as Queryable).props.placeholder).toContain(expectedAgentLabel);
-      expect(input(harness.tree.root as Queryable).props.placeholder).not.toContain(
+      expect(input(harness.tree.root as Queryable).props['placeholder']).toContain(
+        expectedAgentLabel,
+      );
+      expect(input(harness.tree.root as Queryable).props['placeholder']).not.toContain(
         'Unknown agent',
       );
       expect(
         (harness.tree.root as Queryable).findAll(
-          (node) => node.props.accessibilityLabel === 'Fast mode',
+          (node) => node.props['accessibilityLabel'] === 'Fast mode',
         ),
       ).toHaveLength(0);
       harness.unmount();
@@ -4247,13 +4276,15 @@ function MainRouteShell() {
       };
       let latest = running;
       const api = createApi({ chat: running });
-      api.getChat.mockImplementation(() => Promise.resolve(latest));
+      requireTestValue(api['getChat'], 'indexed test value').mockImplementation(() =>
+        Promise.resolve(latest),
+      );
       const harness = await renderMain({ api, chat: running });
       const root = harness.tree.root as Queryable;
 
       expect(text(root, 'Working')).toBe(true);
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
 
       latest = answered;
@@ -4267,7 +4298,7 @@ function MainRouteShell() {
       const answerVisible = transcript(root).some(({ message }) => message.id === 'answer');
       const workingVisible = text(root, 'Working');
       const stopControlCount = root.findAll(
-        (node) => node.props.accessibilityLabel === 'Stop agent',
+        (node) => node.props['accessibilityLabel'] === 'Stop agent',
       ).length;
       harness.unmount();
 
@@ -4315,7 +4346,9 @@ function MainRouteShell() {
       };
       let latest = running;
       const api = createApi({ chat: running });
-      api.getChat.mockImplementation(() => Promise.resolve(latest));
+      requireTestValue(api['getChat'], 'indexed test value').mockImplementation(() =>
+        Promise.resolve(latest),
+      );
       const harness = await renderMain({ api, chat: running });
       const root = harness.tree.root as Queryable;
 
@@ -4326,7 +4359,7 @@ function MainRouteShell() {
       ).toBe(true);
       expect(text(root, 'Working')).toBe(true);
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
 
       latest = settled;
@@ -4344,15 +4377,15 @@ function MainRouteShell() {
       ).toBe(true);
       expect(text(root, 'Turn completed')).toBe(true);
       expect(text(root, 'Working')).toBe(false);
-      expect(root.findAll((node) => node.props.accessibilityLabel === 'Stop agent')).toHaveLength(
-        0,
-      );
-      const onChangeText = input(root).props.onChangeText;
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      const onChangeText = input(root).props['onChangeText'];
       if (typeof onChangeText !== 'function') {
         throw new Error('Message input cannot be edited');
       }
       act(() => onChangeText('Follow up after reasoning'));
-      expect(input(root).props.value).toBe('Follow up after reasoning');
+      expect(input(root).props['value']).toBe('Follow up after reasoning');
 
       latest = answered;
       await act(async () => {
@@ -4368,9 +4401,9 @@ function MainRouteShell() {
         ),
       ).toBe(true);
       expect(text(root, 'Working')).toBe(false);
-      expect(root.findAll((node) => node.props.accessibilityLabel === 'Stop agent')).toHaveLength(
-        0,
-      );
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
       harness.unmount();
     });
 
@@ -4561,7 +4594,7 @@ function MainRouteShell() {
         },
       } as Chat;
       const api = createApi({ chat: snapshotChat });
-      (api.readSnapshotPage as jest.Mock)
+      (api['readSnapshotPage'] as jest.Mock)
         .mockResolvedValueOnce({
           threadId: baseChat.id,
           revision: 7,
@@ -4588,7 +4621,7 @@ function MainRouteShell() {
       const root = harness.tree.root as Queryable;
 
       await press(root, 'Load earlier messages');
-      expect(api.readSnapshotPage).toHaveBeenCalledWith(
+      expect(api['readSnapshotPage']).toHaveBeenCalledWith(
         expect.objectContaining({
           threadId: baseChat.id,
           beforeCursor: 'before-1',
@@ -4606,14 +4639,14 @@ function MainRouteShell() {
       const errorChat = { ...snapshotChat, id: 'thread-error-page' };
       harness.unmount();
       const errorApi = createApi({ chat: errorChat });
-      (errorApi.readSnapshotPage as jest.Mock).mockRejectedValueOnce(
+      (errorApi['readSnapshotPage'] as jest.Mock).mockRejectedValueOnce(
         new Error('pagination offline'),
       );
       const errorHarness = await renderMain({ api: errorApi, chat: errorChat });
       await press(errorHarness.tree.root as Queryable, 'Load earlier messages');
       expect(
         (errorHarness.tree.root as Queryable).findAll(
-          (node) => node.props.accessibilityLabel === 'Retry loading earlier history',
+          (node) => node.props['accessibilityLabel'] === 'Retry loading earlier history',
         ),
       ).not.toHaveLength(0);
       errorHarness.unmount();
@@ -4635,7 +4668,7 @@ function MainRouteShell() {
           jest.runOnlyPendingTimers();
           await Promise.resolve();
         });
-        expect(api.getChat).toHaveBeenCalledWith(baseChat.id);
+        expect(api['getChat']).toHaveBeenCalledWith(baseChat.id);
         expect(text(harness.tree.root as Queryable, 'Current answer')).toBe(true);
         harness.unmount();
       },
@@ -4645,8 +4678,11 @@ function MainRouteShell() {
       const api = createApi();
       const backgroundA = { ...baseChat, id: 'background-a', title: 'Background A' };
       const backgroundB = { ...baseChat, id: 'background-b', title: 'Background B' };
-      api.listLoadedChatIds.mockResolvedValue(['background-a', 'background-b']);
-      api.listApprovals.mockResolvedValue([
+      requireTestValue(api['listLoadedChatIds'], 'indexed test value').mockResolvedValue([
+        'background-a',
+        'background-b',
+      ]);
+      requireTestValue(api['listApprovals'], 'indexed test value').mockResolvedValue([
         {
           id: 'approval-recovery',
           threadId: baseChat.id,
@@ -4659,7 +4695,7 @@ function MainRouteShell() {
           options: [],
         },
       ]);
-      api.listPendingUserInputs.mockResolvedValue([
+      requireTestValue(api['listPendingUserInputs'], 'indexed test value').mockResolvedValue([
         {
           id: 'input-recovery',
           threadId: baseChat.id,
@@ -4679,24 +4715,26 @@ function MainRouteShell() {
           ],
         },
       ]);
-      api.getChat.mockImplementation((threadId: string) =>
-        Promise.resolve(
-          threadId === backgroundA.id
-            ? backgroundA
-            : threadId === backgroundB.id
-              ? backgroundB
-              : baseChat,
-        ),
+      requireTestValue(api['getChat'], 'indexed test value').mockImplementation(
+        (threadId: string) =>
+          Promise.resolve(
+            threadId === backgroundA.id
+              ? backgroundA
+              : threadId === backgroundB.id
+                ? backgroundB
+                : baseChat,
+          ),
       );
-      api.readThreadQueue.mockImplementation((threadId: string) =>
-        Promise.resolve({
-          ...emptyQueue,
-          threadId,
-          items:
-            threadId === baseChat.id
-              ? [{ id: 'recovered-queue', content: 'Recovered queued message', createdAt: now }]
-              : [],
-        }),
+      requireTestValue(api['readThreadQueue'], 'indexed test value').mockImplementation(
+        (threadId: string) =>
+          Promise.resolve({
+            ...emptyQueue,
+            threadId,
+            items:
+              threadId === baseChat.id
+                ? [{ id: 'recovered-queue', content: 'Recovered queued message', createdAt: now }]
+                : [],
+          }),
       );
       const harness = await renderMain({ api, chat: baseChat });
       await harness.emit({
@@ -4705,13 +4743,15 @@ function MainRouteShell() {
       });
       await settleRecovery();
 
-      expect(api.getChat.mock.calls.map(([threadId]) => threadId)).toEqual(
-        expect.arrayContaining([baseChat.id, backgroundA.id, backgroundB.id]),
-      );
-      expect(api.rememberChat).toHaveBeenCalledWith(
+      expect(
+        requireTestValue(api['getChat'], 'indexed test value').mock.calls.map(
+          ([threadId]) => threadId,
+        ),
+      ).toEqual(expect.arrayContaining([baseChat.id, backgroundA.id, backgroundB.id]));
+      expect(api['rememberChat']).toHaveBeenCalledWith(
         expect.objectContaining({ id: backgroundA.id }),
       );
-      expect(api.rememberChat).toHaveBeenCalledWith(
+      expect(api['rememberChat']).toHaveBeenCalledWith(
         expect.objectContaining({ id: backgroundB.id }),
       );
       expect(text(harness.tree.root as Queryable, 'Recovered approval')).toBe(true);
@@ -4725,8 +4765,10 @@ function MainRouteShell() {
     it('retains the barrier after one thread fails and acknowledges only after retry succeeds', async () => {
       const api = createApi();
       const harness = await renderMain({ api, chat: baseChat });
-      api.listLoadedChatIds.mockResolvedValue(['background-failing']);
-      api.getChat
+      requireTestValue(api['listLoadedChatIds'], 'indexed test value').mockResolvedValue([
+        'background-failing',
+      ]);
+      requireTestValue(api['getChat'], 'indexed test value')
         .mockReset()
         .mockImplementationOnce(() => Promise.resolve(baseChat))
         .mockRejectedValueOnce(new Error('background unavailable'))
@@ -4750,7 +4792,7 @@ function MainRouteShell() {
       const api = createApi();
       const harness = await renderMain({ api, chat: baseChat });
       let releaseFirst: ((value: string[]) => void) | undefined;
-      api.listLoadedChatIds
+      requireTestValue(api['listLoadedChatIds'], 'indexed test value')
         .mockReset()
         .mockImplementationOnce(
           () =>
@@ -4785,7 +4827,7 @@ function MainRouteShell() {
 
     it('reconnects once without ACK or retry when the loaded list exceeds the protocol maximum', async () => {
       const api = createApi();
-      api.listLoadedChatIds.mockResolvedValue(
+      requireTestValue(api['listLoadedChatIds'], 'indexed test value').mockResolvedValue(
         Array.from({ length: 2_049 }, (_, index) => `thread-${index}`),
       );
       const harness = await renderMain({ api, chat: baseChat });
@@ -4826,13 +4868,15 @@ function MainRouteShell() {
     ])('executes slash command $command', async ({ command }) => {
       const harness = await renderMain();
       const root = harness.tree.root as Queryable;
-      act(() => (input(root).props.onChangeText as (value: string) => void)(command));
+      act(() => (input(root).props['onChangeText'] as (value: string) => void)(command));
       await press(root, 'Send message');
-      expect(harness.api.createChatIdempotent.mock.calls).toHaveLength(0);
-      expect(input(root).props.value).toBe('');
+      expect(
+        requireTestValue(harness.api['createChatIdempotent'], 'indexed test value').mock.calls,
+      ).toHaveLength(0);
+      expect(input(root).props['value']).toBe('');
       if (command === '/plan on') {
         expect(
-          root.findAll((node) => String(node.props.accessibilityLabel).includes('Plan')).length,
+          root.findAll((node) => String(node.props['accessibilityLabel']).includes('Plan')).length,
         ).toBeGreaterThan(0);
       }
       harness.unmount();
@@ -4842,7 +4886,7 @@ function MainRouteShell() {
       const harness = await renderMain({ chat: baseChat });
       const root = harness.tree.root as Queryable;
 
-      act(() => (input(root).props.onChangeText as (value: string) => void)('/help'));
+      act(() => (input(root).props['onChangeText'] as (value: string) => void)('/help'));
       await press(root, 'Send message');
       await act(async () => {
         await Promise.resolve();
@@ -4861,24 +4905,24 @@ function MainRouteShell() {
       { latest: null, error: new Error('stop offline'), expected: 'stop offline' },
     ])('stops through latest-turn fallback', async ({ latest, error }) => {
       const api = createApi();
-      api.interruptLatestTurn.mockImplementation(() =>
+      requireTestValue(api['interruptLatestTurn'], 'indexed test value').mockImplementation(() =>
         error ? Promise.reject(error) : Promise.resolve(latest),
       );
       const running = { ...baseChat, status: 'running' as const, activeTurnId: null };
       const harness = await renderMain({ api, chat: running });
       const root = harness.tree.root as Queryable;
-      const chatInput = root.findAll((node) => typeof node.props.onStop === 'function')[0];
+      const chatInput = root.findAll((node) => typeof node.props['onStop'] === 'function')[0];
       if (!chatInput) {
         throw new Error('Running ChatInput not rendered');
       }
       await act(async () => {
-        (chatInput.props.onStop as () => void)();
+        (chatInput.props['onStop'] as () => void)();
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(api.interruptLatestTurn).toHaveBeenCalledWith(baseChat.id);
+      expect(api['interruptLatestTurn']).toHaveBeenCalledWith(baseChat.id);
       if (latest) {
-        expect(api.interruptTurn).not.toHaveBeenCalled();
+        expect(api['interruptTurn']).not.toHaveBeenCalled();
       }
       if (error) {
         expect(text(harness.tree.root as Queryable, error.message)).toBe(true);
@@ -4898,25 +4942,29 @@ function MainRouteShell() {
           ...emptyQueue,
           items: [{ id: 'queued-send', content: 'Queued response', createdAt: now }],
         };
-        api.sendOrQueueChatMessage.mockImplementation(() => {
-          if (failure) {
-            return Promise.reject(failure);
-          }
-          if (disposition === 'queued') {
-            return Promise.resolve({ disposition, queue: queued });
-          }
-          return Promise.resolve({
-            disposition,
-            queue: emptyQueue,
-            turnId: 'turn-sent',
-            chat: { ...baseChat, status: 'running', activeTurnId: 'turn-sent' },
-          });
-        });
+        requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockImplementation(
+          () => {
+            if (failure) {
+              return Promise.reject(failure);
+            }
+            if (disposition === 'queued') {
+              return Promise.resolve({ disposition, queue: queued });
+            }
+            return Promise.resolve({
+              disposition,
+              queue: emptyQueue,
+              turnId: 'turn-sent',
+              chat: { ...baseChat, status: 'running', activeTurnId: 'turn-sent' },
+            });
+          },
+        );
         const harness = await renderMain({ api, chat: baseChat });
         const root = harness.tree.root as Queryable;
-        act(() => (input(root).props.onChangeText as (value: string) => void)('Runtime send'));
+        act(() => (input(root).props['onChangeText'] as (value: string) => void)('Runtime send'));
         await press(root, 'Send message');
-        expect(api.sendOrQueueChatMessage.mock.calls.length).toBeGreaterThan(0);
+        expect(
+          requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mock.calls.length,
+        ).toBeGreaterThan(0);
         expect(text(root, expected) || (disposition === 'sent' && text(root, 'Working'))).toBe(
           true,
         );
@@ -4954,7 +5002,7 @@ function MainRouteShell() {
       });
       const implementRoot = implementHarness.tree.root as Queryable;
       await press(implementRoot, 'Yes, implement this plan');
-      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+      expect(api['sendOrQueueChatMessage']).toHaveBeenCalledWith(
         baseChat.id,
         expect.objectContaining({ collaborationMode: 'default' }),
         expect.any(Object),
@@ -4975,7 +5023,7 @@ function MainRouteShell() {
       await press(stayHarness.tree.root as Queryable, 'No, stay in Plan mode');
       expect(
         (stayHarness.tree.root as Queryable).findAll((node) =>
-          String(node.props.accessibilityLabel).startsWith('Agent mode, Plan'),
+          String(node.props['accessibilityLabel']).startsWith('Agent mode, Plan'),
         ).length,
       ).toBeGreaterThan(0);
       stayHarness.unmount();
@@ -4983,7 +5031,7 @@ function MainRouteShell() {
 
     it('records synchronization assessments for terminal and error status convergence', async () => {
       const api = createApi();
-      (api.getChatSummary as jest.Mock)
+      (api['getChatSummary'] as jest.Mock)
         .mockResolvedValueOnce({ ...baseChat, status: 'complete', title: 'Synchronized complete' })
         .mockResolvedValueOnce({ ...baseChat, status: 'error', lastError: 'synchronized failure' });
       const harness = await renderMain({
@@ -4992,9 +5040,9 @@ function MainRouteShell() {
       });
 
       await harness.emit(runtimeEvent('thread/status/changed', { status: 'completed' }));
-      expect(api.getChatSummary).toHaveBeenCalledWith(baseChat.id);
+      expect(api['getChatSummary']).toHaveBeenCalledWith(baseChat.id);
       await harness.emit(runtimeEvent('thread/status/changed', { status: 'failed' }));
-      expect(api.getChatSummary).toHaveBeenCalledTimes(2);
+      expect(api['getChatSummary']).toHaveBeenCalledTimes(2);
       harness.unmount();
     });
   });
@@ -5262,7 +5310,7 @@ function MainRouteShell() {
   function input(root: Queryable): TextInputNode {
     const result = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Message');
+      .find((node) => node.props['accessibilityLabel'] === 'Message');
     if (!result) {
       throw new Error('Message input missing');
     }
@@ -5274,13 +5322,13 @@ function MainRouteShell() {
   }
 
   function transcriptMessages(root: Queryable): Array<{ message: Chat['messages'][number] }> {
-    return (root.findAllByType(FlatList)[0]?.props.data ?? []) as Array<{
+    return (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as Array<{
       message: Chat['messages'][number];
     }>;
   }
 
   function labeled(root: Queryable, label: string): Queryable {
-    const result = root.findAll((node) => node.props.accessibilityLabel === label)[0];
+    const result = root.findAll((node) => node.props['accessibilityLabel'] === label)[0];
     if (!result) {
       throw new Error(`Missing label: ${label}`);
     }
@@ -5289,7 +5337,7 @@ function MainRouteShell() {
 
   function labeledPrefix(root: Queryable, prefix: string): Queryable {
     const result = root.findAll((node) =>
-      String(node.props.accessibilityLabel ?? '').startsWith(prefix),
+      accessibilityLabel(node.props['accessibilityLabel']).startsWith(prefix),
     )[0];
     if (!result) {
       throw new Error(`Missing label prefix: ${prefix}`);
@@ -5299,14 +5347,14 @@ function MainRouteShell() {
 
   async function press(node: Queryable): Promise<void> {
     let target: Queryable | null = node;
-    while (target && typeof target.props.onPress !== 'function') {
+    while (target && typeof target.props['onPress'] !== 'function') {
       target = target.parent;
     }
     if (!target) {
       throw new Error('Press target missing');
     }
     await act(async () => {
-      (target?.props.onPress as () => void)();
+      (target?.props['onPress'] as () => void)();
       await flush();
     });
   }
@@ -5328,9 +5376,9 @@ function MainRouteShell() {
 
   function exercisePressedStyles(root: Queryable): void {
     for (const node of root.findAllByType(Pressable)) {
-      if (typeof node.props.style === 'function') {
-        node.props.style({ pressed: false });
-        node.props.style({ pressed: true });
+      if (typeof node.props['style'] === 'function') {
+        node.props['style']({ pressed: false });
+        node.props['style']({ pressed: true });
       }
     }
   }
@@ -5372,7 +5420,7 @@ function MainRouteShell() {
       exercisePressedStyles(harness.root);
       const suggestion = harness.root.findAll(
         (node) =>
-          typeof node.props.onPress === 'function' &&
+          typeof node.props['onPress'] === 'function' &&
           node.children.some((child) => child === '/plan <prompt>'),
       )[0];
       if (suggestion) {
@@ -5431,9 +5479,9 @@ function MainRouteShell() {
       );
       expect(hasText(harness.root, 'Working')).toBe(true);
       expect(
-        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
-      expect(input(harness.root).props.placeholder).toBe('Reply...');
+      expect(input(harness.root).props['placeholder']).toBe('Reply...');
 
       latest = {
         ...running,
@@ -5455,9 +5503,9 @@ function MainRouteShell() {
       expect(hasText(harness.root, 'Turn completed')).toBe(true);
       expect(hasText(harness.root, 'Working')).toBe(false);
       expect(
-        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
-      expect(input(harness.root).props.placeholder).toBe('Reply...');
+      expect(input(harness.root).props['placeholder']).toBe('Reply...');
 
       const callsAfterFirstSettledPoll = getChat.mock.calls.length;
       await act(async () => {
@@ -5473,9 +5521,9 @@ function MainRouteShell() {
       );
       expect(hasText(harness.root, 'Working')).toBe(false);
       expect(
-        harness.root.findAll((node) => node.props.accessibilityLabel === 'Stop agent'),
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
-      expect(input(harness.root).props.placeholder).toBe('Reply...');
+      expect(input(harness.root).props['placeholder']).toBe('Reply...');
       harness.unmount();
     });
 
@@ -5502,13 +5550,15 @@ function MainRouteShell() {
         });
         const harness = await renderMain({ api });
         await submit(harness.root, status === 'complete' ? '/plan design it' : `create ${status}`);
-        expect(api.createChatIdempotent).toHaveBeenCalled();
+        expect(api['createChatIdempotent']).toHaveBeenCalled();
         harness.unmount();
       }
 
       for (const failingMethod of ['createChatIdempotent', 'sendChatMessageIdempotent']) {
         const api = createApi();
-        api[failingMethod].mockRejectedValueOnce(new Error(`${failingMethod} final failure`));
+        requireTestValue(api[failingMethod], 'indexed test value').mockRejectedValueOnce(
+          new Error(`${failingMethod} final failure`),
+        );
         const harness = await renderMain({ api });
         await submit(harness.root, '/plan preserve this plan prompt');
         expect(api[failingMethod]).toHaveBeenCalled();
@@ -5521,7 +5571,7 @@ function MainRouteShell() {
       const api = createApi();
       const harness = await renderMain({ api, chat: running });
 
-      api.sendOrQueueChatMessage.mockResolvedValueOnce({
+      requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockResolvedValueOnce({
         disposition: 'queued',
         queue: {
           ...emptyQueue,
@@ -5530,7 +5580,7 @@ function MainRouteShell() {
       });
       await submit(harness.root, 'queued result');
 
-      api.sendOrQueueChatMessage.mockResolvedValueOnce({
+      requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockResolvedValueOnce({
         disposition: 'sent',
         queue: emptyQueue,
         turnId: 'turn-complete',
@@ -5547,7 +5597,7 @@ function MainRouteShell() {
       });
       await submit(harness.root, 'complete result');
 
-      api.sendOrQueueChatMessage.mockResolvedValueOnce({
+      requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockResolvedValueOnce({
         disposition: 'sent',
         queue: emptyQueue,
         turnId: 'turn-error',
@@ -5555,15 +5605,19 @@ function MainRouteShell() {
       });
       await submit(harness.root, '/goal deliver release');
 
-      api.sendOrQueueChatMessage.mockRejectedValueOnce(new Error('send final failure'));
+      requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockRejectedValueOnce(
+        new Error('send final failure'),
+      );
       await submit(harness.root, '/goal restore release');
       expect(input(harness.root).props.value).toBe('/goal restore release');
 
       const pending = deferred<unknown>();
-      api.sendOrQueueChatMessage.mockReturnValueOnce(pending.promise);
+      requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mockReturnValueOnce(
+        pending.promise,
+      );
       await act(async () => {
         input(harness.root).props.onChangeText('resolve after navigation');
-        (labeled(harness.root, 'Send message').props.onPress as () => void)();
+        (labeled(harness.root, 'Send message').props['onPress'] as () => void)();
         await flush();
         harness.ref.current?.startNewChat();
         pending.resolve({
@@ -5582,11 +5636,11 @@ function MainRouteShell() {
       const second = deferred<Chat>();
       const queueFirst = deferred<typeof emptyQueue>();
       const api = createApi();
-      api.getChat
+      requireTestValue(api['getChat'], 'indexed test value')
         .mockReset()
         .mockReturnValueOnce(first.promise)
         .mockReturnValueOnce(second.promise);
-      api.readThreadQueue
+      requireTestValue(api['readThreadQueue'], 'indexed test value')
         .mockReset()
         .mockReturnValueOnce(queueFirst.promise)
         .mockResolvedValue(emptyQueue);
@@ -5604,12 +5658,14 @@ function MainRouteShell() {
       });
       expect(hasText(harness.root, 'Second wins')).toBe(true);
 
-      api.peekChat.mockReturnValue({
+      requireTestValue(api['peekChat'], 'indexed test value').mockReturnValue({
         ...baseChat,
         id: 'cached-thread',
         title: 'Cached immediately',
       });
-      api.getChat.mockRejectedValueOnce(new Error('revalidation failed'));
+      requireTestValue(api['getChat'], 'indexed test value').mockRejectedValueOnce(
+        new Error('revalidation failed'),
+      );
       await act(async () => {
         harness.ref.current?.openChat('cached-thread');
         await flush();
@@ -5823,7 +5879,7 @@ function MainRouteShell() {
       });
       exercisePressedStyles(harness.root);
       const planHeader = harness.root.findAll((node) =>
-        String(node.props.accessibilityLabel ?? '').startsWith('Plan,'),
+        accessibilityLabel(node.props['accessibilityLabel']).startsWith('Plan,'),
       )[0];
       if (planHeader) {
         await press(planHeader);
@@ -5880,8 +5936,13 @@ function MainRouteShell() {
         listLoadedChatIds: Promise.resolve(childRows.map((row) => row.id)),
         getChatSummaries: Promise.resolve(childRows),
       });
-      api.steerQueuedThreadMessage.mockRejectedValueOnce(new Error('steer failed'));
-      api.cancelQueuedThreadMessage.mockRejectedValueOnce(new Error('cancel failed'));
+      requireTestValue(api['steerQueuedThreadMessage'], 'indexed test value').mockRejectedValueOnce(
+        new Error('steer failed'),
+      );
+      requireTestValue(
+        api['cancelQueuedThreadMessage'],
+        'indexed test value',
+      ).mockRejectedValueOnce(new Error('cancel failed'));
       const harness = await renderMain({
         api,
         chat: { ...baseChat, status: 'running', activeTurnId: 'active' },
@@ -5897,7 +5958,7 @@ function MainRouteShell() {
       });
       exercisePressedStyles(harness.root);
       const agentHeader = harness.root.findAll((node) =>
-        String(node.props.accessibilityLabel ?? '').startsWith('Agents,'),
+        accessibilityLabel(node.props['accessibilityLabel']).startsWith('Agents,'),
       )[0];
       if (agentHeader) {
         await press(agentHeader);
@@ -5951,7 +6012,7 @@ function MainRouteShell() {
     it('covers disconnect recovery, status summary truth, switching away, and pressed recovery controls', async () => {
       const onRecovery = jest.fn();
       const api = createApi();
-      api.getChatSummary
+      requireTestValue(api['getChatSummary'], 'indexed test value')
         .mockResolvedValueOnce({ ...baseChat, status: 'running', activeTurnId: 'summary-turn' })
         .mockResolvedValueOnce({ ...baseChat, status: 'error', lastError: 'summary error' })
         .mockResolvedValueOnce({ ...baseChat, status: 'idle' });
@@ -6046,13 +6107,21 @@ function MainRouteShell() {
         },
         {
           ...baseChat,
-          latestPlan: { ...plan, steps: [{ ...plan.steps[0], step: 'Changed step' }] },
+          latestPlan: {
+            ...plan,
+            steps: [
+              { ...requireTestValue(plan.steps[0], 'first plan step'), step: 'Changed step' },
+            ],
+          },
           latestTurnPlan: plan,
           messages: [message],
         },
         {
           ...baseChat,
-          latestPlan: { ...plan, steps: [{ ...plan.steps[0], status: 'completed' }] },
+          latestPlan: {
+            ...plan,
+            steps: [{ ...requireTestValue(plan.steps[0], 'first plan step'), status: 'completed' }],
+          },
           latestTurnPlan: plan,
           messages: [message],
         },
@@ -6176,9 +6245,9 @@ function MainRouteShell() {
         { ...baseChat, status: 'running', messages: [message] },
       ];
       const api = createApi();
-      api.getChat.mockReset();
+      requireTestValue(api['getChat'], 'indexed test value').mockReset();
       for (const snapshot of snapshots) {
-        api.getChat.mockResolvedValueOnce(snapshot);
+        requireTestValue(api['getChat'], 'indexed test value').mockResolvedValueOnce(snapshot);
       }
       const harness = await renderMain({ api, chat: snapshots[0] });
 
@@ -6188,14 +6257,16 @@ function MainRouteShell() {
           await flush();
         });
       }
-      expect(api.getChat).toHaveBeenCalled();
+      expect(api['getChat']).toHaveBeenCalled();
       harness.unmount();
     });
 
     it('renders mixed user-input fields, presets, secret, other, validation, pressed, and resolving states', async () => {
       const api = createApi();
       const pendingResolution = deferred<{ ok: boolean }>();
-      api.resolveUserInput.mockReturnValueOnce(pendingResolution.promise);
+      requireTestValue(api['resolveUserInput'], 'indexed test value').mockReturnValueOnce(
+        pendingResolution.promise,
+      );
       const harness = await renderMain({ api, chat: baseChat });
       await harness.emit({
         method: 'bridge/userInput.requested',
@@ -6344,7 +6415,7 @@ function MainRouteShell() {
       await press(labeled(compose.root, 'Plan mode'));
       await press(labeled(compose.root, 'Fast mode'));
       const suggestion = compose.root.findAll((node) =>
-        String(node.props.accessibilityLabel ?? '').startsWith('Use suggestion:'),
+        accessibilityLabel(node.props['accessibilityLabel']).startsWith('Use suggestion:'),
       )[0];
       if (suggestion) {
         await press(suggestion);
@@ -6354,8 +6425,12 @@ function MainRouteShell() {
 
     it('renders modal bridge UI and handles missing turn, retained actions, dismissals, and failures', async () => {
       const api = createApi();
-      api.resolveBridgeUiSurface.mockRejectedValueOnce(new Error('action failed'));
-      api.dismissBridgeUiSurface.mockRejectedValueOnce(new Error('dismiss failed'));
+      requireTestValue(api['resolveBridgeUiSurface'], 'indexed test value').mockRejectedValueOnce(
+        new Error('action failed'),
+      );
+      requireTestValue(api['dismissBridgeUiSurface'], 'indexed test value').mockRejectedValueOnce(
+        new Error('dismiss failed'),
+      );
       const harness = await renderMain({ api, chat: baseChat });
       const surface = {
         id: 'modal-final',
@@ -6371,27 +6446,29 @@ function MainRouteShell() {
       expect(bridgeModalProps).not.toBeNull();
       await act(async () => {
         await (
-          bridgeModalProps?.onAction as (
+          bridgeModalProps?.['onAction'] as (
             nextSurface: typeof surface,
             action: (typeof surface.actions)[number],
           ) => Promise<void>
-        )(surface, surface.actions[0]);
+        )(surface, requireTestValue(surface.actions[0], 'indexed test value'));
         await flush();
       });
       await act(async () => {
-        await (bridgeModalProps?.onDismiss as (nextSurface: typeof surface) => Promise<void>)(
+        await (bridgeModalProps?.['onDismiss'] as (nextSurface: typeof surface) => Promise<void>)(
           surface,
         );
         await flush();
       });
-      expect(api.resolveBridgeUiSurface).toHaveBeenCalledWith('modal-final', {
+      expect(api['resolveBridgeUiSurface']).toHaveBeenCalledWith('modal-final', {
         threadId,
         turnId: null,
         actionId: 'retain',
       });
-      expect(api.dismissBridgeUiSurface).toHaveBeenCalledWith('modal-final', threadId);
+      expect(api['dismissBridgeUiSurface']).toHaveBeenCalledWith('modal-final', threadId);
 
-      api.resolveBridgeUiSurface.mockResolvedValueOnce({ ok: true });
+      requireTestValue(api['resolveBridgeUiSurface'], 'indexed test value').mockResolvedValueOnce({
+        ok: true,
+      });
       const dismissingSurface = {
         ...surface,
         id: 'modal-success',
@@ -6401,14 +6478,14 @@ function MainRouteShell() {
       await harness.emit({ method: 'bridge/ui.present', params: dismissingSurface });
       await act(async () => {
         await (
-          bridgeModalProps?.onAction as (
+          bridgeModalProps?.['onAction'] as (
             nextSurface: typeof dismissingSurface,
             action: (typeof dismissingSurface.actions)[number],
           ) => Promise<void>
-        )(dismissingSurface, dismissingSurface.actions[0]);
+        )(dismissingSurface, requireTestValue(dismissingSurface.actions[0], 'indexed test value'));
         await flush();
       });
-      expect(api.resolveBridgeUiSurface).toHaveBeenLastCalledWith('modal-success', {
+      expect(api['resolveBridgeUiSurface']).toHaveBeenLastCalledWith('modal-success', {
         threadId,
         turnId: 'turn-modal-success',
         actionId: 'dismiss',

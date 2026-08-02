@@ -86,24 +86,24 @@ function readFirstAvailableString(
 }
 
 function extractThreadSpawnRecord(record: NotificationRecord | null): NotificationRecord | null {
-  const subagentRecord = firstRecord([record?.subagent, record?.subAgent]);
-  return firstRecord([subagentRecord?.thread_spawn]);
+  const subagentRecord = firstRecord([record?.['subagent'], record?.['subAgent']]);
+  return firstRecord([subagentRecord?.['thread_spawn']]);
 }
 
 function resolveNotificationLookupContext(
   params: NotificationRecord | null,
   msgArg?: NotificationRecord | null,
 ): NotificationLookupContext {
-  const msg = firstRecord([msgArg, params?.msg]);
+  const msg = firstRecord([msgArg, params?.['msg']]);
   const threadRecord = firstRecord([
-    params?.thread,
-    params?.threadState,
-    params?.thread_state,
-    msg?.thread,
+    params?.['thread'],
+    params?.['threadState'],
+    params?.['thread_state'],
+    msg?.['thread'],
   ]);
-  const threadSourceRecord = firstRecord([threadRecord?.source]);
-  const turnRecord = firstRecord([params?.turn, msg?.turn]);
-  const sourceRecord = firstRecord([params?.source, msg?.source]);
+  const threadSourceRecord = firstRecord([threadRecord?.['source']]);
+  const turnRecord = firstRecord([params?.['turn'], msg?.['turn']]);
+  const sourceRecord = firstRecord([params?.['source'], msg?.['source']]);
 
   return {
     msg,
@@ -135,9 +135,9 @@ function extractNestedThreadStatusHint(threadRecord: NotificationRecord | null):
 
   const status = readFirstAvailableString([
     { record: threadRecord, keys: ['status'] },
-    { record: toRecord(threadRecord.status), keys: ['type'] },
+    { record: toRecord(threadRecord['status']), keys: ['type'] },
     { record: threadRecord, keys: ['state', 'phase'] },
-    { record: toRecord(threadRecord.lifecycle), keys: ['status'] },
+    { record: toRecord(threadRecord['lifecycle']), keys: ['status'] },
   ]);
   return normalizeExternalStatusHint(status);
 }
@@ -148,11 +148,11 @@ function isPendingApprovalKind(value: string | null): value is PendingApproval['
 
 function extractPendingApprovalBase(record: NotificationRecord) {
   const requestId = readFirstStringFromRecord(record, ['requestId', 'id']);
-  const kind = readString(record.kind);
-  const threadId = readString(record.threadId);
-  const turnId = readString(record.turnId);
-  const itemId = readString(record.itemId);
-  const requestedAt = readString(record.requestedAt);
+  const kind = readString(record['kind']);
+  const threadId = readString(record['threadId']);
+  const turnId = readString(record['turnId']);
+  const itemId = readString(record['itemId']);
+  const requestedAt = readString(record['requestedAt']);
 
   if (
     !requestId ||
@@ -177,7 +177,7 @@ function extractPendingApprovalBase(record: NotificationRecord) {
 
 function extractPendingApprovalOption(value: unknown): PendingApproval['options'][number] | null {
   const option = toRecord(value);
-  const optionId = readString(option?.id);
+  const optionId = readString(option?.['id']);
   const label = readFirstStringFromRecord(option, ['label', 'name']);
   if (!optionId || !label) {
     return null;
@@ -186,7 +186,7 @@ function extractPendingApprovalOption(value: unknown): PendingApproval['options'
   return {
     id: optionId,
     label,
-    kind: readString(option?.kind) ?? undefined,
+    kind: readString(option?.['kind']) ?? undefined,
   };
 }
 
@@ -355,7 +355,7 @@ export function isChatLikelyRunning(chat: Chat): boolean {
 export function hasRecentUnansweredUserTurn(chat: Chat): boolean {
   let lastUserIndex = -1;
   for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
-    if (chat.messages[index].role === 'user') {
+    if (chat.messages[index]?.role === 'user') {
       lastUserIndex = index;
       break;
     }
@@ -366,12 +366,15 @@ export function hasRecentUnansweredUserTurn(chat: Chat): boolean {
   }
 
   for (let index = lastUserIndex + 1; index < chat.messages.length; index += 1) {
-    if (chat.messages[index].role === 'assistant') {
+    if (chat.messages[index]?.role === 'assistant') {
       return false;
     }
   }
 
   const lastUser = chat.messages[lastUserIndex];
+  if (!lastUser) {
+    return false;
+  }
   const userCreatedAtMs = Date.parse(lastUser.createdAt);
   if (!Number.isFinite(userCreatedAtMs)) {
     return false;
@@ -421,7 +424,7 @@ export function latestAssistantMessage(
 ): ChatTranscriptMessage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.role === 'assistant') {
+    if (message?.role === 'assistant') {
       return message;
     }
   }
@@ -484,16 +487,16 @@ export function toPendingApproval(value: unknown): PendingApproval | null {
 
   return {
     ...approval,
-    agentId: readString(record.agentId) ?? '',
+    agentId: readString(record['agentId']) ?? '',
     title: readFirstStringFromRecord(record, ['title', 'reason']) ?? '',
     message: readFirstStringFromRecord(record, ['message', 'reason']) ?? '',
-    reason: readString(record.reason) ?? undefined,
-    command: readString(record.command) ?? undefined,
-    cwd: readString(record.cwd) ?? undefined,
-    grantRoot: readString(record.grantRoot) ?? undefined,
+    reason: readString(record['reason']) ?? undefined,
+    command: readString(record['command']) ?? undefined,
+    cwd: readString(record['cwd']) ?? undefined,
+    grantRoot: readString(record['grantRoot']) ?? undefined,
     proposedExecpolicyAmendment:
-      readNonEmptyStringArray(record.proposedExecpolicyAmendment) ?? undefined,
-    options: extractPendingApprovalOptions(record.options),
+      readNonEmptyStringArray(record['proposedExecpolicyAmendment']) ?? undefined,
+    options: extractPendingApprovalOptions(record['options']),
   };
 }
 

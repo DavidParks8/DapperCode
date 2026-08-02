@@ -141,15 +141,15 @@ export interface ThreadSourceMetadata {
 }
 
 export function readFileChangePaths(item: Record<string, unknown>): string[] {
-  const rawChanges = Array.isArray(item.changes) ? item.changes : [];
+  const rawChanges = Array.isArray(item['changes']) ? item['changes'] : [];
   const seen = new Set<string>();
   const paths: string[] = [];
   for (const change of rawChanges) {
     const path =
       readString(change)?.trim() ??
-      readString(toRecord(change)?.path)?.trim() ??
-      readString(toRecord(change)?.filePath)?.trim() ??
-      readString(toRecord(change)?.file_path)?.trim();
+      readString(toRecord(change)?.['path'])?.trim() ??
+      readString(toRecord(change)?.['filePath'])?.trim() ??
+      readString(toRecord(change)?.['file_path'])?.trim();
     if (!path) {
       continue;
     }

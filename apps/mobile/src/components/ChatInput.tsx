@@ -2,14 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
-  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
   Text,
   TextInput,
-  type TextLayoutEventData,
-  type TextInputKeyPressEventData,
+  type TextLayoutEvent,
+  type TextInputKeyPressEvent,
   View,
 } from 'react-native';
 
@@ -446,7 +445,7 @@ export function ChatInput(props: ChatInputProps) {
                     paddingVertical: INPUT_TEXT_VERTICAL_PADDING,
                   },
                 ]}
-                onTextLayout={(event: NativeSyntheticEvent<TextLayoutEventData>) => {
+                onTextLayout={(event: TextLayoutEvent) => {
                   if (inputWidth <= 0) {
                     return;
                   }
@@ -476,8 +475,8 @@ export function ChatInput(props: ChatInputProps) {
                 accessibilityLabel="Message"
                 accessibilityHint="Enter a message for the agent"
                 scrollEnabled={inputScrollEnabled}
-                onKeyPress={(e: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
-                  const keyEvent = e.nativeEvent as TextInputKeyPressEventData & {
+                onKeyPress={(e: TextInputKeyPressEvent) => {
+                  const keyEvent = e.nativeEvent as TextInputKeyPressEvent['nativeEvent'] & {
                     shiftKey?: boolean;
                   };
                   if (Platform.OS === 'web' && keyEvent.key === 'Enter' && !keyEvent.shiftKey) {

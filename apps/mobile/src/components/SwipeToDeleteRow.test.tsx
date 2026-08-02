@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -38,12 +39,13 @@ function renderRow(onDelete: () => void | Promise<boolean | void>): RenderedRow 
       </AppThemeProvider>,
     );
   });
-  const [translateXValue] = mockSharedValues;
+  const translateXValue = requireTestValue(mockSharedValues[0], 'translate shared value');
   act(() => {
-    const layoutNode = (tree.root as Queryable).findAll(
-      (node) => typeof node.props.onLayout === 'function',
-    )[0];
-    (layoutNode.props.onLayout as (event: unknown) => void)({
+    const layoutNode = requireTestValue(
+      (tree.root as Queryable).findAll((node) => typeof node.props['onLayout'] === 'function')[0],
+      'indexed test value',
+    );
+    (layoutNode.props['onLayout'] as (event: unknown) => void)({
       nativeEvent: { layout: { width: ROW_WIDTH, height: 68 } },
     });
   });
@@ -52,12 +54,15 @@ function renderRow(onDelete: () => void | Promise<boolean | void>): RenderedRow 
 
 function pressDelete(tree: ReactTestRenderer): void {
   act(() => {
-    const action = (tree.root as Queryable).findAll(
-      (node) =>
-        node.props.accessibilityLabel === 'Delete Session one' &&
-        typeof node.props.onPress === 'function',
-    )[0];
-    (action.props.onPress as () => void)();
+    const action = requireTestValue(
+      (tree.root as Queryable).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Delete Session one' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
+    (action.props['onPress'] as () => void)();
   });
 }
 
@@ -81,11 +86,11 @@ describe('SwipeToDeleteRow', () => {
     const clip = tree.root.findByProps({ testID: 'swipe-delete-clip' });
     const actionLayer = tree.root.findByProps({ testID: 'swipe-delete-action-layer' });
     const content = tree.root.findByProps({ testID: 'swipe-delete-content' });
-    const clipStyle = StyleSheet.flatten(clip.props.style);
-    const actionStyle = StyleSheet.flatten(actionLayer.props.style);
-    const contentStyle = StyleSheet.flatten(content.props.style);
+    const clipStyle = StyleSheet.flatten(clip.props['style']);
+    const actionStyle = StyleSheet.flatten(actionLayer.props['style']);
+    const contentStyle = StyleSheet.flatten(content.props['style']);
 
-    expect(clip.props.collapsable).toBe(false);
+    expect(clip.props['collapsable']).toBe(false);
     expect(clipStyle).toMatchObject({
       position: 'relative',
       overflow: 'hidden',
@@ -109,7 +114,7 @@ describe('SwipeToDeleteRow', () => {
   it('lets right drags through while closed so the drawer keeps its own swipe', () => {
     renderRow(jest.fn());
 
-    expect(latestMockGesture('Pan').config.activeOffsetX).toBe(-6);
+    expect(latestMockGesture('Pan').config['activeOffsetX']).toBe(-6);
   });
 
   it('commits the delete when the row is dragged most of the way across', () => {
@@ -151,14 +156,14 @@ describe('SwipeToDeleteRow', () => {
 
     expect(onDelete).not.toHaveBeenCalled();
     expect(translateX()).toBe(-SWIPE_ACTION_WIDTH);
-    expect(latestMockGesture('Pan').config.activeOffsetX).toEqual([-6, 6]);
+    expect(latestMockGesture('Pan').config['activeOffsetX']).toEqual([-6, 6]);
 
     act(() => {
       simulatePan(latestMockGesture('Pan'), [{ translationX: 80 }], { velocityX: 0 });
     });
 
     expect(translateX()).toBe(0);
-    expect(latestMockGesture('Pan').config.activeOffsetX).toBe(-6);
+    expect(latestMockGesture('Pan').config['activeOffsetX']).toBe(-6);
   });
 
   it('snaps the row back when a flick is too short to reveal the action', () => {
@@ -259,6 +264,6 @@ describe('SwipeToDeleteRow', () => {
       );
     });
 
-    expect(latestMockGesture('Pan').config.enabled).toBe(false);
+    expect(latestMockGesture('Pan').config['enabled']).toBe(false);
   });
 });

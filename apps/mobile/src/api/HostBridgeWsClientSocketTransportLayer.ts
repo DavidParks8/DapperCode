@@ -4,8 +4,8 @@ import { Platform } from 'react-native';
 import { RpcRequestError } from './wsErrors';
 import { readIntegerLike, readString, toRecord } from '../runtimeValidation';
 import { readEventId, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
-import { type ReactNativeWebSocketConstructor } from './wsTypes';
-import { type RpcNotification } from './types';
+import type { ReactNativeWebSocketConstructor } from './wsTypes';
+import type { RpcNotification } from './types';
 
 export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeWsClientConnectionLayer {
   protected async openSocket(generation: number): Promise<void> {
@@ -13,11 +13,12 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       const WebSocketCtor = globalThis.WebSocket as unknown as ReactNativeWebSocketConstructor;
       const socketUrl = this.socketUrl();
       const shouldUseQueryTokenAuth = this.shouldUseQueryTokenAuth();
+      const authToken = this.authToken;
       const shouldUseHeaderAuth =
-        Boolean(this.authToken) && Platform.OS !== 'web' && !shouldUseQueryTokenAuth;
+        authToken !== null && Platform.OS !== 'web' && !shouldUseQueryTokenAuth;
       const socket = shouldUseHeaderAuth
         ? new WebSocketCtor(socketUrl, undefined, {
-            headers: { Authorization: `Bearer ${this.authToken}` },
+            headers: { Authorization: `Bearer ${authToken}` },
           })
         : new WebSocketCtor(socketUrl);
       this.pendingSocket = socket;
@@ -126,21 +127,23 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     if (!record) {
       return;
     }
-    const hasMethod = typeof record.method === 'string';
-    const hasId = typeof record.id === 'string' || typeof record.id === 'number';
+    const hasMethod = typeof record['method'] === 'string';
+    const hasId = typeof record['id'] === 'string' || typeof record['id'] === 'number';
     if (hasId) {
-      const pending = this.pendingRequests.get(record.id as string | number);
+      const pending = this.pendingRequests.get(record['id'] as string | number);
       if (!pending) {
         return;
       }
       clearTimeout(pending.timeout);
-      this.pendingRequests.delete(record.id as string | number);
-      const error = toRecord(record.error);
-      if (error && typeof error.code === 'number' && typeof error.message === 'string') {
-        pending.reject(new RpcRequestError(pending.method, error.code, error.message, error.data));
+      this.pendingRequests.delete(record['id'] as string | number);
+      const error = toRecord(record['error']);
+      if (error && typeof error['code'] === 'number' && typeof error['message'] === 'string') {
+        pending.reject(
+          new RpcRequestError(pending.method, error['code'], error['message'], error['data']),
+        );
         return;
       }
-      pending.resolve(record.result ?? null);
+      pending.resolve(record['result'] ?? null);
       return;
     }
     if (hasMethod) {
@@ -162,12 +165,12 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     this.scheduleConnectionReplay(method, identityResult);
   }
   private readNotification(record: Record<string, unknown>) {
-    const method = readString(record.method);
+    const method = readString(record['method']);
     if (!method) {
       return null;
     }
-    const protocolVersion = readIntegerLike(record.protocolVersion);
-    const streamId = readString(record.streamId);
+    const protocolVersion = readIntegerLike(record['protocolVersion']);
+    const streamId = readString(record['streamId']);
     const identityResult = this.applyStreamIdentity(protocolVersion, streamId);
     if (identityResult === 'unsupported') {
       return null;
@@ -175,7 +178,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     const eventId = readEventId(record);
     const event = this.createNotification(
       method,
-      toRecord(record.params),
+      toRecord(record['params']),
       protocolVersion,
       streamId,
       eventId,

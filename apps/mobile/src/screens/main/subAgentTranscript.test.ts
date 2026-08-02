@@ -27,7 +27,7 @@ function message(
     role: role === 'activity' || role === 'reasoning' || role === 'tool' ? 'system' : role,
     content,
     createdAt: '2026-03-20T00:00:00.000Z',
-  } as ChatMessage;
+  };
 }
 
 describe('trimInheritedParentMessages', () => {

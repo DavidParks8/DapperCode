@@ -30,7 +30,7 @@ import {
   normalizeListLimit,
   readSnapshotPageResponse,
 } from './clientChatListInternals';
-import { type ChatSummary, type RpcNotification } from './types';
+import type { ChatSummary, RpcNotification } from './types';
 
 export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiClientHealthAndCacheLayer {
   async listAllChats(options: ListAllChatsOptions = {}): Promise<ChatListResult> {
@@ -67,24 +67,24 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
     let closed = false;
     const unsubscribe = this.ws.onEvent((event: RpcNotification) => {
       const params = toRecord(event.params);
-      if (!params || readString(params.streamId) !== streamId) {
+      if (!params || readString(params['streamId']) !== streamId) {
         return;
       }
       if (event.method === THREAD_LIST_STREAM_ERROR_METHOD) {
         closed = true;
         unsubscribe();
-        onError?.(new Error(readString(params.error) ?? 'thread list stream failed'));
+        onError?.(new Error(readString(params['error']) ?? 'thread list stream failed'));
         return;
       }
       if (event.method !== THREAD_LIST_STREAM_BATCH_METHOD) {
         return;
       }
-      const limit = normalizeListLimit(params.limit);
-      const rawList = Array.isArray(params.data) ? params.data : [];
+      const limit = normalizeListLimit(params['limit']);
+      const rawList = Array.isArray(params['data']) ? params['data'] : [];
       const chats = this.mapChatListItems(rawList, includeSubAgents);
       this.rememberChats(chats, { includeSubAgents, limit });
-      onBatch({ streamId, limit, done: params.done === true, chats });
-      if (params.done === true) {
+      onBatch({ streamId, limit, done: params['done'] === true, chats });
+      if (params['done'] === true) {
         closed = true;
         unsubscribe();
       }

@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -43,7 +44,8 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
@@ -72,7 +74,7 @@ describe('SelectableTextSheet', () => {
     const tree = render(<SelectableTextSheet text="hello" onClose={() => {}} />);
     const root = queryRoot(tree);
     const closeButton = findPressable(root, 'Close text selection');
-    const hitSlop = closeButton.props.hitSlop as
+    const hitSlop = closeButton.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
@@ -82,9 +84,12 @@ describe('SelectableTextSheet', () => {
   it('renders the given text in a read-only, non-editable input', () => {
     const tree = render(<SelectableTextSheet text="selectable body text" onClose={() => {}} />);
     const root = queryRoot(tree);
-    const input = root.findAll((node) => node.props.accessibilityLabel === 'Response text')[0];
+    const input = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Response text')[0],
+      'indexed test value',
+    );
     expect(input).toBeDefined();
-    expect(input.props.value).toBe('selectable body text');
-    expect(input.props.editable).toBe(false);
+    expect(input.props['value']).toBe('selectable body text');
+    expect(input.props['editable']).toBe(false);
   });
 });

@@ -72,6 +72,6 @@ function getWebStorage(): WebStorageLike | null {
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
-    ? (storage as WebStorageLike)
+    ? storage
     : null;
 }

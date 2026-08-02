@@ -3,12 +3,12 @@ import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
 import { BridgeProtocolVersionError, isRpcRequestError } from './wsErrors';
 import { readIntegerLike, readString, toRecord } from '../runtimeValidation';
 import { readEventId, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
-import {
-  type BridgeSnapshotRequiredParams,
-  type BridgeSnapshotRequiredReason,
-  type RpcNotification,
+import type {
+  BridgeSnapshotRequiredParams,
+  BridgeSnapshotRequiredReason,
+  RpcNotification,
 } from './types';
-import { type ReplayEventsResponse } from './wsTypes';
+import type { ReplayEventsResponse } from './wsTypes';
 
 export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridgeWsClientSocketTransportLayer {
   protected scheduleReplay(): void {

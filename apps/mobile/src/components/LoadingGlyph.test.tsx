@@ -1,5 +1,5 @@
 import React from 'react';
-import { AccessibilityInfo, Animated, type ViewStyle } from 'react-native';
+import { AccessibilityInfo, Animated } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -54,14 +54,7 @@ describe('LoadingGlyph', () => {
     expect(starts).toHaveLength(3);
     act(() => {
       tree.update(
-        wrap(
-          <LoadingGlyph
-            color="#000"
-            variant="ring"
-            size="medium"
-            style={{ opacity: 0.5 } as ViewStyle}
-          />,
-        ),
+        wrap(<LoadingGlyph color="#000" variant="ring" size="medium" style={{ opacity: 0.5 }} />),
       );
     });
     act(() => tree.unmount());

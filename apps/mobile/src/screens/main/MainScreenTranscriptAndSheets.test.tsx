@@ -103,7 +103,7 @@ describe('MainScreenTranscriptAndSheets', () => {
         </Provider>,
       );
     });
-    const first = mockTranscriptProps.at(-1)?.onLoadEarlier;
+    const first = mockTranscriptProps.at(-1)?.['onLoadEarlier'];
 
     act(() => {
       store.set(liveAssistantByThreadAtom, {
@@ -114,7 +114,7 @@ describe('MainScreenTranscriptAndSheets', () => {
       });
     });
 
-    expect(mockTranscriptProps.at(-1)?.onLoadEarlier).toBe(first);
+    expect(mockTranscriptProps.at(-1)?.['onLoadEarlier']).toBe(first);
     expect(first).not.toBe(handleLoadEarlier);
   });
 });

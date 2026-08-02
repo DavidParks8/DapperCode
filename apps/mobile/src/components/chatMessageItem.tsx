@@ -109,7 +109,9 @@ function arePartsEqual(previous?: ChatMessagePart[], next?: ChatMessagePart[]): 
     return false;
   }
   for (let index = 0; index < previous.length; index += 1) {
-    if (!isPartEqual(previous[index], next[index])) {
+    const previousPart = previous[index];
+    const nextPart = next[index];
+    if (!previousPart || !nextPart || !isPartEqual(previousPart, nextPart)) {
       return false;
     }
   }

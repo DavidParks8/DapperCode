@@ -52,7 +52,7 @@ describe('ConnectionScreen', () => {
     const tree = renderConnection('initial', false);
     await act(async () => {
       await (
-        mockOnboardingProps?.onSave as (draft: {
+        mockOnboardingProps?.['onSave'] as (draft: {
           bridgeUrl: string;
           bridgeToken: string;
         }) => Promise<void>
@@ -75,7 +75,7 @@ describe('ConnectionScreen', () => {
         initialBridgeToken: 'token',
       }),
     );
-    act(() => (mockOnboardingProps?.onCancel as () => void)());
+    act(() => (mockOnboardingProps?.['onCancel'] as () => void)());
     expect(router.back).toHaveBeenCalled();
     act(() => tree.unmount());
 
@@ -88,7 +88,7 @@ describe('ConnectionScreen', () => {
     const tree = renderConnection('add');
     await act(async () => {
       await (
-        mockOnboardingProps?.onSave as (draft: {
+        mockOnboardingProps?.['onSave'] as (draft: {
           bridgeUrl: string;
           bridgeToken: string;
         }) => Promise<void>
@@ -103,7 +103,7 @@ describe('ConnectionScreen', () => {
     const tree = renderConnection('edit', true, { onSaved });
     await act(async () => {
       await (
-        mockOnboardingProps?.onSave as (draft: {
+        mockOnboardingProps?.['onSave'] as (draft: {
           bridgeUrl: string;
           bridgeToken: string;
         }) => Promise<void>

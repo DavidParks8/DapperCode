@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { EventType } from '@ag-ui/core';
 import { TestableThreadState } from '../TestableThreadState';
 import { sequence } from '../EventSequenceBuilder';
@@ -135,8 +136,8 @@ describe('Message ordering', () => {
 
     const contents = state.getMessageContents('t1');
     expect(contents).toHaveLength(2);
-    expect(contents[0].content).toBe('First');
-    expect(contents[1].content).toBe('Second');
+    expect(requireTestValue(contents[0], 'indexed test value').content).toBe('First');
+    expect(requireTestValue(contents[1], 'indexed test value').content).toBe('Second');
   });
 });
 
@@ -217,8 +218,8 @@ describe('Message retention', () => {
 
     const contents = state.getMessageContents('t1');
     expect(contents).toHaveLength(2);
-    expect(contents[0].content).toBe('First message');
-    expect(contents[1].content).toBe('Second message');
+    expect(requireTestValue(contents[0], 'indexed test value').content).toBe('First message');
+    expect(requireTestValue(contents[1], 'indexed test value').content).toBe('Second message');
   });
 });
 
@@ -262,7 +263,7 @@ describe('Sub-agent behavior', () => {
 
     const childContents = state.getMessageContents('child');
     expect(childContents).toHaveLength(1);
-    expect(childContents[0].content).toBe('Working on it');
+    expect(requireTestValue(childContents[0], 'indexed test value').content).toBe('Working on it');
   });
 
   it('does not leak child messages into parent transcript', () => {

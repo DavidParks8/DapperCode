@@ -69,12 +69,16 @@ export function parseChatSummaryCache(
   now = Date.now(),
 ): ChatSummaryCache {
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed.profileId !== profileId) {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return createEmptyChatSummaryCache(profileId, new Date(now).toISOString());
+    }
+    const record = parsed as Record<string, unknown>;
+    if (record['profileId'] !== profileId) {
       return createEmptyChatSummaryCache(profileId, new Date(now).toISOString());
     }
 
-    const migrated = migrateCache(parsed, profileId, now);
+    const migrated = migrateCache(record, profileId, now);
     if (!migrated) {
       return createEmptyChatSummaryCache(profileId, new Date(now).toISOString());
     }
@@ -266,23 +270,27 @@ function migrateCache(
   profileId: string,
   now: number,
 ): ChatSummaryCache | null {
-  if (parsed.version === CHAT_SUMMARY_CACHE_VERSION && Array.isArray(parsed.entries)) {
+  if (parsed['version'] === CHAT_SUMMARY_CACHE_VERSION && Array.isArray(parsed['entries'])) {
     return {
       version: CHAT_SUMMARY_CACHE_VERSION,
       profileId,
-      updatedAt: normalizeTimestamp(parsed.updatedAt, now),
-      lastSuccessfulRefreshAt: normalizeNullableTimestamp(parsed.lastSuccessfulRefreshAt),
-      entries: parsed.entries as ChatSummaryCacheEntry[],
+      updatedAt: normalizeTimestamp(parsed['updatedAt'], now),
+      lastSuccessfulRefreshAt: normalizeNullableTimestamp(parsed['lastSuccessfulRefreshAt']),
+      entries: parsed['entries'] as ChatSummaryCacheEntry[],
     };
   }
-  if (parsed.version === 0 && Array.isArray(parsed.chats)) {
-    const updatedAt = normalizeTimestamp(parsed.updatedAt, now);
+  if (parsed['version'] === 0 && Array.isArray(parsed['chats'])) {
+    const updatedAt = normalizeTimestamp(parsed['updatedAt'], now);
+    const entries = (parsed['chats'] as unknown[])
+      .map(normalizeSummary)
+      .filter((summary): summary is ChatSummary => summary !== null)
+      .map((summary) => ({ summary, cachedAt: updatedAt }));
     return {
       version: CHAT_SUMMARY_CACHE_VERSION,
       profileId,
       updatedAt,
       lastSuccessfulRefreshAt: updatedAt,
-      entries: parsed.chats.map((summary) => ({ summary, cachedAt: updatedAt })),
+      entries,
     };
   }
   return null;
@@ -310,25 +318,25 @@ function normalizeSummary(value: unknown): ChatSummary | null {
   }
   const summary = value as Record<string, unknown>;
   if (
-    typeof summary.id !== 'string' ||
-    !summary.id.trim() ||
-    typeof summary.title !== 'string' ||
-    !isChatStatus(summary.status) ||
-    !isTimestamp(summary.createdAt) ||
-    !isTimestamp(summary.updatedAt) ||
-    !isTimestamp(summary.statusUpdatedAt) ||
-    typeof summary.lastMessagePreview !== 'string'
+    typeof summary['id'] !== 'string' ||
+    !summary['id'].trim() ||
+    typeof summary['title'] !== 'string' ||
+    !isChatStatus(summary['status']) ||
+    !isTimestamp(summary['createdAt']) ||
+    !isTimestamp(summary['updatedAt']) ||
+    !isTimestamp(summary['statusUpdatedAt']) ||
+    typeof summary['lastMessagePreview'] !== 'string'
   ) {
     return null;
   }
   return {
-    id: summary.id,
-    title: summary.title,
-    status: summary.status,
-    createdAt: summary.createdAt,
-    updatedAt: summary.updatedAt,
-    statusUpdatedAt: summary.statusUpdatedAt,
-    lastMessagePreview: summary.lastMessagePreview,
+    id: summary['id'],
+    title: summary['title'],
+    status: summary['status'],
+    createdAt: summary['createdAt'],
+    updatedAt: summary['updatedAt'],
+    statusUpdatedAt: summary['statusUpdatedAt'],
+    lastMessagePreview: summary['lastMessagePreview'],
     ...optionalBoolean(summary, 'timestampsSynthesized'),
     ...optionalString(summary, 'cwd'),
     ...optionalNullableString(summary, 'agentId'),

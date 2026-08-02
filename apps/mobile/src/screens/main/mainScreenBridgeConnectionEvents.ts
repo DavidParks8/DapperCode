@@ -22,7 +22,7 @@ export function processBridgeConnectionEvents(
 
   if (event.method === 'bridge/connection/state') {
     const params = toRecord(event.params);
-    const status = readString(params?.status);
+    const status = readString(params?.['status']);
     if (status === 'connected') {
       clearDeferredDisconnectActivity();
       setBridgeRecoveryBannerVisible(false);

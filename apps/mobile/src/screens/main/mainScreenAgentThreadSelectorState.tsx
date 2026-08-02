@@ -7,7 +7,7 @@ import {
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import type { Chat } from '../../api/types';
-import { type SelectionSheetOption } from '../../components/SelectionSheet';
+import type { SelectionSheetOption } from '../../components/SelectionSheet';
 import { mainScreenCommandsAtom } from '../../state/commands';
 import {
   describeAgentThreadSource,

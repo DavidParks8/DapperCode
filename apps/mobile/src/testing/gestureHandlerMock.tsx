@@ -33,7 +33,7 @@ export function resetMockGestures(): void {
 export function latestMockGesture(kind: string): MockGesture {
   for (let index = mockGestures.length - 1; index >= 0; index -= 1) {
     const gesture = mockGestures[index];
-    if (gesture.kind === kind) {
+    if (gesture?.kind === kind) {
       return gesture;
     }
   }
@@ -44,7 +44,7 @@ export function latestMockGesture(kind: string): MockGesture {
 export function mockGestureByTestId(testId: string): MockGesture {
   for (let index = mockGestures.length - 1; index >= 0; index -= 1) {
     const gesture = mockGestures[index];
-    if (gesture.config.withTestId === testId) {
+    if (gesture?.config['withTestId'] === testId) {
       return gesture;
     }
   }

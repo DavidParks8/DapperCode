@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import React from 'react';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
@@ -182,7 +183,7 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     });
     const tree = render(context);
 
-    const pressableRows = root(tree).findAll((node) => typeof node.props.onPress === 'function');
+    const pressableRows = root(tree).findAll((node) => typeof node.props['onPress'] === 'function');
     expect(pressableRows.length).toBeGreaterThan(0);
 
     act(() => tree.unmount());
@@ -192,11 +193,14 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     const context = baseContext({ showBridgeRecoveryBanner: true });
     const tree = render(context);
 
-    const button = root(tree).findAll(
-      (node) => typeof node.props.hitSlop === 'object' && node.props.hitSlop !== null,
-    )[0];
+    const button = requireTestValue(
+      root(tree).findAll(
+        (node) => typeof node.props['hitSlop'] === 'object' && node.props['hitSlop'] !== null,
+      )[0],
+      'indexed test value',
+    );
     expect(button).toBeDefined();
-    const hitSlop = button.props.hitSlop as { top: number; bottom: number };
+    const hitSlop = button.props['hitSlop'] as { top: number; bottom: number };
     expect(hitSlop.top).toBeGreaterThan(0);
     expect(hitSlop.bottom).toBeGreaterThan(0);
 

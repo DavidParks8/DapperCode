@@ -227,12 +227,13 @@ function readToolMessage(
     return { title: null, lines: isToolCall ? [] : text.split('\n') };
   }
   const entries = parseTimelineEntries(text);
-  if (entries?.length) {
+  const [firstEntry, ...remainingEntries] = entries ?? [];
+  if (firstEntry) {
     return {
-      title: entries[0].title,
+      title: firstEntry.title,
       lines: [
-        ...entries[0].details,
-        ...entries.slice(1).flatMap((entry) => [entry.title, ...entry.details]),
+        ...firstEntry.details,
+        ...remainingEntries.flatMap((entry) => [entry.title, ...entry.details]),
       ],
     };
   }
@@ -289,9 +290,9 @@ function parseStructuredContent(content: unknown): ParsedStructuredContent {
 }
 
 function visitDiffContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
-  const path = asString(entry.path) ?? 'file';
-  const newText = asString(entry.newText) ?? asString(entry.new_text) ?? '';
-  const oldText = asString(entry.oldText) ?? asString(entry.old_text) ?? null;
+  const path = asString(entry['path']) ?? 'file';
+  const newText = asString(entry['newText']) ?? asString(entry['new_text']) ?? '';
+  const oldText = asString(entry['oldText']) ?? asString(entry['old_text']) ?? null;
   parsed.diffs.push({ path, oldText, newText });
   parsed.suppressedLines.add(`[diff: ${path}]`);
   for (const text of [oldText, newText]) {
@@ -307,8 +308,8 @@ function visitTerminalContent(
   entry: Record<string, unknown>,
   parsed: ParsedStructuredContent,
 ): void {
-  const terminalId = asString(entry.terminalId) ?? asString(entry.terminal_id) ?? null;
-  const output = collectText([entry.output, entry.content]);
+  const terminalId = asString(entry['terminalId']) ?? asString(entry['terminal_id']) ?? null;
+  const output = collectText([entry['output'], entry['content']]);
   parsed.terminals.push({ terminalId, output });
   parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
   for (const line of output.split('\n')) {
@@ -318,9 +319,9 @@ function visitTerminalContent(
 
 function visitImageContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
   const source =
-    asString(entry.url) ??
-    asString(entry.imageUrl) ??
-    asString(entry.image_url) ??
+    asString(entry['url']) ??
+    asString(entry['imageUrl']) ??
+    asString(entry['image_url']) ??
     toDataUrl(entry);
   if (source) {
     parsed.images.push(source);
@@ -351,7 +352,7 @@ const STRUCTURED_CONTENT_VISITORS: Partial<Record<string, StructuredContentVisit
   diff: (entry, parsed) => visitDiffContent(entry, parsed),
   terminal: (entry, parsed) => visitTerminalContent(entry, parsed),
   image: (entry, parsed) => visitImageContent(entry, parsed),
-  content: (entry, parsed, depth) => visitStructuredContent(entry.content, parsed, depth + 1),
+  content: (entry, parsed, depth) => visitStructuredContent(entry['content'], parsed, depth + 1),
 };
 
 function visitStructuredContent(
@@ -372,7 +373,7 @@ function visitStructuredContent(
   if (!entry) {
     return;
   }
-  const type = normalizedType(entry.type);
+  const type = normalizedType(entry['type']);
   const visitor = lookupDispatchEntry(STRUCTURED_CONTENT_VISITORS, type);
   if (visitor) {
     visitor(entry, parsed, depth);
@@ -387,11 +388,11 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
   }
   return value.flatMap((entry) => {
     const location = asRecord(entry);
-    const path = asString(location?.path);
+    const path = asString(location?.['path']);
     if (!path) {
       return [];
     }
-    const line = location?.line;
+    const line = location?.['line'];
     return [{ path, ...(typeof line === 'number' ? { line } : {}) }];
   });
 }
@@ -418,8 +419,8 @@ function collectText(values: unknown[]): string {
     if (!entry) {
       return;
     }
-    if (normalizedType(entry.type) === 'text') {
-      const text = asString(entry.text);
+    if (normalizedType(entry['type']) === 'text') {
+      const text = asString(entry['text']);
       if (text) {
         lines.push(text);
       }
@@ -436,8 +437,8 @@ function collectText(values: unknown[]): string {
 }
 
 function toDataUrl(entry: Record<string, unknown>): string | null {
-  const data = asString(entry.data);
-  const mimeType = asString(entry.mimeType) ?? asString(entry.mime_type);
+  const data = asString(entry['data']);
+  const mimeType = asString(entry['mimeType']) ?? asString(entry['mime_type']);
   return data && mimeType ? `data:${mimeType};base64,${data}` : null;
 }
 

@@ -9,19 +9,19 @@ import {
 } from './clientChatCloneAndRetryInternals';
 import { normalizeEffort, readPositiveInteger } from './clientBridgeResponseNormalization';
 import { readString, toRecord } from './chatMapping';
-import {
-  type AgentId,
-  type BridgeCapabilities,
-  type BridgeStatus,
-  type Chat,
-  type ChatSummary,
-  type ModelOption,
-  type ReasoningEffort,
+import type {
+  AgentId,
+  BridgeCapabilities,
+  BridgeStatus,
+  Chat,
+  ChatSummary,
+  ModelOption,
+  ReasoningEffort,
 } from './types';
-import {
-  type AppServerStartResponse,
-  type HealthResponse,
-  type ListChatsOptions,
+import type {
+  AppServerStartResponse,
+  HealthResponse,
+  ListChatsOptions,
 } from './clientContractsAndSnapshotInternals';
 
 export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
@@ -82,17 +82,19 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
     const response = await this.ws.request<Record<string, unknown>>('model/list', {
       agentId: agentId ?? null,
     });
-    const entries = Array.isArray(response.data) ? response.data : [];
+    const entries = Array.isArray(response['data']) ? response['data'] : [];
     return entries
       .map((entry) => toRecord(entry))
       .filter((entry): entry is Record<string, unknown> => entry !== null)
       .map((entry) => {
-        const id = readString(entry.id)?.trim() ?? '';
-        const displayName = readString(entry.displayName)?.trim() ?? id;
-        const providerId = readString(entry.providerId)?.trim() || undefined;
-        const providerName = readString(entry.providerName)?.trim() || undefined;
-        const contextWindow = readPositiveInteger(entry.contextWindow);
-        const reasoningEffort = (Array.isArray(entry.reasoningEffort) ? entry.reasoningEffort : [])
+        const id = readString(entry['id'])?.trim() ?? '';
+        const displayName = readString(entry['displayName'])?.trim() ?? id;
+        const providerId = readString(entry['providerId'])?.trim() || undefined;
+        const providerName = readString(entry['providerName'])?.trim() || undefined;
+        const contextWindow = readPositiveInteger(entry['contextWindow']);
+        const reasoningEffort = (
+          Array.isArray(entry['reasoningEffort']) ? entry['reasoningEffort'] : []
+        )
           .map((value) => normalizeEffort(readString(value)))
           .filter((value): value is ReasoningEffort => value !== null)
           .map((effort) => ({ effort }));

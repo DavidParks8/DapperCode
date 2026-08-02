@@ -1,7 +1,7 @@
 import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
 import type { BridgeProtocolVersionError } from './wsErrors';
 import { isFailedTurnStatus, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
-import { type EventListener, type StatusListener, type TurnCompletionSnapshot } from './wsTypes';
+import type { EventListener, StatusListener, TurnCompletionSnapshot } from './wsTypes';
 
 export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClientCore {
   public get isConnected(): boolean {
@@ -133,7 +133,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     const id = `${Date.now()}-${++this.requestCounter}`;
     const payload: Record<string, unknown> = { id, method };
     if (params !== undefined) {
-      payload.params = params;
+      payload['params'] = params;
     }
     const socket = this.socket;
     if (!socket || socket.readyState !== 1) {

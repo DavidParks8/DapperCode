@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import type {
   Chat,
   ChatMessage,
@@ -259,7 +260,7 @@ function message(
   content: string,
   createdAt = '2026-07-18T12:00:00.000Z',
 ): ChatMessage {
-  return { id, role, content, createdAt } as ChatMessage;
+  return { id, role, content, createdAt };
 }
 
 function chat(overrides: Partial<Chat> = {}): Chat {
@@ -273,7 +274,7 @@ function chat(overrides: Partial<Chat> = {}): Chat {
     lastMessagePreview: '',
     messages: [],
     ...overrides,
-  } as Chat;
+  };
 }
 
 function summary(overrides: Partial<ChatSummary> = {}): ChatSummary {
@@ -484,7 +485,7 @@ describe('mainScreenHelpers branch behavior', () => {
       isOther: true,
       isSecret: false,
     });
-    expect(request?.questions[1].options).toHaveLength(2);
+    expect(requireTestValue(request?.questions[1], 'indexed test value').options).toHaveLength(2);
     expect(helpers.buildUserInputDrafts(request!)).toEqual({ q1: '', q2: '' });
   });
 
@@ -567,7 +568,7 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.upsertBridgeUiSurfaceList([], first)).toEqual([first]);
     const original = [first];
     expect(helpers.upsertBridgeUiSurfaceList(original, replacement)).toEqual([replacement]);
-    expect(original[0].title).toBe('Goal');
+    expect(requireTestValue(original[0], 'indexed test value').title).toBe('Goal');
     expect(helpers.removeBridgeUiSurfaceFromList([first], first.id)).toEqual([]);
   });
 
@@ -765,7 +766,10 @@ describe('mainScreenHelpers branch behavior', () => {
     ).toEqual([]);
     expect(
       helpers.parseWorkspaceFavoritePaths(
-        JSON.stringify({ version: 1, paths: [' ', '/a', '/a', '/b', '/c', '/d', '/e'] }),
+        JSON.stringify({
+          version: 1,
+          paths: [' ', '/a', null, 42, { path: '/ignored' }, '/a', '/b', '/c', '/d', '/e'],
+        }),
       ),
     ).toEqual(['/a', '/b', '/c', '/d']);
 
@@ -865,12 +869,14 @@ describe('mainScreenHelpers branch behavior', () => {
         },
       }),
     );
-    expect(preferences.thread).toMatchObject({
+    expect(preferences['thread']).toMatchObject({
       modelId: 'model',
       effort: 'high',
       serviceTier: 'fast',
     });
-    expect(preferences.thread.updatedAt).toBe(new Date(0).toISOString());
+    expect(requireTestValue(preferences['thread'], 'indexed test value').updatedAt).toBe(
+      new Date(0).toISOString(),
+    );
 
     expect(helpers.parseChatPlanSnapshots('')).toEqual({});
     expect(helpers.parseChatPlanSnapshots('{')).toEqual({});
@@ -892,7 +898,7 @@ describe('mainScreenHelpers branch behavior', () => {
         },
       }),
     );
-    expect(snapshots.thread).toMatchObject({
+    expect(snapshots['thread']).toMatchObject({
       threadId: 'thread',
       turnId: 'turn',
       explanation: null,

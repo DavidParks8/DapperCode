@@ -26,6 +26,10 @@ interface UseGitScreenControllerArgs {
 
 export const GIT_SCREEN_REFRESH_INTERVAL_MS = 15_000;
 
+export function gitErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function setGitRefreshLoadingState(
   initialLoad: boolean,
   setLoading: (value: boolean) => void,
@@ -338,8 +342,8 @@ export function useGitScreenController({
             setBranches(result.branches);
             setBranchDraft(result.current ?? status?.branch ?? '');
           })
-          .catch((err) => {
-            setError((err as Error).message);
+          .catch((err: unknown) => {
+            setError(gitErrorMessage(err, 'Could not load branches.'));
           });
       }
       return nextOpen;

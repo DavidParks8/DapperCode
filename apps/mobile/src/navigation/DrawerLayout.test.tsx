@@ -36,7 +36,7 @@ function readScreenOptions(): DrawerScreenOptions {
   if (!mockDrawerProps) {
     throw new Error('Expected Drawer props');
   }
-  return mockDrawerProps.screenOptions as DrawerScreenOptions;
+  return mockDrawerProps['screenOptions'] as DrawerScreenOptions;
 }
 
 describe('DrawerLayout responsive sizing', () => {

@@ -29,7 +29,7 @@ export function screenAtom<Value>(initialValue: Value | (() => Value)): Primitiv
   const created = atom(createInitialValue());
   entries.push({
     atom: created as PrimitiveAtom<unknown>,
-    createInitialValue: createInitialValue as () => unknown,
+    createInitialValue: createInitialValue,
   });
   return created;
 }

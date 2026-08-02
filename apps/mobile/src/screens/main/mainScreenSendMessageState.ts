@@ -245,7 +245,7 @@ export function createGoalSurfaceState(args: GoalSurfaceStateArgs) {
     }
   };
   return {
-    applyGoalSurface() {
+    applyGoalSurface: () => {
       if (!optimisticGoalSurface) {
         return;
       }
@@ -258,7 +258,7 @@ export function createGoalSurfaceState(args: GoalSurfaceStateArgs) {
       args.replaceThreadBridgeUiSurfaces(args.targetChatId, nextSurfaces);
       syncSurfaces(nextSurfaces);
     },
-    restoreGoalSurfaces() {
+    restoreGoalSurfaces: () => {
       if (!previousBridgeUiSurfaces) {
         return;
       }
@@ -312,7 +312,7 @@ export function createSentMessageState(args: SentMessageStateArgs) {
         ? args.selectedChatState.lastMessagePreview
         : null;
   return {
-    applySentMessage() {
+    applySentMessage: () => {
       if (!optimisticSentMessage) {
         return;
       }
@@ -344,7 +344,7 @@ export function createSentMessageState(args: SentMessageStateArgs) {
       });
       args.scrollToBottomReliable(true);
     },
-    clearSentMessage() {
+    clearSentMessage: () => {
       if (!optimisticSentMessage) {
         return;
       }
@@ -359,9 +359,10 @@ export function createSentMessageState(args: SentMessageStateArgs) {
         if (nextMessages.length === prev.messages.length) {
           return prev;
         }
+        const latestMessage = nextMessages.at(-1);
         const fallbackPreview =
           normalizeChatMessageMatchContent(
-            nextMessages.length > 0 ? getMessageText(nextMessages[nextMessages.length - 1]) : '',
+            latestMessage ? getMessageText(latestMessage) : '',
           ).slice(0, 120) || '';
         return {
           ...prev,

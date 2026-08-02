@@ -65,8 +65,10 @@ type WorkspaceRootsResult = Omit<
   Pick<WorkspaceListResponse, 'bridgeRoot' | 'workspaces'>,
   'bridgeRoot'
 > & { bridgeRoot: string | null };
+type WorkspaceRootsRequest = Promise<WorkspaceRootsResult | null>;
 
-const rootsRequestsByApi = new WeakMap<object, Map<string, Promise<WorkspaceRootsResult | null>>>();
+const rootsRequestsByApi = new WeakMap<object, Map<string, WorkspaceRootsRequest>>();
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const favoritesRequestsByPersistence = new WeakMap<
   MainScreenPersistenceController,
   Promise<void>
@@ -122,14 +124,14 @@ export const loadWorkspaceFavoritesAtom = atom(
           },
         }));
       })
-      .catch((error: Error) => {
+      .catch((error: unknown) => {
         const latest = get(workspaceFavoritesByProfileAtom)[profileId];
         if (!latest || latest.requestId !== requestId) {
           return;
         }
         set(workspaceFavoritesByProfileAtom, (resources) => ({
           ...resources,
-          [profileId]: { ...latest, error: error.message, refreshing: false },
+          [profileId]: { ...latest, error: errorMessage(error), refreshing: false },
         }));
       })
       .finally(() => {
@@ -173,11 +175,11 @@ export const toggleWorkspaceFavoriteAtom = atom(
       },
     }));
     const persistence = getFavoritesPersistence(profileId);
-    void persistence.saveWorkspaceFavorites(next).catch((error: Error) =>
+    void persistence.saveWorkspaceFavorites(next).catch((error: unknown) =>
       set(workspaceFavoritesByProfileAtom, (resources) => {
         const resource = resources[profileId];
         return resource
-          ? { ...resources, [profileId]: { ...resource, error: error.message } }
+          ? { ...resources, [profileId]: { ...resource, error: errorMessage(error) } }
           : resources;
       }),
     );
@@ -204,7 +206,7 @@ export const refreshWorkspaceRootsAtom = atom(
       return { bridgeRoot: current.bridgeRoot, workspaces: current.data };
     }
 
-    const requestsForApi = rootsRequestsByApi.get(api) ?? new Map();
+    const requestsForApi = rootsRequestsByApi.get(api) ?? new Map<string, WorkspaceRootsRequest>();
     rootsRequestsByApi.set(api, requestsForApi);
     // Keyed by identity (not just profile ID) so an in-flight request from a bridge/token that
     // was edited out from under it is never mistaken for the same-identity single-flight request.
@@ -238,12 +240,12 @@ export const refreshWorkspaceRootsAtom = atom(
         }));
         return response;
       })
-      .catch((err: Error) => {
+      .catch((err: unknown) => {
         const latest = get(workspaceRootsByProfileAtom)[profileId];
         if (latest?.identityKey === identityKey && latest.requestId === requestId) {
           set(workspaceRootsByProfileAtom, (resources) => ({
             ...resources,
-            [profileId]: { ...latest, error: err.message, refreshing: false },
+            [profileId]: { ...latest, error: errorMessage(err), refreshing: false },
           }));
         }
         return null;

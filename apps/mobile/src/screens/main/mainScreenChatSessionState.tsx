@@ -28,6 +28,7 @@ import {
 import { useAttachmentController } from './controllers/attachmentController';
 import { mergeModelOptions, modelOptionsFromAcpConfig } from './mainScreenChatState';
 import { lastUsedModelPreference } from './mainScreenHelperPreferences';
+import { useMountTimestampRef } from './useMountTimestampRef';
 import type {
   MainScreenLifecycleRecoveryContext,
   MainScreenLifecycleRecoveryResult,
@@ -241,7 +242,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const stopRequestedRef = useRef(false);
   const stopSystemMessageLoggedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
-  const lastAppForegroundedAtRef = useRef(AppState.currentState === 'active' ? Date.now() : 0);
+  const lastAppForegroundedAtRef = useMountTimestampRef(appStateRef.current === 'active');
   const deferredDisconnectActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track whether a command arrived since the last delta — used to

@@ -88,7 +88,7 @@ export const useSharedValue = <T,>(initial: T) => {
   const ref = useRef<{ value: T } | null>(null);
   if (!ref.current) {
     ref.current = { value: initial };
-    mockSharedValues.push(ref.current as { value: unknown });
+    mockSharedValues.push(ref.current);
   }
   return ref.current;
 };

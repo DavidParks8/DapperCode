@@ -10,23 +10,82 @@ export interface DapperCodeActivityContent extends Record<string, unknown> {
   subAgent?: ChatMessageSubAgentMeta;
 }
 
-export function getMessageText(message: Message | ChatMessage): string {
-  if (message.role === 'activity') {
-    return typeof message.content.text === 'string' ? message.content.text : '';
+function readActivityText(content: unknown): string {
+  return content &&
+    typeof content === 'object' &&
+    'text' in content &&
+    typeof content.text === 'string'
+    ? content.text
+    : '';
+}
+
+function readUserText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
   }
-  if (message.role === 'assistant') {
-    return message.content ?? '';
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const parts: unknown[] = content;
+  let text = '';
+  for (const part of parts) {
+    if (
+      part &&
+      typeof part === 'object' &&
+      'type' in part &&
+      part.type === 'text' &&
+      'text' in part &&
+      typeof part.text === 'string'
+    ) {
+      text += part.text;
+    }
+  }
+  return text;
+}
+
+export function getMessageText(message: unknown): string {
+  if (!message || typeof message !== 'object' || !('role' in message) || !('content' in message)) {
+    return '';
+  }
+  if (message.role === 'activity') {
+    return readActivityText(message.content);
   }
   if (message.role === 'user') {
-    if (typeof message.content === 'string') {
-      return message.content;
-    }
-    return message.content
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text)
-      .join('');
+    return readUserText(message.content);
   }
-  return message.content;
+  return typeof message.content === 'string' ? message.content : '';
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function isOptionalStringProperty(value: Record<string, unknown>, key: string): boolean {
+  const property = value[key];
+  return property === undefined || typeof property === 'string';
+}
+
+function isOptionalStringArrayProperty(value: Record<string, unknown>, key: string): boolean {
+  const property = value[key];
+  return property === undefined || isStringArray(property);
+}
+
+function isChatMessageSubAgentMeta(value: unknown): value is ChatMessageSubAgentMeta {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    isOptionalStringProperty(value, 'toolCallId') &&
+    isOptionalStringProperty(value, 'tool') &&
+    isOptionalStringProperty(value, 'prompt') &&
+    isOptionalStringProperty(value, 'senderThreadId') &&
+    isOptionalStringArrayProperty(value, 'receiverThreadIds') &&
+    isOptionalStringProperty(value, 'agentStatus')
+  );
 }
 
 export function getSubAgentMeta(
@@ -35,8 +94,8 @@ export function getSubAgentMeta(
   if (message.role !== 'activity' || message.activityType !== SUBAGENT_ACTIVITY_TYPE) {
     return undefined;
   }
-  const value = message.content.subAgent;
-  return value && typeof value === 'object' ? (value as ChatMessageSubAgentMeta) : undefined;
+  const value: unknown = message.content.subAgent;
+  return isChatMessageSubAgentMeta(value) ? value : undefined;
 }
 
 export function getToolCallDisplayLines(message: Message | ChatMessage): string[] {

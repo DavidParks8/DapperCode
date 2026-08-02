@@ -71,24 +71,29 @@ export function parseChatSnapshotCache(
   now = Date.now(),
 ): ChatSnapshotCache {
   try {
-    const parsed = JSON.parse(raw) as Partial<ChatSnapshotCache>;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return createEmptyChatSnapshotCache(profileId);
+    }
+    const record = parsed as Record<string, unknown>;
     if (
-      parsed.version !== CHAT_SNAPSHOT_CACHE_VERSION ||
-      parsed.profileId !== profileId ||
-      !Array.isArray(parsed.entries)
+      record['version'] !== CHAT_SNAPSHOT_CACHE_VERSION ||
+      record['profileId'] !== profileId ||
+      !Array.isArray(record['entries'])
     ) {
       return createEmptyChatSnapshotCache(profileId);
     }
 
-    const entries = parsed.entries
+    const rawEntries: unknown[] = record['entries'];
+    const entries = rawEntries
       .map(normalizeCacheEntry)
       .filter((entry): entry is ChatSnapshotCacheEntry => entry !== null)
       .filter((entry) => now - Date.parse(entry.cachedAt) <= CHAT_SNAPSHOT_CACHE_MAX_AGE_MS)
       .sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt));
     const selectedChatId =
-      typeof parsed.selectedChatId === 'string' &&
-      entries.some((entry) => entry.chat.id === parsed.selectedChatId)
-        ? parsed.selectedChatId
+      typeof record['selectedChatId'] === 'string' &&
+      entries.some((entry) => entry.chat.id === record['selectedChatId'])
+        ? record['selectedChatId']
         : null;
 
     return boundChatSnapshotCache({
@@ -96,8 +101,8 @@ export function parseChatSnapshotCache(
       profileId,
       selectedChatId,
       updatedAt:
-        typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
-          ? parsed.updatedAt
+        typeof record['updatedAt'] === 'string' && Number.isFinite(Date.parse(record['updatedAt']))
+          ? record['updatedAt']
           : new Date(now).toISOString(),
       entries,
     });
@@ -126,8 +131,9 @@ export function updateChatSnapshotCache(
     });
   } else if (normalizedSelectedChatId) {
     const index = entries.findIndex((entry) => entry.chat.id === normalizedSelectedChatId);
-    if (index !== -1) {
-      entries[index] = { ...entries[index], lastAccessedAt: now };
+    const entry = entries[index];
+    if (entry) {
+      entries[index] = { ...entry, lastAccessedAt: now };
     }
   }
 
@@ -291,12 +297,13 @@ function migrateLegacyChat(value: unknown): unknown {
     return value;
   }
   const chat = value as Record<string, unknown>;
-  if (!Array.isArray(chat.messages)) {
+  if (!Array.isArray(chat['messages'])) {
     return value;
   }
+  const messages: unknown[] = chat['messages'];
   return {
     ...chat,
-    messages: chat.messages.map((message) =>
+    messages: messages.map((message) =>
       message && typeof message === 'object'
         ? migrateLegacyMessage(message as Record<string, unknown>)
         : message,
@@ -330,15 +337,15 @@ function isChatMessage(value: unknown): value is ChatMessage {
   const message = value as Record<string, unknown>;
   return (
     MessageSchema.safeParse(migrateLegacyMessage(message)).success &&
-    typeof message.createdAt === 'string' &&
-    (message.parts === undefined ||
-      (Array.isArray(message.parts) && message.parts.every(isChatMessagePart)))
+    typeof message['createdAt'] === 'string' &&
+    (message['parts'] === undefined ||
+      (Array.isArray(message['parts']) && message['parts'].every(isChatMessagePart)))
   );
 }
 
 function migrateLegacyMessage(value: Record<string, unknown>): unknown {
-  const systemKind = typeof value.systemKind === 'string' ? value.systemKind : null;
-  const text = typeof value.content === 'string' ? value.content : '';
+  const systemKind = typeof value['systemKind'] === 'string' ? value['systemKind'] : null;
+  const text = typeof value['content'] === 'string' ? value['content'] : '';
   if (systemKind === 'reasoning') {
     return { ...value, role: 'reasoning', content: text };
   }
@@ -346,23 +353,24 @@ function migrateLegacyMessage(value: Record<string, unknown>): unknown {
     return {
       ...value,
       role: 'tool',
-      toolCallId: typeof value.toolCallId === 'string' ? value.toolCallId : String(value.id),
+      toolCallId:
+        typeof value['toolCallId'] === 'string' ? value['toolCallId'] : String(value['id']),
       content: text,
     };
   }
   if (systemKind === 'subAgent' || systemKind === 'compaction') {
     return createActivityMessage(
-      String(value.id),
+      String(value['id']),
       systemKind === 'subAgent' ? SUBAGENT_ACTIVITY_TYPE : COMPACTION_ACTIVITY_TYPE,
       {
         text,
         ...(systemKind === 'subAgent' &&
-        value.subAgentMeta &&
-        typeof value.subAgentMeta === 'object'
-          ? { subAgent: value.subAgentMeta as Record<string, unknown> }
+        value['subAgentMeta'] &&
+        typeof value['subAgentMeta'] === 'object'
+          ? { subAgent: value['subAgentMeta'] }
           : {}),
       },
-      String(value.createdAt),
+      String(value['createdAt']),
     );
   }
   return value;
@@ -373,20 +381,20 @@ function isChatMessagePart(value: unknown): value is ChatMessagePart {
     return false;
   }
   const part = value as Record<string, unknown>;
-  if (part.type === 'text') {
-    return typeof part.text === 'string';
+  if (part['type'] === 'text') {
+    return typeof part['text'] === 'string';
   }
-  if (part.type === 'image' || part.type === 'audio') {
+  if (part['type'] === 'image' || part['type'] === 'audio') {
     return true;
   }
-  if (part.type === 'resourceLink') {
-    return typeof part.uri === 'string';
+  if (part['type'] === 'resourceLink') {
+    return typeof part['uri'] === 'string';
   }
   return (
-    part.type === 'resource' &&
-    typeof part.resource === 'object' &&
-    part.resource !== null &&
-    !Array.isArray(part.resource)
+    part['type'] === 'resource' &&
+    typeof part['resource'] === 'object' &&
+    part['resource'] !== null &&
+    !Array.isArray(part['resource'])
   );
 }
 
@@ -440,12 +448,12 @@ function sanitizePartsForCache(parts: ChatMessagePart[]): ChatMessagePart[] {
 function sanitizePartForCache(part: ChatMessagePart): ChatMessagePart {
   if ((part.type === 'image' || part.type === 'audio') && isOversizedPayload(part.data)) {
     const rest: Record<string, unknown> = { ...part };
-    delete rest.data;
+    delete rest['data'];
     return rest as ChatMessagePart;
   }
   if (part.type === 'resource' && isOversizedPayload(part.resource.blob)) {
     const resource: Record<string, unknown> = { ...part.resource };
-    delete resource.blob;
+    delete resource['blob'];
     return { ...part, resource };
   }
   return part;

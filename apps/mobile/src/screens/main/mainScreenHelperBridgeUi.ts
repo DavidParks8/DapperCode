@@ -51,12 +51,12 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
     return null;
   }
 
-  const requestId = readString(record.requestId) ?? readString(record.id);
-  const threadId = readString(record.threadId);
-  const turnId = readString(record.turnId);
-  const itemId = readString(record.itemId);
-  const requestedAt = readString(record.requestedAt);
-  const rawQuestions = Array.isArray(record.questions) ? record.questions : [];
+  const requestId = readString(record['requestId']) ?? readString(record['id']);
+  const threadId = readString(record['threadId']);
+  const turnId = readString(record['turnId']);
+  const itemId = readString(record['itemId']);
+  const requestedAt = readString(record['requestedAt']);
+  const rawQuestions = Array.isArray(record['questions']) ? record['questions'] : [];
   if (!requestId || !threadId || !turnId || !itemId || !requestedAt || rawQuestions.length === 0) {
     return null;
   }
@@ -68,17 +68,17 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
         return null;
       }
 
-      const questionId = readString(itemRecord.id);
-      const header = readString(itemRecord.header);
-      const question = readString(itemRecord.question);
+      const questionId = readString(itemRecord['id']);
+      const header = readString(itemRecord['header']);
+      const question = readString(itemRecord['question']);
       if (!questionId || !header || !question) {
         return null;
       }
 
       const parsedInlineOptions = parseInlineOptionsFromQuestionText(question);
 
-      const parsedOptions = Array.isArray(itemRecord.options)
-        ? itemRecord.options
+      const parsedOptions = Array.isArray(itemRecord['options'])
+        ? itemRecord['options']
             .map((option) => {
               const optionRecord = toRecord(option);
               if (!optionRecord) {
@@ -86,17 +86,17 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
               }
 
               const label =
-                readString(optionRecord.label) ??
-                readString(optionRecord.title) ??
-                readString(optionRecord.value) ??
-                readString(optionRecord.text);
+                readString(optionRecord['label']) ??
+                readString(optionRecord['title']) ??
+                readString(optionRecord['value']) ??
+                readString(optionRecord['text']);
               const description =
-                readString(optionRecord.description) ?? readString(optionRecord.detail) ?? '';
+                readString(optionRecord['description']) ?? readString(optionRecord['detail']) ?? '';
               if (!label) {
                 return null;
               }
               return {
-                value: readString(optionRecord.value) ?? label,
+                value: readString(optionRecord['value']) ?? label,
                 label,
                 description,
               };
@@ -118,11 +118,11 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
         id: questionId,
         header,
         question: parsedInlineOptions.question,
-        isOther: readBoolean(itemRecord.isOther) ?? false,
-        isSecret: readBoolean(itemRecord.isSecret) ?? false,
-        required: readBoolean(itemRecord.required) ?? false,
-        fieldType: readUserInputFieldType(itemRecord.fieldType),
-        defaultValue: readUserInputDefaultValue(itemRecord.defaultValue),
+        isOther: readBoolean(itemRecord['isOther']) ?? false,
+        isSecret: readBoolean(itemRecord['isSecret']) ?? false,
+        required: readBoolean(itemRecord['required']) ?? false,
+        fieldType: readUserInputFieldType(itemRecord['fieldType']),
+        defaultValue: readUserInputDefaultValue(itemRecord['defaultValue']),
         options,
       } satisfies PendingUserInputRequest['questions'][number];
     })
@@ -134,11 +134,11 @@ export function toPendingUserInputRequest(value: unknown): PendingUserInputReque
 
   return {
     requestId,
-    agentId: readString(record.agentId),
+    agentId: readString(record['agentId']),
     threadId,
     turnId,
     itemId,
-    message: readString(record.message) ?? questions[0]?.question ?? '',
+    message: readString(record['message']) ?? questions[0]?.question ?? '',
     requestedAt,
     questions,
   };
@@ -168,25 +168,25 @@ export function toBridgeUiSurface(value: unknown): BridgeUiSurface | null {
     return null;
   }
 
-  const blocks = parseBridgeUiBlocks(record.blocks);
-  const bodyMarkdown = readString(record.bodyMarkdown) ?? null;
-  const rawActions = Array.isArray(record.actions) ? record.actions : [];
+  const blocks = parseBridgeUiBlocks(record['blocks']);
+  const bodyMarkdown = readString(record['bodyMarkdown']) ?? null;
+  const rawActions = Array.isArray(record['actions']) ? record['actions'] : [];
   const actions = rawActions
     .map(toBridgeUiAction)
     .filter((action): action is BridgeUiAction => action !== null);
 
   return {
     ...baseSurface,
-    turnId: readString(record.turnId) ?? null,
-    kind: readString(record.kind) ?? null,
-    tone: readBridgeUiTone(readString(record.tone)),
-    subtitle: readString(record.subtitle) ?? null,
+    turnId: readString(record['turnId']) ?? null,
+    kind: readString(record['kind']) ?? null,
+    tone: readBridgeUiTone(readString(record['tone'])),
+    subtitle: readString(record['subtitle']) ?? null,
     bodyMarkdown,
     blocks,
     actions,
-    dismissible: readBoolean(record.dismissible) ?? true,
-    createdAt: readString(record.createdAt) ?? null,
-    updatedAt: readString(record.updatedAt) ?? null,
+    dismissible: readBoolean(record['dismissible']) ?? true,
+    createdAt: readString(record['createdAt']) ?? null,
+    updatedAt: readString(record['updatedAt']) ?? null,
   };
 }
 
@@ -240,19 +240,19 @@ function toBridgeUiAction(value: unknown): BridgeUiAction | null {
     return null;
   }
 
-  const id = readString(record.id);
-  const label = readString(record.label);
+  const id = readString(record['id']);
+  const label = readString(record['label']);
   if (!id || !label) {
     return null;
   }
 
-  const style = readString(record.style);
+  const style = readString(record['style']);
   return {
     id,
     label,
     style:
       style === 'primary' || style === 'secondary' || style === 'destructive' ? style : undefined,
-    dismissesSurface: readBoolean(record.dismissesSurface) ?? true,
+    dismissesSurface: readBoolean(record['dismissesSurface']) ?? true,
   };
 }
 
@@ -270,7 +270,7 @@ function toBridgeUiBlock(value: unknown): BridgeUiBlock | null {
     return null;
   }
 
-  const type = readString(record.type);
+  const type = readString(record['type']);
   if (!type) {
     return null;
   }
@@ -302,10 +302,10 @@ export function removeBridgeUiSurfaceFromList(
 function readBridgeUiSurfaceBase(
   record: Record<string, unknown>,
 ): Pick<BridgeUiSurface, 'id' | 'threadId' | 'presentation' | 'title'> | null {
-  const id = readString(record.id);
-  const threadId = readString(record.threadId);
-  const presentation = readBridgeUiPresentation(record.presentation);
-  const title = readString(record.title);
+  const id = readString(record['id']);
+  const threadId = readString(record['threadId']);
+  const presentation = readBridgeUiPresentation(record['presentation']);
+  const title = readString(record['title']);
 
   return id && threadId && presentation && title ? { id, threadId, presentation, title } : null;
 }
@@ -337,40 +337,40 @@ const BRIDGE_UI_BLOCK_READERS: Record<
 };
 
 function toTextBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const text = readString(record.text);
+  const text = readString(record['text']);
   return text ? { type: 'text', text } : null;
 }
 
 function toMarkdownBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const markdown = readString(record.markdown);
+  const markdown = readString(record['markdown']);
   return markdown ? { type: 'markdown', markdown } : null;
 }
 
 function toChecklistBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const items = parseBridgeUiChecklistItems(record.items);
+  const items = parseBridgeUiChecklistItems(record['items']);
   return items.length > 0 ? { type: 'checklist', items } : null;
 }
 
 function toKeyValueBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const items = parseBridgeUiKeyValueItems(record.items);
+  const items = parseBridgeUiKeyValueItems(record['items']);
   return items.length > 0 ? { type: 'keyValue', items } : null;
 }
 
 function toCodeBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const text = readString(record.text);
+  const text = readString(record['text']);
   return text
     ? {
         type: 'code',
         text,
-        language: readString(record.language) ?? null,
+        language: readString(record['language']) ?? null,
       }
     : null;
 }
 
 function toProgressBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
-  const label = readString(record.label);
-  const progressValue = readFiniteNumber(record.value);
-  const max = readFiniteNumber(record.max);
+  const label = readString(record['label']);
+  const progressValue = readFiniteNumber(record['value']);
+  const max = readFiniteNumber(record['max']);
   if (!label || progressValue === null || max === null || max <= 0) {
     return null;
   }
@@ -380,7 +380,7 @@ function toProgressBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock
     label,
     value: progressValue,
     max,
-    detail: readString(record.detail) ?? null,
+    detail: readString(record['detail']) ?? null,
   };
 }
 
@@ -400,15 +400,15 @@ function toBridgeUiChecklistItem(value: unknown): BridgeUiChecklistItem | null {
     return null;
   }
 
-  const label = readString(record.label);
+  const label = readString(record['label']);
   if (!label) {
     return null;
   }
 
   return {
     label,
-    status: readBridgeUiChecklistStatus(record.status),
-    detail: readString(record.detail) ?? undefined,
+    status: readBridgeUiChecklistStatus(record['status']),
+    detail: readString(record['detail']) ?? undefined,
   };
 }
 
@@ -432,7 +432,7 @@ function toBridgeUiKeyValueItem(value: unknown): { label: string; value: string 
     return null;
   }
 
-  const label = readString(record.label);
-  const itemValue = readString(record.value);
+  const label = readString(record['label']);
+  const itemValue = readString(record['value']);
   return label && itemValue ? { label, value: itemValue } : null;
 }

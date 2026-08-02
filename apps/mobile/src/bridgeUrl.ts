@@ -93,6 +93,9 @@ function isValidIpv4Octet(octet: string): boolean {
 }
 
 function isPrivateIpv4Prefix([first, second]: number[]): boolean {
+  if (first === undefined || second === undefined) {
+    return false;
+  }
   if (first === 10 || (first === 192 && second === 168) || (first === 169 && second === 254)) {
     return true;
   }

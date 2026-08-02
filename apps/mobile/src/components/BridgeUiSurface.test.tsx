@@ -104,8 +104,8 @@ describe('BridgeUiWorkflowCard', () => {
     expect(findText(root, '40% complete')).toBe(true);
 
     const toggleButton = findPressableByLabel(root, 'Collapse surface');
-    expect(toggleButton.props.accessibilityRole).toBe('button');
-    expect(toggleButton.props.accessibilityState).toEqual({
+    expect(toggleButton.props['accessibilityRole']).toBe('button');
+    expect(toggleButton.props['accessibilityState']).toEqual({
       disabled: false,
       expanded: true,
     });
@@ -121,7 +121,7 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => {
       readOnPress(findPressableByLabel(root, 'Expand surface').props)();
     });
-    expect(findPressableByLabel(root, 'Collapse surface').props.accessibilityState).toEqual({
+    expect(findPressableByLabel(root, 'Collapse surface').props['accessibilityState']).toEqual({
       disabled: false,
       expanded: true,
     });
@@ -211,7 +211,7 @@ describe('BridgeUiWorkflowCard', () => {
         </SafeAreaProvider>,
       );
     });
-    act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
+    act(() => (tree.root.findByType(AppSheet).props['onClose'] as () => void)());
     expect(onDismiss).toHaveBeenCalledTimes(2);
     act(() => tree.unmount());
   });
@@ -246,7 +246,7 @@ describe('BridgeUiWorkflowCard', () => {
       const root = expectValue(rendered).root as QueryableTestInstance;
       expect(findText(root, `${tone} surface`)).toBe(true);
       expect(
-        root.findAll((node) => node.props.accessibilityLabel === `Dismiss ${tone} surface`),
+        root.findAll((node) => node.props['accessibilityLabel'] === `Dismiss ${tone} surface`),
       ).toHaveLength(0);
       act(() => expectValue(rendered).unmount());
     },
@@ -280,7 +280,7 @@ describe('BridgeUiWorkflowCard', () => {
     });
     const tree = expectValue(rendered);
     expect(findText(tree.root as QueryableTestInstance, 'No details provided.')).toBe(true);
-    act(() => (tree.root.findByType(AppSheet).props.onClose as () => void)());
+    act(() => (tree.root.findByType(AppSheet).props['onClose'] as () => void)());
     expect(onDismiss).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
@@ -442,7 +442,8 @@ function findText(root: QueryableTestInstance, text: string): boolean {
 
 function findPressableByLabel(root: QueryableTestInstance, label: string): QueryableTestInstance {
   const pressable = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!pressable) {
     throw new Error(`Unable to find pressable with label "${label}"`);
@@ -452,7 +453,7 @@ function findPressableByLabel(root: QueryableTestInstance, label: string): Query
 
 function findPressableByText(root: QueryableTestInstance, text: string): QueryableTestInstance {
   const pressable = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && containsText(node, text),
+    (node) => typeof node.props['onPress'] === 'function' && containsText(node, text),
   )[0];
   if (!pressable) {
     throw new Error(`Unable to find pressable with text "${text}"`);
@@ -482,7 +483,7 @@ function readOnPress(props: { onPress?: unknown }): () => void {
 
 /** Resolves a Pressable's (possibly function-form) style prop and returns its effective minHeight. */
 function resolvePressableMinHeight(node: QueryableTestInstance): number {
-  const rawStyle = node.props.style as unknown;
+  const rawStyle = node.props['style'];
   const resolved = typeof rawStyle === 'function' ? rawStyle({ pressed: false }) : rawStyle;
   const flattened = StyleSheet.flatten(resolved) as { minHeight?: number } | undefined;
   return flattened?.minHeight ?? 0;

@@ -12,5 +12,5 @@ export function createDrawerContentStyles(theme: AppTheme): DrawerContentStyles 
     ...createDrawerContentShellStyles(theme),
     ...createDrawerContentFilterListStyles(theme),
     ...createDrawerContentWorkspaceRowStyles(theme),
-  } as DrawerContentStyles;
+  };
 }

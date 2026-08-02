@@ -9,7 +9,7 @@ export interface ActivityIndicatorInputs {
   isOpeningChat: boolean;
   isTurnLikelyRunning: boolean;
   pendingApproval: { command?: string | null; kind?: string | null } | null;
-  pendingUserInputRequest: unknown | null;
+  pendingUserInputRequest: unknown;
   selectedChatStatus: Chat['status'] | null;
   showBridgeRecoveryBanner: boolean;
   turnFailureDetail: string | null;

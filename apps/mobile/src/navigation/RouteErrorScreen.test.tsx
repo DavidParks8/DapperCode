@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
 
 import { router } from 'expo-router';
@@ -28,10 +29,11 @@ describe('RouteErrorScreen', () => {
     if (!tree) {
       throw new Error('Expected route error screen');
     }
-    const button = (tree.root as Queryable).findAll(
-      (node) => node.props.accessibilityRole === 'button',
-    )[0];
-    act(() => (button.props.onPress as () => void)());
+    const button = requireTestValue(
+      (tree.root as Queryable).findAll((node) => node.props['accessibilityRole'] === 'button')[0],
+      'indexed test value',
+    );
+    act(() => (button.props['onPress'] as () => void)());
     expect(router.replace).toHaveBeenCalledWith('/');
     act(() => tree?.unmount());
   });
@@ -50,20 +52,24 @@ describe('RouteErrorScreen', () => {
       throw new Error('Expected route error screen');
     }
     const texts = (tree.root as Queryable).findAll((node) => node.type === Text);
-    const [titleText, messageText, actionText] = texts;
+    const titleText = requireTestValue(texts[0], 'route error title');
+    const messageText = requireTestValue(texts[1], 'route error message');
+    const actionText = requireTestValue(texts[2], 'route error action');
 
-    const flatTitle = StyleSheet.flatten<TextStyle>(titleText.props.style as StyleProp<TextStyle>);
+    const flatTitle = StyleSheet.flatten<TextStyle>(
+      titleText.props['style'] as StyleProp<TextStyle>,
+    );
     expect(flatTitle.fontSize).toBe(theme.typography.title.fontSize);
     expect(flatTitle.lineHeight).toBe(theme.typography.title.lineHeight);
 
     const flatMessage = StyleSheet.flatten<TextStyle>(
-      messageText.props.style as StyleProp<TextStyle>,
+      messageText.props['style'] as StyleProp<TextStyle>,
     );
     expect(flatMessage.fontSize).toBe(theme.typography.body.fontSize);
     expect(flatMessage.lineHeight).toBe(theme.typography.body.lineHeight);
 
     const flatAction = StyleSheet.flatten<TextStyle>(
-      actionText.props.style as StyleProp<TextStyle>,
+      actionText.props['style'] as StyleProp<TextStyle>,
     );
     expect(flatAction.fontSize).toBe(theme.typography.headline.fontSize);
     expect(flatAction.lineHeight).toBe(theme.typography.headline.lineHeight);

@@ -1,4 +1,4 @@
-import type { Message } from '@ag-ui/core';
+import type { ActivityMessage, Message } from '@ag-ui/core';
 import type { RawAcpSnapshot } from './chatMapping';
 import type { TurnPlanStep } from './typesBridge';
 
@@ -82,7 +82,17 @@ interface ChatMessageMetadata {
   toolMeta?: ChatToolMeta;
 }
 
-export type ChatMessage = Message & ChatMessageMetadata;
+export interface ChatActivityContent extends Record<string, unknown> {
+  text?: string;
+  subAgent?: ChatMessageSubAgentMeta;
+}
+
+type ChatActivityMessage = Omit<ActivityMessage, 'content'> & {
+  content: ChatActivityContent;
+};
+
+export type ChatMessage = (Exclude<Message, ActivityMessage> | ChatActivityMessage) &
+  ChatMessageMetadata;
 
 export interface ChatSummary {
   id: string;

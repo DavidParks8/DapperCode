@@ -1,6 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { usePathname } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import {
@@ -28,11 +28,16 @@ export function useAppStoreReview(): void {
   );
 
   const appLifecycleStateRef = useRef(AppState.currentState);
-  const activeUsageStartedAtRef = useRef<number | null>(
-    AppState.currentState === 'active' ? Date.now() : null,
-  );
+  const activeUsageStartedAtRef = useRef<number | null>(null);
   const storeReviewStateRef = useRef<AutoStoreReviewState>(createDefaultAutoStoreReviewState());
   const automaticStoreReviewInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const currentState = AppState.currentState;
+    appLifecycleStateRef.current = currentState;
+    activeUsageStartedAtRef.current = currentState === 'active' ? Date.now() : null;
+    setAppLifecycleState(currentState);
+  }, []);
 
   const persistStoreReviewState = useCallback(async (nextState: AutoStoreReviewState) => {
     try {

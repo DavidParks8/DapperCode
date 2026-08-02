@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import type { ReactElement, ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -118,9 +119,9 @@ describe('ChatMessage image viewer', () => {
     const tree = expectValue(rendered) as QueryableRenderer;
 
     const modal = tree.root.findByType(Modal);
-    expect(modal.props.visible).toBe(false);
+    expect(modal.props['visible']).toBe(false);
 
-    const previewImage = tree.root.findAllByType(Image)[0];
+    const previewImage = requireTestValue(tree.root.findAllByType(Image)[0], 'indexed test value');
     act(() => {
       previewImage.props.onLoad({ nativeEvent: { source: { width: 800, height: 400 } } });
       previewImage.props.onLoad({ nativeEvent: { source: { width: 800, height: 400 } } });
@@ -135,12 +136,12 @@ describe('ChatMessage image viewer', () => {
       readOnPress(trigger.props)();
     });
 
-    expect(tree.root.findByType(Modal).props.visible).toBe(true);
+    expect(tree.root.findByType(Modal).props['visible']).toBe(true);
 
     act(() => {
-      (tree.root.findByType(Modal).props.onRequestClose as () => void)();
+      (tree.root.findByType(Modal).props['onRequestClose'] as () => void)();
     });
-    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(tree.root.findByType(Modal).props['visible']).toBe(false);
 
     act(() => {
       readOnPress(trigger.props)();
@@ -148,7 +149,7 @@ describe('ChatMessage image viewer', () => {
     act(() => {
       readOnPress(tree.root.findByProps({ testID: 'chat-image-fullscreen-close' }).props)();
     });
-    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(tree.root.findByType(Modal).props['visible']).toBe(false);
 
     act(() => {
       readOnPress(trigger.props)();
@@ -161,7 +162,7 @@ describe('ChatMessage image viewer', () => {
       readOnPress(backdrop.props)();
     });
 
-    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    expect(tree.root.findByType(Modal).props['visible']).toBe(false);
   });
 });
 
@@ -189,12 +190,14 @@ describe('ChatMessage markdown formatting', () => {
 
     const heading = root
       .findAll((node) => node.type === Text)
-      .find((node) => flattenRenderedText(node.props.children).includes('Role'));
+      .find((node) => flattenRenderedText(node.props['children']).includes('Role'));
 
     if (!heading) {
       throw new Error('Expected heading text to render');
     }
-    const headingStyle = StyleSheet.flatten(heading.props.style as never) as { fontSize?: number };
+    const headingStyle = StyleSheet.flatten(heading.props['style'] as never) as {
+      fontSize?: number;
+    };
     // h1 maps to the semantic `headline` role (17pt) rather than a bespoke literal, so the
     // rendered size must match that token exactly, not just stay under some loose ceiling.
     expect(headingStyle.fontSize).toBe(theme.typography.headline.fontSize);
@@ -216,16 +219,16 @@ describe('ChatMessage markdown formatting', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     };
     const tree = renderMessage(message);
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const fontSizeFor = (label: string): number | undefined => {
       const node = root
         .findAll((n) => n.type === Text)
-        .find((n) => flattenRenderedText(n.props.children).includes(label));
+        .find((n) => flattenRenderedText(n.props['children']).includes(label));
       if (!node) {
         throw new Error(`Expected "${label}" heading text to render`);
       }
-      const style = StyleSheet.flatten(node.props.style as never) as { fontSize?: number };
+      const style = StyleSheet.flatten(node.props['style'] as never) as { fontSize?: number };
       return style.fontSize;
     };
 
@@ -260,15 +263,15 @@ describe('ChatMessage markdown formatting', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     };
     const tree = renderMessage(message);
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const codeNodes = root
       .findAll((node) => node.type === Text)
-      .filter((node) => flattenRenderedText(node.props.children).includes('npm test'));
+      .filter((node) => flattenRenderedText(node.props['children']).includes('npm test'));
     expect(codeNodes.length).toBeGreaterThan(0);
 
     for (const node of codeNodes) {
-      const style = StyleSheet.flatten(node.props.style as never) as {
+      const style = StyleSheet.flatten(node.props['style'] as never) as {
         fontFamily?: string;
         fontSize?: number;
       };
@@ -289,22 +292,22 @@ describe('ChatMessage markdown formatting', () => {
     };
     jest.mocked(Clipboard.setStringAsync).mockClear();
     const tree = renderMessage(message);
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     expect(root.findByProps({ testID: 'chat-code-block' })).toBeTruthy();
     expect(
       root
         .findAll((node) => node.type === Text)
-        .some((node) => flattenRenderedText(node.props.children) === 'TypeScript'),
+        .some((node) => flattenRenderedText(node.props['children']) === 'TypeScript'),
     ).toBe(true);
 
     const keyword = root
       .findAll((node) => node.type === Text)
-      .find((node) => flattenRenderedText(node.props.children) === 'const');
+      .find((node) => flattenRenderedText(node.props['children']) === 'const');
     if (!keyword) {
       throw new Error('Expected TypeScript keyword highlighting');
     }
-    expect(StyleSheet.flatten(keyword.props.style as never)).toMatchObject({
+    expect(StyleSheet.flatten(keyword.props['style'] as never)).toMatchObject({
       color: theme.colors.codeSyntaxKeyword,
     });
 
@@ -341,7 +344,7 @@ describe('ChatMessage markdown formatting', () => {
     const readText = () =>
       (tree.root as QueryableTestInstance)
         .findAll((node) => node.type === Text)
-        .map((node) => flattenRenderedText(node.props.children))
+        .map((node) => flattenRenderedText(node.props['children']))
         .join(' ');
 
     expect(readText()).toContain('This needs a');
@@ -456,7 +459,7 @@ describe('ChatMessage markdown formatting', () => {
     expect(
       root
         .findAll((node) => node.type === ScrollView)
-        .some((node) => node.props.horizontal === true),
+        .some((node) => node.props['horizontal'] === true),
     ).toBe(true);
   });
 
@@ -473,7 +476,7 @@ describe('ChatMessage markdown formatting', () => {
       },
       { onOpenLocalPreview },
     );
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     act(() => {
       readOnPress(findTextPressable(root, 'Docs').props)();
@@ -484,7 +487,7 @@ describe('ChatMessage markdown formatting', () => {
     expect(onOpenLocalPreview).toHaveBeenCalledWith('http://localhost:4173');
     expect(hasRenderedText(root, 'source.ts:12')).toBe(true);
     expect(
-      findTextNodes(root, 'source.ts:12').every((node) => node.props.onPress === undefined),
+      findTextNodes(root, 'source.ts:12').every((node) => node.props['onPress'] === undefined),
     ).toBe(true);
     act(() => tree.unmount());
     openUrl.mockRestore();
@@ -501,15 +504,15 @@ describe('ChatMessage markdown formatting', () => {
       },
       { onOpenLocalPreview },
     );
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const chip = root
       .findAllByProps({ accessibilityLabel: 'Open http://localhost:3000/ in Browser' })
-      .find((node) => typeof node.props.onPress === 'function');
+      .find((node) => typeof node.props['onPress'] === 'function');
     if (!chip) {
       throw new Error('Expected the local-preview chip to render');
     }
-    const hitSlop = chip.props.hitSlop as
+    const hitSlop = chip.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
 
     // The chip's visible chrome (padding + icon/text row) is well under the 44pt/48dp minimum
@@ -533,15 +536,15 @@ describe('ChatMessage markdown formatting', () => {
       },
       { onOpenLocalPreview },
     );
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const chips = root
       .findAllByProps({ accessibilityRole: 'button' })
       .filter(
         (node) =>
-          typeof node.props.onPress === 'function' &&
-          typeof node.props.accessibilityLabel === 'string' &&
-          (node.props.accessibilityLabel as string).startsWith('Open http://localhost:'),
+          typeof node.props['onPress'] === 'function' &&
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          node.props['accessibilityLabel'].startsWith('Open http://localhost:'),
       );
     expect(chips).toHaveLength(2);
 
@@ -553,19 +556,22 @@ describe('ChatMessage markdown formatting', () => {
     const GAP = 4;
     const HALF_GAP = GAP / 2;
     for (const chip of chips) {
-      const hitSlop = chip.props.hitSlop as
+      const hitSlop = chip.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
-      expect(hitSlop!.top).toBeLessThanOrEqual(HALF_GAP);
-      expect(hitSlop!.bottom).toBeLessThanOrEqual(HALF_GAP);
+      expect(requireTestValue(hitSlop, 'chip hit slop').top).toBeLessThanOrEqual(HALF_GAP);
+      expect(requireTestValue(hitSlop, 'chip hit slop').bottom).toBeLessThanOrEqual(HALF_GAP);
     }
 
     // Exact effective-geometry check: the first chip's expanded bottom edge and the second
     // chip's expanded top edge must not cross the midpoint of the gap between them, i.e. they
     // must not overlap at all.
-    const [firstHitSlop, secondHitSlop] = chips.map(
-      (chip) => chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
+    const [firstHitSlopValue, secondHitSlopValue] = chips.map(
+      (chip) =>
+        chip.props['hitSlop'] as { top: number; bottom: number; left: number; right: number },
     );
+    const firstHitSlop = requireTestValue(firstHitSlopValue, 'first chip hit slop');
+    const secondHitSlop = requireTestValue(secondHitSlopValue, 'second chip hit slop');
     const firstChipExpandedBottomOffset = firstHitSlop.bottom;
     const secondChipExpandedTopOffset = secondHitSlop.top;
     expect(firstChipExpandedBottomOffset + secondChipExpandedTopOffset).toBeLessThanOrEqual(GAP);
@@ -607,21 +613,23 @@ describe('ChatMessage copy action', () => {
       content: 'The bridge is running on port 4319.',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     const button = findCopyButton(root, 'assistant-copy');
 
-    expect(button.props.accessibilityLabel).toBe('Copy message');
+    expect(button.props['accessibilityLabel']).toBe('Copy message');
 
     act(() => readOnPress(button.props)());
 
     expect(Clipboard.setStringAsync).toHaveBeenCalledWith('The bridge is running on port 4319.');
-    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copied message');
+    expect(findCopyButton(root, 'assistant-copy').props['accessibilityLabel']).toBe(
+      'Copied message',
+    );
 
     act(() => {
       jest.advanceTimersByTime(2000);
     });
 
-    expect(findCopyButton(root, 'assistant-copy').props.accessibilityLabel).toBe('Copy message');
+    expect(findCopyButton(root, 'assistant-copy').props['accessibilityLabel']).toBe('Copy message');
 
     act(() => tree.unmount());
   });
@@ -638,7 +646,7 @@ describe('ChatMessage copy action', () => {
       ],
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     act(() => readOnPress(findCopyButton(root, 'assistant-parts').props)());
 
@@ -654,9 +662,7 @@ describe('ChatMessage copy action', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
 
-    expect(findCopyButtons(tree.root as QueryableTestInstance, 'assistant-streaming').length).toBe(
-      0,
-    );
+    expect(findCopyButtons(tree.root, 'assistant-streaming').length).toBe(0);
     act(() => tree.unmount());
   });
 
@@ -668,7 +674,7 @@ describe('ChatMessage copy action', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
 
-    expect(findCopyButtons(tree.root as QueryableTestInstance, 'user-message').length).toBe(0);
+    expect(findCopyButtons(tree.root, 'user-message').length).toBe(0);
     act(() => tree.unmount());
   });
 });
@@ -686,14 +692,14 @@ describe('ChatMessage text selection', () => {
       content: response,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const blockTexts = root
       .findAll((node) => node.type === Text)
       .filter((node) => !hasTextAncestor(node));
 
     expect(blockTexts.length).toBeGreaterThan(0);
-    expect(blockTexts.filter((node) => node.props.selectable === true)).toHaveLength(0);
+    expect(blockTexts.filter((node) => node.props['selectable'] === true)).toHaveLength(0);
     act(() => tree.unmount());
   });
 
@@ -704,7 +710,7 @@ describe('ChatMessage text selection', () => {
       content: response,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     expect(
       root.findAllByProps({ testID: 'chat-message-select-text-assistant-longpress' }),
@@ -716,9 +722,9 @@ describe('ChatMessage text selection', () => {
     // A read-only multiline TextInput is the only React Native surface that supports partial
     // selection, so the sheet has to hand the response to one.
     const input = root.findByType(TextInput);
-    expect(input.props.value).toBe(response);
-    expect(input.props.editable).toBe(false);
-    expect(input.props.multiline).toBe(true);
+    expect(input.props['value']).toBe(response);
+    expect(input.props['editable']).toBe(false);
+    expect(input.props['multiline']).toBe(true);
 
     act(() =>
       readOnPress(
@@ -737,14 +743,14 @@ describe('ChatMessage text selection', () => {
       content: response,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     const button = root.findByProps({ testID: 'chat-message-copy-assistant-action-select' });
-    expect(button.props.accessibilityLabel).toBe('Select message text');
+    expect(button.props['accessibilityLabel']).toBe('Select message text');
 
     act(() => readOnPress(button.props)());
 
-    expect(root.findByType(TextInput).props.value).toBe(response);
+    expect(root.findByType(TextInput).props['value']).toBe(response);
     act(() => tree.unmount());
   });
 
@@ -755,10 +761,12 @@ describe('ChatMessage text selection', () => {
       content: '',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     expect(
-      root.findByProps({ testID: 'chat-message-select-target-assistant-empty' }).props.onLongPress,
+      root.findByProps({ testID: 'chat-message-select-target-assistant-empty' }).props[
+        'onLongPress'
+      ],
     ).toBeUndefined();
     act(() => tree.unmount());
   });
@@ -770,13 +778,13 @@ describe('ChatMessage text selection', () => {
       content: 'Restart the bridge',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const userRoot = userTree.root as QueryableTestInstance;
+    const userRoot = userTree.root;
 
     expect(
       userRoot
         .findAll((node) => node.type === Text)
         .filter((node) => !hasTextAncestor(node))
-        .some((node) => node.props.selectable === true),
+        .some((node) => node.props['selectable'] === true),
     ).toBe(true);
     act(() => userTree.unmount());
   });
@@ -809,11 +817,11 @@ describe('ChatMessage command rows', () => {
     const horizontalScroll = viewport.findByType(ScrollView);
     const commandText = horizontalScroll.findByType(Text);
 
-    expect(horizontalScroll.props.horizontal).toBe(true);
+    expect(horizontalScroll.props['horizontal']).toBe(true);
     // The row is one line tall until it is expanded, and the scroll viewport
     // leaves the text unconstrained so the whole command stays reachable.
-    expect(commandText.props.numberOfLines).toBe(1);
-    expect(flattenRenderedText(commandText.props.children)).toContain('ChatMessage.test.tsx');
+    expect(commandText.props['numberOfLines']).toBe(1);
+    expect(flattenRenderedText(commandText.props['children'])).toContain('ChatMessage.test.tsx');
   });
 });
 
@@ -934,7 +942,7 @@ describe('ChatMessage transcript width', () => {
     });
 
     const body = tree.root.findByProps({ testID: 'tool-output-body' });
-    const bodyStyle = (StyleSheet.flatten(body.props.style as never) ?? {}) as {
+    const bodyStyle = (StyleSheet.flatten(body.props['style'] as never) ?? {}) as {
       marginRight?: number;
     };
 
@@ -950,7 +958,7 @@ describe('ChatMessage user bubble', () => {
   const findUserText = (root: QueryableTestInstance) => {
     const node = root
       .findAll((candidate) => candidate.type === Text)
-      .find((candidate) => flattenRenderedText(candidate.props.children).includes('wrapped'));
+      .find((candidate) => flattenRenderedText(candidate.props['children']).includes('wrapped'));
     if (!node) {
       throw new Error('Expected the user message text to render');
     }
@@ -958,11 +966,12 @@ describe('ChatMessage user bubble', () => {
   };
 
   const readContentStyle = (root: QueryableTestInstance) =>
-    (StyleSheet.flatten(root.findByProps({ testID: 'user-bubble-content' }).props.style as never) ??
-      {}) as { maxWidth?: number | string };
+    (StyleSheet.flatten(
+      root.findByProps({ testID: 'user-bubble-content' }).props['style'] as never,
+    ) ?? {}) as { maxWidth?: number | string };
 
   const fireTextLayout = (node: QueryableTestInstance, widths: number[]) => {
-    const onTextLayout = node.props.onTextLayout as
+    const onTextLayout = node.props['onTextLayout'] as
       ((event: { nativeEvent: { lines: { width: number }[] } }) => void) | undefined;
     if (!onTextLayout) {
       throw new Error('Expected the user text to report its layout');
@@ -980,11 +989,11 @@ describe('ChatMessage user bubble', () => {
       content: 'A wrapped user message.',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     const bubbleStyle = (StyleSheet.flatten(
-      root.findByProps({ testID: 'user-message-bubble' }).props.style as never,
+      root.findByProps({ testID: 'user-message-bubble' }).props['style'] as never,
     ) ?? {}) as { backgroundColor?: string; borderColor?: string };
-    const textStyle = (StyleSheet.flatten(findUserText(root).props.style as never) ?? {}) as {
+    const textStyle = (StyleSheet.flatten(findUserText(root).props['style'] as never) ?? {}) as {
       color?: string;
     };
 
@@ -1002,7 +1011,7 @@ describe('ChatMessage user bubble', () => {
       content: 'A message long enough that it gets wrapped across more than one line.',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     expect(readContentStyle(root).maxWidth).toBeUndefined();
 
@@ -1022,7 +1031,7 @@ describe('ChatMessage user bubble', () => {
       content: 'Another wrapped user message for measurement.',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
     fireTextLayout(findUserText(root), [180, 60]);
     fireTextLayout(findUserText(root), []);
@@ -1041,12 +1050,12 @@ describe('ChatMessage user bubble', () => {
     };
 
     const first = renderMessage(message);
-    fireTextLayout(findUserText(first.root as QueryableTestInstance), [164, 70]);
-    expect(readContentStyle(first.root as QueryableTestInstance).maxWidth).toBe(164);
+    fireTextLayout(findUserText(first.root), [164, 70]);
+    expect(readContentStyle(first.root).maxWidth).toBe(164);
     act(() => first.unmount());
 
     const second = renderMessage(message);
-    expect(readContentStyle(second.root as QueryableTestInstance).maxWidth).toBe(164);
+    expect(readContentStyle(second.root).maxWidth).toBe(164);
     act(() => second.unmount());
   });
 
@@ -1057,9 +1066,9 @@ describe('ChatMessage user bubble', () => {
       content: 'A wrapped caption\n[file: /tmp/a-very-long-attachment-path-report.txt]',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
 
-    expect(findUserText(root).props.onTextLayout).toBeUndefined();
+    expect(findUserText(root).props['onTextLayout']).toBeUndefined();
     expect(readContentStyle(root).maxWidth).toBeUndefined();
     act(() => tree.unmount());
   });
@@ -1072,8 +1081,8 @@ describe('ChatMessage user bubble', () => {
       content: 'A wrapped user message.',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
-    const style = (StyleSheet.flatten(findUserText(root).props.style as never) ?? {}) as {
+    const root = tree.root;
+    const style = (StyleSheet.flatten(findUserText(root).props['style'] as never) ?? {}) as {
       fontFamily?: string;
       fontSize?: number;
     };
@@ -1132,7 +1141,7 @@ describe('ChatMessage role and part matrices', () => {
   ])('renders $name', ({ message, expected }) => {
     const tree = renderMessage(message);
     for (const text of expected) {
-      expect(hasRenderedText(tree.root as QueryableTestInstance, text)).toBe(true);
+      expect(hasRenderedText(tree.root, text)).toBe(true);
     }
     act(() => tree.unmount());
   });
@@ -1157,7 +1166,7 @@ describe('ChatMessage role and part matrices', () => {
       ],
     };
     const tree = renderMessage(message, { bridgeUrl: 'http://bridge', bridgeToken: 'secret' });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     for (const text of [
       'Structured text',
       '[image]',
@@ -1177,7 +1186,7 @@ describe('ChatMessage role and part matrices', () => {
       images.some((node) => String(node.props.source?.uri).includes('/local-image?path=')),
     ).toBe(true);
     expect(
-      images.some((node) => node.props.source?.headers?.Authorization === 'Bearer secret'),
+      images.some((node) => node.props.source?.headers?.['Authorization'] === 'Bearer secret'),
     ).toBe(true);
     act(() => tree.unmount());
   });
@@ -1194,7 +1203,7 @@ describe('ChatMessage role and part matrices', () => {
       { bridgeUrl: 'https://bridge' },
     );
     expect(
-      hasRenderedText(tree.root as QueryableTestInstance, expected) ||
+      hasRenderedText(tree.root, expected) ||
         tree.root.findAllByProps({ accessibilityLabel: expected }).length > 0,
     ).toBe(true);
     act(() => tree.unmount());
@@ -1217,7 +1226,7 @@ describe('ChatMessage role and part matrices', () => {
         .findAllByType(Image)
         .some((node) => node.props.source?.uri === 'data:image/png;base64,abc123'),
     ).toBe(true);
-    expect(hasRenderedText(tree.root as QueryableTestInstance, '[embedded resource]')).toBe(true);
+    expect(hasRenderedText(tree.root, '[embedded resource]')).toBe(true);
     act(() => tree.unmount());
   });
 });
@@ -1244,19 +1253,23 @@ describe('ChatMessage system timeline matrices', () => {
       content,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
-    expect(root.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(
-      0,
-    );
+    const root = tree.root;
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+    ).toBeGreaterThan(0);
     if (hint) {
       expect(hasRenderedText(root, hint)).toBe(true);
     } else {
       expect(hasRenderedText(root, 'First thought')).toBe(false);
       expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
     }
-    const control = root.findAll(
-      (node) => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function',
-    )[0];
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === label && typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
     act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, kind === 'reasoning' ? 'First thought' : 'query=coverage')).toBe(
       true,
@@ -1297,12 +1310,15 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
       pending: true,
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     simulateTextLayout(root, 2);
     expect(hasRenderedText(root, 'Short thought')).toBe(true);
     expect(hasRenderedText(root, 'Tap to show thinking')).toBe(false);
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Plan')[0].props.accessibilityState,
+      requireTestValue(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Plan')[0],
+        'indexed test value',
+      ).props['accessibilityState'],
     ).toEqual({ disabled: true });
     act(() => tree.unmount());
   });
@@ -1322,14 +1338,14 @@ describe('ChatMessage system timeline matrices', () => {
       },
       { onOpenSubAgentThread },
     );
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     expect(hasRenderedText(root, 'Analyze tests')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
     const latestViewport = root.findAllByProps({ testID: 'subagent-latest-scroll' })[0];
     const latestScroll = latestViewport?.findAllByType(ScrollView)[0];
     const latestText = latestScroll
       ?.findAllByType(Text)
-      .find((node) => flattenRenderedText(node.props.children).trimStart() === latest);
+      .find((node) => flattenRenderedText(node.props['children']).trimStart() === latest);
     expect(latestScroll?.props).toMatchObject({
       horizontal: true,
       nestedScrollEnabled: true,
@@ -1339,11 +1355,14 @@ describe('ChatMessage system timeline matrices', () => {
     expect(latestText?.props).toMatchObject({
       numberOfLines: 1,
     });
-    const control = root.findAll(
-      (node) =>
-        node.props.accessibilityLabel === 'Open agent chat' &&
-        typeof node.props.onPress === 'function',
-    )[0];
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Open agent chat' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
     expect(control.findAllByProps({ testID: 'subagent-latest-scroll' })).toHaveLength(0);
     act(() => {
       latestScroll?.props.onLayout({ nativeEvent: { layout: { width: 120 } } });
@@ -1351,7 +1370,7 @@ describe('ChatMessage system timeline matrices', () => {
       latestScroll?.props.onScroll({ nativeEvent: { contentOffset: { x: 40 } } });
     });
     expect(
-      latestViewport?.findAll((node) => node.props.pointerEvents === 'none').length,
+      latestViewport?.findAll((node) => node.props['pointerEvents'] === 'none').length,
     ).toBeGreaterThanOrEqual(2);
     act(() => readOnPress(control.props)());
     expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-thread');
@@ -1374,9 +1393,12 @@ describe('ChatMessage system timeline matrices', () => {
       },
       { onOpenSubAgentThread },
     );
-    const root = tree.root as QueryableTestInstance;
-    const button = root.findAll((node) => node.props.accessibilityLabel === 'Open agent chat')[0];
-    expect(button?.props.accessibilityState).toMatchObject({ disabled: false });
+    const root = tree.root;
+    const button = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat')[0],
+      'indexed test value',
+    );
+    expect(button?.props['accessibilityState']).toMatchObject({ disabled: false });
     expect(hasRenderedText(root, 'Workspace title')).toBe(true);
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
     act(() => readOnPress(button.props)());
@@ -1400,13 +1422,16 @@ describe('ChatMessage system timeline matrices', () => {
       },
       { onOpenSubAgentThread },
     );
-    const root = tree.root as QueryableTestInstance;
-    const control = root.findAll(
-      (node) =>
-        node.props.accessibilityLabel === 'Open agent chat' &&
-        typeof node.props.onPress === 'function',
-    )[0];
-    expect(control?.props.accessibilityState).toMatchObject({ disabled: false });
+    const root = tree.root;
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Open agent chat' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
+    expect(control?.props['accessibilityState']).toMatchObject({ disabled: false });
     act(() => readOnPress(control.props)());
     expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
     act(() => tree.unmount());
@@ -1424,7 +1449,7 @@ describe('ChatMessage system timeline matrices', () => {
     );
     const tree = renderMessage(running);
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(1);
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     expect(hasRenderedText(root, 'Open agent chat')).toBe(true);
     // The card names the tool the sub-agent actually ran, not its narration.
     expect(hasRenderedText(root, 'Latest: Working on Read repository')).toBe(true);
@@ -1442,9 +1467,7 @@ describe('ChatMessage system timeline matrices', () => {
     expect(completedTree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
     // A running card and a finished card occupy exactly the same height, so a sub-agent
     // reporting progress never makes the transcript jump under the reader.
-    expect(subAgentCardHeight(tree.root as QueryableTestInstance)).toBe(
-      subAgentCardHeight(completedTree.root as QueryableTestInstance),
-    );
+    expect(subAgentCardHeight(tree.root)).toBe(subAgentCardHeight(completedTree.root));
     act(() => tree.unmount());
     act(() => completedTree.unmount());
   });
@@ -1478,8 +1501,8 @@ describe('ChatMessage system timeline matrices', () => {
     expect(hasRenderedText(root, 'compile error')).toBe(false);
     const control = root.findAll(
       (node) =>
-        typeof node.props.onPress === 'function' &&
-        node.props.accessibilityLabel === 'npm run build',
+        typeof node.props['onPress'] === 'function' &&
+        node.props['accessibilityLabel'] === 'npm run build',
     )[0];
     if (!control) {
       throw new Error('Missing invocation row');
@@ -1519,11 +1542,14 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    const control = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        node.props.accessibilityLabel === 'Edit src/app.ts',
-    )[0];
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props['onPress'] === 'function' &&
+          node.props['accessibilityLabel'] === 'Edit src/app.ts',
+      )[0],
+      'indexed test value',
+    );
     act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, '- const a = 1;')).toBe(true);
     expect(hasRenderedText(root, '+ const a = 2;')).toBe(true);
@@ -1558,17 +1584,20 @@ describe('ChatMessage system timeline matrices', () => {
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
     expect(root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
-    const control = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        node.props.accessibilityLabel === 'Read package.json',
-    )[0];
-    expect(control.props.accessibilityState).toEqual({ disabled: true });
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props['onPress'] === 'function' &&
+          node.props['accessibilityLabel'] === 'Read package.json',
+      )[0],
+      'indexed test value',
+    );
+    expect(control.props['accessibilityState']).toEqual({ disabled: true });
     act(() => rendered.unmount());
   });
 
   it('renders the computer-use action family with metadata and image output', () => {
-    const actions = [
+    const actions: ReadonlyArray<readonly [string, string]> = [
       ['getAppState', 'Captured screen'],
       ['click', 'Clicked'],
       ['scroll', 'Scrolled'],
@@ -1592,10 +1621,12 @@ describe('ChatMessage system timeline matrices', () => {
       content,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    const root = tree.root as QueryableTestInstance;
+    const root = tree.root;
     expect(hasRenderedText(root, '9 actions')).toBe(true);
     for (const [, label] of actions) {
-      expect(hasRenderedText(root, label)).toBe(true);
+      expect(hasRenderedText(root, requireTestValue(label, 'computer-use action label'))).toBe(
+        true,
+      );
     }
     expect(hasRenderedText(root, 'VSCode')).toBe(true);
     expect(
@@ -1639,23 +1670,26 @@ describe('ChatMessage system timeline matrices', () => {
       commandScroll.props.onContentSizeChange(300);
       commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 50 } } });
     });
-    expect(root.findAll((node) => Array.isArray(node.props.colors)).length).toBeGreaterThanOrEqual(
-      1,
-    );
+    expect(
+      root.findAll((node) => Array.isArray(node.props['colors'])).length,
+    ).toBeGreaterThanOrEqual(1);
     act(() => {
       commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 200 } } });
     });
-    const control = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        node.props.accessibilityLabel === 'Ran exhaustive command',
-    )[0];
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props['onPress'] === 'function' &&
+          node.props['accessibilityLabel'] === 'Ran exhaustive command',
+      )[0],
+      'indexed test value',
+    );
     act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, 'line 26')).toBe(true);
     expect(
       root
         .findAllByType(ScrollView)
-        .some((node) => node.props.showsVerticalScrollIndicator === true),
+        .some((node) => node.props['showsVerticalScrollIndicator'] === true),
     ).toBe(true);
     act(() => rendered.unmount());
   });
@@ -1669,9 +1703,10 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(
-      (reasoning.root as QueryableTestInstance).findAll(
-        (node) => node.props.accessibilityLabel === 'Waiting',
-      )[0].props.accessibilityState,
+      requireTestValue(
+        reasoning.root.findAll((node) => node.props['accessibilityLabel'] === 'Waiting')[0],
+        'indexed test value',
+      ).props['accessibilityState'],
     ).toEqual({ disabled: true });
     act(() => reasoning.unmount());
 
@@ -1684,9 +1719,10 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(
-      (subagent.root as QueryableTestInstance).findAll(
-        (node) => node.props.accessibilityLabel === 'Open agent chat',
-      )[0].props.accessibilityState,
+      requireTestValue(
+        subagent.root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat')[0],
+        'indexed test value',
+      ).props['accessibilityState'],
     ).toEqual({ disabled: true });
     act(() => subagent.unmount());
 
@@ -1706,9 +1742,7 @@ describe('ChatMessage system timeline matrices', () => {
       content: `• ${title}`,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    expect(
-      (tree.root as QueryableTestInstance).findAll((node) => node.props.name === icon).length,
-    ).toBeGreaterThan(0);
+    expect(tree.root.findAll((node) => node.props['name'] === icon).length).toBeGreaterThan(0);
     act(() => tree.unmount());
   });
 
@@ -1724,7 +1758,7 @@ describe('ChatMessage system timeline matrices', () => {
       content,
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    expect(hasRenderedText(tree.root as QueryableTestInstance, expected)).toBe(true);
+    expect(hasRenderedText(tree.root, expected)).toBe(true);
     act(() => tree.unmount());
   });
 
@@ -1736,7 +1770,7 @@ describe('ChatMessage system timeline matrices', () => {
       content: 'before bullet\n• Tool call',
       createdAt: '2026-04-17T00:00:00.000Z',
     });
-    expect(hasRenderedText(tree.root as QueryableTestInstance, 'before bullet')).toBe(true);
+    expect(hasRenderedText(tree.root, 'before bullet')).toBe(true);
     act(() => tree.unmount());
   });
 });
@@ -1826,7 +1860,7 @@ function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
 function subAgentCardHeight(root: QueryableTestInstance): number {
   const card = root
     .findAllByType(View)
-    .map((node) => StyleSheet.flatten(node.props.style as StyleProp<ViewStyle>))
+    .map((node) => StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>))
     .find((style) => typeof style?.height === 'number' && style.borderRadius !== undefined);
   if (typeof card?.height !== 'number') {
     throw new Error('Expected the sub-agent card to declare a fixed height');
@@ -1842,17 +1876,17 @@ function expectValue<T>(value: T | undefined): T {
 }
 
 function readOnPress(props: Record<string, unknown>): () => void {
-  if (typeof props.onPress !== 'function') {
+  if (typeof props['onPress'] !== 'function') {
     throw new Error('Expected press handler');
   }
-  return props.onPress as () => void;
+  return props['onPress'] as () => void;
 }
 
 function readOnLongPress(props: Record<string, unknown>): () => void {
-  if (typeof props.onLongPress !== 'function') {
+  if (typeof props['onLongPress'] !== 'function') {
     throw new Error('Expected long press handler');
   }
-  return props.onLongPress as () => void;
+  return props['onLongPress'] as () => void;
 }
 
 /**
@@ -1873,8 +1907,8 @@ function hasTextAncestor(node: QueryableTestInstance): boolean {
 function findCopyButtons(root: QueryableTestInstance, messageId: string): QueryableTestInstance[] {
   return root.findAll(
     (node) =>
-      node.props.testID === `chat-message-copy-${messageId}` &&
-      typeof node.props.onPress === 'function',
+      node.props['testID'] === `chat-message-copy-${messageId}` &&
+      typeof node.props['onPress'] === 'function',
   );
 }
 
@@ -1892,11 +1926,11 @@ function findTextNodes(root: QueryableTestInstance, text: string): QueryableTest
 
 function simulateTextLayout(root: QueryableTestInstance, lineCount: number): void {
   const measured = root.findAll(
-    (node) => node.type === Text && typeof node.props.onTextLayout === 'function',
+    (node) => node.type === Text && typeof node.props['onTextLayout'] === 'function',
   );
   act(() => {
     for (const node of measured) {
-      (node.props.onTextLayout as (event: { nativeEvent: { lines: unknown[] } }) => void)({
+      (node.props['onTextLayout'] as (event: { nativeEvent: { lines: unknown[] } }) => void)({
         nativeEvent: { lines: Array.from({ length: lineCount }, () => ({})) },
       });
     }
@@ -1905,7 +1939,7 @@ function simulateTextLayout(root: QueryableTestInstance, lineCount: number): voi
 
 function findTextPressable(root: QueryableTestInstance, text: string): QueryableTestInstance {
   const node = findTextNodes(root, text).find(
-    (candidate) => typeof candidate.props.onPress === 'function',
+    (candidate) => typeof candidate.props['onPress'] === 'function',
   );
   if (!node) {
     throw new Error(`Expected pressable text "${text}"`);

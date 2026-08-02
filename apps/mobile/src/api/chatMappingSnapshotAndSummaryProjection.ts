@@ -14,7 +14,7 @@ import {
   readTrimmedStringArray,
   toRecord,
 } from '../runtimeValidation';
-import { type ChatSummary } from './types';
+import type { ChatSummary } from './types';
 import {
   type RawAcpSnapshot,
   type RawSnapshotCollectionMetadata,
@@ -26,33 +26,35 @@ import {
 } from './chatMappingRawTypesAndReaders';
 
 function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapshot['messages'] {
-  return (Array.isArray(snapshot.messages) ? snapshot.messages : [])
+  return (Array.isArray(snapshot['messages']) ? snapshot['messages'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? '',
-      role: readString(entry.role) ?? '',
-      parts: Array.isArray(entry.parts) ? entry.parts : [],
-      truncated: entry.truncated === true,
+      id: readString(entry['id']) ?? '',
+      role: readString(entry['role']) ?? '',
+      parts: Array.isArray(entry['parts']) ? entry['parts'] : [],
+      truncated: entry['truncated'] === true,
     }))
     .filter((entry) => entry.id && entry.role);
 }
 
 function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['tools'] {
-  return (Array.isArray(snapshot.tools) ? snapshot.tools : [])
+  return (Array.isArray(snapshot['tools']) ? snapshot['tools'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? '',
-      generation: readCoercedFiniteNumber(entry.generation),
-      kind: readString(entry.kind) ?? '',
-      status: readString(entry.status) ?? '',
-      title: readString(entry.title) ?? '',
-      content: readString(entry.content) ?? '',
-      structuredContent: Array.isArray(entry.structuredContent) ? entry.structuredContent : [],
-      locations: Array.isArray(entry.locations) ? entry.locations : [],
-      truncated: entry.truncated === true,
-      subagent: entry.subagent === true,
+      id: readString(entry['id']) ?? '',
+      generation: readCoercedFiniteNumber(entry['generation']),
+      kind: readString(entry['kind']) ?? '',
+      status: readString(entry['status']) ?? '',
+      title: readString(entry['title']) ?? '',
+      content: readString(entry['content']) ?? '',
+      structuredContent: Array.isArray(entry['structuredContent'])
+        ? entry['structuredContent']
+        : [],
+      locations: Array.isArray(entry['locations']) ? entry['locations'] : [],
+      truncated: entry['truncated'] === true,
+      subagent: entry['subagent'] === true,
     }))
     .filter((entry) => entry.id);
 }
@@ -60,13 +62,13 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
 function parseSnapshotTimeline(
   snapshot: Record<string, unknown>,
 ): NonNullable<RawAcpSnapshot['timeline']> {
-  return (Array.isArray(snapshot.timeline) ? snapshot.timeline : [])
+  return (Array.isArray(snapshot['timeline']) ? snapshot['timeline'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      sequence: readCoercedFiniteNumber(entry.sequence) ?? -1,
-      kind: readString(entry.kind),
-      canonicalId: readString(entry.canonicalId) ?? '',
+      sequence: readCoercedFiniteNumber(entry['sequence']) ?? -1,
+      kind: readString(entry['kind']),
+      canonicalId: readString(entry['canonicalId']) ?? '',
     }))
     .filter(
       (entry): entry is NonNullable<RawAcpSnapshot['timeline']>[number] =>
@@ -77,34 +79,34 @@ function parseSnapshotTimeline(
 }
 
 function parseSnapshotPlan(snapshot: Record<string, unknown>): RawAcpSnapshot['plan'] {
-  return (Array.isArray(snapshot.plan) ? snapshot.plan : [])
+  return (Array.isArray(snapshot['plan']) ? snapshot['plan'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      content: readString(entry.content) ?? '',
-      priority: readString(entry.priority) ?? '',
-      status: readString(entry.status) ?? '',
+      content: readString(entry['content']) ?? '',
+      priority: readString(entry['priority']) ?? '',
+      status: readString(entry['status']) ?? '',
     }))
     .filter((entry) => entry.content);
 }
 
 function parseSnapshotConfig(snapshot: Record<string, unknown>): RawAcpSnapshot['config'] {
-  return (Array.isArray(snapshot.config) ? snapshot.config : [])
+  return (Array.isArray(snapshot['config']) ? snapshot['config'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      id: readString(entry.id) ?? '',
-      value: readString(entry.value) ?? '',
-      name: readString(entry.name) ?? undefined,
-      description: readString(entry.description) ?? undefined,
-      category: readString(entry.category) ?? undefined,
-      options: (Array.isArray(entry.options) ? entry.options : [])
+      id: readString(entry['id']) ?? '',
+      value: readString(entry['value']) ?? '',
+      name: readString(entry['name']) ?? undefined,
+      description: readString(entry['description']) ?? undefined,
+      category: readString(entry['category']) ?? undefined,
+      options: (Array.isArray(entry['options']) ? entry['options'] : [])
         .map(toRecord)
         .filter((option): option is Record<string, unknown> => option !== null)
         .map((option) => ({
-          value: readString(option.value) ?? '',
-          name: readString(option.name) ?? '',
-          description: readString(option.description) ?? undefined,
+          value: readString(option['value']) ?? '',
+          name: readString(option['name']) ?? '',
+          description: readString(option['description']) ?? undefined,
         }))
         .filter((option) => option.value && option.name),
     }))
@@ -112,12 +114,12 @@ function parseSnapshotConfig(snapshot: Record<string, unknown>): RawAcpSnapshot[
 }
 
 function parseSnapshotCommands(snapshot: Record<string, unknown>): RawAcpSnapshot['commands'] {
-  return (Array.isArray(snapshot.commands) ? snapshot.commands : [])
+  return (Array.isArray(snapshot['commands']) ? snapshot['commands'] : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      name: readString(entry.name) ?? '',
-      description: readString(entry.description) ?? '',
+      name: readString(entry['name']) ?? '',
+      description: readString(entry['description']) ?? '',
     }))
     .filter((entry) => entry.name);
 }
@@ -125,71 +127,71 @@ function parseSnapshotCommands(snapshot: Record<string, unknown>): RawAcpSnapsho
 function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
   const usage = toRecord(usageValue) ?? {};
   return {
-    used: readCoercedFiniteNumber(usage.used),
-    size: readCoercedFiniteNumber(usage.size),
-    cost: readString(usage.cost),
+    used: readCoercedFiniteNumber(usage['used']),
+    size: readCoercedFiniteNumber(usage['size']),
+    cost: readString(usage['cost']),
   };
 }
 
 function readSnapshotCollectionMetadata(value: unknown): RawSnapshotCollectionMetadata | undefined {
   const collection = toRecord(value);
-  const revision = readCoercedFiniteNumber(collection?.revision);
+  const revision = readCoercedFiniteNumber(collection?.['revision']);
   if (!collection || revision === null) {
     return undefined;
   }
   return {
-    truncated: collection.truncated === true,
-    omittedCount: readCoercedFiniteNumber(collection.omittedCount) ?? 0,
-    oldestAvailableSequence: readCoercedFiniteNumber(collection.oldestAvailableSequence),
-    newestSequence: readCoercedFiniteNumber(collection.newestSequence),
-    beforeCursor: readString(collection.beforeCursor),
+    truncated: collection['truncated'] === true,
+    omittedCount: readCoercedFiniteNumber(collection['omittedCount']) ?? 0,
+    oldestAvailableSequence: readCoercedFiniteNumber(collection['oldestAvailableSequence']),
+    newestSequence: readCoercedFiniteNumber(collection['newestSequence']),
+    beforeCursor: readString(collection['beforeCursor']),
     revision,
   };
 }
 
 function parseSnapshotContinuation(value: unknown): RawAcpSnapshot['continuation'] {
   const continuationRecord = toRecord(value);
-  const continuationRevision = readCoercedFiniteNumber(continuationRecord?.revision);
+  const continuationRevision = readCoercedFiniteNumber(continuationRecord?.['revision']);
   if (!continuationRecord || continuationRevision === null) {
     return undefined;
   }
   return {
     revision: continuationRevision,
-    unavailableCount: readCoercedFiniteNumber(continuationRecord.unavailableCount) ?? 0,
+    unavailableCount: readCoercedFiniteNumber(continuationRecord['unavailableCount']) ?? 0,
     earliestAvailableSequence: readCoercedFiniteNumber(
-      continuationRecord.earliestAvailableSequence,
+      continuationRecord['earliestAvailableSequence'],
     ),
-    latestAvailableSequence: readCoercedFiniteNumber(continuationRecord.latestAvailableSequence),
-    maxPageSize: readCoercedFiniteNumber(continuationRecord.maxPageSize) ?? 0,
-    maxHistoryEntries: readCoercedFiniteNumber(continuationRecord.maxHistoryEntries) ?? 0,
-    maxHistoryBytes: readCoercedFiniteNumber(continuationRecord.maxHistoryBytes) ?? 0,
+    latestAvailableSequence: readCoercedFiniteNumber(continuationRecord['latestAvailableSequence']),
+    maxPageSize: readCoercedFiniteNumber(continuationRecord['maxPageSize']) ?? 0,
+    maxHistoryEntries: readCoercedFiniteNumber(continuationRecord['maxHistoryEntries']) ?? 0,
+    maxHistoryBytes: readCoercedFiniteNumber(continuationRecord['maxHistoryBytes']) ?? 0,
   };
 }
 
 function parseSnapshotSessionInfo(session: Record<string, unknown>): RawAcpSnapshot['session'] {
   return {
-    agentId: readString(session.agentId) ?? '',
-    threadId: readString(session.threadId) ?? '',
-    title: readString(session.title),
-    updatedAt: readString(session.updatedAt),
-    historyReconstruction: session.historyReconstruction === true,
+    agentId: readString(session['agentId']) ?? '',
+    threadId: readString(session['threadId']) ?? '',
+    title: readString(session['title']),
+    updatedAt: readString(session['updatedAt']),
+    historyReconstruction: session['historyReconstruction'] === true,
   };
 }
 
 function parseSnapshotActiveInfo(active: Record<string, unknown>): RawAcpSnapshot['active'] {
   return {
-    runId: readString(active.runId),
-    sourceTurnId: readString(active.sourceTurnId),
-    generation: readCoercedFiniteNumber(active.generation),
-    toolIds: readTrimmedStringArray(active.toolIds),
+    runId: readString(active['runId']),
+    sourceTurnId: readString(active['sourceTurnId']),
+    generation: readCoercedFiniteNumber(active['generation']),
+    toolIds: readTrimmedStringArray(active['toolIds']),
   };
 }
 
 export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
   const snapshot = toRecord(value);
-  const session = toRecord(snapshot?.session);
-  const active = toRecord(snapshot?.active);
-  const version = readCoercedFiniteNumber(snapshot?.version);
+  const session = toRecord(snapshot?.['session']);
+  const active = toRecord(snapshot?.['active']);
+  const version = readCoercedFiniteNumber(snapshot?.['version']);
   if (!snapshot || (version !== 1 && version !== 2) || !session || !active) {
     return undefined;
   }
@@ -199,13 +201,13 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     timeline: timeline.length > 0 ? timeline : undefined,
     messages: parseSnapshotMessages(snapshot),
     tools: parseSnapshotTools(snapshot),
-    messageCollection: readSnapshotCollectionMetadata(snapshot.messageCollection),
-    reasoningCollection: readSnapshotCollectionMetadata(snapshot.reasoningCollection),
-    toolCollection: readSnapshotCollectionMetadata(snapshot.toolCollection),
-    continuation: parseSnapshotContinuation(snapshot.continuation),
+    messageCollection: readSnapshotCollectionMetadata(snapshot['messageCollection']),
+    reasoningCollection: readSnapshotCollectionMetadata(snapshot['reasoningCollection']),
+    toolCollection: readSnapshotCollectionMetadata(snapshot['toolCollection']),
+    continuation: parseSnapshotContinuation(snapshot['continuation']),
     plan: parseSnapshotPlan(snapshot),
-    usage: parseSnapshotUsage(snapshot.usage),
-    mode: readString(snapshot.mode),
+    usage: parseSnapshotUsage(snapshot['usage']),
+    mode: readString(snapshot['mode']),
     config: parseSnapshotConfig(snapshot),
     commands: parseSnapshotCommands(snapshot),
     session: parseSnapshotSessionInfo(session),
@@ -218,23 +220,23 @@ export function toRawTurn(value: unknown): RawTurn | null {
   if (!record) {
     return null;
   }
-  const items = Array.isArray(record.items)
-    ? (record.items
+  const items = Array.isArray(record['items'])
+    ? record['items']
         .map((item) => toRecord(item))
-        .filter((item): item is RawThreadItem => item !== null) as RawThreadItem[])
+        .filter((item): item is RawThreadItem => item !== null)
     : undefined;
   return {
-    id: readString(record.id) ?? undefined,
-    status: readString(record.status) ?? undefined,
-    error: record.error,
-    message: record.message,
-    errorMessage: record.errorMessage,
-    error_message: record.error_message,
-    detail: record.detail,
-    details: record.details,
-    reason: record.reason,
-    description: record.description,
-    stderr: record.stderr,
+    id: readString(record['id']) ?? undefined,
+    status: readString(record['status']) ?? undefined,
+    error: record['error'],
+    message: record['message'],
+    errorMessage: record['errorMessage'],
+    error_message: record['error_message'],
+    detail: record['detail'],
+    details: record['details'],
+    reason: record['reason'],
+    description: record['description'],
+    stderr: record['stderr'],
     items,
   };
 }

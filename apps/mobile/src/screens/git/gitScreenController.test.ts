@@ -3,7 +3,11 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { Chat, GitStatusResponse } from '../../api/types';
-import { type GitScreenController, useGitScreenController } from './gitScreenController';
+import {
+  gitErrorMessage,
+  type GitScreenController,
+  useGitScreenController,
+} from './gitScreenController';
 
 const chat: Chat = {
   id: 'thread-1',
@@ -112,6 +116,11 @@ function makeHarness(api: HostBridgeApiClient, initialChat: Chat = chat) {
 }
 
 describe('useGitScreenController committed cwd handling', () => {
+  it('normalizes branch-loading rejection values', () => {
+    expect(gitErrorMessage(new Error('offline'), 'Could not load branches.')).toBe('offline');
+    expect(gitErrorMessage('offline', 'Could not load branches.')).toBe('Could not load branches.');
+  });
+
   it('reads only the committed activeChat.cwd on initial load, ignoring the seeded draft text', async () => {
     const api = createApi();
     const harness = makeHarness(api);

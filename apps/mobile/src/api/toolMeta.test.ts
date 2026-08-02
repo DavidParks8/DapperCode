@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import type { ChatMessage, ChatToolMeta } from './types';
 import {
   attachToolMeta,
@@ -95,9 +96,9 @@ describe('attachToolMeta', () => {
 
   it('stamps every message that speaks for the same call', () => {
     const next = attachToolMeta([toolCall, toolResult, unrelated], baseMeta);
-    expect(next[0].toolMeta).toEqual(baseMeta);
-    expect(next[1].toolMeta).toEqual(baseMeta);
-    expect(next[2].toolMeta).toBeUndefined();
+    expect(requireTestValue(next[0], 'indexed test value').toolMeta).toEqual(baseMeta);
+    expect(requireTestValue(next[1], 'indexed test value').toolMeta).toEqual(baseMeta);
+    expect(requireTestValue(next[2], 'indexed test value').toolMeta).toBeUndefined();
   });
 
   it('returns the same list when nothing changed', () => {

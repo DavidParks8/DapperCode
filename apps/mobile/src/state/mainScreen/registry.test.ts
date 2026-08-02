@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { activityAtom } from './composer';
 import { gitCheckoutRepoUrlAtom } from './gitCheckout';
 import { titleDraftAtom } from './modals';
@@ -105,7 +106,7 @@ describe('MainScreen atom registry', () => {
       const pattern = /(.{0,40})screenRefView\(/g;
       let match = pattern.exec(normalized);
       while (match) {
-        if (!/useMemo\( ?\(\) => $/.test(match[1])) {
+        if (!/useMemo\( ?\(\) => $/.test(requireTestValue(match[1], 'indexed test value'))) {
           offenders.push(`${file.name}: ${match[0].trim()}`);
         }
         match = pattern.exec(normalized);

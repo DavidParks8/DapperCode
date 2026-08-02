@@ -1,10 +1,11 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({
   usePreventRemove: jest.fn(),
 }));
 jest.mock('react-native-reanimated', () => {
   // Require react-native in this context so View/Text are valid renderable types.
-  const rnActual = jest.requireActual('react-native') as Record<string, unknown>;
+  const rnActual = jest.requireActual('react-native');
   const { View, Text, Image, ScrollView } = rnActual;
   const base = jest.requireActual('../../testing/reanimatedMock');
   // Extend the passthrough builder with the reduceMotion method used by GitCheckoutScreen.
@@ -87,7 +88,7 @@ function hasText(root: Queryable, text: string): boolean {
 }
 
 function findByAccessibilityRole(root: Queryable, role: string): Queryable[] {
-  return root.findAll((node) => node.props.accessibilityRole === role);
+  return root.findAll((node) => node.props['accessibilityRole'] === role);
 }
 
 async function renderScreen(store: AppStore): Promise<ReactTestRenderer> {
@@ -123,9 +124,9 @@ describe('GitCheckoutScreen', () => {
       const root = tree.root as Queryable;
 
       expect(hasText(root, 'Git checkout')).toBe(true);
-      const inputs = root.findAll((node) => node.props.accessibilityLabel !== undefined);
-      const urlInput = inputs.find((n) => n.props.accessibilityLabel === 'Repository URL');
-      const dirInput = inputs.find((n) => n.props.accessibilityLabel === 'Clone directory name');
+      const inputs = root.findAll((node) => node.props['accessibilityLabel'] !== undefined);
+      const urlInput = inputs.find((n) => n.props['accessibilityLabel'] === 'Repository URL');
+      const dirInput = inputs.find((n) => n.props['accessibilityLabel'] === 'Clone directory name');
       expect(urlInput).toBeDefined();
       expect(dirInput).toBeDefined();
 
@@ -157,7 +158,9 @@ describe('GitCheckoutScreen', () => {
 
       const progressbars = findByAccessibilityRole(root, 'progressbar');
       expect(progressbars.length).toBeGreaterThan(0);
-      expect(progressbars[0].props.accessibilityLabel).toBe('Cloning repository');
+      expect(
+        requireTestValue(progressbars[0], 'indexed test value').props['accessibilityLabel'],
+      ).toBe('Cloning repository');
 
       act(() => tree.unmount());
     });
@@ -181,11 +184,13 @@ describe('GitCheckoutScreen', () => {
       const tree = await renderScreen(store);
       const root = tree.root as Queryable;
 
-      const urlInputs = root.findAll((n) => n.props.accessibilityLabel === 'Repository URL');
-      expect(urlInputs[0]?.props.editable).toBe(false);
+      const urlInputs = root.findAll((n) => n.props['accessibilityLabel'] === 'Repository URL');
+      expect(urlInputs[0]?.props['editable']).toBe(false);
 
-      const cancelBtn = root.findAll((n) => n.props.accessibilityLabel === 'Cancel git checkout');
-      expect(cancelBtn[0]?.props.disabled).toBe(true);
+      const cancelBtn = root.findAll(
+        (n) => n.props['accessibilityLabel'] === 'Cancel git checkout',
+      );
+      expect(cancelBtn[0]?.props['disabled']).toBe(true);
 
       act(() => tree.unmount());
     });
@@ -313,9 +318,7 @@ describe('GitCheckoutScreen', () => {
 
       // Verify via the stylesheet factory that button styles meet the 44pt iOS minimum.
       const { createGitCheckoutScreenStyles } = jest.requireActual('./gitCheckoutScreenStyles');
-      const styles = createGitCheckoutScreenStyles(theme) as ReturnType<
-        typeof createGitCheckoutScreenStyles
-      >;
+      const styles = createGitCheckoutScreenStyles(theme);
       expect(styles.button.minHeight).toBeGreaterThanOrEqual(44);
 
       act(() => tree.unmount());
@@ -326,8 +329,8 @@ describe('GitCheckoutScreen', () => {
       const tree = await renderScreen(store);
       const root = tree.root as Queryable;
 
-      const backBtn = root.findAll((n) => n.props.accessibilityLabel === 'Back')[0];
-      const hitSlop = backBtn?.props.hitSlop as
+      const backBtn = root.findAll((n) => n.props['accessibilityLabel'] === 'Back')[0];
+      const hitSlop = backBtn?.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
 
       // Back button is 36×36; hitSlop must expand to at least 44 (iOS minimum)
@@ -346,9 +349,9 @@ describe('GitCheckoutScreen', () => {
       const root = tree.root as Queryable;
 
       const titleNode = root.findAll((n) => n.children.map(String).join('') === 'Git checkout')[0];
-      const style = Array.isArray(titleNode?.props.style)
-        ? Object.assign({}, ...titleNode.props.style)
-        : ((titleNode?.props.style as Record<string, unknown>) ?? {});
+      const style = Array.isArray(titleNode?.props['style'])
+        ? Object.assign({}, ...titleNode.props['style'])
+        : ((titleNode?.props['style'] as Record<string, unknown>) ?? {});
 
       // Screen-title baseline uses the `title` role (22pt), one step below `largeTitle`.
       expect(style.fontSize).toBe(22);

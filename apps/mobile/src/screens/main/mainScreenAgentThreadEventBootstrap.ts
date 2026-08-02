@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification } from '../../api/agUi';
 import { toRecord } from '../../runtimeValidation';
+import { EventType } from '@ag-ui/core';
 import {
   extractNotificationThreadId,
   extractNotificationParentThreadId,
@@ -18,9 +19,9 @@ function isAgUiLifecycleEvent(event: RpcNotification): boolean {
   const agUi = parseAgUiEventNotification(event);
   return Boolean(
     agUi &&
-    (agUi.event.type === 'RUN_STARTED' ||
-      agUi.event.type === 'RUN_FINISHED' ||
-      agUi.event.type === 'RUN_ERROR'),
+    (agUi.event.type === EventType.RUN_STARTED ||
+      agUi.event.type === EventType.RUN_FINISHED ||
+      agUi.event.type === EventType.RUN_ERROR),
   );
 }
 

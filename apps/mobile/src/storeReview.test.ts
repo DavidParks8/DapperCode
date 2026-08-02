@@ -79,7 +79,7 @@ describe('storeReview helpers', () => {
     }));
     let isolated!: typeof StoreReviewModule;
     jest.isolateModules(() => {
-      isolated = jest.requireActual('./storeReview') as typeof StoreReviewModule;
+      isolated = jest.requireActual('./storeReview');
     });
     read.mockResolvedValueOnce(
       JSON.stringify({ accumulatedForegroundMs: 12, automaticRequestAt: null }),
@@ -118,8 +118,8 @@ describe('storeReview helpers', () => {
   });
 
   it('opens the deep link and falls back to the web review URL', async () => {
-    const originalAppStoreId = process.env.EXPO_PUBLIC_IOS_APP_STORE_ID;
-    process.env.EXPO_PUBLIC_IOS_APP_STORE_ID = '1234567890';
+    const originalAppStoreId = process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
+    process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = '1234567890';
     jest.resetModules();
     const isolated = jest.requireActual<typeof StoreReviewModule>('./storeReview');
     const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
@@ -134,9 +134,9 @@ describe('storeReview helpers', () => {
     await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(false);
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
     if (originalAppStoreId === undefined) {
-      delete process.env.EXPO_PUBLIC_IOS_APP_STORE_ID;
+      delete process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
     } else {
-      process.env.EXPO_PUBLIC_IOS_APP_STORE_ID = originalAppStoreId;
+      process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = originalAppStoreId;
     }
   });
 

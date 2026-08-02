@@ -3,6 +3,7 @@
 // sheet's content instead of its animation machinery.
 jest.mock('@gorhom/bottom-sheet', () => require('./src/testing/bottomSheetMock'));
 jest.mock('react-native-reanimated', () => require('./src/testing/reanimatedMock'));
+jest.mock('react-native-worklets', () => require('./src/testing/workletsMock'));
 jest.mock('react-native-gesture-handler', () => require('./src/testing/gestureHandlerMock'));
 jest.mock('expo-haptics', () => ({
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },

@@ -4,20 +4,20 @@ import {
 } from './clientChatCloneAndRetryInternals';
 import { getMessageText } from './messages';
 import { normalizeEffort, normalizeModel } from './clientBridgeResponseNormalization';
-import {
-  type AgentId,
-  type Chat,
-  type CollaborationMode,
-  type LocalImageInput,
-  type MentionInput,
-  type ReasoningEffort,
+import type {
+  AgentId,
+  Chat,
+  CollaborationMode,
+  LocalImageInput,
+  MentionInput,
+  ReasoningEffort,
 } from './types';
-import {
-  type AppServerCollaborationMode,
-  type AppServerThreadRuntimeSettings,
-  type TurnInputLocalImage,
-  type TurnInputMention,
-  type TurnInputText,
+import type {
+  AppServerCollaborationMode,
+  AppServerThreadRuntimeSettings,
+  TurnInputLocalImage,
+  TurnInputMention,
+  TurnInputText,
 } from './clientContractsAndSnapshotInternals';
 import { type RawThread, readString, toRecord } from './chatMapping';
 
@@ -105,7 +105,7 @@ export function normalizeLocalImages(raw: LocalImageInput[] | undefined): TurnIn
 }
 
 export function toTurnCollaborationMode(
-  value: CollaborationMode | string | null | undefined,
+  value: string | null | undefined,
   model: string | null,
   effort: ReasoningEffort | null,
 ): AppServerCollaborationMode | null {
@@ -129,7 +129,7 @@ export function toTurnCollaborationMode(
 }
 
 export function normalizeCollaborationMode(
-  value: CollaborationMode | string | null | undefined,
+  value: string | null | undefined,
 ): CollaborationMode | null {
   if (typeof value !== 'string') {
     return null;
@@ -160,9 +160,9 @@ export function normalizeAgentId(value: string | null | undefined): AgentId | nu
 export function readThreadRuntimeSettings(value: unknown): AppServerThreadRuntimeSettings {
   const record = toRecord(value);
   return {
-    model: normalizeModel(readString(record?.model)),
+    model: normalizeModel(readString(record?.['model'])),
     effort: normalizeEffort(
-      readString(record?.reasoningEffort) ?? readString(record?.reasoning_effort),
+      readString(record?.['reasoningEffort']) ?? readString(record?.['reasoning_effort']),
     ),
   };
 }
@@ -207,14 +207,14 @@ export function rawThreadHasTurnUserMessage(
   }
   return matchedTurn.items.some((item) => {
     const record = toRecord(item);
-    if (!record || readString(record.type) !== 'userMessage') {
+    if (!record || readString(record['type']) !== 'userMessage') {
       return false;
     }
     return (
       buildExpectedUserMessageContent(
-        extractUserMessageText(record.content).trim(),
-        extractUserMessageMentions(record.content),
-        extractUserMessageLocalImages(record.content),
+        extractUserMessageText(record['content']).trim(),
+        extractUserMessageMentions(record['content']),
+        extractUserMessageLocalImages(record['content']),
       ) === buildExpectedUserMessageContent(normalizedContent, mentions, localImages)
     );
   });
@@ -230,10 +230,10 @@ export function extractUserMessageText(value: unknown): string {
       if (!record) {
         return '';
       }
-      if (readString(record.type) !== 'text') {
+      if (readString(record['type']) !== 'text') {
         return '';
       }
-      return readString(record.text) ?? '';
+      return readString(record['text']) ?? '';
     })
     .filter((part) => part.length > 0)
     .join('\n');
@@ -246,17 +246,17 @@ export function extractUserMessageMentions(value: unknown): TurnInputMention[] {
   const mentions: TurnInputMention[] = [];
   for (const entry of value) {
     const record = toRecord(entry);
-    if (!record || readString(record.type) !== 'mention') {
+    if (!record || readString(record['type']) !== 'mention') {
       continue;
     }
-    const path = readString(record.path)?.trim();
+    const path = readString(record['path'])?.trim();
     if (!path) {
       continue;
     }
     mentions.push({
       type: 'mention',
       path,
-      name: normalizeMentionName(readString(record.name) ?? undefined, path),
+      name: normalizeMentionName(readString(record['name']) ?? undefined, path),
     });
   }
   return mentions;

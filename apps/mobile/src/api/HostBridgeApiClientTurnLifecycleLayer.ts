@@ -30,14 +30,14 @@ import {
   type SendChatMessageOptions,
   type SendOrQueueChatMessageResult,
 } from './clientContractsAndSnapshotInternals';
-import {
-  type ApprovalPolicy,
-  type BridgeThreadQueueSendResponse,
-  type BridgeThreadQueueState,
-  type Chat,
-  type ChatSummary,
-  type SendChatMessageRequest,
-  type SteerChatTurnRequest,
+import type {
+  ApprovalPolicy,
+  BridgeThreadQueueSendResponse,
+  BridgeThreadQueueState,
+  Chat,
+  ChatSummary,
+  SendChatMessageRequest,
+  SteerChatTurnRequest,
 } from './types';
 
 export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeApiClientWorkspaceAndChatReadLayer {
@@ -54,14 +54,18 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       DEFAULT_CHAT_SUMMARY_HYDRATION_CONCURRENCY,
       MAX_CHAT_SUMMARY_HYDRATION_CONCURRENCY,
     );
-    const results: Array<ChatSummary | null> = Array(uniqueIds.length).fill(null);
+    const results = Array.from({ length: uniqueIds.length }, (): ChatSummary | null => null);
     let nextIndex = 0;
     const workers = Array.from({ length: Math.min(concurrency, uniqueIds.length) }, async () => {
       while (nextIndex < uniqueIds.length) {
         const index = nextIndex;
         nextIndex += 1;
+        const id = uniqueIds[index];
+        if (!id) {
+          continue;
+        }
         try {
-          results[index] = await this.getChatSummary(uniqueIds[index]);
+          results[index] = await this.getChatSummary(id);
         } catch {
           results[index] = null;
         }
@@ -242,6 +246,9 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     const turns = Array.isArray(snapshot.rawThread.turns) ? snapshot.rawThread.turns : [];
     for (let i = turns.length - 1; i >= 0; i -= 1) {
       const turn = turns[i];
+      if (!turn) {
+        continue;
+      }
       const turnId = readString(turn.id);
       const status = normalizeTurnStatus(readString(turn.status));
       if (!turnId || !status || !ACTIVE_TURN_STATUSES.has(status)) {

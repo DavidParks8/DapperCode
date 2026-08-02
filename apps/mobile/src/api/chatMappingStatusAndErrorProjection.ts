@@ -8,7 +8,7 @@ import {
   readTimestampSeconds,
 } from './chatMappingRawTypesAndReaders';
 import { toRawAcpSnapshot, toRawTurn } from './chatMappingSnapshotAndSummaryProjection';
-import { type ChatStatus } from './types';
+import type { ChatStatus } from './types';
 
 const RUNNING_STATUSES = new Set(['inprogress', 'running', 'active', 'queued', 'pending']);
 const ERROR_STATUSES = new Set([
@@ -34,15 +34,15 @@ export function readErrorMessage(value: unknown, depth = 0): string | null {
     return null;
   }
   const fields = [
-    record.message,
-    record.errorMessage,
-    record.error_message,
-    record.detail,
-    record.details,
-    record.reason,
-    record.description,
-    record.stderr,
-    record.error,
+    record['message'],
+    record['errorMessage'],
+    record['error_message'],
+    record['detail'],
+    record['details'],
+    record['reason'],
+    record['description'],
+    record['stderr'],
+    record['error'],
   ];
   for (const field of fields) {
     const message = readErrorMessage(field, depth + 1);
@@ -73,7 +73,9 @@ export function hasActiveAcpRun(acpSnapshot: RawAcpSnapshot | undefined): boolea
 
 export function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): ChatStatus {
   const statusRecord = toRecord(status);
-  const statusType = normalizeLifecycleStatus(readString(statusRecord?.type) ?? readString(status));
+  const statusType = normalizeLifecycleStatus(
+    readString(statusRecord?.['type']) ?? readString(status),
+  );
   const hasTurns = Array.isArray(turns) && turns.length > 0;
   const lastTurn = hasTurns ? turns[turns.length - 1] : null;
   const lastTurnStatus = normalizeLifecycleStatus(readString(lastTurn?.status));
@@ -125,8 +127,11 @@ function mapThreadLifecycleStatus(
 export function extractLastError(turns: RawTurn[]): string | null {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
+    if (!turn) {
+      continue;
+    }
     const turnStatus = normalizeLifecycleStatus(readString(turn.status));
-    if (!ERROR_STATUSES.has(turnStatus ?? '')) {
+    if (turnStatus === null || !ERROR_STATUSES.has(turnStatus)) {
       continue;
     }
     const message = readTurnErrorMessage(turn);
@@ -160,24 +165,29 @@ function readTurnErrorMessage(turn: RawTurn): string | null {
 
 export function toRawThread(value: unknown): RawThread {
   const record = toRecord(value) ?? {};
-  const threadName = firstString(record.name, record.title, record.threadName, record.thread_name);
+  const threadName = firstString(
+    record['name'],
+    record['title'],
+    record['threadName'],
+    record['thread_name'],
+  );
   return {
-    id: readString(record.id) ?? undefined,
-    agentId: record.agentId,
+    id: readString(record['id']) ?? undefined,
+    agentId: record['agentId'],
     name: threadName,
     title: threadName,
-    preview: readString(record.preview) ?? undefined,
-    modelProvider: readString(record.modelProvider) ?? undefined,
-    agentNickname: firstString(record.agentNickname, record.agent_nickname),
-    agentRole: firstString(record.agentRole, record.agent_role),
-    createdAt: readTimestampSeconds(record.createdAt) ?? undefined,
-    updatedAt: readTimestampSeconds(record.updatedAt) ?? undefined,
-    status: (record.status as RawThreadStatus) ?? undefined,
-    cwd: readString(record.cwd) ?? undefined,
-    source: record.source,
-    acpSnapshot: toRawAcpSnapshot(record.acpSnapshot),
-    turns: Array.isArray(record.turns)
-      ? (record.turns.map((turn) => toRawTurn(turn)).filter(Boolean) as RawTurn[])
+    preview: readString(record['preview']) ?? undefined,
+    modelProvider: readString(record['modelProvider']) ?? undefined,
+    agentNickname: firstString(record['agentNickname'], record['agent_nickname']),
+    agentRole: firstString(record['agentRole'], record['agent_role']),
+    createdAt: readTimestampSeconds(record['createdAt']) ?? undefined,
+    updatedAt: readTimestampSeconds(record['updatedAt']) ?? undefined,
+    status: (record['status'] as RawThreadStatus) ?? undefined,
+    cwd: readString(record['cwd']) ?? undefined,
+    source: record['source'],
+    acpSnapshot: toRawAcpSnapshot(record['acpSnapshot']),
+    turns: Array.isArray(record['turns'])
+      ? (record['turns'].map((turn) => toRawTurn(turn)).filter(Boolean) as RawTurn[])
       : undefined,
   };
 }

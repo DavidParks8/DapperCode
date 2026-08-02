@@ -51,7 +51,7 @@ describe('turnExecutionController', () => {
       steerQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true }),
       cancelQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true }),
     };
-    const controller = new TurnExecutionController(api as never);
+    const controller = new TurnExecutionController(api);
     await controller.createAndStart({
       submissionId: 'submission',
       create: {},

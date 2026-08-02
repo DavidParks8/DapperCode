@@ -47,8 +47,8 @@ function RouterDrawerContent({
 
   useEffect(() => {
     setDrawerCommands({
-      closeDrawer: navigation.closeDrawer,
-      toggleNavigation: permanent ? undefined : navigation.toggleDrawer,
+      closeDrawer: () => navigation.closeDrawer(),
+      toggleNavigation: permanent ? undefined : () => navigation.toggleDrawer(),
     });
     return () => setDrawerCommands(null);
   }, [navigation, permanent, setDrawerCommands]);
@@ -57,7 +57,7 @@ function RouterDrawerContent({
     <DrawerContent
       key={activeProfileId}
       active={permanent || drawerStatus === 'open'}
-      onClose={permanent ? undefined : navigation.closeDrawer}
+      onClose={permanent ? undefined : () => navigation.closeDrawer()}
     />
   );
 }

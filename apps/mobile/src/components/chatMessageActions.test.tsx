@@ -54,7 +54,8 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
@@ -108,7 +109,7 @@ describe('MessageActions', () => {
     const selectButton = findPressable(root, 'Select message text');
 
     for (const button of [copyButton, selectButton]) {
-      const hitSlop = button.props.hitSlop as
+      const hitSlop = button.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);
@@ -120,7 +121,7 @@ describe('MessageActions', () => {
     const tree = render(<MessageActions text="hello" />);
     const root = queryRoot(tree);
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Select message text'),
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Select message text'),
     ).toHaveLength(0);
   });
 

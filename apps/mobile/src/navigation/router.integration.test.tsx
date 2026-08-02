@@ -716,11 +716,13 @@ describe('Expo Router route topology', () => {
 
     // The drawer footer's anchored push lands on the modal, same as the sibling test above.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
-    expect(mockConnectionScreenProps?.onSaved).toEqual(expect.any(Function));
+    expect(mockConnectionScreenProps?.['onSaved']).toEqual(expect.any(Function));
 
     // Simulate a successful Save completing for the profile already active in this Settings
     // instance (edit mode keeps the same profile id).
-    act(() => (mockConnectionScreenProps?.onSaved as (nextProfileId: string) => void)('profile-1'));
+    act(() =>
+      (mockConnectionScreenProps?.['onSaved'] as (nextProfileId: string) => void)('profile-1'),
+    );
 
     // Root navigation switches the Drawer to the newly (re)activated chat root...
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');

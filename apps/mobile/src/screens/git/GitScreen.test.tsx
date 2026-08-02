@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { AppState, ScrollView, TextInput, type AppStateStatus } from 'react-native';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
 jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
@@ -185,8 +186,8 @@ function hasText(root: Queryable, text: string): boolean {
 }
 
 function exercisePressableStyles(root: Queryable): void {
-  for (const node of root.findAll((candidate) => typeof candidate.props.style === 'function')) {
-    const style = node.props.style as (state: { pressed: boolean }) => unknown;
+  for (const node of root.findAll((candidate) => typeof candidate.props['style'] === 'function')) {
+    const style = node.props['style'] as (state: { pressed: boolean }) => unknown;
     style({ pressed: false });
     style({ pressed: true });
   }
@@ -196,8 +197,8 @@ function findPressableByText(root: Queryable, text: string): Queryable {
   const textNodes = root.findAll((node) => node.children.map(String).join('') === text);
   for (const textNode of textNodes) {
     let current: Queryable | null = textNode;
-    while (current && typeof current.props.onPress !== 'function') {
-      current = current.parent as Queryable | null;
+    while (current && typeof current.props['onPress'] !== 'function') {
+      current = current.parent;
     }
     if (current) {
       return current;
@@ -209,7 +210,7 @@ function findPressableByText(root: Queryable, text: string): Queryable {
 async function press(root: Queryable, text: string): Promise<void> {
   const target = findPressableByText(root, text);
   await act(async () => {
-    (target.props.onPress as () => void)();
+    (target.props['onPress'] as () => void)();
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -302,7 +303,7 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'git unavailable')).toBe(true);
     expect(hasText(root, 'Working tree clean')).toBe(false);
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Loading Git status'),
     ).toHaveLength(0);
 
     // Trigger the periodic poll. Since the initial attempt already settled (even though it
@@ -316,7 +317,7 @@ describe('GitScreen behavior', () => {
       await Promise.resolve();
     });
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Loading Git status'),
     ).toHaveLength(0);
 
     await act(async () => {
@@ -328,7 +329,7 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'Clean')).toBe(true);
     expect(hasText(root, 'git unavailable')).toBe(false);
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Loading Git status'),
     ).toHaveLength(0);
     act(() => tree.unmount());
   });
@@ -347,13 +348,16 @@ describe('GitScreen behavior', () => {
     await press(root, 'Push (2)');
     await press(root, 'Change branch');
     exercisePressableStyles(root);
-    const mainBranch = root.findAll((node) => node.props.accessibilityLabel === 'main, Local')[0];
-    act(() => (mainBranch.props.onPress as () => void)());
+    const mainBranch = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'main, Local')[0],
+      'indexed test value',
+    );
+    act(() => (mainBranch.props['onPress'] as () => void)());
     await press(root, 'Switch');
 
     const workspace = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Git workspace path');
+      .find((node) => node.props['accessibilityLabel'] === 'Git workspace path');
     if (!workspace) {
       throw new Error('Missing workspace input');
     }
@@ -404,17 +408,17 @@ describe('GitScreen behavior', () => {
     }
     const root = tree.root as Queryable;
     const icon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
-    let commentButton = icon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') {
-      commentButton = commentButton.parent as Queryable | null;
+    let commentButton = icon?.parent;
+    while (commentButton && typeof commentButton.props['onPress'] !== 'function') {
+      commentButton = commentButton.parent;
     }
     if (!commentButton) {
       throw new Error('Missing review comment action');
     }
-    act(() => (commentButton.props.onPress as () => void)());
+    act(() => (commentButton.props['onPress'] as () => void)());
     const input = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Review comment');
+      .find((node) => node.props['accessibilityLabel'] === 'Review comment');
     if (!input) {
       throw new Error('Missing review input');
     }
@@ -531,7 +535,7 @@ describe('GitScreen behavior', () => {
     const root = tree.root as Queryable;
 
     await act(async () => {
-      (findByLabel(root, 'Refresh Git status').props.onPress as () => void)();
+      (findByLabel(root, 'Refresh Git status').props['onPress'] as () => void)();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -541,7 +545,7 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'Test commit')).toBe(true);
     expect(hasText(root, 'staged.ts')).toBe(true);
     expect(hasText(root, 'feature/coverage')).toBe(true);
-    expect(findByLabel(root, 'Refresh Git status').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Refresh Git status').props['accessibilityState']).toEqual(
       expect.objectContaining({ busy: true, disabled: true }),
     );
 
@@ -610,7 +614,7 @@ describe('GitScreen behavior', () => {
       });
 
     act(() => {
-      (findByLabel(root, 'Refresh Git status').props.onPress as () => void)();
+      (findByLabel(root, 'Refresh Git status').props['onPress'] as () => void)();
     });
     await act(async () => {
       await Promise.resolve();
@@ -750,16 +754,16 @@ describe('GitScreen behavior', () => {
     await act(async () => Promise.resolve());
     expect(hasText(root, 'branches rejected')).toBe(true);
 
-    const scrolls = root.findAllByType(ScrollView) as unknown as Queryable[];
-    const nested = scrolls.filter((node) => node.props.nestedScrollEnabled);
+    const scrolls = root.findAllByType(ScrollView);
+    const nested = scrolls.filter((node) => node.props['nestedScrollEnabled']);
     for (const scroll of nested) {
       act(() => {
-        (scroll.props.onTouchStart as (() => void) | undefined)?.();
-        (scroll.props.onTouchCancel as (() => void) | undefined)?.();
-        (scroll.props.onTouchEnd as (() => void) | undefined)?.();
-        (scroll.props.onScrollBeginDrag as (() => void) | undefined)?.();
-        (scroll.props.onScrollEndDrag as (() => void) | undefined)?.();
-        (scroll.props.onMomentumScrollEnd as (() => void) | undefined)?.();
+        (scroll.props['onTouchStart'] as (() => void) | undefined)?.();
+        (scroll.props['onTouchCancel'] as (() => void) | undefined)?.();
+        (scroll.props['onTouchEnd'] as (() => void) | undefined)?.();
+        (scroll.props['onScrollBeginDrag'] as (() => void) | undefined)?.();
+        (scroll.props['onScrollEndDrag'] as (() => void) | undefined)?.();
+        (scroll.props['onMomentumScrollEnd'] as (() => void) | undefined)?.();
       });
     }
 
@@ -769,9 +773,9 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'unstaged.ts')).toBe(true);
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
-    let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') {
-      commentButton = commentButton.parent as Queryable | null;
+    let commentButton = commentIcon?.parent;
+    while (commentButton && typeof commentButton.props['onPress'] !== 'function') {
+      commentButton = commentButton.parent;
     }
     if (!commentButton) {
       throw new Error('Missing review comment action');
@@ -807,9 +811,9 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'switch exploded')).toBe(true);
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
-    let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') {
-      commentButton = commentButton.parent as Queryable | null;
+    let commentButton = commentIcon?.parent;
+    while (commentButton && typeof commentButton.props['onPress'] !== 'function') {
+      commentButton = commentButton.parent;
     }
     if (!commentButton) {
       throw new Error('Missing review comment action');
@@ -966,7 +970,8 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'No staged or unstaged changes.')).toBe(true);
     const emptyStateNode = root.findAll(
       (node) =>
-        node.props.accessibilityLabel === 'Working tree is clean. No changes to stage or commit.',
+        node.props['accessibilityLabel'] ===
+        'Working tree is clean. No changes to stage or commit.',
     );
     expect(emptyStateNode.length).toBeGreaterThan(0);
     act(() => tree.unmount());
@@ -976,9 +981,9 @@ describe('GitScreen behavior', () => {
     const tree = await renderGit(createApi());
     const root = tree.root as Queryable;
     const commentIcons = root.findAll((node) => node.children.includes('add-circle-outline'));
-    let commentButton = commentIcons[0]?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') {
-      commentButton = commentButton.parent as Queryable | null;
+    let commentButton = commentIcons[0]?.parent;
+    while (commentButton && typeof commentButton.props['onPress'] !== 'function') {
+      commentButton = commentButton.parent;
     }
     if (!commentButton) {
       throw new Error('Missing diff comment button');
@@ -1002,7 +1007,7 @@ describe('GitScreen behavior', () => {
   it('inlineReviewComment style has no fixed minWidth that overflows narrow screens', () => {
     const testTheme = createAppTheme('dark');
     const styles = createGitScreenStyles(testTheme) as Record<string, Record<string, unknown>>;
-    const { minWidth } = styles.inlineReviewComment ?? {};
+    const { minWidth } = styles['inlineReviewComment'] ?? {};
     expect(
       minWidth === undefined || minWidth === 0 || (typeof minWidth === 'number' && minWidth < 320),
     ).toBe(true);
@@ -1030,8 +1035,11 @@ describe('GitScreen behavior', () => {
     jest.clearAllMocks();
 
     await press(root, 'Change branch');
-    const mainBranch = root.findAll((node) => node.props.accessibilityLabel === 'main, Local')[0];
-    act(() => (mainBranch.props.onPress as () => void)());
+    const mainBranch = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'main, Local')[0],
+      'indexed test value',
+    );
+    act(() => (mainBranch.props['onPress'] as () => void)());
     await press(root, 'Switch');
     expect(feedback.selection as jest.Mock).toHaveBeenCalled();
 
@@ -1069,17 +1077,17 @@ describe('GitScreen behavior', () => {
     const root = tree.root as Queryable;
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
-    let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function') {
-      commentButton = commentButton.parent as Queryable | null;
+    let commentButton = commentIcon?.parent;
+    while (commentButton && typeof commentButton.props['onPress'] !== 'function') {
+      commentButton = commentButton.parent;
     }
     if (!commentButton) {
       throw new Error('Missing review comment action');
     }
-    act(() => (commentButton.props.onPress as () => void)());
+    act(() => (commentButton.props['onPress'] as () => void)());
     const input = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Review comment');
+      .find((node) => node.props['accessibilityLabel'] === 'Review comment');
     if (!input) {
       throw new Error('Missing review input');
     }
@@ -1101,7 +1109,7 @@ describe('GitScreen behavior', () => {
     const root = tree.root as Queryable;
     expect(hasText(root, 'Diff preview is limited to 1 KB.')).toBe(true);
     // The truncation node should not have accessibilityRole="alert" (that's for real errors)
-    const alertNodes = root.findAll((node) => node.props.accessibilityRole === 'alert');
+    const alertNodes = root.findAll((node) => node.props['accessibilityRole'] === 'alert');
     const truncationAlerts = alertNodes.filter((node) =>
       node.children.map(String).join('').includes('Diff preview'),
     );
@@ -1111,7 +1119,7 @@ describe('GitScreen behavior', () => {
 });
 
 function findByLabel(root: Queryable, label: string): Queryable {
-  const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+  const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
   if (!node) {
     throw new Error(`Missing label: ${label}`);
   }

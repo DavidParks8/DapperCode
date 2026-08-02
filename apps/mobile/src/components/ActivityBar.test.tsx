@@ -54,7 +54,7 @@ function allNodes(tree: ReactTestRenderer): Queryable[] {
 
 function flattenedStyles(tree: ReactTestRenderer): Props[] {
   return allNodes(tree)
-    .map((node) => StyleSheet.flatten(node.props.style as never) as Props | undefined)
+    .map((node) => StyleSheet.flatten(node.props['style'] as never) as Props | undefined)
     .filter((style): style is Props => Boolean(style));
 }
 
@@ -66,13 +66,13 @@ describe('ActivityBar', () => {
 
     expect(textContent(tree.root as Queryable)).toContain('Waiting for input');
     const blurNodes = allNodes(tree).filter(
-      (node) => node.props.intensity !== undefined || node.props.tint !== undefined,
+      (node) => node.props['intensity'] !== undefined || node.props['tint'] !== undefined,
     );
     expect(blurNodes).toHaveLength(0);
     for (const style of flattenedStyles(tree)) {
-      expect(style.backgroundColor).toBeUndefined();
-      expect(style.borderWidth).toBeUndefined();
-      expect(style.borderRadius).toBeUndefined();
+      expect(style['backgroundColor']).toBeUndefined();
+      expect(style['borderWidth']).toBeUndefined();
+      expect(style['borderRadius']).toBeUndefined();
     }
     act(() => tree.unmount());
   });

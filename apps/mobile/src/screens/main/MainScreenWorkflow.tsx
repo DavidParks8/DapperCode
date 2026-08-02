@@ -121,11 +121,12 @@ function WorkflowPlanSteps({
   if (steps.length === 0) {
     return <Text style={styles.planDeltaText}>(no steps provided)</Text>;
   }
+  const turnId = plan?.turnId ?? 'plan';
 
   return (
     <View style={styles.planStepsList}>
       {steps.map((step, index) => (
-        <View key={`${plan?.turnId}-${index}-${step.step}`} style={styles.planStepRow}>
+        <View key={`${turnId}-${index}-${step.step}`} style={styles.planStepRow}>
           <Text style={[styles.planStepStatus, stepStatusStyle(styles, step.status)]}>
             {renderPlanStatusGlyph(step.status)}
           </Text>

@@ -43,10 +43,10 @@ function resolveTokenUsageRecord(
   infoRecord: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
   return firstRecord([
-    toRecord(record.tokenUsage),
-    toRecord(record.token_usage),
-    toRecord(infoRecord?.tokenUsage),
-    toRecord(infoRecord?.token_usage),
+    toRecord(record['tokenUsage']),
+    toRecord(record['token_usage']),
+    toRecord(infoRecord?.['tokenUsage']),
+    toRecord(infoRecord?.['token_usage']),
   ]);
 }
 
@@ -78,27 +78,27 @@ function parseThreadContextUsage(value: unknown): ThreadContextUsage | null {
     return null;
   }
 
-  const turnRecord = toRecord(record.turn);
-  const infoRecord = toRecord(record.info);
+  const turnRecord = toRecord(record['turn']);
+  const infoRecord = toRecord(record['info']);
   const tokenUsageRecord = resolveTokenUsageRecord(record, infoRecord);
   const totalRecord = resolveTokenWindowRecord(tokenUsageRecord, infoRecord, 'total');
   const lastRecord = resolveTokenWindowRecord(tokenUsageRecord, infoRecord, 'last');
   const totalTokens = readFirstNonNegativeIntegerLike([
-    totalRecord?.totalTokens,
-    totalRecord?.total_tokens,
+    totalRecord?.['totalTokens'],
+    totalRecord?.['total_tokens'],
   ]);
   const lastTokens =
-    readFirstNonNegativeIntegerLike([lastRecord?.totalTokens, lastRecord?.total_tokens]) ??
+    readFirstNonNegativeIntegerLike([lastRecord?.['totalTokens'], lastRecord?.['total_tokens']]) ??
     (totalTokens !== null ? 0 : null);
   const modelContextWindow = readFirstNonNegativeIntegerLike([
-    record.modelContextWindow,
-    record.model_context_window,
-    turnRecord?.modelContextWindow,
-    turnRecord?.model_context_window,
-    tokenUsageRecord?.modelContextWindow,
-    tokenUsageRecord?.model_context_window,
-    infoRecord?.modelContextWindow,
-    infoRecord?.model_context_window,
+    record['modelContextWindow'],
+    record['model_context_window'],
+    turnRecord?.['modelContextWindow'],
+    turnRecord?.['model_context_window'],
+    tokenUsageRecord?.['modelContextWindow'],
+    tokenUsageRecord?.['model_context_window'],
+    infoRecord?.['modelContextWindow'],
+    infoRecord?.['model_context_window'],
   ]);
 
   if (!hasThreadContextUsage(totalTokens, modelContextWindow)) {

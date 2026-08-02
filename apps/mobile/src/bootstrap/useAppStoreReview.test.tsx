@@ -57,4 +57,39 @@ describe('useAppStoreReview route gates', () => {
     expect(mockSaveAutoStoreReviewState).toHaveBeenCalled();
     act(() => tree?.unmount());
   });
+
+  it('measures active usage from commit without resetting the timestamp on rerender', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    let appStateListener: ((state: 'background') => void) | undefined;
+    const appStateSubscription = { remove: jest.fn() };
+    const addEventListener = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockImplementation((_event, listener) => {
+        appStateListener = listener;
+        return appStateSubscription;
+      });
+    router.replace('/profiles/profile-1/chats/new/connection');
+    const store = createTestStore();
+    let tree!: ReactTestRenderer;
+
+    await act(async () => {
+      tree = renderer.create(withAppStore(store, <Harness />));
+      await Promise.resolve();
+    });
+    now.mockReturnValue(2_000);
+    act(() => tree.update(withAppStore(store, <Harness />)));
+    now.mockReturnValue(2_500);
+    await act(async () => {
+      appStateListener?.('background');
+      await Promise.resolve();
+    });
+
+    expect(mockSaveAutoStoreReviewState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accumulatedForegroundMs: 1_500 }),
+    );
+    act(() => tree.unmount());
+    expect(appStateSubscription.remove).toHaveBeenCalled();
+    addEventListener.mockRestore();
+    now.mockRestore();
+  });
 });

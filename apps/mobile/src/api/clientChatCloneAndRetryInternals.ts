@@ -1,10 +1,7 @@
 import { isRpcRequestError, type RpcRequestError } from './ws';
 import { readString, toRecord } from './chatMapping';
-import { type Chat, type ChatSummary, type ModelOption } from './types';
-import {
-  type TurnInputLocalImage,
-  type TurnInputMention,
-} from './clientContractsAndSnapshotInternals';
+import type { Chat, ChatSummary, ModelOption } from './types';
+import type { TurnInputLocalImage, TurnInputMention } from './clientContractsAndSnapshotInternals';
 
 export function extractUserMessageLocalImages(value: unknown): TurnInputLocalImage[] {
   if (!Array.isArray(value)) {
@@ -13,10 +10,10 @@ export function extractUserMessageLocalImages(value: unknown): TurnInputLocalIma
   const images: TurnInputLocalImage[] = [];
   for (const entry of value) {
     const record = toRecord(entry);
-    if (!record || readString(record.type) !== 'localImage') {
+    if (!record || readString(record['type']) !== 'localImage') {
       continue;
     }
-    const path = readString(record.path)?.trim();
+    const path = readString(record['path'])?.trim();
     if (!path) {
       continue;
     }
@@ -89,11 +86,11 @@ export function preserveCachedTranscript(cached: Chat | null, latest: Chat): Cha
   };
 }
 
-export function cloneChatPlan<T extends Chat['latestPlan'] | Chat['latestTurnPlan']>(plan: T): T {
+export function cloneChatPlan<T extends Chat['latestPlan']>(plan: T): T {
   if (!plan) {
     return plan;
   }
-  return { ...plan, steps: plan.steps.map((step) => ({ ...step })) } as T;
+  return { ...plan, steps: plan.steps.map((step) => ({ ...step })) };
 }
 
 export function appendSyntheticUserMessage(

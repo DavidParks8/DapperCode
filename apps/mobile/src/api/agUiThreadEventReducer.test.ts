@@ -455,7 +455,7 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
       state,
       envelope({ type: EventType.STEP_FINISHED, stepName: 'compile' }),
     );
-    expect(state.steps.compile).toBe('finished');
+    expect(state.steps['compile']).toBe('finished');
 
     for (let index = 0; index < MAX_RAW_EVENTS_PER_THREAD + 5; index += 1) {
       state = reduceThreadState(

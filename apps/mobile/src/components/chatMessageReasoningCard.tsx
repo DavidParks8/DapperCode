@@ -1,12 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import {
-  Pressable,
-  Text,
-  View,
-  type NativeSyntheticEvent,
-  type TextLayoutEventData,
-} from 'react-native';
+import { Pressable, Text, View, type TextLayoutEvent } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
@@ -78,7 +72,7 @@ function ReasoningCardPreview({
   preview: string | null;
   pending: boolean;
   showDetails: boolean;
-  onPreviewTextLayout: (event: NativeSyntheticEvent<TextLayoutEventData>) => void;
+  onPreviewTextLayout: (event: TextLayoutEvent) => void;
   styles: ReturnType<typeof createStyles>;
 }) {
   if (!pending || showDetails || !preview) {
@@ -146,7 +140,7 @@ export function ReasoningEntryCard({ entry, pending }: { entry: TimelineEntry; p
   const canToggle = preview !== null && (!pending || clipped);
   const showDetails = expanded && canToggle;
 
-  const onPreviewTextLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+  const onPreviewTextLayout = (event: TextLayoutEvent) => {
     if (preview === null) {
       return;
     }

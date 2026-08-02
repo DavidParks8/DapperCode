@@ -1,7 +1,7 @@
 import { renderAgUiCustomContent } from './agUiContent';
 import { toolCall } from './agUiStructuredAndTerminalReducers';
-import { type ChatMessagePart } from './types';
-import { type ToolCall } from '@ag-ui/core';
+import type { ChatMessagePart } from './types';
+import type { ToolCall } from '@ag-ui/core';
 import { nonEmptyString, record } from './agUiValueReaders';
 
 export { nonEmptyString, record } from './agUiValueReaders';
@@ -22,13 +22,15 @@ export function upsertToolCall(
 export function appendOrderedPart(parts: ChatMessagePart[], part: unknown): ChatMessagePart[] {
   const partRecord = record(part);
   const text =
-    partRecord?.type === 'text' && typeof partRecord.text === 'string' ? partRecord.text : null;
+    partRecord?.['type'] === 'text' && typeof partRecord['text'] === 'string'
+      ? partRecord['text']
+      : null;
   if (text === null || text.length === 0) {
     return text === null && isChatMessagePart(part) ? [...parts, part] : parts;
   }
   const previous = record(parts.at(-1));
-  return previous?.type === 'text' && typeof previous.text === 'string'
-    ? [...parts.slice(0, -1), { type: 'text', text: `${previous.text}${text}` }]
+  return previous?.['type'] === 'text' && typeof previous['text'] === 'string'
+    ? [...parts.slice(0, -1), { type: 'text', text: `${previous['text']}${text}` }]
     : [...parts, { type: 'text', text }];
 }
 
@@ -38,19 +40,19 @@ export function renderOrderedParts(parts: ChatMessagePart[]): string {
 
 export function isChatMessagePart(value: unknown): value is ChatMessagePart {
   const part = record(value);
-  if (!part || typeof part.type !== 'string') {
+  if (!part || typeof part['type'] !== 'string') {
     return false;
   }
-  if (part.type === 'text') {
-    return typeof part.text === 'string';
+  if (part['type'] === 'text') {
+    return typeof part['text'] === 'string';
   }
-  if (part.type === 'image' || part.type === 'audio') {
+  if (part['type'] === 'image' || part['type'] === 'audio') {
     return true;
   }
-  if (part.type === 'resourceLink') {
-    return typeof part.uri === 'string';
+  if (part['type'] === 'resourceLink') {
+    return typeof part['uri'] === 'string';
   }
-  return part.type === 'resource' && record(part.resource) !== null;
+  return part['type'] === 'resource' && record(part['resource']) !== null;
 }
 
 export function applyJsonPatch(value: unknown, operations: unknown[]): unknown {
@@ -63,16 +65,16 @@ export function applyJsonPatch(value: unknown, operations: unknown[]): unknown {
 }
 
 function applyPatchOperation(root: unknown, patch: Record<string, unknown> | null): unknown {
-  const op = nonEmptyString(patch?.op);
-  const path = typeof patch?.path === 'string' ? patch.path : null;
+  const op = nonEmptyString(patch?.['op']);
+  const path = typeof patch?.['path'] === 'string' ? patch['path'] : null;
   if (!op || path === null) {
     return root;
   }
   const segments = path.split('/').slice(1).map(unescapePointer);
   if (segments.length === 0) {
-    return applyRootPatch(root, op, patch?.value);
+    return applyRootPatch(root, op, patch?.['value']);
   }
-  applyNestedPatch(root, segments, op, patch?.value);
+  applyNestedPatch(root, segments, op, patch?.['value']);
   return root;
 }
 
@@ -88,7 +90,10 @@ function applyNestedPatch(root: unknown, segments: string[], op: string, value: 
   if (!parent) {
     return;
   }
-  const key = segments.at(-1)!;
+  const key = segments.at(-1);
+  if (key === undefined) {
+    return;
+  }
   if (Array.isArray(parent)) {
     applyArrayPatch(parent, key, op, value);
   } else if (typeof parent === 'object') {

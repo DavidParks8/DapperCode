@@ -115,9 +115,9 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 function findPressableByLabelPrefix(root: QueryableInstance, prefix: string): QueryableInstance {
   const match = root.findAll(
     (node) =>
-      typeof node.props.onPress === 'function' &&
-      typeof node.props.accessibilityLabel === 'string' &&
-      (node.props.accessibilityLabel as string).startsWith(prefix),
+      typeof node.props['onPress'] === 'function' &&
+      typeof node.props['accessibilityLabel'] === 'string' &&
+      node.props['accessibilityLabel'].startsWith(prefix),
   )[0];
   if (!match) {
     throw new Error(`Missing pressable starting with: ${prefix}`);
@@ -155,7 +155,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       'Fast mode',
     ]) {
       const chip = findPressableByLabelPrefix(root, prefix);
-      const hitSlop = chip.props.hitSlop as
+      const hitSlop = chip.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);
@@ -208,8 +208,8 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     expect(
       root.findAll(
         (node) =>
-          typeof node.props.accessibilityLabel === 'string' &&
-          (node.props.accessibilityLabel as string).startsWith('Model,'),
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          node.props['accessibilityLabel'].startsWith('Model,'),
       ),
     ).toHaveLength(0);
     act(() => tree.unmount());

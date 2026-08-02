@@ -94,6 +94,12 @@ export const testHarnessMatchers = {
       };
     }
     const message = messages[index];
+    if (!message) {
+      return {
+        pass: false,
+        message: () => `expected a message at index ${String(index)}`,
+      };
+    }
     const failures: string[] = [];
     if (expected.id !== undefined && message.id !== expected.id) {
       failures.push(`id: expected "${expected.id}" but got "${message.id}"`);
@@ -145,14 +151,20 @@ export const testHarnessMatchers = {
     const positionById = new Map(actualIds.map((id, index) => [id, index] as const));
     const failures: string[] = [];
     for (let index = 1; index < ids.length; index += 1) {
-      const previous = positionById.get(ids[index - 1]);
-      const current = positionById.get(ids[index]);
+      const previousId = ids[index - 1];
+      const currentId = ids[index];
+      if (previousId === undefined || currentId === undefined) {
+        failures.push('an ordered message id is missing');
+        continue;
+      }
+      const previous = positionById.get(previousId);
+      const current = positionById.get(currentId);
       if (previous === undefined) {
-        failures.push(`"${ids[index - 1]}" is not rendered`);
+        failures.push(`"${previousId}" is not rendered`);
       } else if (current === undefined) {
-        failures.push(`"${ids[index]}" is not rendered`);
+        failures.push(`"${currentId}" is not rendered`);
       } else if (current <= previous) {
-        failures.push(`"${ids[index]}" should come after "${ids[index - 1]}"`);
+        failures.push(`"${currentId}" should come after "${previousId}"`);
       }
     }
     return {

@@ -2,6 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { ChatSummary, RpcNotification } from '../api/types';
 import { parseAgUiEventNotification } from '../api/agUi';
 import type { DrawerRunIndicatorMap } from './drawerRuntimeIndicators';
+import { EventType } from '@ag-ui/core';
 
 export const DRAWER_REFRESH_CONNECTED_MS = 10_000;
 export const DRAWER_REFRESH_DISCONNECTED_MS = 5_000;
@@ -41,9 +42,9 @@ export function drawerEventRequiresRefresh(event: RpcNotification): boolean {
     event.method === 'thread/name/updated' ||
     event.method === 'thread/deleted' ||
     event.method === 'thread/status/changed' ||
-    agUiEvent?.type === 'RUN_STARTED' ||
-    agUiEvent?.type === 'RUN_FINISHED' ||
-    agUiEvent?.type === 'RUN_ERROR'
+    agUiEvent?.type === EventType.RUN_STARTED ||
+    agUiEvent?.type === EventType.RUN_FINISHED ||
+    agUiEvent?.type === EventType.RUN_ERROR
   );
 }
 
@@ -55,6 +56,6 @@ export function readDeletedThreadId(event: RpcNotification): string | null {
   if (event.method !== 'thread/deleted') {
     return null;
   }
-  const threadId = event.params?.threadId;
+  const threadId = event.params?.['threadId'];
   return typeof threadId === 'string' && threadId.trim() ? threadId.trim() : null;
 }

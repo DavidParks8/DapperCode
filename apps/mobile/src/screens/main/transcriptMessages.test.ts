@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import type { ChatMessage } from '../../api/types';
 import {
   COMPACTION_ACTIVITY_TYPE,
@@ -47,7 +48,7 @@ function message(
     role: role === 'activity' || role === 'reasoning' || role === 'tool' ? 'system' : role,
     content,
     createdAt,
-  } as ChatMessage;
+  };
 }
 
 describe('getVisibleTranscriptMessages', () => {
@@ -242,9 +243,12 @@ describe('getVisibleTranscriptMessages', () => {
       throw new Error('Expected synced spawned message to be an activity message.');
     }
     expect(syncedSpawned.content.text).toBe('• Spawned sub-agent\n  Status: running');
-    expect(syncVisibleSubAgentStatuses([synced[1]], new Map([['child', 'running']]))[0]).toBe(
-      synced[1],
-    );
+    expect(
+      syncVisibleSubAgentStatuses(
+        [requireTestValue(synced[1], 'indexed test value')],
+        new Map([['child', 'running']]),
+      )[0],
+    ).toBe(synced[1]);
     expect(syncVisibleSubAgentStatuses([spawned], new Map([['other', 'running']]))).toEqual([
       spawned,
     ]);
@@ -310,8 +314,9 @@ describe('buildTranscriptDisplayItems', () => {
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toEqual(['user-1-Run the snippet', callId, 'a1']);
 
-    const [invocation] = items.flatMap((item) =>
-      item.kind === 'toolInvocation' ? [item.invocation] : [],
+    const invocation = requireTestValue(
+      items.find((item) => item.kind === 'toolInvocation')?.invocation,
+      'tool invocation',
     );
     expect(invocation.textLines.join('\n')).toContain('harness ok 42');
   });
@@ -333,7 +338,7 @@ describe('buildTranscriptDisplayItems', () => {
       { kind: 'toolGroup', id: 'tool-group-t1-t2' },
       { kind: 'message', id: 'a1' },
     ]);
-    const group = items[1];
+    const group = requireTestValue(items[1], 'indexed test value');
     if (group.kind !== 'toolGroup') {
       throw new Error('expected a tool group');
     }
@@ -517,7 +522,7 @@ describe('buildTranscriptDisplayItems', () => {
       message('u2', 'user', 'Second prompt'),
     ];
     const withToolMessage = [
-      baseMessages[0],
+      requireTestValue(baseMessages[0], 'first base message'),
       message('t1', 'system', '• Ran `pwd`', { systemKind: 'tool' }),
       ...baseMessages.slice(1),
     ];
@@ -558,6 +563,11 @@ describe('buildTranscriptDisplayItems', () => {
     '• Task',
     '• Conversation compacted',
   ])('keeps legacy lifecycle row %s outside tool groups', (content) => {
-    expect(buildTranscriptDisplayItems([message('s', 'system', content)])[0].kind).toBe('message');
+    expect(
+      requireTestValue(
+        buildTranscriptDisplayItems([message('s', 'system', content)])[0],
+        'indexed test value',
+      ).kind,
+    ).toBe('message');
   });
 });

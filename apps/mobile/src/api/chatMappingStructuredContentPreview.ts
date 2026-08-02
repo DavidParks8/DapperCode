@@ -16,7 +16,11 @@ export function withNestedDetail(title: string, detail: string | null): string {
   if (lines.length === 0) {
     return title;
   }
-  const first = `  └ ${lines[0]}`;
+  const firstLine = lines[0];
+  if (firstLine === undefined) {
+    return title;
+  }
+  const first = `  └ ${firstLine}`;
   if (lines.length === 1) {
     return `${title}\n${first}`;
   }
@@ -53,7 +57,7 @@ export function stringifyStructuredContentEntry(entry: unknown): string[] {
     const text = readString(entry)?.trim();
     return text ? [text] : [];
   }
-  const entryType = normalizeType(readString(entryRecord.type) ?? '');
+  const entryType = normalizeType(readString(entryRecord['type']) ?? '');
   if (isStructuredTextType(entryType)) {
     const text = readStructuredText(entryRecord);
     return text ? [text] : [];
@@ -87,14 +91,14 @@ function stringifyStructuredImage(entry: Record<string, unknown>): string[] {
 
 export function readStructuredText(entryRecord: Record<string, unknown>): string | null {
   return (
-    readString(entryRecord.text)?.trim() ??
-    readString(toRecord(entryRecord.data)?.text)?.trim() ??
+    readString(entryRecord['text'])?.trim() ??
+    readString(toRecord(entryRecord['data'])?.['text'])?.trim() ??
     null
   );
 }
 
 export function readStructuredImageUrl(entryRecord: Record<string, unknown>): string | null {
-  const data = toRecord(entryRecord.data);
+  const data = toRecord(entryRecord['data']);
   return (
     readInlineImageDataUrl(entryRecord, data) ?? readStructuredImageUrlValue(entryRecord, data)
   );
@@ -104,12 +108,12 @@ function readInlineImageDataUrl(
   entry: Record<string, unknown>,
   data: Record<string, unknown> | null,
 ): string | null {
-  const imageData = firstTrimmedString([entry.data, data?.data]);
+  const imageData = firstTrimmedString([entry['data'], data?.['data']]);
   const mimeType = firstTrimmedString([
-    entry.mimeType,
-    entry.mime_type,
-    data?.mimeType,
-    data?.mime_type,
+    entry['mimeType'],
+    entry['mime_type'],
+    data?.['mimeType'],
+    data?.['mime_type'],
   ]);
   return imageData && mimeType ? `data:${mimeType};base64,${imageData}` : null;
 }
@@ -119,12 +123,12 @@ function readStructuredImageUrlValue(
   data: Record<string, unknown> | null,
 ): string | null {
   return firstTrimmedString([
-    entry.url,
-    entry.image_url,
-    entry.imageUrl,
-    data?.url,
-    data?.image_url,
-    data?.imageUrl,
+    entry['url'],
+    entry['image_url'],
+    entry['imageUrl'],
+    data?.['url'],
+    data?.['image_url'],
+    data?.['imageUrl'],
   ]);
 }
 
@@ -139,13 +143,13 @@ function firstTrimmedString(values: unknown[]): string | null {
 }
 
 export function readStructuredLocalImagePath(entryRecord: Record<string, unknown>): string | null {
-  const data = toRecord(entryRecord.data);
-  return readString(entryRecord.path)?.trim() ?? readString(data?.path)?.trim() ?? null;
+  const data = toRecord(entryRecord['data']);
+  return readString(entryRecord['path'])?.trim() ?? readString(data?.['path'])?.trim() ?? null;
 }
 
 export function readStructuredMentionPath(entryRecord: Record<string, unknown>): string | null {
-  const data = toRecord(entryRecord.data);
-  return readString(entryRecord.path)?.trim() ?? readString(data?.path)?.trim() ?? null;
+  const data = toRecord(entryRecord['data']);
+  return readString(entryRecord['path'])?.trim() ?? readString(data?.['path'])?.trim() ?? null;
 }
 
 export function toStructuredContentPreview(value: unknown, maxChars: number): string | null {

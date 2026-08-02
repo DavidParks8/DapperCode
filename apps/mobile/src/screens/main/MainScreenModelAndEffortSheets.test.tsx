@@ -25,7 +25,7 @@ type Queryable = Omit<ReactTestInstance, 'props' | 'findAll'> & {
 const theme = createAppTheme('dark');
 
 function flattenStyle(style: unknown): Record<string, number | string | undefined> {
-  return (StyleSheet.flatten(style as never) ?? {}) as Record<string, number | string | undefined>;
+  return StyleSheet.flatten(style as never) ?? {};
 }
 
 function buildContext(closeModelModal: () => void, closeEffortModal: () => void) {
@@ -69,7 +69,7 @@ function openModelSelector(
 }
 
 function findByTestId(root: Queryable, testID: string): Queryable {
-  const match = root.findAll((node) => node.props.testID === testID)[0];
+  const match = root.findAll((node) => node.props['testID'] === testID)[0];
   if (!match) {
     throw new Error(`Missing node: ${testID}`);
   }
@@ -85,18 +85,18 @@ describe('MainScreenModelAndEffortSheets', () => {
       bottom: 34,
     });
 
-    const footer = flattenStyle(findByTestId(root, 'selection-sheet-footer').props.style);
-    expect(footer.alignItems).toBe('center');
+    const footer = flattenStyle(findByTestId(root, 'selection-sheet-footer').props['style']);
+    expect(footer['alignItems']).toBe('center');
 
     const close = findByTestId(root, 'selection-sheet-close');
     const closeStyle = flattenStyle(
-      typeof close.props.style === 'function'
-        ? (close.props.style as (state: { pressed: boolean }) => unknown)({ pressed: false })
-        : close.props.style,
+      typeof close.props['style'] === 'function'
+        ? (close.props['style'] as (state: { pressed: boolean }) => unknown)({ pressed: false })
+        : close.props['style'],
     );
-    expect(Number(closeStyle.minHeight ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(Number(closeStyle['minHeight'] ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
 
-    act(() => (close.props.onPress as () => void)());
+    act(() => (close.props['onPress'] as () => void)());
     expect(closeModelModal).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });
@@ -104,12 +104,12 @@ describe('MainScreenModelAndEffortSheets', () => {
   it('keeps the model selector padded below its close button on a device with no bottom inset', () => {
     const { tree, root } = openModelSelector({ top: 0, left: 0, right: 0, bottom: 0 });
 
-    const content = root.findAll((node) => node.props.testID === 'app-sheet-content')[0];
+    const content = root.findAll((node) => node.props['testID'] === 'app-sheet-content')[0];
     if (!content) {
       throw new Error('Missing model selector content');
     }
-    const contentStyle = flattenStyle(content.props.style);
-    expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
+    const contentStyle = flattenStyle(content.props['style']);
+    expect(Number(contentStyle['paddingBottom'] ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,
     );
     act(() => tree.unmount());
@@ -118,16 +118,16 @@ describe('MainScreenModelAndEffortSheets', () => {
   it('gives the model selector drag handle a full touch target', () => {
     const { tree, root } = openModelSelector({ top: 47, left: 0, right: 0, bottom: 34 });
 
-    const modal = root.findAll((node) => typeof node.props.onDismiss === 'function')[0];
+    const modal = root.findAll((node) => typeof node.props['onDismiss'] === 'function')[0];
     if (!modal) {
       throw new Error('Missing model selector sheet');
     }
-    const handle = flattenStyle(modal.props.handleStyle);
-    const indicator = flattenStyle(modal.props.handleIndicatorStyle);
+    const handle = flattenStyle(modal.props['handleStyle']);
+    const indicator = flattenStyle(modal.props['handleIndicatorStyle']);
     expect(
-      Number(handle.paddingTop ?? 0) +
-        Number(indicator.height ?? 0) +
-        Number(handle.paddingBottom ?? 0),
+      Number(handle['paddingTop'] ?? 0) +
+        Number(indicator['height'] ?? 0) +
+        Number(handle['paddingBottom'] ?? 0),
     ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
     act(() => tree.unmount());
   });
@@ -162,7 +162,7 @@ describe('MainScreenModelAndEffortSheets', () => {
     const effortTree = tree;
     const root = effortTree.root as unknown as Queryable;
     const close = findByTestId(root, 'selection-sheet-close');
-    act(() => (close.props.onPress as () => void)());
+    act(() => (close.props['onPress'] as () => void)());
     expect(closeEffortModal).toHaveBeenCalledTimes(1);
     act(() => effortTree.unmount());
   });

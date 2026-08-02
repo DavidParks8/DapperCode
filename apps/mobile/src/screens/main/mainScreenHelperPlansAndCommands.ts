@@ -270,9 +270,13 @@ export function parseSlashCommand(input: string): { name: string; args: string }
   if (!match) {
     return null;
   }
+  const command = match[1];
+  if (!command) {
+    return null;
+  }
 
   return {
-    name: match[1].toLowerCase(),
+    name: command.toLowerCase(),
     args: match[2] ?? '',
   };
 }
@@ -394,12 +398,11 @@ export function iconForAgentThread(
     return 'chatbubble-ellipses-outline';
   }
 
-  switch (chat.sourceKind) {
-    case 'subAgentReview':
-      return 'shield-checkmark-outline';
-    case 'subAgentCompact':
-      return 'layers-outline';
-    default:
-      return chat.status === 'running' ? 'sparkles-outline' : 'git-branch-outline';
+  if (chat.sourceKind === 'subAgentReview') {
+    return 'shield-checkmark-outline';
   }
+  if (chat.sourceKind === 'subAgentCompact') {
+    return 'layers-outline';
+  }
+  return chat.status === 'running' ? 'sparkles-outline' : 'git-branch-outline';
 }

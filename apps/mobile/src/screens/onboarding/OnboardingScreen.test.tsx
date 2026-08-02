@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import * as Clipboard from 'expo-clipboard';
 import type * as fsNode from 'fs';
 import type * as pathNode from 'path';
@@ -73,7 +74,7 @@ function hasText(root: Queryable, text: string): boolean {
 }
 
 function findByLabel(root: Queryable, label: string): Queryable {
-  const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+  const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
   if (!node) {
     throw new Error(`Missing label: ${label}`);
   }
@@ -83,7 +84,7 @@ function findByLabel(root: Queryable, label: string): Queryable {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') {
+  while (current && typeof current.props['onPress'] !== 'function') {
     current = current.parent;
   }
   if (!current) {
@@ -166,7 +167,7 @@ describe('OnboardingScreen behavior', () => {
     jest.useFakeTimers();
     jest.clearAllMocks();
     mockCameraGranted = false;
-    global.fetch = jest.fn().mockResolvedValue({ status: 200 }) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue({ status: 200 });
     mockWsRequest.mockResolvedValue({ status: 'ok' });
     jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' });
   });
@@ -203,9 +204,9 @@ describe('OnboardingScreen behavior', () => {
     await press(findByLabel(root, 'Cancel connection setup'));
     expect(result.onCancel).toHaveBeenCalled();
     await press(findByLabel(root, 'Show bridge token'));
-    expect(findByLabel(root, 'Bridge token').props.secureTextEntry).toBe(false);
+    expect(findByLabel(root, 'Bridge token').props['secureTextEntry']).toBe(false);
     await press(findByLabel(root, 'Hide bridge token'));
-    expect(findByLabel(root, 'Bridge token').props.secureTextEntry).toBe(true);
+    expect(findByLabel(root, 'Bridge token').props['secureTextEntry']).toBe(true);
     act(() => result.tree.unmount());
   });
 
@@ -319,8 +320,8 @@ describe('OnboardingScreen behavior', () => {
         }),
       });
     });
-    expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:3001');
-    expect(findByLabel(root, 'Bridge token').props.value).toBe('qr-token');
+    expect(findByLabel(root, 'Bridge URL').props['value']).toBe('http://127.0.0.1:3001');
+    expect(findByLabel(root, 'Bridge token').props['value']).toBe('qr-token');
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
     act(() => granted.tree.unmount());
   });
@@ -330,7 +331,10 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
-    const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const camera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () => {
       readHandler<(event: { data: string }) => void>(
         camera,
@@ -375,15 +379,18 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
-    const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const camera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () =>
       readHandler<(event: { data: string }) => void>(
         camera,
         'onBarcodeScanned',
       )({ data: JSON.stringify(payload) }),
     );
-    expect(findByLabel(root, 'Bridge URL').props.value).toBe(expectedUrl);
-    expect(findByLabel(root, 'Bridge token').props.value).toBe(expectedToken);
+    expect(findByLabel(root, 'Bridge URL').props['value']).toBe(expectedUrl);
+    expect(findByLabel(root, 'Bridge token').props['value']).toBe(expectedToken);
     act(() => result.tree.unmount());
   });
 
@@ -404,12 +411,15 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
-    const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const camera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () =>
       readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }),
     );
-    expect(findByLabel(root, 'Bridge URL').props.value).toBe(expectedUrl);
-    expect(findByLabel(root, 'Bridge token').props.value).toBe(expectedToken);
+    expect(findByLabel(root, 'Bridge URL').props['value']).toBe(expectedUrl);
+    expect(findByLabel(root, 'Bridge token').props['value']).toBe(expectedToken);
     act(() => result.tree.unmount());
   });
 
@@ -425,7 +435,10 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
-    const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const camera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () =>
       readHandler<(event: { data: string }) => void>(camera, 'onBarcodeScanned')({ data }),
     );
@@ -438,23 +451,29 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding({ mode: 'add' });
     const root = result.tree.root as Queryable;
     await press(findPressableByText(root, 'Scan QR'));
-    const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const camera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () =>
       readHandler<(event: { data: string }) => void>(
         camera,
         'onBarcodeScanned',
       )({ data: 'invalid' }),
     );
-    expect(camera.props.onBarcodeScanned).toBeUndefined();
+    expect(camera.props['onBarcodeScanned']).toBeUndefined();
     act(() => jest.advanceTimersByTime(1200));
-    const unlockedCamera = root.findAll((node) => node.type === 'mock-camera-view')[0];
+    const unlockedCamera = requireTestValue(
+      root.findAll((node) => node.type === 'mock-camera-view')[0],
+      'indexed test value',
+    );
     await act(async () =>
       readHandler<(event: { data: string }) => void>(
         unlockedCamera,
         'onBarcodeScanned',
       )({ data: 'dappercode://pair?token=unlocked' }),
     );
-    expect(findByLabel(root, 'Bridge token').props.value).toBe('unlocked');
+    expect(findByLabel(root, 'Bridge token').props['value']).toBe('unlocked');
     act(() => result.tree.unmount());
   });
 
@@ -471,13 +490,13 @@ describe('OnboardingScreen behavior', () => {
     let checkPromise: Promise<void> | undefined;
     act(() => {
       checkPromise = (
-        findPressableByText(root, 'Test Connection').props.onPress as () => Promise<void>
+        findPressableByText(root, 'Test Connection').props['onPress'] as () => Promise<void>
       )();
     });
-    expect(findPressableByText(root, 'Test Connection').props.accessibilityState).toEqual(
+    expect(findPressableByText(root, 'Test Connection').props['accessibilityState']).toEqual(
       expect.objectContaining({ disabled: true, busy: true }),
     );
-    expect(findByLabel(root, 'Continue').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Continue').props['accessibilityState']).toEqual(
       expect.objectContaining({ disabled: true, busy: true }),
     );
     await act(async () => {
@@ -608,8 +627,8 @@ describe('OnboardingScreen behavior', () => {
       initialBridgeToken: 'rerender-token',
     });
     const root = result.tree.root as Queryable;
-    expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:4999');
-    expect(findByLabel(root, 'Bridge token').props.value).toBe('rerender-token');
+    expect(findByLabel(root, 'Bridge URL').props['value']).toBe('http://127.0.0.1:4999');
+    expect(findByLabel(root, 'Bridge token').props['value']).toBe('rerender-token');
     expect(findByLabel(root, 'Save URL')).toBeTruthy();
     await result.rerender({ mode: 'initial', initialBridgeUrl: null, initialBridgeToken: null });
     expect(hasText(root, 'Private connection')).toBe(true);
@@ -658,7 +677,10 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     expect(hasText(root, 'Scan Pairing QR')).toBe(true);
     expect(hasText(root, 'Camera permission is required to scan the pairing QR.')).toBe(true);
-    const modal = root.findAll((node) => node.type === Modal)[0];
+    const modal = requireTestValue(
+      root.findAll((node) => node.type === Modal)[0],
+      'indexed test value',
+    );
     act(() => readHandler<() => void>(modal, 'onRequestClose')());
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
 
@@ -669,7 +691,10 @@ describe('OnboardingScreen behavior', () => {
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
 
     await press(findPressableByText(root, 'Scan QR'));
-    const sheet = root.findAll((node) => node.props.accessibilityRole === 'none')[0];
+    const sheet = requireTestValue(
+      root.findAll((node) => node.props['accessibilityRole'] === 'none')[0],
+      'indexed test value',
+    );
     const stopPropagation = jest.fn();
     act(() =>
       readHandler<(event: { stopPropagation: () => void }) => void>(
@@ -678,11 +703,14 @@ describe('OnboardingScreen behavior', () => {
       )({ stopPropagation }),
     );
     expect(stopPropagation).toHaveBeenCalled();
-    const backdrop = root.findAll(
-      (node) =>
-        node.props.accessibilityLabel === 'Close QR scanner' &&
-        typeof node.props.onPress === 'function',
-    )[0];
+    const backdrop = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Close QR scanner' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
     await press(backdrop);
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
     act(() => result.tree.unmount());
@@ -793,13 +821,13 @@ describe('OnboardingScreen behavior', () => {
     // disabled+busy forever. Read `.props` directly rather than relying on the `press` helper,
     // which invokes onPress unconditionally and would not surface a stuck-disabled regression.
     const testConnectionButton = findPressableByText(root, 'Test Connection');
-    expect(testConnectionButton.props.disabled).toBe(false);
-    expect(testConnectionButton.props.accessibilityState).toEqual(
+    expect(testConnectionButton.props['disabled']).toBe(false);
+    expect(testConnectionButton.props['accessibilityState']).toEqual(
       expect.objectContaining({ disabled: false, busy: false }),
     );
     const continueButtonAfterStaleProbe = findByLabel(root, 'Continue');
-    expect(continueButtonAfterStaleProbe.props.disabled).toBe(false);
-    expect(continueButtonAfterStaleProbe.props.accessibilityState).toEqual(
+    expect(continueButtonAfterStaleProbe.props['disabled']).toBe(false);
+    expect(continueButtonAfterStaleProbe.props['accessibilityState']).toEqual(
       expect.objectContaining({ disabled: false, busy: false }),
     );
 
@@ -835,7 +863,7 @@ describe('OnboardingScreen behavior', () => {
     // The cached success from the previous profile's credentials must not leak into the
     // freshly loaded, never-probed pair.
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
-    expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:9002');
+    expect(findByLabel(root, 'Bridge URL').props['value']).toBe('http://127.0.0.1:9002');
 
     await press(findByLabel(root, 'Save URL'));
     expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -881,12 +909,12 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(initialRoot, 'Private connection'));
 
     const backButton = findByLabel(initialRoot, 'Back');
-    expect(backButton.props.accessibilityRole).toBe('button');
-    expect(backButton.props.accessibilityHint).toBeTruthy();
+    expect(backButton.props['accessibilityRole']).toBe('button');
+    expect(backButton.props['accessibilityHint']).toBeTruthy();
 
     const scanButton = findByLabel(initialRoot, 'Scan QR');
-    expect(scanButton.props.accessibilityRole).toBe('button');
-    expect(scanButton.props.accessibilityHint).toBeTruthy();
+    expect(scanButton.props['accessibilityRole']).toBe('button');
+    expect(scanButton.props['accessibilityHint']).toBeTruthy();
     act(() => initial.tree.unmount());
 
     const direct = await renderOnboarding({
@@ -897,13 +925,13 @@ describe('OnboardingScreen behavior', () => {
     const directRoot = direct.tree.root as Queryable;
 
     const cancelButton = findByLabel(directRoot, 'Cancel connection setup');
-    const cancelHitSlop = cancelButton.props.hitSlop as {
+    const cancelHitSlop = cancelButton.props['hitSlop'] as {
       top: number;
       bottom: number;
       left: number;
       right: number;
     };
-    const minimum = Platform.select({ ios: 44, android: 48, default: 44 }) as number;
+    const minimum = Platform.select({ ios: 44, android: 48, default: 44 });
     // cancelBtn is drawn at 30px; hitSlop must pad it out to at least the platform minimum.
     expect(30 + cancelHitSlop.top + cancelHitSlop.bottom).toBeGreaterThanOrEqual(minimum);
     expect(30 + cancelHitSlop.left + cancelHitSlop.right).toBeGreaterThanOrEqual(minimum);
@@ -931,13 +959,13 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
     const shareButton = findByLabel(root, 'Share bridge setup guide');
     const copyButton = findByLabel(root, 'Copy setup command');
-    const shareHitSlop = shareButton.props.hitSlop as {
+    const shareHitSlop = shareButton.props['hitSlop'] as {
       top: number;
       bottom: number;
       left: number;
       right: number;
     };
-    const copyHitSlop = copyButton.props.hitSlop as typeof shareHitSlop;
+    const copyHitSlop = copyButton.props['hitSlop'] as typeof shareHitSlop;
 
     // Share sits left of Copy in commandCardActions: Share's right slop plus Copy's left slop
     // must not exceed the 4px gap between them, or one button's hit area reaches into the
@@ -975,10 +1003,11 @@ describe('OnboardingScreen behavior', () => {
     try {
       const result = await renderOnboarding({ mode: 'add' });
       const root = result.tree.root as Queryable;
-      const keyboardAvoiding = root.findAll(
-        (node) => node.type === KeyboardAvoidingView,
-      )[0] as Queryable;
-      expect(keyboardAvoiding.props.behavior).toBe('height');
+      const keyboardAvoiding = requireTestValue(
+        root.findAll((node) => node.type === KeyboardAvoidingView)[0],
+        'indexed test value',
+      );
+      expect(keyboardAvoiding.props['behavior']).toBe('height');
       act(() => result.tree.unmount());
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
@@ -987,8 +1016,8 @@ describe('OnboardingScreen behavior', () => {
 
   describe('typography tokens', () => {
     it('has no ad hoc numeric fontSize literals in owned onboarding source files', () => {
-      const fs = jest.requireActual('fs') as typeof fsNode;
-      const path = jest.requireActual('path') as typeof pathNode;
+      const fs: typeof fsNode = jest.requireActual('fs');
+      const path: typeof pathNode = jest.requireActual('path');
       const dir = __dirname;
       const offenders: string[] = [];
       for (const entry of fs.readdirSync(dir)) {
@@ -1010,9 +1039,9 @@ describe('OnboardingScreen behavior', () => {
       const brandNode = root.findAll(
         (node) => node.children.map(String).join('') === 'DapperCode',
       )[0];
-      const style = Array.isArray(brandNode?.props.style)
-        ? Object.assign({}, ...brandNode.props.style)
-        : ((brandNode?.props.style as Record<string, unknown>) ?? {});
+      const style = Array.isArray(brandNode?.props['style'])
+        ? Object.assign({}, ...brandNode.props['style'])
+        : ((brandNode?.props['style'] as Record<string, unknown>) ?? {});
       expect(style.fontSize).toBe(theme.typography.headline.fontSize);
       act(() => result.tree.unmount());
     });
@@ -1022,9 +1051,9 @@ describe('OnboardingScreen behavior', () => {
       const root = result.tree.root as Queryable;
       await press(findPressableByText(root, 'Private connection'));
       const pillIndexNode = root.findAll((node) => node.children.map(String).join('') === '1')[0];
-      const style = Array.isArray(pillIndexNode?.props.style)
-        ? Object.assign({}, ...pillIndexNode.props.style)
-        : ((pillIndexNode?.props.style as Record<string, unknown>) ?? {});
+      const style = Array.isArray(pillIndexNode?.props['style'])
+        ? Object.assign({}, ...pillIndexNode.props['style'])
+        : ((pillIndexNode?.props['style'] as Record<string, unknown>) ?? {});
       expect(style.fontSize).toBe(theme.typography.metadata.fontSize);
       // 11pt readability floor is preserved via the metadata role rather than a raw literal.
       expect(style.fontSize).toBeGreaterThanOrEqual(11);

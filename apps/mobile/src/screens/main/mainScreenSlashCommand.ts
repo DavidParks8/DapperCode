@@ -94,15 +94,15 @@ export async function executeSlashCommand(
       appendLocalAssistantMessage(`Supported slash commands:\n${lines.join('\n')}`, commandChatId);
       return true;
     },
-    new: async () => {
+    new: () => {
       if (activeAgentId) {
         startNewChat(activeAgentId);
       }
-      return true;
+      return Promise.resolve(true);
     },
-    model: async () => {
+    model: () => {
       setError('This ACP agent does not advertise configurable models.');
-      return true;
+      return Promise.resolve(true);
     },
     plan: () => executePlanCommand(context, argText),
     status: async () => {
@@ -127,10 +127,10 @@ export async function executeSlashCommand(
       appendLocalAssistantMessage(lines.join('\n'), commandChatId);
       return true;
     },
-    review: async () => {
+    review: () => {
       if (!selectedChatId) {
         setError('/review requires an open chat');
-        return true;
+        return Promise.resolve(true);
       }
 
       if (!supportsReview) {
@@ -141,7 +141,7 @@ export async function executeSlashCommand(
           title: 'Review unavailable',
           detail,
         });
-        return true;
+        return Promise.resolve(true);
       }
 
       try {
@@ -159,15 +159,15 @@ export async function executeSlashCommand(
           detail: message,
         });
       }
-      return true;
+      return Promise.resolve(true);
     },
-    diff: async () => {
+    diff: () => {
       if (!selectedChat) {
         setError('/diff requires an open chat');
-        return true;
+        return Promise.resolve(true);
       }
       onOpenGit(selectedChat);
-      return true;
+      return Promise.resolve(true);
     },
   };
 

@@ -111,7 +111,7 @@ export function createMarkdownRules(
       </SelectableMessageText>
     ),
     link: (node, children, _parent, styles, onLinkPress) => {
-      const href = readMarkdownAttr(node.attributes.href);
+      const href = readMarkdownAttr(node.attributes['href']);
       if (!href) {
         return (
           <SelectableMessageText key={node.key} style={styles.link}>
@@ -138,7 +138,7 @@ export function createMarkdownRules(
       );
     },
     image: (node) => {
-      const src = readMarkdownAttr(node.attributes.src);
+      const src = readMarkdownAttr(node.attributes['src']);
       if (!src) {
         return null;
       }
@@ -146,7 +146,7 @@ export function createMarkdownRules(
       if (!source) {
         return null;
       }
-      const alt = readMarkdownAttr(node.attributes.alt);
+      const alt = readMarkdownAttr(node.attributes['alt']);
       return <MarkdownImage key={node.key} source={source} accessibilityLabel={alt ?? undefined} />;
     },
   };

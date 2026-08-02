@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { Alert, Linking, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -41,8 +42,8 @@ function typeName(node: Queryable): string {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') {
-    current = current.parent as Queryable | null;
+  while (current && typeof current.props['onPress'] !== 'function') {
+    current = current.parent;
   }
   if (!current) {
     throw new Error(`Missing pressable: ${text}`);
@@ -52,8 +53,8 @@ function findPressableByText(root: Queryable, text: string): Queryable {
 
 function findPressableAncestor(node: Queryable): Queryable {
   let current: Queryable | null = node;
-  while (current && typeof current.props.onPress !== 'function') {
-    current = current.parent as Queryable | null;
+  while (current && typeof current.props['onPress'] !== 'function') {
+    current = current.parent;
   }
   if (!current) {
     throw new Error('Missing pressable ancestor');
@@ -62,7 +63,7 @@ function findPressableAncestor(node: Queryable): Queryable {
 }
 
 function getPressCallback(node: Queryable): PressCallback {
-  const callback = node.props.onPress;
+  const callback = node.props['onPress'];
   if (typeof callback !== 'function') {
     throw new Error('Expected onPress callback');
   }
@@ -71,7 +72,7 @@ function getPressCallback(node: Queryable): PressCallback {
 
 /** Resolves a Pressable's (possibly function-form) style prop and returns its effective minHeight. */
 function resolveMinHeight(node: Queryable): number {
-  const rawStyle = node.props.style as unknown;
+  const rawStyle = node.props['style'];
   const resolved = typeof rawStyle === 'function' ? rawStyle({ pressed: false }) : rawStyle;
   const flattened = StyleSheet.flatten(resolved) as { minHeight?: number } | undefined;
   return flattened?.minHeight ?? 0;
@@ -142,14 +143,17 @@ describe('PrivacyScreen behavior', () => {
     await press(findPressableByText(root, button));
     expect(Linking.canOpenURL).toHaveBeenCalledWith(url);
     expect(Linking.openURL).toHaveBeenCalledWith(url);
-    const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+    const backIcon = requireTestValue(
+      root.findAll((node) => node.children.includes('chevron-back'))[0],
+      'indexed test value',
+    );
     await press(findPressableAncestor(backIcon));
     expect(onBack).toHaveBeenCalled();
     act(() => configured.unmount());
 
     const absent = await renderPrivacy(null);
     expect(hasText(absent.root as Queryable, missing)).toBe(true);
-    expect(findPressableByText(absent.root as Queryable, button).props.disabled).toBe(true);
+    expect(findPressableByText(absent.root as Queryable, button).props['disabled']).toBe(true);
     act(() => absent.unmount());
   });
 
@@ -196,7 +200,7 @@ describe('PrivacyScreen behavior', () => {
     const buttonNode = findPressableByText(root, button);
     act(() => getPressCallback(buttonNode)());
     expect(hasText(root, 'Opening...')).toBe(true);
-    expect(buttonNode.props.disabled).toBe(true);
+    expect(buttonNode.props['disabled']).toBe(true);
     act(() => getPressCallback(buttonNode)());
     expect(Linking.canOpenURL).toHaveBeenCalledTimes(1);
     await act(async () => {
@@ -211,9 +215,12 @@ describe('PrivacyScreen behavior', () => {
   it('back button hitSlop plus icon meets the platform touch target minimum', async () => {
     const tree = await renderPrivacy(url);
     const root = tree.root as Queryable;
-    const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+    const backIcon = requireTestValue(
+      root.findAll((node) => node.children.includes('chevron-back'))[0],
+      'indexed test value',
+    );
     const backBtn = findPressableAncestor(backIcon);
-    const hitSlop = backBtn.props.hitSlop as
+    const hitSlop = backBtn.props['hitSlop'] as
       { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
     const iconSize = 22;
     expect(effectiveSize(iconSize, hitSlop, 'vertical')).toBeGreaterThanOrEqual(
@@ -256,9 +263,12 @@ describe('PrivacyScreen behavior', () => {
         );
       });
       const root = tree!.root as Queryable;
-      const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
+      const backIcon = requireTestValue(
+        root.findAll((node) => node.children.includes('chevron-back'))[0],
+        'indexed test value',
+      );
       const backBtn = findPressableAncestor(backIcon);
-      const hitSlop = backBtn.props.hitSlop as
+      const hitSlop = backBtn.props['hitSlop'] as
         { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
       expect(effectiveSize(22, hitSlop, 'vertical')).toBeGreaterThanOrEqual(48);
       expect(effectiveSize(22, hitSlop, 'horizontal')).toBeGreaterThanOrEqual(48);

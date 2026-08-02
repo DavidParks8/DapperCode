@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import React from 'react';
 import { ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -70,7 +71,7 @@ function hostNodes(root: QueryableInstance): QueryableInstance[] {
 }
 
 function findHost(root: QueryableInstance, label: string): QueryableInstance {
-  const match = hostNodes(root).find((node) => node.props.accessibilityLabel === label);
+  const match = hostNodes(root).find((node) => node.props['accessibilityLabel'] === label);
   if (!match) {
     throw new Error(`Missing host node: ${label}`);
   }
@@ -78,12 +79,13 @@ function findHost(root: QueryableInstance, label: string): QueryableInstance {
 }
 
 function queryHost(root: QueryableInstance, label: string): QueryableInstance | null {
-  return hostNodes(root).find((node) => node.props.accessibilityLabel === label) ?? null;
+  return hostNodes(root).find((node) => node.props['accessibilityLabel'] === label) ?? null;
 }
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
@@ -92,7 +94,7 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
 }
 
 function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
-  const style = node.props.style;
+  const style = node.props['style'];
   return typeof style === 'function' ? style({ pressed }) : style;
 }
 
@@ -127,7 +129,7 @@ function touchClaimingAncestors(node: QueryableInstance): QueryableInstance[] {
   while (current) {
     if (
       typeof current.type === 'string' &&
-      typeof current.props.onStartShouldSetResponder === 'function'
+      typeof current.props['onStartShouldSetResponder'] === 'function'
     ) {
       claimers.push(current);
     }
@@ -140,7 +142,7 @@ function pressAncestors(node: QueryableInstance): QueryableInstance[] {
   const pressables: QueryableInstance[] = [];
   let current = node.parent;
   while (current) {
-    if (typeof current.props.onPress === 'function') {
+    if (typeof current.props['onPress'] === 'function') {
       pressables.push(current);
     }
     current = current.parent;
@@ -179,7 +181,7 @@ function touchEvent() {
 
 /** Drives the responder handshake a real finger tap performs instead of calling `onPress`. */
 function tapHost(node: QueryableInstance): void {
-  const shouldSet = node.props.onStartShouldSetResponder;
+  const shouldSet = node.props['onStartShouldSetResponder'];
   if (typeof shouldSet !== 'function' || (shouldSet as () => boolean)() !== true) {
     throw new Error('Node does not accept touches');
   }
@@ -258,13 +260,15 @@ function createTitleScroller(
       if (claimers.length > 0) {
         throw new Error(
           `Title drag was intercepted by ${claimers.length} touch-claiming ancestor(s): ` +
-            claimers.map((node) => String(node.props.accessibilityLabel ?? node.type)).join(', '),
+            claimers
+              .map((node) => String(node.props['accessibilityLabel'] ?? node.type))
+              .join(', '),
         );
       }
-      if (scrollHost.props.horizontal !== true) {
+      if (scrollHost.props['horizontal'] !== true) {
         throw new Error('Title does not scroll horizontally');
       }
-      if (scrollHost.props.scrollEnabled === false) {
+      if (scrollHost.props['scrollEnabled'] === false) {
         throw new Error('Title scrolling is disabled');
       }
 
@@ -340,8 +344,8 @@ describe('ChatHeader', () => {
     const editButton = findHost(root, 'Edit session title');
 
     expect(textContent(editButton)).toBe('pencil');
-    expect(editButton.props.accessibilityRole).toBe('button');
-    expect(editButton.props.accessibilityHint).toBe('Opens the rename form for this session');
+    expect(editButton.props['accessibilityRole']).toBe('button');
+    expect(editButton.props['accessibilityHint']).toBe('Opens the rename form for this session');
     // The old chat-options chevron menu is gone; renaming is the only header title action.
     expect(textContent(root)).not.toContain('chevron-down');
     expect(queryHost(root, `${LONG_TITLE}, chat options`)).toBeNull();
@@ -369,22 +373,23 @@ describe('ChatHeader', () => {
     // Regression: a Pressable around the scroll view ate the gesture, so the title tap did nothing.
     expect(touchClaimingAncestors(scrollHost)).toHaveLength(0);
     expect(pressAncestors(scrollHost)).toHaveLength(0);
-    expect(typeof scrollHost.props.onStartShouldSetResponder).not.toBe('function');
-    expect(scrollHost.props.horizontal).toBe(true);
-    expect(scrollHost.props.scrollEnabled).not.toBe(false);
-    expect(scrollHost.props.bounces).toBe(false);
+    expect(typeof scrollHost.props['onStartShouldSetResponder']).not.toBe('function');
+    expect(scrollHost.props['horizontal']).toBe(true);
+    expect(scrollHost.props['scrollEnabled']).not.toBe(false);
+    expect(scrollHost.props['bounces']).toBe(false);
 
     // Nothing in the title region is pressable, so touching it cannot open the rename sheet.
-    const titleText = root.findAll(
-      (node) => node.type === 'Text' && textContent(node) === LONG_TITLE,
-    )[0];
+    const titleText = requireTestValue(
+      root.findAll((node) => node.type === 'Text' && textContent(node) === LONG_TITLE)[0],
+      'indexed test value',
+    );
     expect(titleText).toBeDefined();
     expect(pressAncestors(titleText)).toHaveLength(0);
     expect(touchClaimingAncestors(titleText)).toHaveLength(0);
     expect(onRenameTitle).not.toHaveBeenCalled();
 
     // The rename button itself still takes touches.
-    expect(typeof findHost(root, 'Edit session title').props.onStartShouldSetResponder).toBe(
+    expect(typeof findHost(root, 'Edit session title').props['onStartShouldSetResponder']).toBe(
       'function',
     );
     act(() => tree.unmount());
@@ -544,7 +549,7 @@ describe('ChatHeader', () => {
     const root = queryRoot(tree);
 
     const expectMinimumHitSlop = (label: string) => {
-      const hitSlop = findPressable(root, label).props.hitSlop as
+      const hitSlop = findPressable(root, label).props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);

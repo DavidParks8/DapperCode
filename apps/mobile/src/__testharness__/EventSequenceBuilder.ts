@@ -176,7 +176,7 @@ export class EventSequenceBuilder {
     return this.push(this._threadId, this._runId, {
       type: EventType.MESSAGES_SNAPSHOT,
       messages,
-    } as AGUIEvent);
+    });
   }
 
   /** Emit STEP_STARTED. */

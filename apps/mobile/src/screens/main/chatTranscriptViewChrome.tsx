@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { Dispatch, MutableRefObject, ReactNode, RefObject, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { Pressable, type FlatList } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion, type SharedValue } from 'react-native-reanimated';
 
@@ -33,9 +33,9 @@ export const resolveListBatchingConfig = (count: number, isLarge: boolean) => ({
   windowSize: isLarge ? 13 : 11,
 });
 export function ensureRailJumpController(params: {
-  railJumpControllerRef: MutableRefObject<ChatScrollRailJumpController | null>;
-  displayIndexByMessageIdRef: MutableRefObject<Map<string, number>>;
-  scrollRefRef: MutableRefObject<RefObject<FlatList<TranscriptDisplayItem> | null>>;
+  railJumpControllerRef: RefObject<ChatScrollRailJumpController | null>;
+  displayIndexByMessageIdRef: RefObject<Map<string, number>>;
+  scrollRefRef: RefObject<RefObject<FlatList<TranscriptDisplayItem> | null>>;
   setVisibleStartIndex: Dispatch<SetStateAction<number>>;
   spacingLg: number;
 }) {
@@ -88,14 +88,14 @@ export function renderScrollRail(params: {
   );
 }
 export function renderJumpToLatestButton(params: {
-  autoScrollStateRef: MutableRefObject<AutoScrollState>;
+  autoScrollStateRef: RefObject<AutoScrollState>;
   bottomInset: number;
   hitSlop: ReturnType<typeof computeHitSlop>;
   onJumpToLatest: () => void;
-  railJumpControllerRef: MutableRefObject<ChatScrollRailJumpController | null>;
+  railJumpControllerRef: RefObject<ChatScrollRailJumpController | null>;
   setShowJumpToLatest: Dispatch<SetStateAction<boolean>>;
   showJumpToLatest: boolean;
-  showJumpToLatestRef: MutableRefObject<boolean>;
+  showJumpToLatestRef: RefObject<boolean>;
   styles: ReturnType<typeof createStyles>;
   theme: ReturnType<typeof useAppTheme>;
 }): ReactNode {

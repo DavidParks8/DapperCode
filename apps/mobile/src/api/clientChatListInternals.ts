@@ -1,9 +1,9 @@
 import { cloneChatSummaries } from './clientChatCloneAndRetryInternals';
 import { readString, toRecord } from './chatMapping';
-import { type ChatSummary } from './types';
-import {
-  type SnapshotPageEntry,
-  type SnapshotPageResponse,
+import type { ChatSummary } from './types';
+import type {
+  SnapshotPageEntry,
+  SnapshotPageResponse,
 } from './clientContractsAndSnapshotInternals';
 
 export interface ChatListPage {
@@ -177,27 +177,27 @@ export function readTimestampIso(value: unknown): string | null {
 
 export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
   const record = toRecord(value) ?? {};
-  const entries = (Array.isArray(record.entries) ? record.entries : []).flatMap(
+  const entries = (Array.isArray(record['entries']) ? record['entries'] : []).flatMap(
     parseSnapshotPageEntry,
   );
   return {
     entries,
-    beforeCursor: readString(record.beforeCursor),
-    afterCursor: readString(record.afterCursor),
-    hasMoreBefore: record.hasMoreBefore === true,
-    hasMoreAfter: record.hasMoreAfter === true,
-    unavailableCount: readFiniteNumber(record.unavailableCount) ?? 0,
-    earliestAvailableSequence: readFiniteNumber(record.earliestAvailableSequence),
-    latestAvailableSequence: readFiniteNumber(record.latestAvailableSequence),
-    revision: readFiniteNumber(record.revision) ?? 0,
+    beforeCursor: readString(record['beforeCursor']),
+    afterCursor: readString(record['afterCursor']),
+    hasMoreBefore: record['hasMoreBefore'] === true,
+    hasMoreAfter: record['hasMoreAfter'] === true,
+    unavailableCount: readFiniteNumber(record['unavailableCount']) ?? 0,
+    earliestAvailableSequence: readFiniteNumber(record['earliestAvailableSequence']),
+    latestAvailableSequence: readFiniteNumber(record['latestAvailableSequence']),
+    revision: readFiniteNumber(record['revision']) ?? 0,
   };
 }
 
 function parseSnapshotPageEntry(value: unknown): SnapshotPageEntry[] {
   const entry = toRecord(value);
-  const sequence = readFiniteNumber(entry?.sequence);
-  const kind = readString(entry?.kind);
-  const canonicalId = readString(entry?.canonicalId)?.trim();
+  const sequence = readFiniteNumber(entry?.['sequence']);
+  const kind = readString(entry?.['kind']);
+  const canonicalId = readString(entry?.['canonicalId'])?.trim();
   if (sequence === null || !canonicalId || !isSnapshotPageEntryKind(kind)) {
     return [];
   }
@@ -206,8 +206,8 @@ function parseSnapshotPageEntry(value: unknown): SnapshotPageEntry[] {
       sequence,
       kind,
       canonicalId,
-      message: parseSnapshotPageMessage(entry?.message, canonicalId),
-      tool: parseSnapshotPageTool(entry?.tool, canonicalId),
+      message: parseSnapshotPageMessage(entry?.['message'], canonicalId),
+      tool: parseSnapshotPageTool(entry?.['tool'], canonicalId),
     },
   ];
 }
@@ -222,10 +222,10 @@ function parseSnapshotPageMessage(value: unknown, canonicalId: string) {
     return undefined;
   }
   return {
-    id: readString(message.id) ?? canonicalId,
-    role: readString(message.role) ?? '',
-    parts: Array.isArray(message.parts) ? message.parts : [],
-    truncated: message.truncated === true,
+    id: readString(message['id']) ?? canonicalId,
+    role: readString(message['role']) ?? '',
+    parts: Array.isArray(message['parts']) ? message['parts'] : [],
+    truncated: message['truncated'] === true,
   };
 }
 
@@ -235,16 +235,16 @@ function parseSnapshotPageTool(value: unknown, canonicalId: string) {
     return undefined;
   }
   return {
-    id: readString(tool.id) ?? canonicalId,
-    generation: readFiniteNumber(tool.generation),
-    kind: readString(tool.kind) ?? '',
-    status: readString(tool.status) ?? '',
-    title: readString(tool.title) ?? '',
-    content: readString(tool.content) ?? '',
-    structuredContent: Array.isArray(tool.structuredContent) ? tool.structuredContent : [],
-    locations: Array.isArray(tool.locations) ? tool.locations : [],
-    truncated: tool.truncated === true,
-    subagent: tool.subagent === true,
+    id: readString(tool['id']) ?? canonicalId,
+    generation: readFiniteNumber(tool['generation']),
+    kind: readString(tool['kind']) ?? '',
+    status: readString(tool['status']) ?? '',
+    title: readString(tool['title']) ?? '',
+    content: readString(tool['content']) ?? '',
+    structuredContent: Array.isArray(tool['structuredContent']) ? tool['structuredContent'] : [],
+    locations: Array.isArray(tool['locations']) ? tool['locations'] : [],
+    truncated: tool['truncated'] === true,
+    subagent: tool['subagent'] === true,
   };
 }
 

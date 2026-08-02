@@ -3,6 +3,7 @@ import { StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
+import { requireTestValue } from '../testing/requireTestValue';
 import { AppThemeProvider, createAppTheme, spacing } from '../theme';
 import { SelectionSheet, type SelectionSheetOption } from './SelectionSheet';
 import { MIN_TOUCH_TARGET, SHEET_CORNER_CLEARANCE } from './sheetLayout';
@@ -60,7 +61,8 @@ function textContent(node: QueryableInstance): string {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
@@ -69,12 +71,12 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
 }
 
 function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
-  const style = node.props.style;
+  const style = node.props['style'];
   return typeof style === 'function' ? style({ pressed }) : style;
 }
 
 function flattenStyle(style: unknown): Record<string, number | string | undefined> {
-  return (StyleSheet.flatten(style as never) ?? {}) as Record<string, number | string | undefined>;
+  return StyleSheet.flatten(style as never) ?? {};
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
@@ -108,7 +110,7 @@ describe('SelectionSheet', () => {
         badgeTextColor: '#fff',
         metaColor: '#404040',
         iconColor: '#505050',
-        onPress: optionPresses[0],
+        onPress: requireTestValue(optionPresses[0], 'selected option handler'),
       },
       {
         key: 'danger',
@@ -117,9 +119,13 @@ describe('SelectionSheet', () => {
         icon: 'trash-outline',
         tone: 'danger',
         disabled: true,
-        onPress: optionPresses[1],
+        onPress: requireTestValue(optionPresses[1], 'danger option handler'),
       },
-      { key: 'plain', title: 'Plain', onPress: optionPresses[2] },
+      {
+        key: 'plain',
+        title: 'Plain',
+        onPress: requireTestValue(optionPresses[2], 'plain option handler'),
+      },
     ];
     const tree = render(
       <SelectionSheet
@@ -137,8 +143,8 @@ describe('SelectionSheet', () => {
     const selected = findPressable(root, 'Selected');
     const danger = findPressable(root, 'Delete');
     const plain = findPressable(root, 'Plain');
-    expect(selected.props.accessibilityState).toEqual({ disabled: false, selected: true });
-    expect(danger.props.accessibilityState).toEqual({ disabled: true });
+    expect(selected.props['accessibilityState']).toEqual({ disabled: false, selected: true });
+    expect(danger.props['accessibilityState']).toEqual({ disabled: true });
     expect(invokeStyle(selected, true)).toBeDefined();
     expect(invokeStyle(danger, true)).toBeDefined();
     expect(invokeStyle(plain, false)).toBeDefined();
@@ -169,23 +175,23 @@ describe('SelectionSheet', () => {
     if (!eyebrowText) {
       throw new Error('Missing eyebrow text');
     }
-    const eyebrowStyle = flattenStyle(eyebrowText.props.style);
+    const eyebrowStyle = flattenStyle(eyebrowText.props['style']);
     const badgeText = root.findAll(
       (node) => node.type === Text && textContent(node) === 'Active',
     )[0];
     if (!badgeText) {
       throw new Error('Missing badge text');
     }
-    const badgeTextStyle = flattenStyle(badgeText.props.style);
+    const badgeTextStyle = flattenStyle(badgeText.props['style']);
 
     // Both styles must adopt theme.typography.metadata (11/14) instead of the old sub-11pt
     // literal override (10/12), while keeping their uppercase/bold/muted presentation.
     for (const style of [eyebrowStyle, badgeTextStyle]) {
-      expect(Number(style.fontSize)).toBe(11);
-      expect(Number(style.lineHeight)).toBe(14);
-      expect(style.fontWeight).toBe('700');
-      expect(style.textTransform).toBe('uppercase');
-      expect(style.color).toBe(theme.colors.textMuted);
+      expect(Number(style['fontSize'])).toBe(11);
+      expect(Number(style['lineHeight'])).toBe(14);
+      expect(style['fontWeight']).toBe('700');
+      expect(style['textTransform']).toBe('uppercase');
+      expect(style['color']).toBe(theme.colors.textMuted);
     }
 
     act(() => tree.unmount());
@@ -237,24 +243,24 @@ describe('SelectionSheet', () => {
     );
     const root = queryRoot(tree);
 
-    const footer = root.findAll((node) => node.props.testID === 'selection-sheet-footer')[0];
+    const footer = root.findAll((node) => node.props['testID'] === 'selection-sheet-footer')[0];
     if (!footer) {
       throw new Error('Missing selection sheet footer');
     }
-    const footerStyle = flattenStyle(footer.props.style);
+    const footerStyle = flattenStyle(footer.props['style']);
     // Right aligning the button parked it in the screen's rounded bottom corner, where it was
     // visually clipped.
-    expect(footerStyle.alignItems).toBe('center');
-    expect(footerStyle.alignItems).not.toBe('flex-end');
+    expect(footerStyle['alignItems']).toBe('center');
+    expect(footerStyle['alignItems']).not.toBe('flex-end');
 
     const close = findPressable(root, 'Close');
     const closeStyle = flattenStyle(invokeStyle(close, false));
-    expect(Number(closeStyle.minHeight ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    expect(closeStyle.alignSelf).not.toBe('flex-end');
+    expect(Number(closeStyle['minHeight'] ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(closeStyle['alignSelf']).not.toBe('flex-end');
 
     const pressedStyle = flattenStyle(invokeStyle(close, true));
-    expect(Number(pressedStyle.minHeight ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    expect(pressedStyle.alignItems).toBe('center');
+    expect(Number(pressedStyle['minHeight'] ?? 0)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(pressedStyle['alignItems']).toBe('center');
 
     act(() => invokeProp(close, 'onPress'));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -287,12 +293,14 @@ describe('SelectionSheet', () => {
     if (!tree) {
       throw new Error('Component did not render');
     }
-    const content = queryRoot(tree).findAll((node) => node.props.testID === 'app-sheet-content')[0];
+    const content = queryRoot(tree).findAll(
+      (node) => node.props['testID'] === 'app-sheet-content',
+    )[0];
     if (!content) {
       throw new Error('Missing sheet content');
     }
-    const contentStyle = flattenStyle(content.props.style);
-    expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
+    const contentStyle = flattenStyle(content.props['style']);
+    expect(Number(contentStyle['paddingBottom'] ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,
     );
     act(() => tree?.unmount());

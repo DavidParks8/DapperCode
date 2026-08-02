@@ -34,7 +34,7 @@ describe('appStatePersistence', () => {
 
     let module!: typeof AppStatePersistenceModule;
     jest.isolateModules(() => {
-      module = jest.requireActual('./appStatePersistence') as typeof AppStatePersistenceModule;
+      module = jest.requireActual('./appStatePersistence');
     });
     const persistence = module.createAppStatePersistence();
 
@@ -63,7 +63,7 @@ describe('appStatePersistence', () => {
 
     let module!: typeof AppStatePersistenceModule;
     jest.isolateModules(() => {
-      module = jest.requireActual('./appStatePersistence') as typeof AppStatePersistenceModule;
+      module = jest.requireActual('./appStatePersistence');
     });
     const persistence = module.createAppStatePersistence();
 
@@ -91,7 +91,7 @@ describe('appStatePersistence', () => {
 
     let module!: typeof AppStatePersistenceModule;
     jest.isolateModules(() => {
-      module = jest.requireActual('./appStatePersistence') as typeof AppStatePersistenceModule;
+      module = jest.requireActual('./appStatePersistence');
     });
     const persistence = module.createAppStatePersistence();
     await expect(persistence.readCurrent()).resolves.toBeNull();
@@ -117,7 +117,7 @@ describe('appStatePersistence', () => {
 
     let module!: typeof AppStatePersistenceModule;
     jest.isolateModules(() => {
-      module = jest.requireActual('./appStatePersistence') as typeof AppStatePersistenceModule;
+      module = jest.requireActual('./appStatePersistence');
     });
     await module.createAppStatePersistence().readLegacy();
     expect(readAsStringAsync).not.toHaveBeenCalled();

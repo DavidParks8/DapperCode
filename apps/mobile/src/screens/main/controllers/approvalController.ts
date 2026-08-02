@@ -1,11 +1,42 @@
 import type { HostBridgeApiClient } from '../../../api/client';
-import type { PendingApproval, PendingUserInputRequest, UserInputValue } from '../../../api/types';
+import type {
+  PendingApproval,
+  PendingUserInputRequest,
+  UserInputQuestion,
+  UserInputValue,
+} from '../../../api/types';
 import { normalizeQuestionAnswers } from '../mainScreenHelpers';
 
 type ApprovalApi = Pick<
   HostBridgeApiClient,
   'listApprovals' | 'resolveApproval' | 'resolveUserInput'
 >;
+
+function parseUserInputValue(
+  fieldType: NonNullable<UserInputQuestion['fieldType']>,
+  draft: string,
+  header: string,
+): { value: UserInputValue } | { error: string } {
+  switch (fieldType) {
+    case 'integer': {
+      const value = Number(draft);
+      return Number.isInteger(value) ? { value } : { error: `"${header}" must be an integer` };
+    }
+    case 'number': {
+      const value = Number(draft);
+      return Number.isFinite(value) ? { value } : { error: `"${header}" must be a number` };
+    }
+    case 'boolean':
+      return draft === 'true' || draft === 'false'
+        ? { value: draft === 'true' }
+        : { error: `"${header}" must be true or false` };
+    case 'string-array':
+      return { value: normalizeQuestionAnswers(draft) };
+    case 'string':
+    default:
+      return { value: draft };
+  }
+}
 
 export function buildUserInputAnswers(
   request: PendingUserInputRequest,
@@ -20,35 +51,11 @@ export function buildUserInputAnswers(
     if (!draft) {
       return { error: `Please answer "${question.header}"` };
     }
-    switch (question.fieldType ?? 'string') {
-      case 'integer': {
-        const value = Number(draft);
-        if (!Number.isInteger(value)) {
-          return { error: `"${question.header}" must be an integer` };
-        }
-        answers[question.id] = value;
-        break;
-      }
-      case 'number': {
-        const value = Number(draft);
-        if (!Number.isFinite(value)) {
-          return { error: `"${question.header}" must be a number` };
-        }
-        answers[question.id] = value;
-        break;
-      }
-      case 'boolean':
-        if (draft !== 'true' && draft !== 'false') {
-          return { error: `"${question.header}" must be true or false` };
-        }
-        answers[question.id] = draft === 'true';
-        break;
-      case 'string-array':
-        answers[question.id] = normalizeQuestionAnswers(draft);
-        break;
-      default:
-        answers[question.id] = draft;
+    const parsed = parseUserInputValue(question.fieldType ?? 'string', draft, question.header);
+    if ('error' in parsed) {
+      return parsed;
     }
+    answers[question.id] = parsed.value;
   }
   return { answers };
 }

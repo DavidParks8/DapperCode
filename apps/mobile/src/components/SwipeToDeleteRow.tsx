@@ -2,12 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import { decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme, type AppTheme } from '../theme';
 
@@ -119,12 +115,12 @@ export function SwipeToDeleteRow({
           const width = rowWidth.value > 0 ? rowWidth.value : SWIPE_ACTION_WIDTH;
           if (distance >= width * FULL_SWIPE_RATIO) {
             translateX.value = withTiming(-width, { duration: SWIPE_ANIMATION_MS });
-            runOnJS(commitDelete)();
+            scheduleOnRN(commitDelete);
             return;
           }
           const shouldOpen =
             distance > SWIPE_ACTION_WIDTH / 2 || event.velocityX < SWIPE_OPEN_VELOCITY;
-          runOnJS(settle)(shouldOpen);
+          scheduleOnRN(settle, shouldOpen);
         }),
     [commitDelete, dragStartX, enabled, open, rowWidth, settle, translateX],
   );

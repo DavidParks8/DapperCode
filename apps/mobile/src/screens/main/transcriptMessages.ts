@@ -240,6 +240,9 @@ export function syncVisibleSubAgentStatuses(
 
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (!message) {
+      continue;
+    }
     const nextMessage = syncSubAgentMessageStatus(message, threadStatuses);
 
     if (!nextMessages) {

@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import type { ChatMessage, ChatToolMeta } from '../api/types';
 import { buildToolInvocations, toolKindIcon } from './toolInvocationModel';
 
@@ -93,14 +94,18 @@ describe('buildToolInvocations', () => {
       ),
     ]);
 
-    expect(invocations[0].diffs).toEqual([{ path: 'src/app.ts', oldText: 'old', newText: 'new' }]);
-    expect(invocations[0].terminals).toEqual([{ terminalId: 'term-1', output: 'boot' }]);
-    expect(invocations[0].images).toEqual([
+    expect(requireTestValue(invocations[0], 'indexed test value').diffs).toEqual([
+      { path: 'src/app.ts', oldText: 'old', newText: 'new' },
+    ]);
+    expect(requireTestValue(invocations[0], 'indexed test value').terminals).toEqual([
+      { terminalId: 'term-1', output: 'boot' },
+    ]);
+    expect(requireTestValue(invocations[0], 'indexed test value').images).toEqual([
       'data:image/png;base64,AAA',
       'https://example.test/a.png',
     ]);
-    expect(invocations[0].textLines).toEqual(['leftover']);
-    expect(invocations[0].truncated).toBe(true);
+    expect(requireTestValue(invocations[0], 'indexed test value').textLines).toEqual(['leftover']);
+    expect(requireTestValue(invocations[0], 'indexed test value').truncated).toBe(true);
   });
 
   it('marks a failed invocation and keeps execute titles monospaced', () => {
@@ -135,8 +140,12 @@ describe('buildToolInvocations', () => {
       ),
     ]);
 
-    expect(invocations[0].locations).toEqual([{ path: 'a.ts' }]);
-    expect(invocations[0].diffs).toEqual([{ path: 'file', oldText: null, newText: 'body' }]);
+    expect(requireTestValue(invocations[0], 'indexed test value').locations).toEqual([
+      { path: 'a.ts' },
+    ]);
+    expect(requireTestValue(invocations[0], 'indexed test value').diffs).toEqual([
+      { path: 'file', oldText: null, newText: 'body' },
+    ]);
   });
 
   it('falls back to legacy timeline text when no metadata arrives', () => {
@@ -215,7 +224,7 @@ describe('buildToolInvocations', () => {
       ),
     ]);
 
-    expect(invocations[0].terminals).toEqual([
+    expect(requireTestValue(invocations[0], 'indexed test value').terminals).toEqual([
       { terminalId: 'plain', output: 'ran 3 tests' },
       { terminalId: 'nested', output: 'compiling\nlinking' },
     ]);
@@ -236,7 +245,9 @@ describe('buildToolInvocations', () => {
       ),
     ]);
 
-    expect(invocations[0].images).toEqual(['data:image/png;base64,AAAA']);
+    expect(requireTestValue(invocations[0], 'indexed test value').images).toEqual([
+      'data:image/png;base64,AAAA',
+    ]);
   });
 
   it('uses the first output line as a title when nothing else names the tool', () => {

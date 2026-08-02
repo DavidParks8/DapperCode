@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import type * as fsNode from 'fs';
 import type * as pathNode from 'path';
 import { Alert, Text, TextInput } from 'react-native';
@@ -116,12 +117,12 @@ describe('WorkspacePicker', () => {
     });
 
     const root = expectValue(rendered).root as QueryableTestInstance;
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Back').length).toBeGreaterThan(
-      0,
-    );
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0]?.props
-        .accessibilityState,
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Back').length,
+    ).toBeGreaterThan(0);
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0]
+        ?.props['accessibilityState'],
     ).toEqual({ disabled: false, selected: false });
     act(() => {
       expectValue(rendered).unmount();
@@ -143,14 +144,15 @@ describe('WorkspacePicker', () => {
     const root = tree.root as QueryableTestInstance;
     act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
-    const parent = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Go to parent folder',
-    )[0];
+    const parent = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Go to parent folder')[0],
+      'indexed test value',
+    );
     act(() => readOnPress(parent.props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks');
     const search = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Search folders');
+      .find((node) => node.props['accessibilityLabel'] === 'Search folders');
     if (!search) {
       throw new Error('Missing search');
     }
@@ -159,17 +161,28 @@ describe('WorkspacePicker', () => {
     act(() => search.props.onChangeText(''));
     act(() => readOnPress(findPressableWithExactText(root, 'Use').props)());
     expect(onSelectPath).toHaveBeenCalledWith('/Users/davidparks');
-    const unpin = root.findAll((node) => node.props.accessibilityLabel === 'Pin davidparks')[0];
+    const unpin = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Pin davidparks')[0],
+      'indexed test value',
+    );
     act(() => readOnPress(unpin.props)());
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks');
     act(() =>
       readOnPress(
-        root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props,
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0],
+          'indexed test value',
+        ).props,
       )(),
     );
     expect(onSelectPath).toHaveBeenCalledWith(null);
     act(() =>
-      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+      readOnPress(
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
+          'indexed test value',
+        ).props,
+      )(),
     );
     expect(onClose).toHaveBeenCalled();
     act(() => tree.unmount());
@@ -199,11 +212,14 @@ describe('WorkspacePicker', () => {
     );
     expect(flattenTreeText(root)).toContain('Showing the first 100 folders.');
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Loading folders...').length,
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Loading folders...').length,
     ).toBeGreaterThan(0);
     act(() =>
       readOnPress(
-        root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0].props,
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
+          'indexed test value',
+        ).props,
       )(),
     );
     expect(onActionPress).toHaveBeenCalled();
@@ -220,9 +236,11 @@ describe('WorkspacePicker', () => {
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    const search = root.findAllByType(TextInput)[0];
+    const search = requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value');
     act(() => search.props.onChangeText('notes'));
-    expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
+    expect(
+      requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value').props['value'],
+    ).toBe('notes');
 
     act(() =>
       tree.update(
@@ -236,16 +254,22 @@ describe('WorkspacePicker', () => {
         }),
       ),
     );
-    expect(root.findAllByType(TextInput)[0].props.value).toBe('notes');
+    expect(
+      requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value').props['value'],
+    ).toBe('notes');
     expect(flattenTreeText(root)).toContain('Default workspace');
-    const use = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Use Default workspace workspace',
-    )[0];
-    const pin = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Pin Default workspace',
-    )[0];
-    expect(use.props.accessibilityState).toEqual({ disabled: true });
-    expect(pin.props.accessibilityState).toEqual({ disabled: true, selected: false });
+    const use = requireTestValue(
+      root.findAll(
+        (node) => node.props['accessibilityLabel'] === 'Use Default workspace workspace',
+      )[0],
+      'indexed test value',
+    );
+    const pin = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Pin Default workspace')[0],
+      'indexed test value',
+    );
+    expect(use.props['accessibilityState']).toEqual({ disabled: true });
+    expect(pin.props['accessibilityState']).toEqual({ disabled: true, selected: false });
 
     act(() =>
       tree.update(
@@ -293,11 +317,17 @@ describe('WorkspacePicker', () => {
       );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    const up = root.findAll((node) => node.props.accessibilityLabel === 'Go to parent folder')[0];
-    const action = root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0];
-    expect(up.props.accessibilityState).toEqual({ disabled: true });
-    expect(action.props.accessibilityState).toEqual({ disabled: true });
-    expect(action.props.accessibilityHint).toBe('Clones a repository into this folder');
+    const up = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Go to parent folder')[0],
+      'indexed test value',
+    );
+    const action = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
+      'indexed test value',
+    );
+    expect(up.props['accessibilityState']).toEqual({ disabled: true });
+    expect(action.props['accessibilityState']).toEqual({ disabled: true });
+    expect(action.props['accessibilityHint']).toBe('Clones a repository into this folder');
     expect(onBrowsePath).not.toHaveBeenCalled();
     expect(onActionPress).not.toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
@@ -313,12 +343,14 @@ describe('WorkspacePicker', () => {
       rendered = renderer.create(renderPickerMatrix({ onToggleFavorite }));
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    const pinnedTile = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Code, 12 chats',
-    )[0];
-    const notesRow = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Open folder notes',
-    )[0];
+    const pinnedTile = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Code, 12 chats')[0],
+      'indexed test value',
+    );
+    const notesRow = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Open folder notes')[0],
+      'indexed test value',
+    );
     act(() => {
       pinnedTile.props.onLongPress();
       notesRow.props.onLongPress();
@@ -353,7 +385,7 @@ describe('WorkspacePicker', () => {
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('now');
     expect(flattenTreeText(root)).toContain('0 chats');
-    const search = root.findAllByType(TextInput)[0];
+    const search = requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value');
     act(() => search.props.onChangeText('does-not-match'));
     expect(flattenTreeText(root)).not.toContain('Pinned');
     act(() => expectValue(rendered).unmount());
@@ -402,12 +434,20 @@ describe('WorkspacePicker', () => {
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('1 chat');
-    const action = root.findAll((node) => node.props.accessibilityLabel === 'Clone here')[0];
-    expect(action.props.accessibilityHint).toBe('Create a checkout here');
+    const action = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
+      'indexed test value',
+    );
+    expect(action.props['accessibilityHint']).toBe('Create a checkout here');
     act(() => readOnPress(action.props)());
     expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/dappercode');
     act(() =>
-      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+      readOnPress(
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
+          'indexed test value',
+        ).props,
+      )(),
     );
     expect(onClose).toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
@@ -457,8 +497,10 @@ describe('WorkspacePicker', () => {
       );
     });
     expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Pin Default workspace')[0].props
-        .accessibilityState,
+      requireTestValue(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Pin Default workspace')[0],
+        'indexed test value',
+      ).props['accessibilityState'],
     ).toEqual({ disabled: true, selected: false });
     act(() => expectValue(rendered).unmount());
   });
@@ -484,22 +526,33 @@ describe('WorkspacePicker', () => {
 
     act(() =>
       readOnPress(
-        root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props,
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0],
+          'indexed test value',
+        ).props,
       )(),
     );
     expect(selection).toHaveBeenCalledTimes(2);
 
-    const unpin = root.findAll(
-      (node) =>
-        typeof node.props.accessibilityLabel === 'string' &&
-        /^(Pin|Unpin) /.test(node.props.accessibilityLabel) &&
-        node.props.accessibilityLabel !== 'Pin Default workspace',
-    )[0];
+    const unpin = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          /^(Pin|Unpin) /.test(node.props['accessibilityLabel']) &&
+          node.props['accessibilityLabel'] !== 'Pin Default workspace',
+      )[0],
+      'indexed test value',
+    );
     act(() => readOnPress(unpin.props)());
     expect(selection).toHaveBeenCalledTimes(3);
 
     act(() =>
-      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+      readOnPress(
+        requireTestValue(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
+          'indexed test value',
+        ).props,
+      )(),
     );
     expect(onClose).toHaveBeenCalled();
     expect(selection).toHaveBeenCalledTimes(4);
@@ -514,8 +567,11 @@ describe('WorkspacePicker', () => {
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    const backButton = root.findAll((node) => node.props.accessibilityLabel === 'Back')[0];
-    const hitSlop = backButton.props.hitSlop as {
+    const backButton = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
+      'indexed test value',
+    );
+    const hitSlop = backButton.props['hitSlop'] as {
       top: number;
       bottom: number;
       left: number;
@@ -546,22 +602,28 @@ describe('WorkspacePicker', () => {
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    const selectedTile = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        flattenTreeText(node).includes('alpha-project') &&
-        node.props.accessibilityState !== undefined,
-    )[0];
-    const unselectedTile = root.findAll(
-      (node) =>
-        typeof node.props.onPress === 'function' &&
-        flattenTreeText(node).includes('beta-project') &&
-        node.props.accessibilityState !== undefined,
-    )[0];
-    expect(selectedTile.props.accessibilityState).toEqual(
+    const selectedTile = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          flattenTreeText(node).includes('alpha-project') &&
+          node.props['accessibilityState'] !== undefined,
+      )[0],
+      'indexed test value',
+    );
+    const unselectedTile = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          flattenTreeText(node).includes('beta-project') &&
+          node.props['accessibilityState'] !== undefined,
+      )[0],
+      'indexed test value',
+    );
+    expect(selectedTile.props['accessibilityState']).toEqual(
       expect.objectContaining({ selected: true }),
     );
-    expect(unselectedTile.props.accessibilityState).toEqual(
+    expect(unselectedTile.props['accessibilityState']).toEqual(
       expect.objectContaining({ selected: false }),
     );
     act(() => tree.unmount());
@@ -569,8 +631,8 @@ describe('WorkspacePicker', () => {
 
   describe('typography tokens', () => {
     it('has no ad hoc numeric fontSize literals in owned workspace-picker source files', () => {
-      const fs = jest.requireActual('fs') as typeof fsNode;
-      const path = jest.requireActual('path') as typeof pathNode;
+      const fs: typeof fsNode = jest.requireActual('fs');
+      const path: typeof pathNode = jest.requireActual('path');
       const offenders: string[] = [];
       const scan = (dir: string, filter: (entry: string) => boolean) => {
         for (const entry of fs.readdirSync(dir)) {
@@ -604,9 +666,9 @@ describe('WorkspacePicker', () => {
       const titleNode = root.findAll(
         (node) => node.children.map(String).join('') === 'Choose Workspace',
       )[0];
-      const style = Array.isArray(titleNode?.props.style)
-        ? Object.assign({}, ...(titleNode.props.style as object[]))
-        : ((titleNode?.props.style as Record<string, unknown>) ?? {});
+      const style = Array.isArray(titleNode?.props['style'])
+        ? Object.assign({}, ...(titleNode.props['style'] as object[]))
+        : ((titleNode?.props['style'] as Record<string, unknown>) ?? {});
       expect(style.fontSize).toBe(theme.typography.title.fontSize);
       act(() => tree.unmount());
     });
@@ -699,10 +761,10 @@ function expectValue<T>(value: T | undefined): T {
 }
 
 function readOnPress(props: Record<string, unknown>): () => void {
-  if (typeof props.onPress !== 'function') {
+  if (typeof props['onPress'] !== 'function') {
     throw new Error('Expected press handler');
   }
-  return props.onPress as () => void;
+  return props['onPress'] as () => void;
 }
 
 function findPressableContainingText(
@@ -716,7 +778,7 @@ function findPressableContainingText(
   if (matches.length === 0) {
     throw new Error(`Expected press target containing "${expectedText}"`);
   }
-  return matches[0];
+  return requireTestValue(matches[0], `press target containing "${expectedText}"`);
 }
 
 function findPressableWithExactText(
@@ -730,7 +792,7 @@ function findPressableWithExactText(
   if (matches.length === 0) {
     throw new Error(`Expected press target with text "${expectedText}"`);
   }
-  return matches[0];
+  return requireTestValue(matches[0], `press target with text "${expectedText}"`);
 }
 
 function flattenRenderedText(value: unknown): string {
@@ -745,7 +807,7 @@ function flattenRenderedText(value: unknown): string {
 
 function flattenTreeText(node: QueryableTestInstance): string {
   if (node.type === Text) {
-    return flattenRenderedText(node.props.children);
+    return flattenRenderedText(node.props['children']);
   }
 
   return node.children

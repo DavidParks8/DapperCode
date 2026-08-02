@@ -35,7 +35,7 @@ export function parseBridgeProfileStore(raw: string | null | undefined): BridgeP
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') {
       return createEmptyBridgeProfileStore();
     }

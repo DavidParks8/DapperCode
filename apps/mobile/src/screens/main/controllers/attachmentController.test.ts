@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../../testing/requireTestValue';
 import React from 'react';
 import { Keyboard, Platform } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -49,7 +50,7 @@ function makeHarness(workspace: string | null = '/repo', draft = '') {
     React.useEffect(() => setLocalDraft(props.draft), [props.draft]);
     draftValue = localDraft;
     current = useAttachmentController({
-      api: api as never,
+      api: api,
       chat: { id: 'thread-1' } as never,
       workspace: props.workspace,
       draft: localDraft,
@@ -411,7 +412,11 @@ describe('attachmentController', () => {
     });
     await runAction(harness.current, 'phone-file');
     expect(harness.current.composerAttachments[0]?.label).toContain('unnamed.bin');
-    act(() => harness.current.removeComposerAttachment(harness.current.composerAttachments[0]!.id));
+    act(() =>
+      harness.current.removeComposerAttachment(
+        requireTestValue(harness.current.composerAttachments[0], 'indexed test value').id,
+      ),
+    );
     expect(harness.current.composerAttachments).toEqual([]);
     harness.unmount();
   });

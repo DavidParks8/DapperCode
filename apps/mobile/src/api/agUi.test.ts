@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { EventType, type AGUIEvent } from '@ag-ui/core';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -81,15 +82,15 @@ describe('AG-UI bridge notifications', () => {
       {} as AgUiLiveAssistantMessages,
     );
 
-    const toolMessages = toolState.thread?.messages ?? [];
+    const toolMessages = toolState['thread']?.messages ?? [];
     const toolResult = toolMessages.find((message) => message.role === 'tool');
     expect(toolMessages).toHaveLength(2);
     expect(toolResult).toMatchObject({
       role: 'tool',
       toolCallId: 'tool-revision',
     });
-    expect(toolState.thread?.terminalMessageIds).toContain('tool-call:tool-revision');
-    expect(toolState.thread?.structuredRevisionByCallId['tool-revision']).toBe(
+    expect(toolState['thread']?.terminalMessageIds).toContain('tool-call:tool-revision');
+    expect(toolState['thread']?.structuredRevisionByCallId['tool-revision']).toBe(
       'sha256:structured-two',
     );
     expect(toolResult?.content).toContain('terminal-2');
@@ -98,6 +99,7 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('handles current AG-UI event types and rejects deprecated thinking events', () => {
+    /* eslint-disable @typescript-eslint/no-deprecated -- This regression test verifies rejection of legacy event members. */
     const deprecated = new Set<EventType>([
       EventType.THINKING_START,
       EventType.THINKING_END,
@@ -127,6 +129,7 @@ describe('AG-UI bridge notifications', () => {
         }),
       ).toBeNull();
     }
+    /* eslint-enable @typescript-eslint/no-deprecated */
   });
   it('parses canonical text events and projects them to the migration reducer', () => {
     expect(parseAgUiEventNotification(notification)).toEqual(notification.params);
@@ -399,8 +402,11 @@ describe('AG-UI bridge notifications', () => {
         expect.objectContaining({ id: 'image', role: 'assistant' }),
       ]),
     );
-    expect(state.thread?.customMetadata['dappercode.dev/usage']).toEqual({ used: 10, size: 100 });
-    expect(state.thread?.terminalMessageIds).toEqual(
+    expect(state['thread']?.customMetadata['dappercode.dev/usage']).toEqual({
+      used: 10,
+      size: 100,
+    });
+    expect(state['thread']?.terminalMessageIds).toEqual(
       expect.arrayContaining(['reasoning', 'tool-call:tool']),
     );
 
@@ -412,7 +418,7 @@ describe('AG-UI bridge notifications', () => {
       });
     }
     expect(messages(state).length).toBeLessThanOrEqual(128);
-    expect(state.thread?.customMetadataOrder).toHaveLength(128);
+    expect(state['thread']?.customMetadataOrder).toHaveLength(128);
   });
 
   it('rejects malformed typed fields', () => {
@@ -457,8 +463,8 @@ describe('AG-UI bridge notifications', () => {
     });
 
     expect(messages(state)).toEqual([]);
-    expect(state.thread?.customMetadata['dappercode.dev/commands']).toEqual(commandEvent.value);
-    expect(state.thread?.customMetadataOrder).toEqual(['dappercode.dev/commands']);
+    expect(state['thread']?.customMetadata['dappercode.dev/commands']).toEqual(commandEvent.value);
+    expect(state['thread']?.customMetadataOrder).toEqual(['dappercode.dev/commands']);
   });
 
   it('keeps live assistant messages isolated by thread and run', () => {
@@ -643,20 +649,24 @@ describe('AG-UI bridge notifications', () => {
       { threadId: 'thread', runId: 'run', event: metaEvent('in_progress', 'npm test') },
     );
     expect(messages(state)).toHaveLength(1);
-    expect(state.thread?.toolMetaByCallId.tool).toEqual({
+    expect(state['thread']?.toolMetaByCallId['tool']).toEqual({
       toolCallId: 'tool',
       kind: 'execute',
       status: 'in_progress',
       title: 'npm test',
     });
-    expect(messages(state)[0].toolMeta?.status).toBe('in_progress');
+    expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
+      'in_progress',
+    );
 
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
       event: metaEvent('completed', 'npm test'),
     });
-    expect(messages(state)[0].toolMeta?.status).toBe('completed');
+    expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
+      'completed',
+    );
 
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
@@ -690,7 +700,7 @@ describe('AG-UI bridge notifications', () => {
         value: { kind: 'read' },
       },
     });
-    expect(ignored.thread?.toolMetaByCallId).toEqual(state.thread?.toolMetaByCallId);
+    expect(ignored['thread']?.toolMetaByCallId).toEqual(state['thread']?.toolMetaByCallId);
   });
 
   it('folds snapshot tool activity messages into metadata instead of rendering them', () => {
@@ -727,7 +737,7 @@ describe('AG-UI bridge notifications', () => {
       'tool-call:tool',
       'tool-result:tool',
     ]);
-    expect(messages(state)[1].toolMeta).toMatchObject({
+    expect(requireTestValue(messages(state)[1], 'indexed test value').toolMeta).toMatchObject({
       kind: 'edit',
       status: 'failed',
       title: 'Edit a.ts',
@@ -789,7 +799,7 @@ describe('AG-UI bridge notifications', () => {
     expect(messages(cleared).find((message) => message.role === 'tool')?.content).not.toContain(
       'terminal-2',
     );
-    expect(cleared.thread?.structuredTextByCallId.tool).toBe('');
+    expect(cleared['thread']?.structuredTextByCallId['tool']).toBe('');
   });
 
   it('replaces revisioned tool text and only appends official suffix deltas', () => {
@@ -884,7 +894,7 @@ describe('AG-UI bridge notifications', () => {
       event: subagent,
     });
     expect(messages(state, 'parent')).toHaveLength(1);
-    const message = messages(state, 'parent')[0]!;
+    const message = requireTestValue(messages(state, 'parent')[0], 'indexed test value');
     expect(message).toMatchObject({
       id: 'subagent:task-1',
       role: 'activity',
@@ -989,14 +999,14 @@ describe('AG-UI bridge notifications', () => {
             runId: 'run',
             event: { type: EventType.RUN_STARTED, threadId: 'missing', runId: 'run' },
           },
-        ).missing,
+        )['missing'],
       ).toEqual(createAgUiThreadMessageState());
       const withSystem = updateAgUiLiveAssistantMessages(existing, {
         threadId: 'thread',
         runId: 'run',
         event: { type: EventType.TEXT_MESSAGE_START, messageId: 'bad', role: 'system' },
       });
-      expect(withSystem.thread?.messages).toEqual(
+      expect(withSystem['thread']?.messages).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: 'bad', role: 'system', content: '' }),
         ]),
@@ -1027,12 +1037,12 @@ describe('AG-UI bridge notifications', () => {
         } as unknown as AGUIEvent,
         { type: EventType.RUN_ERROR, message: 'done' },
       ]);
-      expect(state.thread?.messages.map((message) => message.id)).toEqual([
+      expect(state['thread']?.messages.map((message) => message.id)).toEqual([
         'implicit',
         'reason',
         'ignored',
       ]);
-      expect(state.thread?.terminalMessageIds).toEqual(
+      expect(state['thread']?.terminalMessageIds).toEqual(
         expect.arrayContaining(['implicit', 'reason', 'ignored']),
       );
     });
@@ -1073,7 +1083,7 @@ describe('AG-UI bridge notifications', () => {
           data: 'bad',
         }),
       );
-      expect(state.thread?.chunkAssemblies).toBeDefined();
+      expect(state['thread']?.chunkAssemblies).toBeDefined();
       const pending = updateAgUiLiveAssistantMessages(
         {},
         chunk({
@@ -1084,7 +1094,7 @@ describe('AG-UI bridge notifications', () => {
           data: '{',
         }),
       );
-      expect(pending.thread?.chunkAssemblies).toBeDefined();
+      expect(pending['thread']?.chunkAssemblies).toBeDefined();
 
       const payload = JSON.stringify({
         messageId: 'message',
@@ -1101,11 +1111,11 @@ describe('AG-UI bridge notifications', () => {
           data: payload,
         }),
       );
-      expect(complete.thread?.messages[0]).toMatchObject({
+      expect(complete['thread']?.messages[0]).toMatchObject({
         content: 'complete',
         role: 'reasoning',
       });
-      expect(complete.thread?.chunkAssemblies).toEqual({});
+      expect(complete['thread']?.chunkAssemblies).toEqual({});
     });
 
     it('covers custom tool fallbacks, duplicate revisions, and generic custom events', () => {
@@ -1138,13 +1148,13 @@ describe('AG-UI bridge notifications', () => {
       customEvents.forEach((event) => {
         state = updateAgUiLiveAssistantMessages(state, { threadId: 'thread', runId: 'run', event });
       });
-      expect(state.thread?.messages).toEqual(
+      expect(state['thread']?.messages).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: 'run:content', role: 'assistant' }),
           expect.objectContaining({ id: 'tool-result:unknown', role: 'tool' }),
         ]),
       );
-      expect(state.thread?.customMetadata).toEqual(
+      expect(state['thread']?.customMetadata).toEqual(
         expect.objectContaining({
           'dappercode.dev/plan': { entries: [] },
           'dappercode.dev/unknown': 'value',

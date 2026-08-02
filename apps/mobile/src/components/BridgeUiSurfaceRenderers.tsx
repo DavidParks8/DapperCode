@@ -333,7 +333,7 @@ function ProgressBlock({ block }: { block: BridgeUiProgressBlock }) {
   }, [ratio, progressWidth]);
 
   const fillStyle = useAnimatedStyle(() => ({
-    width: `${progressWidth.value * 100}%` as `${number}%`,
+    width: `${progressWidth.value * 100}%`,
   }));
 
   return (

@@ -214,7 +214,7 @@ export function useBrowserScreenViewport(model: BrowserScreenModel) {
           model.setWebReloadKey((value) => value + 1);
           model.setNativeReloadKey((value) => value + 1);
         })
-        .catch((error) => {
+        .catch((error: unknown) => {
           if (model.previewRequestIdRef.current !== requestId) {
             return;
           }

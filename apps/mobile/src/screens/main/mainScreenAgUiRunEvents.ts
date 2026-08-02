@@ -214,7 +214,9 @@ function settlePendingReasoningMessages(messages: ChatMessage[]): ChatMessage[] 
 }
 
 function isSubagentCustomEvent(envelope: AgUiEventEnvelope): boolean {
-  return envelope.event.type === 'CUSTOM' && envelope.event.name === 'dappercode.dev/subagent';
+  return (
+    envelope.event.type === EventType.CUSTOM && envelope.event.name === 'dappercode.dev/subagent'
+  );
 }
 
 function isInterruptedRunError(
@@ -267,8 +269,8 @@ export function coalesceAgUiTextContentEvents(envelopes: AgUiEventEnvelope[]): A
     const event = envelope.event;
     const previous = coalesced.at(-1);
     if (
-      event.type === 'TEXT_MESSAGE_CONTENT' &&
-      previous?.event.type === 'TEXT_MESSAGE_CONTENT' &&
+      event.type === EventType.TEXT_MESSAGE_CONTENT &&
+      previous?.event.type === EventType.TEXT_MESSAGE_CONTENT &&
       previous.threadId === envelope.threadId &&
       previous.runId === envelope.runId &&
       previous.event.messageId === event.messageId

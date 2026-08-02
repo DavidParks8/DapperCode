@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { parseUnifiedGitDiff } from './gitDiff';
 
 describe('parseUnifiedGitDiff', () => {
@@ -21,34 +22,34 @@ describe('parseUnifiedGitDiff', () => {
     expect(parsed.totalAdditions).toBe(2);
     expect(parsed.totalDeletions).toBe(1);
 
-    const file = parsed.files[0];
+    const file = requireTestValue(parsed.files[0], 'indexed test value');
     expect(file.displayPath).toBe('src/app.ts');
     expect(file.status).toBe('modified');
     expect(file.additions).toBe(2);
     expect(file.deletions).toBe(1);
     expect(file.hunks).toHaveLength(1);
 
-    const hunk = file.hunks[0];
+    const hunk = requireTestValue(file.hunks[0], 'indexed test value');
     expect(hunk.lines).toHaveLength(5);
-    expect(hunk.lines[0]).toMatchObject({
+    expect(requireTestValue(hunk.lines[0], 'indexed test value')).toMatchObject({
       kind: 'context',
       oldLineNumber: 1,
       newLineNumber: 1,
       content: 'line1',
     });
-    expect(hunk.lines[1]).toMatchObject({
+    expect(requireTestValue(hunk.lines[1], 'indexed test value')).toMatchObject({
       kind: 'remove',
       oldLineNumber: 2,
       newLineNumber: null,
       content: 'line2',
     });
-    expect(hunk.lines[2]).toMatchObject({
+    expect(requireTestValue(hunk.lines[2], 'indexed test value')).toMatchObject({
       kind: 'add',
       oldLineNumber: null,
       newLineNumber: 2,
       content: 'line2 changed',
     });
-    expect(hunk.lines[4]).toMatchObject({
+    expect(requireTestValue(hunk.lines[4], 'indexed test value')).toMatchObject({
       kind: 'context',
       oldLineNumber: 3,
       newLineNumber: 4,
@@ -119,11 +120,21 @@ describe('parseUnifiedGitDiff', () => {
       additions: 1,
       deletions: 1,
     });
-    expect(parsed.files[0].hunks[0].lines[0]).toMatchObject({
+    expect(
+      requireTestValue(
+        requireTestValue(parsed.files[0], 'indexed test value').hunks[0],
+        'indexed test value',
+      ).lines[0],
+    ).toMatchObject({
       kind: 'remove',
       content: 'oldValue',
     });
-    expect(parsed.files[0].hunks[0].lines[1]).toMatchObject({
+    expect(
+      requireTestValue(
+        requireTestValue(parsed.files[0], 'indexed test value').hunks[0],
+        'indexed test value',
+      ).lines[1],
+    ).toMatchObject({
       kind: 'add',
       content: 'newValue',
     });
@@ -147,7 +158,12 @@ describe('parseUnifiedGitDiff', () => {
         'unexpected',
       ].join('\n'),
     );
-    expect(parsed.files[0].hunks[0].lines.slice(2)).toEqual([
+    expect(
+      requireTestValue(
+        requireTestValue(parsed.files[0], 'indexed test value').hunks[0],
+        'indexed test value',
+      ).lines.slice(2),
+    ).toEqual([
       {
         kind: 'meta',
         prefix: '\\',
@@ -218,14 +234,16 @@ describe('parseUnifiedGitDiff', () => {
       ].join('\n'),
     );
     expect(parsed.files.map((file) => file.status)).toEqual(['added', 'deleted', 'renamed']);
-    expect(parsed.files[2].displayPath).toBe('old-name.ts -> new-name.ts');
+    expect(requireTestValue(parsed.files[2], 'indexed test value').displayPath).toBe(
+      'old-name.ts -> new-name.ts',
+    );
   });
 
   it('defaults omitted hunk counts to one and normalizes CR line endings', () => {
     const parsed = parseUnifiedGitDiff(
       'diff --git a/a b/a\r--- a/a\r+++ b/a\r@@ -3 +4 @@\r old\r+new',
     );
-    expect(parsed.files[0].hunks[0]).toMatchObject({
+    expect(requireTestValue(parsed.files[0], 'indexed test value').hunks[0]).toMatchObject({
       oldStart: 3,
       oldCount: 1,
       newStart: 4,

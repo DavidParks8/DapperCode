@@ -83,7 +83,7 @@ describe('chatSyncController', () => {
       getChat: jest.fn().mockResolvedValue(chat('idle')),
       readThreadQueue: jest.fn().mockResolvedValue([]),
     };
-    const controller = new ChatSyncController(api as never);
+    const controller = new ChatSyncController(api);
     await controller.load('thread');
     await controller.poll('thread');
     await controller.readQueue('thread');

@@ -1,13 +1,4 @@
-import {
-  memo,
-  type MutableRefObject,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -24,7 +15,7 @@ import {
 import { GestureDetector } from 'react-native-gesture-handler';
 
 import type { Chat } from '../../api/types';
-import { type ChatScrollRailJumpController } from '../../components/chatScrollRail/chatScrollRailJumpController';
+import type { ChatScrollRailJumpController } from '../../components/chatScrollRail/chatScrollRailJumpController';
 import {
   collectUserMessageAnchors,
   railWindowCapacity,
@@ -73,7 +64,7 @@ export interface ChatTranscriptViewProps {
   onPinnedAutoScroll: (animated?: boolean) => void;
   onJumpToLatest: () => void;
   onScrollInteractionStart: () => void;
-  autoScrollStateRef: MutableRefObject<AutoScrollState>;
+  autoScrollStateRef: RefObject<AutoScrollState>;
   bottomInset: number;
   liveMessageState?: AgUiThreadMessageState | null;
   onOpenSubAgentThread?: (threadId: string) => void;

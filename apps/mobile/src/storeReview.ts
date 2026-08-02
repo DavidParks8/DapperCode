@@ -87,12 +87,13 @@ export function canOpenAppStoreWriteReviewPage(): boolean {
 }
 
 export async function openAppStoreWriteReviewPage(): Promise<boolean> {
-  if (!canOpenAppStoreWriteReviewPage()) {
+  const itemId = IOS_APP_STORE_ITEM_ID;
+  if (Platform.OS !== 'ios' || itemId === null) {
     return false;
   }
 
-  const webUrl = `https://apps.apple.com/app/id${IOS_APP_STORE_ITEM_ID}?action=write-review`;
-  const deepLink = `itms-apps://itunes.apple.com/app/viewContentsUserReviews/id${IOS_APP_STORE_ITEM_ID}?action=write-review`;
+  const webUrl = `https://apps.apple.com/app/id${itemId}?action=write-review`;
+  const deepLink = `itms-apps://itunes.apple.com/app/viewContentsUserReviews/id${itemId}?action=write-review`;
   try {
     await Linking.openURL(deepLink);
     return true;

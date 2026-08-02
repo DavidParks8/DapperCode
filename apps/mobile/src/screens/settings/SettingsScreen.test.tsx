@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { Switch } from 'react-native';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
 import { router } from 'expo-router';
@@ -132,7 +133,7 @@ function createSettingsData(options: SettingsStoreOptions): AppStateData {
 function createSettingsStore(options: SettingsStoreOptions = {}): AppStore {
   const persistence = createMemoryPersistence();
   if (options.writeCurrent) {
-    persistence.writeCurrent = options.writeCurrent as unknown as typeof persistence.writeCurrent;
+    persistence.writeCurrent = options.writeCurrent;
   }
   const store = createTestStore({ data: createSettingsData(options), persistence });
   if (options.persistenceError) {
@@ -151,8 +152,8 @@ function hasText(root: Queryable, text: string): boolean {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') {
-    current = current.parent as Queryable | null;
+  while (current && typeof current.props['onPress'] !== 'function') {
+    current = current.parent;
   }
   if (!current) {
     throw new Error(`Missing pressable: ${text}`);
@@ -165,18 +166,18 @@ function findToggle(root: Queryable, label: string): Queryable {
   let current: Queryable | null = labelNode ?? null;
   while (current) {
     const toggle = current.findAll(
-      (node) => node.type === Switch || typeof node.props.onValueChange === 'function',
+      (node) => node.type === Switch || typeof node.props['onValueChange'] === 'function',
     )[0];
     if (toggle) {
       return toggle;
     }
-    current = current.parent as Queryable | null;
+    current = current.parent;
   }
   throw new Error(`Missing toggle: ${label}`);
 }
 
 function getPressCallback(node: Queryable): PressCallback {
-  const callback = node.props.onPress;
+  const callback = node.props['onPress'];
   if (typeof callback !== 'function') {
     throw new Error('Expected onPress callback');
   }
@@ -184,7 +185,7 @@ function getPressCallback(node: Queryable): PressCallback {
 }
 
 function getToggleCallback(node: Queryable): ToggleCallback {
-  const callback = node.props.onValueChange;
+  const callback = node.props['onValueChange'];
   if (typeof callback !== 'function') {
     throw new Error('Expected onValueChange callback');
   }
@@ -302,9 +303,10 @@ describe('SettingsScreen behavior', () => {
     await press(findPressableByText(root, 'Secondary'));
     expect(router.replace).toHaveBeenCalledWith(routes.newChat('profile-2'));
 
-    const drawer = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Open navigation drawer',
-    )[0];
+    const drawer = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Open navigation drawer')[0],
+      'indexed test value',
+    );
     await press(drawer);
     expect(drawerToggle).toHaveBeenCalled();
     act(() => tree.unmount());
@@ -362,7 +364,7 @@ describe('SettingsScreen behavior', () => {
     });
     const enabled = await renderSettings({ store: disabledStore });
     await changeToggle(findToggle(enabled.tree.root as Queryable, 'Push notifications'), true);
-    expect(enabled.api.registerPushDevice).toHaveBeenCalledWith(
+    expect(enabled.api['registerPushDevice']).toHaveBeenCalledWith(
       expect.objectContaining({ token: 'new-token' }),
     );
     expect(disabledStore.get(pushSettingsAtom).optedOut).toBe(false);
@@ -379,7 +381,7 @@ describe('SettingsScreen behavior', () => {
     const active = await renderSettings({ store: activeStore });
     const root = active.tree.root as Queryable;
     await changeToggle(findToggle(root, 'Push notifications'), false);
-    expect(active.api.unregisterPushDevice).toHaveBeenCalled();
+    expect(active.api['unregisterPushDevice']).toHaveBeenCalled();
     expect(activeStore.get(pushSettingsAtom).optedOut).toBe(true);
     await changeToggle(findToggle(root, 'Approval requested'), false);
     expect(activeStore.get(pushSettingsAtom).events).toEqual({

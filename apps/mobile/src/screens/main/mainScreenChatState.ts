@@ -232,6 +232,9 @@ function areChatPlansEquivalent(previous: Chat['latestPlan'], next: Chat['latest
   for (let index = 0; index < previous.steps.length; index += 1) {
     const previousStep = previous.steps[index];
     const nextStep = next.steps[index];
+    if (!previousStep || !nextStep) {
+      return false;
+    }
     if (previousStep.step !== nextStep.step || previousStep.status !== nextStep.status) {
       return false;
     }
@@ -302,6 +305,9 @@ function areChatMessagesEquivalent(previous: ChatMessage[], next: ChatMessage[])
   for (let index = 0; index < previous.length; index += 1) {
     const left = previous[index];
     const right = next[index];
+    if (!left || !right) {
+      return false;
+    }
     if (
       left.id !== right.id ||
       left.role !== right.role ||
@@ -366,7 +372,13 @@ export function areChatSummaryListsEquivalent(
   }
 
   for (let index = 0; index < previous.length; index += 1) {
-    if (!areChatSummariesEquivalent(previous[index], next[index])) {
+    const previousSummary = previous[index];
+    const nextSummary = next[index];
+    if (
+      !previousSummary ||
+      !nextSummary ||
+      !areChatSummariesEquivalent(previousSummary, nextSummary)
+    ) {
       return false;
     }
   }

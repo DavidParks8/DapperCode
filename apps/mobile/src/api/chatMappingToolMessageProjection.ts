@@ -25,7 +25,7 @@ import { toStructuredPreview, withNestedDetail } from './chatMappingStructuredCo
 type ToolLikeMessageHandler = (item: Record<string, unknown>) => string | null;
 
 function toPlanToolLikeMessage(item: Record<string, unknown>): string | null {
-  const text = normalizeMultiline(readString(item.text), 1800);
+  const text = normalizeMultiline(readString(item['text']), 1800);
   return text || null;
 }
 
@@ -35,13 +35,13 @@ function toReasoningToolLikeMessage(item: Record<string, unknown>): string | nul
 }
 
 function toCommandExecutionToolLikeMessage(item: Record<string, unknown>): string | null {
-  const command = normalizeInline(readString(item.command), 240) ?? 'command';
-  const status = normalizeType(readString(item.status) ?? '');
+  const command = normalizeInline(readString(item['command']), 240) ?? 'command';
+  const status = normalizeType(readString(item['status']) ?? '');
   const output =
-    normalizeMultiline(readString(item.aggregatedOutput), 2400) ??
-    normalizeMultiline(readString(item.aggregated_output), 2400);
+    normalizeMultiline(readString(item['aggregatedOutput']), 2400) ??
+    normalizeMultiline(readString(item['aggregated_output']), 2400);
   const exitCode =
-    readCoercedFiniteNumber(item.exitCode) ?? readCoercedFiniteNumber(item.exit_code);
+    readCoercedFiniteNumber(item['exitCode']) ?? readCoercedFiniteNumber(item['exit_code']);
   const title =
     status === 'failed' || status === 'error'
       ? `• Command failed \`${command}\``
@@ -52,15 +52,15 @@ function toCommandExecutionToolLikeMessage(item: Record<string, unknown>): strin
 }
 
 function toMcpToolCallToolLikeMessage(item: Record<string, unknown>): string | null {
-  const server = normalizeInline(readString(item.server), 120);
-  const tool = normalizeInline(readString(item.tool), 120);
+  const server = normalizeInline(readString(item['server']), 120);
+  const tool = normalizeInline(readString(item['tool']), 120);
   const label = [server, tool].filter(Boolean).join(' / ') || 'MCP tool call';
-  const status = normalizeType(readString(item.status) ?? '');
-  const errorRecord = toRecord(item.error);
+  const status = normalizeType(readString(item['status']) ?? '');
+  const errorRecord = toRecord(item['error']);
   const errorDetail =
-    normalizeInline(readString(errorRecord?.message), 240) ??
-    normalizeInline(readString(item.error), 240);
-  const resultDetail = toStructuredPreview(item.result, 240);
+    normalizeInline(readString(errorRecord?.['message']), 240) ??
+    normalizeInline(readString(item['error']), 240);
+  const resultDetail = toStructuredPreview(item['result'], 240);
   const detail =
     status === 'failed' || status === 'error' ? (errorDetail ?? resultDetail) : resultDetail;
   const title =
@@ -72,11 +72,12 @@ function toMcpToolCallToolLikeMessage(item: Record<string, unknown>): string | n
 
 function toFunctionCallOutputToolLikeMessage(item: Record<string, unknown>): string | null {
   const output =
-    normalizeMultiline(readString(item.output), 2400) ?? toStructuredPreview(item.output, 1200);
+    normalizeMultiline(readString(item['output']), 2400) ??
+    toStructuredPreview(item['output'], 1200);
   if (!output) {
     return null;
   }
-  const callId = normalizeInline(readString(item.call_id) ?? readString(item.callId), 120);
+  const callId = normalizeInline(readString(item['call_id']) ?? readString(item['callId']), 120);
   const title = callId ? `• Tool output \`${callId}\`` : '• Tool output';
   return withNestedDetail(title, toNestedOutput(output, 8, 1600));
 }
@@ -105,21 +106,21 @@ function buildCollabToolCallTitle(tool: string, status: string): string {
 }
 
 function toCollabToolCallToolLikeMessage(item: Record<string, unknown>): string | null {
-  const tool = normalizeType(readString(item.tool) ?? '');
-  const status = normalizeType(readString(item.status) ?? '');
-  const prompt = normalizeInline(readString(item.prompt), 220);
+  const tool = normalizeType(readString(item['tool']) ?? '');
+  const status = normalizeType(readString(item['status']) ?? '');
+  const prompt = normalizeInline(readString(item['prompt']), 220);
   const receiverThreadIds = readReceiverThreadIds(item);
-  const primaryReceiverThreadId = normalizeInline(receiverThreadIds[0], 120);
+  const primaryReceiverThreadId = normalizeInline(receiverThreadIds[0] ?? null, 120);
   const newThreadId = normalizeInline(
-    readString(item.newThreadId) ?? readString(item.new_thread_id) ?? primaryReceiverThreadId,
+    readString(item['newThreadId']) ?? readString(item['new_thread_id']) ?? primaryReceiverThreadId,
     120,
   );
   const senderThreadId = normalizeInline(
-    readString(item.senderThreadId) ?? readString(item.sender_thread_id),
+    readString(item['senderThreadId']) ?? readString(item['sender_thread_id']),
     120,
   );
   const agentStatus = normalizeInline(
-    readString(item.agentStatus) ?? readString(item.agent_status),
+    readString(item['agentStatus']) ?? readString(item['agent_status']),
     120,
   );
   const title = buildCollabToolCallTitle(tool, status);
@@ -134,15 +135,15 @@ function toCollabToolCallToolLikeMessage(item: Record<string, unknown>): string 
 }
 
 function toWebSearchToolLikeMessage(item: Record<string, unknown>): string | null {
-  const query = normalizeInline(readString(item.query), 180);
-  const actionRecord = toRecord(item.action);
-  const actionType = normalizeType(readString(actionRecord?.type) ?? '');
+  const query = normalizeInline(readString(item['query']), 180);
+  const actionRecord = toRecord(item['action']);
+  const actionType = normalizeType(readString(actionRecord?.['type']) ?? '');
   let detail: string | null = query;
   if (actionType === 'openpage') {
-    detail = normalizeInline(readString(actionRecord?.url), 240) ?? detail;
+    detail = normalizeInline(readString(actionRecord?.['url']), 240) ?? detail;
   } else if (actionType === 'findinpage') {
-    const url = normalizeInline(readString(actionRecord?.url), 180);
-    const pattern = normalizeInline(readString(actionRecord?.pattern), 120);
+    const url = normalizeInline(readString(actionRecord?.['url']), 180);
+    const pattern = normalizeInline(readString(actionRecord?.['pattern']), 120);
     detail = [url, pattern ? `pattern: ${pattern}` : null].filter(Boolean).join(' | ') || detail;
   }
   const title = query ? `• Searched web for "${query}"` : '• Searched web';
@@ -150,16 +151,16 @@ function toWebSearchToolLikeMessage(item: Record<string, unknown>): string | nul
 }
 
 function toFileChangeToolLikeMessage(item: Record<string, unknown>): string | null {
-  const status = normalizeType(readString(item.status) ?? '');
+  const status = normalizeType(readString(item['status']) ?? '');
   const changedPaths = readFileChangePaths(item);
   const changeCount = changedPaths.length;
+  const firstChangedPath = changedPaths[0] ?? null;
   const detail = changeCount > 0 ? changedPaths.join('\n') : null;
-  const titleSuffix =
-    changeCount === 0
-      ? ''
-      : changeCount === 1
-        ? ` to ${toFileChangeTargetLabel(changedPaths[0])}`
-        : ` to ${toFileChangeTargetLabel(changedPaths[0])} +${String(changeCount - 1)} more`;
+  const titleSuffix = !firstChangedPath
+    ? ''
+    : changeCount === 1
+      ? ` to ${toFileChangeTargetLabel(firstChangedPath)}`
+      : ` to ${toFileChangeTargetLabel(firstChangedPath)} +${String(changeCount - 1)} more`;
   const title =
     status === 'failed' || status === 'error'
       ? `• File changes failed${titleSuffix}`
@@ -168,7 +169,7 @@ function toFileChangeToolLikeMessage(item: Record<string, unknown>): string | nu
 }
 
 function toImageViewToolLikeMessage(item: Record<string, unknown>): string | null {
-  const path = normalizeInline(readString(item.path), 220);
+  const path = normalizeInline(readString(item['path']), 220);
   if (!path) {
     return null;
   }
@@ -192,7 +193,7 @@ const TOOL_LIKE_MESSAGE_HANDLERS: Partial<Record<string, ToolLikeMessageHandler>
 };
 
 export function toToolLikeMessage(item: Record<string, unknown>): string | null {
-  const rawType = readString(item.type);
+  const rawType = readString(item['type']);
   if (!rawType) {
     return null;
   }
@@ -234,7 +235,7 @@ function buildExecCommandToolMessage(
       : status === 'running' || status === 'inprogress'
         ? `• Running command \`${command ?? 'command'}\``
         : `• Ran \`${command ?? 'command'}\``;
-  const workdir = normalizeInline(readString(args?.workdir), 220);
+  const workdir = normalizeInline(readString(args?.['workdir']), 220);
   return withNestedDetail(title, workdir ? `cwd: ${workdir}` : null);
 }
 
@@ -267,13 +268,13 @@ function buildSearchQueryToolMessage(
 function buildApplyPatchToolMessage(item: Record<string, unknown>): string | null {
   const patchInput = readFunctionToolInput(item);
   const changedPaths = patchInput ? readPatchTargetPaths(patchInput) : [];
+  const firstChangedPath = changedPaths[0] ?? null;
   const detail = changedPaths.length > 0 ? changedPaths.join('\n') : null;
-  const title =
-    changedPaths.length === 0
-      ? '• Applied file changes'
-      : changedPaths.length === 1
-        ? `• Applied file changes to ${toFileChangeTargetLabel(changedPaths[0])}`
-        : `• Applied file changes to ${toFileChangeTargetLabel(changedPaths[0])} +${String(changedPaths.length - 1)} more`;
+  const title = !firstChangedPath
+    ? '• Applied file changes'
+    : changedPaths.length === 1
+      ? `• Applied file changes to ${toFileChangeTargetLabel(firstChangedPath)}`
+      : `• Applied file changes to ${toFileChangeTargetLabel(firstChangedPath)} +${String(changedPaths.length - 1)} more`;
   return withNestedDetail(title, detail);
 }
 
@@ -293,13 +294,13 @@ function buildDefaultFunctionToolMessage(
 
 export function toFunctionToolLikeMessage(item: Record<string, unknown>): string | null {
   const rawName =
-    readString(item.name) ??
-    readString(item.tool) ??
-    readString(item.function) ??
-    readString(item.function_name);
+    readString(item['name']) ??
+    readString(item['tool']) ??
+    readString(item['function']) ??
+    readString(item['function_name']);
   const toolName = normalizeInline(rawName, 160) ?? 'tool';
   const normalizedToolName = toolName.replace(/^functions\./, '');
-  const status = normalizeType(readString(item.status) ?? '');
+  const status = normalizeType(readString(item['status']) ?? '');
   const args = readFunctionToolArguments(item);
   const inputPreview = args ? toStructuredPreview(args, 900) : readFunctionToolInput(item);
   const category = classifyFunctionToolName(normalizedToolName);

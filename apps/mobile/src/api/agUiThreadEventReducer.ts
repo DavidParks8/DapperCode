@@ -21,7 +21,7 @@ import {
   markTerminal,
   updateEncryptedValue,
 } from './agUiStructuredAndTerminalReducers';
-import { type AgUiEventEnvelope } from './agUi';
+import type { AgUiEventEnvelope } from './agUi';
 import {
   type AgUiThreadMessageState,
   createAgUiThreadMessageState,
@@ -52,7 +52,7 @@ function reduceTextMessageStartEvent(
   return rememberReplacement(
     started,
     event.messageId,
-    nonEmptyString(record(event)?.replacesMessageId),
+    nonEmptyString(record(event)?.['replacesMessageId']),
   );
 }
 
@@ -405,9 +405,10 @@ function reduceRawEvent(
     return current;
   }
   const event = envelope.event;
+  const rawEvent: unknown = event.event;
   return {
     ...current,
-    rawEvents: [...current.rawEvents, { source: event.source, event: event.event }].slice(
+    rawEvents: [...current.rawEvents, { source: event.source, event: rawEvent }].slice(
       -MAX_RAW_EVENTS_PER_THREAD,
     ),
   };

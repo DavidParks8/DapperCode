@@ -102,7 +102,7 @@ export function processBridgeInteractionEvents(
     },
     'bridge/userInput.resolved': () => {
       const params = toRecord(event.params);
-      const resolvedId = readString(params?.id);
+      const resolvedId = readString(params?.['id']);
       const selectedPendingUserInputId = currentId
         ? (threadRuntimeSnapshotsRef.current[currentId]?.pendingUserInputRequest?.requestId ??
           pendingUserInputRequestId)
@@ -140,8 +140,8 @@ export function processBridgeInteractionEvents(
     },
     'bridge/ui.dismiss': () => {
       const params = toRecord(event.params);
-      const surfaceId = readString(params?.id);
-      const threadId = readString(params?.threadId);
+      const surfaceId = readString(params?.['id']);
+      const threadId = readString(params?.['threadId']);
       if (!surfaceId) {
         return;
       }
@@ -150,7 +150,7 @@ export function processBridgeInteractionEvents(
     },
     'bridge/approval.resolved': () => {
       const params = toRecord(event.params);
-      const resolvedId = readString(params?.id);
+      const resolvedId = readString(params?.['id']);
       const selectedPendingApprovalId = currentId
         ? (threadRuntimeSnapshotsRef.current[currentId]?.pendingApproval?.requestId ??
           pendingApprovalId)

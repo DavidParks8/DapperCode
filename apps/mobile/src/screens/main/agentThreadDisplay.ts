@@ -27,8 +27,8 @@ export interface AgentThreadRuntimeSnapshotLike {
     detail?: string;
   };
   activeCommands?: unknown[];
-  pendingApproval?: unknown | null;
-  pendingUserInputRequest?: unknown | null;
+  pendingApproval?: unknown;
+  pendingUserInputRequest?: unknown;
   activeTurnId?: string | null;
   runWatchdogUntil?: number;
   updatedAtMs?: number;
@@ -80,7 +80,11 @@ export function getAgentThreadAccentColor(threadId: string): string {
     hash = (hash * 33 + threadId.charCodeAt(index)) >>> 0;
   }
 
-  return AGENT_ACCENT_PALETTE[hash % AGENT_ACCENT_PALETTE.length];
+  const accentColor = AGENT_ACCENT_PALETTE[hash % AGENT_ACCENT_PALETTE.length];
+  if (!accentColor) {
+    throw new Error('Agent accent palette must not be empty');
+  }
+  return accentColor;
 }
 
 function resolveAgentRuntimeStatus(

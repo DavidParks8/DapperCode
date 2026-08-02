@@ -1,4 +1,5 @@
-import type { Chat, ChatMessagePart } from './api/types';
+import { requireTestValue } from './testing/requireTestValue';
+import type { Chat } from './api/types';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   CHAT_SNAPSHOT_CACHE_MAX_BYTES,
@@ -47,7 +48,7 @@ function deferred<T>() {
 describe('chatSnapshotCache', () => {
   it('round trips exact-version snapshots for one profile', () => {
     const typedChat = chat('thread-1');
-    typedChat.messages[0].parts = [
+    requireTestValue(typedChat.messages[0], 'indexed test value').parts = [
       { type: 'text', text: 'A' },
       { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
       { type: 'text', text: 'B' },
@@ -77,7 +78,9 @@ describe('chatSnapshotCache', () => {
         Date.parse('2026-07-18T00:00:00.000Z'),
       ),
     ).toEqual(updated);
-    expect(updated.entries[0]?.chat.messages[0]?.parts).toEqual(typedChat.messages[0].parts);
+    expect(updated.entries[0]?.chat.messages[0]?.parts).toEqual(
+      requireTestValue(typedChat.messages[0], 'indexed test value').parts,
+    );
     expect(parseChatSnapshotCache(JSON.stringify(updated), 'profile-b').entries).toEqual([]);
   });
 
@@ -99,6 +102,16 @@ describe('chatSnapshotCache', () => {
       ).entries,
     ).toEqual([]);
     expect(parseChatSnapshotCache('{', 'profile-a').entries).toEqual([]);
+    for (const root of [null, 'not-an-object', 42, []]) {
+      expect(parseChatSnapshotCache(JSON.stringify(root), 'profile-a')).toEqual(
+        expect.objectContaining({
+          version: 1,
+          profileId: 'profile-a',
+          selectedChatId: null,
+          entries: [],
+        }),
+      );
+    }
   });
 
   it('bounds entries while retaining the selected snapshot', () => {
@@ -280,12 +293,15 @@ describe('chatSnapshotCache', () => {
     const withMedia = chat('with-media');
     const oversizedImageData = 'i'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1);
     const oversizedAudioData = 'a'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1);
-    withMedia.messages[0].parts = [
+    requireTestValue(withMedia.messages[0], 'indexed test value').parts = [
       { type: 'text', text: 'before' },
       { type: 'image', data: oversizedImageData, mimeType: 'image/png', uri: 'file:///cached.png' },
       { type: 'audio', data: oversizedAudioData, mimeType: 'audio/wav' },
     ];
-    const originalParts = withMedia.messages[0].parts.map((part) => ({ ...part }));
+    const originalParts = requireTestValue(
+      requireTestValue(withMedia.messages[0], 'indexed test value').parts,
+      'original message parts',
+    ).map((part) => ({ ...part }));
 
     const cache = updateChatSnapshotCache(
       createEmptyChatSnapshotCache('profile-a'),
@@ -294,20 +310,27 @@ describe('chatSnapshotCache', () => {
     );
 
     expect(cache.entries).toHaveLength(1);
-    const [textPart, imagePart, audioPart] = cache.entries[0]!.chat.messages[0]!
-      .parts as ChatMessagePart[];
+    const [textPart, imagePart, audioPart] = requireTestValue(
+      requireTestValue(
+        requireTestValue(cache.entries[0], 'indexed test value').chat.messages[0],
+        'indexed test value',
+      ).parts,
+      'cached message parts',
+    );
     expect(textPart).toEqual({ type: 'text', text: 'before' });
     expect(imagePart).toEqual({ type: 'image', mimeType: 'image/png', uri: 'file:///cached.png' });
     expect(audioPart).toEqual({ type: 'audio', mimeType: 'audio/wav' });
 
     // The live/in-memory chat object handed to the cache must be left
     // untouched: the active session keeps its full-fidelity payloads.
-    expect(withMedia.messages[0].parts).toEqual(originalParts);
+    expect(requireTestValue(withMedia.messages[0], 'indexed test value').parts).toEqual(
+      originalParts,
+    );
   });
 
   it('keeps inline image/audio data at or under the threshold untouched', () => {
     const withSmallImage = chat('with-small-image');
-    withSmallImage.messages[0].parts = [
+    requireTestValue(withSmallImage.messages[0], 'indexed test value').parts = [
       {
         type: 'image',
         data: 'i'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES),
@@ -321,12 +344,14 @@ describe('chatSnapshotCache', () => {
       withSmallImage,
     );
 
-    expect(cache.entries[0]?.chat.messages[0]?.parts).toEqual(withSmallImage.messages[0].parts);
+    expect(cache.entries[0]?.chat.messages[0]?.parts).toEqual(
+      requireTestValue(withSmallImage.messages[0], 'indexed test value').parts,
+    );
   });
 
   it('drops oversized inline resource blobs while keeping resource metadata', () => {
     const withResource = chat('with-resource');
-    withResource.messages[0].parts = [
+    requireTestValue(withResource.messages[0], 'indexed test value').parts = [
       {
         type: 'resource',
         resource: {
@@ -387,7 +412,7 @@ describe('chatSnapshotCache', () => {
 
   it('re-sanitizes oversized payloads left over from an older on-disk cache when re-priming', () => {
     const legacyChat = chat('legacy');
-    legacyChat.messages[0].parts = [
+    requireTestValue(legacyChat.messages[0], 'indexed test value').parts = [
       {
         type: 'image',
         data: 'z'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1),

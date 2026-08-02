@@ -17,9 +17,10 @@ export function parseTimelineEntries(content: string): TimelineEntry[] | null {
   };
   for (const line of content.split('\n')) {
     const headingMatch = line.match(/^\s*•\s+(.+)$/);
-    if (headingMatch) {
+    const heading = headingMatch?.[1];
+    if (heading) {
       commitCurrent();
-      current = { title: headingMatch[1].trim(), details: [] };
+      current = { title: heading.trim(), details: [] };
       continue;
     }
     if (!current) {

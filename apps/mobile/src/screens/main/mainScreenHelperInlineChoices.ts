@@ -16,6 +16,9 @@ export function findInlineChoiceSet(messages: ChatTranscriptMessage[]): {
 } | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    if (!message) {
+      continue;
+    }
     if (message.role !== 'assistant') {
       continue;
     }
@@ -137,6 +140,9 @@ export function parseInlineOptionsFromQuestionText(value: string): {
       const continuation = stripOptionText(line.replace(/^[-*+\u2022]\s+/, ''));
       if (continuation) {
         const lastOption = options[options.length - 1];
+        if (!lastOption) {
+          continue;
+        }
         lastOption.description = lastOption.description
           ? `${lastOption.description} ${continuation}`
           : continuation;

@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
-import type { GitReviewTarget } from './gitDiffReview';
 import { createGitReviewTarget } from './gitDiffReview';
 import type { GitScreenController } from './gitScreenController';
 import type { GitChangedFileWithStats } from './gitScreenTypes';
@@ -316,10 +315,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                                       <Pressable
                                         onPress={
                                           target
-                                            ? () =>
-                                                controller.openReviewComment(
-                                                  target as GitReviewTarget,
-                                                )
+                                            ? () => controller.openReviewComment(target)
                                             : undefined
                                         }
                                         disabled={!target}

@@ -150,12 +150,7 @@ export function useMainScreenThreadRuntimeMutations(
         ActivePlanState | null | ((previous: ActivePlanState | null) => ActivePlanState | null),
     ) => {
       upsertThreadRuntimeSnapshot(threadId, (previous) => ({
-        plan:
-          typeof nextPlan === 'function'
-            ? (nextPlan as (previous: ActivePlanState | null) => ActivePlanState | null)(
-                previous.plan ?? null,
-              )
-            : nextPlan,
+        plan: typeof nextPlan === 'function' ? nextPlan(previous.plan ?? null) : nextPlan,
       }));
       rememberChatPlanSnapshot(threadId, threadRuntimeSnapshotsRef.current[threadId]?.plan ?? null);
     },

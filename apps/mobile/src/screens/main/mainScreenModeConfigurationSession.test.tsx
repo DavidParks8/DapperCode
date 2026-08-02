@@ -73,7 +73,7 @@ describe('useMainScreenModeConfigurationSession refreshModelOptions', () => {
     expect(store.get(errorAtom)).toBeNull();
     expect(store.get(loadingModelsAtom)).toBe(false);
     // The previously cached models for this agent must still be usable.
-    expect(store.get(modelOptionsByAgentAtom).codex).toEqual([cachedModel]);
+    expect(store.get(modelOptionsByAgentAtom)['codex']).toEqual([cachedModel]);
   });
 
   it('still surfaces a global error for an explicit/manual refresh failure', async () => {

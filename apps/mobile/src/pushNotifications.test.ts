@@ -8,7 +8,7 @@ jest.mock('expo-notifications', () => ({
   requestPermissionsAsync: jest.fn(),
   getExpoPushTokenAsync: jest.fn(),
   addNotificationResponseReceivedListener: jest.fn(),
-  getLastNotificationResponseAsync: jest.fn(),
+  getLastNotificationResponse: jest.fn(),
 }));
 jest.mock('expo-constants', () => ({
   __esModule: true,
@@ -43,7 +43,7 @@ const mockNotifications = Notifications as unknown as {
   requestPermissionsAsync: jest.Mock;
   getExpoPushTokenAsync: jest.Mock;
   addNotificationResponseReceivedListener: jest.Mock;
-  getLastNotificationResponseAsync: jest.Mock;
+  getLastNotificationResponse: jest.Mock;
 };
 const mockConstants = Constants as unknown as {
   expoConfig?: { extra?: { eas?: { projectId?: unknown } } };
@@ -238,13 +238,17 @@ describe('pushNotifications', () => {
     subscription.remove();
     expect(remove).toHaveBeenCalled();
 
-    mockNotifications.getLastNotificationResponseAsync.mockResolvedValue(null);
+    mockNotifications.getLastNotificationResponse.mockReturnValue(null);
     await expect(getInitialNotificationResponse()).resolves.toBeNull();
-    mockNotifications.getLastNotificationResponseAsync.mockResolvedValue(
+    mockNotifications.getLastNotificationResponse.mockReturnValue(
       response({ ...identity, type: 'turn_completed' }),
     );
     await expect(getInitialNotificationResponse()).resolves.toEqual(
       expect.objectContaining({ actionId: 'notification-1:default', action: 'default' }),
     );
+    mockNotifications.getLastNotificationResponse.mockImplementationOnce(() => {
+      throw new Error('notifications unavailable');
+    });
+    await expect(getInitialNotificationResponse()).resolves.toBeNull();
   });
 });

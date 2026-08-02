@@ -1,12 +1,7 @@
-import {
-  type AgentId,
-  type BridgeThreadQueueState,
-  type Chat,
-  type ReasoningEffort,
-} from './types';
+import type { AgentId, BridgeThreadQueueState, Chat, ReasoningEffort } from './types';
 import { StaleSnapshotRevisionError } from './clientSnapshotErrors';
-import { type HostBridgeWsClient } from './ws';
-import { type RawAcpSnapshot, type RawThread } from './chatMapping';
+import type { HostBridgeWsClient } from './ws';
+import type { RawAcpSnapshot, RawThread } from './chatMapping';
 
 export interface HealthResponse {
   status: 'ok' | 'degraded' | 'unhealthy';

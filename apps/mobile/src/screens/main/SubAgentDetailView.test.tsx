@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -118,11 +119,12 @@ type Queryable = ReactTestInstance & {
 };
 
 function countByLabel(tree: ReactTestRenderer, label: string): number {
-  return (tree.root as Queryable).findAll((node) => node.props.accessibilityLabel === label).length;
+  return (tree.root as Queryable).findAll((node) => node.props['accessibilityLabel'] === label)
+    .length;
 }
 
 function countByTestId(tree: ReactTestRenderer, testID: string): number {
-  return (tree.root as Queryable).findAll((node) => node.props.testID === testID).length;
+  return (tree.root as Queryable).findAll((node) => node.props['testID'] === testID).length;
 }
 
 function isStarting(tree: ReactTestRenderer): boolean {
@@ -157,18 +159,18 @@ describe('SubAgentDetailView starting state', () => {
     if (!eyebrow) {
       throw new Error('Missing "Sub-agent" eyebrow text');
     }
-    const style = (StyleSheet.flatten(eyebrow.props.style) ?? {}) as Record<
+    const style = (StyleSheet.flatten(eyebrow.props['style']) ?? {}) as Record<
       string,
       number | string | undefined
     >;
 
     // Must adopt theme.typography.metadata (11/14) instead of the old sub-11pt literal
     // override (10/12), while keeping its uppercase/bold/muted presentation.
-    expect(Number(style.fontSize)).toBe(11);
-    expect(Number(style.lineHeight)).toBe(14);
-    expect(style.fontWeight).toBe('700');
-    expect(style.textTransform).toBe('uppercase');
-    expect(style.color).toBe(theme.colors.textMuted);
+    expect(Number(style['fontSize'])).toBe(11);
+    expect(Number(style['lineHeight'])).toBe(14);
+    expect(style['fontWeight']).toBe('700');
+    expect(style['textTransform']).toBe('uppercase');
+    expect(style['color']).toBe(theme.colors.textMuted);
 
     act(() => tree.unmount());
   });
@@ -471,16 +473,19 @@ describe('SubAgentDetailView starting state', () => {
       ]),
     });
     const transcript = tree.root.findByType(ChatTranscriptView);
-    const openSubAgentThread = transcript.props.onOpenSubAgentThread as
+    const openSubAgentThread = transcript.props['onOpenSubAgentThread'] as
       ((threadId: string) => void) | undefined;
 
     act(() => openSubAgentThread?.('grandchild'));
     expect(router.push).toHaveBeenCalledWith(routes.agent('profile-1', 'new', 'grandchild'));
 
-    const back = (tree.root as Queryable).findAll(
-      (node) => node.props.accessibilityLabel === 'Back from sub-agent transcript',
-    )[0];
-    const pressBack = back.props.onPress as () => void;
+    const back = requireTestValue(
+      (tree.root as Queryable).findAll(
+        (node) => node.props['accessibilityLabel'] === 'Back from sub-agent transcript',
+      )[0],
+      'indexed test value',
+    );
+    const pressBack = back.props['onPress'] as () => void;
     act(() => pressBack());
     expect(router.back).toHaveBeenCalled();
     act(() => tree.unmount());

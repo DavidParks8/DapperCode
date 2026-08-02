@@ -21,16 +21,16 @@ import {
   MOBILE_DEFAULT_SANDBOX,
   MOBILE_DEVELOPER_INSTRUCTIONS,
 } from './clientContractsAndSnapshotInternals';
-import {
-  type BridgeThreadCreateResponse,
-  type BrowserPreviewDiscoveryResponse,
-  type BrowserPreviewSession,
-  type Chat,
-  type ChatSummary,
-  type CreateChatRequest,
-  type FileSystemListRequest,
-  type FileSystemListResponse,
-  type WorkspaceListResponse,
+import type {
+  BridgeThreadCreateResponse,
+  BrowserPreviewDiscoveryResponse,
+  BrowserPreviewSession,
+  Chat,
+  ChatSummary,
+  CreateChatRequest,
+  FileSystemListRequest,
+  FileSystemListResponse,
+  WorkspaceListResponse,
 } from './types';
 import {
   type ChatReadOptions,
@@ -88,7 +88,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
       directoriesOnly: request?.directoriesOnly !== false,
     };
     if (request?.includeGitRepo === true) {
-      params.includeGitRepo = true;
+      params['includeGitRepo'] = true;
     }
     const response = await this.ws.request<Record<string, unknown>>('bridge/fs/list', params);
     return readFileSystemListResponse(response);
@@ -107,7 +107,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
   async listBrowserPreviewSessions(): Promise<BrowserPreviewSession[]> {
     const response = await this.ws.request<Record<string, unknown>>('bridge/browser/sessions/list');
     const record = toRecord(response) ?? {};
-    const rawSessions = Array.isArray(record.sessions) ? record.sessions : [];
+    const rawSessions = Array.isArray(record['sessions']) ? record['sessions'] : [];
     return rawSessions
       .map((entry) => readBrowserPreviewSession(entry))
       .filter((entry): entry is BrowserPreviewSession => entry !== null);
@@ -117,7 +117,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
       'bridge/browser/session/close',
       { sessionId },
     );
-    return response.closed === true;
+    return response['closed'] === true;
   }
   async discoverBrowserPreviewTargets(): Promise<BrowserPreviewDiscoveryResponse> {
     const response = await this.ws.request<Record<string, unknown>>(
@@ -215,7 +215,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
       },
     });
     const thread = toRecord(started.thread);
-    const chatId = readString(thread?.id);
+    const chatId = readString(thread?.['id']);
     if (!chatId || !thread) {
       throw new Error('bridge/thread/create did not return a chat');
     }

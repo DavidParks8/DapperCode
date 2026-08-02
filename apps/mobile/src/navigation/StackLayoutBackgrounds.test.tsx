@@ -40,7 +40,7 @@ function readScreenOptions(): StackScreenOptions {
   if (!mockStackProps) {
     throw new Error('Expected Stack props');
   }
-  return mockStackProps.screenOptions as StackScreenOptions;
+  return mockStackProps['screenOptions'] as StackScreenOptions;
 }
 
 describe('full-screen transition backgrounds', () => {

@@ -28,12 +28,12 @@ type PlanAndReasoningProcessingContext = {
 };
 
 function readThreadId(params: Record<string, unknown> | null): string | null {
-  return readString(params?.threadId) ?? readString(params?.thread_id);
+  return readString(params?.['threadId']) ?? readString(params?.['thread_id']);
 }
 
 function readSummaryKey(params: Record<string, unknown> | null): string | null {
-  const itemId = readString(params?.itemId);
-  const summaryIndex = readFiniteNumber(params?.summaryIndex);
+  const itemId = readString(params?.['itemId']);
+  const summaryIndex = readFiniteNumber(params?.['summaryIndex']);
   if (!itemId || summaryIndex === null) {
     return null;
   }
@@ -141,11 +141,11 @@ function handlePlanDelta(
     return;
   }
 
-  const turnId = readString(params?.turnId) ?? 'unknown-turn';
+  const turnId = readString(params?.['turnId']) ?? 'unknown-turn';
   processing.context.planItemTurnIdByThreadRef.current[threadId] = turnId;
 
   if (threadId !== processing.currentId) {
-    const rawDelta = readString(params?.delta) ?? '';
+    const rawDelta = readString(params?.['delta']) ?? '';
     cacheRunWatchdog(processing.context, threadId, 'Planning');
     cachePlanDelta(processing.context, threadId, turnId, rawDelta);
     return;
@@ -153,7 +153,7 @@ function handlePlanDelta(
 
   processing.setSelectedCollaborationMode('plan');
   processing.context.bumpRunWatchdog();
-  const rawDelta = readString(params?.delta) ?? '';
+  const rawDelta = readString(params?.['delta']) ?? '';
   processing.setActivePlan((prev) => buildNextPlanStateFromDelta(prev, threadId, turnId, rawDelta));
   cachePlanDelta(processing.context, threadId, turnId, rawDelta);
   setPlanningActivity(processing.setActivity);
@@ -191,7 +191,7 @@ function handleReasoningSummaryTextDelta(
     return;
   }
 
-  const delta = readString(params?.delta);
+  const delta = readString(params?.['delta']);
   if (threadId !== processing.currentId) {
     if (!delta) {
       return;
@@ -229,7 +229,7 @@ function handleReasoningTextDelta(
   }
 
   processing.context.bumpRunWatchdog();
-  const delta = readString(params?.delta);
+  const delta = readString(params?.['delta']);
   if (delta) {
     processing.context.upsertLiveReasoningMessage(threadId, delta);
   }

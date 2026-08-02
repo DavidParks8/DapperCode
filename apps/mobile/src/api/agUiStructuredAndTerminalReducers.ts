@@ -6,10 +6,10 @@ import {
 } from './agUiReducerUtilities';
 import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { renderAgUiCustomContent, structuredTextRemainder } from './agUiContent';
-import { type AgUiEventEnvelope } from './agUi';
+import type { AgUiEventEnvelope } from './agUi';
 import { findMessageIndex, indexMessages, type AgUiThreadMessageState } from './agUiMessagesState';
-import { type ChatMessage, type ChatMessageSubAgentMeta } from './types';
-import { type ToolCall } from '@ag-ui/core';
+import type { ChatMessage, ChatMessageSubAgentMeta } from './types';
+import type { ToolCall } from '@ag-ui/core';
 import { upsertMessage } from './agUiMessageMutations';
 import { upsertToolResult } from './agUiToolAndCustomEventReducers';
 import { attachToolMeta, withToolStructured } from './toolMeta';
@@ -19,11 +19,11 @@ export function reduceStructuredMessageContent(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const messageId = nonEmptyString(value?.messageId) ?? `${envelope.runId}:content`;
+  const messageId = nonEmptyString(value?.['messageId']) ?? `${envelope.runId}:content`;
   const role =
-    value?.role === 'thought' ? 'reasoning' : value?.role === 'user' ? 'user' : 'assistant';
+    value?.['role'] === 'thought' ? 'reasoning' : value?.['role'] === 'user' ? 'user' : 'assistant';
   const existing = findMessage(current, messageId);
-  const parts = appendOrderedPart(existing?.parts ?? [], value?.content);
+  const parts = appendOrderedPart(existing?.parts ?? [], value?.['content']);
   const text = renderOrderedParts(parts);
   const base: ChatMessage =
     role === 'reasoning'
@@ -68,12 +68,12 @@ export function reduceToolText(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const toolCallId = nonEmptyString(value?.toolCallId);
+  const toolCallId = nonEmptyString(value?.['toolCallId']);
   if (toolCallId && current.subagentToolCallIds[toolCallId]) {
     return current;
   }
-  const revision = nonEmptyString(value?.revision);
-  const content = typeof value?.content === 'string' ? value.content : null;
+  const revision = nonEmptyString(value?.['revision']);
+  const content = typeof value?.['content'] === 'string' ? value['content'] : null;
   if (!toolCallId || !revision || content === null) {
     return current;
   }
@@ -109,11 +109,11 @@ export function reduceToolContent(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
+  const toolCallId = nonEmptyString(value?.['toolCallId']) ?? 'unknown';
   if (current.subagentToolCallIds[toolCallId]) {
     return current;
   }
-  const revision = nonEmptyString(value?.revision) ?? JSON.stringify(value);
+  const revision = nonEmptyString(value?.['revision']) ?? JSON.stringify(value);
   if (current.structuredRevisionByCallId[toolCallId] === revision) {
     return current;
   }
@@ -139,8 +139,8 @@ export function reduceToolContent(
   const meta = withToolStructured(
     next.toolMetaByCallId[toolCallId],
     toolCallId,
-    Array.isArray(value?.content) ? value.content : undefined,
-    Array.isArray(value?.locations) ? value.locations : undefined,
+    Array.isArray(value?.['content']) ? value['content'] : undefined,
+    Array.isArray(value?.['locations']) ? value['locations'] : undefined,
   );
   return {
     ...next,
@@ -158,8 +158,8 @@ export function reduceToolContent(
 }
 
 function renderToolStructuredContent(value: Record<string, unknown> | null): string {
-  const emptyContent = Array.isArray(value?.content) && value.content.length === 0;
-  const emptyLocations = Array.isArray(value?.locations) && value.locations.length === 0;
+  const emptyContent = Array.isArray(value?.['content']) && value['content'].length === 0;
+  const emptyLocations = Array.isArray(value?.['locations']) && value['locations'].length === 0;
   return emptyContent && emptyLocations ? '' : renderAgUiCustomContent(value);
 }
 
@@ -174,14 +174,18 @@ export function reduceSubagentActivity(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
-  const receiverThreadIds = readReceiverThreadIds(value?.receiverThreadIds);
+  const toolCallId = nonEmptyString(value?.['toolCallId']) ?? 'unknown';
+  const receiverThreadIds = readReceiverThreadIds(value?.['receiverThreadIds']);
   if (receiverThreadIds.length === 0) {
     return current;
   }
+  const [receiverThreadId] = receiverThreadIds;
+  if (!receiverThreadId) {
+    return current;
+  }
   const meta = createSubagentMeta(toolCallId, receiverThreadIds, value, envelope.threadId);
-  const resultPreview = nonEmptyString(value?.resultPreview);
-  const text = formatSubagentActivity(meta, receiverThreadIds[0], resultPreview);
+  const resultPreview = nonEmptyString(value?.['resultPreview']);
+  const text = formatSubagentActivity(meta, receiverThreadId, resultPreview);
   const messages = withoutSubagentMessages(current.messages, toolCallId);
   return upsertMessage(
     {
@@ -218,10 +222,10 @@ function createSubagentMeta(
 ): ChatMessageSubAgentMeta {
   return {
     toolCallId,
-    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
-    senderThreadId: nonEmptyString(value?.senderThreadId) ?? threadId,
+    tool: nonEmptyString(value?.['tool']) ?? 'spawnAgent',
+    senderThreadId: nonEmptyString(value?.['senderThreadId']) ?? threadId,
     receiverThreadIds: Array.from(new Set(receiverThreadIds)),
-    agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
+    agentStatus: nonEmptyString(value?.['agentStatus']) ?? undefined,
   };
 }
 

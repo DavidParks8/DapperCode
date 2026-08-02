@@ -2,8 +2,8 @@ import { HostBridgeWsClientReplayAndOrderingLayer } from './HostBridgeWsClientRe
 import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
 import { Platform } from 'react-native';
 import { isFailedTurnStatus, turnCompletionKey } from './wsEventParsingInternals';
-import { type RpcNotification } from './types';
-import { type TurnCompletionSnapshot } from './wsTypes';
+import type { RpcNotification } from './types';
+import type { TurnCompletionSnapshot } from './wsTypes';
 
 export abstract class HostBridgeWsClientCompletionAndDispatchLayer extends HostBridgeWsClientReplayAndOrderingLayer {
   protected getTurnCompletion(threadId: string, turnId: string): TurnCompletionSnapshot | null {

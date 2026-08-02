@@ -1,12 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
-import {
-  Text,
-  useWindowDimensions,
-  View,
-  type NativeSyntheticEvent,
-  type TextLayoutEventData,
-} from 'react-native';
+import { Text, useWindowDimensions, View, type TextLayoutEvent } from 'react-native';
 
 import { decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
@@ -41,7 +35,7 @@ export function useHuggedTextWidth(messageId: string) {
   const width = measurement?.key === cacheKey ? measurement.width : cached;
 
   const onTextLayout = useCallback(
-    (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+    (event: TextLayoutEvent) => {
       const lines = event.nativeEvent.lines;
       if (!lines.length) {
         return;

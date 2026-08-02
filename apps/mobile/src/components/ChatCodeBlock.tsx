@@ -56,7 +56,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   yml: 'yaml',
 };
 
-const LANGUAGE_LABELS: Record<string, string> = {
+const LANGUAGE_LABELS: Record<string, string> & { text: string } = {
   bash: 'Shell',
   csharp: 'C#',
   cpp: 'C++',

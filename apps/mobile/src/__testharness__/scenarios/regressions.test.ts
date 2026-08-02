@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { EventType, type AGUIEvent } from '@ag-ui/core';
 import { mapChat, toRawThread } from '../../api/chatMapping';
 import { resolveSubAgentState } from '../../api/chatMappingPlanParsing';
@@ -31,6 +32,16 @@ import {
 
 registerTestHarnessMatchers();
 
+describe('Harness matcher regressions', () => {
+  it('does not skip empty message ids in ordering assertions', () => {
+    const state = new TestableThreadState();
+
+    expect(() => expect(state).toHaveMessagesInOrder('t1', '', 'missing')).toThrow(
+      '"" is not rendered',
+    );
+  });
+});
+
 /**
  * Every scenario here reproduces a defect that reached a user. They are written
  * against the sequence of events the bridge actually emits, so a regression fails
@@ -52,10 +63,13 @@ describe('Streaming and snapshot sequencing', () => {
     const state = new TestableThreadState();
     state.applySequence(streamThenAuthoritativeSnapshot('t1', 'run-1'));
 
-    const [message] = state.getMessageContents('t1');
+    const message = requireTestValue(state.getMessageContents('t1')[0], 'streamed message');
     expect(message.content).toBe("This needs a wider search, so I'll delegate to a sub-agent.");
 
-    const projected = state.projectTranscript('t1').messages[0];
+    const projected = requireTestValue(
+      state.projectTranscript('t1').messages[0],
+      'indexed test value',
+    );
     expect(projected.parts).toBeUndefined();
   });
 
@@ -611,7 +625,7 @@ describe('Sub-agent card lifecycle', () => {
     const { classified } = lateClassifiedSubAgent('parent', 'child');
     state.applySequence(classified);
 
-    const [card] = state.getSubAgentActivities('parent');
+    const card = requireTestValue(state.getSubAgentActivities('parent')[0], 'sub-agent card');
     expect(card).toBeTruthy();
     const text = String((card.content as { text?: string }).text).toLowerCase();
     expect(text).not.toContain('starting');
@@ -648,7 +662,7 @@ describe('Sub-agent card lifecycle', () => {
 
     expect(state).toHaveSubAgentCount('parent', 1);
     expect(state).toHaveSubAgentPreview('parent', 'Running npm test');
-    const [card] = state.getSubAgentActivities('parent');
+    const card = requireTestValue(state.getSubAgentActivities('parent')[0], 'sub-agent card');
     expect(String((card.content as { text?: string }).text)).not.toContain('Reading src/math.ts');
   });
 
@@ -687,7 +701,7 @@ describe('Sub-agent card lifecycle', () => {
     const steps = parentOnlySubAgent('parent', ['Working']);
     state.applySequence(steps.start);
 
-    const [card] = state.getSubAgentActivities('parent');
+    const card = requireTestValue(state.getSubAgentActivities('parent')[0], 'sub-agent card');
     const text = (card.content as { text?: string }).text ?? '';
     expect(text).not.toMatch(/Thread:/);
     expect(text).not.toMatch(/v1\./);
@@ -701,7 +715,7 @@ describe('Sub-agent card lifecycle', () => {
     state.applySequence(subAgentStatusOnlyUpdate('parent', 'child'));
 
     expect(state).toHaveSubAgentCard('parent', 'child', { status: 'running' });
-    const [card] = state.getSubAgentActivities('parent');
+    const card = requireTestValue(state.getSubAgentActivities('parent')[0], 'sub-agent card');
     const meta = (card.content as { subAgent?: { receiverThreadIds?: string[] } }).subAgent;
     expect(meta?.receiverThreadIds).toContain('child');
   });
@@ -714,7 +728,7 @@ describe('Sub-agent card lifecycle', () => {
     state.setThreadStatus('child', 'idle');
 
     expect(state).toHaveSubAgentCard('parent', 'child', { status: 'completed' });
-    const [card] = state.getSubAgentActivities('parent');
+    const card = requireTestValue(state.getSubAgentActivities('parent')[0], 'sub-agent card');
     const text = (card.content as { text?: string }).text ?? '';
     expect(text).toContain('Status: completed');
     expect(text).not.toContain('Status: idle');
@@ -901,9 +915,10 @@ describe('Tool rendering', () => {
     ).toHaveLength(1);
 
     // The completed output still belongs to the one row that survives.
-    const [invocation] = items.flatMap((item) =>
+    const invocations = items.flatMap((item) =>
       item.kind === 'toolInvocation' && item.id === toolCallId ? [item.invocation] : [],
     );
+    const invocation = requireTestValue(invocations[0], 'tool invocation');
     expect(invocation.title).toContain('node -e');
     expect(invocation.status).toBe('completed');
     expect(invocation.terminals.map((terminal) => terminal.output)).toEqual(['harness ok 42\n']);
@@ -941,7 +956,9 @@ describe('Tool rendering', () => {
       item.kind === 'toolInvocation' && item.id === toolCallId ? [item.invocation] : [],
     );
     expect(invocations).toHaveLength(1);
-    expect(invocations[0].textLines.join('\n')).toContain('harness ok 42');
+    expect(requireTestValue(invocations[0], 'indexed test value').textLines.join('\n')).toContain(
+      'harness ok 42',
+    );
   });
 });
 
@@ -1115,7 +1132,7 @@ describe('Settled sub-agents after a bridge restart', () => {
       }),
     );
 
-    const message = mapped.messages[0];
+    const message = requireTestValue(mapped.messages[0], 'indexed test value');
     if (message.role !== 'activity') {
       throw new Error('expected activity message');
     }
@@ -1278,7 +1295,7 @@ describe('Opening a finished session does not look like a live run', () => {
       role,
       createdAt: '2024-03-02T00:00:00.000Z',
       content: text,
-    } as unknown as Chat['messages'][number];
+    };
   }
 
   function chatWith(messages: Chat['messages'], status: Chat['status'] = 'idle'): Chat {

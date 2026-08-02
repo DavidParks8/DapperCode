@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { MutableRefObject, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { ActivityIndicator, type FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Chat } from '../../api/types';
@@ -136,7 +136,7 @@ export interface SubAgentTranscriptProps {
   onOpenSubAgentThread: (threadId: string) => void;
   agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
   scrollRef: RefObject<FlatList<TranscriptDisplayItem> | null>;
-  autoScrollStateRef: MutableRefObject<AutoScrollState>;
+  autoScrollStateRef: RefObject<AutoScrollState>;
   liveMessageState: ChatTranscriptViewProps['liveMessageState'];
   projectedMessageCount: number;
   isStarting: boolean;

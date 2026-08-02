@@ -188,14 +188,16 @@ export function parsePersistedAppState(raw: string): AppStateData {
     if (
       !parsed ||
       typeof parsed !== 'object' ||
-      (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== APP_STATE_VERSION)
+      (parsed['version'] !== 1 &&
+        parsed['version'] !== 2 &&
+        parsed['version'] !== APP_STATE_VERSION)
     ) {
-      throw new Error(`Unsupported app-state version: ${String(parsed?.version)}`);
+      throw new Error(`Unsupported app-state version: ${String(parsed?.['version'])}`);
     }
     return normalizeAppStateData({
-      settings: normalizeAppSettings(parsed.settings),
-      bridgeProfiles: parseBridgeProfileStore(JSON.stringify(parsed.bridgeProfiles ?? {})),
-      push: parsed.push,
+      settings: normalizeAppSettings(parsed['settings']),
+      bridgeProfiles: parseBridgeProfileStore(JSON.stringify(parsed['bridgeProfiles'] ?? {})),
+      push: parsed['push'],
     });
   } catch (error) {
     if (error instanceof AppStatePersistenceError) {

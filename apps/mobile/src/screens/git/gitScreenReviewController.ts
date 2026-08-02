@@ -49,25 +49,26 @@ export function useGitScreenReviewController({
   const reviewCommentIdRef = useRef(0);
 
   const selectedDiffFile = useMemo(() => {
-    if (derived.parsedDiff.files.length === 0) {
+    const firstFile = derived.parsedDiff.files[0];
+    if (!firstFile) {
       return null;
     }
 
     return (
       derived.parsedDiff.files.find((file: UnifiedDiffFile) => file.id === selectedDiffFileId) ??
-      derived.parsedDiff.files[0]
+      firstFile
     );
   }, [derived.parsedDiff.files, selectedDiffFileId]);
 
   const diffFileForView = useMemo(() => {
-    if (derived.parsedDiff.files.length === 0) {
+    const firstFile = derived.parsedDiff.files[0];
+    if (!firstFile) {
       return null;
     }
 
-    const targetId = pendingDiffFileId ?? selectedDiffFile?.id ?? derived.parsedDiff.files[0].id;
+    const targetId = pendingDiffFileId ?? selectedDiffFile?.id ?? firstFile.id;
     return (
-      derived.parsedDiff.files.find((file: UnifiedDiffFile) => file.id === targetId) ??
-      derived.parsedDiff.files[0]
+      derived.parsedDiff.files.find((file: UnifiedDiffFile) => file.id === targetId) ?? firstFile
     );
   }, [derived.parsedDiff.files, pendingDiffFileId, selectedDiffFile]);
 
@@ -90,7 +91,8 @@ export function useGitScreenReviewController({
   }, [derived.parsedDiff.files]);
 
   useEffect(() => {
-    if (derived.parsedDiff.files.length === 0) {
+    const firstFile = derived.parsedDiff.files[0];
+    if (!firstFile) {
       if (selectedDiffFileId) {
         setSelectedDiffFileId(null);
       }
@@ -104,7 +106,7 @@ export function useGitScreenReviewController({
     }
 
     if (!selectedDiffFileId) {
-      setSelectedDiffFileId(derived.parsedDiff.files[0].id);
+      setSelectedDiffFileId(firstFile.id);
       return;
     }
 
@@ -112,7 +114,7 @@ export function useGitScreenReviewController({
       (file: UnifiedDiffFile) => file.id === selectedDiffFileId,
     );
     if (!stillExists) {
-      setSelectedDiffFileId(derived.parsedDiff.files[0].id);
+      setSelectedDiffFileId(firstFile.id);
     }
 
     if (pendingDiffFileId) {

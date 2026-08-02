@@ -11,7 +11,11 @@ let stack: MockRoute[] = [{ pathname: '/', params: {} }];
 const listeners = new Set<() => void>();
 
 function currentRoute(): MockRoute {
-  return stack[stack.length - 1];
+  const route = stack.at(-1);
+  if (!route) {
+    throw new Error('Mock router stack must not be empty');
+  }
+  return route;
 }
 
 function resolveHref(href: MockHref): MockRoute {
@@ -43,14 +47,14 @@ const router = {
   canDismiss: jest.fn(() => stack.length > 1),
   dismiss: jest.fn(),
   dismissAll: jest.fn(() => {
-    stack = [stack[0]];
+    stack = [stack[0] ?? currentRoute()];
     publish();
   }),
   dismissTo: jest.fn((href: MockHref) => {
     const target = resolveHref(href);
     let targetIndex = -1;
     for (let index = stack.length - 1; index >= 0; index -= 1) {
-      if (stack[index].pathname === target.pathname) {
+      if (stack[index]?.pathname === target.pathname) {
         targetIndex = index;
         break;
       }

@@ -205,9 +205,14 @@ function parseHunkHeader(
     return null;
   }
 
-  const oldStart = Number.parseInt(match[1], 10);
+  const oldStartRaw = match[1];
+  const newStartRaw = match[3];
+  if (!oldStartRaw || !newStartRaw) {
+    return null;
+  }
+  const oldStart = Number.parseInt(oldStartRaw, 10);
   const oldCount = Number.parseInt(match[2] ?? '1', 10);
-  const newStart = Number.parseInt(match[3], 10);
+  const newStart = Number.parseInt(newStartRaw, 10);
   const newCount = Number.parseInt(match[4] ?? '1', 10);
 
   if (

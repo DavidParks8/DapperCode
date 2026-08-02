@@ -114,6 +114,7 @@ export function AppSheet({
     if (presentedRef.current) {
       sheetRef.current?.dismiss();
     }
+    return undefined;
   }, [visible]);
 
   // Fires for drag-to-dismiss and backdrop taps as well as programmatic dismissal; the guard

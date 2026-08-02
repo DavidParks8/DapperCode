@@ -286,6 +286,15 @@ describe('workspace actions', () => {
     expect(store.get(workspaceFavoritesResourceAtom).fetchedAt).not.toBeNull();
   });
 
+  it('normalizes non-Error workspace root failures', async () => {
+    const { store, api } = createStore();
+    api.listWorkspaceRoots.mockRejectedValueOnce('bridge offline');
+
+    await store.set(refreshWorkspaceRootsAtom, { force: true });
+
+    expect(store.get(workspaceRootsResourceAtom).error).toBe('bridge offline');
+  });
+
   it('clears cached roots and browse data (but keeps favorites) when a profile is edited in place', async () => {
     const { store, api } = createStore();
     jest

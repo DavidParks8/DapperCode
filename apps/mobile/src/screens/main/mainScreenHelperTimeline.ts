@@ -71,6 +71,9 @@ export function formatLiveReasoningMessage(text: string): string {
   }
 
   const [first, ...rest] = lines;
+  if (first === undefined) {
+    return '• Reasoning';
+  }
   return ['• Reasoning', `  └ ${first}`, ...rest.map((line) => `    ${line}`)].join('\n');
 }
 
@@ -95,9 +98,9 @@ export function filterReasoningMessages(
 export function describeStartedToolEvent(
   item: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
-  const itemType = readString(item?.type);
+  const itemType = readString(item?.['type']);
   if (itemType === 'commandExecution') {
-    const command = toTickerSnippet(readString(item?.command), 80) ?? 'Command';
+    const command = toTickerSnippet(readString(item?.['command']), 80) ?? 'Command';
     return {
       eventType: 'command.running',
       detail: buildToolEventDetail(command, 'running'),
@@ -113,7 +116,8 @@ export function describeStartedToolEvent(
 
   if (itemType === 'mcpToolCall') {
     const detail =
-      [readString(item?.server), readString(item?.tool)].filter(Boolean).join(' / ') || 'Tool call';
+      [readString(item?.['server']), readString(item?.['tool'])].filter(Boolean).join(' / ') ||
+      'Tool call';
     return {
       eventType: 'tool.running',
       detail: buildToolEventDetail(detail, 'running'),
@@ -121,7 +125,7 @@ export function describeStartedToolEvent(
   }
 
   if (itemType === 'toolCall') {
-    const detail = readString(item?.tool) ?? readString(item?.name) ?? 'Tool call';
+    const detail = readString(item?.['tool']) ?? readString(item?.['name']) ?? 'Tool call';
     return {
       eventType: 'tool.running',
       detail: buildToolEventDetail(detail, 'running'),
@@ -134,11 +138,11 @@ export function describeStartedToolEvent(
 export function describeCompletedToolEvent(
   item: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
-  const itemType = readString(item?.type);
+  const itemType = readString(item?.['type']);
   const status = readCompletedToolStatus(item);
 
   if (itemType === 'commandExecution') {
-    const command = toTickerSnippet(readString(item?.command), 80) ?? 'Command';
+    const command = toTickerSnippet(readString(item?.['command']), 80) ?? 'Command';
     return {
       eventType: 'command.completed',
       detail: buildToolEventDetail(command, status),
@@ -154,7 +158,8 @@ export function describeCompletedToolEvent(
 
   if (itemType === 'mcpToolCall') {
     const detail =
-      [readString(item?.server), readString(item?.tool)].filter(Boolean).join(' / ') || 'Tool call';
+      [readString(item?.['server']), readString(item?.['tool'])].filter(Boolean).join(' / ') ||
+      'Tool call';
     return {
       eventType: 'tool.completed',
       detail: buildToolEventDetail(detail, status),
@@ -162,7 +167,7 @@ export function describeCompletedToolEvent(
   }
 
   if (itemType === 'toolCall') {
-    const detail = readString(item?.tool) ?? readString(item?.name) ?? 'Tool call';
+    const detail = readString(item?.['tool']) ?? readString(item?.['name']) ?? 'Tool call';
     return {
       eventType: 'tool.completed',
       detail: buildToolEventDetail(detail, status),
@@ -173,7 +178,7 @@ export function describeCompletedToolEvent(
 }
 
 function readCompletedToolStatus(item: Record<string, unknown> | null): 'complete' | 'error' {
-  const rawStatus = readString(item?.status);
+  const rawStatus = readString(item?.['status']);
   return rawStatus === 'failed' || rawStatus === 'error' ? 'error' : 'complete';
 }
 
@@ -182,18 +187,22 @@ function buildCompletedFileChangeLabel(item: Record<string, unknown> | null): st
   if (changedPaths.length === 0) {
     return 'File changes';
   }
-
-  if (changedPaths.length === 1) {
-    return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 48) ?? 'file'}`;
+  const firstPath = changedPaths[0];
+  if (!firstPath) {
+    return 'File changes';
   }
 
-  return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
+  if (changedPaths.length === 1) {
+    return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(firstPath), 48) ?? 'file'}`;
+  }
+
+  return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(firstPath), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
 }
 
 export function describeWebSearchToolEvent(
   msg: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
-  const query = toTickerSnippet(readString(msg?.query), 80);
+  const query = toTickerSnippet(readString(msg?.['query']), 80);
   return {
     eventType: 'web_search.running',
     detail: buildToolEventDetail(query ? `Web search: ${query}` : 'Web search', 'running'),
@@ -208,7 +217,7 @@ export function buildToolEventDetail(
 }
 
 export function readCompletedFileChangePaths(item: Record<string, unknown> | null): string[] {
-  const rawChanges = Array.isArray(item?.changes) ? item.changes : [];
+  const rawChanges = Array.isArray(item?.['changes']) ? item['changes'] : [];
   const seen = new Set<string>();
   const paths: string[] = [];
 
@@ -228,9 +237,9 @@ function readCompletedFileChangePath(change: unknown): string | null {
   const changeRecord = toRecord(change);
   const path =
     readString(change)?.trim() ??
-    readString(changeRecord?.path)?.trim() ??
-    readString(changeRecord?.filePath)?.trim() ??
-    readString(changeRecord?.file_path)?.trim();
+    readString(changeRecord?.['path'])?.trim() ??
+    readString(changeRecord?.['filePath'])?.trim() ??
+    readString(changeRecord?.['file_path'])?.trim();
   return path ? path.replace(/\\/g, '/') : null;
 }
 

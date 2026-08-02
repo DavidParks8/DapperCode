@@ -79,7 +79,7 @@ describe('useMainScreenThreadSnapshotStore parent chat cache', () => {
     // and the rename is reflected once it resolves.
     expect(getChat).toHaveBeenCalledWith('parent');
     expect(setSelectedParentChat).toHaveBeenLastCalledWith(renamedParent);
-    expect(context.parentChatCacheRef.current.parent).toEqual(renamedParent);
+    expect(context.parentChatCacheRef.current['parent']).toEqual(renamedParent);
 
     act(() => tree.unmount());
   });

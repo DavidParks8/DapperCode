@@ -28,10 +28,10 @@ export function parseAgUiEventNotification(
     return null;
   }
   const params = record(notification.params);
-  const threadId = nonEmptyString(params?.threadId);
-  const runId = nonEmptyString(params?.runId);
-  const sourceTurnId = nonEmptyString(params?.sourceTurnId) ?? undefined;
-  const parsedEvent = EventSchemas.safeParse(params?.event);
+  const threadId = nonEmptyString(params?.['threadId']);
+  const runId = nonEmptyString(params?.['runId']);
+  const sourceTurnId = nonEmptyString(params?.['sourceTurnId']) ?? undefined;
+  const parsedEvent = EventSchemas.safeParse(params?.['event']);
   if (!threadId || !runId || !parsedEvent.success) {
     return null;
   }

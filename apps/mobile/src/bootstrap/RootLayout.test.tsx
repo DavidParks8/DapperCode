@@ -98,7 +98,7 @@ describe('RootLayout', () => {
       throw new Error('Expected root Stack props');
     }
 
-    expect(mockRootStackProps.screenOptions).toMatchObject({
+    expect(mockRootStackProps['screenOptions']).toMatchObject({
       contentStyle: { backgroundColor: store.get(themeAtom).colors.bgMain },
     });
 

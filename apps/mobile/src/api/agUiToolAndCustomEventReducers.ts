@@ -23,14 +23,14 @@ import {
 } from './agUiStructuredAndTerminalReducers';
 import { startToolCall, upsertMessage } from './agUiMessageMutations';
 import { type AGUIEvent, EventType, type Message, type ToolMessage } from '@ag-ui/core';
-import { type AgUiEventEnvelope } from './agUi';
+import type { AgUiEventEnvelope } from './agUi';
 import {
   indexMessages,
   type AgUiThreadMessageState,
   MAX_CUSTOM_METADATA_ENTRIES,
   MAX_MESSAGES_PER_THREAD,
 } from './agUiMessagesState';
-import { type ChatMessage, type ChatToolMeta } from './types';
+import type { ChatMessage, ChatToolMeta } from './types';
 
 /**
  * Records a tool's kind, status and title, and stamps them onto every message
@@ -136,7 +136,7 @@ function collectCurrentSubagentsById(current: AgUiThreadMessageState): Map<strin
     if (message.role !== 'activity' || message.activityType !== SUBAGENT_ACTIVITY_TYPE) {
       continue;
     }
-    const toolCallId = nonEmptyString(record(message.content.subAgent)?.toolCallId);
+    const toolCallId = nonEmptyString(record(message.content.subAgent)?.['toolCallId']);
     if (toolCallId) {
       currentSubagents.set(toolCallId, message);
     }
@@ -153,8 +153,8 @@ function collectSnapshotSubagentIds(
     (ids, message) => {
       if (message.role === 'activity' && message.activityType === SUBAGENT_ACTIVITY_TYPE) {
         const content = record(message.content);
-        const subAgent = record(content?.subAgent);
-        const toolCallId = nonEmptyString(subAgent?.toolCallId);
+        const subAgent = record(content?.['subAgent']);
+        const toolCallId = nonEmptyString(subAgent?.['toolCallId']);
         if (toolCallId) {
           ids[toolCallId] = true;
           snapshotActivityIds.add(toolCallId);
@@ -254,7 +254,7 @@ function buildSnapshotMessages(
       parts: partsMatchMessageContent(existing?.parts, message.content)
         ? existing?.parts
         : undefined,
-    } as ChatMessage);
+    });
   }
   return { nextMessages, toolMetaByCallId };
 }
@@ -370,7 +370,7 @@ function terminalizeSubagentCard(
     return message;
   }
   const meta = record(message.content.subAgent);
-  const existingStatus = nonEmptyString(meta?.agentStatus);
+  const existingStatus = nonEmptyString(meta?.['agentStatus']);
   const effectiveStatus =
     existingStatus && isFailedSubagentStatus(existingStatus) ? existingStatus : status;
   const text = typeof message.content.text === 'string' ? message.content.text : '';
@@ -496,11 +496,11 @@ function readCustomChunk(
   customName: string,
   value: Record<string, unknown> | null,
 ): { key: string; count: number; index: number; data: string } | null {
-  const canonicalId = nonEmptyString(value?.canonicalId);
-  const revision = nonEmptyString(value?.revision);
-  const index = typeof value?.index === 'number' ? value.index : -1;
-  const count = typeof value?.count === 'number' ? value.count : 0;
-  const data = typeof value?.data === 'string' ? value.data : null;
+  const canonicalId = nonEmptyString(value?.['canonicalId']);
+  const revision = nonEmptyString(value?.['revision']);
+  const index = typeof value?.['index'] === 'number' ? value['index'] : -1;
+  const count = typeof value?.['count'] === 'number' ? value['count'] : 0;
+  const data = typeof value?.['data'] === 'string' ? value['data'] : null;
   if (!canonicalId || !revision || index < 0 || index >= count || !data) {
     return null;
   }

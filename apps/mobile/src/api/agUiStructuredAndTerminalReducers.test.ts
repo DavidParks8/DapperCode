@@ -14,7 +14,6 @@ import {
 } from './agUiStructuredAndTerminalReducers';
 import type { AgUiThreadMessageState } from './agUiMessagesState';
 import { structuredTextRemainder } from './agUiContent';
-import type { ChatMessage } from './types';
 
 function createState(overrides: Partial<AgUiThreadMessageState> = {}): AgUiThreadMessageState {
   return {
@@ -34,7 +33,7 @@ function createEnvelope(overrides: Partial<AgUiEventEnvelope> = {}): AgUiEventEn
       timestamp: 1_700_000_000_000,
     },
     ...overrides,
-  } as AgUiEventEnvelope;
+  };
 }
 
 describe('agUiStructuredAndTerminalReducers', () => {
@@ -102,7 +101,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             content: 'alpha',
             createdAt: '2024-01-01T00:00:00.000Z',
             parts: [{ type: 'text', text: 'alpha' }],
-          } as ChatMessage,
+          },
         ],
       });
 
@@ -180,7 +179,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
         toolCallId: 'tc2',
         content: 'plain\n[terminal]\nout',
       });
-      expect(next.toolTextRevisionByCallId.tc2).toBe('rev-2');
+      expect(next.toolTextRevisionByCallId['tc2']).toBe('rev-2');
     });
 
     it('updates an existing mapped tool-result message', () => {
@@ -192,7 +191,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             toolCallId: 'tc3',
             content: 'old',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         toolResultMessageIdByCallId: { tc3: 'msg-tool-1' },
       });
@@ -204,7 +203,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
       });
 
       expect(next.messages[0]).toMatchObject({ id: 'msg-tool-1', content: 'new' });
-      expect(next.toolTextRevisionByCallId.tc3).toBe('rev-3');
+      expect(next.toolTextRevisionByCallId['tc3']).toBe('rev-3');
     });
   });
 
@@ -242,10 +241,10 @@ describe('agUiStructuredAndTerminalReducers', () => {
         toolCallId: 'unknown',
         content: '',
       });
-      expect(next.structuredRevisionByCallId.unknown).toBe(
+      expect(next.structuredRevisionByCallId['unknown']).toBe(
         JSON.stringify({ content: [], locations: [] }),
       );
-      expect(next.structuredTextByCallId.unknown).toBe('');
+      expect(next.structuredTextByCallId['unknown']).toBe('');
     });
 
     it('replaces prior structured suffix when revising structured content', () => {
@@ -257,7 +256,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             toolCallId: 'tc4',
             content: 'base line\nold structured',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         toolResultMessageIdByCallId: { tc4: 'tool-result:tc4' },
         structuredTextByCallId: { tc4: 'old structured' },
@@ -270,8 +269,8 @@ describe('agUiStructuredAndTerminalReducers', () => {
       });
 
       expect(next.messages[0]).toMatchObject({ content: 'base line\nnew structured' });
-      expect(next.structuredTextByCallId.tc4).toBe('new structured');
-      expect(next.structuredRevisionByCallId.tc4).toBe('rev-4');
+      expect(next.structuredTextByCallId['tc4']).toBe('new structured');
+      expect(next.structuredRevisionByCallId['tc4']).toBe('rev-4');
     });
 
     it('keeps existing text unchanged when previous structured suffix does not match', () => {
@@ -283,7 +282,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             toolCallId: 'tc5',
             content: 'existing text',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         toolResultMessageIdByCallId: { tc5: 'tool-result:tc5' },
         structuredTextByCallId: { tc5: 'different previous structured' },
@@ -318,21 +317,21 @@ describe('agUiStructuredAndTerminalReducers', () => {
             content: '',
             toolCalls: [toolCall('tc-sub-2', 'spawnAgent', '{}')],
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
           {
             id: 'tool-result:tc-sub-2',
             role: 'tool',
             toolCallId: 'tc-sub-2',
             content: 'old',
             createdAt: '2024-01-01T00:00:01.000Z',
-          } as ChatMessage,
+          },
           {
             id: 'subagent:tc-sub-2',
             role: 'activity',
             activityType: 'dappercode.subagent',
             content: { text: 'stale' },
             createdAt: '2024-01-01T00:00:02.000Z',
-          } as ChatMessage,
+          },
         ],
       });
 
@@ -372,7 +371,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
         agentStatus: 'running',
       });
 
-      expect(next.subagentToolCallIds.unknown).toBe(true);
+      expect(next.subagentToolCallIds['unknown']).toBe(true);
       const message = next.messages[0];
       expect(message).toMatchObject({ id: 'subagent:unknown', role: 'activity' });
       if (message?.role === 'activity') {
@@ -410,7 +409,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             role: 'assistant',
             content: 'hi',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         runByMessageId: { 'msg-enc': 'run-enc' },
       });
@@ -429,7 +428,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             content: '',
             toolCalls: [toolCall('tool-1', 'search', '{}'), toolCall('tool-2', 'open', '{}')],
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         toolCallMessageIdByCallId: { 'tool-1': 'assistant-1' },
         runByMessageId: { 'assistant-1': 'run-a' },
@@ -452,7 +451,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             toolCallId: 'tool-9',
             content: '',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
         toolCallMessageIdByCallId: { 'tool-9': 'tool-container' },
       });
@@ -471,7 +470,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
             role: 'assistant',
             content: 'hello',
             createdAt: '2024-01-01T00:00:00.000Z',
-          } as ChatMessage,
+          },
         ],
       });
 

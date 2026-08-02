@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { requireTestValue } from '../testing/requireTestValue';
 import { BridgeProtocolVersionError, HostBridgeWsClient, RpcRequestError } from './ws';
 
 interface ContractManifest {
@@ -56,7 +57,7 @@ class MockWebSocket {
 let mockInstances: MockWebSocket[];
 
 function latestMockSocket(): MockWebSocket {
-  return mockInstances[mockInstances.length - 1];
+  return requireTestValue(mockInstances.at(-1), 'latest mock socket');
 }
 
 beforeEach(() => {
@@ -1159,10 +1160,18 @@ describe('HostBridgeWsClient', () => {
       client.connect();
       latestMockSocket().simulateOpen();
       const request = client.request('slow', { value: 1 });
-      const expectation = expect(request).rejects.toThrow('RPC timeout for method: slow');
+      const rejection = request.then(
+        () => null,
+        (error: unknown) => error,
+      );
       await Promise.resolve();
       await jest.advanceTimersByTimeAsync(25);
-      await expectation;
+      const error = await rejection;
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) {
+        throw new Error('Expected slow request to reject');
+      }
+      expect(error.message).toBe('RPC timeout for method: slow');
     } finally {
       jest.useRealTimers();
     }

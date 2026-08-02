@@ -57,7 +57,7 @@ describe('chatSummaryCache', () => {
         version: 0,
         profileId: 'profile-a',
         updatedAt: '2026-07-17T00:00:00.000Z',
-        chats: [summary('legacy')],
+        chats: [{ ...summary('legacy'), authToken: 'must-not-survive' }, { id: 'malformed' }, null],
       }),
       'profile-a',
       Date.parse('2026-07-18T00:00:00.000Z'),
@@ -67,6 +67,7 @@ describe('chatSummaryCache', () => {
       lastSuccessfulRefreshAt: '2026-07-17T00:00:00.000Z',
       entries: [{ summary: { id: 'legacy' }, cachedAt: '2026-07-17T00:00:00.000Z' }],
     });
+    expect(migrated.entries[0]?.summary).not.toHaveProperty('authToken');
 
     expect(parseChatSummaryCache('{', 'profile-a').entries).toEqual([]);
     expect(

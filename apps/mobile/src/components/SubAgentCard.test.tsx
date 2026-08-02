@@ -36,7 +36,7 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 }
 
 function findByAccessibilityLabel(root: QueryableInstance, label: string): QueryableInstance {
-  const match = root.findAll((node) => node.props.accessibilityLabel === label)[0];
+  const match = root.findAll((node) => node.props['accessibilityLabel'] === label)[0];
   if (!match) {
     throw new Error(`Missing element with accessibilityLabel: ${label}`);
   }
@@ -106,12 +106,12 @@ describe('SubAgentCard', () => {
       />,
     );
     const card = queryRoot(tree).findAll(
-      (node) => node.props.testID === 'sub-1-subagent-card-0',
+      (node) => node.props['testID'] === 'sub-1-subagent-card-0',
     )[0];
     if (!card) {
       throw new Error('Expected sub-agent card');
     }
-    const style = StyleSheet.flatten(card.props.style as never) as {
+    const style = StyleSheet.flatten(card.props['style'] as never) as {
       backgroundColor?: string;
       borderColor?: string;
     };
@@ -136,7 +136,7 @@ describe('SubAgentCard', () => {
     );
 
     const openButton = findByAccessibilityLabel(queryRoot(tree), 'Open agent chat');
-    const hitSlop = openButton.props.hitSlop as {
+    const hitSlop = openButton.props['hitSlop'] as {
       top: number;
       bottom: number;
       left: number;
@@ -164,7 +164,7 @@ describe('SubAgentCard', () => {
     );
 
     const openButton = findByAccessibilityLabel(queryRoot(tree), 'Open agent chat');
-    expect(openButton.props.disabled).toBe(true);
-    expect(openButton.props.onPress).toBeUndefined();
+    expect(openButton.props['disabled']).toBe(true);
+    expect(openButton.props['onPress']).toBeUndefined();
   });
 });

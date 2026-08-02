@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -13,7 +14,7 @@ import {
   type RawThreadItem,
 } from './chatMapping';
 import { renderAgUiCustomContent } from './agUi';
-import { COMPACTION_ACTIVITY_TYPE, SUBAGENT_ACTIVITY_TYPE } from './messages';
+import { COMPACTION_ACTIVITY_TYPE, getMessageText, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import type { Chat, ChatSummary } from './types';
 
 function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
@@ -217,7 +218,7 @@ describe('chatMapping', () => {
       'reasoning-r',
     ]);
     // The persisted path must describe a tool row as richly as the live one.
-    expect(snapshot.messages[1].toolMeta).toEqual({
+    expect(requireTestValue(snapshot.messages[1], 'indexed test value').toolMeta).toEqual({
       toolCallId: 'tool-t',
       kind: 'read',
       status: 'completed',
@@ -261,17 +262,18 @@ describe('chatMapping', () => {
     );
 
     expect(mapped.messages).toHaveLength(1);
-    expect(mapped.messages[0]).toMatchObject({
+    const activity = requireTestValue(mapped.messages[0], 'mapped activity');
+    expect(activity).toMatchObject({
       id: 'subagent:task-1',
       role: 'activity',
       activityType: SUBAGENT_ACTIVITY_TYPE,
     });
-    expect(mapped.messages[0].role).toBe('activity');
-    if (mapped.messages[0].role !== 'activity') {
+    expect(activity.role).toBe('activity');
+    if (activity.role !== 'activity') {
       throw new Error('expected activity message');
     }
-    expect(mapped.messages[0].content.text).toContain('Latest: Workspace title');
-    expect(mapped.messages[0].content.subAgent).toEqual({
+    expect(activity.content.text).toContain('Latest: Workspace title');
+    expect(activity.content.subAgent).toEqual({
       toolCallId: 'task-1',
       tool: 'spawnAgent',
       senderThreadId: 'parent-thread',
@@ -356,7 +358,7 @@ describe('chatMapping', () => {
       }),
     );
 
-    const content = mapped.messages[0].content as string;
+    const content = requireTestValue(mapped.messages[0], 'indexed test value').content as string;
     expect(content.match(/export function add\(\) \{\}/g)).toHaveLength(1);
     expect(content).toContain('[location: src/math.ts]');
     expect(content).not.toContain('{"content"');
@@ -392,7 +394,7 @@ describe('chatMapping', () => {
       }),
     );
 
-    const message = mapped.messages[0];
+    const message = requireTestValue(mapped.messages[0], 'indexed test value');
     if (message.role !== 'activity') {
       throw new Error('expected activity message');
     }
@@ -428,7 +430,7 @@ describe('chatMapping', () => {
       }),
     );
 
-    expect(mapped.messages[0].content).toBe('rm -rf build');
+    expect(requireTestValue(mapped.messages[0], 'indexed test value').content).toBe('rm -rf build');
   });
 
   it('uses the newest appended task header and never shows raw child thread ids', () => {
@@ -465,7 +467,7 @@ describe('chatMapping', () => {
       }),
     );
 
-    const message = mapped.messages[0];
+    const message = requireTestValue(mapped.messages[0], 'indexed test value');
     if (message.role !== 'activity') {
       throw new Error('expected activity message');
     }
@@ -889,12 +891,16 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(3);
-    expect(chat.messages[0].role).toBe('user');
-    expect(chat.messages[1].role).toBe('tool');
-    expect(chat.messages[1].content).toContain('• Ran `git status --short`');
-    expect(chat.messages[1].content).toContain('M apps/mobile/src/api/ws.ts');
-    expect(chat.messages[2].role).toBe('assistant');
-    expect(chat.messages[2].content).toBe('Done');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('user');
+    expect(requireTestValue(chat.messages[1], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[1], 'indexed test value').content).toContain(
+      '• Ran `git status --short`',
+    );
+    expect(requireTestValue(chat.messages[1], 'indexed test value').content).toContain(
+      'M apps/mobile/src/api/ws.ts',
+    );
+    expect(requireTestValue(chat.messages[2], 'indexed test value').role).toBe('assistant');
+    expect(requireTestValue(chat.messages[2], 'indexed test value').content).toBe('Done');
   });
 
   it('maps plan and tool items into readable system timeline entries', () => {
@@ -941,11 +947,19 @@ describe('chatMapping', () => {
 
     const toolMessages = chat.messages.filter((message) => message.role === 'tool');
     expect(toolMessages).toHaveLength(4);
-    expect(toolMessages[0].content).toContain('• Explored');
-    expect(toolMessages[1].content).toContain('• Searched web for "react native keyboard inset"');
-    expect(toolMessages[2].content).toContain('• Called tool `filesystem / read_file`');
-    expect(toolMessages[3].content).toContain('• Applied file changes to MainScreen.tsx');
-    expect(toolMessages[3].content).toContain('apps/mobile/src/screens/MainScreen.tsx');
+    expect(requireTestValue(toolMessages[0], 'indexed test value').content).toContain('• Explored');
+    expect(requireTestValue(toolMessages[1], 'indexed test value').content).toContain(
+      '• Searched web for "react native keyboard inset"',
+    );
+    expect(requireTestValue(toolMessages[2], 'indexed test value').content).toContain(
+      '• Called tool `filesystem / read_file`',
+    );
+    expect(requireTestValue(toolMessages[3], 'indexed test value').content).toContain(
+      '• Applied file changes to MainScreen.tsx',
+    );
+    expect(requireTestValue(toolMessages[3], 'indexed test value').content).toContain(
+      'apps/mobile/src/screens/MainScreen.tsx',
+    );
   });
 
   it('maps function call items into visible tool timeline entries', () => {
@@ -995,14 +1009,22 @@ describe('chatMapping', () => {
 
     const toolMessages = chat.messages.filter((message) => message.role === 'tool');
     expect(toolMessages).toHaveLength(3);
-    expect(toolMessages[0].content).toContain(
+    expect(requireTestValue(toolMessages[0], 'indexed test value').content).toContain(
       "• Ran `sed -n '1,80p' apps/mobile/src/api/chatMapping.ts`",
     );
-    expect(toolMessages[0].content).toContain('cwd: /repo');
-    expect(toolMessages[1].content).toContain('• Tool output `call_read_file`');
-    expect(toolMessages[1].content).toContain('import type { Chat }');
-    expect(toolMessages[2].content).toContain('• Tool output `custom_call_read_file`');
-    expect(toolMessages[2].content).toContain('custom output');
+    expect(requireTestValue(toolMessages[0], 'indexed test value').content).toContain('cwd: /repo');
+    expect(requireTestValue(toolMessages[1], 'indexed test value').content).toContain(
+      '• Tool output `call_read_file`',
+    );
+    expect(requireTestValue(toolMessages[1], 'indexed test value').content).toContain(
+      'import type { Chat }',
+    );
+    expect(requireTestValue(toolMessages[2], 'indexed test value').content).toContain(
+      '• Tool output `custom_call_read_file`',
+    );
+    expect(requireTestValue(toolMessages[2], 'indexed test value').content).toContain(
+      'custom output',
+    );
   });
 
   it('maps MCP and search function calls into readable timeline entries', () => {
@@ -1038,9 +1060,11 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(2);
-    expect(chat.messages[0].content).toContain('• Called tool `computer_use / click`');
-    expect(chat.messages[0].content).toContain('Input:');
-    expect(chat.messages[1].content).toContain(
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Called tool `computer_use / click`',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain('Input:');
+    expect(requireTestValue(chat.messages[1], 'indexed test value').content).toContain(
       '• Searched web for "React Native FlatList maintainVisibleContentPosition"',
     );
   });
@@ -1077,9 +1101,13 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain('• Applied file changes to MainScreen.tsx');
-    expect(chat.messages[0].content).toContain('apps/mobile/src/screens/MainScreen.tsx');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Applied file changes to MainScreen.tsx',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'apps/mobile/src/screens/MainScreen.tsx',
+    );
   });
 
   it('includes apply_patch move destinations in file change timeline entries', () => {
@@ -1114,9 +1142,15 @@ describe('chatMapping', () => {
       }),
     );
 
-    expect(chat.messages[0].content).toContain('OldName.tsx +1 more');
-    expect(chat.messages[0].content).toContain('apps/mobile/src/screens/OldName.tsx');
-    expect(chat.messages[0].content).toContain('apps/mobile/src/screens/NewName.tsx');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'OldName.tsx +1 more',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'apps/mobile/src/screens/OldName.tsx',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'apps/mobile/src/screens/NewName.tsx',
+    );
   });
 
   it('maps reasoning items into visible transcript system messages', () => {
@@ -1148,10 +1182,14 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(2);
-    expect(chat.messages[0].role).toBe('reasoning');
-    expect(chat.messages[0].content).toContain('• Reasoning');
-    expect(chat.messages[0].content).toContain('Inspecting the current workspace');
-    expect(chat.messages[1].role).toBe('assistant');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('reasoning');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Reasoning',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Inspecting the current workspace',
+    );
+    expect(requireTestValue(chat.messages[1], 'indexed test value').role).toBe('assistant');
   });
 
   it('maps context compaction into a dedicated system message kind', () => {
@@ -1177,14 +1215,13 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('activity');
-    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(
-      COMPACTION_ACTIVITY_TYPE,
-    );
-    if (chat.messages[0].role !== 'activity') {
+    const activity = requireTestValue(chat.messages[0], 'compaction activity');
+    expect(activity.role).toBe('activity');
+    if (activity.role !== 'activity') {
       throw new Error('expected activity message');
     }
-    expect(chat.messages[0].content.text).toContain('Compacted conversation context');
+    expect(activity.activityType).toBe(COMPACTION_ACTIVITY_TYPE);
+    expect(activity.content.text).toContain('Compacted conversation context');
   });
 
   it('maps reasoning items that use content arrays', () => {
@@ -1215,9 +1252,11 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('reasoning');
-    expect(chat.messages[0].content).toContain('Checking how the bridge forwards live events.');
-    expect(chat.messages[0].content).toContain(
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('reasoning');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Checking how the bridge forwards live events.',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
       'Comparing persisted thread items with live deltas.',
     );
   });
@@ -1251,9 +1290,11 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('reasoning');
-    expect(chat.messages[0].content).toContain('• Reasoning');
-    expect(chat.messages[0].content).toContain(
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('reasoning');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Reasoning',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
       'Read the transcript mapper and checked tool item shapes.',
     );
   });
@@ -1285,9 +1326,13 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('assistant');
-    expect(chat.messages[0].content).toContain('Here is the QR code');
-    expect(chat.messages[0].content).toContain('[local image: /tmp/bridge-pairing-qr.png]');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('assistant');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Here is the QR code',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '[local image: /tmp/bridge-pairing-qr.png]',
+    );
   });
 
   it('maps assistant structured content arrays using responses api item types', () => {
@@ -1318,9 +1363,13 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('assistant');
-    expect(chat.messages[0].content).toContain('Window snapshot attached');
-    expect(chat.messages[0].content).toContain(`[image: ${dataUrl}]`);
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('assistant');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Window snapshot attached',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      `[image: ${dataUrl}]`,
+    );
   });
 
   it('extracts the latest structured persisted plan for workflow rehydration', () => {
@@ -1525,17 +1574,16 @@ describe('chatMapping', () => {
     expect(chat.agentNickname).toBe('Atlas');
     expect(chat.agentRole).toBe('explorer');
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('activity');
-    expect(chat.messages[0].role === 'activity' && chat.messages[0].activityType).toBe(
-      SUBAGENT_ACTIVITY_TYPE,
-    );
-    if (chat.messages[0].role !== 'activity') {
+    const activity = requireTestValue(chat.messages[0], 'sub-agent activity');
+    expect(activity.role).toBe('activity');
+    if (activity.role !== 'activity') {
       throw new Error('expected activity message');
     }
-    expect(chat.messages[0].content.text).toContain('• Spawned sub-agent');
-    expect(chat.messages[0].content.text).toContain('Prompt: Inspect the websocket protocol');
-    expect(chat.messages[0].content.text).toContain('Thread: thr_sub');
-    expect(chat.messages[0].content.subAgent).toEqual({
+    expect(activity.activityType).toBe(SUBAGENT_ACTIVITY_TYPE);
+    expect(activity.content.text).toContain('• Spawned sub-agent');
+    expect(activity.content.text).toContain('Prompt: Inspect the websocket protocol');
+    expect(activity.content.text).toContain('Thread: thr_sub');
+    expect(activity.content.subAgent).toEqual({
       tool: 'spawn_agent',
       prompt: 'Inspect the websocket protocol and summarize it',
       senderThreadId: 'thr_root',
@@ -1572,10 +1620,16 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('user');
-    expect(chat.messages[0].content).toContain('please review these files');
-    expect(chat.messages[0].content).toContain('[file: apps/mobile/src/screens/MainScreen.tsx]');
-    expect(chat.messages[0].content).toContain('[file: apps/mobile/src/api/client.ts]');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('user');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'please review these files',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '[file: apps/mobile/src/screens/MainScreen.tsx]',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '[file: apps/mobile/src/api/client.ts]',
+    );
   });
 
   it('maps structured tool results with screenshots into previewable system details', () => {
@@ -1617,10 +1671,16 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain('• Called tool `computer_use / get_app_state`');
-    expect(chat.messages[0].content).toContain('Computer Use state');
-    expect(chat.messages[0].content).toContain(`[image: ${dataUrl}]`);
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Called tool `computer_use / get_app_state`',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Computer Use state',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      `[image: ${dataUrl}]`,
+    );
   });
 
   it('maps mcp tool result structuredContent screenshots into previewable system details', () => {
@@ -1664,10 +1724,16 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain('• Called tool `computer-use / get_app_state`');
-    expect(chat.messages[0].content).toContain('Computer Use state');
-    expect(chat.messages[0].content).toContain(`[image: ${dataUrl}]`);
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Called tool `computer-use / get_app_state`',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Computer Use state',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      `[image: ${dataUrl}]`,
+    );
   });
 
   it('maps raw image data parts in tool results into previewable screenshots', () => {
@@ -1710,10 +1776,16 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain('• Called tool `computer-use / get_app_state`');
-    expect(chat.messages[0].content).toContain('Computer Use state');
-    expect(chat.messages[0].content).toContain(`[image: data:image/png;base64,${base64Image}]`);
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Called tool `computer-use / get_app_state`',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      'Computer Use state',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      `[image: data:image/png;base64,${base64Image}]`,
+    );
   });
 
   it('keeps imageview as a compact tool event with the viewed filename', () => {
@@ -1740,9 +1812,13 @@ describe('chatMapping', () => {
     );
 
     expect(chat.messages).toHaveLength(1);
-    expect(chat.messages[0].role).toBe('tool');
-    expect(chat.messages[0].content).toContain('• Viewed image bridge-pairing-qr.png');
-    expect(chat.messages[0].content).toContain('/tmp/bridge-pairing-qr.png');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').role).toBe('tool');
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '• Viewed image bridge-pairing-qr.png',
+    );
+    expect(requireTestValue(chat.messages[0], 'indexed test value').content).toContain(
+      '/tmp/bridge-pairing-qr.png',
+    );
   });
 
   it('covers primitive readers, preview truncation, and malformed raw payloads', () => {
@@ -1869,7 +1945,7 @@ describe('chatMapping', () => {
       }),
     );
 
-    const text = chat.messages.map((message) => message.content).join('\n');
+    const text = chat.messages.map(getMessageText).join('\n');
     expect(text).toContain('Command failed `command`');
     expect(text).toContain('exit code 2');
     expect(text).toContain('Tool failed `MCP tool call`');
@@ -1899,12 +1975,13 @@ describe('chatMapping', () => {
         turns: [{ items: [{ type: 'collabToolCall', tool, status }] }],
       }),
     );
-    expect(chat.messages[0].role).toBe('activity');
-    if (chat.messages[0].role !== 'activity') {
+    const activity = requireTestValue(chat.messages[0], 'collaboration activity');
+    expect(activity.role).toBe('activity');
+    if (activity.role !== 'activity') {
       throw new Error('expected activity message');
     }
-    expect(chat.messages[0].content.text).toContain(expected);
-    expect(chat.messages[0].content.subAgent).toEqual(expect.objectContaining({ tool }));
+    expect(activity.content.text).toContain(expected);
+    expect(activity.content.subAgent).toEqual(expect.objectContaining({ tool }));
   });
 
   it('maps web actions and file changes with empty and multiple targets', () => {
@@ -1927,10 +2004,10 @@ describe('chatMapping', () => {
         ],
       }),
     );
-    expect(chat.messages.map((message) => message.content).join('\n')).toContain(
+    expect(chat.messages.map(getMessageText).join('\n')).toContain(
       'https://example.com | pattern: target',
     );
-    expect(chat.messages.map((message) => message.content).join('\n')).toContain('one.ts +1 more');
+    expect(chat.messages.map(getMessageText).join('\n')).toContain('one.ts +1 more');
   });
 
   it('rejects malformed plans and maps alternate steps and statuses', () => {
@@ -2006,7 +2083,7 @@ describe('chatMapping', () => {
         ],
       }),
     );
-    const text = chat.messages.map((message) => message.content).join('\n');
+    const text = chat.messages.map(getMessageText).join('\n');
     expect(text).toContain('nested text');
     expect(text).toContain('fallback text');
     expect(text).toContain('structured reasoning');
@@ -2453,11 +2530,7 @@ describe('chatMapping', () => {
       expect(chat.messages.map((message) => message.role)).toEqual(
         expect.arrayContaining(['reasoning', 'activity']),
       );
-      expect(
-        chat.messages
-          .map((message) => (message.role === 'activity' ? message.content.text : message.content))
-          .join('\n'),
-      ).toMatch(
+      expect(chat.messages.map(getMessageText).join('\n')).toMatch(
         /Command failed|Tool failed|Running command|Calling tool|Spawned sub-agent|Searched web|Viewed image|Entered review mode|Compacted/,
       );
     });
@@ -2556,7 +2629,7 @@ describe('chatMapping', () => {
           { step: 'done', status: 'completed' },
         ],
       });
-      expect(chat.messages.map((message) => message.content).join('\n')).toMatch(
+      expect(chat.messages.map(getMessageText).join('\n')).toMatch(
         /Ran `true`|Called tool|Command failed|Searched web|Applied file changes|Sub-agent spawn failed/,
       );
     });
@@ -2641,7 +2714,7 @@ describe('chatMapping', () => {
           },
         ],
       });
-      expect(structured.messages.map((message) => message.content).join('\n')).toMatch(
+      expect(structured.messages.map(getMessageText).join('\n')).toMatch(
         /plain|image\/png|remote\.png|src\/a\.ts|summary|Called tool/,
       );
     });
@@ -2684,7 +2757,7 @@ describe('chatMapping', () => {
             id: 'turn',
             status: 'completed',
             items: malformedItems([
-              3 as never,
+              3,
               { type: 'commandExecution', status: undefined, aggregatedOutput: '', exitCode: 7 },
               {
                 type: 'mcpToolCall',
@@ -2716,7 +2789,7 @@ describe('chatMapping', () => {
           },
         ],
       });
-      expect(chat.messages.map((message) => message.content).join('\n')).toMatch(
+      expect(chat.messages.map(getMessageText).join('\n')).toMatch(
         /exit code 7|fallback result|Command failed|Running command|Searched web|Applied file changes/,
       );
 

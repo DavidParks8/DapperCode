@@ -1,12 +1,13 @@
 import { readString, toRecord } from '../runtimeValidation';
 import {
   normalizeLifecycleStatus,
+  type RawAcpSnapshot,
   type RawThread,
   type RawTurn,
 } from './chatMappingRawTypesAndReaders';
 import { normalizeType } from './chatMappingToolArgumentParsers';
 import { toPlanSnapshot } from './chatMappingPlanParsing';
-import { type ChatPlanSnapshot } from './types';
+import type { ChatPlanSnapshot } from './types';
 
 export function extractChatPlans(raw: RawThread): {
   latestPlan: ChatPlanSnapshot | null;
@@ -16,11 +17,12 @@ export function extractChatPlans(raw: RawThread): {
 } {
   const threadId = raw.id?.trim();
   const turns = Array.isArray(raw.turns) ? raw.turns : [];
-  const latestTurn = turns.length > 0 ? turns[turns.length - 1] : null;
+  const latestTurn = turns.at(-1) ?? null;
   const latestTurnStatus = readString(latestTurn?.status);
   const activeTurnId = extractActiveTurnId(turns);
-  if (threadId && raw.acpSnapshot) {
-    return extractSnapshotPlans(raw, threadId);
+  const snapshot = raw.acpSnapshot;
+  if (threadId && snapshot) {
+    return extractSnapshotPlans(snapshot, threadId);
   }
   if (!threadId || turns.length === 0) {
     return {
@@ -34,10 +36,9 @@ export function extractChatPlans(raw: RawThread): {
 }
 
 function extractSnapshotPlans(
-  raw: RawThread,
+  snapshot: RawAcpSnapshot,
   threadId: string,
 ): ReturnType<typeof extractChatPlans> {
-  const snapshot = raw.acpSnapshot!;
   const steps = snapshot.plan.map((entry) => ({
     step: entry.content,
     status: snapshotPlanStepStatus(entry.status),
@@ -84,7 +85,7 @@ function extractTurnPlans(
       if (!itemRecord) {
         continue;
       }
-      const itemType = normalizeType(readString(itemRecord.type) ?? '');
+      const itemType = normalizeType(readString(itemRecord['type']) ?? '');
       if (itemType !== 'plan') {
         continue;
       }
@@ -105,6 +106,9 @@ function extractTurnPlans(
 export function extractActiveTurnId(turns: RawTurn[]): string | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
+    if (!turn) {
+      continue;
+    }
     const turnId = readString(turn.id)?.trim();
     const turnStatus = normalizeLifecycleStatus(readString(turn.status));
     if (

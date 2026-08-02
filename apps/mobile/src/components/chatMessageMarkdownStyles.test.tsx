@@ -17,7 +17,7 @@ const LIBRARY_DEFAULT_HR_BACKGROUND = '#000000';
 const LIBRARY_DEFAULT_BORDER = '#000000';
 
 function flattenViewStyle(node: ReactTestInstance): ViewStyle {
-  return (StyleSheet.flatten(node.props.style as ViewStyle) ?? {}) as ViewStyle;
+  return StyleSheet.flatten(node.props['style'] as ViewStyle) ?? {};
 }
 
 function renderMarkdownViewStyles(styles: object, markdown: string): ViewStyle[] {

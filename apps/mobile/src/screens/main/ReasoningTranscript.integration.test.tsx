@@ -131,11 +131,12 @@ describe('reasoning transcript lifecycle', () => {
     expect(hasText(root, 'Inspecting the active transcript')).toBe(false);
     const control = root.findAll(
       (node) =>
-        node.props.accessibilityLabel === 'Reasoning' && typeof node.props.onPress === 'function',
+        node.props['accessibilityLabel'] === 'Reasoning' &&
+        typeof node.props['onPress'] === 'function',
     )[0];
-    expect(control?.props.accessibilityState).toEqual({ disabled: false, expanded: false });
+    expect(control?.props['accessibilityState']).toEqual({ disabled: false, expanded: false });
     act(() => {
-      (control?.props.onPress as (() => void) | undefined)?.();
+      (control?.props['onPress'] as (() => void) | undefined)?.();
     });
     expect(hasText(root, 'Inspecting the active transcript')).toBe(true);
     expect(root.findAllByType(FlatList)).toHaveLength(1);

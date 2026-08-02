@@ -1,7 +1,17 @@
-import { appendText, appendToolResult } from './agUiMessageMutations';
+import { appendText, appendToolResult, textMessage } from './agUiMessageMutations';
 import { createAgUiThreadMessageState } from './agUiMessagesState';
 
 describe('agUiMessageMutations', () => {
+  it('defaults unknown runtime roles from bridge events to assistant messages', () => {
+    const runtimeRole = 'future-bridge-role' as Parameters<typeof textMessage>[1];
+
+    expect(textMessage('message', runtimeRole, 'Hello')).toMatchObject({
+      id: 'message',
+      role: 'assistant',
+      content: 'Hello',
+    });
+  });
+
   it('updates an indexed streaming message without scanning or mapping the message array', () => {
     let state = appendText(
       createAgUiThreadMessageState(),

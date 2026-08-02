@@ -65,7 +65,8 @@ function textContent(node: QueryableInstance): string {
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
@@ -74,7 +75,7 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
 }
 
 function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
-  const style = node.props.style;
+  const style = node.props['style'];
   return typeof style === 'function' ? style({ pressed }) : style;
 }
 
@@ -142,18 +143,18 @@ describe('ApprovalBanner', () => {
       await Promise.resolve();
     });
     expect(onResolve).toHaveBeenCalledWith('approval-1', 'allow');
-    expect(findPressable(root, 'Allow').props.accessibilityState).toEqual({
+    expect(findPressable(root, 'Allow').props['accessibilityState']).toEqual({
       disabled: true,
       busy: true,
     });
-    expect(findPressable(root, 'Reject').props.accessibilityState).toEqual({
+    expect(findPressable(root, 'Reject').props['accessibilityState']).toEqual({
       disabled: true,
       busy: false,
     });
     // Dense action buttons must still resolve to the platform minimum effective touch target.
-    expect(allow.props.hitSlop).toBeDefined();
+    expect(allow.props['hitSlop']).toBeDefined();
     await act(async () => finishResolution?.());
-    expect(findPressable(root, 'Allow').props.accessibilityState).toEqual({
+    expect(findPressable(root, 'Allow').props['accessibilityState']).toEqual({
       disabled: false,
       busy: false,
     });

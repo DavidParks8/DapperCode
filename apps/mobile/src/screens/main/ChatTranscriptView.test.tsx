@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
 import { FlatList, Keyboard, Platform, Pressable } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -165,9 +166,9 @@ describe('ChatTranscriptView magical scroll rail', () => {
     );
     expect(tree.root.findAllByProps({ testID: 'chat-scroll-rail-bar-approval' })).toHaveLength(0);
     const gesture = mockGestureByTestId('chat-scroll-rail-pan');
-    expect(gesture.config.hitSlop).toEqual({ width: CHAT_SCROLL_RAIL_TOUCH_WIDTH, right: 0 });
-    expect(gesture.config.activateAfterLongPress).toBe(CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS);
-    expect(gesture.config.maxPointers).toBe(1);
+    expect(gesture.config['hitSlop']).toEqual({ width: CHAT_SCROLL_RAIL_TOUCH_WIDTH, right: 0 });
+    expect(gesture.config['activateAfterLongPress']).toBe(CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS);
+    expect(gesture.config['maxPointers']).toBe(1);
     act(() => tree.unmount());
   });
 
@@ -181,7 +182,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const scrollToOffset = jest.fn();
     const scrollRef = {
       current: null,
-    } as React.MutableRefObject<FlatList<never> | null>;
+    } as React.RefObject<FlatList<never> | null>;
     const autoScrollStateRef = {
       current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: true },
     };
@@ -208,7 +209,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
       isUserInteracting: true,
       isMomentumScrolling: false,
     });
-    expect(getList(tree).props.scrollEnabled).toBe(false);
+    expect(getList(tree).props['scrollEnabled']).toBe(false);
     expect(scrollToIndex).toHaveBeenLastCalledWith({
       index: expect.any(Number),
       animated: false,
@@ -228,7 +229,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     act(() => {
       gesture.onFinalize?.({ y: 164 });
     });
-    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(getList(tree).props['scrollEnabled']).toBe(true);
     expect(autoScrollStateRef.current.isUserInteracting).toBe(false);
     const settledJumpCount = scrollToIndex.mock.calls.length;
     update(tree, {
@@ -275,7 +276,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const phoneRail = (phoneTree as QueryableRenderer).root.findByProps({
       testID: 'chat-scroll-rail',
     }) as Queryable;
-    expect((phoneRail.props.style as Array<{ opacity?: number }>)[1]?.opacity).toBe(0);
+    expect((phoneRail.props['style'] as Array<{ opacity?: number }>)[1]?.opacity).toBe(0);
     act(() => phoneTree?.unmount());
 
     let tabletTree: ReactTestRenderer | undefined;
@@ -298,7 +299,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const tabletRail = (tabletTree as QueryableRenderer).root.findByProps({
       testID: 'chat-scroll-rail',
     }) as Queryable;
-    expect((tabletRail.props.style as Array<{ opacity?: number }>)[1]?.opacity).toBe(1);
+    expect((tabletRail.props['style'] as Array<{ opacity?: number }>)[1]?.opacity).toBe(1);
     act(() => tabletTree?.unmount());
   });
 
@@ -329,7 +330,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const gesture = mockGestureByTestId('chat-scroll-rail-pan');
     act(() => gesture.onStart?.({ y: 120 }));
 
-    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(getList(tree).props['scrollEnabled']).toBe(true);
     expect(onScrollInteractionStart).not.toHaveBeenCalled();
     expect(Haptics.impactAsync).not.toHaveBeenCalled();
     act(() => tree.unmount());
@@ -346,13 +347,13 @@ describe('ChatTranscriptView magical scroll rail', () => {
     act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
     const gesture = mockGestureByTestId('chat-scroll-rail-pan');
     act(() => gesture.onStart?.({ y: 140 }));
-    expect(getList(tree).props.scrollEnabled).toBe(false);
+    expect(getList(tree).props['scrollEnabled']).toBe(false);
 
     update(tree, {
       chat: makeChat({ id: 'second', messages: makeMessages(4) }),
       autoScrollStateRef,
     });
-    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(getList(tree).props['scrollEnabled']).toBe(true);
     expect(autoScrollStateRef.current.isUserInteracting).toBe(false);
     act(() => tree.unmount());
   });
@@ -361,7 +362,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const scrollToIndex = jest.fn();
     const scrollRef = {
       current: null,
-    } as React.MutableRefObject<FlatList<never> | null>;
+    } as React.RefObject<FlatList<never> | null>;
     const first = makeChat({ id: 'first-long', messages: makeMessages(80) });
     const second = makeChat({ id: 'second-long', messages: makeMessages(80) });
     const tree = render({
@@ -396,14 +397,14 @@ describe('ChatTranscriptView magical scroll rail', () => {
     const scrollToIndex = jest.fn();
     const scrollRef = {
       current: null,
-    } as React.MutableRefObject<FlatList<never> | null>;
+    } as React.RefObject<FlatList<never> | null>;
     const tree = render({
       chat: makeChat({ messages: makeMessages(80) }),
       scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
     });
     act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
     let list = getList(tree);
-    expect(list.props.viewabilityConfig).toEqual({ viewAreaCoveragePercentThreshold: 1 });
+    expect(list.props['viewabilityConfig']).toEqual({ viewAreaCoveragePercentThreshold: 1 });
     const oldestDisplayItem = list.props.data[79];
     act(() =>
       list.props.onViewableItemsChanged({
@@ -440,9 +441,9 @@ describe('ChatTranscriptView continuation', () => {
       onLoadEarlier,
     });
     const list = tree.root.findByType(FlatList);
-    expect(list.props.inverted).toBe(true);
-    expect(list.props.maintainVisibleContentPosition).toEqual({ minIndexForVisible: 0 });
-    const loadBoundary = list.props.ListFooterComponent as React.ReactElement<{
+    expect(list.props['inverted']).toBe(true);
+    expect(list.props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 0 });
+    const loadBoundary = list.props['ListFooterComponent'] as React.ReactElement<{
       onPress: () => void;
     }>;
     act(() => loadBoundary.props.onPress());
@@ -464,7 +465,7 @@ describe('ChatTranscriptView continuation', () => {
         </AppThemeProvider>,
       ),
     );
-    expect(findText(tree.root as Queryable, 'Loading earlier history...')).toBeTruthy();
+    expect(findText(tree.root, 'Loading earlier history...')).toBeTruthy();
 
     act(() =>
       tree.update(
@@ -482,9 +483,7 @@ describe('ChatTranscriptView continuation', () => {
         </AppThemeProvider>,
       ),
     );
-    expect(
-      findText(tree.root as Queryable, 'Earlier history failed to load. Tap to retry.'),
-    ).toBeTruthy();
+    expect(findText(tree.root, 'Earlier history failed to load. Tap to retry.')).toBeTruthy();
 
     act(() =>
       tree.update(
@@ -522,17 +521,13 @@ describe('ChatTranscriptView continuation', () => {
         </AppThemeProvider>,
       ),
     );
-    expect(
-      findText(tree.root as Queryable, '3 older history entries are no longer available.'),
-    ).toBeTruthy();
+    expect(findText(tree.root, '3 older history entries are no longer available.')).toBeTruthy();
 
     update(tree, {
       continuationState: { loading: false, error: null, exhausted: true, unavailableCount: 1 },
       onLoadEarlier,
     });
-    expect(
-      findText(tree.root as Queryable, '1 older history entry is no longer available.'),
-    ).toBeTruthy();
+    expect(findText(tree.root, '1 older history entry is no longer available.')).toBeTruthy();
     act(() => tree.unmount());
   });
 
@@ -621,7 +616,7 @@ describe('ChatTranscriptView continuation', () => {
     const jump = tree.root.findByProps({
       accessibilityLabel: 'Jump to latest message',
     }) as Queryable;
-    const hitSlop = jump.props.hitSlop as
+    const hitSlop = jump.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
@@ -650,10 +645,10 @@ describe('ChatTranscriptView continuation', () => {
     const tree = render({ chat: largeChat, onPinnedAutoScroll });
     let list = getList(tree);
     expect(list.props.data).toHaveLength(80);
-    expect(list.props.initialNumToRender).toBe(18);
-    expect(list.props.maxToRenderPerBatch).toBe(12);
-    expect(list.props.updateCellsBatchingPeriod).toBe(32);
-    expect(list.props.windowSize).toBe(13);
+    expect(list.props['initialNumToRender']).toBe(18);
+    expect(list.props['maxToRenderPerBatch']).toBe(12);
+    expect(list.props['updateCellsBatchingPeriod']).toBe(32);
+    expect(list.props['windowSize']).toBe(13);
 
     act(() => list.props.onLayout({ nativeEvent: { layout: { height: 200 } } }));
     list = getList(tree);
@@ -748,14 +743,14 @@ describe('ChatTranscriptView continuation', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     const androidTree = render({ bottomInset: 24 });
     const androidList = getList(androidTree);
-    expect(androidList.props.keyboardDismissMode).toBe('on-drag');
+    expect(androidList.props['keyboardDismissMode']).toBe('on-drag');
     expect(androidList.props.contentContainerStyle[1]).toEqual({ paddingTop: 24 });
     act(() => androidTree.unmount());
 
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     const iosTree = render({ bottomInset: 12 });
     const iosList = getList(iosTree);
-    expect(iosList.props.keyboardDismissMode).toBe('interactive');
+    expect(iosList.props['keyboardDismissMode']).toBe('interactive');
     expect(iosList.props.contentContainerStyle[1]).toEqual({ paddingBottom: 12 });
     act(() => iosTree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
@@ -776,7 +771,7 @@ describe('ChatTranscriptView continuation', () => {
     update(tree, { chat: second, autoScrollStateRef });
     const list = getList(tree);
     expect(list.props.data).toHaveLength(20);
-    expect(list.props.accessibilityLabel).toBe('Chat transcript');
+    expect(list.props['accessibilityLabel']).toBe('Chat transcript');
     expect(tree.root.findAllByType(Pressable)).toHaveLength(0);
     expect(autoScrollStateRef.current).toEqual({
       shouldStickToBottom: true,
@@ -828,7 +823,7 @@ describe('ChatTranscriptView continuation', () => {
     for (const changedChat of changedChats) {
       const changedTree = render({ chat: stableChat });
       update(changedTree, { chat: changedChat });
-      expect(getList(changedTree).props.extraData).toBe(changedChat.status);
+      expect(getList(changedTree).props['extraData']).toBe(changedChat.status);
       act(() => changedTree.unmount());
     }
 
@@ -897,13 +892,13 @@ describe('ChatTranscriptView continuation', () => {
       onInlineOptionSelect,
     });
     const list = getList(tree);
-    const messageItem = list.props.data.find((item) => item.kind === 'message');
-    const toolItem = list.props.data.find((item) => item.kind === 'toolInvocation');
+    const messageItem = list.props.data.find((item) => item['kind'] === 'message');
+    const toolItem = list.props.data.find((item) => item['kind'] === 'toolInvocation');
     if (!messageItem || !toolItem) {
       throw new Error('Expected message and tool items');
     }
-    expect(list.props.keyExtractor(messageItem)).toBe(messageItem.renderKey);
-    expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);
+    expect(list.props.keyExtractor(messageItem)).toBe(messageItem['renderKey']);
+    expect(list.props.keyExtractor(toolItem)).toBe(toolItem['id']);
 
     const renderedMessage = list.props.renderItem({
       item: messageItem,
@@ -930,15 +925,21 @@ describe('ChatTranscriptView continuation', () => {
       throw new Error('Expected rendered tool item');
     }
     expect(options).toHaveLength(2);
-    expect(options[0].props.style({ pressed: false })[1]).toBe(false);
-    expect(options[0].props.style({ pressed: true })[1]).toBeTruthy();
-    expect(options[1].props.accessibilityHint).toBe('Fills the reply box with this answer');
-    act(() => options[0].props.onPress());
+    expect(
+      requireTestValue(options[0], 'indexed test value').props.style({ pressed: false })[1],
+    ).toBe(false);
+    expect(
+      requireTestValue(options[0], 'indexed test value').props.style({ pressed: true })[1],
+    ).toBeTruthy();
+    expect(requireTestValue(options[1], 'indexed test value').props.accessibilityHint).toBe(
+      'Fills the reply box with this answer',
+    );
+    act(() => requireTestValue(options[0], 'indexed test value').props.onPress());
     expect(onInlineOptionSelect).toHaveBeenCalledWith('Fast');
     expect((toolTree as QueryableRenderer).toJSON()).toBeTruthy();
 
     const noChoicesTree = render({
-      chat: makeChat({ messages: [messages[1]] }),
+      chat: makeChat({ messages: [requireTestValue(messages[1], 'indexed test value')] }),
       inlineChoicesEnabled: false,
     });
     const noChoicesList = getList(noChoicesTree);
@@ -989,7 +990,7 @@ describe('ChatTranscriptView continuation', () => {
       },
     ];
     const tree = render({ chat: makeChat({ messages }) });
-    const groupItem = getList(tree).props.data.find((item) => item.kind === 'toolGroup');
+    const groupItem = getList(tree).props.data.find((item) => item['kind'] === 'toolGroup');
     if (!groupItem) {
       throw new Error('Expected a computer-use tool group');
     }

@@ -35,12 +35,7 @@ import {
   type TurnInputLocalImage,
   type TurnInputMention,
 } from './clientContractsAndSnapshotInternals';
-import {
-  type Chat,
-  type ChatSummary,
-  type GitPushResponse,
-  type SendChatMessageRequest,
-} from './types';
+import type { Chat, ChatSummary, GitPushResponse, SendChatMessageRequest } from './types';
 
 function emptyPreparedTurn(threadId: string): PreparedTurnRequest {
   return {

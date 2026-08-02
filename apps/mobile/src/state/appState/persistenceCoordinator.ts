@@ -94,7 +94,7 @@ export class AppStatePersistenceCoordinator {
 
   private async loadInitialState(): Promise<void> {
     try {
-      const raw = await this.persistence.readCurrent().catch((error) => {
+      const raw = await this.persistence.readCurrent().catch((error: unknown) => {
         throw persistenceError('read_failed', 'load', 'Could not load saved app state.', error);
       });
       if (raw !== null) {
@@ -117,7 +117,7 @@ export class AppStatePersistenceCoordinator {
   }
 
   private async importLegacyState(): Promise<void> {
-    const legacy = await this.persistence.readLegacy().catch((error) => {
+    const legacy = await this.persistence.readLegacy().catch((error: unknown) => {
       throw persistenceError(
         'read_failed',
         'import',

@@ -10,6 +10,7 @@ import { useEffect, useRef } from 'react';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification, type AgUiEventEnvelope } from '../../api/agUi';
+import { EventType } from '@ag-ui/core';
 import type {
   MainScreenReplayRecoveryEngineContext,
   MainScreenReplayRecoveryEngineResult,
@@ -116,7 +117,7 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
       const eventContext = eventContextRef.current;
       const currentId = eventContext.chatIdRef.current;
       const agUiEnvelope = parseAgUiEventNotification(event);
-      if (agUiEnvelope?.event.type === 'TEXT_MESSAGE_CONTENT') {
+      if (agUiEnvelope?.event.type === EventType.TEXT_MESSAGE_CONTENT) {
         pendingTextEvents.push(agUiEnvelope);
         animationFrame ??= requestAnimationFrame(flushTextEvents);
         return;

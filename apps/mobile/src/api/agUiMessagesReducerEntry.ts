@@ -1,5 +1,5 @@
 import { reduceThreadState } from './agUiThreadEventReducer';
-import { type AgUiEventEnvelope } from './agUi';
+import type { AgUiEventEnvelope } from './agUi';
 import { type AgUiMessageState, createAgUiThreadMessageState } from './agUiMessagesState';
 
 export function reduceAgUiMessageState(

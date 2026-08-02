@@ -1,10 +1,11 @@
 import { parseAgUiEventNotification } from './agUi';
-import { type RpcNotification } from './types';
-import { type TurnCompletionSnapshot } from './wsTypes';
+import type { RpcNotification } from './types';
+import type { TurnCompletionSnapshot } from './wsTypes';
 import { readIntegerLike } from '../runtimeValidation';
+import { EventType } from '@ag-ui/core';
 
 export function readEventId(record: Record<string, unknown>): number | null {
-  const eventId = readIntegerLike(record.eventId) ?? readIntegerLike(record.event_id);
+  const eventId = readIntegerLike(record['eventId']) ?? readIntegerLike(record['event_id']);
   if (eventId === null || eventId < 1) {
     return null;
   }
@@ -22,7 +23,7 @@ export function toAgUiTurnCompletionSnapshot(
   if (!envelope?.sourceTurnId) {
     return null;
   }
-  if (envelope.event.type === 'RUN_FINISHED') {
+  if (envelope.event.type === EventType.RUN_FINISHED) {
     return {
       threadId: envelope.threadId,
       turnId: envelope.sourceTurnId,
@@ -31,7 +32,7 @@ export function toAgUiTurnCompletionSnapshot(
       completedAt: Date.now(),
     };
   }
-  if (envelope.event.type === 'RUN_ERROR') {
+  if (envelope.event.type === EventType.RUN_ERROR) {
     return {
       threadId: envelope.threadId,
       turnId: envelope.sourceTurnId,

@@ -171,7 +171,7 @@ function projectAuthoritativeLiveMessages(
         // Ordered parts win over `content` when rendering, so drop them when
         // they no longer describe the authoritative snapshot text.
         parts: partsMatchMessageContent(parts, message.content) ? parts : undefined,
-      } as ChatMessage;
+      };
     });
 }
 

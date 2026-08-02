@@ -3,7 +3,7 @@ import { getMessageText } from './messages';
 import { mapChatSummary } from './chatMappingSnapshotAndSummaryProjection';
 import { mapMessages } from './chatMappingMessageProjection';
 import { readCoercedFiniteNumber, readString, toRecord } from '../runtimeValidation';
-import { type AgentId, type Chat } from './types';
+import type { AgentId, Chat } from './types';
 import {
   type RawAcpSnapshot,
   type RawThread,
@@ -14,19 +14,19 @@ import {
 
 export function readThreadItemText(item: RawThreadItem): string {
   const record = toRecord(item);
-  const text = readString(record?.text);
+  const text = readString(record?.['text']);
   if (text) {
     return text;
   }
-  const content = Array.isArray(record?.content) ? record.content : [];
+  const content = Array.isArray(record?.['content']) ? record['content'] : [];
   if (content.length === 0) {
     return '';
   }
   return content
     .map((entry) => {
       const contentEntry = toRecord(entry);
-      return readString(contentEntry?.type) === 'text'
-        ? (readString(contentEntry?.text) ?? '')
+      return readString(contentEntry?.['type']) === 'text'
+        ? (readString(contentEntry?.['text']) ?? '')
         : '';
     })
     .filter((entry) => entry.length > 0)
@@ -46,16 +46,16 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
   if (!sourceRecord) {
     return {};
   } // Legacy shape used by older adapters.
-  const legacyKind = readString(sourceRecord.kind);
+  const legacyKind = readString(sourceRecord['kind']);
   if (legacyKind) {
     return withSourceFields(legacyKind, sourceRecord);
   }
   // Current app-server shape: { subAgent: ... } tagged union.
-  const subAgentValue = sourceRecord.subAgent ?? sourceRecord.subagent;
+  const subAgentValue = sourceRecord['subAgent'] ?? sourceRecord['subagent'];
   if (subAgentValue !== undefined) {
     return readSubAgentSourceMetadata(subAgentValue);
   }
-  const typeKind = readString(sourceRecord.type);
+  const typeKind = readString(sourceRecord['type']);
   if (typeKind && typeKind.startsWith('subAgent')) {
     return withSourceFields(typeKind, sourceRecord);
   }
@@ -70,11 +70,11 @@ function readSubAgentSourceMetadata(subAgent: unknown): ThreadSourceMetadata {
   if (!subAgentRecord) {
     return { kind: 'subAgent' };
   }
-  const threadSpawn = toRecord(subAgentRecord.thread_spawn);
+  const threadSpawn = toRecord(subAgentRecord['thread_spawn']);
   if (threadSpawn) {
     return withSourceFields('subAgentThreadSpawn', threadSpawn);
   }
-  return readString(subAgentRecord.other)
+  return readString(subAgentRecord['other'])
     ? { kind: 'subAgentOther' }
     : withSourceFields('subAgent', subAgentRecord);
 }
@@ -93,11 +93,11 @@ function withSourceFields(kind: string, source: Record<string, unknown>): Thread
   return {
     kind,
     parentThreadId:
-      readString(source.parentThreadId) ?? readString(source.parent_thread_id) ?? undefined,
+      readString(source['parentThreadId']) ?? readString(source['parent_thread_id']) ?? undefined,
     subAgentDepth:
-      readCoercedFiniteNumber(source.depth) ??
-      readCoercedFiniteNumber(source.agentDepth) ??
-      readCoercedFiniteNumber(source.agent_depth) ??
+      readCoercedFiniteNumber(source['depth']) ??
+      readCoercedFiniteNumber(source['agentDepth']) ??
+      readCoercedFiniteNumber(source['agent_depth']) ??
       undefined,
   };
 }
@@ -109,10 +109,10 @@ export function mapChat(raw: RawThread): Chat {
   }
   const messages = mapMessages(raw, summary.createdAt);
   const plans = extractChatPlans(raw);
-  const lastPreview =
-    messages.length > 0
-      ? toPreview(getMessageText(messages[messages.length - 1]))
-      : summary.lastMessagePreview;
+  const lastMessage = messages.at(-1);
+  const lastPreview = lastMessage
+    ? toPreview(getMessageText(lastMessage))
+    : summary.lastMessagePreview;
   return {
     ...summary,
     lastMessagePreview: lastPreview,

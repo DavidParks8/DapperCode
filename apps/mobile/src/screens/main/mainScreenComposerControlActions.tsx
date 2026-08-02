@@ -10,7 +10,7 @@ import { activityAtom } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { AgentId, ServiceTier } from '../../api/types';
-import { type SelectionSheetOption } from '../../components/SelectionSheet';
+import type { SelectionSheetOption } from '../../components/SelectionSheet';
 import { normalizeModelId } from './mainScreenHelpers';
 import { agentModelPreferenceKey } from './mainScreenHelperPreferences';
 import { ATTACHMENT_MAX_LABEL } from './controllers/attachmentController';

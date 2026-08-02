@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import { AccessibilityInfo, Alert, StyleSheet, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -45,9 +46,9 @@ function hasText(root: Queryable, text: string): boolean {
 function findRunButton(root: Queryable): Queryable {
   const button = root.findAll(
     (node) =>
-      typeof node.props.onPress === 'function' &&
-      (node.props.accessibilityLabel === 'Run command' ||
-        node.props.accessibilityLabel === 'Running command'),
+      typeof node.props['onPress'] === 'function' &&
+      (node.props['accessibilityLabel'] === 'Run command' ||
+        node.props['accessibilityLabel'] === 'Running command'),
   )[0];
   if (!button) {
     throw new Error('Missing run button');
@@ -57,8 +58,8 @@ function findRunButton(root: Queryable): Queryable {
 
 function findPressableAncestor(node: Queryable): Queryable {
   let current: Queryable | null = node;
-  while (current && typeof current.props.onPress !== 'function') {
-    current = current.parent as Queryable | null;
+  while (current && typeof current.props['onPress'] !== 'function') {
+    current = current.parent;
   }
   if (!current) {
     throw new Error('Missing pressable ancestor');
@@ -151,9 +152,9 @@ describe('TerminalScreen behavior', () => {
   it('blocks blank commands, confirms execution, supports cancel, and opens the drawer', async () => {
     const result = await renderTerminal();
     const root = result.tree.root as Queryable;
-    const input = root.findAllByType(TextInput)[0] as Queryable;
+    const input = requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value');
     act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('   '));
-    expect(findRunButton(root).props.disabled).toBe(true);
+    expect(findRunButton(root).props['disabled']).toBe(true);
     act(() => getCallback<PressCallback>(input, 'onSubmitEditing')());
     expect(Alert.alert).not.toHaveBeenCalled();
 
@@ -164,7 +165,10 @@ describe('TerminalScreen behavior', () => {
     expect(Alert.alert).toHaveBeenCalledWith('Run command?', 'echo hello', expect.any(Array));
     expect(result.api.execTerminal).toHaveBeenCalledWith({ command: 'echo hello' });
 
-    const menuIcon = root.findAll((node) => node.children.includes('menu'))[0];
+    const menuIcon = requireTestValue(
+      root.findAll((node) => node.children.includes('menu'))[0],
+      'indexed test value',
+    );
     act(() => getCallback<PressCallback>(findPressableAncestor(menuIcon), 'onPress')());
     expect(result.onOpenDrawer).toHaveBeenCalled();
     act(() => result.tree.unmount());
@@ -251,7 +255,7 @@ describe('TerminalScreen behavior', () => {
     const result = await renderTerminal();
     const root = result.tree.root as Queryable;
     const runBtn = findRunButton(root);
-    const hitSlop = runBtn.props.hitSlop as {
+    const hitSlop = runBtn.props['hitSlop'] as {
       top: number;
       bottom: number;
       left: number;
@@ -274,7 +278,7 @@ describe('TerminalScreen behavior', () => {
       execTerminal: jest.fn().mockReturnValue(pendingResponse),
     });
     const root = result.tree.root as Queryable;
-    const input = root.findAllByType(TextInput)[0] as Queryable;
+    const input = requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value');
     act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
 
     // Tap Run → confirm → selection haptic fires and exactly one exec request is sent.
@@ -286,8 +290,8 @@ describe('TerminalScreen behavior', () => {
     // truthfully disabled (no fake "Stop"): re-pressing it must not fire a second confirmation,
     // a second selection haptic, or a second concurrent exec request.
     const runningBtn = findRunButton(root);
-    expect(runningBtn.props.disabled).toBe(true);
-    expect(runningBtn.props.accessibilityLabel).toBe('Running command');
+    expect(runningBtn.props['disabled']).toBe(true);
+    expect(runningBtn.props['accessibilityLabel']).toBe('Running command');
     await act(async () => {
       getCallback<PressCallback>(runningBtn, 'onPress')();
     });
@@ -312,8 +316,8 @@ describe('TerminalScreen behavior', () => {
 
     // Once the in-flight request settles, Run becomes available again for a fresh attempt.
     const idleBtn = findRunButton(root);
-    expect(idleBtn.props.disabled).toBe(false);
-    expect(idleBtn.props.accessibilityLabel).toBe('Run command');
+    expect(idleBtn.props['disabled']).toBe(false);
+    expect(idleBtn.props['accessibilityLabel']).toBe('Run command');
     await triggerRun(root);
     expect(result.api.execTerminal).toHaveBeenCalledTimes(2);
     expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(2);
@@ -334,7 +338,7 @@ describe('TerminalScreen behavior', () => {
       execTerminal: jest.fn().mockReturnValue(pendingResponse),
     });
     const root = result.tree.root as Queryable;
-    const input = root.findAllByType(TextInput)[0] as Queryable;
+    const input = requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value');
     act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
 
     await triggerRun(root);

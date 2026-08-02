@@ -99,14 +99,14 @@ export const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
  */
 export function setupNotificationHandler(): void {
   Notifications.setNotificationHandler({
-    handleNotification: async () => {
+    handleNotification: () => {
       const active = AppState.currentState === 'active';
-      return {
+      return Promise.resolve({
         shouldShowBanner: !active,
         shouldShowList: !active,
         shouldPlaySound: !active,
         shouldSetBadge: false,
-      };
+      });
     },
   });
 }
@@ -194,18 +194,23 @@ export function addNotificationResponseListener(handler: (event: PushResponseEve
   });
 }
 
-export async function getInitialNotificationResponse(): Promise<PushResponseEvent | null> {
+export function getInitialNotificationResponse(): Promise<PushResponseEvent | null> {
   // Platforms without a notifications module (or with permissions denied) reject
   // here; a missing cold-start notification must never break app startup.
-  const response = await Notifications.getLastNotificationResponseAsync().catch(() => null);
-  if (!response) {
-    return null;
+  let response: Notifications.NotificationResponse | null;
+  try {
+    response = Notifications.getLastNotificationResponse();
+  } catch {
+    response = null;
   }
-  return parsePushResponse(response);
+  if (!response) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(parsePushResponse(response));
 }
 
 function parsePushResponse(response: Notifications.NotificationResponse): PushResponseEvent | null {
-  const target = parsePushNavigationTarget(response.notification.request.content.data as unknown);
+  const target = parsePushNavigationTarget(response.notification.request.content.data);
   if (!target) {
     return null;
   }
@@ -223,7 +228,7 @@ export function parsePushNavigationTarget(data: unknown): PushNavigationTarget |
     return null;
   }
   const record = data as Record<string, unknown>;
-  const rawType = typeof record.type === 'string' ? record.type : '';
+  const rawType = typeof record['type'] === 'string' ? record['type'] : '';
   const type: PushEventKey | null =
     rawType === 'turn_completed'
       ? 'turnCompleted'
@@ -233,18 +238,18 @@ export function parsePushNavigationTarget(data: unknown): PushNavigationTarget |
   if (!type) {
     return null;
   }
-  const notificationId = readRequiredString(record.notificationId);
-  const profileId = readRequiredString(record.profileId);
-  const registrationId = readRequiredString(record.registrationId);
+  const notificationId = readRequiredString(record['notificationId']);
+  const profileId = readRequiredString(record['profileId']);
+  const registrationId = readRequiredString(record['registrationId']);
   if (!notificationId || !profileId || !registrationId) {
     return null;
   }
-  const threadIdValue = record.threadId;
+  const threadIdValue = record['threadId'];
   const threadId =
     typeof threadIdValue === 'string' && threadIdValue.trim().length > 0
       ? threadIdValue.trim()
       : null;
-  const approvalIdValue = record.approvalId;
+  const approvalIdValue = record['approvalId'];
   const approvalId =
     typeof approvalIdValue === 'string' && approvalIdValue.trim().length > 0
       ? approvalIdValue.trim()

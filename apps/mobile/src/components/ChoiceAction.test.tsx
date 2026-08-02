@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -56,7 +57,7 @@ function textContent(node: QueryableInstance): string {
 }
 
 function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
-  const style = node.props.style;
+  const style = node.props['style'];
   return typeof style === 'function' ? style({ pressed }) : style;
 }
 
@@ -88,13 +89,14 @@ describe('ChoiceAction', () => {
       </>,
     );
     const buttons = queryRoot(tree).findAll(
-      (node) => typeof node.props.onPress === 'function' && typeof node.props.style === 'function',
+      (node) =>
+        typeof node.props['onPress'] === 'function' && typeof node.props['style'] === 'function',
     );
     expect(buttons).toHaveLength(6);
-    expect(invokeStyle(buttons[0], true)).toBeDefined();
-    expect(invokeStyle(buttons[3], true)).toBeDefined();
-    expect(invokeStyle(buttons[4], false)).toBeDefined();
-    act(() => invokeProp(buttons[0], 'onPress'));
+    expect(invokeStyle(requireTestValue(buttons[0], 'indexed test value'), true)).toBeDefined();
+    expect(invokeStyle(requireTestValue(buttons[3], 'indexed test value'), true)).toBeDefined();
+    expect(invokeStyle(requireTestValue(buttons[4], 'indexed test value'), false)).toBeDefined();
+    act(() => invokeProp(requireTestValue(buttons[0], 'indexed test value'), 'onPress'));
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(textContent(queryRoot(tree))).toContain('Ready');
     act(() => tree.unmount());

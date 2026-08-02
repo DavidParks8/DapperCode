@@ -88,13 +88,17 @@ async function mapWithConcurrency<T, R>(
   signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
+  const entries = values.map((value, index) => ({ index, value }));
   let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    while (nextIndex < values.length) {
+  const workers = Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
+    while (nextIndex < entries.length) {
       throwIfReplayRecoveryAborted(signal);
-      const index = nextIndex;
+      const entry = entries[nextIndex];
       nextIndex += 1;
-      results[index] = await awaitWithReplayRecoveryCancellation(mapper(values[index]), signal);
+      if (!entry) {
+        continue;
+      }
+      results[entry.index] = await awaitWithReplayRecoveryCancellation(mapper(entry.value), signal);
     }
   });
   await Promise.all(workers);

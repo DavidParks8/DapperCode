@@ -34,19 +34,19 @@ export function toToolStatus(value: unknown): ChatToolStatus {
 
 export function parseToolMeta(value: unknown, fallbackToolCallId?: string): ChatToolMeta | null {
   const entry = record(value);
-  const toolCallId = nonEmptyString(entry?.toolCallId) ?? fallbackToolCallId;
+  const toolCallId = nonEmptyString(entry?.['toolCallId']) ?? fallbackToolCallId;
   if (!entry || !toolCallId) {
     return null;
   }
-  const kind = toToolKind(entry.kind);
+  const kind = toToolKind(entry['kind']);
   return {
     toolCallId,
     kind,
-    status: toToolStatus(entry.status),
-    title: nonEmptyString(entry.title) ?? kind,
-    ...(Array.isArray(entry.content) ? { content: entry.content } : {}),
-    ...(Array.isArray(entry.locations) ? { locations: entry.locations } : {}),
-    ...(typeof entry.truncated === 'boolean' ? { truncated: entry.truncated } : {}),
+    status: toToolStatus(entry['status']),
+    title: nonEmptyString(entry['title']) ?? kind,
+    ...(Array.isArray(entry['content']) ? { content: entry['content'] } : {}),
+    ...(Array.isArray(entry['locations']) ? { locations: entry['locations'] } : {}),
+    ...(typeof entry['truncated'] === 'boolean' ? { truncated: entry['truncated'] } : {}),
   };
 }
 
@@ -115,7 +115,7 @@ export function attachToolMeta(messages: ChatMessage[], meta: ChatToolMeta): Cha
       return message;
     }
     changed = true;
-    return { ...message, toolMeta: merged } as ChatMessage;
+    return { ...message, toolMeta: merged };
   });
   return changed ? next : messages;
 }

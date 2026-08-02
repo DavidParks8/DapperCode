@@ -197,7 +197,7 @@ function handleItemCompletedEvent(
     return;
   }
 
-  const item = toRecord(params?.item);
+  const item = toRecord(params?.['item']);
   if (threadId !== currentId) {
     handleNonCurrentItemCompleted(context, threadId, item);
     return;
@@ -220,7 +220,7 @@ function handleNonCurrentItemCompleted(
     );
   }
 
-  if (readString(item?.type) !== 'commandExecution') {
+  if (readString(item?.['type']) !== 'commandExecution') {
     return;
   }
 
@@ -242,7 +242,7 @@ function handleCurrentItemCompleted(
     context.pushActiveCommand(threadId, completedToolEvent.eventType, completedToolEvent.detail);
   }
 
-  const itemType = readString(item?.type);
+  const itemType = readString(item?.['type']);
   if (itemType === 'reasoning') {
     // The completed item carries the settled reasoning, so the live buffer stops
     // owning the message and the card collapses to its compact form.
@@ -266,7 +266,7 @@ function buildCompletedCommandActivity(item: Record<string, unknown> | null) {
 }
 
 function isFailedCommandExecution(item: Record<string, unknown> | null): boolean {
-  const status = readString(item?.status);
+  const status = readString(item?.['status']);
   return status === 'failed' || status === 'error';
 }
 
@@ -480,8 +480,8 @@ function readNotificationThreadId(
   allowFallbackThreadId: boolean,
 ): string | null {
   return (
-    readString(params?.threadId) ??
-    readString(params?.thread_id) ??
+    readString(params?.['threadId']) ??
+    readString(params?.['thread_id']) ??
     (allowFallbackThreadId ? fallbackThreadId : null)
   );
 }

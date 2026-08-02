@@ -55,7 +55,7 @@ interface PersistenceMigrationMarker {
 const migrationLocks = new Map<string, Promise<void>>();
 
 export class ProfilePersistenceError extends Error {
-  readonly name = 'ProfilePersistenceError';
+  override readonly name = 'ProfilePersistenceError';
 
   constructor(
     readonly resource: ProfilePersistenceResource,
@@ -83,7 +83,7 @@ export function encodePersistenceProfileId(profileId: string | null | undefined)
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = normalized.charCodeAt(index + 1);
       if (next >= 0xdc00 && next <= 0xdfff) {
-        safe += normalized[index] + normalized[index + 1];
+        safe += normalized.slice(index, index + 2);
         index += 1;
       } else {
         safe += '\ufffd';
@@ -91,7 +91,7 @@ export function encodePersistenceProfileId(profileId: string | null | undefined)
     } else if (code >= 0xdc00 && code <= 0xdfff) {
       safe += '\ufffd';
     } else {
-      safe += normalized[index];
+      safe += normalized.charAt(index);
     }
   }
 
@@ -298,15 +298,18 @@ export function parseWorkspaceFavoritePaths(raw: string): string[] {
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== WORKSPACE_FAVORITES_VERSION) {
+    if (!parsedRecord || parsedRecord['version'] !== WORKSPACE_FAVORITES_VERSION) {
       return [];
     }
 
-    const paths = Array.isArray(parsedRecord.paths) ? parsedRecord.paths : [];
+    const paths: unknown[] = Array.isArray(parsedRecord['paths']) ? parsedRecord['paths'] : [];
     const normalizedPaths: string[] = [];
     for (const path of paths) {
+      if (typeof path !== 'string') {
+        continue;
+      }
       const normalizedPath = normalizeWorkspacePath(path);
       if (!normalizedPath || normalizedPaths.includes(normalizedPath)) {
         continue;
@@ -328,13 +331,13 @@ export function parseChatDrafts(raw: string): Record<string, string> {
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_DRAFTS_VERSION) {
+    if (!parsedRecord || parsedRecord['version'] !== CHAT_DRAFTS_VERSION) {
       return {};
     }
 
-    const entries = toRecord(parsedRecord.entries);
+    const entries = toRecord(parsedRecord['entries']);
     if (!entries) {
       return {};
     }
@@ -357,9 +360,9 @@ export function parseChatDrafts(raw: string): Record<string, string> {
 
 function parseBridgeQueuedMessage(value: unknown): BridgeQueuedMessage | null {
   const entry = toRecord(value);
-  const id = readString(entry?.id)?.trim();
-  const createdAt = readString(entry?.createdAt)?.trim();
-  const content = readString(entry?.content)?.replace(/\r\n/g, '\n');
+  const id = readString(entry?.['id'])?.trim();
+  const createdAt = readString(entry?.['createdAt'])?.trim();
+  const content = readString(entry?.['content'])?.replace(/\r\n/g, '\n');
   return id && createdAt && content ? { id, createdAt, content } : null;
 }
 
@@ -375,16 +378,16 @@ function parseBridgeQueuedMessages(value: unknown): BridgeQueuedMessage[] {
 
 function parseBridgeThreadQueueError(value: unknown): BridgeThreadQueueError | null {
   const record = toRecord(value);
-  const message = readString(record?.message)?.trim();
-  const operation = readString(record?.operation)?.trim();
-  const at = readString(record?.at)?.trim();
+  const message = readString(record?.['message'])?.trim();
+  const operation = readString(record?.['operation'])?.trim();
+  const at = readString(record?.['at'])?.trim();
 
   return message && operation && at
     ? {
         message,
         operation,
         at,
-        itemId: readString(record?.itemId)?.trim() ?? null,
+        itemId: readString(record?.['itemId'])?.trim() ?? null,
       }
     : null;
 }
@@ -395,22 +398,22 @@ function parsePendingSteerCount(value: unknown, fallback: number): number {
 
 export function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueState | null {
   const record = toRecord(value);
-  const threadId = readString(record?.threadId)?.trim();
+  const threadId = readString(record?.['threadId'])?.trim();
   if (!record || !threadId) {
     return null;
   }
 
-  const items = parseBridgeQueuedMessages(record.items);
-  const pendingSteers = parseBridgeQueuedMessages(record.pendingSteers);
+  const items = parseBridgeQueuedMessages(record['items']);
+  const pendingSteers = parseBridgeQueuedMessages(record['pendingSteers']);
 
   return {
     threadId,
     items,
     pendingSteers,
-    pendingSteerCount: parsePendingSteerCount(record.pendingSteerCount, pendingSteers.length),
-    waitingForToolCalls: record.waitingForToolCalls === true,
-    steeringInFlight: record.steeringInFlight === true,
-    lastError: parseBridgeThreadQueueError(record.lastError),
+    pendingSteerCount: parsePendingSteerCount(record['pendingSteerCount'], pendingSteers.length),
+    waitingForToolCalls: record['waitingForToolCalls'] === true,
+    steeringInFlight: record['steeringInFlight'] === true,
+    lastError: parseBridgeThreadQueueError(record['lastError']),
   };
 }
 
@@ -465,13 +468,13 @@ export function parseChatModelPreferences(raw: string): Record<string, ChatModel
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_MODEL_PREFERENCES_VERSION) {
+    if (!parsedRecord || parsedRecord['version'] !== CHAT_MODEL_PREFERENCES_VERSION) {
       return {};
     }
 
-    const entries = toRecord(parsedRecord.entries);
+    const entries = toRecord(parsedRecord['entries']);
     if (!entries) {
       return {};
     }
@@ -489,10 +492,10 @@ export function parseChatModelPreferences(raw: string): Record<string, ChatModel
       }
 
       result[normalizedChatId] = {
-        modelId: normalizeModelId(readString(entry.modelId)),
-        effort: normalizeReasoningEffort(readString(entry.effort)),
-        serviceTier: toSelectedServiceTier(normalizeServiceTier(readString(entry.serviceTier))),
-        updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
+        modelId: normalizeModelId(readString(entry['modelId'])),
+        effort: normalizeReasoningEffort(readString(entry['effort'])),
+        serviceTier: toSelectedServiceTier(normalizeServiceTier(readString(entry['serviceTier']))),
+        updatedAt: readString(entry['updatedAt']) ?? new Date(0).toISOString(),
       };
     }
 
@@ -504,8 +507,8 @@ export function parseChatModelPreferences(raw: string): Record<string, ChatModel
 
 function parseTurnPlanStep(value: unknown): TurnPlanStep | null {
   const record = toRecord(value);
-  const step = readString(record?.step);
-  const status = readString(record?.status);
+  const step = readString(record?.['step']);
+  const status = readString(record?.['status']);
   return step && (status === 'pending' || status === 'inProgress' || status === 'completed')
     ? { step, status }
     : null;
@@ -529,8 +532,8 @@ function parseChatPlanSnapshotEntry(
   }
 
   const normalizedChatId = chatId.trim();
-  const threadId = readString(entry.threadId) ?? normalizedChatId;
-  const turnId = readString(entry.turnId);
+  const threadId = readString(entry['threadId']) ?? normalizedChatId;
+  const turnId = readString(entry['turnId']);
   if (!normalizedChatId || !threadId || !turnId) {
     return null;
   }
@@ -540,10 +543,10 @@ function parseChatPlanSnapshotEntry(
     snapshot: {
       threadId,
       turnId,
-      explanation: readString(entry.explanation),
-      steps: parseTurnPlanSteps(entry.steps),
-      deltaText: readString(entry.deltaText) ?? '',
-      updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
+      explanation: readString(entry['explanation']),
+      steps: parseTurnPlanSteps(entry['steps']),
+      deltaText: readString(entry['deltaText']) ?? '',
+      updatedAt: readString(entry['updatedAt']) ?? new Date(0).toISOString(),
     },
   };
 }
@@ -554,13 +557,13 @@ export function parseChatPlanSnapshots(raw: string): Record<string, ActivePlanSt
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_PLAN_SNAPSHOTS_VERSION) {
+    if (!parsedRecord || parsedRecord['version'] !== CHAT_PLAN_SNAPSHOTS_VERSION) {
       return {};
     }
 
-    const entries = toRecord(parsedRecord.entries);
+    const entries = toRecord(parsedRecord['entries']);
     if (!entries) {
       return {};
     }
@@ -586,13 +589,13 @@ export function parseChatBridgeUiSurfaces(raw: string): Record<string, BridgeUiS
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedRecord = toRecord(parsed);
-    if (!parsedRecord || parsedRecord.version !== CHAT_BRIDGE_UI_SURFACES_VERSION) {
+    if (!parsedRecord || parsedRecord['version'] !== CHAT_BRIDGE_UI_SURFACES_VERSION) {
       return {};
     }
 
-    const entries = toRecord(parsedRecord.entries);
+    const entries = toRecord(parsedRecord['entries']);
     if (!entries) {
       return {};
     }

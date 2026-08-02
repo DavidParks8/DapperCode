@@ -38,7 +38,7 @@ export function parseAppSettings(raw: string): {
   }
 
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     const parsedVersion = (parsed as { version?: unknown }).version;
     if (!parsed || typeof parsed !== 'object' || parsedVersion !== APP_SETTINGS_VERSION) {
       return {
@@ -172,7 +172,7 @@ function normalizeAgentSettings(value: unknown): AgentDefaultSettingsMap {
       continue;
     }
     normalized[agentId] = {
-      collaborationMode: normalizeCollaborationMode(entry.collaborationMode),
+      collaborationMode: normalizeCollaborationMode(entry['collaborationMode']),
     };
   }
   return normalized;

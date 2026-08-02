@@ -3,37 +3,37 @@ import { fetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 import { normalizeCwd } from './clientChatListInternals';
 import { readString, toRecord } from './chatMapping';
-import {
-  type BridgeThreadQueueActionResponse,
-  type DismissBridgeUiSurfaceResponse,
-  type GitBranchesResponse,
-  type GitCloneRequest,
-  type GitCloneResponse,
-  type GitCommitRequest,
-  type GitCommitResponse,
-  type GitDiffResponse,
-  type GitFileRequest,
-  type GitHistoryResponse,
-  type GitHubAuthGrantInput,
-  type GitHubAuthInstallResponse,
-  type GitStageAllResponse,
-  type GitStageResponse,
-  type GitStatusResponse,
-  type GitSwitchRequest,
-  type GitSwitchResponse,
-  type GitUnstageAllResponse,
-  type GitUnstageResponse,
-  type PendingApproval,
-  type PendingUserInputRequest,
-  type ResolveApprovalResponse,
-  type ResolveBridgeUiSurfaceRequest,
-  type ResolveBridgeUiSurfaceResponse,
-  type ResolveUserInputRequest,
-  type ResolveUserInputResponse,
-  type TerminalExecRequest,
-  type TerminalExecResponse,
-  type UploadAttachmentRequest,
-  type UploadAttachmentResponse,
+import type {
+  BridgeThreadQueueActionResponse,
+  DismissBridgeUiSurfaceResponse,
+  GitBranchesResponse,
+  GitCloneRequest,
+  GitCloneResponse,
+  GitCommitRequest,
+  GitCommitResponse,
+  GitDiffResponse,
+  GitFileRequest,
+  GitHistoryResponse,
+  GitHubAuthGrantInput,
+  GitHubAuthInstallResponse,
+  GitStageAllResponse,
+  GitStageResponse,
+  GitStatusResponse,
+  GitSwitchRequest,
+  GitSwitchResponse,
+  GitUnstageAllResponse,
+  GitUnstageResponse,
+  PendingApproval,
+  PendingUserInputRequest,
+  ResolveApprovalResponse,
+  ResolveBridgeUiSurfaceRequest,
+  ResolveBridgeUiSurfaceResponse,
+  ResolveUserInputRequest,
+  ResolveUserInputResponse,
+  TerminalExecRequest,
+  TerminalExecResponse,
+  UploadAttachmentRequest,
+  UploadAttachmentResponse,
 } from './types';
 
 export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeApiClientTurnLifecycleLayer {
@@ -61,13 +61,13 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
     }
     const parameters: Record<string, string> = { kind: body.kind };
     if (body.fileName?.trim()) {
-      parameters.fileName = body.fileName.trim();
+      parameters['fileName'] = body.fileName.trim();
     }
     if (body.mimeType?.trim()) {
-      parameters.mimeType = body.mimeType.trim();
+      parameters['mimeType'] = body.mimeType.trim();
     }
     if (body.threadId?.trim()) {
-      parameters.threadId = body.threadId.trim();
+      parameters['threadId'] = body.threadId.trim();
     }
     const file = new File(body.uri);
     const formData = new FormData();
@@ -90,7 +90,7 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
     if (result.status < 200 || result.status >= 300) {
       const record = toRecord(payload);
       throw new Error(
-        readString(record?.message) ?? `Attachment upload failed (${String(result.status)})`,
+        readString(record?.['message']) ?? `Attachment upload failed (${String(result.status)})`,
       );
     }
     return payload as UploadAttachmentResponse;

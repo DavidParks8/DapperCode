@@ -87,13 +87,13 @@ export function toTurnPlanUpdate(
     return null;
   }
 
-  const threadId = readString(record.threadId) ?? fallbackThreadId;
-  const turnId = readString(record.turnId);
+  const threadId = readString(record['threadId']) ?? fallbackThreadId;
+  const turnId = readString(record['turnId']);
   if (!threadId || !turnId) {
     return null;
   }
 
-  const rawPlan = Array.isArray(record.plan) ? record.plan : [];
+  const rawPlan = Array.isArray(record['plan']) ? record['plan'] : [];
   const plan: TurnPlanStep[] = rawPlan
     .map((item) => {
       const itemRecord = toRecord(item);
@@ -101,8 +101,8 @@ export function toTurnPlanUpdate(
         return null;
       }
 
-      const step = readString(itemRecord.step);
-      const status = readString(itemRecord.status);
+      const step = readString(itemRecord['step']);
+      const status = readString(itemRecord['status']);
       if (!step || (status !== 'pending' && status !== 'inProgress' && status !== 'completed')) {
         return null;
       }
@@ -117,7 +117,7 @@ export function toTurnPlanUpdate(
   return {
     threadId,
     turnId,
-    explanation: readString(record.explanation),
+    explanation: readString(record['explanation']),
     plan,
   };
 }

@@ -143,11 +143,9 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       }
 
       setThreadRuntimeSnapshots((current) => {
-        const previous =
-          current[threadId] ??
-          ({
-            updatedAtMs: Date.now(),
-          } as ThreadRuntimeSnapshot);
+        const previous = current[threadId] ?? {
+          updatedAtMs: Date.now(),
+        };
         return {
           ...current,
           [threadId]: {

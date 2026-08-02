@@ -18,8 +18,8 @@ import { structuredTextRemainder } from './agUiContent';
 import { toToolKind, toToolStatus } from './toolMeta';
 import { toToolLikeMessage } from './chatMappingToolMessageProjection';
 import { readString, toRecord } from '../runtimeValidation';
-import { type ChatMessage } from './types';
-import { type RawAcpSnapshot, type RawThread } from './chatMappingRawTypesAndReaders';
+import type { ChatMessage } from './types';
+import type { RawAcpSnapshot, RawThread } from './chatMappingRawTypesAndReaders';
 
 type SnapshotMessage = RawAcpSnapshot['messages'][number];
 type SnapshotTool = RawAcpSnapshot['tools'][number];
@@ -231,12 +231,12 @@ function pushUserOrAgentTurnMessage(
   const text =
     role === 'user'
       ? stringifyStructuredMessageContent(itemRecord)
-      : stringifyStructuredMessageContent(itemRecord) || readString(itemRecord.text) || '';
+      : stringifyStructuredMessageContent(itemRecord) || readString(itemRecord['text']) || '';
   if (!text.trim()) {
     return false;
   }
   messages.push({
-    id: readString(itemRecord.id) ?? generateLocalId(),
+    id: readString(itemRecord['id']) ?? generateLocalId(),
     role,
     content: text,
     createdAt: new Date(baseTs + messages.length * 1000).toISOString(),
@@ -251,7 +251,7 @@ function pushToolLikeTurnMessage(
   toolLikeMessage: string,
   baseTs: number,
 ): void {
-  const id = readString(itemRecord.id) ?? generateLocalId();
+  const id = readString(itemRecord['id']) ?? generateLocalId();
   const createdAt = new Date(baseTs + messages.length * 1000).toISOString();
   if (normalizedItemType === 'reasoning') {
     messages.push({ id, role: 'reasoning', content: toolLikeMessage, createdAt });
@@ -277,7 +277,7 @@ function pushToolLikeTurnMessage(
   messages.push({
     id,
     role: 'tool',
-    toolCallId: readString(itemRecord.callId) ?? readString(itemRecord.call_id) ?? id,
+    toolCallId: readString(itemRecord['callId']) ?? readString(itemRecord['call_id']) ?? id,
     content: toolLikeMessage,
     createdAt,
   });
@@ -288,7 +288,7 @@ function mapTurnItem(messages: ChatMessage[], item: unknown, baseTs: number): vo
   if (!itemRecord) {
     return;
   }
-  const itemType = readString(itemRecord.type);
+  const itemType = readString(itemRecord['type']);
   const normalizedItemType = normalizeType(itemType ?? '');
   if (normalizedItemType === 'usermessage') {
     pushUserOrAgentTurnMessage(messages, itemRecord, 'user', baseTs);

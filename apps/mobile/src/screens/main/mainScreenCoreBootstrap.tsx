@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from 'react';
+import { type RefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   creatingAtom,
   errorAtom,
@@ -23,7 +23,7 @@ import type { FileSystemListResponse } from '../../api/types';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { useAppTheme } from '../../theme';
 import { createStyles } from './mainScreenStyles';
-import { type IdleTaskHandle } from './mainScreenHelpers';
+import type { IdleTaskHandle } from './mainScreenHelpers';
 import { ApprovalController } from './controllers/approvalController';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { ChatSyncController } from './controllers/chatSyncController';
@@ -37,6 +37,7 @@ import {
   getTranscriptContinuationState,
 } from './controllers/transcriptContinuationController';
 import type { MainScreenBaseContext } from './useMainScreenBaseContext';
+import { useMountTimestampRef } from './useMountTimestampRef';
 
 export type MainScreenCoreBootstrapContext = MainScreenBaseContext;
 
@@ -52,7 +53,7 @@ function resolveInitialPendingSnapshot(
 
 function seedBootstrapAtoms(params: {
   agentSettings: MainScreenCoreBootstrapContext['agentSettings'];
-  didSeedRef: MutableRefObject<boolean>;
+  didSeedRef: RefObject<boolean>;
   initialPendingSnapshot: ReturnType<typeof resolveInitialPendingSnapshot>;
   pendingOpenChatId: string | null;
   preferredAgentId: MainScreenCoreBootstrapContext['preferredAgentId'];
@@ -88,9 +89,7 @@ function resolveStreamingTextUpdate(
   previous: string | null,
   next: string | null | ((previous: string | null) => string | null),
 ): string | null {
-  return typeof next === 'function'
-    ? (next as (previous: string | null) => string | null)(previous)
-    : next;
+  return typeof next === 'function' ? next(previous) : next;
 }
 
 export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapContext) {
@@ -165,8 +164,8 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const setSelectedChatId = useSetAtom(selectedChatIdAtom);
   const openingChatId = useAtomValue(openingChatIdAtom);
   const setOpeningChatId = useSetAtom(openingChatIdAtom);
-  const openingChatStartedAtRef = useRef<number>(
-    initialPendingSnapshot || !pendingOpenChatId ? 0 : Date.now(),
+  const openingChatStartedAtRef = useMountTimestampRef(
+    !initialPendingSnapshot && Boolean(pendingOpenChatId),
   );
   const draftController = useDraftController(
     bridgeProfileId,

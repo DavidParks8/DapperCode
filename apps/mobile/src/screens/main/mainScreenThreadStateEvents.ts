@@ -92,8 +92,8 @@ function handleSnapshotRequiredEvent(
   currentId: string | null,
 ): void {
   const params = toRecord(event.params);
-  const resumeAfterEventId = readFiniteNumber(params?.resumeAfterEventId);
-  const reason = readString(params?.reason);
+  const resumeAfterEventId = readFiniteNumber(params?.['resumeAfterEventId']);
+  const reason = readString(params?.['reason']);
   context.clearRunWatchdog();
   context.setActiveCommands([]);
   context.setStreamingText(null);
@@ -125,7 +125,7 @@ function handleThreadNameUpdatedEvent(
     return;
   }
 
-  const threadName = readString(params?.threadName) ?? readString(params?.thread_name);
+  const threadName = readString(params?.['threadName']) ?? readString(params?.['thread_name']);
   if (threadName && threadName.trim()) {
     context.setSelectedChat((prev) =>
       prev
@@ -161,7 +161,7 @@ function handleThreadTokenUsageUpdatedEvent(
   event: RpcNotification,
 ): void {
   const params = toRecord(event.params);
-  const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
+  const threadId = readString(params?.['threadId']) ?? readString(params?.['thread_id']);
   const contextUsage = context.readThreadContextUsage(params);
   if (!threadId || !contextUsage) {
     return;
@@ -176,14 +176,14 @@ function handleItemStartedEvent(
   currentId: string | null,
 ): void {
   const params = toRecord(event.params);
-  const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
+  const threadId = readString(params?.['threadId']) ?? readString(params?.['thread_id']);
   if (!threadId) {
     return;
   }
 
-  const item = toRecord(params?.item);
-  const itemType = readString(item?.type);
-  const itemTurnId = readString(params?.turnId) ?? readString(params?.turn_id) ?? null;
+  const item = toRecord(params?.['item']);
+  const itemType = readString(item?.['type']);
+  const itemTurnId = readString(params?.['turnId']) ?? readString(params?.['turn_id']) ?? null;
   if (itemType === 'plan' && itemTurnId) {
     context.planItemTurnIdByThreadRef.current[threadId] = itemTurnId;
   }

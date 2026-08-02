@@ -20,7 +20,7 @@ function settingAtom<Key extends keyof AppSettingsState>(key: Key) {
   return atom(
     (get) => get(appSettingsAtom)[key],
     (get, set, value: AppSettingsState[Key]) => {
-      set(updateSettingsAtom, { [key]: value } as Partial<AppSettingsState>);
+      set(updateSettingsAtom, { [key]: value });
     },
   );
 }

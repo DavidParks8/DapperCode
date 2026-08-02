@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import type { ChatSummary } from '../api/types';
 import { buildChatWorkspaceSections } from './chatThreadTree';
 
@@ -58,9 +59,14 @@ describe('buildChatWorkspaceSections', () => {
     ]);
 
     expect(sections).toHaveLength(1);
-    expect(sections[0].title).toBe('repo');
-    expect(sections[0].itemCount).toBe(3);
-    expect(sections[0].data.map((row) => [row.chat.id, row.indentLevel])).toEqual([
+    expect(requireTestValue(sections[0], 'indexed test value').title).toBe('repo');
+    expect(requireTestValue(sections[0], 'indexed test value').itemCount).toBe(3);
+    expect(
+      requireTestValue(sections[0], 'indexed test value').data.map((row) => [
+        row.chat.id,
+        row.indentLevel,
+      ]),
+    ).toEqual([
       ['root', 0],
       ['agent-a', 1],
       ['agent-b', 1],
@@ -87,8 +93,10 @@ describe('buildChatWorkspaceSections', () => {
     ]);
 
     expect(sections).toHaveLength(1);
-    expect(sections[0].key).toBe('/workspace/one');
-    expect(sections[0].data.map((row) => row.chat.id)).toEqual(['root', 'child']);
+    expect(requireTestValue(sections[0], 'indexed test value').key).toBe('/workspace/one');
+    expect(
+      requireTestValue(sections[0], 'indexed test value').data.map((row) => row.chat.id),
+    ).toEqual(['root', 'child']);
   });
 
   it('treats blank, missing, self, and unknown parents as roots', () => {
@@ -111,12 +119,9 @@ describe('buildChatWorkspaceSections', () => {
       subtitle: undefined,
       itemCount: 4,
     });
-    expect(sections[0].data.map((row) => row.chat.id)).toEqual([
-      'blank',
-      'missing',
-      'self',
-      'unknown',
-    ]);
+    expect(
+      requireTestValue(sections[0], 'indexed test value').data.map((row) => row.chat.id),
+    ).toEqual(['blank', 'missing', 'self', 'unknown']);
   });
 
   it('sorts workspaces and roots by their latest update', () => {
@@ -127,7 +132,9 @@ describe('buildChatWorkspaceSections', () => {
     ]);
 
     expect(sections.map((entry) => entry.key)).toEqual(['/work/a', '/work/b']);
-    expect(sections[0].data.map((row) => row.chat.id)).toEqual(['new-a', 'old-a']);
+    expect(
+      requireTestValue(sections[0], 'indexed test value').data.map((row) => row.chat.id),
+    ).toEqual(['new-a', 'old-a']);
   });
 
   it('orders branch children by running state, depth, update time, then title', () => {
@@ -181,19 +188,23 @@ describe('buildChatWorkspaceSections', () => {
       chat({ id: 'grandchild', parentThreadId: 'idle-new', updatedAt: '2026-03-20T09:00:00.000Z' }),
     ]);
 
-    expect(sections[0].data.map((row) => [row.chat.id, row.indentLevel, row.rootThreadId])).toEqual(
-      [
-        ['root', 0, 'root'],
-        ['running', 1, 'root'],
-        ['no-depth-a', 1, 'root'],
-        ['no-depth-b', 1, 'root'],
-        ['idle-new', 1, 'root'],
-        ['grandchild', 2, 'root'],
-        ['idle-a', 1, 'root'],
-        ['idle-b', 1, 'root'],
-        ['idle-deep', 1, 'root'],
-      ],
-    );
+    expect(
+      requireTestValue(sections[0], 'indexed test value').data.map((row) => [
+        row.chat.id,
+        row.indentLevel,
+        row.rootThreadId,
+      ]),
+    ).toEqual([
+      ['root', 0, 'root'],
+      ['running', 1, 'root'],
+      ['no-depth-a', 1, 'root'],
+      ['no-depth-b', 1, 'root'],
+      ['idle-new', 1, 'root'],
+      ['grandchild', 2, 'root'],
+      ['idle-a', 1, 'root'],
+      ['idle-b', 1, 'root'],
+      ['idle-deep', 1, 'root'],
+    ]);
   });
 
   it.each([

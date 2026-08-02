@@ -1,23 +1,23 @@
 import { readString, readTrimmedStringArray, toRecord } from '../runtimeValidation';
 import { stringifyStructuredContentEntries } from './chatMappingStructuredContentPreview';
-import { type ChatMessageSubAgentMeta } from './types';
+import type { ChatMessageSubAgentMeta } from './types';
 
 export function readFunctionToolArguments(
   item: Record<string, unknown>,
 ): Record<string, unknown> | null {
   return (
-    toRecord(item.arguments) ??
-    toRecord(item.args) ??
-    parseJsonObject(readString(item.arguments)) ??
-    parseJsonObject(readString(item.args))
+    toRecord(item['arguments']) ??
+    toRecord(item['args']) ??
+    parseJsonObject(readString(item['arguments'])) ??
+    parseJsonObject(readString(item['args']))
   );
 }
 
 export function readFunctionToolInput(item: Record<string, unknown>): string | null {
   return (
-    normalizeMultiline(readString(item.input), 1800) ??
-    normalizeMultiline(readString(item.arguments), 1800) ??
-    normalizeMultiline(readString(item.args), 1800)
+    normalizeMultiline(readString(item['input']), 1800) ??
+    normalizeMultiline(readString(item['arguments']), 1800) ??
+    normalizeMultiline(readString(item['args']), 1800)
   );
 }
 
@@ -26,12 +26,13 @@ export function readFunctionCommand(args: Record<string, unknown> | null): strin
     return null;
   }
   const direct =
-    normalizeInline(readString(args.cmd), 240) ?? normalizeInline(readString(args.command), 240);
+    normalizeInline(readString(args['cmd']), 240) ??
+    normalizeInline(readString(args['command']), 240);
   if (direct) {
     return direct;
   }
-  const commandParts = readTrimmedStringArray(args.cmd).concat(
-    readTrimmedStringArray(args.command),
+  const commandParts = readTrimmedStringArray(args['cmd']).concat(
+    readTrimmedStringArray(args['command']),
   );
   return commandParts.length > 0 ? normalizeInline(commandParts.join(' '), 240) : null;
 }
@@ -53,17 +54,17 @@ export function readFunctionSearchQuery(args: Record<string, unknown> | null): s
   if (!args) {
     return null;
   }
-  const direct = readString(args.q) ?? readString(args.query);
+  const direct = readString(args['q']) ?? readString(args['query']);
   if (direct) {
     return direct;
   }
-  const searchQueries = Array.isArray(args.search_query)
-    ? args.search_query
-    : Array.isArray(args.image_query)
-      ? args.image_query
+  const searchQueries = Array.isArray(args['search_query'])
+    ? args['search_query']
+    : Array.isArray(args['image_query'])
+      ? args['image_query']
       : [];
   for (const entry of searchQueries) {
-    const query = readString(toRecord(entry)?.q) ?? readString(toRecord(entry)?.query);
+    const query = readString(toRecord(entry)?.['q']) ?? readString(toRecord(entry)?.['query']);
     if (query) {
       return query;
     }
@@ -94,13 +95,15 @@ export function readPatchTargetPaths(input: string): string[] {
 }
 
 export function toSubAgentMeta(item: Record<string, unknown>): ChatMessageSubAgentMeta | undefined {
-  const tool = readString(item.tool) ?? undefined;
-  const prompt = normalizeInline(readString(item.prompt), 4000) ?? undefined;
+  const tool = readString(item['tool']) ?? undefined;
+  const prompt = normalizeInline(readString(item['prompt']), 4000) ?? undefined;
   const senderThreadId =
-    normalizeInline(readString(item.senderThreadId) ?? readString(item.sender_thread_id), 200) ??
-    undefined;
+    normalizeInline(
+      readString(item['senderThreadId']) ?? readString(item['sender_thread_id']),
+      200,
+    ) ?? undefined;
   const agentStatus =
-    normalizeInline(readString(item.agentStatus) ?? readString(item.agent_status), 200) ??
+    normalizeInline(readString(item['agentStatus']) ?? readString(item['agent_status']), 200) ??
     undefined;
   const receiverThreadIds = readReceiverThreadIds(item);
   if (!tool && !prompt && !senderThreadId && receiverThreadIds.length === 0 && !agentStatus) {
@@ -111,17 +114,17 @@ export function toSubAgentMeta(item: Record<string, unknown>): ChatMessageSubAge
 
 export function readReceiverThreadIds(item: Record<string, unknown>): string[] {
   const pluralIds = [
-    ...readTrimmedStringArray(item.receiverThreadIds),
-    ...readTrimmedStringArray(item.receiver_thread_ids),
+    ...readTrimmedStringArray(item['receiverThreadIds']),
+    ...readTrimmedStringArray(item['receiver_thread_ids']),
   ];
   if (pluralIds.length > 0) {
     return Array.from(new Set(pluralIds));
   }
   const singularIds = [
-    readString(item.newThreadId),
-    readString(item.new_thread_id),
-    readString(item.receiverThreadId),
-    readString(item.receiver_thread_id),
+    readString(item['newThreadId']),
+    readString(item['new_thread_id']),
+    readString(item['receiverThreadId']),
+    readString(item['receiver_thread_id']),
   ]
     .map((value) => value?.trim() ?? '')
     .filter((value): value is string => value.length > 0);
@@ -129,26 +132,26 @@ export function readReceiverThreadIds(item: Record<string, unknown>): string[] {
 }
 
 export function reasoningTextFromItem(item: Record<string, unknown>): string | null {
-  const directText = readString(item.text);
+  const directText = readString(item['text']);
   if (directText?.trim()) {
     return directText;
   }
-  const content = readTrimmedStringArray(item.content);
+  const content = readTrimmedStringArray(item['content']);
   if (content.length > 0) {
     return content.join('\n');
   }
-  if (Array.isArray(item.content)) {
-    const structuredContent = stringifyStructuredContentEntries(item.content);
+  if (Array.isArray(item['content'])) {
+    const structuredContent = stringifyStructuredContentEntries(item['content']);
     if (structuredContent.trim()) {
       return structuredContent;
     }
   }
-  const summary = readTrimmedStringArray(item.summary);
+  const summary = readTrimmedStringArray(item['summary']);
   if (summary.length > 0) {
     return summary.join('\n');
   }
-  if (Array.isArray(item.summary)) {
-    const structuredSummary = stringifyStructuredContentEntries(item.summary);
+  if (Array.isArray(item['summary'])) {
+    const structuredSummary = stringifyStructuredContentEntries(item['summary']);
     if (structuredSummary.trim()) {
       return structuredSummary;
     }

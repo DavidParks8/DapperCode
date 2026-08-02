@@ -1,3 +1,4 @@
+import { requireTestValue } from './testing/requireTestValue';
 import {
   APP_STATE_VERSION,
   AppStatePersistenceError,
@@ -69,7 +70,10 @@ describe('current appState production behavior', () => {
       collaborationMode: 'plan',
     });
     expect(state.settings.preferredAgentId).toBe('codex');
-    expect(state.settings.agentSettings.codex.collaborationMode).toBe('plan');
+    expect(
+      requireTestValue(state.settings.agentSettings['codex'], 'indexed test value')
+        .collaborationMode,
+    ).toBe('plan');
     expect(
       appStateReducer(state, {
         type: 'settings/remember-thread',
@@ -96,7 +100,9 @@ describe('current appState production behavior', () => {
       registrationId: 'registration',
       token: ' push-token ',
     });
-    expect(state.push.registrations[0].token).toBe('push-token');
+    expect(requireTestValue(state.push.registrations[0], 'indexed test value').token).toBe(
+      'push-token',
+    );
     state = appStateReducer(state, {
       type: 'push/unregistered',
       profileId,
@@ -250,8 +256,8 @@ describe('appStateReducer', () => {
     });
 
     expect(state.settings.preferredAgentId).toBe('opencode');
-    expect(state.settings.agentSettings.opencode).toEqual({ collaborationMode: 'plan' });
-    expect(state.settings.agentSettings.codex).toBeUndefined();
+    expect(state.settings.agentSettings['opencode']).toEqual({ collaborationMode: 'plan' });
+    expect(state.settings.agentSettings['codex']).toBeUndefined();
   });
 
   it('keeps push registration identity immutable per profile', () => {
@@ -318,7 +324,7 @@ describe('appStateReducer', () => {
       type: 'profiles/save',
       draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
-    const profileId = state.bridgeProfiles.profiles[0]!.id;
+    const profileId = requireTestValue(state.bridgeProfiles.profiles[0], 'indexed test value').id;
     state = appStateReducer(state, { type: 'profiles/rename', profileId, name: 'Renamed' });
     expect(state.bridgeProfiles.profiles[0]?.name).toBe('Renamed');
     state = appStateReducer(state, { type: 'profiles/switch', profileId });
@@ -337,7 +343,7 @@ describe('appStateReducer', () => {
       type: 'profiles/save',
       draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
-    const profileId = state.bridgeProfiles.profiles[0]!.id;
+    const profileId = requireTestValue(state.bridgeProfiles.profiles[0], 'indexed test value').id;
     state = appStateReducer(state, {
       type: 'push/ensure-registration',
       profileId,
@@ -356,7 +362,7 @@ describe('appStateReducer', () => {
       agentId: ' opencode ',
       collaborationMode: 'ask' as never,
     });
-    expect(state.settings.agentSettings.opencode).toEqual({ collaborationMode: 'default' });
+    expect(state.settings.agentSettings['opencode']).toEqual({ collaborationMode: 'default' });
     const fallback = appStateReducer(state, {
       type: 'settings/remember-thread',
       agentId: 'codex',
@@ -380,7 +386,7 @@ describe('appStateReducer', () => {
       type: 'profiles/save',
       draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
-    const profileId = state.bridgeProfiles.profiles[0]!.id;
+    const profileId = requireTestValue(state.bridgeProfiles.profiles[0], 'indexed test value').id;
     expect(() =>
       appStateReducer(state, {
         type: 'push/ensure-registration',
@@ -443,7 +449,10 @@ describe('appStateReducer', () => {
       type: 'profiles/save',
       draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
-    const profileId = profileState.bridgeProfiles.profiles[0]!.id;
+    const profileId = requireTestValue(
+      profileState.bridgeProfiles.profiles[0],
+      'indexed test value',
+    ).id;
     const parsed = parsePersistedAppState(
       JSON.stringify({
         version: APP_STATE_VERSION,
@@ -577,7 +586,9 @@ describe('app-state atoms', () => {
     await store.flushPersistence();
 
     expect(writeCurrent).toHaveBeenCalledTimes(2);
-    const persisted = parsePersistedAppState(writeCurrent.mock.calls[1]![0]);
+    const persisted = parsePersistedAppState(
+      requireTestValue(writeCurrent.mock.calls[1], 'indexed test value')[0],
+    );
     expect(persisted.settings).toMatchObject({
       appearancePreference: 'light',
       showToolCalls: false,
@@ -603,9 +614,10 @@ describe('app-state atoms', () => {
     });
     await store.retryPersistence();
     expect(store.getSnapshot().persistenceError).toBeNull();
-    expect(parsePersistedAppState(writeCurrent.mock.calls[1]![0]).settings.showToolCalls).toBe(
-      false,
-    );
+    expect(
+      parsePersistedAppState(requireTestValue(writeCurrent.mock.calls[1], 'indexed test value')[0])
+        .settings.showToolCalls,
+    ).toBe(false);
   });
 
   it('does not publish a profile switch until that exact state is durable', async () => {

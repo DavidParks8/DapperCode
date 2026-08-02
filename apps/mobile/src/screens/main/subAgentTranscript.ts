@@ -113,7 +113,12 @@ function sharedLeadingMessageCount(left: ChatMessage[], right: ChatMessage[]): n
   const max = Math.min(left.length, right.length);
   let count = 0;
 
-  while (count < max && messagesMatch(left[count], right[count])) {
+  while (count < max) {
+    const leftMessage = left[count];
+    const rightMessage = right[count];
+    if (!leftMessage || !rightMessage || !messagesMatch(leftMessage, rightMessage)) {
+      break;
+    }
     count += 1;
   }
 

@@ -35,7 +35,9 @@ function renderRow(backgroundColor: string): ReactTestRenderer {
 function gradients(root: Queryable): Queryable[] {
   return root.findAll(
     (node) =>
-      Array.isArray(node.props.colors) && node.props.pointerEvents === 'none' && node.type === View,
+      Array.isArray(node.props['colors']) &&
+      node.props['pointerEvents'] === 'none' &&
+      node.type === View,
   );
 }
 
@@ -50,28 +52,28 @@ describe('ScrollableRowText', () => {
     }
 
     act(() => {
-      (scrollView.props.onLayout as (event: unknown) => void)({
+      (scrollView.props['onLayout'] as (event: unknown) => void)({
         nativeEvent: { layout: { width: 100 } },
       });
-      (scrollView.props.onContentSizeChange as (width: number, height: number) => void)(240, 18);
+      (scrollView.props['onContentSizeChange'] as (width: number, height: number) => void)(240, 18);
     });
 
     const rightFade = gradients(root)[0];
-    expect(rightFade?.props.colors).toEqual(['#E3E0F700', backgroundColor]);
-    expect(rightFade?.props.start).toEqual({ x: 0, y: 0.5 });
-    expect(rightFade?.props.end).toEqual({ x: 1, y: 0.5 });
+    expect(rightFade?.props['colors']).toEqual(['#E3E0F700', backgroundColor]);
+    expect(rightFade?.props['start']).toEqual({ x: 0, y: 0.5 });
+    expect(rightFade?.props['end']).toEqual({ x: 1, y: 0.5 });
 
     act(() => {
-      (scrollView.props.onScroll as (event: unknown) => void)({
+      (scrollView.props['onScroll'] as (event: unknown) => void)({
         nativeEvent: { contentOffset: { x: 40 } },
       });
     });
 
     const [leftFade, scrolledRightFade] = gradients(root);
-    expect(leftFade?.props.colors).toEqual([backgroundColor, '#E3E0F700']);
-    expect(scrolledRightFade?.props.colors).toEqual(['#E3E0F700', backgroundColor]);
-    expect(leftFade?.props.start).toEqual({ x: 0, y: 0.5 });
-    expect(leftFade?.props.end).toEqual({ x: 1, y: 0.5 });
+    expect(leftFade?.props['colors']).toEqual([backgroundColor, '#E3E0F700']);
+    expect(scrolledRightFade?.props['colors']).toEqual(['#E3E0F700', backgroundColor]);
+    expect(leftFade?.props['start']).toEqual({ x: 0, y: 0.5 });
+    expect(leftFade?.props['end']).toEqual({ x: 1, y: 0.5 });
 
     act(() => tree.unmount());
   });

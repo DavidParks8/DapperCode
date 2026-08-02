@@ -6,7 +6,7 @@ import {
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import type { CollaborationMode } from '../../api/types';
-import { type SelectionSheetOption } from '../../components/SelectionSheet';
+import type { SelectionSheetOption } from '../../components/SelectionSheet';
 import { feedback } from '../../feedback';
 import { formatModelOptionDescription, formatModelOptionLabel } from '../../modelOptions';
 import { formatReasoningEffort } from './mainScreenHelpers';

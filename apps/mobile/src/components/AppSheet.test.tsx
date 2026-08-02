@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { Keyboard, StyleSheet, Text, type KeyboardEvent } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -43,12 +44,12 @@ type Queryable = Omit<ReactTestInstance, 'props' | 'findAll'> & {
 type FlatStyle = Record<string, number | string | undefined>;
 
 function flatten(style: unknown): FlatStyle {
-  return (StyleSheet.flatten(style as never) ?? {}) as FlatStyle;
+  return StyleSheet.flatten(style as never) ?? {};
 }
 
 function findModal(tree: ReactTestRenderer): Queryable {
   const match = (tree.root as unknown as Queryable).findAll(
-    (node) => typeof node.props.onDismiss === 'function',
+    (node) => typeof node.props['onDismiss'] === 'function',
   )[0];
   if (!match) {
     throw new Error('Expected a bottom sheet modal');
@@ -58,16 +59,16 @@ function findModal(tree: ReactTestRenderer): Queryable {
 
 function findContentContainerStyle(tree: ReactTestRenderer): FlatStyle {
   const match = (tree.root as unknown as Queryable).findAll(
-    (node) => node.props.testID === 'app-sheet-content',
+    (node) => node.props['testID'] === 'app-sheet-content',
   )[0];
   if (!match) {
     throw new Error('Expected sheet content');
   }
-  return flatten(match.props.style);
+  return flatten(match.props['style']);
 }
 
 function renderBackdrop(tree: ReactTestRenderer): { props: Record<string, unknown> } {
-  const backdropComponent = findModal(tree).props.backdropComponent as (
+  const backdropComponent = findModal(tree).props['backdropComponent'] as (
     props: Record<string, unknown>,
   ) => { props: Record<string, unknown> };
   return backdropComponent({ animatedIndex: { value: 0 }, animatedPosition: { value: 0 } });
@@ -195,10 +196,13 @@ describe('AppSheet', () => {
     }
     expect(textOf(tree)).toContain('Scrollable body');
 
-    const sheet = (tree.root as unknown as Queryable).findAll(
-      (node) => typeof node.props.onDismiss === 'function',
-    )[0];
-    act(() => (sheet.props.onDismiss as () => void)());
+    const sheet = requireTestValue(
+      (tree.root as unknown as Queryable).findAll(
+        (node) => typeof node.props['onDismiss'] === 'function',
+      )[0],
+      'indexed test value',
+    );
+    act(() => (sheet.props['onDismiss'] as () => void)());
     expect(onClose).toHaveBeenCalledTimes(1);
     act(() => tree?.unmount());
   });
@@ -238,18 +242,18 @@ describe('AppSheet', () => {
     );
 
     const modal = findModal(tree);
-    const handle = flatten(modal.props.handleStyle);
-    const indicator = flatten(modal.props.handleIndicatorStyle);
+    const handle = flatten(modal.props['handleStyle']);
+    const indicator = flatten(modal.props['handleIndicatorStyle']);
 
-    const paddingTop = Number(handle.paddingTop ?? 0);
-    const paddingBottom = Number(handle.paddingBottom ?? 0);
-    const indicatorHeight = Number(indicator.height ?? 0);
+    const paddingTop = Number(handle['paddingTop'] ?? 0);
+    const paddingBottom = Number(handle['paddingBottom'] ?? 0);
+    const indicatorHeight = Number(indicator['height'] ?? 0);
 
     expect(paddingTop).toBeGreaterThan(0);
     expect(paddingTop).toBe(paddingBottom);
     expect(indicatorHeight).toBeGreaterThan(0);
     expect(paddingTop + indicatorHeight + paddingBottom).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    expect(Number(indicator.width ?? 0)).toBe(SHEET_HANDLE_INDICATOR_WIDTH);
+    expect(Number(indicator['width'] ?? 0)).toBe(SHEET_HANDLE_INDICATOR_WIDTH);
     act(() => tree.unmount());
   });
 
@@ -263,12 +267,12 @@ describe('AppSheet', () => {
     );
 
     const modal = findModal(tree);
-    const handle = flatten(modal.props.handleStyle);
-    const indicator = flatten(modal.props.handleIndicatorStyle);
+    const handle = flatten(modal.props['handleStyle']);
+    const indicator = flatten(modal.props['handleIndicatorStyle']);
     expect(
-      Number(handle.paddingTop ?? 0) +
-        Number(indicator.height ?? 0) +
-        Number(handle.paddingBottom ?? 0),
+      Number(handle['paddingTop'] ?? 0) +
+        Number(indicator['height'] ?? 0) +
+        Number(handle['paddingBottom'] ?? 0),
     ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
     act(() => tree.unmount());
   });
@@ -284,9 +288,9 @@ describe('AppSheet', () => {
     );
 
     const content = findContentContainerStyle(tree);
-    expect(content.paddingBottom).toBe(34 + spacing.lg);
-    expect(content.paddingLeft).toBe(44 + spacing.lg);
-    expect(content.paddingRight).toBe(44 + spacing.lg);
+    expect(content['paddingBottom']).toBe(34 + spacing.lg);
+    expect(content['paddingLeft']).toBe(44 + spacing.lg);
+    expect(content['paddingRight']).toBe(44 + spacing.lg);
     act(() => tree.unmount());
   });
 
@@ -301,10 +305,10 @@ describe('AppSheet', () => {
     );
 
     const content = findContentContainerStyle(tree);
-    expect(content.paddingBottom).toBe(SHEET_CORNER_CLEARANCE + spacing.lg);
-    expect(Number(content.paddingBottom)).toBeGreaterThan(spacing.lg);
-    expect(content.paddingLeft).toBe(spacing.lg);
-    expect(content.paddingRight).toBe(spacing.lg);
+    expect(content['paddingBottom']).toBe(SHEET_CORNER_CLEARANCE + spacing.lg);
+    expect(Number(content['paddingBottom'])).toBeGreaterThan(spacing.lg);
+    expect(content['paddingLeft']).toBe(spacing.lg);
+    expect(content['paddingRight']).toBe(spacing.lg);
     act(() => tree.unmount());
   });
 
@@ -319,9 +323,9 @@ describe('AppSheet', () => {
     );
 
     const content = findContentContainerStyle(tree);
-    expect(content.paddingBottom).toBe(SHEET_CORNER_CLEARANCE + spacing.lg + 12);
-    expect(content.paddingLeft).toBe(spacing.lg);
-    expect(content.paddingRight).toBe(spacing.lg);
+    expect(content['paddingBottom']).toBe(SHEET_CORNER_CLEARANCE + spacing.lg + 12);
+    expect(content['paddingLeft']).toBe(spacing.lg);
+    expect(content['paddingRight']).toBe(spacing.lg);
     act(() => tree.unmount());
   });
 
@@ -334,8 +338,8 @@ describe('AppSheet', () => {
       ),
     );
     const dismissibleBackdrop = renderBackdrop(dismissibleTree);
-    expect(dismissibleBackdrop.props.pressBehavior).toBe('close');
-    expect(dismissibleBackdrop.props.accessibilityLabel).toBe('Close Choose a model');
+    expect(dismissibleBackdrop.props['pressBehavior']).toBe('close');
+    expect(dismissibleBackdrop.props['accessibilityLabel']).toBe('Close Choose a model');
     act(() => dismissibleTree.unmount());
 
     const lockedTree = renderSheet(
@@ -346,8 +350,8 @@ describe('AppSheet', () => {
       ),
     );
     const lockedBackdrop = renderBackdrop(lockedTree);
-    expect(lockedBackdrop.props.pressBehavior).toBe('none');
-    expect(lockedBackdrop.props.accessibilityLabel).toBe('Close sheet');
+    expect(lockedBackdrop.props['pressBehavior']).toBe('none');
+    expect(lockedBackdrop.props['accessibilityLabel']).toBe('Close sheet');
     act(() => lockedTree.unmount());
   });
 
@@ -364,14 +368,14 @@ describe('AppSheet', () => {
     );
 
     const modal = findModal(tree);
-    const handle = flatten(modal.props.handleStyle);
-    const indicator = flatten(modal.props.handleIndicatorStyle);
+    const handle = flatten(modal.props['handleStyle']);
+    const indicator = flatten(modal.props['handleIndicatorStyle']);
     expect(
-      Number(handle.paddingTop ?? 0) +
-        Number(indicator.height ?? 0) +
-        Number(handle.paddingBottom ?? 0),
+      Number(handle['paddingTop'] ?? 0) +
+        Number(indicator['height'] ?? 0) +
+        Number(handle['paddingBottom'] ?? 0),
     ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    expect(findContentContainerStyle(tree).paddingBottom).toBe(34 + spacing.lg);
+    expect(findContentContainerStyle(tree)['paddingBottom']).toBe(34 + spacing.lg);
     act(() => tree.unmount());
   });
 });

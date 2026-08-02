@@ -40,8 +40,9 @@ export function parseMessageBlocks(
       continue;
     }
     const fileMatch = line.match(/^\[file:\s*(.+?)\]$/i);
-    if (fileMatch) {
-      const label = toLocalFileReferenceLabel(fileMatch[1]) ?? toPathBasename(fileMatch[1]);
+    const filePath = fileMatch?.[1];
+    if (filePath) {
+      const label = toLocalFileReferenceLabel(filePath) ?? toPathBasename(filePath);
       if (textContainsMentionLabel(pendingTextLines.join('\n'), label)) {
         continue;
       }
@@ -130,8 +131,12 @@ function toInlineImagePreviewFromMarkerLine(
   if (!match) {
     return null;
   }
-  const source = toMarkdownImageSource(match[1], bridgeUrl, bridgeToken);
-  return source ? { source, accessibilityLabel: toPathBasename(match[1]) } : null;
+  const imagePath = match[1];
+  if (!imagePath) {
+    return null;
+  }
+  const source = toMarkdownImageSource(imagePath, bridgeUrl, bridgeToken);
+  return source ? { source, accessibilityLabel: toPathBasename(imagePath) } : null;
 }
 
 export function isViewedImageEntry(title: string, textDetails: string[]): boolean {

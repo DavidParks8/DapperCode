@@ -303,7 +303,7 @@ async function renderDrawer(
 }
 
 function findByLabel(root: Queryable, label: string): Queryable {
-  const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+  const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
   if (!node) {
     throw new Error(`Expected accessibility label: ${label}`);
   }
@@ -337,19 +337,19 @@ function textContent(node: Queryable): string {
 }
 
 function renderPressedStyles(root: Queryable): void {
-  for (const node of root.findAll((candidate) => typeof candidate.props.style === 'function')) {
-    (node.props.style as (state: { pressed: boolean }) => unknown)({ pressed: true });
+  for (const node of root.findAll((candidate) => typeof candidate.props['style'] === 'function')) {
+    (node.props['style'] as (state: { pressed: boolean }) => unknown)({ pressed: true });
   }
 }
 
 async function exercisePressResponders(root: Queryable): Promise<void> {
-  const responders = root.findAll((node) => typeof node.props.onResponderGrant === 'function');
+  const responders = root.findAll((node) => typeof node.props['onResponderGrant'] === 'function');
   await act(async () => {
     for (const node of responders) {
       const event = { nativeEvent: {}, persist: jest.fn() };
-      (node.props.onResponderGrant as (event: unknown) => void)(event);
-      if (typeof node.props.onResponderRelease === 'function') {
-        (node.props.onResponderRelease as (event: unknown) => void)(event);
+      (node.props['onResponderGrant'] as (event: unknown) => void)(event);
+      if (typeof node.props['onResponderRelease'] === 'function') {
+        (node.props['onResponderRelease'] as (event: unknown) => void)(event);
       }
     }
     await Promise.resolve();
@@ -441,7 +441,9 @@ describe('DrawerContent render behavior matrix', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(root.findAll((node) => node.props.accessibilityLabel === noticeLabel)).toHaveLength(0);
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === noticeLabel)).toHaveLength(
+      0,
+    );
 
     await act(async () => {
       harness.emitStatus(false);
@@ -487,7 +489,9 @@ describe('DrawerContent render behavior matrix', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(root.findAll((node) => node.props.accessibilityLabel === noticeLabel)).toHaveLength(0);
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === noticeLabel)).toHaveLength(
+      0,
+    );
     expect(
       findByLabel(root, 'Streamed pending session, streamed, Codex, Input requested'),
     ).toBeDefined();
@@ -500,7 +504,7 @@ describe('DrawerContent render behavior matrix', () => {
     const withoutClose = await renderDrawer(harness);
     expect(
       (withoutClose.root as Queryable).findAll(
-        (candidate) => candidate.props.accessibilityLabel === 'Close session list',
+        (candidate) => candidate.props['accessibilityLabel'] === 'Close session list',
       ),
     ).toHaveLength(0);
     act(() => withoutClose.unmount());
@@ -561,11 +565,11 @@ describe('DrawerContent render behavior matrix', () => {
     const tree = await renderDrawer(harness, { selectedChatId: 'root', store });
     const root = tree.root as Queryable;
 
-    expect(findByLabel(root, 'Needs your attention, 3 sessions').props.accessibilityState).toEqual(
-      expect.objectContaining({ expanded: true }),
-    );
     expect(
-      findByLabel(root, 'Running root, alpha, Copilot, Working').props.accessibilityState,
+      findByLabel(root, 'Needs your attention, 3 sessions').props['accessibilityState'],
+    ).toEqual(expect.objectContaining({ expanded: true }));
+    expect(
+      findByLabel(root, 'Running root, alpha, Copilot, Working').props['accessibilityState'],
     ).toEqual(expect.objectContaining({ selected: true }));
     expect(findByLabel(root, 'Approval chat, beta, Codex, Approval requested')).toBeDefined();
     expect(findByLabel(root, 'Input chat, beta, Copilot, Input requested')).toBeDefined();
@@ -779,7 +783,7 @@ describe('DrawerContent render behavior matrix', () => {
     ).toBeDefined();
     expect(
       root.findAll(
-        (node) => node.props.accessibilityLabel === 'Could not refresh agent names. Retry',
+        (node) => node.props['accessibilityLabel'] === 'Could not refresh agent names. Retry',
       ),
     ).toHaveLength(0);
     act(() => tree.unmount());
@@ -807,12 +811,12 @@ describe('DrawerContent render behavior matrix', () => {
     const tree = await renderDrawer(harness);
     const root = tree.root as Queryable;
     const refreshControl = root.findAll((node) => node.type === RefreshControl)[0];
-    if (typeof refreshControl?.props.onRefresh !== 'function') {
+    if (typeof refreshControl?.props['onRefresh'] !== 'function') {
       throw new Error('Expected refresh control');
     }
 
     await act(async () => {
-      (refreshControl.props.onRefresh as () => void)();
+      (refreshControl.props['onRefresh'] as () => void)();
       harness.emitEvent({ method: 'unrelated/event', params: null });
       harness.emitEvent({ method: 'thread/started', params: { threadId: 'thread' } });
       harness.emitEvent({ method: 'thread/name/updated', params: { threadId: 'thread' } });
@@ -1106,7 +1110,7 @@ describe('DrawerContent render behavior matrix', () => {
     });
     expect(hasText(root, 'Deep page')).toBe(true);
     expect(
-      root.findAll((node) => Boolean(node.props.style) && textContent(node) === ''),
+      root.findAll((node) => Boolean(node.props['style']) && textContent(node) === ''),
     ).not.toHaveLength(0);
 
     await act(async () => {
@@ -1301,7 +1305,9 @@ describe('DrawerContent render behavior matrix', () => {
     expect(hasText(root, 'Newer duplicate')).toBe(true);
     expect(hasText(root, 'Older duplicate')).toBe(false);
     const errorRow = findByLabel(root, 'Error child, bulk, Codex, Failed');
-    expect(errorRow.props.accessibilityState).toEqual(expect.objectContaining({ selected: true }));
+    expect(errorRow.props['accessibilityState']).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
     renderPressedStyles(root);
     act(() => tree?.unmount());
   });
@@ -1369,10 +1375,10 @@ describe('DrawerContent render behavior matrix', () => {
       streamBatch?.({ streamId: 'stream', limit: 20, done: false, chats: [first, second, third] });
       await Promise.resolve();
     });
-    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Recent, 2 sessions').props['accessibilityState']).toEqual(
       expect.objectContaining({ expanded: false }),
     );
-    expect(findByLabel(root, 'Working now, 1 session').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Working now, 1 session').props['accessibilityState']).toEqual(
       expect.objectContaining({ expanded: true }),
     );
     expect(hasText(root, 'First recent')).toBe(false);
@@ -1474,12 +1480,12 @@ describe('DrawerContent render behavior matrix', () => {
     const refreshControl = (tree.root as Queryable).findAll(
       (node) => node.type === RefreshControl,
     )[0];
-    if (typeof refreshControl?.props.onRefresh !== 'function') {
+    if (typeof refreshControl?.props['onRefresh'] !== 'function') {
       throw new Error('Expected cached refresh control');
     }
 
     await act(async () => {
-      (refreshControl.props.onRefresh as () => void)();
+      (refreshControl.props['onRefresh'] as () => void)();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -1505,12 +1511,12 @@ describe('DrawerContent render behavior matrix', () => {
     const tree = await renderDrawer(harness);
     const root = tree.root as Queryable;
     const refreshControl = root.findAll((node) => node.type === RefreshControl)[0];
-    if (typeof refreshControl?.props.onRefresh !== 'function') {
+    if (typeof refreshControl?.props['onRefresh'] !== 'function') {
       throw new Error('Expected error refresh control');
     }
 
     await act(async () => {
-      (refreshControl.props.onRefresh as () => void)();
+      (refreshControl.props['onRefresh'] as () => void)();
       await Promise.resolve();
       streamError?.();
       await Promise.resolve();
@@ -1565,11 +1571,11 @@ describe('DrawerContent render behavior matrix', () => {
       await Promise.resolve();
     });
     const refreshControl = root.findAll((node) => node.type === RefreshControl)[0];
-    if (typeof refreshControl?.props.onRefresh !== 'function') {
+    if (typeof refreshControl?.props['onRefresh'] !== 'function') {
       throw new Error('Expected deep refresh control');
     }
     await act(async () => {
-      (refreshControl.props.onRefresh as () => void)();
+      (refreshControl.props['onRefresh'] as () => void)();
       await Promise.resolve();
       resolveDeep?.({ chats: [listedChat], partial: false, diagnostics: [] });
       await Promise.resolve();
@@ -1741,13 +1747,13 @@ describe('DrawerContent partial history diagnostics', () => {
 
     const retry = (tree.root as Queryable).findAll(
       (node) =>
-        node.props.accessibilityLabel === 'Chat listing reached the 32-page safety limit. Retry',
+        node.props['accessibilityLabel'] === 'Chat listing reached the 32-page safety limit. Retry',
     )[0];
-    if (typeof retry?.props.onPress !== 'function') {
+    if (typeof retry?.props['onPress'] !== 'function') {
       throw new Error('Expected retry action');
     }
     await act(async () => {
-      (retry.props.onPress as () => void)();
+      (retry.props['onPress'] as () => void)();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -1785,8 +1791,8 @@ describe('DrawerContent session deletion', () => {
   function findDeleteAction(root: Queryable, title: string): Queryable {
     const node = root.findAll(
       (candidate) =>
-        candidate.props.accessibilityLabel === `Delete ${title}` &&
-        typeof candidate.props.onPress === 'function',
+        candidate.props['accessibilityLabel'] === `Delete ${title}` &&
+        typeof candidate.props['onPress'] === 'function',
     )[0];
     if (!node) {
       throw new Error(`Expected delete action for ${title}`);
@@ -1968,7 +1974,7 @@ describe('DrawerContent session search', () => {
 
   async function typeSearch(root: Queryable, value: string): Promise<void> {
     await act(async () => {
-      (searchInput(root).props.onChangeText as (value: string) => void)(value);
+      (searchInput(root).props['onChangeText'] as (value: string) => void)(value);
       await Promise.resolve();
     });
   }
@@ -2058,7 +2064,7 @@ describe('DrawerContent session search', () => {
 
     // Collapse the "Recent" lane before searching.
     await press(findByLabel(root, 'Recent, 2 sessions'));
-    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Recent, 2 sessions').props['accessibilityState']).toEqual(
       expect.objectContaining({ expanded: false }),
     );
     expect(hasText(root, 'First recent')).toBe(false);
@@ -2067,7 +2073,7 @@ describe('DrawerContent session search', () => {
 
     // Rows for the match render (the search bypasses collapse-filtering), so the header must
     // now claim expanded too, not still say collapsed while its rows are visibly showing.
-    expect(findByLabel(root, 'Recent, 1 session').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Recent, 1 session').props['accessibilityState']).toEqual(
       expect.objectContaining({ expanded: true }),
     );
     expect(hasText(root, 'First recent')).toBe(true);
@@ -2075,7 +2081,7 @@ describe('DrawerContent session search', () => {
     await press(findByLabel(root, 'Clear search'));
 
     // Clearing the search restores the user's manual collapse preference.
-    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+    expect(findByLabel(root, 'Recent, 2 sessions').props['accessibilityState']).toEqual(
       expect.objectContaining({ expanded: false }),
     );
     expect(hasText(root, 'First recent')).toBe(false);
@@ -2117,7 +2123,7 @@ describe('DrawerContent session search', () => {
     await press(findByLabel(root, 'Clear search'));
     expect(hasText(root, 'Alpha chat')).toBe(true);
     expect(hasText(root, 'Beta chat')).toBe(true);
-    expect(searchInput(root).props.value).toBe('');
+    expect(searchInput(root).props['value']).toBe('');
     act(() => tree.unmount());
   });
 
@@ -2143,7 +2149,7 @@ describe('DrawerContent session search', () => {
       await Promise.resolve();
     });
 
-    expect(searchInput(root).props.value).toBe('alpha');
+    expect(searchInput(root).props['value']).toBe('alpha');
     expect(hasText(root, 'Alpha chat')).toBe(true);
     expect(hasText(root, 'Beta chat')).toBe(false);
     act(() => tree.unmount());
@@ -2189,13 +2195,13 @@ describe('DrawerContent session search', () => {
 
     // Simulate fast typing: each keystroke lands well inside the debounce window of the last.
     await act(async () => {
-      (searchInput(root).props.onChangeText as (value: string) => void)('a');
+      (searchInput(root).props['onChangeText'] as (value: string) => void)('a');
       await new Promise((resolve) => setTimeout(resolve, 50));
-      (searchInput(root).props.onChangeText as (value: string) => void)('al');
+      (searchInput(root).props['onChangeText'] as (value: string) => void)('al');
       await new Promise((resolve) => setTimeout(resolve, 50));
-      (searchInput(root).props.onChangeText as (value: string) => void)('alp');
+      (searchInput(root).props['onChangeText'] as (value: string) => void)('alp');
       await new Promise((resolve) => setTimeout(resolve, 50));
-      (searchInput(root).props.onChangeText as (value: string) => void)('alpha');
+      (searchInput(root).props['onChangeText'] as (value: string) => void)('alpha');
     });
 
     expect(announce).not.toHaveBeenCalled();
@@ -2218,18 +2224,16 @@ describe('DrawerContent session search', () => {
 
     await typeSearch(root, 'alpha');
     const summaryText = root.findAll(
-      (node) =>
-        textContent(node as Queryable).includes('session matches "alpha"') && node.type === Text,
+      (node) => textContent(node).includes('session matches "alpha"') && node.type === Text,
     )[0];
-    expect(summaryText?.props.accessibilityLiveRegion).toBeUndefined();
+    expect(summaryText?.props['accessibilityLiveRegion']).toBeUndefined();
 
     await typeSearch(root, 'nonexistent');
     const emptyStateView = root.findAll(
       (node) =>
-        node.props.accessibilityLiveRegion !== undefined &&
-        hasText(node as Queryable, 'No sessions match'),
+        node.props['accessibilityLiveRegion'] !== undefined && hasText(node, 'No sessions match'),
     )[0];
-    expect(emptyStateView?.props.accessibilityLiveRegion).toBe('none');
+    expect(emptyStateView?.props['accessibilityLiveRegion']).toBe('none');
 
     act(() => tree.unmount());
   });
@@ -2241,15 +2245,15 @@ describe('DrawerContent session search', () => {
     const tree = await renderDrawer(harness);
     const root = tree.root as Queryable;
     const input = searchInput(root);
-    expect(input.props.accessibilityLabel).toBe('Search sessions');
-    expect(input.props.accessibilityHint).toContain('Filters sessions');
-    expect(root.findAll((node) => node.props.accessibilityLabel === 'Clear search')).toHaveLength(
-      0,
-    );
+    expect(input.props['accessibilityLabel']).toBe('Search sessions');
+    expect(input.props['accessibilityHint']).toContain('Filters sessions');
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Clear search'),
+    ).toHaveLength(0);
 
     await typeSearch(root, 'alpha');
     const clearButton = findByLabel(root, 'Clear search');
-    expect(clearButton.props.accessibilityRole).toBe('button');
+    expect(clearButton.props['accessibilityRole']).toBe('button');
     act(() => tree.unmount());
   });
 

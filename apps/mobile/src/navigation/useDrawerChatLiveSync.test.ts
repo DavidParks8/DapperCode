@@ -7,7 +7,6 @@ import {
   DRAWER_REFRESH_DISCONNECTED_MS,
 } from './drawerChatLoadingConfig';
 import { useDrawerChatLiveSync, type DrawerChatLiveSyncControls } from './useDrawerChatLiveSync';
-import type { DrawerRunIndicatorMap } from './drawerRuntimeIndicators';
 
 interface Harness {
   ws: HostBridgeWsClient;
@@ -58,10 +57,7 @@ function renderLiveSync(
       active: props.active,
       onThreadDeleted: jest.fn(),
       scheduleLoadChats: props.scheduleLoadChats,
-      setRunIndicators: jest.fn() as unknown as (
-        update:
-          DrawerRunIndicatorMap | ((previous: DrawerRunIndicatorMap) => DrawerRunIndicatorMap),
-      ) => void,
+      setRunIndicators: jest.fn(),
       setWsConnected: jest.fn(),
       ws: props.ws,
       wsConnected: props.wsConnected,

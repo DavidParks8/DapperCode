@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { HostBridgeApiClient, StaleSnapshotRevisionError, mergeSnapshotPage } from './client';
 import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from './messages';
 import { mapChat, mapChatSummary, type RawAcpSnapshot } from './chatMapping';
@@ -95,7 +96,9 @@ describe('HostBridgeApiClient', () => {
 
     expect(ws.request).toHaveBeenCalledWith('bridge/status/read');
     expect(result.connectedClients).toBe(1);
-    expect(result.devices[0].clientName).toBe('David iPhone');
+    expect(requireTestValue(result.devices[0], 'indexed test value').clientName).toBe(
+      'David iPhone',
+    );
     expect(result.operational.replay.capacity).toBe(2000);
   });
 
@@ -130,8 +133,8 @@ describe('HostBridgeApiClient', () => {
       }),
     );
     expect(chats).toHaveLength(1);
-    expect(chats[0].id).toBe('thr_1');
-    expect(chats[0].status).toBe('complete');
+    expect(requireTestValue(chats[0], 'indexed test value').id).toBe('thr_1');
+    expect(requireTestValue(chats[0], 'indexed test value').status).toBe('complete');
     expect(client.peekChatShell('thr_1')).toMatchObject({
       id: 'thr_1',
       title: 'hello world',
@@ -616,7 +619,7 @@ describe('HostBridgeApiClient', () => {
     const chats = await client.listChats();
 
     expect(chats).toHaveLength(1);
-    expect(chats[0].status).toBe('complete');
+    expect(requireTestValue(chats[0], 'indexed test value').status).toBe('complete');
   });
 
   it('listChats() excludes sub-agent source kinds defensively', async () => {
@@ -722,8 +725,8 @@ describe('HostBridgeApiClient', () => {
       cwd: null,
     });
     expect(chats.map((chat) => chat.id)).toEqual(['thr_sub', 'thr_root']);
-    expect(chats[0].parentThreadId).toBe('thr_root');
-    expect(chats[0].subAgentDepth).toBe(1);
+    expect(requireTestValue(chats[0], 'indexed test value').parentThreadId).toBe('thr_root');
+    expect(requireTestValue(chats[0], 'indexed test value').subAgentDepth).toBe(1);
   });
 
   it('listLoadedChatIds() returns loaded in-memory thread ids', async () => {
@@ -2255,8 +2258,10 @@ describe('HostBridgeApiClient', () => {
       latestTurnStatus: null,
       activeTurnId: null,
     });
-    expect(client.peekChats()?.[0].title).toBe('Updated');
-    expect(client.peekAllChats()?.[0].title).toBe('Updated');
+    expect(requireTestValue(client.peekChats()?.[0], 'indexed test value').title).toBe('Updated');
+    expect(requireTestValue(client.peekAllChats()?.[0], 'indexed test value').title).toBe(
+      'Updated',
+    );
 
     let resolveRead: (value: unknown) => void = () => {};
     ws.request.mockImplementationOnce(
@@ -3313,7 +3318,7 @@ describe('HostBridgeApiClient', () => {
         return Promise.resolve({});
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await client.startChatListStream(undefined as never, () => {});
+      await client.startChatListStream(undefined, () => {});
       await expect(
         client.listChats({ includeSubAgents: true, forceRefresh: true }),
       ).resolves.toEqual([]);
@@ -3809,7 +3814,7 @@ describe('HostBridgeApiClient model options', () => {
     expect(second).not.toBe(first);
 
     // Mutating a returned option must not corrupt the cache.
-    second[0].displayName = 'mutated';
+    requireTestValue(second[0], 'indexed test value').displayName = 'mutated';
     expect(client.peekModelOptions('codex')?.[0]?.displayName).toBe('GPT-5');
 
     await client.listModelOptions('claude');

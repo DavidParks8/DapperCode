@@ -6,7 +6,7 @@ import {
   showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
 import { useSetAtom } from 'jotai';
-import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, type RefObject } from 'react';
 import type { AppStateStatus } from 'react-native';
 import {
   type AutoScrollState,
@@ -20,9 +20,9 @@ import type {
 
 export type MainScreenLifecycleRecoveryContext = MainScreenCoreBootstrapContext &
   MainScreenCoreBootstrapResult & {
-    appStateRef?: MutableRefObject<AppStateStatus>;
-    deferredDisconnectActivityTimeoutRef?: MutableRefObject<ReturnType<typeof setTimeout> | null>;
-    lastAppForegroundedAtRef?: MutableRefObject<number>;
+    appStateRef?: RefObject<AppStateStatus>;
+    deferredDisconnectActivityTimeoutRef?: RefObject<ReturnType<typeof setTimeout> | null>;
+    lastAppForegroundedAtRef?: RefObject<number>;
   };
 
 export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecoveryContext) {
@@ -58,8 +58,8 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   const replayRecoveryRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const replayRecoveryAbortControllerRef = useRef<AbortController | null>(null);
   const replayRecoveryEpochResetPendingRef = useRef(false);
-  const openAgentThreadSelectorRef = useRef<(query?: string | null) => Promise<boolean>>(
-    async () => false,
+  const openAgentThreadSelectorRef = useRef<(query?: string | null) => Promise<boolean>>(() =>
+    Promise.resolve(false),
   );
   const bumpAgentRuntimeRevision = useCallback(() => {
     setAgentRuntimeRevision((previous) => previous + 1);

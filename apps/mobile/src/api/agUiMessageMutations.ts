@@ -14,8 +14,8 @@ import {
   type AgUiThreadMessageState,
   MAX_MESSAGES_PER_THREAD,
 } from './agUiMessagesState';
-import { type AssistantMessage } from '@ag-ui/core';
-import { type ChatMessage } from './types';
+import type { AssistantMessage } from '@ag-ui/core';
+import type { ChatMessage } from './types';
 import { upsertToolResult } from './agUiToolAndCustomEventReducers';
 
 export function rememberReplacement(
@@ -54,6 +54,7 @@ export function textMessage(
       return { ...base, role: 'system' };
     case 'user':
       return { ...base, role: 'user' };
+    case 'assistant':
     default:
       return { ...base, role: 'assistant' };
   }
@@ -70,7 +71,7 @@ export function upsertMessage(
   const nextMessage: ChatMessage = {
     ...message,
     createdAt: existing?.createdAt ?? timestampIso(timestamp),
-  } as ChatMessage;
+  };
   const messages = current.messages.slice();
   if (index >= 0) {
     messages[index] = nextMessage;
@@ -156,7 +157,7 @@ export function appendText(
       {
         ...withText(existing, content),
         ...(existing.role === 'reasoning' ? { pending: true } : {}),
-      } as ChatMessage,
+      },
       runId,
       timestamp,
     );
@@ -218,8 +219,8 @@ export function reduceActivitySnapshot(
   content: Record<string, unknown>,
   timestamp?: number,
 ): AgUiThreadMessageState {
-  const subAgent = activityType === SUBAGENT_ACTIVITY_TYPE ? record(content.subAgent) : null;
-  const toolCallId = nonEmptyString(subAgent?.toolCallId);
+  const subAgent = activityType === SUBAGENT_ACTIVITY_TYPE ? record(content['subAgent']) : null;
+  const toolCallId = nonEmptyString(subAgent?.['toolCallId']);
   const withoutGenericTool = toolCallId
     ? (() => {
         const messages = current.messages.filter(
@@ -266,7 +267,7 @@ export function withText(message: ChatMessage, content: string): ChatMessage {
   if (message.role === 'user') {
     return { ...message, content };
   }
-  return { ...message, content } as ChatMessage;
+  return { ...message, content };
 }
 
 export function startToolCall(

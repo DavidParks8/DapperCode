@@ -288,13 +288,19 @@ export function withTransparentAlpha(color: string): string {
   }
   const shortHex = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(value);
   if (shortHex) {
-    return `#${shortHex[1]}${shortHex[1]}${shortHex[2]}${shortHex[2]}${shortHex[3]}${shortHex[3]}00`;
+    const [, red, green, blue] = shortHex;
+    if (red && green && blue) {
+      return `#${red}${red}${green}${green}${blue}${blue}00`;
+    }
   }
   const functionalColor = /^rgba?\(\s*([^,]+),\s*([^,]+),\s*([^,\s)]+)(?:,\s*[^)]+)?\s*\)$/i.exec(
     value,
   );
   if (functionalColor) {
-    return `rgba(${functionalColor[1]}, ${functionalColor[2]}, ${functionalColor[3]}, 0)`;
+    const [, red, green, blue] = functionalColor;
+    if (red && green && blue) {
+      return `rgba(${red}, ${green}, ${blue}, 0)`;
+    }
   }
   return 'transparent';
 }

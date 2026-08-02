@@ -90,7 +90,7 @@ export class SubmissionController {
     this.failed.delete(key);
     this.failed.set(key, submission);
     while (this.failed.size > FAILED_SUBMISSION_LIMIT) {
-      const oldest = this.failed.keys().next().value as string | undefined;
+      const oldest = this.failed.keys().next().value;
       if (!oldest) {
         break;
       }

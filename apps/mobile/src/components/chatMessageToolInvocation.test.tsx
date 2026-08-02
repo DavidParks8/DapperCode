@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import { Image, ScrollView, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -66,20 +67,21 @@ function render(value: ToolInvocation, bridgeUrl: string | null = null): Queryab
 
 function expand(tree: QueryableRenderer, title: string) {
   const control = tree.root.findAll(
-    (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === title,
+    (node) =>
+      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === title,
   )[0];
   if (!control) {
     throw new Error('Missing invocation row');
   }
   act(() => {
-    (control.props.onPress as () => void)();
+    (control.props['onPress'] as () => void)();
   });
 }
 
 function textLines(tree: QueryableRenderer): string[] {
   return tree.root
     .findAllByType(Text)
-    .map((node) => node.props.children)
+    .map((node) => node.props['children'])
     .filter((child): child is string => typeof child === 'string');
 }
 
@@ -94,8 +96,11 @@ describe('ToolInvocationRow', () => {
 
   it('gives the collapsed row an effective touch target without inflating its visible chrome', () => {
     const tree = render(invocation({ id: 'tool-hitslop', textLines: ['out'] }));
-    const row = tree.root.findAll((node) => typeof node.props.onPress === 'function')[0];
-    const hitSlop = row.props.hitSlop as
+    const row = requireTestValue(
+      tree.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
+      'indexed test value',
+    );
+    const hitSlop = row.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
 
     expect(hitSlop).toBeDefined();
@@ -130,15 +135,19 @@ describe('ToolInvocationRow', () => {
 
   it('only highlights the press state while the row can actually expand', () => {
     const open = render(invocation({ id: 'tool-pressable', textLines: ['out'] }));
-    const openStyle = open.root.findAll((node) => typeof node.props.onPress === 'function')[0].props
-      .style as (state: { pressed: boolean }) => unknown[];
+    const openStyle = requireTestValue(
+      open.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
+      'indexed test value',
+    ).props['style'] as (state: { pressed: boolean }) => unknown[];
     expect(openStyle({ pressed: true })[2]).toBeTruthy();
     expect(openStyle({ pressed: false })[2]).toBeFalsy();
     act(() => open.unmount());
 
     const closed = render(invocation({ id: 'tool-inert', empty: true }));
-    const closedStyle = closed.root.findAll((node) => typeof node.props.onPress === 'function')[0]
-      .props.style as (state: { pressed: boolean }) => unknown[];
+    const closedStyle = requireTestValue(
+      closed.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
+      'indexed test value',
+    ).props['style'] as (state: { pressed: boolean }) => unknown[];
     expect(closedStyle({ pressed: true })[2]).toBeFalsy();
     act(() => closed.unmount());
   });
@@ -157,8 +166,10 @@ describe('ToolInvocationRow', () => {
 
     expand(tree, value.title);
     expect(tree.root.findAllByProps({ testID: 'tool-command-scroll' })).toHaveLength(0);
-    const title = tree.root.findAllByType(Text).find((node) => node.props.children === value.title);
-    expect(title?.props.numberOfLines).toBe(3);
+    const title = tree.root
+      .findAllByType(Text)
+      .find((node) => node.props['children'] === value.title);
+    expect(title?.props['numberOfLines']).toBe(3);
 
     act(() => tree.unmount());
   });
@@ -176,15 +187,15 @@ describe('ToolInvocationRow', () => {
 
     const collapsedTitle = tree.root
       .findAllByType(Text)
-      .find((node) => typeof node.props.children === 'string');
-    expect(collapsedTitle?.props.numberOfLines).toBe(1);
-    expect(collapsedTitle?.props.children).toBe('cd apps/mobile grep -rn "tool" src echo done');
+      .find((node) => typeof node.props['children'] === 'string');
+    expect(collapsedTitle?.props['numberOfLines']).toBe(1);
+    expect(collapsedTitle?.props['children']).toBe('cd apps/mobile grep -rn "tool" src echo done');
 
     expand(tree, command);
     const expandedTitle = tree.root
       .findAllByType(Text)
-      .find((node) => node.props.children === command);
-    expect(expandedTitle?.props.numberOfLines).toBe(3);
+      .find((node) => node.props['children'] === command);
+    expect(expandedTitle?.props['numberOfLines']).toBe(3);
 
     act(() => tree.unmount());
   });
@@ -196,9 +207,9 @@ describe('ToolInvocationRow', () => {
 
     const collapsedTitle = tree.root
       .findAllByType(Text)
-      .find((node) => typeof node.props.children === 'string');
-    expect(collapsedTitle?.props.numberOfLines).toBe(1);
-    expect(collapsedTitle?.props.children).toBe('Read a file with a wrapped description');
+      .find((node) => typeof node.props['children'] === 'string');
+    expect(collapsedTitle?.props['numberOfLines']).toBe(1);
+    expect(collapsedTitle?.props['children']).toBe('Read a file with a wrapped description');
 
     act(() => tree.unmount());
   });

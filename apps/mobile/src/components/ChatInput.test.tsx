@@ -1,3 +1,4 @@
+import { requireTestValue } from '../testing/requireTestValue';
 import {
   ActivityIndicator,
   Platform,
@@ -44,7 +45,7 @@ type Queryable = ReactTestInstance & {
 const theme = createAppTheme('dark');
 
 function byLabel(root: Queryable, label: string) {
-  const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+  const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
   if (!node) {
     throw new Error(`Missing ${label}`);
   }
@@ -133,14 +134,14 @@ describe('ChatInput behavior', () => {
         ),
       ),
     );
-    expect(byLabel(root, 'Stopping agent').props.disabled).toBe(true);
-    expect(byLabel(root, 'Add attachment').props.disabled).toBe(true);
+    expect(byLabel(root, 'Stopping agent').props['disabled']).toBe(true);
+    expect(byLabel(root, 'Add attachment').props['disabled']).toBe(true);
     act(() =>
       rendered.update(
         wrap(<ChatInput {...base} value="" isLoading onAttachPress={base.onAttachPress} />),
       ),
     );
-    expect(byLabel(root, 'Agent is responding').props.disabled).toBe(true);
+    expect(byLabel(root, 'Agent is responding').props['disabled']).toBe(true);
     act(() => rendered.unmount());
   });
 
@@ -164,7 +165,7 @@ describe('ChatInput behavior', () => {
     const inputStyle = StyleSheet.flatten(input.props.style);
     const verticalPadding = Number(inputStyle.paddingVertical ?? 0);
 
-    expect(input.props.placeholder).toBe('Message debugging...');
+    expect(input.props['placeholder']).toBe('Message debugging...');
     expect(inputStyle.height).toBe(Number(inputStyle.lineHeight) + verticalPadding * 2);
     act(() => rendered.unmount());
   });
@@ -189,16 +190,19 @@ describe('ChatInput behavior', () => {
     const root = rendered.root as Queryable;
     const input = root
       .findAllByType(TextInput)
-      .find((node) => node.props.accessibilityLabel === 'Message');
+      .find((node) => node.props['accessibilityLabel'] === 'Message');
     if (!input) {
       throw new Error('Missing message input');
     }
     act(() => input.props.onLayout({ nativeEvent: { layout: { width: 240 } } }));
-    const measure = root.findAll((node) => typeof node.props.onTextLayout === 'function')[0];
+    const measure = requireTestValue(
+      root.findAll((node) => typeof node.props.onTextLayout === 'function')[0],
+      'indexed test value',
+    );
     act(() => measure.props.onTextLayout({ nativeEvent: { lines: [{}, {}, {}, {}, {}, {}] } }));
     expect(
-      root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === 'Message')
-        ?.props.scrollEnabled,
+      root.findAllByType(TextInput).find((node) => node.props['accessibilityLabel'] === 'Message')
+        ?.props['scrollEnabled'],
     ).toBe(true);
     act(() =>
       rendered.update(
@@ -231,7 +235,7 @@ describe('ChatInput behavior', () => {
     const input = byLabel(rendered.root as Queryable, 'Message');
     const preventDefault = jest.fn();
 
-    const onKeyPress = input.props.onKeyPress as (event: {
+    const onKeyPress = input.props['onKeyPress'] as (event: {
       nativeEvent: { key: string; shiftKey?: boolean };
       preventDefault: () => void;
     }) => void;
@@ -270,7 +274,7 @@ describe('ChatInput behavior', () => {
 
     // Not stopping yet: only the square glyph renders, no spinner underneath it.
     const stopButton = byLabel(root, 'Stop agent');
-    expect(stopButton.findAll((node) => node.props.name === 'square')).toHaveLength(1);
+    expect(stopButton.findAll((node) => node.props['name'] === 'square')).toHaveLength(1);
     expect(stopButton.findAllByType(ActivityIndicator)).toHaveLength(0);
 
     act(() =>
@@ -291,7 +295,7 @@ describe('ChatInput behavior', () => {
     // Stopping: only the spinner renders, the square glyph is gone (regression guard for the
     // overlap bug where both were shown simultaneously).
     const stoppingButton = byLabel(root, 'Stopping agent');
-    expect(stoppingButton.findAll((node) => node.props.name === 'square')).toHaveLength(0);
+    expect(stoppingButton.findAll((node) => node.props['name'] === 'square')).toHaveLength(0);
     expect(stoppingButton.findAllByType(ActivityIndicator)).toHaveLength(1);
     act(() => rendered.unmount());
   });
@@ -320,7 +324,7 @@ describe('ChatInput behavior', () => {
     const removeAttachment = byLabel(root, 'error.log, remove attachment');
 
     for (const control of [addAttachment, sendMessage, removeAttachment]) {
-      const hitSlop = control.props.hitSlop as {
+      const hitSlop = control.props['hitSlop'] as {
         top: number;
         bottom: number;
         left: number;

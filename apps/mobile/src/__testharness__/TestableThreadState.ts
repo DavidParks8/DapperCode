@@ -50,6 +50,9 @@ export class TestableThreadState {
     if (after !== before) {
       this.eventLog.push({ threadId, runId, event, timestamp: ts });
     }
+    if (!after) {
+      throw new Error(`Event did not initialize thread state for "${threadId}"`);
+    }
     return after;
   }
 

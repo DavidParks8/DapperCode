@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../testing/requireTestValue';
 import * as mockReact from 'react';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
 import { BackHandler, Platform } from 'react-native';
@@ -20,8 +21,7 @@ import { createBrowserScreenStyles } from './browserScreenStyles';
 import { feedback } from '../../feedback';
 
 jest.mock('react-native-reanimated', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { View, Text, Image, ScrollView } = jest.requireActual('react-native') as any;
+  const { View, Text, Image, ScrollView } = jest.requireActual('react-native');
   function makeChain() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: Record<string, any> = {};
@@ -181,15 +181,15 @@ function hasText(root: Queryable, text: string): boolean {
 }
 
 function exercisePressableStyles(root: Queryable): void {
-  for (const node of root.findAll((candidate) => typeof candidate.props.style === 'function')) {
-    const style = node.props.style as (state: { pressed: boolean }) => unknown;
+  for (const node of root.findAll((candidate) => typeof candidate.props['style'] === 'function')) {
+    const style = node.props['style'] as (state: { pressed: boolean }) => unknown;
     style({ pressed: false });
     style({ pressed: true });
   }
 }
 
 function findByLabel(root: Queryable, label: string): Queryable {
-  const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
+  const node = root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
   if (!node) {
     throw new Error(`Missing label: ${label}`);
   }
@@ -199,7 +199,7 @@ function findByLabel(root: Queryable, label: string): Queryable {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') {
+  while (current && typeof current.props['onPress'] !== 'function') {
     current = current.parent;
   }
   if (!current) {
@@ -333,7 +333,7 @@ describe('BrowserScreen behavior', () => {
     expect(hasText(unavailable.tree.root as Queryable, 'did not start its preview server')).toBe(
       true,
     );
-    expect(findByLabel(unavailable.tree.root as Queryable, 'Open preview').props.disabled).toBe(
+    expect(findByLabel(unavailable.tree.root as Queryable, 'Open preview').props['disabled']).toBe(
       true,
     );
     act(() => unavailable.tree.unmount());
@@ -370,7 +370,7 @@ describe('BrowserScreen behavior', () => {
     });
     const result = await renderBrowser({ api });
     const root = result.tree.root as Queryable;
-    expect(findByLabel(root, 'Open preview').props.disabled).toBe(true);
+    expect(findByLabel(root, 'Open preview').props['disabled']).toBe(true);
 
     (api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
       new Error('capabilities offline'),
@@ -379,7 +379,7 @@ describe('BrowserScreen behavior', () => {
       await result.store.set(refreshBridgeCapabilitiesAtom);
     });
 
-    expect(findByLabel(root, 'Open preview').props.disabled).toBe(true);
+    expect(findByLabel(root, 'Open preview').props['disabled']).toBe(true);
     expect(hasText(root, 'capabilities offline')).toBe(true);
     act(() => result.tree.unmount());
   });
@@ -438,7 +438,7 @@ describe('BrowserScreen behavior', () => {
     expect(hasText(invalidRoot, 'Use a loopback URL')).toBe(true);
     act(() => readHandler<(value: string) => void>(invalidInput, 'onChangeText')('3000'));
     await invoke(findByLabel(invalidRoot, 'Clear preview address'));
-    expect(findByLabel(invalidRoot, 'Preview address').props.value).toBe('');
+    expect(findByLabel(invalidRoot, 'Preview address').props['value']).toBe('');
     await invoke(findByLabel(invalidRoot, 'Scan for local previews'));
     expect(invalid.api.discoverBrowserPreviewTargets).toHaveBeenCalledTimes(2);
     act(() => invalid.tree.unmount());
@@ -513,7 +513,10 @@ describe('BrowserScreen behavior', () => {
     const result = await renderBrowser();
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
-    let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    let webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'indexed test value',
+    );
     if (!webView) {
       throw new Error('Missing WebView');
     }
@@ -532,17 +535,29 @@ describe('BrowserScreen behavior', () => {
     expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith(
       'http://127.0.0.1:5050/page',
     );
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'reloaded WebView',
+    );
     await invoke(webView, 'onLoadStart');
     expect(hasText(root, 'Loading preview')).toBe(true);
     await invoke(webView, 'onLoadEnd');
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'HTTP error WebView',
+    );
     await invoke(webView, 'onHttpError', { nativeEvent: { statusCode: 503 } });
     expect(hasText(root, 'Preview returned HTTP 503.')).toBe(true);
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'terminated WebView',
+    );
     await invoke(webView, 'onContentProcessDidTerminate');
     expect(hasText(root, 'Loading preview')).toBe(true);
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'scrolling WebView',
+    );
     await invoke(webView, 'onScroll', { nativeEvent: { contentOffset: { x: 0, y: 30 } } });
     await invoke(webView, 'onScroll', { nativeEvent: { contentOffset: { x: 0, y: 34 } } });
     await invoke(webView, 'onScroll', { nativeEvent: { contentOffset: { x: 0, y: 12 } } });
@@ -557,7 +572,7 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop Full viewport'));
     exercisePressableStyles(root);
-    const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
+    const viewport = root.findAll((node) => typeof node.props['onLayout'] === 'function')[0];
     if (!viewport) {
       throw new Error('Missing desktop viewport');
     }
@@ -618,11 +633,14 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop viewport'));
-    let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    let webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'indexed test value',
+    );
     if (!webView) {
       throw new Error('Missing overview WebView');
     }
-    const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
+    const viewport = root.findAll((node) => typeof node.props['onLayout'] === 'function')[0];
     if (!viewport) {
       throw new Error('Missing overview viewport');
     }
@@ -645,13 +663,14 @@ describe('BrowserScreen behavior', () => {
       nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 2200 }) },
     });
     act(() => jest.runOnlyPendingTimers());
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    await invoke(webView, 'onContentProcessDidTerminate');
-    (api.createBrowserPreviewSession as jest.Mock).mockRejectedValueOnce(
-      new Error('viewport reload failed'),
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'desktop WebView',
     );
+    await invoke(webView, 'onContentProcessDidTerminate');
+    (api.createBrowserPreviewSession as jest.Mock).mockRejectedValueOnce('viewport reload failed');
     await invoke(findByLabel(root, 'Mobile viewport'));
-    expect(hasText(root, 'viewport reload failed')).toBe(true);
+    expect(hasText(root, 'Could not reload local preview.')).toBe(true);
     act(() => result.tree.unmount());
   });
 
@@ -672,7 +691,7 @@ describe('BrowserScreen behavior', () => {
       throw new Error('Missing desktop iframe');
     }
     await invoke(iframe, 'onLoad');
-    expect(findByLabel(root, 'Back').props.disabled).toBe(true);
+    expect(findByLabel(root, 'Back').props['disabled']).toBe(true);
     act(() => result.tree.unmount());
   });
 
@@ -717,7 +736,10 @@ describe('BrowserScreen behavior', () => {
     const result = await renderBrowser({ api });
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
-    let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    let webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'indexed test value',
+    );
     if (!webView) {
       throw new Error('Missing WebView');
     }
@@ -729,7 +751,10 @@ describe('BrowserScreen behavior', () => {
       loading: false,
     });
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'failed WebView',
+    );
     await invoke(webView, 'onError', { nativeEvent: { description: '' } });
     expect(hasText(root, 'Could not load preview.')).toBe(true);
     act(() => result.tree.unmount());
@@ -741,7 +766,10 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop Full viewport'));
-    let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    let webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'indexed test value',
+    );
     if (!webView) {
       throw new Error('Missing shell WebView');
     }
@@ -758,7 +786,10 @@ describe('BrowserScreen behavior', () => {
       },
     });
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
-    webView = root.findAll((node) => node.type === 'mock-web-view')[0];
+    webView = requireTestValue(
+      root.findAll((node) => node.type === 'mock-web-view')[0],
+      'HTTP fallback WebView',
+    );
     await invoke(webView, 'onHttpError', { nativeEvent: { statusCode: 404 } });
     expect(hasText(root, 'Preview returned HTTP 404.')).toBe(true);
     act(() => result.tree.unmount());
@@ -788,8 +819,8 @@ describe('BrowserScreen behavior', () => {
     if (!webView) {
       throw new Error('Missing Android WebView');
     }
-    expect(webView.props.contentMode).toBe('mobile');
-    expect(webView.props.userAgent).toBeUndefined();
+    expect(webView.props['contentMode']).toBe('mobile');
+    expect(webView.props['userAgent']).toBeUndefined();
     await invoke(webView, 'onNavigationStateChange', {
       url: 'https://outside.example/path',
       title: 'Outside',
@@ -797,7 +828,9 @@ describe('BrowserScreen behavior', () => {
       canGoForward: false,
       loading: false,
     });
-    expect(findByLabel(root, 'Preview address').props.value).toBe('https://outside.example/path');
+    expect(findByLabel(root, 'Preview address').props['value']).toBe(
+      'https://outside.example/path',
+    );
     act(() => result.tree.unmount());
   });
 
@@ -845,7 +878,7 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop viewport'));
     exercisePressableStyles(root);
-    const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
+    const viewport = root.findAll((node) => typeof node.props['onLayout'] === 'function')[0];
     if (!viewport) {
       throw new Error('Missing native desktop viewport');
     }
@@ -854,8 +887,8 @@ describe('BrowserScreen behavior', () => {
     if (!webView) {
       throw new Error('Missing native desktop WebView');
     }
-    expect(webView.props.contentMode).toBe('desktop');
-    expect(webView.props.userAgent).toContain('Mozilla/5.0');
+    expect(webView.props['contentMode']).toBe('desktop');
+    expect(webView.props['userAgent']).toContain('Mozilla/5.0');
     await invoke(webView, 'onMessage', {
       nativeEvent: { data: JSON.stringify({ type: 'dappercodeOverviewMetrics', height: 3000 }) },
     });
@@ -892,21 +925,21 @@ describe('BrowserScreen behavior', () => {
 
     // Drawer chrome button already has hitSlop={8}
     const drawerBtn = findByLabel(root, 'Open navigation drawer');
-    expect(drawerBtn.props.hitSlop).toBeTruthy();
+    expect(drawerBtn.props['hitSlop']).toBeTruthy();
 
     // Submit / open-preview button has hitSlop
     const submitBtn = findByLabel(root, 'Open preview');
-    expect(submitBtn.props.hitSlop).toBeTruthy();
+    expect(submitBtn.props['hitSlop']).toBeTruthy();
 
     // Bottom nav buttons have hitSlop to reach minimum touch target
     const backBtn = findByLabel(root, 'Back');
-    expect(backBtn.props.hitSlop).toBeTruthy();
+    expect(backBtn.props['hitSlop']).toBeTruthy();
     const forwardBtn = findByLabel(root, 'Forward');
-    expect(forwardBtn.props.hitSlop).toBeTruthy();
+    expect(forwardBtn.props['hitSlop']).toBeTruthy();
     const reloadBtn = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Scan for local previews',
+      (node) => node.props['accessibilityLabel'] === 'Scan for local previews',
     )[0];
-    expect(reloadBtn?.props.hitSlop).toBeTruthy();
+    expect(reloadBtn?.props['hitSlop']).toBeTruthy();
 
     act(() => result.tree.unmount());
   });
@@ -917,14 +950,14 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Open preview'));
 
     const mobileChip = findByLabel(root, 'Mobile viewport');
-    expect(mobileChip.props.hitSlop).toBeTruthy();
+    expect(mobileChip.props['hitSlop']).toBeTruthy();
 
     const viewportSettings = root.findAll(
       (node) =>
-        typeof node.props.accessibilityLabel === 'string' &&
-        (node.props.accessibilityLabel as string).startsWith('Viewport size,'),
+        typeof node.props['accessibilityLabel'] === 'string' &&
+        node.props['accessibilityLabel'].startsWith('Viewport size,'),
     )[0];
-    expect(viewportSettings?.props.hitSlop).toBeTruthy();
+    expect(viewportSettings?.props['hitSlop']).toBeTruthy();
 
     act(() => result.tree.unmount());
   });
@@ -940,18 +973,18 @@ describe('BrowserScreen behavior', () => {
 
     // Trigger loading
     await invoke(webView, 'onLoadStart');
-    const loadingNodes = root.findAll((node) => node.props.accessibilityRole === 'progressbar');
+    const loadingNodes = root.findAll((node) => node.props['accessibilityRole'] === 'progressbar');
     expect(loadingNodes.length).toBeGreaterThan(0);
     expect(hasText(root, 'Loading preview')).toBe(true);
 
     // Trigger an error — error banner uses 'alert' role, loading overlay still present
     await invoke(webView, 'onError', { nativeEvent: { description: 'net::ERR_CONNECTION' } });
-    const errorNodes = root.findAll((node) => node.props.accessibilityRole === 'alert');
+    const errorNodes = root.findAll((node) => node.props['accessibilityRole'] === 'alert');
     expect(errorNodes.length).toBeGreaterThan(0);
 
     // Loading overlay and error banner are distinct nodes with distinct roles
-    const progressbarRole = loadingNodes[0]?.props.accessibilityRole;
-    const alertRole = errorNodes[0]?.props.accessibilityRole;
+    const progressbarRole = loadingNodes[0]?.props['accessibilityRole'];
+    const alertRole = errorNodes[0]?.props['accessibilityRole'];
     expect(progressbarRole).toBe('progressbar');
     expect(alertRole).toBe('alert');
     expect(progressbarRole).not.toBe(alertRole);

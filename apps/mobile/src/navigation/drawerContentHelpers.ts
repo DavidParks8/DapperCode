@@ -54,6 +54,9 @@ export function areDrawerChatListsEquivalent(
   }
   return previous.every((left, index) => {
     const right = next[index];
+    if (!right) {
+      return false;
+    }
     return (
       left.id === right.id &&
       left.title === right.title &&

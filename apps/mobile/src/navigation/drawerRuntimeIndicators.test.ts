@@ -8,7 +8,6 @@ import {
   reconcileDrawerRunIndicatorsWithChats,
   pruneStaleDrawerRunIndicators,
   updateDrawerRunIndicatorsForEvent,
-  type DrawerRunIndicatorMap,
 } from './drawerRuntimeIndicators';
 import type { ChatWorkspaceSection } from './chatThreadTree';
 
@@ -212,7 +211,7 @@ describe('drawerRuntimeIndicators', () => {
       5000,
     );
 
-    expect((refreshed as DrawerRunIndicatorMap).thr_1?.source).toBe('lifecycle');
+    expect(refreshed['thr_1']?.source).toBe('lifecycle');
     expect(isDrawerChatRunning(chat('thr_1'), refreshed, 30_000)).toBe(true);
   });
 

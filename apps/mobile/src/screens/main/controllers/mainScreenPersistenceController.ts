@@ -68,21 +68,22 @@ interface WebStorageLike {
 }
 
 const webStorage: MainScreenStorage = {
-  read: async (key) => {
+  read: (key) => {
     const value = getWebStorage()?.getItem(key);
     if (value === null || value === undefined) {
-      throw new Error('missing');
+      return Promise.reject(new Error('missing'));
     }
-    return value;
+    return Promise.resolve(value);
   },
-  write: async (key, value) => {
+  write: (key, value) => {
     const storage = getWebStorage();
     if (!storage) {
-      throw new Error('Browser storage is unavailable.');
+      return Promise.reject(new Error('Browser storage is unavailable.'));
     }
     storage.setItem(key, value);
+    return Promise.resolve();
   },
-  exists: async (key) => getWebStorage()?.getItem(key) != null,
+  exists: (key) => Promise.resolve(getWebStorage()?.getItem(key) != null),
 };
 
 const WEB_LEGACY_PATHS = {
@@ -294,7 +295,7 @@ export class MainScreenPersistenceController {
       return;
     }
 
-    const suffix = collection[0].toUpperCase() + collection.slice(1);
+    const suffix = collection.charAt(0).toUpperCase() + collection.slice(1);
     await migrateLegacyPersistenceEntry({
       storage: this.storage,
       profileId: this.profileId,
@@ -390,6 +391,6 @@ function getWebStorage(): WebStorageLike | null {
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
-    ? (storage as WebStorageLike)
+    ? storage
     : null;
 }

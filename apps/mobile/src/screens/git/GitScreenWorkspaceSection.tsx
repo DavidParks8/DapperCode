@@ -20,7 +20,7 @@ export function GitScreenWorkspaceSection({ controller, styles, theme }: GitSect
         returnKeyType="done"
         multiline
         numberOfLines={2}
-        blurOnSubmit
+        submitBehavior="blurAndSubmit"
         scrollEnabled={false}
         textAlignVertical="top"
         editable={!controller.savingWorkspace}

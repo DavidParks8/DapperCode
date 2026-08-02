@@ -271,8 +271,9 @@ export async function executePlanCommand(
       submissionController.succeed(planSubmission);
     } catch (err) {
       restoreFailedPlanDraft(planSubmission);
-      if (visibility.getCreatedChatId()) {
-        discardOptimisticUserMessage(visibility.getCreatedChatId()!, optimisticMessage.id);
+      const createdChatId = visibility.getCreatedChatId();
+      if (createdChatId) {
+        discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
       }
       if (visibility.isVisible()) {
         handleTurnFailure(err);

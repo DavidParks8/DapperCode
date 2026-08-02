@@ -1,3 +1,4 @@
+import { requireTestValue } from '../../../testing/requireTestValue';
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///documents/',
   readAsStringAsync: jest.fn(),
@@ -253,6 +254,8 @@ describe('mainScreenPersistenceController', () => {
     });
     await expect(controller.savePlanSnapshots({})).resolves.toBeUndefined();
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toContain('available device storage');
+    expect(requireTestValue(errors[0], 'indexed test value').message).toContain(
+      'available device storage',
+    );
   });
 });
