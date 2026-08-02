@@ -29,6 +29,7 @@ import { areChatStatusMapsEquivalent, resolveEquivalentChat } from './mainScreen
 import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { TranscriptDisplayItem } from './transcriptMessages';
 import { ChatTranscriptView } from './ChatTranscriptView';
+import { SubAgentTranscriptShimmer } from './SubAgentTranscriptShimmer';
 import { useAppTheme, type AppTheme } from '../../theme';
 import {
   decorativeAccessibilityProps,
@@ -38,6 +39,40 @@ import {
 
 interface SubAgentDetailViewProps {
   threadId: string;
+}
+
+const SHIMMER_DELAY_MS = 120;
+const SHIMMER_MIN_VISIBLE_MS = 350;
+const SHIMMER_REVEAL_HOLD_MS = 34;
+
+function useShimmerPresentation(active: boolean): boolean {
+  const [visible, setVisible] = useState(false);
+  const visibleSinceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (active) {
+      if (visible) return;
+      const timer = setTimeout(() => {
+        visibleSinceRef.current = Date.now();
+        setVisible(true);
+      }, SHIMMER_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+
+    if (!visible) {
+      visibleSinceRef.current = null;
+      return;
+    }
+
+    const elapsed = Date.now() - (visibleSinceRef.current ?? Date.now());
+    const timer = setTimeout(() => {
+      visibleSinceRef.current = null;
+      setVisible(false);
+    }, Math.max(SHIMMER_REVEAL_HOLD_MS, SHIMMER_MIN_VISIBLE_MS - elapsed));
+    return () => clearTimeout(timer);
+  }, [active, visible]);
+
+  return visible;
 }
 
 export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
@@ -228,16 +263,26 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
     }).messages.length;
   }, [agentThreadStatusById, chat, detail.parentChat, liveMessageState, showToolCalls]);
 
-  // A sub-agent that has already stopped is never "starting", even when it left no
-  // transcript behind -- otherwise opening a finished agent spins forever.
-  const isStarting = Boolean(chat) && chat?.status === 'running' && projectedMessageCount === 0;
-  const isEmpty = Boolean(chat) && !isStarting && projectedMessageCount === 0;
+  // A non-empty summary preview is evidence that an empty shell still has history to hydrate.
+  // Without that evidence, a running summary is a genuinely new agent and should go directly to
+  // "Starting" rather than briefly promising transcript rows that do not exist.
+  const hasSummaryHistory = Boolean(summary?.lastMessagePreview.trim());
+  const isKnownEmpty =
+    Boolean(summary) && projectedMessageCount === 0 && !hasSummaryHistory;
+  const isSettledEmpty =
+    Boolean(chat) && !detail.loading && projectedMessageCount === 0;
+  const hasNoVisibleTranscript = isKnownEmpty || isSettledEmpty;
+  const isStarting = hasNoVisibleTranscript && summary?.status === 'running';
+  const isEmpty = hasNoVisibleTranscript && !isStarting;
+  const isHydratingTranscript =
+    detail.loading && projectedMessageCount === 0 && !isKnownEmpty;
+  const showHydrationShimmer = useShimmerPresentation(isHydratingTranscript);
 
   const activityDetail =
     display?.detail ?? runtime?.latestCommand?.detail ?? summary?.agentRole?.trim() ?? null;
   const headingFocusRef = useAccessibilityFocus<Text>(true);
   useAccessibilityAnnouncement(
-    detail.error ?? (detail.loading ? 'Loading agent transcript' : null),
+    detail.error ?? (isHydratingTranscript ? 'Loading agent transcript' : null),
   );
 
   const navigateBack = useCallback(() => {
@@ -325,7 +370,12 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
       ) : null}
 
       <View style={styles.transcript}>
-        {isStarting ? (
+        <View
+          style={styles.transcriptContent}
+          accessibilityElementsHidden={showHydrationShimmer}
+          importantForAccessibility={showHydrationShimmer ? 'no-hide-descendants' : 'auto'}
+        >
+          {isStarting ? (
           <View
             style={styles.loadingShell}
             accessibilityRole="progressbar"
@@ -333,11 +383,15 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
           >
             <ActivityIndicator color={theme.colors.warning} />
             <Text style={styles.loadingText}>Starting…</Text>
-            <Text style={styles.startingHint}>
+            <Text
+              style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
+              accessibilityElementsHidden={detail.loading}
+              importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
+            >
               This agent has not reported anything yet. Its work will stream in here.
             </Text>
           </View>
-        ) : isEmpty ? (
+          ) : isEmpty ? (
           <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
             <Ionicons
               {...decorativeAccessibilityProps}
@@ -346,11 +400,15 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
               color={theme.colors.textMuted}
             />
             <Text style={styles.loadingText}>No transcript</Text>
-            <Text style={styles.startingHint}>
+            <Text
+              style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
+              accessibilityElementsHidden={detail.loading}
+              importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
+            >
               This agent reported back through its parent instead of streaming its own session.
             </Text>
           </View>
-        ) : chat ? (
+          ) : chat && projectedMessageCount > 0 ? (
           <ChatTranscriptView
             scrollRailEnabled={false}
             chat={chat}
@@ -377,7 +435,7 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
             bottomInset={0}
             liveMessageState={liveMessageState}
           />
-        ) : (
+          ) : !isHydratingTranscript ? (
           <View
             style={styles.loadingShell}
             accessibilityRole="progressbar"
@@ -386,7 +444,9 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
             <ActivityIndicator color={theme.colors.textMuted} />
             <Text style={styles.loadingText}>Loading agent transcript…</Text>
           </View>
-        )}
+          ) : null}
+        </View>
+        {showHydrationShimmer ? <SubAgentTranscriptShimmer /> : null}
       </View>
     </SafeAreaView>
   );
@@ -468,6 +528,9 @@ const createStyles = (theme: AppTheme) =>
     transcript: {
       flex: 1,
     },
+    transcriptContent: {
+      flex: 1,
+    },
     loadingShell: {
       flex: 1,
       alignItems: 'center',
@@ -484,5 +547,8 @@ const createStyles = (theme: AppTheme) =>
       textAlign: 'center',
       maxWidth: 260,
       paddingHorizontal: theme.spacing.lg,
+    },
+    startingHintLoading: {
+      opacity: 0,
     },
   });

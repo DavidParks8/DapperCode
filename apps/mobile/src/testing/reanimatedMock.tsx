@@ -72,6 +72,7 @@ export const useSharedValue = <T,>(initial: T) => {
   return ref.current;
 };
 export const withDelay = <T,>(_delay: number, value: T) => value;
+export const withRepeat = <T,>(value: T) => value;
 export const withSequence = <T,>(...values: T[]) => values[values.length - 1];
 export const withSpring = <T,>(
   value: T,

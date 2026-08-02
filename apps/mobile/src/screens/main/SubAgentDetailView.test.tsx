@@ -1,4 +1,5 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
+import { ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
 import { router } from 'expo-router';
@@ -104,10 +105,15 @@ async function render(options: RenderOptions = {}): Promise<{
 
 type Queryable = ReactTestInstance & {
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
+  findAllByType(type: unknown): Queryable[];
 };
 
 function countByLabel(tree: ReactTestRenderer, label: string): number {
   return (tree.root as Queryable).findAll((node) => node.props.accessibilityLabel === label).length;
+}
+
+function countByTestId(tree: ReactTestRenderer, testID: string): number {
+  return (tree.root as Queryable).findAll((node) => node.props.testID === testID).length;
 }
 
 function isStarting(tree: ReactTestRenderer): boolean {
@@ -184,13 +190,135 @@ describe('SubAgentDetailView starting state', () => {
     act(() => tree.unmount());
   });
 
-  it('shows the loading shell instead of a starting state before the chat resolves', async () => {
+  it('shows a transcript-shaped shimmer until history resolves', async () => {
+    jest.useFakeTimers();
+    let resolveChat!: (value: Chat) => void;
+    const getChat = jest.fn(
+      () =>
+        new Promise<Chat>((resolve) => {
+          resolveChat = resolve;
+        }),
+    );
+    let tree: ReactTestRenderer | null = null;
+    try {
+      ({ tree } = await render({
+        loadedChat: { ...chat(), lastMessagePreview: 'Loaded from history' },
+        cachedChat: null,
+        getChat,
+      }));
+      expect(isStarting(tree)).toBe(false);
+      expect(countByTestId(tree, 'agent-transcript-shimmer')).toBe(0);
+      expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
+
+      act(() => jest.advanceTimersByTime(120));
+      const shimmer = tree.root.findByProps({ testID: 'agent-transcript-shimmer' }) as Queryable;
+      expect(shimmer.findAllByType(ActivityIndicator)).toHaveLength(0);
+
+      await act(async () => {
+        resolveChat(
+          chat([
+            {
+              id: 'message-1',
+              role: 'assistant',
+              content: 'Loaded from history',
+              createdAt: '2026-07-20T00:00:01.000Z',
+            },
+          ]),
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(countByTestId(tree, 'agent-transcript-shimmer')).toBeGreaterThan(0);
+      expect(renderedText(tree)).toContain('Loaded from history');
+      act(() => jest.advanceTimersByTime(350));
+      expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
+      expect(countByTestId(tree, 'agent-transcript-shimmer')).toBe(0);
+    } finally {
+      if (tree) act(() => tree?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not fabricate history for a known-empty running sub-agent', async () => {
     const { tree } = await render({
       cachedChat: null,
       getChat: jest.fn(() => new Promise<Chat>(() => {})),
     });
-    expect(isStarting(tree)).toBe(false);
-    expect(countByLabel(tree, 'Loading agent transcript')).toBeGreaterThan(0);
+
+    expect(isStarting(tree)).toBe(true);
+    expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it('does not fabricate history for a known-empty finished sub-agent', async () => {
+    const { tree } = await render({
+      loadedChat: { ...chat(), status: 'complete' },
+      cachedChat: null,
+      getChat: jest.fn(() => new Promise<Chat>(() => {})),
+    });
+
+    expect(countByLabel(tree, 'Sub-agent reported no transcript')).toBeGreaterThan(0);
+    expect(countByTestId(tree, 'agent-transcript-shimmer')).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it('settles on no transcript when preview-only messages are filtered out', async () => {
+    const loadedChat = {
+      ...chat([
+        {
+          id: 'message-1',
+          role: 'assistant' as const,
+          content: 'FINAL_TASK_RESULT_JSON {"result":"reported through parent"}',
+          createdAt: '2026-07-20T00:00:01.000Z',
+        },
+      ]),
+      status: 'complete' as const,
+      lastMessagePreview: 'FINAL_TASK_RESULT_JSON {"result":"reported through parent"}',
+    };
+    const { tree } = await render({ loadedChat, cachedChat: null });
+
+    expect(countByLabel(tree, 'Sub-agent reported no transcript')).toBeGreaterThan(0);
+    expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it('skips the shimmer when history resolves inside the grace period', async () => {
+    const loadedChat = {
+      ...chat([
+        {
+          id: 'message-1',
+          role: 'assistant' as const,
+          content: 'Loaded immediately',
+          createdAt: '2026-07-20T00:00:01.000Z',
+        },
+      ]),
+      lastMessagePreview: 'Loaded immediately',
+    };
+    const { tree } = await render({ loadedChat, cachedChat: null });
+
+    expect(countByTestId(tree, 'agent-transcript-shimmer')).toBe(0);
+    expect(renderedText(tree)).toContain('Loaded immediately');
+    act(() => tree.unmount());
+  });
+
+  it('keeps cached transcript history visible during a refresh', async () => {
+    const loadedChat = chat([
+      {
+        id: 'message-1',
+        role: 'assistant',
+        content: 'Already cached',
+        createdAt: '2026-07-20T00:00:01.000Z',
+      },
+    ]);
+    const { tree } = await render({
+      loadedChat,
+      cachedChat: loadedChat,
+      getChat: jest.fn(() => new Promise<Chat>(() => {})),
+    });
+
+    expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
+    expect(renderedText(tree)).toContain('Already cached');
     act(() => tree.unmount());
   });
 
@@ -222,7 +350,7 @@ describe('SubAgentDetailView starting state', () => {
       .mockRejectedValueOnce(new Error('Thread is not available yet'))
       .mockResolvedValueOnce(chat());
     const { emit, tree } = await render({ cachedChat: null, getChat });
-    expect(countByLabel(tree, 'Loading agent transcript')).toBeGreaterThan(0);
+    expect(isStarting(tree)).toBe(true);
 
     await act(async () => {
       emit({ method: 'thread/subagent/adopted', params: { threadId: 'child' } });
