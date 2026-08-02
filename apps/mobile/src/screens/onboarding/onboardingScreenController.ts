@@ -97,6 +97,14 @@ export function useOnboardingScreenController(
     inputGenerationRef.current += 1;
   };
 
+  // Tracks which probe is the most recently *started* one, independent of input generation. An
+  // edit alone bumps inputGenerationRef but does not start a new probe, so the in-flight probe
+  // remains the active one and must still be allowed to clear `checkingConnection` when it
+  // settles — otherwise editing mid-probe would leave Test/Continue disabled+busy forever. A new
+  // probe (pressing Test/Continue again) bumps this ref too, so only the latest probe's `finally`
+  // clears busy state; an older, still-resolving probe's `finally` is a no-op once superseded.
+  const activeProbeIdRef = useRef(0);
+
   useEffect(() => {
     setUrlInputState(initialBridgeUrl ?? '');
     setConnectionCheck({ kind: 'idle' });
@@ -168,6 +176,7 @@ export function useOnboardingScreenController(
   const runConnectionCheck = useCallback(
     async (normalized: string, token: string | null): Promise<boolean> => {
       const generation = inputGenerationRef.current;
+      const probeId = ++activeProbeIdRef.current;
       setCheckingConnection(true);
       setConnectionCheck({ kind: 'idle' });
 
@@ -207,7 +216,10 @@ export function useOnboardingScreenController(
         void feedback.error();
         return false;
       } finally {
-        if (inputGenerationRef.current === generation) {
+        // Busy/disabled state is owned by probe identity, not input generation: an edit alone
+        // (no new probe started) must not block this probe from clearing `checkingConnection`
+        // when it settles. Only skip clearing it if a newer probe has since superseded this one.
+        if (activeProbeIdRef.current === probeId) {
           setCheckingConnection(false);
         }
       }

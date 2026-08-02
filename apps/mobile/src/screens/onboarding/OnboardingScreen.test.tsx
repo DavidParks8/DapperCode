@@ -771,6 +771,21 @@ describe('OnboardingScreen behavior', () => {
     // The stale success must never surface for credentials the user has since replaced.
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
 
+    // Editing mid-probe bumps input generation but must NOT block the still-active probe from
+    // clearing its own busy state once it settles: Test Connection/Continue must not be left
+    // disabled+busy forever. Read `.props` directly rather than relying on the `press` helper,
+    // which invokes onPress unconditionally and would not surface a stuck-disabled regression.
+    const testConnectionButton = findPressableByText(root, 'Test Connection');
+    expect(testConnectionButton.props.disabled).toBe(false);
+    expect(testConnectionButton.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false, busy: false }),
+    );
+    const continueButtonAfterStaleProbe = findByLabel(root, 'Continue');
+    expect(continueButtonAfterStaleProbe.props.disabled).toBe(false);
+    expect(continueButtonAfterStaleProbe.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false, busy: false }),
+    );
+
     // Saving the edited (never-probed) credentials must run its own probe rather than
     // trusting the discarded, mismatched result.
     await press(findByLabel(root, 'Continue'));
