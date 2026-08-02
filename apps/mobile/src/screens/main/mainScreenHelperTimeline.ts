@@ -1,5 +1,5 @@
 import type { RunEvent, ChatMessage as ChatTranscriptMessage } from '../../api/types';
-import { readString, toRecord } from './mainScreenHelperPayloads';
+import { readString, toRecord } from '../../runtimeValidation';
 import { MAX_ACTIVE_COMMANDS } from './mainScreenHelperTypes';
 
 export function stripMarkdownInline(value: string): string {

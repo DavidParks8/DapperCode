@@ -8,6 +8,12 @@ import {
   readThreadItemText,
   readThreadSourceMetadata,
 } from './chatMappingChatProjection';
+import {
+  readCoercedFiniteNumber,
+  readString,
+  readTrimmedStringArray,
+  toRecord,
+} from '../runtimeValidation';
 import { type ChatSummary } from './types';
 import {
   type RawAcpSnapshot,
@@ -15,11 +21,7 @@ import {
   type RawThread,
   type RawThreadItem,
   type RawTurn,
-  readNumber,
-  readString,
-  readStringArray,
   toPreview,
-  toRecord,
   unixSecondsToIso,
 } from './chatMappingRawTypesAndReaders';
 
@@ -27,7 +29,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
   const snapshot = toRecord(value);
   const session = toRecord(snapshot?.session);
   const active = toRecord(snapshot?.active);
-  const version = readNumber(snapshot?.version);
+  const version = readCoercedFiniteNumber(snapshot?.version);
   if (!snapshot || (version !== 1 && version !== 2) || !session || !active) {
     return undefined;
   }
@@ -46,7 +48,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
       id: readString(entry.id) ?? '',
-      generation: readNumber(entry.generation),
+      generation: readCoercedFiniteNumber(entry.generation),
       kind: readString(entry.kind) ?? '',
       status: readString(entry.status) ?? '',
       title: readString(entry.title) ?? '',
@@ -61,7 +63,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
-      sequence: readNumber(entry.sequence) ?? -1,
+      sequence: readCoercedFiniteNumber(entry.sequence) ?? -1,
       kind: readString(entry.kind),
       canonicalId: readString(entry.canonicalId) ?? '',
     }))
@@ -111,19 +113,19 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
   const usage = toRecord(snapshot.usage) ?? {};
   const readCollection = (value: unknown): RawSnapshotCollectionMetadata | undefined => {
     const collection = toRecord(value);
-    const revision = readNumber(collection?.revision);
+    const revision = readCoercedFiniteNumber(collection?.revision);
     if (!collection || revision === null) return undefined;
     return {
       truncated: collection.truncated === true,
-      omittedCount: readNumber(collection.omittedCount) ?? 0,
-      oldestAvailableSequence: readNumber(collection.oldestAvailableSequence),
-      newestSequence: readNumber(collection.newestSequence),
+      omittedCount: readCoercedFiniteNumber(collection.omittedCount) ?? 0,
+      oldestAvailableSequence: readCoercedFiniteNumber(collection.oldestAvailableSequence),
+      newestSequence: readCoercedFiniteNumber(collection.newestSequence),
       beforeCursor: readString(collection.beforeCursor),
       revision,
     };
   };
   const continuationRecord = toRecord(snapshot.continuation);
-  const continuationRevision = readNumber(continuationRecord?.revision);
+  const continuationRevision = readCoercedFiniteNumber(continuationRecord?.revision);
   return {
     version,
     timeline: timeline.length > 0 ? timeline : undefined,
@@ -136,18 +138,22 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       continuationRecord && continuationRevision !== null
         ? {
             revision: continuationRevision,
-            unavailableCount: readNumber(continuationRecord.unavailableCount) ?? 0,
-            earliestAvailableSequence: readNumber(continuationRecord.earliestAvailableSequence),
-            latestAvailableSequence: readNumber(continuationRecord.latestAvailableSequence),
-            maxPageSize: readNumber(continuationRecord.maxPageSize) ?? 0,
-            maxHistoryEntries: readNumber(continuationRecord.maxHistoryEntries) ?? 0,
-            maxHistoryBytes: readNumber(continuationRecord.maxHistoryBytes) ?? 0,
+            unavailableCount: readCoercedFiniteNumber(continuationRecord.unavailableCount) ?? 0,
+            earliestAvailableSequence: readCoercedFiniteNumber(
+              continuationRecord.earliestAvailableSequence,
+            ),
+            latestAvailableSequence: readCoercedFiniteNumber(
+              continuationRecord.latestAvailableSequence,
+            ),
+            maxPageSize: readCoercedFiniteNumber(continuationRecord.maxPageSize) ?? 0,
+            maxHistoryEntries: readCoercedFiniteNumber(continuationRecord.maxHistoryEntries) ?? 0,
+            maxHistoryBytes: readCoercedFiniteNumber(continuationRecord.maxHistoryBytes) ?? 0,
           }
         : undefined,
     plan,
     usage: {
-      used: readNumber(usage.used),
-      size: readNumber(usage.size),
+      used: readCoercedFiniteNumber(usage.used),
+      size: readCoercedFiniteNumber(usage.size),
       cost: readString(usage.cost),
     },
     mode: readString(snapshot.mode),
@@ -163,8 +169,8 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     active: {
       runId: readString(active.runId),
       sourceTurnId: readString(active.sourceTurnId),
-      generation: readNumber(active.generation),
-      toolIds: readStringArray(active.toolIds),
+      generation: readCoercedFiniteNumber(active.generation),
+      toolIds: readTrimmedStringArray(active.toolIds),
     },
   };
 }

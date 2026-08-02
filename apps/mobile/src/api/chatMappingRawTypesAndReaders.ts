@@ -1,3 +1,5 @@
+import { readCoercedFiniteNumber, readString, toRecord } from '../runtimeValidation';
+
 export type RawThreadStatus = { type?: string } | string | null | undefined;
 
 export interface RawTurn {
@@ -138,36 +140,6 @@ export interface ThreadSourceMetadata {
   subAgentDepth?: number;
 }
 
-export function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-export function readString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-export function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((entry) => readString(entry)?.trim() ?? '')
-    .filter((entry): entry is string => entry.length > 0);
-}
-
-export function readNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === 'string') {
-    const numeric = Number(value.trim());
-    if (Number.isFinite(numeric)) {
-      return numeric;
-    }
-  }
-  return null;
-}
-
 export function readFileChangePaths(item: Record<string, unknown>): string[] {
   const rawChanges = Array.isArray(item.changes) ? item.changes : [];
   const seen = new Set<string>();
@@ -204,7 +176,7 @@ export function unixSecondsToIso(value: number): string {
 }
 
 export function readTimestampSeconds(value: unknown): number | null {
-  const numeric = readNumber(value);
+  const numeric = readCoercedFiniteNumber(value);
   if (numeric !== null && Number.isFinite(numeric) && numeric > 0) {
     return numeric > 1_000_000_000_000 ? numeric / 1000 : numeric;
   }

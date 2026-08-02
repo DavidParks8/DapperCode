@@ -1,7 +1,7 @@
 import { screenSetter } from '../../state/mainScreen/registry';
 import { activityAtom, bridgeRecoveryBannerVisibleAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
-import { toRecord, readString } from './mainScreenHelpers';
+import { readString, toRecord } from '../../runtimeValidation';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
 
 export function processBridgeConnectionEvents(

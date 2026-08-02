@@ -17,13 +17,9 @@ import { renderAgUiCustomContent } from './agUi';
 import { structuredTextRemainder } from './agUiContent';
 import { toToolKind, toToolStatus } from './toolMeta';
 import { toToolLikeMessage } from './chatMappingToolMessageProjection';
+import { readString, toRecord } from '../runtimeValidation';
 import { type ChatMessage } from './types';
-import {
-  type RawAcpSnapshot,
-  type RawThread,
-  readString,
-  toRecord,
-} from './chatMappingRawTypesAndReaders';
+import { type RawAcpSnapshot, type RawThread } from './chatMappingRawTypesAndReaders';
 
 export function mapMessages(raw: RawThread, fallbackCreatedAt: string): ChatMessage[] {
   if (raw.acpSnapshot) {

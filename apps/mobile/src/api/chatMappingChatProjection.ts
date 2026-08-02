@@ -2,16 +2,14 @@ import { extractChatPlans } from './chatMappingPlanExtraction';
 import { getMessageText } from './messages';
 import { mapChatSummary } from './chatMappingSnapshotAndSummaryProjection';
 import { mapMessages } from './chatMappingMessageProjection';
+import { readCoercedFiniteNumber, readString, toRecord } from '../runtimeValidation';
 import { type AgentId, type Chat } from './types';
 import {
   type RawAcpSnapshot,
   type RawThread,
   type RawThreadItem,
-  readNumber,
-  readString,
   type ThreadSourceMetadata,
   toPreview,
-  toRecord,
 } from './chatMappingRawTypesAndReaders';
 
 export function readThreadItemText(item: RawThreadItem): string {
@@ -57,9 +55,9 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
         readString(sourceRecord.parent_thread_id) ??
         undefined,
       subAgentDepth:
-        readNumber(sourceRecord.depth) ??
-        readNumber(sourceRecord.agentDepth) ??
-        readNumber(sourceRecord.agent_depth) ??
+        readCoercedFiniteNumber(sourceRecord.depth) ??
+        readCoercedFiniteNumber(sourceRecord.agentDepth) ??
+        readCoercedFiniteNumber(sourceRecord.agent_depth) ??
         undefined,
     };
   }
@@ -91,9 +89,9 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
           readString(threadSpawn.parent_thread_id) ??
           undefined,
         subAgentDepth:
-          readNumber(threadSpawn.depth) ??
-          readNumber(threadSpawn.agentDepth) ??
-          readNumber(threadSpawn.agent_depth) ??
+          readCoercedFiniteNumber(threadSpawn.depth) ??
+          readCoercedFiniteNumber(threadSpawn.agentDepth) ??
+          readCoercedFiniteNumber(threadSpawn.agent_depth) ??
           undefined,
       };
     }
@@ -109,9 +107,9 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
         readString(subAgentRecord.parent_thread_id) ??
         undefined,
       subAgentDepth:
-        readNumber(subAgentRecord.depth) ??
-        readNumber(subAgentRecord.agentDepth) ??
-        readNumber(subAgentRecord.agent_depth) ??
+        readCoercedFiniteNumber(subAgentRecord.depth) ??
+        readCoercedFiniteNumber(subAgentRecord.agentDepth) ??
+        readCoercedFiniteNumber(subAgentRecord.agent_depth) ??
         undefined,
     };
   }
@@ -124,9 +122,9 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
         readString(sourceRecord.parent_thread_id) ??
         undefined,
       subAgentDepth:
-        readNumber(sourceRecord.depth) ??
-        readNumber(sourceRecord.agentDepth) ??
-        readNumber(sourceRecord.agent_depth) ??
+        readCoercedFiniteNumber(sourceRecord.depth) ??
+        readCoercedFiniteNumber(sourceRecord.agentDepth) ??
+        readCoercedFiniteNumber(sourceRecord.agent_depth) ??
         undefined,
     };
   }

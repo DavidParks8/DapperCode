@@ -1,45 +1,6 @@
 import type { TurnPlanStep, TurnPlanUpdate } from '../../api/types';
+import { readString, toRecord } from '../../runtimeValidation';
 import type { ActivePlanState, ThreadContextUsage } from './mainScreenHelperTypes';
-
-export function toRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-}
-
-export function readString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-export function readStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const values = value.filter((entry): entry is string => typeof entry === 'string');
-  return values.length > 0 ? values : null;
-}
-
-export function readNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-export function readIntegerLike(value: unknown): number | null {
-  const numberValue = readNumber(value);
-  if (numberValue !== null) {
-    return Math.max(0, Math.floor(numberValue));
-  }
-
-  const stringValue = readString(value)?.trim();
-  if (!stringValue) {
-    return null;
-  }
-
-  const parsed = Number(stringValue);
-  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
-}
-
-export function readBoolean(value: unknown): boolean | null {
-  return typeof value === 'boolean' ? value : null;
-}
 
 export function mergeThreadContextUsage(
   previous: ThreadContextUsage | null,

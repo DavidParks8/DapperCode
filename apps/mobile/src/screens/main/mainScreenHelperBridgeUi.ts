@@ -7,7 +7,7 @@ import type {
 } from '../../api/types';
 import { parseSlashCommand } from './mainScreenHelperPlansAndCommands';
 import { parseInlineOptionsFromQuestionText } from './mainScreenHelperInlineChoices';
-import { readBoolean, readNumber, readString, toRecord } from './mainScreenHelperPayloads';
+import { readBoolean, readFiniteNumber, readString, toRecord } from '../../runtimeValidation';
 
 function readUserInputFieldType(
   value: unknown,
@@ -343,8 +343,8 @@ function toBridgeUiBlock(value: unknown): BridgeUiBlock | null {
 
   if (type === 'progress') {
     const label = readString(record.label);
-    const progressValue = readNumber(record.value);
-    const max = readNumber(record.max);
+    const progressValue = readFiniteNumber(record.value);
+    const max = readFiniteNumber(record.max);
     if (!label || progressValue === null || max === null || max <= 0) {
       return null;
     }

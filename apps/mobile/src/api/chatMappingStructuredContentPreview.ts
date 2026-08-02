@@ -3,7 +3,7 @@ import {
   normalizeMultiline,
   normalizeType,
 } from './chatMappingToolArgumentParsers';
-import { readString, toRecord } from './chatMappingRawTypesAndReaders';
+import { readString, toRecord } from '../runtimeValidation';
 
 export function withNestedDetail(title: string, detail: string | null): string {
   if (!detail) {

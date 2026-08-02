@@ -1,4 +1,4 @@
-import { readString, readStringArray, toRecord } from './chatMappingRawTypesAndReaders';
+import { readString, readTrimmedStringArray, toRecord } from '../runtimeValidation';
 import { stringifyStructuredContentEntries } from './chatMappingStructuredContentPreview';
 import { type ChatMessageSubAgentMeta } from './types';
 
@@ -30,7 +30,9 @@ export function readFunctionCommand(args: Record<string, unknown> | null): strin
   if (direct) {
     return direct;
   }
-  const commandParts = readStringArray(args.cmd).concat(readStringArray(args.command));
+  const commandParts = readTrimmedStringArray(args.cmd).concat(
+    readTrimmedStringArray(args.command),
+  );
   return commandParts.length > 0 ? normalizeInline(commandParts.join(' '), 240) : null;
 }
 
@@ -109,8 +111,8 @@ export function toSubAgentMeta(item: Record<string, unknown>): ChatMessageSubAge
 
 export function readReceiverThreadIds(item: Record<string, unknown>): string[] {
   const pluralIds = [
-    ...readStringArray(item.receiverThreadIds),
-    ...readStringArray(item.receiver_thread_ids),
+    ...readTrimmedStringArray(item.receiverThreadIds),
+    ...readTrimmedStringArray(item.receiver_thread_ids),
   ];
   if (pluralIds.length > 0) {
     return Array.from(new Set(pluralIds));
@@ -131,7 +133,7 @@ export function reasoningTextFromItem(item: Record<string, unknown>): string | n
   if (directText?.trim()) {
     return directText;
   }
-  const content = readStringArray(item.content);
+  const content = readTrimmedStringArray(item.content);
   if (content.length > 0) {
     return content.join('\n');
   }
@@ -141,7 +143,7 @@ export function reasoningTextFromItem(item: Record<string, unknown>): string | n
       return structuredContent;
     }
   }
-  const summary = readStringArray(item.summary);
+  const summary = readTrimmedStringArray(item.summary);
   if (summary.length > 0) {
     return summary.join('\n');
   }
