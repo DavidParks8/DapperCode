@@ -28,16 +28,12 @@ const reviewed = {
     ],
     fixAvailable: false,
   },
-  'brace-expansion': {
-    via: [{ source: 1124334, name: 'brace-expansion', severity: 'high' }],
-    fixAvailable: { name: 'react-native', version: '0.86.0', isSemVerMajor: true },
-  },
 };
 
 test('production audit accepts only the reviewed high-severity advisories', () => {
   const result = runChecker(reviewed);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /3 reviewed high-severity advisories/);
+  assert.match(result.stdout, /2 reviewed high-severity advisories/);
 });
 
 test('production audit rejects new, stale, or newly fixable advisories', () => {
@@ -53,10 +49,7 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(
-    stale.stderr,
-    /stale exceptions: linkify-it#1121797, linkify-it#1124012, brace-expansion#1124334/,
-  );
+  assert.match(stale.stderr, /stale exceptions: linkify-it#1121797, linkify-it#1124012/);
 
   const fixable = runChecker({
     ...reviewed,
@@ -67,13 +60,13 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const compatibleUpgrade = runChecker({
     ...reviewed,
-    'brace-expansion': {
-      ...reviewed['brace-expansion'],
-      fixAvailable: { name: 'brace-expansion', version: '5.0.8', isSemVerMajor: false },
+    'linkify-it': {
+      ...reviewed['linkify-it'],
+      fixAvailable: { name: 'linkify-it', version: '6.0.0', isSemVerMajor: false },
     },
   });
   assert.notEqual(compatibleUpgrade.status, 0);
-  assert.match(compatibleUpgrade.stderr, /fix now available: brace-expansion/);
+  assert.match(compatibleUpgrade.stderr, /fix now available: linkify-it/);
 
   const escalated = runChecker({
     ...reviewed,
