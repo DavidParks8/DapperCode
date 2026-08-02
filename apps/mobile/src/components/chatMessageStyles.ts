@@ -182,10 +182,8 @@ export const createStyles = (theme: AppTheme) =>
       flex: 1,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
+      ...theme.typography.body,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 14,
-      lineHeight: 20,
-      color: theme.colors.textPrimary,
     },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {

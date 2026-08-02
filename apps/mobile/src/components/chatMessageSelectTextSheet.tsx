@@ -5,7 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
+import { computeHitSlop } from './touchTarget';
 import { createStyles } from './chatMessageStyles';
+
+const CLOSE_BUTTON_VISIBLE_SIZE = { width: 32, height: 32 };
 
 /**
  * Shows a response in a read-only multiline `TextInput`.
@@ -26,6 +29,7 @@ export function SelectableTextSheet({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
+  const closeHitSlop = useMemo(() => computeHitSlop(CLOSE_BUTTON_VISIBLE_SIZE), []);
 
   return (
     <Modal
@@ -45,7 +49,7 @@ export function SelectableTextSheet({
           <Pressable
             testID={testID ? `${testID}-close` : undefined}
             onPress={onClose}
-            hitSlop={12}
+            hitSlop={closeHitSlop}
             style={({ pressed }) => [
               styles.selectTextCloseButton,
               pressed && styles.messageActionButtonPressed,
