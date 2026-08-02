@@ -279,6 +279,45 @@ describe('ChatMessage markdown formatting', () => {
     act(() => tree.unmount());
   });
 
+  it('highlights fenced code and copies the exact snippet from its own button', async () => {
+    const code = 'const port: number = 4319;';
+    const message: ApiChatMessage = {
+      id: 'msg_highlighted_code',
+      role: 'assistant',
+      content: `\`\`\`typescript\n${code}\n\`\`\``,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    jest.mocked(Clipboard.setStringAsync).mockClear();
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    expect(root.findByProps({ testID: 'chat-code-block' })).toBeTruthy();
+    expect(
+      root
+        .findAll((node) => node.type === Text)
+        .some((node) => flattenRenderedText(node.props.children) === 'TypeScript'),
+    ).toBe(true);
+
+    const keyword = root
+      .findAll((node) => node.type === Text)
+      .find((node) => flattenRenderedText(node.props.children) === 'const');
+    if (!keyword) throw new Error('Expected TypeScript keyword highlighting');
+    expect(StyleSheet.flatten(keyword.props.style as never)).toMatchObject({
+      color: theme.colors.codeSyntaxKeyword,
+    });
+
+    await act(async () => {
+      readOnPress(root.findByProps({ testID: 'chat-code-block-copy' }).props)();
+      await Promise.resolve();
+    });
+
+    expect(Clipboard.setStringAsync).toHaveBeenCalledTimes(1);
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith(code);
+    expect(root.findByProps({ accessibilityLabel: 'Code copied' })).toBeTruthy();
+
+    act(() => tree.unmount());
+  });
+
   it('repaints when only the ordered parts change', () => {
     const base: ApiChatMessage = {
       id: 'msg_parts',

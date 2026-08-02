@@ -34,6 +34,13 @@ export interface AppColors {
   inlineCodeBg: string;
   inlineCodeBorder: string;
   inlineCodeText: string;
+  codeSyntaxComment: string;
+  codeSyntaxKeyword: string;
+  codeSyntaxString: string;
+  codeSyntaxNumber: string;
+  codeSyntaxFunction: string;
+  codeSyntaxProperty: string;
+  codeSyntaxOperator: string;
   toolBlockBg: string;
   toolBlockBorder: string;
   subAgentAccent: string;
@@ -127,6 +134,13 @@ const darkClassicColors: AppColors = {
   inlineCodeBg: '#2A303A',
   inlineCodeBorder: 'rgba(197, 206, 223, 0.42)',
   inlineCodeText: '#EEF2FB',
+  codeSyntaxComment: '#AAB3C2',
+  codeSyntaxKeyword: '#D2A8FF',
+  codeSyntaxString: '#A5D6FF',
+  codeSyntaxNumber: '#79C0FF',
+  codeSyntaxFunction: '#FFA657',
+  codeSyntaxProperty: '#FF9492',
+  codeSyntaxOperator: '#D0D5DF',
   toolBlockBg: 'rgba(255, 255, 255, 0.09)',
   toolBlockBorder: '#5A6376',
   subAgentAccent: '#B8AEFF',
@@ -183,6 +197,13 @@ const darkGreyColors: AppColors = {
   inlineCodeBg: '#1e1e1e',
   inlineCodeBorder: 'rgba(255, 255, 255, 0.14)',
   inlineCodeText: '#e8e8e8',
+  codeSyntaxComment: '#A7A7A7',
+  codeSyntaxKeyword: '#DCDCAA',
+  codeSyntaxString: '#CE9178',
+  codeSyntaxNumber: '#B5CEA8',
+  codeSyntaxFunction: '#DCDCAA',
+  codeSyntaxProperty: '#9CDCFE',
+  codeSyntaxOperator: '#D4D4D4',
   toolBlockBg: 'rgba(255, 255, 255, 0.06)',
   toolBlockBorder: 'rgba(255, 255, 255, 0.14)',
   subAgentAccent: '#C1B8FF',
@@ -238,6 +259,13 @@ const lightColors: AppColors = {
   inlineCodeBg: '#DFE8F2',
   inlineCodeBorder: 'rgba(70, 96, 126, 0.30)',
   inlineCodeText: '#102030',
+  codeSyntaxComment: '#59636E',
+  codeSyntaxKeyword: '#6F42C1',
+  codeSyntaxString: '#116329',
+  codeSyntaxNumber: '#0550AE',
+  codeSyntaxFunction: '#953800',
+  codeSyntaxProperty: '#A40E26',
+  codeSyntaxOperator: '#203A55',
   toolBlockBg: 'rgba(67, 96, 126, 0.12)',
   toolBlockBorder: '#7289A4',
   subAgentAccent: '#5848C7',

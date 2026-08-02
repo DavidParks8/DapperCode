@@ -3,10 +3,20 @@ import type { RenderRules } from 'react-native-markdown-display';
 
 import { toMarkdownImageSource } from './chatImageSource';
 import { openMarkdownLink, toLocalFileReferenceLabel } from './chatMessageContentHelpers';
+import { ChatCodeBlock } from './ChatCodeBlock';
 import { MarkdownImage, SelectableMessageText } from './chatMessagePrimitives';
 
 function readMarkdownAttr(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function readFenceLanguage(node: object): string | null {
+  if (!('sourceInfo' in node)) return null;
+  return readMarkdownAttr(node.sourceInfo);
+}
+
+function trimTrailingParserNewline(content: string): string {
+  return content.endsWith('\n') ? content.substring(0, content.length - 1) : content;
 }
 
 export function createMarkdownRules(
@@ -50,36 +60,21 @@ export function createMarkdownRules(
         {node.content}
       </SelectableMessageText>
     ),
-    code_block: (node, _children, _parent, styles, inheritedStyles = {}) => {
-      const content =
-        typeof node.content === 'string' && node.content.endsWith('\n')
-          ? node.content.substring(0, node.content.length - 1)
-          : node.content;
-      return (
-        <SelectableMessageText
-          key={node.key}
-          selectable={blockSelectable}
-          style={[inheritedStyles, styles.code_block]}
-        >
-          {content}
-        </SelectableMessageText>
-      );
-    },
-    fence: (node, _children, _parent, styles, inheritedStyles = {}) => {
-      const content =
-        typeof node.content === 'string' && node.content.endsWith('\n')
-          ? node.content.substring(0, node.content.length - 1)
-          : node.content;
-      return (
-        <SelectableMessageText
-          key={node.key}
-          selectable={blockSelectable}
-          style={[inheritedStyles, styles.fence]}
-        >
-          {content}
-        </SelectableMessageText>
-      );
-    },
+    code_block: (node) => (
+      <ChatCodeBlock
+        key={node.key}
+        code={trimTrailingParserNewline(node.content)}
+        selectable={selectable}
+      />
+    ),
+    fence: (node) => (
+      <ChatCodeBlock
+        key={node.key}
+        code={trimTrailingParserNewline(node.content)}
+        language={readFenceLanguage(node)}
+        selectable={selectable}
+      />
+    ),
     table: (node, children, _parent, styles) => (
       <ScrollView
         key={node.key}
