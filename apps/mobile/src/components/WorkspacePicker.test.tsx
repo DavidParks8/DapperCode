@@ -1,3 +1,5 @@
+import type * as fsNode from 'fs';
+import type * as pathNode from 'path';
 import { Alert, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -563,6 +565,49 @@ describe('WorkspacePicker', () => {
       expect.objectContaining({ selected: false }),
     );
     act(() => tree.unmount());
+  });
+
+  describe('typography tokens', () => {
+    it('has no ad hoc numeric fontSize literals in owned workspace-picker source files', () => {
+      const fs = jest.requireActual('fs') as typeof fsNode;
+      const path = jest.requireActual('path') as typeof pathNode;
+      const offenders: string[] = [];
+      const scan = (dir: string, filter: (entry: string) => boolean) => {
+        for (const entry of fs.readdirSync(dir)) {
+          if (
+            !filter(entry) ||
+            !/\.tsx?$/.test(entry) ||
+            entry.endsWith('.test.tsx') ||
+            entry.endsWith('.test.ts')
+          ) {
+            continue;
+          }
+          const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
+          const matches = contents.match(/fontSize:\s*[0-9]/g);
+          if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+        }
+      };
+      scan(__dirname, (entry) => /^WorkspacePicker|^workspacePicker/.test(entry));
+      scan(path.join(__dirname, '../screens/workspacePicker'), () => true);
+      expect(offenders).toEqual([]);
+    });
+
+    it('renders the header title using the title semantic role', () => {
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(renderPickerMatrix({}));
+      });
+      const tree = expectValue(rendered);
+      const root = tree.root as QueryableTestInstance;
+      const titleNode = root.findAll(
+        (node) => node.children.map(String).join('') === 'Choose Workspace',
+      )[0];
+      const style = Array.isArray(titleNode?.props.style)
+        ? Object.assign({}, ...(titleNode.props.style as object[]))
+        : ((titleNode?.props.style as Record<string, unknown>) ?? {});
+      expect(style.fontSize).toBe(theme.typography.title.fontSize);
+      act(() => tree.unmount());
+    });
   });
 
   function renderPickerMatrix(overrides: Record<string, unknown>) {

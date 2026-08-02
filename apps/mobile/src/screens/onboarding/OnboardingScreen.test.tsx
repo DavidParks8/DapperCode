@@ -1,4 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
+import type * as fsNode from 'fs';
+import type * as pathNode from 'path';
 import { KeyboardAvoidingView, Modal, Platform, Share } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -926,5 +928,52 @@ describe('OnboardingScreen behavior', () => {
     } finally {
       Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     }
+  });
+
+  describe('typography tokens', () => {
+    it('has no ad hoc numeric fontSize literals in owned onboarding source files', () => {
+      const fs = jest.requireActual('fs') as typeof fsNode;
+      const path = jest.requireActual('path') as typeof pathNode;
+      const dir = __dirname;
+      const offenders: string[] = [];
+      for (const entry of fs.readdirSync(dir)) {
+        if (!/\.tsx?$/.test(entry) || entry.endsWith('.test.tsx') || entry.endsWith('.test.ts')) {
+          continue;
+        }
+        const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
+        const matches = contents.match(/fontSize:\s*[0-9]/g);
+        if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('renders the brand name using the headline semantic role', async () => {
+      const result = await renderOnboarding({ mode: 'initial' });
+      const root = result.tree.root as Queryable;
+      const brandNode = root.findAll(
+        (node) => node.children.map(String).join('') === 'DapperCode',
+      )[0];
+      const style = Array.isArray(brandNode?.props.style)
+        ? Object.assign({}, ...brandNode.props.style)
+        : ((brandNode?.props.style as Record<string, unknown>) ?? {});
+      expect(style.fontSize).toBe(theme.typography.headline.fontSize);
+      act(() => result.tree.unmount());
+    });
+
+    it('renders the compact stepper pill index using the metadata semantic role', async () => {
+      const result = await renderOnboarding({ mode: 'initial' });
+      const root = result.tree.root as Queryable;
+      await press(findPressableByText(root, 'Private connection'));
+      const pillIndexNode = root.findAll(
+        (node) => node.children.map(String).join('') === '1',
+      )[0];
+      const style = Array.isArray(pillIndexNode?.props.style)
+        ? Object.assign({}, ...pillIndexNode.props.style)
+        : ((pillIndexNode?.props.style as Record<string, unknown>) ?? {});
+      expect(style.fontSize).toBe(theme.typography.metadata.fontSize);
+      // 11pt readability floor is preserved via the metadata role rather than a raw literal.
+      expect(style.fontSize).toBeGreaterThanOrEqual(11);
+      act(() => result.tree.unmount());
+    });
   });
 });

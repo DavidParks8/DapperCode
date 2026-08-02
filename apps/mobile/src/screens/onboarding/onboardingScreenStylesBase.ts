@@ -57,7 +57,6 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     introBrandName: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 18,
       letterSpacing: 0,
     },
     introBody: {
@@ -135,7 +134,8 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     introHeroAgentLabel: {
       ...theme.typography.largeTitle,
       flexShrink: 1,
-      fontSize: 28,
+      // Tighter than largeTitle's own lineHeight to keep both stacked words inside the fixed
+      // 42px agent-word row.
       lineHeight: 32,
       letterSpacing: 0,
       textAlign: 'center',
@@ -143,7 +143,6 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     },
     introHeroTitleTail: {
       ...theme.typography.largeTitle,
-      fontSize: 28,
       lineHeight: 32,
       letterSpacing: 0,
       textAlign: 'center',
@@ -152,8 +151,6 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     introHeroDescription: {
       ...theme.typography.body,
       color: theme.colors.textSecondary,
-      fontSize: 15,
-      lineHeight: 21,
       textAlign: 'center',
       maxWidth: 280,
     },
@@ -211,24 +208,17 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
       borderColor: theme.colors.statusComplete,
     },
     stepperPillIndexText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textPrimary,
       fontWeight: '700',
-      // Compact chip index: bumped to the 11pt readability floor (below theme.typography.caption's
-      // own 12pt) rather than the original 10pt.
-      fontSize: 11,
-      lineHeight: 14,
     },
     stepperPillIndexTextActive: {
       color: theme.colors.accentText,
     },
     stepperPillTitle: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textSecondary,
       fontWeight: '600',
-      // Compact chip label: bumped to the 11pt readability floor rather than the original 10pt.
-      fontSize: 11,
-      lineHeight: 14,
     },
     stepperPillTitleActive: {
       color: theme.colors.textPrimary,
@@ -279,7 +269,6 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     },
     introFeatureTitle: {
       ...theme.typography.headline,
-      fontSize: 14,
     },
     introFeatureDescription: {
       ...theme.typography.caption,

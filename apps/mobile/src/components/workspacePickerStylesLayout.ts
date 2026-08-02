@@ -12,9 +12,7 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   },
   headerSpacer: { width: 36 },
   title: {
-    ...theme.typography.headline,
-    fontSize: 18,
-    fontWeight: '700' as const,
+    ...theme.typography.title,
     textAlign: 'center' as const,
   },
   closeButton: {
@@ -97,15 +95,12 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
   },
   actionCopy: { flex: 1, gap: 2 },
   actionTitle: {
-    ...theme.typography.body,
-    fontSize: 13,
-    lineHeight: 18,
+    ...theme.typography.caption,
     fontWeight: '700' as const,
     color: theme.colors.textPrimary,
   },
   actionSubtitle: {
-    ...theme.typography.caption,
-    fontSize: 11,
+    ...theme.typography.metadata,
     lineHeight: 15,
     color: theme.colors.textSecondary,
   },
@@ -145,16 +140,12 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
     gap: 2,
   },
   currentFolderTitle: {
-    ...theme.typography.body,
-    fontSize: 12,
-    lineHeight: 16,
+    ...theme.typography.label,
     color: theme.colors.textPrimary,
     fontWeight: '700' as const,
   },
   currentFolderPath: {
     ...theme.typography.mono,
-    fontSize: 11,
-    lineHeight: 14,
     color: theme.colors.textMuted,
   },
   sectionHeader: {
@@ -165,8 +156,7 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
     gap: theme.spacing.sm,
   },
   sectionTitle: {
-    ...theme.typography.caption,
-    fontSize: 11,
+    ...theme.typography.metadata,
     color: theme.colors.textSecondary,
     fontWeight: '600' as const,
     textTransform: 'uppercase' as const,
