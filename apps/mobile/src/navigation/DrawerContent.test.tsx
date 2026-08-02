@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
 import { router } from 'expo-router';
-import { AccessibilityInfo, Alert, AppState, RefreshControl, StyleSheet, Text } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, Platform, RefreshControl, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -2206,6 +2206,22 @@ describe('DrawerContent session search', () => {
     const flattened = StyleSheet.flatten(createDrawerContentStyles(theme).searchField);
     expect(flattened.minHeight).toBe(theme.touchTarget.minimum);
     expect(flattened.minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it('sizes the lane header to the platform touch-target minimum, including 48dp on Android', () => {
+    const flattenedDefault = StyleSheet.flatten(createDrawerContentStyles(theme).laneHeader);
+    expect(flattenedDefault.minHeight).toBe(theme.touchTarget.minimum);
+
+    const originalOS = Platform.OS;
+    Platform.OS = 'android';
+    try {
+      const androidTheme = createAppTheme('dark');
+      expect(androidTheme.touchTarget.minimum).toBe(48);
+      const flattenedAndroid = StyleSheet.flatten(createDrawerContentStyles(androidTheme).laneHeader);
+      expect(flattenedAndroid.minHeight).toBe(48);
+    } finally {
+      Platform.OS = originalOS;
+    }
   });
 
   it('does not hide the offline notice or connection footer while a search matches', async () => {

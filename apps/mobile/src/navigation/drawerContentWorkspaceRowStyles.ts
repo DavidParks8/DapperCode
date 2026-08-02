@@ -4,7 +4,7 @@ import type { AppTheme } from '../theme';
 export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
   return StyleSheet.create({
     laneHeader: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       paddingHorizontal: theme.spacing.xs,
       flexDirection: 'row',
       alignItems: 'center',
