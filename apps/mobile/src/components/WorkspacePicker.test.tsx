@@ -3,6 +3,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { FileSystemEntry } from '../api/types';
+import { feedback } from '../feedback';
 import { createAppTheme, AppThemeProvider } from '../theme';
 import { WorkspacePicker } from './WorkspacePicker';
 
@@ -18,6 +19,17 @@ type QueryableTestInstance = ReactTestInstance & {
   findAllByType(type: unknown): QueryableTestInstance[];
 };
 
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+jest.mock('../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 jest.mock('@expo/vector-icons', () => {
   const React = jest.requireActual('react');
   const { Text } = jest.requireActual('react-native');
@@ -445,6 +457,112 @@ describe('WorkspacePicker', () => {
         .accessibilityState,
     ).toEqual({ disabled: true, selected: false });
     act(() => expectValue(rendered).unmount());
+  });
+
+  it('fires a single selection haptic per gesture for close, browse, select, and favorite toggle', () => {
+    const onBrowsePath = jest.fn();
+    const onSelectPath = jest.fn();
+    const onToggleFavorite = jest.fn();
+    const onClose = jest.fn();
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        renderPickerMatrix({ onBrowsePath, onSelectPath, onToggleFavorite, onClose }),
+      );
+    });
+    const tree = expectValue(rendered);
+    const root = tree.root as QueryableTestInstance;
+    const selection = feedback.selection as jest.Mock;
+    selection.mockClear();
+
+    act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
+    expect(selection).toHaveBeenCalledTimes(1);
+
+    act(() =>
+      readOnPress(
+        root.findAll((node) => node.props.accessibilityLabel === 'Use default workspace')[0].props,
+      )(),
+    );
+    expect(selection).toHaveBeenCalledTimes(2);
+
+    const unpin = root.findAll(
+      (node) =>
+        typeof node.props.accessibilityLabel === 'string' &&
+        /^(Pin|Unpin) /.test(node.props.accessibilityLabel) &&
+        node.props.accessibilityLabel !== 'Pin Default workspace',
+    )[0];
+    act(() => readOnPress(unpin.props)());
+    expect(selection).toHaveBeenCalledTimes(3);
+
+    act(() =>
+      readOnPress(root.findAll((node) => node.props.accessibilityLabel === 'Back')[0].props)(),
+    );
+    expect(onClose).toHaveBeenCalled();
+    expect(selection).toHaveBeenCalledTimes(4);
+
+    act(() => tree.unmount());
+  });
+
+  it('pads the compact header Back button out to the platform touch-target minimum', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(renderPickerMatrix({}));
+    });
+    const tree = expectValue(rendered);
+    const root = tree.root as QueryableTestInstance;
+    const backButton = root.findAll((node) => node.props.accessibilityLabel === 'Back')[0];
+    const hitSlop = backButton.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    // closeButton is drawn at 36px; hitSlop must pad it out to at least 44 (iOS/default minimum).
+    expect(36 + hitSlop.top + hitSlop.bottom).toBeGreaterThanOrEqual(44);
+    expect(36 + hitSlop.left + hitSlop.right).toBeGreaterThanOrEqual(44);
+    act(() => tree.unmount());
+  });
+
+  it('renders a restrained selection highlight only on the selected workspace tile', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        renderPickerMatrix({
+          selectedPath: '/Users/davidparks/Code/alpha-project',
+          recentWorkspaces: [
+            { path: '/Users/davidparks/Code/alpha-project', chatCount: 3 },
+            { path: '/Users/davidparks/Code/beta-project', chatCount: 1 },
+          ],
+          favoriteWorkspacePaths: [
+            '/Users/davidparks/Code/alpha-project',
+            '/Users/davidparks/Code/beta-project',
+          ],
+        }),
+      );
+    });
+    const tree = expectValue(rendered);
+    const root = tree.root as QueryableTestInstance;
+    const selectedTile = root
+      .findAll(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          flattenTreeText(node).includes('alpha-project') &&
+          node.props.accessibilityState !== undefined,
+      )[0];
+    const unselectedTile = root
+      .findAll(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          flattenTreeText(node).includes('beta-project') &&
+          node.props.accessibilityState !== undefined,
+      )[0];
+    expect(selectedTile.props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+    expect(unselectedTile.props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: false }),
+    );
+    act(() => tree.unmount());
   });
 
   function renderPickerMatrix(overrides: Record<string, unknown>) {

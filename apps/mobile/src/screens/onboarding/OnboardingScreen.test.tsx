@@ -1,9 +1,11 @@
 import * as Clipboard from 'expo-clipboard';
-import { Modal, Platform, Share } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Share } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
+import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
+import { setMockReducedMotionEnabled } from '../../testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
 
 const mockRequestCameraPermission = jest.fn().mockResolvedValue({ granted: false });
@@ -12,6 +14,17 @@ const mockWsRequest = jest.fn().mockResolvedValue({ status: 'ok' });
 const mockWsDisconnect = jest.fn();
 let mockCameraGranted = false;
 
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('expo-blur', () => ({ BlurView: jest.requireActual('react-native').View }));
 jest.mock('expo-linear-gradient', () => ({
@@ -658,5 +671,154 @@ describe('OnboardingScreen behavior', () => {
     await press(backdrop);
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
     act(() => result.tree.unmount());
+  });
+
+  it('does not re-probe after a successful Test Connection when saving unchanged credentials', async () => {
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockWsRequest).toHaveBeenCalledTimes(1);
+    (feedback.success as jest.Mock).mockClear();
+
+    await press(findByLabel(root, 'Continue'));
+
+    // The unchanged, already-successful credential check must be reused rather than probed again.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockWsRequest).toHaveBeenCalledTimes(1);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:3001',
+      bridgeToken: 'token',
+    });
+    // No redundant success haptic for a save that skipped a fresh probe.
+    expect((feedback.success as jest.Mock)).not.toHaveBeenCalled();
+    act(() => result.tree.unmount());
+  });
+
+  it('does re-probe when credentials change after a successful Test Connection', async () => {
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    act(() =>
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge token'),
+        'onChangeText',
+      )('different-token'),
+    );
+
+    await press(findByLabel(root, 'Continue'));
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(mockWsRequest).toHaveBeenCalledTimes(2);
+    act(() => result.tree.unmount());
+  });
+
+  it('fires semantic haptics for selection, connection outcomes, and QR scan results', async () => {
+    mockRequestCameraPermission.mockResolvedValueOnce({ granted: true });
+    mockCameraGranted = true;
+    const result = await renderOnboarding();
+    const root = result.tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Private connection'));
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    (feedback.selection as jest.Mock).mockClear();
+
+    const url = findByLabel(root, 'Bridge URL');
+    const token = findByLabel(root, 'Bridge token');
+    act(() => readHandler<(value: string) => void>(url, 'onChangeText')('http://127.0.0.1:3001'));
+    act(() => readHandler<(value: string) => void>(token, 'onChangeText')('token'));
+
+    await press(findPressableByText(root, 'Test Connection'));
+    expect((feedback.success as jest.Mock)).toHaveBeenCalledTimes(1);
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 503 });
+    mockWsRequest.mockRejectedValueOnce(new Error('offline'));
+    act(() =>
+      readHandler<(value: string) => void>(token, 'onChangeText')('token-changed'),
+    );
+    await press(findPressableByText(root, 'Test Connection'));
+    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+
+    await press(findPressableByText(root, 'Scan QR'));
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    act(() => result.tree.unmount());
+  });
+
+  it('meets the platform touch-target minimum and exposes accessibility roles/labels/hints', async () => {
+    const initial = await renderOnboarding();
+    const initialRoot = initial.tree.root as Queryable;
+    await press(findPressableByText(initialRoot, 'Private connection'));
+
+    const backButton = findByLabel(initialRoot, 'Back');
+    expect(backButton.props.accessibilityRole).toBe('button');
+    expect(backButton.props.accessibilityHint).toBeTruthy();
+
+    const scanButton = findByLabel(initialRoot, 'Scan QR');
+    expect(scanButton.props.accessibilityRole).toBe('button');
+    expect(scanButton.props.accessibilityHint).toBeTruthy();
+    act(() => initial.tree.unmount());
+
+    const direct = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const directRoot = direct.tree.root as Queryable;
+
+    const cancelButton = findByLabel(directRoot, 'Cancel connection setup');
+    const cancelHitSlop = cancelButton.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    const minimum = Platform.select({ ios: 44, android: 48, default: 44 }) as number;
+    // cancelBtn is drawn at 30px; hitSlop must pad it out to at least the platform minimum.
+    expect(30 + cancelHitSlop.top + cancelHitSlop.bottom).toBeGreaterThanOrEqual(minimum);
+    expect(30 + cancelHitSlop.left + cancelHitSlop.right).toBeGreaterThanOrEqual(minimum);
+
+    act(() => direct.tree.unmount());
+  });
+
+  it('renders StatusBanner without a Reanimated entrance when Reduce Motion is enabled', async () => {
+    setMockReducedMotionEnabled(true);
+    try {
+      const result = await renderOnboarding({
+        mode: 'add',
+        initialBridgeUrl: 'http://127.0.0.1:3001',
+        initialBridgeToken: 'token',
+      });
+      const root = result.tree.root as Queryable;
+      await press(findPressableByText(root, 'Test Connection'));
+      expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+      act(() => result.tree.unmount());
+    } finally {
+      setMockReducedMotionEnabled(false);
+    }
+  });
+
+  it('uses Android-appropriate keyboard avoidance so the URL/token fields stay reachable', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    try {
+      const result = await renderOnboarding({ mode: 'add' });
+      const root = result.tree.root as Queryable;
+      const keyboardAvoiding = root.findAll(
+        (node) => node.type === KeyboardAvoidingView,
+      )[0] as Queryable;
+      expect(keyboardAvoiding.props.behavior).toBe('height');
+      act(() => result.tree.unmount());
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    }
   });
 });

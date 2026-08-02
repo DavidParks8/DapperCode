@@ -60,7 +60,9 @@ export function OnboardingScreen({
       </View>
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
-          behavior={Platform.select({ ios: 'padding', android: 'height', default: undefined })}
+          behavior={
+            Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined
+          }
           style={styles.keyboardAvoiding}
         >
           {controller.showIntroStep ? (
