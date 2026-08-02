@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Alert, AppState } from 'react-native';
+import { Alert, AppState, Keyboard } from 'react-native';
 import type { ChatSummary } from '../api/types';
 import { useAccessibilityAnnouncement } from '../accessibility';
 import { confirmAction } from '../components/confirm';
@@ -246,6 +246,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   );
 
   const handleNewChat = useCallback(() => {
+    Keyboard.dismiss();
     cancelChatListStream();
     onNewChat();
   }, [cancelChatListStream, onNewChat]);

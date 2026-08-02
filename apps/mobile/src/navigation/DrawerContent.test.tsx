@@ -1,7 +1,16 @@
 import { useMemo } from 'react';
 jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
 import { router } from 'expo-router';
-import { AccessibilityInfo, Alert, AppState, Platform, RefreshControl, StyleSheet, Text } from 'react-native';
+import {
+  AccessibilityInfo,
+  Alert,
+  AppState,
+  Keyboard,
+  Platform,
+  RefreshControl,
+  StyleSheet,
+  Text,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -1941,6 +1950,23 @@ describe('DrawerContent session search', () => {
       await Promise.resolve();
     });
   }
+
+  it('dismisses the search keyboard before starting a new chat', async () => {
+    const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    await press(findByLabel(root, 'New chat'));
+
+    expect(dismissSpy).toHaveBeenCalledTimes(1);
+
+    dismissSpy.mockRestore();
+    act(() => tree.unmount());
+  });
 
   it('matches sessions case-insensitively across title, workspace, agent, and status', async () => {
     const harness = createHarness({
