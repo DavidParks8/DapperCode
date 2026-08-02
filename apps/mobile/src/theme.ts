@@ -36,6 +36,9 @@ export interface AppColors {
   inlineCodeText: string;
   toolBlockBg: string;
   toolBlockBorder: string;
+  subAgentAccent: string;
+  subAgentBg: string;
+  subAgentBorder: string;
   diffAddedText: string;
   diffAddedBg: string;
   diffRemovedText: string;
@@ -126,6 +129,9 @@ const darkClassicColors: AppColors = {
   inlineCodeText: '#EEF2FB',
   toolBlockBg: 'rgba(255, 255, 255, 0.09)',
   toolBlockBorder: '#5A6376',
+  subAgentAccent: '#B8AEFF',
+  subAgentBg: '#17152B',
+  subAgentBorder: '#413A73',
   diffAddedText: '#7EE787',
   diffAddedBg: 'rgba(46, 160, 67, 0.16)',
   diffRemovedText: '#FF9492',
@@ -179,6 +185,9 @@ const darkGreyColors: AppColors = {
   inlineCodeText: '#e8e8e8',
   toolBlockBg: 'rgba(255, 255, 255, 0.06)',
   toolBlockBorder: 'rgba(255, 255, 255, 0.14)',
+  subAgentAccent: '#C1B8FF',
+  subAgentBg: '#2B2940',
+  subAgentBorder: '#514A7F',
   diffAddedText: '#89d185',
   diffAddedBg: 'rgba(137, 209, 133, 0.14)',
   diffRemovedText: '#f14c4c',
@@ -231,6 +240,9 @@ const lightColors: AppColors = {
   inlineCodeText: '#102030',
   toolBlockBg: 'rgba(67, 96, 126, 0.12)',
   toolBlockBorder: '#7289A4',
+  subAgentAccent: '#5848C7',
+  subAgentBg: '#E3E0F7',
+  subAgentBorder: '#B8B0E5',
   diffAddedText: '#116329',
   diffAddedBg: 'rgba(17, 99, 41, 0.10)',
   diffRemovedText: '#A40E26',

@@ -72,18 +72,19 @@ export function SubAgentCard({
         return (
           <View
             key={`${idPrefix}-subagent-${String(index)}`}
+            testID={`${idPrefix}-subagent-card-${String(index)}`}
             style={[styles.subAgentCard, visual.isError && styles.subAgentCardError]}
           >
             <View style={styles.subAgentHeader}>
               <View style={styles.subAgentHeaderIcon}>
                 {running ? (
-                  <ActivityIndicator size="small" color={theme.colors.warning} />
+                  <ActivityIndicator size="small" color={theme.colors.subAgentAccent} />
                 ) : (
                   <Ionicons
                     {...decorativeAccessibilityProps}
                     name={visual.icon}
                     size={14}
-                    color={visual.isError ? theme.colors.statusError : theme.colors.warning}
+                    color={visual.isError ? theme.colors.statusError : theme.colors.subAgentAccent}
                   />
                 )}
               </View>
@@ -100,7 +101,7 @@ export function SubAgentCard({
               <View style={styles.subAgentDetailRow}>
                 <ScrollableRowText
                   style={styles.subAgentDetailLine}
-                  backgroundColor={visual.isError ? theme.colors.errorBg : theme.colors.warningBg}
+                  backgroundColor={visual.isError ? theme.colors.errorBg : theme.colors.subAgentBg}
                   numberOfLines={1}
                   testID="subagent-latest-scroll"
                 >
@@ -126,7 +127,7 @@ export function SubAgentCard({
                 {...decorativeAccessibilityProps}
                 name="chevron-forward"
                 size={12}
-                color={theme.colors.textMuted}
+                color={theme.colors.subAgentAccent}
               />
             </Pressable>
           </View>

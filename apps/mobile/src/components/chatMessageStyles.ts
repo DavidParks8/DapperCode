@@ -356,8 +356,8 @@ export const createStyles = (theme: AppTheme) =>
     subAgentCard: {
       borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.warningBorder,
-      backgroundColor: theme.colors.warningBg,
+      borderColor: theme.colors.subAgentBorder,
+      backgroundColor: theme.colors.subAgentBg,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm + 1,
       // Every row below is a fixed height, so a sub-agent streaming progress never resizes the
@@ -410,7 +410,7 @@ export const createStyles = (theme: AppTheme) =>
     subAgentOpenHintPressed: { opacity: 0.6 },
     subAgentOpenHintText: {
       ...theme.typography.caption,
-      color: theme.colors.textMuted,
+      color: theme.colors.subAgentAccent,
       fontWeight: '600',
     },
     timelineCard: {

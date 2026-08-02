@@ -182,6 +182,19 @@ describe('theme', () => {
     }
   });
 
+  it('uses a composed indigo-lavender surface for sub-agent work', () => {
+    const darkClassic = createAppTheme('dark', 'classic');
+    const darkGrey = createAppTheme('dark', 'grey');
+    const light = createAppTheme('light');
+
+    expect(darkClassic.colors.subAgentBg).toBe('#17152B');
+    expect(darkClassic.colors.subAgentAccent).toBe('#B8AEFF');
+    expect(darkGrey.colors.subAgentBg).toBe('#2B2940');
+    expect(darkGrey.colors.subAgentAccent).toBe('#C1B8FF');
+    expect(light.colors.subAgentBg).toBe('#E3E0F7');
+    expect(light.colors.subAgentAccent).toBe('#5848C7');
+  });
+
   it('exposes an expanded radius scale while preserving existing steps', () => {
     expect(radius.xs).toBe(4);
     expect(radius.sm).toBe(8);

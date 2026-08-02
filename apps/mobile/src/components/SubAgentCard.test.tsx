@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '../theme';
@@ -87,6 +88,33 @@ describe('SubAgentCard', () => {
     });
 
     expect(createStylesSpy.mock.calls.length).toBe(callsAfterMount);
+  });
+
+  it('uses the dedicated indigo sub-agent surface instead of warning colors', () => {
+    const tree = render(
+      <SubAgentCard
+        idPrefix="sub-1"
+        entries={entries}
+        agentStatus="completed"
+        running={false}
+        threadId="thread-1"
+        onOpen={jest.fn()}
+      />,
+    );
+    const card = queryRoot(tree).findAll(
+      (node) => node.props.testID === 'sub-1-subagent-card-0',
+    )[0];
+    if (!card) throw new Error('Expected sub-agent card');
+    const style = StyleSheet.flatten(card.props.style as never) as {
+      backgroundColor?: string;
+      borderColor?: string;
+    };
+
+    expect(style.backgroundColor).toBe(theme.colors.subAgentBg);
+    expect(style.borderColor).toBe(theme.colors.subAgentBorder);
+    expect(style.backgroundColor).not.toBe(theme.colors.warningBg);
+
+    act(() => tree.unmount());
   });
 
   it('caps the open-agent-chat hitSlop so it cannot overlap the scrollable Latest row above it', () => {
