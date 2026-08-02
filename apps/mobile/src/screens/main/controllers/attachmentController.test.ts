@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { Keyboard, Platform } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -153,6 +153,7 @@ describe('attachmentController', () => {
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     jest.useRealTimers();
     delete (globalThis as { requestIdleCallback?: unknown }).requestIdleCallback;
     delete (globalThis as { cancelIdleCallback?: unknown }).cancelIdleCallback;
@@ -189,6 +190,18 @@ describe('attachmentController', () => {
     await blankWorkspace.mount();
     expect(blankWorkspace.current.fileCandidates).toEqual([]);
     blankWorkspace.unmount();
+  });
+
+  it('dismisses the keyboard before opening the attachment menu', async () => {
+    const harness = makeHarness();
+    await harness.mount();
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
+
+    act(() => harness.current.openMenu());
+
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(harness.current.attachmentMenuVisible).toBe(true);
+    harness.unmount();
   });
 
   it('adds, deduplicates, selects, removes, clears, and projects paths', async () => {
