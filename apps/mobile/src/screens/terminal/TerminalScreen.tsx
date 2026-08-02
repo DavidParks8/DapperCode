@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -35,20 +36,14 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   const [output, setOutput] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cancelRef = useRef<() => void>(() => {});
 
   useAccessibilityAnnouncement(running ? 'Running command' : null);
 
   const executeCommand = useCallback(async () => {
-    let cancelled = false;
-    cancelRef.current = () => {
-      cancelled = true;
-    };
     try {
       setRunning(true);
       setError(null);
       const result = await api.execTerminal({ command });
-      if (cancelled) return;
       const lines = [
         `$ ${result.command}`,
         result.stdout || '(no stdout)',
@@ -61,26 +56,19 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
       setError(null);
       void feedback.success();
     } catch (err) {
-      if (cancelled) return;
       setError((err as Error).message);
       void feedback.error();
     } finally {
-      if (!cancelled) {
-        setRunning(false);
-        cancelRef.current = () => {};
-      }
+      setRunning(false);
     }
   }, [api, command]);
-
-  const stopCommand = useCallback(() => {
-    cancelRef.current();
-    setRunning(false);
-    void feedback.warning();
-  }, []);
 
   const runCommand = useCallback(() => {
     const trimmed = command.trim();
     if (!trimmed || running) {
+      // No real cancel/abort API exists for an in-flight bridge exec request, so while one is
+      // running the control must stay truthfully disabled rather than allow a second
+      // concurrent request or claim a cancellation that never happens.
       return;
     }
 
@@ -100,6 +88,7 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   }, [command, executeCommand, running]);
 
   const runDisabled = !command.trim();
+  const runBlocked = running || runDisabled;
 
   useEffect(() => {
     return ws.onEvent((event) => {
@@ -178,22 +167,27 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
             placeholderTextColor={theme.colors.textMuted}
           />
           <Pressable
-            onPress={running ? stopCommand : runCommand}
-            disabled={!running && runDisabled}
+            onPress={runCommand}
+            disabled={runBlocked}
             hitSlop={computeHitSlop({ width: 30, height: 30 })}
             accessibilityRole="button"
-            accessibilityLabel={running ? 'Stop command' : 'Run command'}
+            accessibilityLabel={running ? 'Running command' : 'Run command'}
+            accessibilityState={{ disabled: runBlocked, busy: running }}
             style={({ pressed }) => [
               styles.runBtn,
-              pressed && !(!running && runDisabled) && styles.runBtnPressed,
-              !running && runDisabled && styles.runBtnDisabled,
+              pressed && !runBlocked && styles.runBtnPressed,
+              runBlocked && styles.runBtnDisabled,
             ]}
           >
-            <Ionicons
-              name={running ? 'pause' : 'play'}
-              size={14}
-              color={!running && runDisabled ? theme.colors.textMuted : theme.colors.accentText}
-            />
+            {running ? (
+              <ActivityIndicator size="small" color={theme.colors.accentText} />
+            ) : (
+              <Ionicons
+                name="play"
+                size={14}
+                color={runDisabled ? theme.colors.textMuted : theme.colors.accentText}
+              />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
