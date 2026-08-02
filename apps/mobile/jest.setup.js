@@ -2,6 +2,13 @@
 // Every suite that renders a sheet gets the same lightweight double so tests can assert on the
 // sheet's content instead of its animation machinery.
 jest.mock('@gorhom/bottom-sheet', () => require('./src/testing/bottomSheetMock'));
+jest.mock('react-native-reanimated', () => require('./src/testing/reanimatedMock'));
+jest.mock('react-native-gesture-handler', () => require('./src/testing/gestureHandlerMock'));
+jest.mock('expo-haptics', () => ({
+  ImpactFeedbackStyle: { Light: 'light' },
+  impactAsync: jest.fn(() => Promise.resolve()),
+  selectionAsync: jest.fn(() => Promise.resolve()),
+}));
 
 beforeEach(() => {
   require('./src/testing/expoRouterMock').resetRouterMock();

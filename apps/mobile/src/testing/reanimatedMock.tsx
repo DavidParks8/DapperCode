@@ -43,12 +43,15 @@ export const cancelAnimation = () => {};
 export const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 export const interpolate = (value: number) => value;
+export const interpolateColor = (_value: number, _input: number[], output: string[]) =>
+  output[output.length - 1];
 export const runOnJS =
   <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
   (...args: Args) =>
     callback(...args);
 export const useAnimatedStyle = (factory: () => unknown) => factory();
 export const useDerivedValue = <T,>(factory: () => T) => ({ value: factory() });
+export const useReducedMotion = () => false;
 /**
  * Shared values created since the last reset, in hook order, so tests can assert on the settled
  * animation target instead of reaching into worklet internals.
