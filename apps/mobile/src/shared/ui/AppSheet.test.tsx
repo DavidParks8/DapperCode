@@ -90,12 +90,17 @@ function textOf(tree: ReactTestRenderer): string {
 }
 
 describe('AppSheet', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
   it('waits for an open keyboard to hide before presenting a sheet', () => {
-    const isVisibleSpy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
     const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
     let handleKeyboardDidHide: ((event: KeyboardEvent) => void) | undefined;
     const remove = jest.fn();
-    const listenerSpy = jest.spyOn(Keyboard, 'addListener').mockImplementation((event, handler) => {
+    jest.spyOn(Keyboard, 'addListener').mockImplementation((event, handler) => {
       if (event === 'keyboardDidHide') {
         handleKeyboardDidHide = handler;
       }
@@ -118,9 +123,38 @@ describe('AppSheet', () => {
 
     act(() => tree.unmount());
     expect(remove).toHaveBeenCalledTimes(1);
-    listenerSpy.mockRestore();
-    dismissSpy.mockRestore();
-    isVisibleSpy.mockRestore();
+  });
+
+  it('presents when keyboard dismissal races the hide event subscription', () => {
+    jest.useFakeTimers();
+    let keyboardVisible = true;
+    jest.spyOn(Keyboard, 'isVisible').mockImplementation(() => keyboardVisible);
+    const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {
+      keyboardVisible = false;
+    });
+    const remove = jest.fn();
+    jest.spyOn(Keyboard, 'addListener').mockImplementation(() => {
+      return { remove } as unknown as ReturnType<typeof Keyboard.addListener>;
+    });
+    const tree = renderSheet(
+      wrap(
+        <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose an agent">
+          <Text>Agent list</Text>
+        </AppSheet>,
+      ),
+    );
+
+    expect(dismissSpy).toHaveBeenCalledTimes(1);
+    expect(textOf(tree)).not.toContain('Agent list');
+
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+
+    expect(textOf(tree)).toContain('Agent list');
+
+    act(() => tree.unmount());
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 
   it('opens from an initially hidden state and can reopen after closing', () => {

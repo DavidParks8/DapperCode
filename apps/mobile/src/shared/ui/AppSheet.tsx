@@ -45,6 +45,7 @@ export interface AppSheetProps {
 
 const BACKDROP_APPEARS_AT = 0;
 const BACKDROP_DISAPPEARS_AT = -1;
+const KEYBOARD_DISMISS_FALLBACK_MS = 400;
 const HANDLE_VERTICAL_PADDING = sheetHandleVerticalPadding(
   SHEET_HANDLE_INDICATOR_HEIGHT,
   MIN_TOUCH_TARGET,
@@ -86,7 +87,12 @@ export function AppSheet({
   useEffect(() => {
     if (visible) {
       if (!presentedRef.current) {
+        let keyboardFallbackTimer: ReturnType<typeof setTimeout> | null = null;
         const present = () => {
+          if (keyboardFallbackTimer) {
+            clearTimeout(keyboardFallbackTimer);
+            keyboardFallbackTimer = null;
+          }
           if (!visibleRef.current || presentedRef.current) {
             return;
           }
@@ -96,8 +102,18 @@ export function AppSheet({
 
         if (Keyboard.isVisible()) {
           const keyboardHideSubscription = Keyboard.addListener('keyboardDidHide', present);
+          // A tap can start the keyboard transition before this effect subscribes, leaving no
+          // hide event for this listener. The fallback covers that race without delaying normal
+          // event-driven presentation.
+          keyboardFallbackTimer = setTimeout(present, KEYBOARD_DISMISS_FALLBACK_MS);
           Keyboard.dismiss();
-          return () => keyboardHideSubscription.remove();
+          return () => {
+            keyboardHideSubscription.remove();
+            if (keyboardFallbackTimer) {
+              clearTimeout(keyboardFallbackTimer);
+              keyboardFallbackTimer = null;
+            }
+          };
         }
 
         // Also clear text focus when a hardware keyboard is attached or the software keyboard has
