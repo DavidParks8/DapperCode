@@ -7,10 +7,8 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
   StyleSheet.create({
     header: { gap: 4 },
     eyebrow: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0,
@@ -18,15 +16,12 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
     title: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 18,
-      lineHeight: 22,
       fontWeight: '700',
     },
     subtitle: {
-      ...theme.typography.caption,
+      ...theme.typography.label,
       color: theme.colors.textMuted,
-      fontSize: 12,
-      lineHeight: 16,
+      fontWeight: '400',
     },
     list: { gap: theme.spacing.sm },
     loadingState: {
@@ -106,20 +101,15 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
       paddingVertical: 2,
     },
     badgeText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
       letterSpacing: 0,
     },
     accessory: { flexShrink: 0, alignItems: 'flex-end', gap: 6 },
     meta: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
+      ...theme.typography.metadata,
       fontWeight: '600',
     },
     footer: {

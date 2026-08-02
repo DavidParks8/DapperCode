@@ -93,6 +93,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
   const viewportMenuFocusRef = useModalAccessibilityFocus(showViewportMenu);
   useAccessibilityAnnouncement(capabilitiesError);
   useAccessibilityAnnouncement(openingPreview ? 'Opening local preview' : null);
+  useAccessibilityAnnouncement(loadingPreview && !openingPreview ? 'Loading preview' : null);
 
   const previewOrigin = useMemo(
     () =>

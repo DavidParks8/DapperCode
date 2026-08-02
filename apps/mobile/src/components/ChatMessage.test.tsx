@@ -23,9 +23,10 @@ import {
   SUBAGENT_ACTIVITY_TYPE,
 } from '../api/messages';
 import { createAppTheme, AppThemeProvider } from '../theme';
-import { ChatMessage, ToolInvocationRow } from './ChatMessage';
+import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
 import { resetHuggedTextWidthCache } from './chatMessageUserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
+import { LinearTransition, ReduceMotion } from '../testing/reanimatedMock';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -55,20 +56,7 @@ type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
-jest.mock('react-native-reanimated', () => {
-  const reactNative = jest.requireActual('react-native');
-
-  return {
-    __esModule: true,
-    default: {
-      Image: reactNative.Image,
-    },
-    clamp: (value: number, min: number, max: number) => Math.min(Math.max(value, min), max),
-    useAnimatedStyle: (updater: () => unknown) => updater(),
-    useSharedValue: <T,>(value: T) => ({ value }),
-    withTiming: <T,>(value: T) => value,
-  };
-});
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 
 jest.mock('react-native-gesture-handler', () => {
   const React = jest.requireActual('react');
@@ -207,7 +195,88 @@ describe('ChatMessage markdown formatting', () => {
       throw new Error('Expected heading text to render');
     }
     const headingStyle = StyleSheet.flatten(heading.props.style as never) as { fontSize?: number };
+    // h1 maps to the semantic `headline` role (17pt) rather than a bespoke literal, so the
+    // rendered size must match that token exactly, not just stay under some loose ceiling.
+    expect(headingStyle.fontSize).toBe(theme.typography.headline.fontSize);
     expect(headingStyle.fontSize).toBeLessThanOrEqual(18);
+  });
+
+  it('maps markdown h1-h6 to descending semantic typography roles, not arbitrary literals', () => {
+    const message: ApiChatMessage = {
+      id: 'msg_heading_hierarchy',
+      role: 'assistant',
+      content: [
+        '# LevelOne',
+        '## LevelTwo',
+        '### LevelThree',
+        '#### LevelFour',
+        '##### LevelFive',
+        '###### LevelSix',
+      ].join('\n\n'),
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    const fontSizeFor = (label: string): number | undefined => {
+      const node = root
+        .findAll((n) => n.type === Text)
+        .find((n) => flattenRenderedText(n.props.children).includes(label));
+      if (!node) throw new Error(`Expected "${label}" heading text to render`);
+      const style = StyleSheet.flatten(node.props.style as never) as { fontSize?: number };
+      return style.fontSize;
+    };
+
+    const sizes = [
+      fontSizeFor('LevelOne'),
+      fontSizeFor('LevelTwo'),
+      fontSizeFor('LevelThree'),
+      fontSizeFor('LevelFour'),
+      fontSizeFor('LevelFive'),
+      fontSizeFor('LevelSix'),
+    ];
+
+    // Each level must resolve to one of the theme's named typography roles (never an arbitrary
+    // literal), and the sizes must strictly descend from h1 to h6.
+    const knownRoleSizes = new Set(
+      Object.values(theme.typography).map((role) => role.fontSize),
+    );
+    for (const size of sizes) {
+      expect(size).toBeDefined();
+      expect(knownRoleSizes.has(size as number)).toBe(true);
+    }
+    for (let i = 1; i < sizes.length; i += 1) {
+      expect(sizes[i]!).toBeLessThan(sizes[i - 1]!);
+    }
+
+    act(() => tree.unmount());
+  });
+
+  it('renders inline and block markdown code using the semantic mono typography role', () => {
+    const message: ApiChatMessage = {
+      id: 'msg_code_mono',
+      role: 'assistant',
+      content: 'Run `npm test` or:\n\n```\nnpm test\n```',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    const codeNodes = root
+      .findAll((node) => node.type === Text)
+      .filter((node) => flattenRenderedText(node.props.children).includes('npm test'));
+    expect(codeNodes.length).toBeGreaterThan(0);
+
+    for (const node of codeNodes) {
+      const style = StyleSheet.flatten(node.props.style as never) as {
+        fontFamily?: string;
+        fontSize?: number;
+      };
+      expect(style.fontFamily).toBe(theme.fonts.monoRegular);
+      expect(style.fontSize).toBe(theme.typography.mono.fontSize);
+    }
+
+    act(() => tree.unmount());
   });
 
   it('repaints when only the ordered parts change', () => {
@@ -247,6 +316,66 @@ describe('ChatMessage markdown formatting', () => {
     });
 
     expect(readText()).toContain('This needs a wider search.');
+  });
+
+  it('skips memoized re-render work when parts are deep-equal but a new array/object reference', () => {
+    // Regression test for replacing the JSON.stringify(parts) comparator with field-aware
+    // equality: streamed re-renders often produce brand-new part array/object references that
+    // are structurally identical to the previous ones, and those should still be treated as
+    // equal so ChatMessage does not repaint on every token.
+    const previous: ApiChatMessage = {
+      id: 'msg_stable_parts',
+      role: 'assistant',
+      content: 'Same content',
+      parts: [
+        { type: 'text', text: 'Same content' },
+        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+      ],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = {
+      ...previous,
+      parts: [
+        { type: 'text', text: 'Same content' },
+        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+      ],
+    };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(true);
+  });
+
+  it('detects a real change nested inside a resource part', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_resource_change',
+      role: 'assistant',
+      content: '',
+      parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'body' } }],
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = {
+      ...previous,
+      parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'changed body' } }],
+    };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(false);
+  });
+
+  it('detects a content-only change even when parts are unchanged', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_content_change',
+      role: 'assistant',
+      content: 'before',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const next: ApiChatMessage = { ...previous, content: 'after' };
+
+    expect(
+      areChatMessagePropsEqual({ message: previous }, { message: next }),
+    ).toBe(false);
   });
 
   it('renders markdown tables in a horizontal scroll area', () => {
@@ -304,6 +433,90 @@ describe('ChatMessage markdown formatting', () => {
     ).toBe(true);
     act(() => tree.unmount());
     openUrl.mockRestore();
+  });
+
+  it('gives the local-preview chip a hitSlop that pads its compact chrome to the platform minimum', () => {
+    const onOpenLocalPreview = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'local-preview-chip',
+        role: 'assistant',
+        content: 'Server ready on http://localhost:3000',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    const root = tree.root as QueryableTestInstance;
+
+    const chip = root
+      .findAllByProps({ accessibilityLabel: 'Open http://localhost:3000/ in Browser' })
+      .find((node) => typeof node.props.onPress === 'function');
+    if (!chip) throw new Error('Expected the local-preview chip to render');
+    const hitSlop = chip.props.hitSlop as
+      | { top: number; bottom: number; left: number; right: number }
+      | undefined;
+
+    // The chip's visible chrome (padding + icon/text row) is well under the 44pt/48dp minimum
+    // touch target, so it must widen its effective tap area via hitSlop rather than relying on
+    // its compact chrome alone.
+    expect(hitSlop).toBeDefined();
+    expect(hitSlop?.top).toBeGreaterThan(0);
+    expect(hitSlop?.bottom).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('caps local-preview chip hitSlop so stacked chips cannot steal a neighbor’s tap', () => {
+    const onOpenLocalPreview = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'local-preview-chip-stack',
+        role: 'assistant',
+        content: 'Servers ready on http://localhost:3000 and http://localhost:4000',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    const root = tree.root as QueryableTestInstance;
+
+    const chips = root
+      .findAllByProps({ accessibilityRole: 'button' })
+      .filter(
+        (node) =>
+          typeof node.props.onPress === 'function' &&
+          typeof node.props.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel as string).startsWith('Open http://localhost:'),
+      );
+    expect(chips).toHaveLength(2);
+
+    // The chips stack in a column with a 4px gap (localPreviewLinkList's `gap: theme.spacing.xs`
+    // in chatMessageStyles.ts). Each chip's vertical hitSlop must be capped at half that gap (2)
+    // so one chip's bottom slop plus the next chip's top slop never exceeds the real 4px gap
+    // between them — anything larger would let the earlier chip's expanded hit area steal a tap
+    // aimed at the chip below it.
+    const GAP = 4;
+    const HALF_GAP = GAP / 2;
+    for (const chip of chips) {
+      const hitSlop = chip.props.hitSlop as
+        | { top: number; bottom: number; left: number; right: number }
+        | undefined;
+      expect(hitSlop).toBeDefined();
+      expect(hitSlop!.top).toBeLessThanOrEqual(HALF_GAP);
+      expect(hitSlop!.bottom).toBeLessThanOrEqual(HALF_GAP);
+    }
+
+    // Exact effective-geometry check: the first chip's expanded bottom edge and the second
+    // chip's expanded top edge must not cross the midpoint of the gap between them, i.e. they
+    // must not overlap at all.
+    const [firstHitSlop, secondHitSlop] = chips.map(
+      (chip) =>
+        chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
+    );
+    const firstChipExpandedBottomOffset = firstHitSlop.bottom;
+    const secondChipExpandedTopOffset = secondHitSlop.top;
+    expect(firstChipExpandedBottomOffset + secondChipExpandedTopOffset).toBeLessThanOrEqual(GAP);
+
+    act(() => tree.unmount());
   });
 
   it('renders markdown images only when their source is usable', () => {
@@ -701,6 +914,29 @@ describe('ChatMessage user bubble', () => {
     });
   };
 
+  it('renders user messages with the accessible iMessage-blue palette', () => {
+    const theme = createAppTheme('dark');
+    const tree = renderMessage({
+      id: 'user-blue',
+      role: 'user',
+      content: 'A wrapped user message.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const bubbleStyle = (StyleSheet.flatten(
+      root.findByProps({ testID: 'user-message-bubble' }).props.style as never,
+    ) ?? {}) as { backgroundColor?: string; borderColor?: string };
+    const textStyle = (StyleSheet.flatten(findUserText(root).props.style as never) ?? {}) as {
+      color?: string;
+    };
+
+    expect(bubbleStyle.backgroundColor).toBe(theme.colors.userBubble);
+    expect(bubbleStyle.borderColor).toBe(theme.colors.userBubbleBorder);
+    expect(textStyle.color).toBe(theme.colors.userBubbleText);
+
+    act(() => tree.unmount());
+  });
+
   it('hugs the widest rendered line instead of filling the allowed width', () => {
     const tree = renderMessage({
       id: 'user-hug',
@@ -963,6 +1199,31 @@ describe('ChatMessage system timeline matrices', () => {
       true,
     );
     act(() => tree.unmount());
+  });
+
+  it('wires the reasoning and tool timeline layout transitions to honor system Reduce Motion', () => {
+    const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
+
+    const reasoningTree = renderMessage({
+      id: 'timeline-reduce-motion-reasoning',
+      role: 'system',
+      systemKind: 'reasoning',
+      content: '• Plan\n  └ First thought\n  └ Second thought',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const toolTree = renderMessage({
+      id: 'timeline-reduce-motion-tool',
+      role: 'system',
+      systemKind: 'tool',
+      content: '• Called tool `search`\n  └ query=coverage\n  └ 3 results',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    reduceMotionSpy.mockRestore();
+    act(() => reasoningTree.unmount());
+    act(() => toolTree.unmount());
   });
 
   it('hides the reasoning toggle when the preview already shows every line', () => {

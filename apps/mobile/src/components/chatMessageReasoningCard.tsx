@@ -7,9 +7,11 @@ import {
   type NativeSyntheticEvent,
   type TextLayoutEventData,
 } from 'react-native';
+import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
+import { motionDuration } from './motion';
 import { SelectableMessageText } from './chatMessagePrimitives';
 import { createStyles } from './chatMessageStyles';
 import { summarizeReasoningPreview } from './chatMessageTimelineHelpers';
@@ -49,75 +51,83 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
   };
 
   return (
-    <Pressable
-      disabled={!canToggle}
-      onPress={() => setExpanded((previous) => !previous)}
-      style={({ pressed }) => [
-        styles.reasoningCard,
-        canToggle && styles.reasoningCardInteractive,
-        pressed && canToggle && styles.reasoningCardPressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={entry.title}
-      accessibilityHint={
-        canToggle ? `${showDetails ? 'Hides' : 'Shows'} reasoning details` : undefined
-      }
-      accessibilityState={controlAccessibilityState({
-        disabled: !canToggle,
-        expanded: canToggle ? showDetails : undefined,
-      })}
+    <Animated.View
+      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
     >
-      <View style={styles.reasoningHeader}>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="sparkles-outline"
-          size={13}
-          color={theme.colors.textMuted}
-        />
-        <Text style={styles.reasoningTitle}>{entry.title}</Text>
-        {canToggle ? (
+      <Pressable
+        disabled={!canToggle}
+        onPress={() => setExpanded((previous) => !previous)}
+        style={({ pressed }) => [
+          styles.reasoningCard,
+          canToggle && styles.reasoningCardInteractive,
+          pressed && canToggle && styles.reasoningCardPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={entry.title}
+        accessibilityHint={
+          canToggle ? `${showDetails ? 'Hides' : 'Shows'} reasoning details` : undefined
+        }
+        accessibilityState={controlAccessibilityState({
+          disabled: !canToggle,
+          expanded: canToggle ? showDetails : undefined,
+        })}
+      >
+        <View style={styles.reasoningHeader}>
           <Ionicons
             {...decorativeAccessibilityProps}
-            name={showDetails ? 'chevron-up' : 'chevron-down'}
-            size={14}
+            name="sparkles-outline"
+            size={13}
             color={theme.colors.textMuted}
           />
-        ) : null}
-      </View>
-      {!showDetails && preview ? (
-        <View>
-          <SelectableMessageText
-            style={styles.reasoningPreview}
-            numberOfLines={REASONING_PREVIEW_LINES}
-          >
-            {preview}
-          </SelectableMessageText>
-          <Text
-            {...decorativeAccessibilityProps}
-            style={[styles.reasoningPreview, styles.reasoningPreviewMeasure]}
-            onTextLayout={onPreviewTextLayout}
-          >
-            {preview}
-          </Text>
+          <Text style={styles.reasoningTitle}>{entry.title}</Text>
+          {canToggle ? (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={showDetails ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={theme.colors.textMuted}
+            />
+          ) : null}
         </View>
-      ) : null}
-      {showDetails ? (
-        <View style={styles.reasoningDetailWrap}>
-          {entry.details.map((line, lineIndex) => (
+        {!showDetails && preview ? (
+          <View>
             <SelectableMessageText
-              key={`reasoning-line-${String(lineIndex)}`}
-              style={styles.reasoningDetailLine}
+              style={styles.reasoningPreview}
+              numberOfLines={REASONING_PREVIEW_LINES}
             >
-              {line}
+              {preview}
             </SelectableMessageText>
-          ))}
-        </View>
-      ) : null}
-      {canToggle ? (
-        <Text style={styles.reasoningToggleText}>
-          {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}
-        </Text>
-      ) : null}
-    </Pressable>
+            <Text
+              {...decorativeAccessibilityProps}
+              style={[styles.reasoningPreview, styles.reasoningPreviewMeasure]}
+              onTextLayout={onPreviewTextLayout}
+            >
+              {preview}
+            </Text>
+          </View>
+        ) : null}
+        {showDetails ? (
+          <Animated.View
+            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+            style={styles.reasoningDetailWrap}
+          >
+            {entry.details.map((line, lineIndex) => (
+              <SelectableMessageText
+                key={`reasoning-line-${String(lineIndex)}`}
+                style={styles.reasoningDetailLine}
+              >
+                {line}
+              </SelectableMessageText>
+            ))}
+          </Animated.View>
+        ) : null}
+        {canToggle ? (
+          <Text style={styles.reasoningToggleText}>
+            {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}
+          </Text>
+        ) : null}
+      </Pressable>
+    </Animated.View>
   );
 }

@@ -1,7 +1,8 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { ActivityIndicator } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';
@@ -104,6 +105,8 @@ async function render(options: RenderOptions = {}): Promise<{
 }
 
 type Queryable = ReactTestInstance & {
+  type: unknown;
+  children: Array<Queryable | string>;
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
   findAllByType(type: unknown): Queryable[];
 };
@@ -124,6 +127,12 @@ function renderedText(tree: ReactTestRenderer): string {
   return JSON.stringify((tree as unknown as { toJSON: () => unknown }).toJSON());
 }
 
+function textContent(node: Queryable): string {
+  return node.children
+    .map((child) => (typeof child === 'string' ? child : textContent(child)))
+    .join('');
+}
+
 describe('SubAgentDetailView starting state', () => {
   it('hydrates the route and reports a sub-agent that has not produced anything as starting', async () => {
     // A just-spawned sub-agent has no transcript. An empty scroll view makes a
@@ -131,6 +140,28 @@ describe('SubAgentDetailView starting state', () => {
     const { api, tree } = await render();
     expect(api.getChat).toHaveBeenCalledWith('child', { forceRefresh: true });
     expect(isStarting(tree)).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the "Sub-agent" eyebrow readable at theme.typography.metadata size', async () => {
+    const { tree } = await render();
+    const eyebrow = (tree.root as Queryable).findAll(
+      (node) => node.type === Text && textContent(node) === 'Sub-agent',
+    )[0];
+    if (!eyebrow) throw new Error('Missing "Sub-agent" eyebrow text');
+    const style = (StyleSheet.flatten(eyebrow.props.style) ?? {}) as Record<
+      string,
+      number | string | undefined
+    >;
+
+    // Must adopt theme.typography.metadata (11/14) instead of the old sub-11pt literal
+    // override (10/12), while keeping its uppercase/bold/muted presentation.
+    expect(Number(style.fontSize)).toBe(11);
+    expect(Number(style.lineHeight)).toBe(14);
+    expect(style.fontWeight).toBe('700');
+    expect(style.textTransform).toBe('uppercase');
+    expect(style.color).toBe(theme.colors.textMuted);
+
     act(() => tree.unmount());
   });
 

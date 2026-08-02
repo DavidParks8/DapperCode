@@ -2,8 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,9 +13,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, { Easing, FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { decorativeAccessibilityProps } from '../../accessibility';
+import { decorativeAccessibilityProps, useAccessibilityAnnouncement } from '../../accessibility';
+import { feedback } from '../../feedback';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -30,6 +33,7 @@ import {
   openGitCheckoutDestinationPickerAtom,
   submitGitCheckoutAtom,
 } from '../../state/mainScreen/workspaceActions';
+import { motionDuration, motionEasing } from '../../components/motion';
 import { useAppTheme } from '../../theme';
 import { joinWorkspacePath, normalizeCloneDirectoryName } from '../main/mainScreenHelpers';
 import { createGitCheckoutScreenStyles } from './gitCheckoutScreenStyles';
@@ -58,6 +62,35 @@ export function GitCheckoutScreen() {
   const submitDisabled = !repoUrl.trim() || !normalizedDirectoryName || cloning;
   usePreventRemove(cloning, () => undefined);
 
+  // Announce loading state to screen readers, mirroring the GitScreen pattern.
+  useAccessibilityAnnouncement(cloning ? 'Cloning repository' : null);
+
+  // Fire semantic haptics once when the clone operation settles, without double-firing on
+  // re-renders. Uses a ref to detect the cloning→idle edge.
+  const prevCloningRef = useRef(false);
+  useEffect(() => {
+    const wasCloning = prevCloningRef.current;
+    prevCloningRef.current = cloning;
+    if (wasCloning && !cloning) {
+      if (error) {
+        void feedback.error();
+      } else {
+        void feedback.success();
+      }
+    }
+  }, [cloning, error]);
+
+  // 36×36 visual button + 6px hitSlop on each side = 48×48 effective touch area,
+  // meeting both iOS (44pt) and Android (48dp) minimum touch targets.
+  const backButtonHitSlop = { top: 6, bottom: 6, left: 6, right: 6 };
+
+  const routineEnter = FadeIn.duration(motionDuration.routine)
+    .easing(Easing.bezier(...motionEasing.decelerate))
+    .reduceMotion(ReduceMotion.System);
+  const routineExit = FadeOut.duration(motionDuration.routine)
+    .easing(Easing.bezier(...motionEasing.accelerate))
+    .reduceMotion(ReduceMotion.System);
+
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <Stack.Screen options={{ gestureEnabled: !cloning }} />
@@ -69,6 +102,7 @@ export function GitCheckoutScreen() {
           <Pressable
             onPress={() => close()}
             disabled={cloning}
+            hitSlop={backButtonHitSlop}
             style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="Back"
@@ -149,6 +183,17 @@ export function GitCheckoutScreen() {
             <Text style={styles.summary} numberOfLines={2}>
               {`Will clone into ${targetPath}`}
             </Text>
+          ) : null}
+          {cloning ? (
+            <Animated.View entering={routineEnter} exiting={routineExit} style={styles.cloningRow}>
+              <ActivityIndicator
+                accessibilityRole="progressbar"
+                accessibilityLabel="Cloning repository"
+                color={theme.colors.accent}
+                size="small"
+              />
+              <Text style={styles.cloningText}>Cloning repository…</Text>
+            </Animated.View>
           ) : null}
           {error ? (
             <Text

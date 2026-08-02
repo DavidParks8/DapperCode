@@ -206,6 +206,7 @@ export function applyMessagesSnapshot(
     (messages, meta) => attachToolMeta(messages, meta),
     nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
   );
+  const keptIds = new Set(kept.map((message) => message.id));
   return {
     ...current,
     messages: kept,
@@ -214,7 +215,59 @@ export function applyMessagesSnapshot(
     terminalMessageIds: nextMessages.map((message) => message.id),
     subagentToolCallIds: snapshotSubagentIds,
     toolMetaByCallId,
+    toolCallMessageIdByCallId: rebaseToolBookkeeping(
+      current.toolCallMessageIdByCallId,
+      snapshotToolCallMessageIds(kept),
+      keptIds,
+    ),
+    toolResultMessageIdByCallId: rebaseToolBookkeeping(
+      current.toolResultMessageIdByCallId,
+      snapshotToolResultMessageIds(kept),
+      keptIds,
+    ),
   };
+}
+
+/**
+ * A snapshot re-states the whole transcript under the agent's own message ids, so
+ * the call-to-message bookkeeping built while streaming now points at messages
+ * that are gone. Left stale, the next event for the same call resurrects the
+ * pre-snapshot message at the end of the transcript and the tool renders twice.
+ * Bookkeeping the snapshot does not speak for is kept only while its message
+ * survives, so a call still in flight keeps updating its own row.
+ */
+function rebaseToolBookkeeping(
+  previous: Record<string, string>,
+  fromSnapshot: Map<string, string>,
+  survivingMessageIds: ReadonlySet<string>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [toolCallId, messageId] of Object.entries(previous)) {
+    if (survivingMessageIds.has(messageId)) next[toolCallId] = messageId;
+  }
+  for (const [toolCallId, messageId] of fromSnapshot) {
+    next[toolCallId] = messageId;
+  }
+  return next;
+}
+
+function snapshotToolCallMessageIds(messages: ChatMessage[]): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const call of message.toolCalls ?? []) {
+      ids.set(call.id, message.id);
+    }
+  }
+  return ids;
+}
+
+function snapshotToolResultMessageIds(messages: ChatMessage[]): Map<string, string> {
+  const ids = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === 'tool') ids.set(message.toolCallId, message.id);
+  }
+  return ids;
 }
 
 function snapshotToolFailed(messages: Message[], toolCallId: string): boolean {

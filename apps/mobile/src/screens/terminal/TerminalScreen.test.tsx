@@ -1,14 +1,28 @@
-import { Alert, TextInput } from 'react-native';
+import { AccessibilityInfo, Alert, StyleSheet, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { RpcNotification, TerminalExecResponse } from '../../api/types';
 import type { HostBridgeWsClient } from '../../api/ws';
+import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
-import { TerminalScreen } from './TerminalScreen';
+import { createStyles, TerminalScreen } from './TerminalScreen';
+
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
+
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 type Queryable = Omit<ReactTestInstance, 'children' | 'findAll' | 'parent' | 'props'> & {
   children: unknown[];
@@ -29,14 +43,14 @@ function hasText(root: Queryable, text: string): boolean {
 }
 
 function findRunButton(root: Queryable): Queryable {
-  const icon = root.findAll(
-    (node) => node.children.includes('play') || node.children.includes('pause'),
+  const button = root.findAll(
+    (node) =>
+      typeof node.props.onPress === 'function' &&
+      (node.props.accessibilityLabel === 'Run command' ||
+        node.props.accessibilityLabel === 'Running command'),
   )[0];
-  let current: Queryable | null = icon ?? null;
-  while (current && typeof current.props.onPress !== 'function')
-    current = current.parent as Queryable | null;
-  if (!current) throw new Error('Missing run button');
-  return current;
+  if (!button) throw new Error('Missing run button');
+  return button;
 }
 
 function findPressableAncestor(node: Queryable): Queryable {
@@ -119,6 +133,10 @@ describe('TerminalScreen behavior', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    (feedback.selection as jest.Mock).mockClear();
+    (feedback.warning as jest.Mock).mockClear();
+    (feedback.success as jest.Mock).mockClear();
+    (feedback.error as jest.Mock).mockClear();
   });
 
   it('blocks blank commands, confirms execution, supports cancel, and opens the drawer', async () => {
@@ -218,5 +236,109 @@ describe('TerminalScreen behavior', () => {
     await triggerRun(result.tree.root as Queryable);
     expect(result.api.execTerminal).toHaveBeenCalledWith({ command: 'pwd' });
     act(() => result.tree.unmount());
+  });
+
+  it('run button meets minimum touch target via hitSlop', async () => {
+    const result = await renderTerminal();
+    const root = result.tree.root as Queryable;
+    const runBtn = findRunButton(root);
+    const hitSlop = runBtn.props.hitSlop as { top: number; bottom: number; left: number; right: number };
+    // Button is 30pt, needs 7pt per side to reach 44pt minimum.
+    expect(hitSlop.top).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.bottom).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.left).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.right).toBeGreaterThanOrEqual(7);
+    act(() => result.tree.unmount());
+  });
+
+  it('fires the selection haptic once on Run and prevents a duplicate concurrent exec request on re-press', async () => {
+    let resolveExec!: (value: TerminalExecResponse) => void;
+    const pendingResponse = new Promise<TerminalExecResponse>((resolve) => {
+      resolveExec = resolve;
+    });
+    const result = await renderTerminal({
+      execTerminal: jest.fn().mockReturnValue(pendingResponse),
+    });
+    const root = result.tree.root as Queryable;
+    const input = root.findAllByType(TextInput)[0] as Queryable;
+    act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
+
+    // Tap Run → confirm → selection haptic fires and exactly one exec request is sent.
+    await triggerRun(root);
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    expect(result.api.execTerminal).toHaveBeenCalledTimes(1);
+
+    // While the request is still in flight there is no real cancel API, so the button must be
+    // truthfully disabled (no fake "Stop"): re-pressing it must not fire a second confirmation,
+    // a second selection haptic, or a second concurrent exec request.
+    const runningBtn = findRunButton(root);
+    expect(runningBtn.props.disabled).toBe(true);
+    expect(runningBtn.props.accessibilityLabel).toBe('Running command');
+    await act(async () => {
+      getCallback<PressCallback>(runningBtn, 'onPress')();
+    });
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    expect(result.api.execTerminal).toHaveBeenCalledTimes(1);
+    expect(feedback.warning as jest.Mock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveExec({
+        command: 'echo hi',
+        cwd: '/',
+        code: 0,
+        stdout: '',
+        stderr: '',
+        timedOut: false,
+        durationMs: 1,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Once the in-flight request settles, Run becomes available again for a fresh attempt.
+    const idleBtn = findRunButton(root);
+    expect(idleBtn.props.disabled).toBe(false);
+    expect(idleBtn.props.accessibilityLabel).toBe('Run command');
+    await triggerRun(root);
+    expect(result.api.execTerminal).toHaveBeenCalledTimes(2);
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(2);
+
+    act(() => result.tree.unmount());
+  });
+
+  it('announces running state for accessibility', async () => {
+    const announceSpy = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(jest.fn());
+
+    let resolveExec!: (value: TerminalExecResponse) => void;
+    const pendingResponse = new Promise<TerminalExecResponse>((resolve) => {
+      resolveExec = resolve;
+    });
+    const result = await renderTerminal({
+      execTerminal: jest.fn().mockReturnValue(pendingResponse),
+    });
+    const root = result.tree.root as Queryable;
+    const input = root.findAllByType(TextInput)[0] as Queryable;
+    act(() => getCallback<TextChangeCallback>(input, 'onChangeText')('echo hi'));
+
+    await triggerRun(root);
+    expect(announceSpy).toHaveBeenCalledWith('Running command');
+
+    resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: 'hi', stderr: '', timedOut: false, durationMs: 1 });
+    await act(async () => { await Promise.resolve(); });
+    act(() => result.tree.unmount());
+  });
+});
+
+describe('TerminalScreen typography mapping', () => {
+  it('outputText uses the full mono role font size/family, with only lineHeight intentionally overridden for scrollback density', () => {
+    const styles = createStyles(theme);
+    const outputText = StyleSheet.flatten(styles.outputText);
+    expect(outputText.fontSize).toBe(theme.typography.mono.fontSize);
+    expect(outputText.fontFamily).toBe(theme.typography.mono.fontFamily);
+    // Intentional scrollback readability tweak, not a raw ad hoc literal replacing the role.
+    expect(outputText.lineHeight).toBe(20);
   });
 });

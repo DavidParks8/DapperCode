@@ -7,6 +7,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import type { CollaborationMode } from '../../api/types';
 import { type SelectionSheetOption } from '../../components/SelectionSheet';
+import { feedback } from '../../feedback';
 import { formatModelOptionDescription, formatModelOptionLabel } from '../../modelOptions';
 import { formatReasoningEffort } from './mainScreenHelpers';
 import type {
@@ -47,6 +48,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
 
   const collaborationModeOptions = useMemo<SelectionSheetOption[]>(() => {
     const setMode = async (mode: CollaborationMode, acpMode: string) => {
+      void feedback.selection();
       if (modeConfig) {
         const updated = await applyAcpConfigOption(modeConfig, acpMode);
         if (!updated) {
@@ -137,6 +139,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
               badge: 'Auto',
               selected: !effectiveModelId || effectiveModelId === serverDefaultModel?.id,
               onPress: () => {
+                void feedback.selection();
                 void selectModel(null);
               },
             },
@@ -153,6 +156,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
           : undefined,
         selected: model.id === effectiveModelId,
         onPress: () => {
+          void feedback.selection();
           void selectModel(model.id);
         },
       })),
@@ -176,6 +180,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
               badge: 'Auto',
               selected: activeEffort === null,
               onPress: () => {
+                void feedback.selection();
                 void selectEffort(null);
               },
             },
@@ -189,6 +194,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         icon: 'pulse-outline' as const,
         selected: option.effort === activeEffort,
         onPress: () => {
+          void feedback.selection();
           void selectEffort(option.effort);
         },
       })),

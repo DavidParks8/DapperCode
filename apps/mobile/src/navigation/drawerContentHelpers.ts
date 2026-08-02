@@ -1,5 +1,6 @@
 import type { ChatSummary } from '../api/types';
 import { DEFAULT_WORKSPACE_CHAT_LIMIT, type WorkspaceChatLimit } from '../appSettings';
+import type { DrawerAttentionRow, DrawerAttentionSection } from './drawerAttention';
 
 export function sortChats(chats: ChatSummary[]): ChatSummary[] {
   return [...chats].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -86,4 +87,44 @@ export function formatCompactCount(value: number): string {
 
 export function normalizeWorkspaceChatLimit(value: WorkspaceChatLimit): WorkspaceChatLimit {
   return value === 10 || value === 25 || value === null ? value : DEFAULT_WORKSPACE_CHAT_LIMIT;
+}
+
+/**
+ * Case-insensitive match across every field a person could plausibly search a session by:
+ * its title, the workspace/folder it belongs to, the agent working it (by label or raw id),
+ * and its current state label (e.g. "Approval requested", "Failed"). `query` must already be
+ * trimmed and lower-cased by the caller so this stays a cheap, allocation-free comparison.
+ */
+export function matchesDrawerSearch(row: DrawerAttentionRow, query: string): boolean {
+  if (!query) return true;
+  const haystacks: Array<string | null | undefined> = [
+    row.chat.title,
+    row.workspaceLabel,
+    row.agentLabel,
+    row.chat.agentId,
+    row.stateLabel,
+  ];
+  return haystacks.some(
+    (value) => typeof value === 'string' && value.toLowerCase().includes(query),
+  );
+}
+
+/**
+ * Filters each lane's rows by `query` while preserving lane order and identity for lanes with
+ * no matches (they are dropped entirely rather than rendered empty, matching how the unfiltered
+ * model already omits empty lanes). `query` is trimmed/lower-cased internally so callers can pass
+ * the raw search field value as-is.
+ */
+export function filterDrawerAttentionSections(
+  sections: DrawerAttentionSection[],
+  query: string,
+): DrawerAttentionSection[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return sections;
+  return sections
+    .map((section) => {
+      const data = section.data.filter((row) => matchesDrawerSearch(row, normalized));
+      return { ...section, data, itemCount: data.length };
+    })
+    .filter((section) => section.data.length > 0);
 }

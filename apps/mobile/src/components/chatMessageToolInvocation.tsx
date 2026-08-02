@@ -2,14 +2,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/mainScreen/toolInvocations';
 import { useAppTheme } from '../theme';
+import { motionDuration } from './motion';
+import { computeHitSlop } from './touchTarget';
 import { ScrollableRowText } from './chatMessagePrimitives';
 import { createStyles } from './chatMessageStyles';
 import { ToolInvocationOutput } from './chatMessageToolOutput';
 import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
+
+// The collapsed row is a dense single line (~26pt); pad it toward the 44pt/48dp minimum without
+// growing its visible chrome.
+const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
+
 
 export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   invocation,
@@ -29,12 +37,17 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   const toggle = useCallback(() => {
     setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
   }, [invocation.id, setExpandedIds]);
+  const toggleHitSlop = useMemo(() => computeHitSlop(TOOL_ROW_VISIBLE_SIZE), []);
 
   return (
-    <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
+    <Animated.View
+      style={[styles.messageWrapper, styles.messageWrapperAssistant]}
+      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+    >
       <Pressable
         disabled={!expandable}
         onPress={toggle}
+        hitSlop={toggleHitSlop}
         style={({ pressed }) => [
           styles.toolRow,
           invocation.isError && styles.toolRowError,
@@ -94,15 +107,21 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         </View>
       </Pressable>
       {expanded ? (
-        <ToolInvocationOutput
-          invocation={invocation}
-          bridgeUrl={bridgeUrl}
-          bridgeToken={bridgeToken}
-        />
+        <Animated.View
+          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+        >
+          <ToolInvocationOutput
+            invocation={invocation}
+            bridgeUrl={bridgeUrl}
+            bridgeToken={bridgeToken}
+          />
+        </Animated.View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 });
+
 ToolInvocationRow.displayName = 'ToolInvocationRow';
 
 /**

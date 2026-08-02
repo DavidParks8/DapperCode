@@ -5,9 +5,12 @@ import { Pressable, View } from 'react-native';
 
 import { decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
+import { feedback } from '../feedback';
+import { computeHitSlop } from './touchTarget';
 import { createStyles } from './chatMessageStyles';
 
 const COPIED_RESET_MS = 1600;
+const ACTION_BUTTON_VISIBLE_SIZE = { width: 30, height: 30 };
 
 /**
  * The action row under a response: copy the whole thing, or open it for real text selection.
@@ -28,6 +31,7 @@ export function MessageActions({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionHitSlop = useMemo(() => computeHitSlop(ACTION_BUTTON_VISIBLE_SIZE), []);
 
   useEffect(
     () => () => {
@@ -38,6 +42,7 @@ export function MessageActions({
 
   const handleCopy = useCallback(() => {
     void Clipboard.setStringAsync(text).catch(() => {});
+    void feedback.success();
     setCopied(true);
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     resetTimerRef.current = setTimeout(() => {
@@ -52,7 +57,7 @@ export function MessageActions({
       <Pressable
         testID={testID}
         onPress={handleCopy}
-        hitSlop={8}
+        hitSlop={actionHitSlop}
         style={({ pressed }) => [
           styles.messageActionButton,
           pressed && styles.messageActionButtonPressed,
@@ -72,7 +77,7 @@ export function MessageActions({
         <Pressable
           testID={testID ? `${testID}-select` : undefined}
           onPress={onSelectText}
-          hitSlop={8}
+          hitSlop={actionHitSlop}
           style={({ pressed }) => [
             styles.messageActionButton,
             pressed && styles.messageActionButtonPressed,

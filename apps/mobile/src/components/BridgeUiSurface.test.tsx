@@ -1,15 +1,26 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
+import { Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '../api/types';
+import { feedback } from '../feedback';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { AppSheet } from './AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
+import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 
-const safeAreaMetrics = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
-};
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+
+jest.mock('../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => {
@@ -26,8 +37,17 @@ type QueryableTestInstance = ReactTestInstance & {
   findAll(predicate: (node: QueryableTestInstance) => boolean): QueryableTestInstance[];
 };
 
+const safeAreaMetrics = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
+
 describe('BridgeUiWorkflowCard', () => {
   const theme = createAppTheme('dark');
+
+  beforeEach(() => {
+    (feedback.selection as jest.Mock).mockClear();
+  });
 
   it('renders and resolves a dynamic agent goal surface', () => {
     const surface: BridgeUiSurface = {
@@ -264,6 +284,156 @@ describe('BridgeUiWorkflowCard', () => {
     expect(onDismiss).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
+
+  it('fires selection haptic on collapse/expand toggle', () => {
+    const surface: BridgeUiSurface = {
+      id: 'haptic-test',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'goal',
+      presentation: 'workflowCard',
+      tone: 'info',
+      title: 'Haptic',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [],
+      dismissible: false,
+    };
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    const collapseBtn = findPressableByLabel(root, 'Collapse surface');
+    act(() => readOnPress(collapseBtn.props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    act(() => readOnPress(findPressableByLabel(root, 'Expand surface').props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(2);
+    act(() => expectValue(rendered).unmount());
+  });
+
+  it('fires selection haptic on action button press', () => {
+    const surface: BridgeUiSurface = {
+      id: 'action-haptic',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'review',
+      presentation: 'workflowCard',
+      tone: 'warning',
+      title: 'Action',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [{ id: 'ok', label: 'OK', style: 'primary' }],
+      dismissible: false,
+    };
+    const onAction = jest.fn();
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={onAction} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    act(() => readOnPress(findPressableByText(root, 'OK').props)());
+    expect(feedback.selection as jest.Mock).toHaveBeenCalledTimes(1);
+    expect(onAction).toHaveBeenCalledWith(surface, surface.actions[0]);
+    act(() => expectValue(rendered).unmount());
+  });
+
+  it('action buttons meet the platform touch target minimum via resolved minHeight', () => {
+    const surface: BridgeUiSurface = {
+      id: 'touch-target',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'review',
+      presentation: 'workflowCard',
+      tone: 'info',
+      title: 'TouchTarget',
+      subtitle: null,
+      bodyMarkdown: null,
+      blocks: [],
+      actions: [{ id: 'act', label: 'Act', style: 'primary' }],
+      dismissible: true,
+    };
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    const actionBtn = findPressableByText(root, 'Act');
+    const minH = resolvePressableMinHeight(actionBtn);
+    expect(minH).toBeGreaterThanOrEqual(theme.touchTarget.minimum);
+    act(() => expectValue(rendered).unmount());
+  });
+
+  it('action buttons meet the 48dp Android touch target minimum', () => {
+    const originalOS = Platform.OS;
+    Platform.OS = 'android';
+    try {
+      const androidTheme = createAppTheme('dark');
+      expect(androidTheme.touchTarget.minimum).toBe(48);
+      const surface: BridgeUiSurface = {
+        id: 'touch-target-android',
+        threadId: 'thread-1',
+        turnId: null,
+        kind: 'review',
+        presentation: 'workflowCard',
+        tone: 'info',
+        title: 'TouchTarget',
+        subtitle: null,
+        bodyMarkdown: null,
+        blocks: [],
+        actions: [{ id: 'act', label: 'Act', style: 'primary' }],
+        dismissible: true,
+      };
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={androidTheme}>
+              <BridgeUiWorkflowCard surface={surface} onAction={jest.fn()} onDismiss={jest.fn()} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = expectValue(rendered).root as QueryableTestInstance;
+      const actionBtn = findPressableByText(root, 'Act');
+      const minH = resolvePressableMinHeight(actionBtn);
+      expect(minH).toBeGreaterThanOrEqual(48);
+      act(() => expectValue(rendered).unmount());
+    } finally {
+      Platform.OS = originalOS;
+    }
+  });
+});
+
+describe('bridge-ui-surface-styles typography mapping', () => {
+  it('codeText uses the full mono role (size/lineHeight/fontFamily), no raw fontSize override', () => {
+    const theme = createAppTheme('dark');
+    const styles = createBridgeUiSurfaceStyles(theme);
+    const codeText = StyleSheet.flatten(styles.codeText);
+    expect(codeText.fontSize).toBe(theme.typography.mono.fontSize);
+    expect(codeText.lineHeight).toBe(theme.typography.mono.lineHeight);
+    expect(codeText.fontFamily).toBe(theme.typography.mono.fontFamily);
+  });
 });
 
 function findText(root: QueryableTestInstance, text: string): boolean {
@@ -308,6 +478,14 @@ function readOnPress(props: { onPress?: unknown }): () => void {
     throw new Error('Expected onPress to be a function');
   }
   return props.onPress as () => void;
+}
+
+/** Resolves a Pressable's (possibly function-form) style prop and returns its effective minHeight. */
+function resolvePressableMinHeight(node: QueryableTestInstance): number {
+  const rawStyle = node.props.style as unknown;
+  const resolved = typeof rawStyle === 'function' ? rawStyle({ pressed: false }) : rawStyle;
+  const flattened = StyleSheet.flatten(resolved) as { minHeight?: number } | undefined;
+  return flattened?.minHeight ?? 0;
 }
 
 function expectValue<T>(value: T | undefined): T {

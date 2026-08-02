@@ -77,7 +77,10 @@ export function ChatMessageUserBubble({
 
   return (
     <View style={[styles.messageWrapper, styles.messageWrapperUser]}>
-      <View style={[styles.userBubble, blocks.length > 1 && styles.userBubbleWithAttachments]}>
+      <View
+        testID="user-message-bubble"
+        style={[styles.userBubble, blocks.length > 1 && styles.userBubbleWithAttachments]}
+      >
         <View testID="user-bubble-content" style={[styles.userBubbleContent, hugStyle]}>
           {blocks.map((block, index) => {
             if (block.kind === 'image')
@@ -95,7 +98,7 @@ export function ChatMessageUserBubble({
                     {...decorativeAccessibilityProps}
                     name="document-text-outline"
                     size={12}
-                    color={theme.colors.textMuted}
+                    color={theme.colors.userBubbleSecondaryText}
                   />
                   <Text style={styles.userFileChipText} numberOfLines={1}>
                     {block.value}

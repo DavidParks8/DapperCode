@@ -56,4 +56,15 @@ export const routes = {
       params: { profileId, chatId, mode },
     };
   },
+  /**
+   * Settings-owned connection modal for adding/editing a bridge profile. Unlike `connection`,
+   * this is not nested under a chat, so dismissing it (back/cancel) always lands back on
+   * Settings rather than whatever chat happened to be selected when it was opened.
+   */
+  settingsConnection(profileId: string, mode: Extract<ConnectionMode, 'add' | 'edit'>): Href {
+    return {
+      pathname: '/profiles/[profileId]/settings/connection',
+      params: { profileId, mode },
+    };
+  },
 };

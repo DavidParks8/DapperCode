@@ -8,6 +8,7 @@ import { decorativeAccessibilityProps } from '../accessibility';
 import type { AppTheme } from '../theme';
 import { WorkspacePickerBrowser } from './WorkspacePickerBrowser';
 import { WorkspacePickerFooter } from './WorkspacePickerFooter';
+import { computeHitSlop } from './touchTarget';
 import type { WorkspacePickerStyles } from './workspacePickerStyles';
 import { WorkspacePickerTopSection } from './WorkspacePickerTopSection';
 
@@ -51,6 +52,7 @@ export function WorkspacePickerView(props: WorkspacePickerViewProps) {
       <View style={props.styles.header}>
         <Pressable
           onPress={props.onClose}
+          hitSlop={computeHitSlop({ width: 36, height: 36 })}
           style={({ pressed }) => [props.styles.closeButton, pressed && props.styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel="Back"

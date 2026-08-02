@@ -17,6 +17,9 @@ jest.mock('expo-router', () => {
 jest.mock('react-native-gesture-handler', () =>
   jest.requireActual('../testing/gestureHandlerMock'),
 );
+// OnboardingScreen renders an Animated.View for its connect step, which needs the worklet-free
+// double below since Jest has no native reanimated runtime.
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
 jest.mock('react-native-safe-area-context', () => {
   const React = jest.requireActual('react');
   return {

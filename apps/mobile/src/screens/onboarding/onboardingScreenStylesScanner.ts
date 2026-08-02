@@ -74,8 +74,8 @@ export const createOnboardingScannerStyles = (theme: AppTheme, tokens: Onboardin
       color: theme.colors.textMuted,
     },
     scannerCancelButton: {
-      minHeight: 44,
-      borderRadius: 12,
+      minHeight: 48,
+      borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
       backgroundColor: theme.colors.bgItem,

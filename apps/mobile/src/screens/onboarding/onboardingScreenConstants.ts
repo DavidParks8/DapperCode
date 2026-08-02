@@ -3,5 +3,8 @@ export const BRIDGE_SETUP_INSTRUCTION =
 export const BRIDGE_SETUP_URL =
   'https://github.com/DavidParks8/DapperCode/blob/main/docs/setup-and-operations.md';
 
-export const SETUP_STAGES = [{ title: 'Start' }, { title: 'Pair' }, { title: 'Verify' }] as const;
+// Stage 3 reads "Save" to match the form section eyebrow and primary button label below it;
+// it previously said "Verify" even though the step dock only reaches stage 3 once verification
+// has already succeeded, which read as a mismatched, confusing label.
+export const SETUP_STAGES = [{ title: 'Start' }, { title: 'Pair' }, { title: 'Save' }] as const;
 export const CONNECTION_CHECK_TIMEOUT_MS = 7_000;

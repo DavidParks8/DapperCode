@@ -19,6 +19,7 @@ export function DrawerChatList() {
     collapsedLaneKeys,
     handleDeleteChat,
     handleSelectChat,
+    isSearching,
     loading,
     loadingOlderChats,
     noticeMessages,
@@ -27,6 +28,7 @@ export function DrawerChatList() {
     resolvedEmptyHint,
     resolvedEmptyTitle,
     retryDeepChatListRef,
+    searchQuery,
     selectedChatId,
     styles,
     theme,
@@ -77,6 +79,11 @@ export function DrawerChatList() {
   }
 
   if (visibleAttentionSections.length === 0) {
+    const trimmedQuery = searchQuery.trim();
+    const emptyTitle = isSearching ? `No sessions match “${trimmedQuery}”` : resolvedEmptyTitle;
+    const emptyHint = isSearching
+      ? 'Try a different title, workspace, agent, or status.'
+      : resolvedEmptyHint;
     return (
       <ScrollView
         contentContainerStyle={styles.emptyListContent}
@@ -92,15 +99,22 @@ export function DrawerChatList() {
         style={styles.list}
       >
         {notice}
-        <View accessibilityLiveRegion="polite" style={styles.emptyState}>
+        {/* Live region announces the genuinely-empty-drawer state; while searching, the
+            debounced useAccessibilityAnnouncement channel in DrawerContent.tsx already
+            announces "No sessions match", so this stays a silent visual update to avoid a
+            duplicate announcement. */}
+        <View
+          accessibilityLiveRegion={isSearching ? 'none' : 'polite'}
+          style={styles.emptyState}
+        >
           <Ionicons
             {...decorativeAccessibilityProps}
-            name="chatbubbles-outline"
+            name={isSearching ? 'search-outline' : 'chatbubbles-outline'}
             size={21}
             color={theme.colors.textMuted}
           />
-          <Text style={styles.emptyTitle}>{resolvedEmptyTitle}</Text>
-          <Text style={styles.emptyHint}>{resolvedEmptyHint}</Text>
+          <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+          <Text style={styles.emptyHint}>{emptyHint}</Text>
         </View>
       </ScrollView>
     );
@@ -137,7 +151,11 @@ export function DrawerChatList() {
         ) : null
       }
       renderSectionHeader={({ section }) => {
-        const collapsed = collapsedLaneKeys.has(section.key);
+        // While searching, matches render regardless of the lane's collapsed state (see
+        // DrawerContent.tsx's visibleAttentionSections), so the header must reflect "expanded"
+        // too — otherwise the chevron/accessibilityState would claim collapsed while rows are
+        // visibly rendered underneath it.
+        const collapsed = !isSearching && collapsedLaneKeys.has(section.key);
         return (
           <Pressable
             accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}

@@ -27,10 +27,7 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     },
     pressed: { opacity: 0.86 },
     title: {
-      ...theme.typography.headline,
-      fontSize: 18,
-      fontWeight: '700',
-      color: theme.colors.textPrimary,
+      ...theme.typography.title,
       textAlign: 'center',
     },
     body: {
@@ -43,7 +40,7 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     input: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.md,
       borderWidth: 1,
       borderColor: theme.colors.borderLight,
@@ -65,9 +62,8 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     },
     pathCopy: { flex: 1, minWidth: 0, gap: 2 },
     pathLabel: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 11,
       textTransform: 'uppercase',
       letterSpacing: 0,
     },
@@ -83,6 +79,22 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     errorText: {
       ...theme.typography.caption,
       color: theme.colors.error,
+      backgroundColor: theme.colors.errorBg,
+      borderWidth: 1,
+      borderColor: theme.colors.errorBorder,
+      borderRadius: theme.radius.sm,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+    },
+    cloningRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingVertical: theme.spacing.sm,
+    },
+    cloningText: {
+      ...theme.typography.body,
+      color: theme.colors.textSecondary,
     },
     actions: {
       flexDirection: 'row',
@@ -96,7 +108,7 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     },
     button: {
       minWidth: 110,
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.md,
       alignItems: 'center',
       justifyContent: 'center',

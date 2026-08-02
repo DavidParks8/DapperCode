@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCameraPermissions } from 'expo-camera';
 
 import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from '../../bridgeUrl';
 import { useAccessibilityAnnouncement } from '../../accessibility';
+import { feedback } from '../../feedback';
 import {
   useOnboardingIntroAnimations,
   type OnboardingHeroAnimatedStyle,
@@ -87,12 +88,33 @@ export function useOnboardingScreenController(
     setOnboardingStep(mode === 'initial' ? 'intro' : 'connect');
   }, [mode]);
 
+  // Bumped on every credential-changing action (typed edit, pairing payload, or a prop-driven
+  // reset). `runConnectionCheck` captures this at request start and re-checks it before applying
+  // its result, so a probe that resolves after the credentials it was testing have since changed
+  // never overwrites the current state with a stale/mismatched outcome.
+  const inputGenerationRef = useRef(0);
+  const bumpInputGeneration = () => {
+    inputGenerationRef.current += 1;
+  };
+
+  // Tracks which probe is the most recently *started* one, independent of input generation. An
+  // edit alone bumps inputGenerationRef but does not start a new probe, so the in-flight probe
+  // remains the active one and must still be allowed to clear `checkingConnection` when it
+  // settles — otherwise editing mid-probe would leave Test/Continue disabled+busy forever. A new
+  // probe (pressing Test/Continue again) bumps this ref too, so only the latest probe's `finally`
+  // clears busy state; an older, still-resolving probe's `finally` is a no-op once superseded.
+  const activeProbeIdRef = useRef(0);
+
   useEffect(() => {
     setUrlInputState(initialBridgeUrl ?? '');
+    setConnectionCheck({ kind: 'idle' });
+    bumpInputGeneration();
   }, [initialBridgeUrl]);
 
   useEffect(() => {
     setTokenInputState(initialBridgeToken ?? '');
+    setConnectionCheck({ kind: 'idle' });
+    bumpInputGeneration();
   }, [initialBridgeToken]);
 
   const showIntroStep = mode === 'initial' && onboardingStep === 'intro';
@@ -153,6 +175,8 @@ export function useOnboardingScreenController(
 
   const runConnectionCheck = useCallback(
     async (normalized: string, token: string | null): Promise<boolean> => {
+      const generation = inputGenerationRef.current;
+      const probeId = ++activeProbeIdRef.current;
       setCheckingConnection(true);
       setConnectionCheck({ kind: 'idle' });
 
@@ -165,22 +189,39 @@ export function useOnboardingScreenController(
         if (!result.ok) {
           throw new Error('probe failed');
         }
+        if (inputGenerationRef.current !== generation) {
+          // The URL/token have changed since this probe started; discard the stale result
+          // instead of showing a success message for credentials the user has since edited.
+          return false;
+        }
 
         setConnectionCheck({
           kind: 'success',
           message: result.healthCheckError
             ? 'Connected. Authenticated RPC verified; /health endpoint did not return 200.'
             : 'Connected. URL and token both verified.',
+          verifiedUrl: normalized,
+          verifiedToken: token,
         });
+        void feedback.success();
         return true;
       } catch {
+        if (inputGenerationRef.current !== generation) {
+          return false;
+        }
         setConnectionCheck({
           kind: 'error',
           message: 'Connection error. Check the URL and token, then try again.',
         });
+        void feedback.error();
         return false;
       } finally {
-        setCheckingConnection(false);
+        // Busy/disabled state is owned by probe identity, not input generation: an edit alone
+        // (no new probe started) must not block this probe from clearing `checkingConnection`
+        // when it settles. Only skip clearing it if a newer probe has since superseded this one.
+        if (activeProbeIdRef.current === probeId) {
+          setCheckingConnection(false);
+        }
       }
     },
     [allowQueryTokenAuth],
@@ -189,11 +230,20 @@ export function useOnboardingScreenController(
   const handleSave = useCallback(async () => {
     const validated = validateInput();
     if (!validated) {
+      void feedback.warning();
       return;
     }
 
     const normalizedToken = normalizeTokenInput(validated.bridgeToken);
-    const ok = await runConnectionCheck(validated.bridgeUrl, normalizedToken);
+    // A prior "Test Connection" is only reused when it verified these exact, current url/token
+    // values. Any edit — including one that raced with an in-flight probe — either resets
+    // connectionCheck to idle synchronously or is caught by runConnectionCheck's generation
+    // guard, so a lingering `success` here is guaranteed to match validated.bridgeUrl/token.
+    const alreadyVerified =
+      connectionCheck.kind === 'success' &&
+      connectionCheck.verifiedUrl === validated.bridgeUrl &&
+      connectionCheck.verifiedToken === normalizedToken;
+    const ok = alreadyVerified ? true : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
     if (!ok) {
       return;
     }
@@ -205,13 +255,15 @@ export function useOnboardingScreenController(
         kind: 'error',
         message: (error as Error).message || 'Saving the connection failed.',
       });
+      void feedback.error();
     }
-  }, [normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
+  }, [connectionCheck, normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
 
   const handleConnectionCheck = useCallback(async () => {
     const validated = validateInput();
     if (!validated) {
       setConnectionCheck({ kind: 'idle' });
+      void feedback.warning();
       return;
     }
 
@@ -220,16 +272,19 @@ export function useOnboardingScreenController(
   }, [normalizeTokenInput, runConnectionCheck, validateInput]);
 
   const goToConnectStep = useCallback(() => {
+    void feedback.selection();
     setOnboardingStep('connect');
   }, []);
 
   const goBackToIntro = useCallback(() => {
+    void feedback.selection();
     setOnboardingStep('intro');
     setFormError(null);
     setConnectionCheck({ kind: 'idle' });
   }, []);
 
   const closeScanner = useCallback(() => {
+    void feedback.selection();
     setScannerVisible(false);
     setScannerLocked(false);
     setScannerError(null);
@@ -244,10 +299,12 @@ export function useOnboardingScreenController(
       const result = await requestCameraPermission();
       if (!result.granted) {
         setFormError('Camera permission is required to scan the pairing QR.');
+        void feedback.error();
         return;
       }
     }
 
+    void feedback.selection();
     setScannerLocked(false);
     setScannerVisible(true);
   }, [cameraPermission?.granted, requestCameraPermission]);
@@ -263,6 +320,7 @@ export function useOnboardingScreenController(
       setScannerError(null);
       setScannerLocked(false);
       setScannerVisible(false);
+      bumpInputGeneration();
     },
     [],
   );
@@ -277,12 +335,14 @@ export function useOnboardingScreenController(
       const pairing = parsePairingPayload(data);
       if (!pairing) {
         setScannerError('QR code is not a valid DapperCode bridge pairing code.');
+        void feedback.warning();
         setTimeout(() => {
           setScannerLocked(false);
         }, 1200);
         return;
       }
 
+      void feedback.success();
       applyPairingPayload(pairing);
     },
     [applyPairingPayload, scannerLocked],
@@ -320,12 +380,17 @@ export function useOnboardingScreenController(
       setUrlInputState(value);
       setFormError(null);
       setConnectionCheck({ kind: 'idle' });
+      bumpInputGeneration();
     },
     setTokenInput: (value: string) => {
       setTokenInputState(value);
       setConnectionCheck({ kind: 'idle' });
+      bumpInputGeneration();
     },
-    setTokenHidden,
+    setTokenHidden: (updater: (previous: boolean) => boolean) => {
+      void feedback.selection();
+      setTokenHidden(updater);
+    },
     handleSave,
     handleConnectionCheck,
     goToConnectStep,

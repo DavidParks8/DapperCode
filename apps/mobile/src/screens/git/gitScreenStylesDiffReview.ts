@@ -65,8 +65,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       ...theme.typography.body,
       color: theme.colors.textPrimary,
       flexShrink: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
     diffTabStats: {
       flexDirection: 'row',
@@ -76,8 +74,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
     diffTabCommentCount: {
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
-      fontSize: 10,
-      lineHeight: 13,
     },
     diffFileHeader: {
       flexDirection: 'row',
@@ -94,8 +90,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.textSecondary,
       flex: 1,
       flexShrink: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
     diffFileStatus: {
       ...theme.typography.caption,
@@ -167,22 +161,20 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       backgroundColor: theme.colors.bgCanvasAccent,
     },
     diffLineNumber: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       width: 44,
       textAlign: 'right',
       color: theme.colors.textMuted,
       paddingHorizontal: theme.spacing.xs,
       paddingVertical: 3,
-      fontSize: 11,
-      lineHeight: 17,
     },
     diffLinePrefix: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       width: 16,
       color: theme.colors.textMuted,
       paddingVertical: 3,
-      fontSize: 11,
-      lineHeight: 17,
     },
     diffLinePrefixAdd: {
       color: theme.colors.statusComplete,
@@ -198,15 +190,13 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.textPrimary,
       paddingRight: theme.spacing.md,
       paddingVertical: 3,
-      fontSize: 12,
-      lineHeight: 17,
     },
     inlineReviewComment: {
       marginLeft: 28,
       marginRight: theme.spacing.md,
       marginVertical: theme.spacing.xs,
       padding: theme.spacing.sm,
-      minWidth: 320,
+      minWidth: 0,
       borderRadius: theme.radius.sm,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderHighlight,
@@ -223,7 +213,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
       fontWeight: '700',
-      fontSize: 10,
       textTransform: 'uppercase',
     },
     inlineReviewCommentActions: {
@@ -243,8 +232,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
     inlineReviewCommentText: {
       ...theme.typography.body,
       color: theme.colors.textPrimary,
-      fontSize: 13,
-      lineHeight: 18,
     },
     reviewTray: {
       borderRadius: theme.radius.md,
@@ -263,7 +250,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
     reviewTrayTitle: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 16,
     },
     reviewTraySubtitle: {
       ...theme.typography.caption,
@@ -295,7 +281,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.textPrimary,
     },
     submitReviewButton: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.sm,
       backgroundColor: theme.colors.accent,
       flexDirection: 'row',
@@ -325,7 +311,6 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
       fontWeight: '700',
-      fontSize: 10,
     },
     reviewModalTitle: {
       ...theme.typography.body,
@@ -349,7 +334,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
     },
     reviewModalCancel: {
-      minHeight: 42,
+      minHeight: theme.touchTarget.minimum,
       justifyContent: 'center',
       paddingHorizontal: theme.spacing.md,
     },
@@ -359,7 +344,7 @@ export function createGitScreenDiffReviewStyles(theme: AppTheme) {
       fontWeight: '600',
     },
     reviewModalSave: {
-      minHeight: 42,
+      minHeight: theme.touchTarget.minimum,
       justifyContent: 'center',
       borderRadius: theme.radius.sm,
       backgroundColor: theme.colors.accent,

@@ -6,7 +6,7 @@ import {
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -86,8 +86,25 @@ export function AppSheet({
   useEffect(() => {
     if (visible) {
       if (!presentedRef.current) {
-        presentedRef.current = true;
-        sheetRef.current?.present();
+        const present = () => {
+          if (!visibleRef.current || presentedRef.current) {
+            return;
+          }
+          presentedRef.current = true;
+          sheetRef.current?.present();
+        };
+
+        if (Keyboard.isVisible()) {
+          const keyboardHideSubscription = Keyboard.addListener('keyboardDidHide', present);
+          Keyboard.dismiss();
+          return () => keyboardHideSubscription.remove();
+        }
+
+        // Also clear text focus when a hardware keyboard is attached or the software keyboard has
+        // already finished hiding. This keeps every sheet transition at the same interaction
+        // boundary without delaying presentation when no keyboard occupies the viewport.
+        Keyboard.dismiss();
+        present();
       }
       return;
     }

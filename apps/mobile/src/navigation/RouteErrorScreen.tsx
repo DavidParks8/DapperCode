@@ -19,8 +19,13 @@ export function RouteErrorScreen({
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.bgMain }]} accessibilityRole="alert">
-      <Text style={[styles.title, { color: theme.colors.textPrimary }]}>{title}</Text>
-      <Text selectable style={[styles.message, { color: theme.colors.textSecondary }]}>
+      <Text style={[styles.title, theme.typography.title, { color: theme.colors.textPrimary }]}>
+        {title}
+      </Text>
+      <Text
+        selectable
+        style={[styles.message, theme.typography.body, { color: theme.colors.textSecondary }]}
+      >
         {message}
       </Text>
       <Pressable
@@ -32,7 +37,15 @@ export function RouteErrorScreen({
           pressed && styles.actionPressed,
         ]}
       >
-        <Text style={[styles.actionLabel, { color: theme.colors.bgMain }]}>{actionLabel}</Text>
+        <Text
+          style={[
+            styles.actionLabel,
+            theme.typography.headline,
+            { color: theme.colors.bgMain, fontWeight: '700' },
+          ]}
+        >
+          {actionLabel}
+        </Text>
       </Pressable>
     </View>
   );
@@ -47,14 +60,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
     textAlign: 'center',
   },
   message: {
     maxWidth: 520,
-    fontSize: 15,
-    lineHeight: 22,
     textAlign: 'center',
   },
   action: {
@@ -69,8 +78,5 @@ const styles = StyleSheet.create({
   actionPressed: {
     opacity: 0.8,
   },
-  actionLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  actionLabel: {},
 });

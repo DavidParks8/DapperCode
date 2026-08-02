@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -11,10 +12,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, { Easing, FadeIn, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { HostBridgeWsClient } from '../../api/ws';
+import { useAccessibilityAnnouncement } from '../../accessibility';
+import { motionDuration, motionEasing } from '../../components/motion';
+import { computeHitSlop } from '../../components/touchTarget';
+import { feedback } from '../../feedback';
 import { useAppTheme, type AppTheme } from '../../theme';
 
 interface TerminalScreenProps {
@@ -31,9 +37,12 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useAccessibilityAnnouncement(running ? 'Running command' : null);
+
   const executeCommand = useCallback(async () => {
     try {
       setRunning(true);
+      setError(null);
       const result = await api.execTerminal({ command });
       const lines = [
         `$ ${result.command}`,
@@ -45,8 +54,10 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
         .join('\n\n');
       setOutput(lines);
       setError(null);
+      void feedback.success();
     } catch (err) {
       setError((err as Error).message);
+      void feedback.error();
     } finally {
       setRunning(false);
     }
@@ -55,6 +66,9 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   const runCommand = useCallback(() => {
     const trimmed = command.trim();
     if (!trimmed || running) {
+      // No real cancel/abort API exists for an in-flight bridge exec request, so while one is
+      // running the control must stay truthfully disabled rather than allow a second
+      // concurrent request or claim a cancellation that never happens.
       return;
     }
 
@@ -66,12 +80,15 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
       {
         text: 'Run',
         onPress: () => {
+          void feedback.selection();
           void executeCommand();
         },
       },
     ]);
   }, [command, executeCommand, running]);
-  const runDisabled = running || !command.trim();
+
+  const runDisabled = !command.trim();
+  const runBlocked = running || runDisabled;
 
   useEffect(() => {
     return ws.onEvent((event) => {
@@ -118,6 +135,21 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
           </ScrollView>
         </View>
 
+        {running ? (
+          <Animated.View
+            entering={FadeIn.duration(motionDuration.routine).easing(
+              Easing.bezier(...motionEasing.standard),
+            )}
+            exiting={FadeOut.duration(motionDuration.immediate)}
+            style={styles.runningIndicator}
+            accessibilityRole="progressbar"
+            accessibilityLabel="Command running"
+            accessibilityLiveRegion="polite"
+          >
+            <Text style={styles.runningText}>Running…</Text>
+          </Animated.View>
+        ) : null}
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.inputRow}>
@@ -136,18 +168,26 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
           />
           <Pressable
             onPress={runCommand}
-            disabled={runDisabled}
+            disabled={runBlocked}
+            hitSlop={computeHitSlop({ width: 30, height: 30 })}
+            accessibilityRole="button"
+            accessibilityLabel={running ? 'Running command' : 'Run command'}
+            accessibilityState={{ disabled: runBlocked, busy: running }}
             style={({ pressed }) => [
               styles.runBtn,
-              pressed && !runDisabled && styles.runBtnPressed,
-              runDisabled && styles.runBtnDisabled,
+              pressed && !runBlocked && styles.runBtnPressed,
+              runBlocked && styles.runBtnDisabled,
             ]}
           >
-            <Ionicons
-              name={running ? 'pause' : 'play'}
-              size={14}
-              color={runDisabled ? theme.colors.textMuted : theme.colors.accentText}
-            />
+            {running ? (
+              <ActivityIndicator size="small" color={theme.colors.accentText} />
+            ) : (
+              <Ionicons
+                name="play"
+                size={14}
+                color={runDisabled ? theme.colors.textMuted : theme.colors.accentText}
+              />
+            )}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -155,7 +195,7 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
   );
 }
 
-const createStyles = (theme: AppTheme) =>
+export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.isDark ? '#000000' : theme.colors.bgMain },
     header: {
@@ -201,7 +241,7 @@ const createStyles = (theme: AppTheme) =>
     trafficLight: {
       width: 12,
       height: 12,
-      borderRadius: 6,
+      borderRadius: theme.radius.full,
     },
     windowTitle: {
       ...theme.typography.caption,
@@ -213,8 +253,16 @@ const createStyles = (theme: AppTheme) =>
     outputText: {
       ...theme.typography.mono,
       color: theme.colors.textPrimary,
-      fontSize: 13,
+      // Slightly taller than the base mono line height for legible scrollback density.
       lineHeight: 20,
+    },
+    runningIndicator: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.xs,
+    },
+    runningText: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
     },
     errorText: {
       ...theme.typography.caption,
@@ -244,7 +292,7 @@ const createStyles = (theme: AppTheme) =>
     runBtn: {
       width: 30,
       height: 30,
-      borderRadius: 15,
+      borderRadius: theme.radius.full,
       backgroundColor: theme.colors.accent,
       alignItems: 'center',
       justifyContent: 'center',

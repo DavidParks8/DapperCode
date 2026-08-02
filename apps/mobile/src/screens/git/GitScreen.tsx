@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, Text } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Chat } from '../../api/types';
@@ -79,11 +80,13 @@ export function GitScreen({ chat }: GitScreenProps) {
             style={styles.loader}
           />
         ) : (
-          <>
+          <Animated.View
+            entering={FadeIn.duration(200)}
+          >
             <GitScreenBranchSummarySection controller={controller} styles={styles} theme={theme} />
             <GitScreenCommitHistorySection controller={controller} styles={styles} theme={theme} />
             <GitScreenDiffSection controller={controller} styles={styles} theme={theme} />
-          </>
+          </Animated.View>
         )}
 
         {controller.error ? (

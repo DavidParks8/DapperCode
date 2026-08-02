@@ -31,7 +31,6 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
     },
     formSectionTitle: {
       ...theme.typography.headline,
-      fontSize: 15,
       lineHeight: 21,
     },
     commandPanel: {
@@ -40,7 +39,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
     },
     commandCard: {
       gap: theme.spacing.xs,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
       backgroundColor: tokens.glassSubtleBackground,
@@ -110,7 +109,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       color: theme.colors.accentText,
     },
     commandCodeWrap: {
-      borderRadius: 12,
+      borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.bgInput,
@@ -119,9 +118,6 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
     },
     commandCodeText: {
       ...theme.typography.mono,
-      color: theme.colors.textPrimary,
-      fontSize: 12,
-      lineHeight: 18,
     },
     fieldGroup: {
       gap: theme.spacing.sm,
@@ -139,7 +135,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       alignItems: 'center',
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       backgroundColor: tokens.glassSubtleBackground,
       minHeight: 54,
       paddingHorizontal: theme.spacing.md,
@@ -167,7 +163,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       minWidth: 74,
       minHeight: 54,
       flexShrink: 0,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.bgInput,
@@ -186,7 +182,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       fontWeight: '600',
     },
     scanButton: {
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.bgInput,
@@ -209,7 +205,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: theme.spacing.sm,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       borderWidth: StyleSheet.hairlineWidth,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm,
@@ -256,7 +252,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.bgInput,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       minHeight: 54,
     },
     secondaryButtonPressed: {
@@ -277,7 +273,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.accent,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       minHeight: 54,
     },
     connectFooterButton: {
@@ -302,7 +298,7 @@ export const createOnboardingFormStyles = (theme: AppTheme, tokens: OnboardingSt
     primaryButtonIconWrap: {
       width: 46,
       height: 46,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.isDark ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.38)',

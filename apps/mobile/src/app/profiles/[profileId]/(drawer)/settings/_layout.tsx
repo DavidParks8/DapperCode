@@ -9,5 +9,10 @@ export const unstable_settings = {
 
 export default function SettingsLayout() {
   const theme = useAppTheme();
-  return <Stack screenOptions={createStackScreenOptions(theme)} />;
+  return (
+    <Stack screenOptions={createStackScreenOptions(theme)}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="connection" options={{ presentation: 'modal', gestureEnabled: true }} />
+    </Stack>
+  );
 }

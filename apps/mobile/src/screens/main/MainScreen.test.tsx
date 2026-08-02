@@ -51,32 +51,7 @@ import { routes } from '../../navigation/routes';
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
-jest.mock('react-native-reanimated', () => {
-  const View = jest.requireActual('react-native').View;
-  const transition = { duration: () => transition, easing: () => transition };
-  return {
-    __esModule: true,
-    default: { View },
-    FadeIn: transition,
-    FadeInDown: transition,
-    FadeInUp: transition,
-    cancelAnimation: jest.fn(),
-    Easing: {
-      bezier: () => 'bezier',
-      out: (value: unknown) => value,
-      cubic: 'cubic',
-    },
-    interpolateColor: (_value: number, _input: number[], output: string[]) => output.at(-1),
-    LinearTransition: transition,
-    runOnJS: (callback: (...args: unknown[]) => unknown) => callback,
-    useAnimatedStyle: (factory: () => unknown) => factory(),
-    useReducedMotion: () => false,
-    useSharedValue: (value: unknown) => ({ value }),
-    withRepeat: (value: unknown) => value,
-    withSequence: (...values: unknown[]) => values.at(-1),
-    withTiming: (value: unknown) => value,
-  };
-});
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///documents/',
   readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),

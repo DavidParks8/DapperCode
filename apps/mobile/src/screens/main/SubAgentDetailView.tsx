@@ -376,74 +376,74 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
           importantForAccessibility={showHydrationShimmer ? 'no-hide-descendants' : 'auto'}
         >
           {isStarting ? (
-          <View
-            style={styles.loadingShell}
-            accessibilityRole="progressbar"
-            accessibilityLabel="Sub-agent starting"
-          >
-            <ActivityIndicator color={theme.colors.warning} />
-            <Text style={styles.loadingText}>Starting…</Text>
-            <Text
-              style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
-              accessibilityElementsHidden={detail.loading}
-              importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
+            <View
+              style={styles.loadingShell}
+              accessibilityRole="progressbar"
+              accessibilityLabel="Sub-agent starting"
             >
-              This agent has not reported anything yet. Its work will stream in here.
-            </Text>
-          </View>
+              <ActivityIndicator color={theme.colors.warning} />
+              <Text style={styles.loadingText}>Starting…</Text>
+              <Text
+                style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
+                accessibilityElementsHidden={detail.loading}
+                importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
+              >
+                This agent has not reported anything yet. Its work will stream in here.
+              </Text>
+            </View>
           ) : isEmpty ? (
-          <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="document-text-outline"
-              size={20}
-              color={theme.colors.textMuted}
-            />
-            <Text style={styles.loadingText}>No transcript</Text>
-            <Text
-              style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
-              accessibilityElementsHidden={detail.loading}
-              importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
-            >
-              This agent reported back through its parent instead of streaming its own session.
-            </Text>
-          </View>
+            <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="document-text-outline"
+                size={20}
+                color={theme.colors.textMuted}
+              />
+              <Text style={styles.loadingText}>No transcript</Text>
+              <Text
+                style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
+                accessibilityElementsHidden={detail.loading}
+                importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
+              >
+                This agent reported back through its parent instead of streaming its own session.
+              </Text>
+            </View>
           ) : chat && projectedMessageCount > 0 ? (
-          <ChatTranscriptView
-            scrollRailEnabled={false}
-            chat={chat}
-            parentChat={detail.parentChat}
-            bridgeUrl={bridgeUrl}
-            bridgeToken={bridgeToken}
-            onOpenLocalPreview={openBrowser}
-            showToolCalls={showToolCalls}
-            onOpenSubAgentThread={openSubAgentThread}
-            agentThreadStatusById={agentThreadStatusById}
-            scrollRef={scrollRef}
-            inlineChoicesEnabled={false}
-            onInlineOptionSelect={() => {}}
-            onPinnedAutoScroll={() => {
-              if (autoScrollStateRef.current.shouldStickToBottom) {
-                scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
-              }
-            }}
-            onJumpToLatest={() => {
-              scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
-            }}
-            onScrollInteractionStart={() => {}}
-            autoScrollStateRef={autoScrollStateRef}
-            bottomInset={0}
-            liveMessageState={liveMessageState}
-          />
+            <ChatTranscriptView
+              scrollRailEnabled={false}
+              chat={chat}
+              parentChat={detail.parentChat}
+              bridgeUrl={bridgeUrl}
+              bridgeToken={bridgeToken}
+              onOpenLocalPreview={openBrowser}
+              showToolCalls={showToolCalls}
+              onOpenSubAgentThread={openSubAgentThread}
+              agentThreadStatusById={agentThreadStatusById}
+              scrollRef={scrollRef}
+              inlineChoicesEnabled={false}
+              onInlineOptionSelect={() => {}}
+              onPinnedAutoScroll={() => {
+                if (autoScrollStateRef.current.shouldStickToBottom) {
+                  scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
+                }
+              }}
+              onJumpToLatest={() => {
+                scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
+              }}
+              onScrollInteractionStart={() => {}}
+              autoScrollStateRef={autoScrollStateRef}
+              bottomInset={0}
+              liveMessageState={liveMessageState}
+            />
           ) : !isHydratingTranscript ? (
-          <View
-            style={styles.loadingShell}
-            accessibilityRole="progressbar"
-            accessibilityLabel="Loading agent transcript"
-          >
-            <ActivityIndicator color={theme.colors.textMuted} />
-            <Text style={styles.loadingText}>Loading agent transcript…</Text>
-          </View>
+            <View
+              style={styles.loadingShell}
+              accessibilityRole="progressbar"
+              accessibilityLabel="Loading agent transcript"
+            >
+              <ActivityIndicator color={theme.colors.textMuted} />
+              <Text style={styles.loadingText}>Loading agent transcript…</Text>
+            </View>
           ) : null}
         </View>
         {showHydrationShimmer ? <SubAgentTranscriptShimmer /> : null}
@@ -479,17 +479,14 @@ const createStyles = (theme: AppTheme) =>
       minWidth: 0,
     },
     eyebrow: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
     },
     title: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 17,
     },
     statusBar: {
       flexDirection: 'row',

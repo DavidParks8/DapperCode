@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { ApprovalMode, Chat } from '../../api/types';
+import { feedback } from '../../feedback';
 import { toApprovalPolicyForMode } from '../main/mainScreenHelpers';
 import {
   buildGitReviewPrompt,
@@ -196,6 +197,7 @@ export function useGitScreenReviewController({
         ? current.map((entry) => (entry.anchorKey === reviewTarget.anchorKey ? next : entry))
         : [...current, next];
     });
+    void feedback.selection();
     closeReviewComment();
   }, [closeReviewComment, reviewCommentDraft, reviewTarget]);
 
@@ -220,6 +222,7 @@ export function useGitScreenReviewController({
         onChatUpdated?.(result.chat);
       }
       setReviewComments([]);
+      void feedback.success();
       setError(null);
       onBack();
     } catch (err) {

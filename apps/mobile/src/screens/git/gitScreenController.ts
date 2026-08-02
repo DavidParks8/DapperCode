@@ -10,6 +10,7 @@ import type {
   GitHistoryCommit,
   GitStatusResponse,
 } from '../../api/types';
+import { feedback } from '../../feedback';
 import { useGitScreenDerived } from './gitScreenDerived';
 import { useGitScreenReviewController } from './gitScreenReviewController';
 
@@ -116,6 +117,10 @@ export function useGitScreenController({
         requestId === refreshRequestIdRef.current &&
         requestCwd === requestedCwdRef.current
       ) {
+        // Mark the initial load attempt as settled even on failure so a subsequent poll or
+        // manual retry is treated as a lightweight background refresh instead of re-triggering
+        // the full-screen "loading" spinner indefinitely.
+        hasLoadedRef.current = true;
         setError((err as Error).message);
       }
     } finally {
@@ -231,12 +236,15 @@ export function useGitScreenController({
         cwd: requestedCwd,
       });
       if (!result.committed) {
+        void feedback.error();
         setError(result.stderr || 'Commit failed.');
       } else {
+        void feedback.success();
         setError(null);
       }
       await refresh();
     } catch (err) {
+      void feedback.error();
       setError((err as Error).message);
     } finally {
       setCommitting(false);
@@ -248,12 +256,15 @@ export function useGitScreenController({
       setPushing(true);
       const result = await api.gitPush(requestedCwd);
       if (!result.pushed) {
+        void feedback.error();
         setError(result.stderr || 'Push failed.');
       } else {
+        void feedback.success();
         setError(null);
       }
       await refresh();
     } catch (err) {
+      void feedback.error();
       setError((err as Error).message);
     } finally {
       setPushing(false);
@@ -288,6 +299,7 @@ export function useGitScreenController({
 
       try {
         setSwitchingBranch(true);
+        void feedback.selection();
         const result = await api.gitSwitch({
           branch,
           cwd: requestedCwd,
@@ -317,6 +329,7 @@ export function useGitScreenController({
 
       try {
         setStagingPath(path);
+        void feedback.selection();
         const result = await api.gitStage({
           path,
           cwd: requestedCwd,
@@ -344,6 +357,7 @@ export function useGitScreenController({
 
       try {
         setUnstagingPath(path);
+        void feedback.selection();
         const result = await api.gitUnstage({
           path,
           cwd: requestedCwd,
@@ -366,6 +380,7 @@ export function useGitScreenController({
   const stageAll = useCallback(async () => {
     try {
       setStagingAll(true);
+      void feedback.selection();
       const result = await api.gitStageAll(requestedCwd);
       if (!result.staged) {
         setError(result.stderr || 'Failed to stage all files.');
@@ -383,6 +398,7 @@ export function useGitScreenController({
   const unstageAll = useCallback(async () => {
     try {
       setUnstagingAll(true);
+      void feedback.selection();
       const result = await api.gitUnstageAll(requestedCwd);
       if (!result.unstaged) {
         setError(result.stderr || 'Failed to unstage all files.');

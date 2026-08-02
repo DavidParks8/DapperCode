@@ -1,9 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import Markdown from 'react-native-markdown-display';
 
-import type { BridgeUiAction, BridgeUiBlock, BridgeUiSurface } from '../api/types';
+import type { BridgeUiAction, BridgeUiBlock, BridgeUiProgressBlock, BridgeUiSurface } from '../api/types';
 import {
   formatNumber,
   getChecklistGlyph,
@@ -14,6 +24,9 @@ import {
 import { AppSheet } from './AppSheet';
 import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 import { useAppTheme } from '../theme';
+import { motionDuration, motionEasing } from './motion';
+import { computeHitSlop } from './touchTarget';
+import { feedback } from '../feedback';
 import { createWorkflowMarkdownStyles } from '../screens/main/mainScreenStyles';
 import {
   controlAccessibilityState,
@@ -39,16 +52,30 @@ export function BridgeUiWorkflowCard({
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
   const [collapsed, setCollapsed] = useState(false);
 
+  const handleToggleCollapse = useCallback(() => {
+    setCollapsed((value) => !value);
+  }, []);
+
   return (
-    <View style={[styles.surfaceCard, styles.workflowCard]}>
+    <Animated.View
+      style={[styles.surfaceCard, styles.workflowCard]}
+      layout={LinearTransition.duration(motionDuration.layout).easing(
+        Easing.bezier(...motionEasing.standard),
+      )}
+    >
       <SurfaceHeader
         surface={surface}
         onDismiss={onDismiss}
         collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((value) => !value)}
+        onToggleCollapse={handleToggleCollapse}
       />
       {collapsed ? null : (
-        <>
+        <Animated.View
+          entering={FadeIn.duration(motionDuration.routine).easing(
+            Easing.bezier(...motionEasing.standard),
+          )}
+          exiting={FadeOut.duration(motionDuration.immediate)}
+        >
           <ScrollView
             nestedScrollEnabled
             bounces={false}
@@ -59,9 +86,9 @@ export function BridgeUiWorkflowCard({
             <SurfaceContent surface={surface} />
           </ScrollView>
           <SurfaceActions surface={surface} onAction={onAction} />
-        </>
+        </Animated.View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -158,7 +185,10 @@ function SurfaceHeader({
   if (collapsible) {
     return (
       <Pressable
-        onPress={onToggleCollapse}
+        onPress={() => {
+          void feedback.selection();
+          onToggleCollapse();
+        }}
         style={({ pressed }) => [
           styles.header,
           styles.headerPressable,
@@ -187,7 +217,7 @@ function SurfaceHeader({
       {surface.dismissible === false ? null : (
         <Pressable
           onPress={() => onDismiss(surface)}
-          hitSlop={8}
+          hitSlop={computeHitSlop({ width: 26, height: 26 })}
           style={({ pressed }) => [styles.dismissButton, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={`Dismiss ${surface.title}`}
@@ -278,35 +308,54 @@ function SurfaceBlock({ block, compact }: { block: BridgeUiBlock; compact?: bool
           </Text>
         </View>
       );
-    case 'progress': {
-      const ratio = Math.max(0, Math.min(1, block.value / block.max));
-      return (
-        <View
-          style={styles.progressBlock}
-          accessibilityRole="progressbar"
-          accessibilityLabel={block.label}
-          accessibilityValue={{
-            min: 0,
-            max: block.max,
-            now: block.value,
-            text: block.detail ?? undefined,
-          }}
-          accessibilityLiveRegion="polite"
-        >
-          <View style={styles.progressHeader}>
-            <Text style={styles.bodyText}>{block.label}</Text>
-            <Text style={styles.detailText}>
-              {`${formatNumber(block.value)} / ${formatNumber(block.max)}`}
-            </Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${ratio * 100}%` }]} />
-          </View>
-          {block.detail ? <Text style={styles.detailText}>{block.detail}</Text> : null}
-        </View>
-      );
-    }
+    case 'progress':
+      return <ProgressBlock block={block} />;
   }
+}
+
+function ProgressBlock({ block }: { block: BridgeUiProgressBlock }) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
+  const ratio = Math.max(0, Math.min(1, block.value / block.max));
+  const progressWidth = useSharedValue(ratio);
+
+  useEffect(() => {
+    progressWidth.value = withTiming(ratio, {
+      duration: motionDuration.routine,
+      easing: Easing.bezier(...motionEasing.standard),
+      reduceMotion: ReduceMotion.System,
+    });
+  }, [ratio, progressWidth]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${progressWidth.value * 100}%` as `${number}%`,
+  }));
+
+  return (
+    <View
+      style={styles.progressBlock}
+      accessibilityRole="progressbar"
+      accessibilityLabel={block.label}
+      accessibilityValue={{
+        min: 0,
+        max: block.max,
+        now: block.value,
+        text: block.detail ?? undefined,
+      }}
+      accessibilityLiveRegion="polite"
+    >
+      <View style={styles.progressHeader}>
+        <Text style={styles.bodyText}>{block.label}</Text>
+        <Text style={styles.detailText}>
+          {`${formatNumber(block.value)} / ${formatNumber(block.max)}`}
+        </Text>
+      </View>
+      <View style={styles.progressTrack}>
+        <Animated.View style={[styles.progressFill, fillStyle]} />
+      </View>
+      {block.detail ? <Text style={styles.detailText}>{block.detail}</Text> : null}
+    </View>
+  );
 }
 
 function SurfaceActions({
@@ -330,7 +379,10 @@ function SurfaceActions({
       {surface.actions.map((action) => (
         <Pressable
           key={action.id}
-          onPress={() => onAction(surface, action)}
+          onPress={() => {
+            void feedback.selection();
+            onAction(surface, action);
+          }}
           accessibilityRole="button"
           accessibilityLabel={action.label}
           style={({ pressed }) => [

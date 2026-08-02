@@ -3,6 +3,7 @@ import { BlurView } from 'expo-blur';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
+import { computeHitSlop } from '../../components/touchTarget';
 import type { AppTheme } from '../../theme';
 import { BRIDGE_SETUP_INSTRUCTION } from './onboardingScreenConstants';
 import { CommandSnippet, OnboardingStepDock, StatusBanner } from './OnboardingScreenWidgets';
@@ -70,7 +71,9 @@ export function OnboardingConnectSection({
             {showOnboardingDock ? (
               <Pressable
                 onPress={onBack}
-                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                accessibilityHint="Returns to the introduction"
                 style={({ pressed }) => [
                   styles.connectTopButton,
                   pressed && styles.cancelBtnPressed,
@@ -99,7 +102,7 @@ export function OnboardingConnectSection({
             {(mode === 'edit' || mode === 'add' || mode === 'reconnect') && onCancel ? (
               <Pressable
                 onPress={onCancel}
-                hitSlop={8}
+                hitSlop={computeHitSlop({ width: 30, height: 30 })}
                 style={({ pressed }) => [styles.cancelBtn, pressed && styles.cancelBtnPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel connection setup"
@@ -129,6 +132,9 @@ export function OnboardingConnectSection({
           <View style={styles.connectPrimaryActions}>
             <Pressable
               onPress={onOpenScanner}
+              accessibilityRole="button"
+              accessibilityLabel="Scan QR"
+              accessibilityHint="Opens the camera to scan a pairing QR code"
               style={({ pressed }) => [
                 styles.scanButton,
                 styles.connectActionPrimary,

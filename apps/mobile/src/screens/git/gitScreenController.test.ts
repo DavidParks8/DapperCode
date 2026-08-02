@@ -261,3 +261,49 @@ describe('useGitScreenController committed cwd handling', () => {
     harness.unmount();
   });
 });
+
+describe('useGitScreenController rejected gitStatus handling', () => {
+  it('settles the initial load on failure: status stays null, error is set, and loading clears', async () => {
+    const api = createApi();
+    (api.gitStatus as jest.Mock).mockRejectedValueOnce(new Error('git status failed'));
+    const harness = makeHarness(api);
+    await harness.mount();
+
+    expect(harness.current.status).toBeNull();
+    expect(harness.current.error).toBe('git status failed');
+    expect(harness.current.loading).toBe(false);
+    harness.unmount();
+  });
+
+  it('treats a manual refresh after a failed initial load as a background refresh, not a repeated initial spinner', async () => {
+    const api = createApi();
+    (api.gitStatus as jest.Mock)
+      .mockRejectedValueOnce(new Error('git status failed'))
+      .mockImplementationOnce(() => Promise.resolve(statusFor('/committed')));
+    const harness = makeHarness(api);
+    await harness.mount();
+
+    expect(harness.current.status).toBeNull();
+    expect(harness.current.error).toBe('git status failed');
+    expect(harness.current.loading).toBe(false);
+
+    // A subsequent refresh attempt (e.g. the periodic poll or a manual retry) must not
+    // re-trigger the full-screen "loading" state; it should use the lightweight "refreshing"
+    // treatment because the initial load already settled (even though it failed).
+    let sawLoadingDuringRetry = false;
+    await act(async () => {
+      const retry = harness.current.refresh();
+      // loading must not flip back to true synchronously when the retry starts.
+      sawLoadingDuringRetry = harness.current.loading;
+      await retry;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(sawLoadingDuringRetry).toBe(false);
+    expect(harness.current.loading).toBe(false);
+    expect(harness.current.error).toBeNull();
+    expect(harness.current.status?.cwd).toBe('/committed');
+    harness.unmount();
+  });
+});

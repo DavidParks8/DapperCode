@@ -19,9 +19,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     },
     composeIcon: { marginBottom: theme.spacing.lg },
     composeTitle: {
-      fontSize: 28,
-      fontWeight: '700',
-      color: theme.colors.textPrimary,
+      ...theme.typography.largeTitle,
       marginBottom: theme.spacing.xl,
     },
     workspaceSelectBtn: {
@@ -29,7 +27,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.sm,
-      borderRadius: 12,
+      borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
       backgroundColor: theme.colors.bgItem,
@@ -55,7 +53,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       backgroundColor: theme.colors.bgItem,
       borderWidth: 1,
       borderColor: theme.colors.border,
-      borderRadius: 12,
+      borderRadius: theme.radius.md,
       padding: theme.spacing.md,
     },
     suggestionCardPressed: { backgroundColor: theme.colors.bgInput },
@@ -69,6 +67,8 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     jumpToLatestButton: {
       position: 'absolute',
       alignSelf: 'center',
+    },
+    jumpToLatestButtonInner: {
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: StyleSheet.hairlineWidth,
@@ -185,7 +185,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     bridgeRecoveryBannerIconWrap: {
       width: 24,
       height: 24,
-      borderRadius: 12,
+      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: theme.colors.bgItem,

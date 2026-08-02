@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { AgentDescriptor, BridgeCapabilities } from '../../api/types';
 import { AgentIcon } from '../../components/AgentIcon';
+import { feedback } from '../../feedback';
 import { disablePush, enablePush, updatePushEvents } from '../../pushController';
 import { retryPersistenceAtom } from '../../state/appState/actions';
 import {
@@ -36,23 +37,20 @@ import { useBridgeCapabilitiesResource } from '../../state/bridge/capabilities';
 import { drawerCommandsAtom } from '../../state/drawer/atoms';
 import { routes } from '../../navigation/routes';
 import { replaceRoot } from '../../navigation/routeNavigation';
-import { selectedChatIdAtom } from '../../state/chat/atoms';
-import { useAppTheme } from '../../theme';
+import { useAppTheme, type AppTheme } from '../../theme';
 
 export function SettingsScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
   const store = useStore();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const api = useAtomValue(apiClientAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
   const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
   const activeBridgeProfileId = activeBridgeProfile?.id ?? null;
   const profileId = routeProfileId ?? activeBridgeProfileId ?? '';
   const bridgeProfiles = useAtomValue(bridgeProfilesAtom);
-  const selectedChatId = useAtomValue(selectedChatIdAtom);
-  const chatId = selectedChatId ?? 'new';
   const pushSettings = useAtomValue(pushSettingsAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
@@ -117,19 +115,11 @@ export function SettingsScreen() {
           <Row
             label={activeBridgeProfile?.name ?? 'Current bridge'}
             value={bridgeConnected ? 'Connected' : 'Disconnected'}
-            onPress={() =>
-              router.push(routes.connection(profileId, chatId, 'edit'), {
-                withAnchor: true,
-              })
-            }
+            onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
           />
           <Row
             label="Add bridge"
-            onPress={() =>
-              router.push(routes.connection(profileId, chatId, 'add'), {
-                withAnchor: true,
-              })
-            }
+            onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
           />
           {bridgeProfiles.map((profile) => (
             <Row
@@ -211,7 +201,7 @@ function AgentRow({
   capabilities: BridgeCapabilities;
 }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const statuses = [
     agent.agentId === capabilities.preferredAgentId ? 'Preferred' : null,
     agent.agentId === capabilities.activeAgentId ? 'Active' : null,
@@ -237,10 +227,12 @@ function AgentRow({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>
+        {title}
+      </Text>
       {children}
     </View>
   );
@@ -248,9 +240,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Row({ label, value, onPress }: { label: string; value?: string; onPress?: () => void }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
-    <Pressable disabled={!onPress} onPress={onPress} style={styles.row}>
+    <Pressable
+      accessibilityLabel={value ? `${label}, ${value}` : label}
+      accessibilityRole={onPress ? 'button' : undefined}
+      disabled={!onPress}
+      onPress={() => {
+        if (!onPress) return;
+        void feedback.selection();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.row, pressed && onPress && styles.rowPressed]}
+    >
       <Text style={styles.rowLabel}>{label}</Text>
       {value ? <Text style={styles.muted}>{value}</Text> : null}
     </Pressable>
@@ -269,11 +271,19 @@ function Toggle({
   onChange: (value: boolean) => void;
 }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Switch value={value} disabled={disabled} onValueChange={onChange} />
+      <Switch
+        accessibilityLabel={label}
+        value={value}
+        disabled={disabled}
+        onValueChange={(next) => {
+          void feedback.selection();
+          onChange(next);
+        }}
+      />
     </View>
   );
 }
@@ -288,12 +298,21 @@ function Notice({
   onPress?: () => void | Promise<void>;
 }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme.colors), [theme.colors]);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
     <View style={styles.notice}>
       <Text style={styles.error}>{text}</Text>
       {action ? (
-        <Pressable onPress={() => void onPress?.()}>
+        <Pressable
+          accessibilityLabel={action}
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => {
+            void feedback.selection();
+            void onPress?.();
+          }}
+          style={styles.noticeAction}
+        >
           <Text style={styles.action}>{action}</Text>
         </Pressable>
       ) : null}
@@ -301,7 +320,8 @@ function Notice({
   );
 }
 
-function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
+function createStyles(theme: AppTheme) {
+  const { colors } = theme;
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.bgMain },
     header: {
@@ -311,18 +331,21 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       alignItems: 'center',
       gap: 16,
     },
-    title: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+    title: {
+      ...theme.typography.title,
+      color: colors.textPrimary,
+    },
     content: { padding: 18, gap: 24, paddingBottom: 48 },
     section: { gap: 4 },
     sectionTitle: {
+      ...theme.typography.label,
       color: colors.textMuted,
-      fontSize: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
       marginBottom: 6,
     },
     row: {
-      minHeight: 48,
+      minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -330,11 +353,19 @@ function createStyles(colors: ReturnType<typeof useAppTheme>['colors']) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.borderLight,
     },
-    rowLabel: { color: colors.textPrimary, fontSize: 15, flexShrink: 1 },
-    muted: { color: colors.textMuted, fontSize: 13 },
-    error: { color: colors.error, fontSize: 13 },
-    action: { color: colors.accent, fontWeight: '700' },
-    notice: { padding: 12, borderWidth: 1, borderColor: colors.error, gap: 8 },
+    rowPressed: { backgroundColor: colors.bgCanvasAccent },
+    rowLabel: { ...theme.typography.subheadline, color: colors.textPrimary, flexShrink: 1 },
+    muted: { ...theme.typography.caption, color: colors.textMuted },
+    error: { ...theme.typography.caption, color: colors.error },
+    action: { ...theme.typography.label, color: colors.accent, fontWeight: '700' },
+    noticeAction: { minHeight: theme.touchTarget.minimum, justifyContent: 'center' },
+    notice: {
+      padding: 12,
+      borderWidth: 1,
+      borderRadius: theme.radius.md,
+      borderColor: colors.error,
+      gap: 8,
+    },
     agentRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',

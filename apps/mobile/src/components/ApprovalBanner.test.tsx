@@ -6,11 +6,20 @@ import type { PendingApproval } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { ApprovalBanner, runApprovalResolution } from './ApprovalBanner';
 
-jest.mock('react-native-reanimated', () => ({
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+
+jest.mock('expo-haptics', () => ({
   __esModule: true,
-  default: { View: 'View' },
-  FadeInDown: { duration: () => undefined },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+  selectionAsync: jest.fn().mockResolvedValue(undefined),
+  impactAsync: jest.fn().mockResolvedValue(undefined),
+  notificationAsync: jest.fn().mockResolvedValue(undefined),
 }));
+
+import * as Haptics from 'expo-haptics';
+
+const mockHaptics = Haptics as unknown as { notificationAsync: jest.Mock };
 
 type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll'> & {
   type: unknown;
@@ -135,11 +144,14 @@ describe('ApprovalBanner', () => {
       disabled: true,
       busy: false,
     });
+    // Dense action buttons must still resolve to the platform minimum effective touch target.
+    expect(allow.props.hitSlop).toBeDefined();
     await act(async () => finishResolution?.());
     expect(findPressable(root, 'Allow').props.accessibilityState).toEqual({
       disabled: false,
       busy: false,
     });
+    expect(mockHaptics.notificationAsync).toHaveBeenLastCalledWith('success');
 
     const failed = jest.fn().mockRejectedValue(new Error('denied'));
     act(() => {
@@ -154,18 +166,29 @@ describe('ApprovalBanner', () => {
     });
     await act(async () => invokeProp(findPressable(queryRoot(tree), 'Reject'), 'onPress'));
     expect(failed).toHaveBeenCalledWith('approval-1', 'reject');
+    // The card must show its own visible error instead of swallowing the rejection, so a user
+    // who denies a command isn't left staring at controls with no explanation of the failure.
+    expect(textContent(queryRoot(tree))).toContain('denied');
+    expect(mockHaptics.notificationAsync).toHaveBeenLastCalledWith('error');
 
     act(() => {
       tree.update(
         wrap(
           <ApprovalBanner
-            approval={{ ...commandApproval, kind: 'fileChange', reason: undefined }}
+            approval={{
+              ...commandApproval,
+              requestId: 'approval-2',
+              kind: 'fileChange',
+              reason: undefined,
+            }}
             onResolve={jest.fn().mockResolvedValue(undefined)}
           />,
         ),
       );
     });
     expect(textContent(queryRoot(tree))).toContain('File change');
+    // A new approval (distinct requestId) must clear the previous card's stale error.
+    expect(textContent(queryRoot(tree))).not.toContain('denied');
     act(() => tree.unmount());
   });
 });

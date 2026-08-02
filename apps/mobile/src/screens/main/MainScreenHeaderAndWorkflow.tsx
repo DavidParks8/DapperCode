@@ -2,10 +2,13 @@ import { useMainScreenStyles } from './useMainScreenStyles';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
 import { useAtomValue } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { BridgeUiWorkflowCard } from '../../components/BridgeUiSurface';
 import { ChatHeader } from '../../components/ChatHeader';
 import { decorativeAccessibilityProps } from '../../accessibility';
+import { feedback } from '../../feedback';
+import { computeHitSlop } from '../../components/touchTarget';
 import { WorkflowCard } from './MainScreenWorkflow';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -13,6 +16,13 @@ import type {
 } from './mainScreenPanelCollapseCoordinator';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
+
+// Chips are dense, dynamically-sized labels in a scrollable row (28pt tall); the estimated
+// width keeps them visually compact while still resolving to the 44pt/48dp effective touch
+// target, and maxHorizontal caps the added slop so neighboring chips (separated by a ~6px gap)
+// don't steal each other's taps.
+const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 28 };
+const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3 };
 
 export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   const {
@@ -54,6 +64,10 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
+  const sessionMetaChipHitSlop = useMemo(
+    () => computeHitSlop(SESSION_META_CHIP_VISIBLE_SIZE, SESSION_META_CHIP_HIT_SLOP_OPTIONS),
+    [],
+  );
 
   return (
     <>
@@ -75,7 +89,11 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
             {modelOptions.length > 0 ? (
               <Pressable
                 style={({ pressed }) => [styles.modelChip, pressed && styles.modelChipPressed]}
-                onPress={openModelModal}
+                onPress={() => {
+                  void feedback.selection();
+                  openModelModal();
+                }}
+                hitSlop={sessionMetaChipHitSlop}
                 accessibilityRole="button"
                 accessibilityLabel={`Model, ${activeModelLabel}`}
               >
@@ -93,7 +111,11 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
             {activeModelEffortOptions.length > 0 ? (
               <Pressable
                 style={({ pressed }) => [styles.modelChip, pressed && styles.modelChipPressed]}
-                onPress={() => openEffortModal()}
+                onPress={() => {
+                  void feedback.selection();
+                  openEffortModal();
+                }}
+                hitSlop={sessionMetaChipHitSlop}
                 accessibilityRole="button"
                 accessibilityLabel={`Thinking level, ${activeEffortLabel}`}
               >
@@ -110,7 +132,11 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
             ) : null}
             <Pressable
               style={({ pressed }) => [styles.modeChip, pressed && styles.modelChipPressed]}
-              onPress={openCollaborationModeMenu}
+              onPress={() => {
+                void feedback.selection();
+                openCollaborationModeMenu();
+              }}
+              hitSlop={sessionMetaChipHitSlop}
               accessibilityRole="button"
               accessibilityLabel={`Agent mode, ${collaborationModeLabel}`}
             >
@@ -128,8 +154,10 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
               <Pressable
                 style={({ pressed }) => [styles.modeChip, pressed && styles.modelChipPressed]}
                 onPress={() => {
+                  void feedback.selection();
                   void openAgentThreadSelector();
                 }}
+                hitSlop={sessionMetaChipHitSlop}
                 accessibilityRole="button"
                 accessibilityLabel={agentThreadChipLabel}
               >
@@ -153,8 +181,10 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
                   fastModeControlDisabled && styles.sessionMetaChipDisabled,
                 ]}
                 onPress={() => {
+                  void feedback.selection();
                   void toggleFastMode();
                 }}
+                hitSlop={sessionMetaChipHitSlop}
                 disabled={fastModeControlDisabled}
                 accessibilityRole="switch"
                 accessibilityLabel="Fast mode"

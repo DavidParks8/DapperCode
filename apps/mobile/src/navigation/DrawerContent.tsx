@@ -1,20 +1,22 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Alert, AppState } from 'react-native';
+import { Alert, AppState, Keyboard } from 'react-native';
 import type { ChatSummary } from '../api/types';
+import { useAccessibilityAnnouncement } from '../accessibility';
 import { confirmAction } from '../components/confirm';
+import { feedback } from '../feedback';
 import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
 import { useBridgeCapabilitiesResource } from '../state/bridge/capabilities';
 import { selectedChatIdAtom } from '../state/chat/atoms';
-import { navigateAtom, selectChatAtom, startNewChatAtom } from './actions';
+import { navigateAtom, openBridgeConnectionAtom, selectChatAtom, startNewChatAtom } from './actions';
 import { useAppTheme } from '../theme';
 import { buildDrawerAttentionModel, type DrawerAttentionLane } from './drawerAttention';
 import { createDrawerContentStyles } from './drawerContentStyles';
 import type { DrawerContentProps, DrawerScreen } from './drawerContentTypes';
 import { DrawerContentView } from './DrawerContentView';
 import { DrawerContentViewContext } from './drawerContentViewContext';
-import { normalizeWorkspaceChatLimit } from './drawerContentHelpers';
+import { filterDrawerAttentionSections, normalizeWorkspaceChatLimit } from './drawerContentHelpers';
 import { useDrawerAttentionRequests } from './useDrawerAttentionRequests';
 import { useDrawerChatLoading } from './useDrawerChatLoading';
 
@@ -51,6 +53,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const onSelectChat = useSetAtom(selectChatAtom);
   const onNewChat = useSetAtom(startNewChatAtom);
   const onNavigate = useSetAtom(navigateAtom);
+  const onOpenConnection = useSetAtom(openBridgeConnectionAtom);
   const {
     pendingApprovals,
     pendingUserInputs,
@@ -93,6 +96,9 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(new Set());
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const trimmedSearchQuery = searchQuery.trim();
+  const isSearching = trimmedSearchQuery.length > 0;
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
   const normalizedWorkspaceChatLimit = normalizeWorkspaceChatLimit(workspaceChatLimit);
 
@@ -127,18 +133,67 @@ export const DrawerContent = memo(function DrawerContentComponent({
     }
   }, [attentionModel.folderOptions, selectedFolderKey]);
 
-  const visibleAttentionSections = useMemo(
-    () =>
-      attentionModel.sections.map((section) =>
-        collapsedLaneKeys.has(section.key)
-          ? {
-              ...section,
-              data: [],
-            }
-          : section,
-      ),
-    [attentionModel.sections, collapsedLaneKeys],
+  const visibleAttentionSections = useMemo(() => {
+    // While searching, matches must surface regardless of collapsed-lane state — a collapsed
+    // "Working now" lane should still reveal a hit rather than hide it — so search filters the
+    // full model instead of the collapse-adjusted one used outside of search.
+    if (isSearching) {
+      return filterDrawerAttentionSections(attentionModel.sections, trimmedSearchQuery);
+    }
+    return attentionModel.sections.map((section) =>
+      collapsedLaneKeys.has(section.key)
+        ? {
+            ...section,
+            data: [],
+          }
+        : section,
+    );
+  }, [attentionModel.sections, collapsedLaneKeys, isSearching, trimmedSearchQuery]);
+
+  const searchResultCount = useMemo(
+    () => visibleAttentionSections.reduce((total, section) => total + section.data.length, 0),
+    [visibleAttentionSections],
   );
+
+  const searchAnnouncementMessage = isSearching
+    ? searchResultCount === 0
+      ? `No sessions match "${trimmedSearchQuery}"`
+      : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${trimmedSearchQuery}"`
+    : null;
+
+  // Search is the ONLY announcement channel for result counts/no-results: the visual result
+  // summary and empty-state copy intentionally omit accessibilityLiveRegion so a screen reader
+  // doesn't hear the same update twice. Debounce so rapid typing settles before announcing
+  // instead of firing once per keystroke.
+  const [debouncedSearchAnnouncement, setDebouncedSearchAnnouncement] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!isSearching) {
+      setDebouncedSearchAnnouncement(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setDebouncedSearchAnnouncement(searchAnnouncementMessage);
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [isSearching, searchAnnouncementMessage]);
+
+  useAccessibilityAnnouncement(debouncedSearchAnnouncement);
+
+  const handleSearchQueryChange = useCallback((value: string) => {
+    setSearchQuery(value);
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+    void feedback.selection();
+  }, []);
+
+  const handleOpenConnection = useCallback(() => {
+    cancelChatListStream();
+    onOpenConnection();
+  }, [cancelChatListStream, onOpenConnection]);
 
   const toggleAttentionSection = useCallback((lane: DrawerAttentionLane) => {
     setCollapsedLaneKeys((previous) => {
@@ -183,6 +238,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
 
   const handleSelectChat = useCallback(
     (chatId: string) => {
+      void feedback.selection();
       cancelChatListStream();
       onSelectChat(chatId);
     },
@@ -190,6 +246,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   );
 
   const handleNewChat = useCallback(() => {
+    Keyboard.dismiss();
     cancelChatListStream();
     onNewChat();
   }, [cancelChatListStream, onNewChat]);
@@ -219,6 +276,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
       if (!confirmed) {
         return false;
       }
+      void feedback.destructive();
       for (const affectedChatId of affectedChatIds) {
         removeChat(affectedChatId);
       }
@@ -276,14 +334,19 @@ export const DrawerContent = memo(function DrawerContentComponent({
     collapsedLaneKeys,
     folderOptions: attentionModel.folderOptions,
     folderPickerVisible,
+    handleClearSearch,
     handleClose: onClose,
     handleDismissFolderPicker: () => setFolderPickerVisible(false),
     handleDeleteChat,
     handleNavigate,
     handleNewChat,
+    handleOpenConnection,
     handleOpenFolderPicker,
+    handleSearchQueryChange,
     handleSelectChat,
     handleSelectFolder,
+    hasAnySessions: chats.length > 0,
+    isSearching,
     loading,
     loadingOlderChats,
     noticeMessages,
@@ -293,6 +356,8 @@ export const DrawerContent = memo(function DrawerContentComponent({
     resolvedEmptyHint,
     resolvedEmptyTitle,
     retryDeepChatListRef,
+    searchQuery,
+    searchResultCount,
     selectedChatId,
     selectedFolderKey,
     selectedFolderLabel: attentionModel.selectedFolderLabel,

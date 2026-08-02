@@ -1,9 +1,14 @@
 import * as Clipboard from 'expo-clipboard';
-import { Modal, Platform, Share } from 'react-native';
+import type * as fsNode from 'fs';
+import type * as pathNode from 'path';
+import { KeyboardAvoidingView, Modal, Platform, Share } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
+import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
+import { computeHitSlop } from '../../components/touchTarget';
+import { setMockReducedMotionEnabled } from '../../testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
 
 const mockRequestCameraPermission = jest.fn().mockResolvedValue({ granted: false });
@@ -12,6 +17,17 @@ const mockWsRequest = jest.fn().mockResolvedValue({ status: 'ok' });
 const mockWsDisconnect = jest.fn();
 let mockCameraGranted = false;
 
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
 jest.mock('expo-blur', () => ({ BlurView: jest.requireActual('react-native').View }));
 jest.mock('expo-linear-gradient', () => ({
@@ -658,5 +674,349 @@ describe('OnboardingScreen behavior', () => {
     await press(backdrop);
     expect(hasText(root, 'Scan Pairing QR')).toBe(false);
     act(() => result.tree.unmount());
+  });
+
+  it('does not re-probe after a successful Test Connection when saving unchanged credentials', async () => {
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockWsRequest).toHaveBeenCalledTimes(1);
+    (feedback.success as jest.Mock).mockClear();
+
+    await press(findByLabel(root, 'Continue'));
+
+    // The unchanged, already-successful credential check must be reused rather than probed again.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockWsRequest).toHaveBeenCalledTimes(1);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:3001',
+      bridgeToken: 'token',
+    });
+    // No redundant success haptic for a save that skipped a fresh probe.
+    expect((feedback.success as jest.Mock)).not.toHaveBeenCalled();
+    act(() => result.tree.unmount());
+  });
+
+  it('does re-probe when credentials change after a successful Test Connection', async () => {
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    act(() =>
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge token'),
+        'onChangeText',
+      )('different-token'),
+    );
+
+    await press(findByLabel(root, 'Continue'));
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(mockWsRequest).toHaveBeenCalledTimes(2);
+    act(() => result.tree.unmount());
+  });
+
+  it('discards a stale in-flight probe result for credentials edited while it was pending', async () => {
+    let resolveWsRequest: ((value: { status: string }) => void) | undefined;
+    mockWsRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveWsRequest = resolve;
+        }),
+    );
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token-a',
+    });
+    const root = result.tree.root as Queryable;
+
+    // Start a Test Connection probe for the original credentials; it stays pending on the
+    // authenticated RPC health check until resolveWsRequest is invoked below.
+    await act(async () => {
+      readHandler<() => void>(findPressableByText(root, 'Test Connection'), 'onPress')();
+      await Promise.resolve();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    // Edit both fields to a different, never-probed pair of credentials while the first
+    // probe is still in flight.
+    act(() =>
+      readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')(
+        'http://127.0.0.1:4002',
+      ),
+    );
+    act(() =>
+      readHandler<(value: string) => void>(findByLabel(root, 'Bridge token'), 'onChangeText')(
+        'token-b',
+      ),
+    );
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+
+    // Let the stale probe for the original credentials resolve.
+    await act(async () => {
+      resolveWsRequest?.({ status: 'ok' });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The stale success must never surface for credentials the user has since replaced.
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+
+    // Editing mid-probe bumps input generation but must NOT block the still-active probe from
+    // clearing its own busy state once it settles: Test Connection/Continue must not be left
+    // disabled+busy forever. Read `.props` directly rather than relying on the `press` helper,
+    // which invokes onPress unconditionally and would not surface a stuck-disabled regression.
+    const testConnectionButton = findPressableByText(root, 'Test Connection');
+    expect(testConnectionButton.props.disabled).toBe(false);
+    expect(testConnectionButton.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false, busy: false }),
+    );
+    const continueButtonAfterStaleProbe = findByLabel(root, 'Continue');
+    expect(continueButtonAfterStaleProbe.props.disabled).toBe(false);
+    expect(continueButtonAfterStaleProbe.props.accessibilityState).toEqual(
+      expect.objectContaining({ disabled: false, busy: false }),
+    );
+
+    // Saving the edited (never-probed) credentials must run its own probe rather than
+    // trusting the discarded, mismatched result.
+    await press(findByLabel(root, 'Continue'));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(mockWsRequest).toHaveBeenCalledTimes(2);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:4002',
+      bridgeToken: 'token-b',
+    });
+    act(() => result.tree.unmount());
+  });
+
+  it('clears a cached probe success when initial credentials reset via props', async () => {
+    const result = await renderOnboarding({
+      mode: 'edit',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token-a',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    await result.rerender({
+      mode: 'edit',
+      initialBridgeUrl: 'http://127.0.0.1:9002',
+      initialBridgeToken: 'token-b',
+    });
+
+    // The cached success from the previous profile's credentials must not leak into the
+    // freshly loaded, never-probed pair.
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+    expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:9002');
+
+    await press(findByLabel(root, 'Save URL'));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:9002',
+      bridgeToken: 'token-b',
+    });
+    act(() => result.tree.unmount());
+  });
+
+  it('fires semantic haptics for selection, connection outcomes, and QR scan results', async () => {
+    mockRequestCameraPermission.mockResolvedValueOnce({ granted: true });
+    mockCameraGranted = true;
+    const result = await renderOnboarding();
+    const root = result.tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Private connection'));
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    (feedback.selection as jest.Mock).mockClear();
+
+    const url = findByLabel(root, 'Bridge URL');
+    const token = findByLabel(root, 'Bridge token');
+    act(() => readHandler<(value: string) => void>(url, 'onChangeText')('http://127.0.0.1:3001'));
+    act(() => readHandler<(value: string) => void>(token, 'onChangeText')('token'));
+
+    await press(findPressableByText(root, 'Test Connection'));
+    expect((feedback.success as jest.Mock)).toHaveBeenCalledTimes(1);
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 503 });
+    mockWsRequest.mockRejectedValueOnce(new Error('offline'));
+    act(() =>
+      readHandler<(value: string) => void>(token, 'onChangeText')('token-changed'),
+    );
+    await press(findPressableByText(root, 'Test Connection'));
+    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+
+    await press(findPressableByText(root, 'Scan QR'));
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    act(() => result.tree.unmount());
+  });
+
+  it('meets the platform touch-target minimum and exposes accessibility roles/labels/hints', async () => {
+    const initial = await renderOnboarding();
+    const initialRoot = initial.tree.root as Queryable;
+    await press(findPressableByText(initialRoot, 'Private connection'));
+
+    const backButton = findByLabel(initialRoot, 'Back');
+    expect(backButton.props.accessibilityRole).toBe('button');
+    expect(backButton.props.accessibilityHint).toBeTruthy();
+
+    const scanButton = findByLabel(initialRoot, 'Scan QR');
+    expect(scanButton.props.accessibilityRole).toBe('button');
+    expect(scanButton.props.accessibilityHint).toBeTruthy();
+    act(() => initial.tree.unmount());
+
+    const direct = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+    });
+    const directRoot = direct.tree.root as Queryable;
+
+    const cancelButton = findByLabel(directRoot, 'Cancel connection setup');
+    const cancelHitSlop = cancelButton.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    const minimum = Platform.select({ ios: 44, android: 48, default: 44 }) as number;
+    // cancelBtn is drawn at 30px; hitSlop must pad it out to at least the platform minimum.
+    expect(30 + cancelHitSlop.top + cancelHitSlop.bottom).toBeGreaterThanOrEqual(minimum);
+    expect(30 + cancelHitSlop.left + cancelHitSlop.right).toBeGreaterThanOrEqual(minimum);
+
+    act(() => direct.tree.unmount());
+  });
+
+  it('caps Share/Copy hitSlop so adjacent sides never overlap the commandCardActions gap', async () => {
+    // commandCardActions gap is spacing.xs (4). Each button's horizontal slop must stay within
+    // half that gap so the two adjacent hit areas meet without stealing taps from one another,
+    // on both iOS's 44pt and Android's 48dp minimum effective touch target.
+    for (const platformOS of ['ios', 'android'] as const) {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: platformOS });
+      const slop = computeHitSlop({ width: 30, height: 30 }, { maxHorizontal: 2 });
+      expect(slop.left).toBeLessThanOrEqual(2);
+      expect(slop.right).toBeLessThanOrEqual(2);
+      expect(slop.left + slop.right).toBeLessThanOrEqual(4);
+      // Vertical slop stays uncapped so the full platform minimum is preserved on that axis.
+      const minimum = platformOS === 'android' ? 48 : 44;
+      expect(30 + slop.top + slop.bottom).toBeGreaterThanOrEqual(minimum);
+    }
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+
+    const result = await renderOnboarding({ mode: 'add' });
+    const root = result.tree.root as Queryable;
+    const shareButton = findByLabel(root, 'Share bridge setup guide');
+    const copyButton = findByLabel(root, 'Copy setup command');
+    const shareHitSlop = shareButton.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    const copyHitSlop = copyButton.props.hitSlop as typeof shareHitSlop;
+
+    // Share sits left of Copy in commandCardActions: Share's right slop plus Copy's left slop
+    // must not exceed the 4px gap between them, or one button's hit area reaches into the
+    // other's visible chrome.
+    expect(shareHitSlop.right).toBeLessThanOrEqual(2);
+    expect(copyHitSlop.left).toBeLessThanOrEqual(2);
+    expect(shareHitSlop.right + copyHitSlop.left).toBeLessThanOrEqual(4);
+    // Vertical (top/bottom) slop is unaffected by the horizontal cap and still meets the 44pt
+    // iOS minimum effective touch target.
+    expect(30 + shareHitSlop.top + shareHitSlop.bottom).toBeGreaterThanOrEqual(44);
+    expect(30 + copyHitSlop.top + copyHitSlop.bottom).toBeGreaterThanOrEqual(44);
+
+    act(() => result.tree.unmount());
+  });
+
+  it('renders StatusBanner without a Reanimated entrance when Reduce Motion is enabled', async () => {
+    setMockReducedMotionEnabled(true);
+    try {
+      const result = await renderOnboarding({
+        mode: 'add',
+        initialBridgeUrl: 'http://127.0.0.1:3001',
+        initialBridgeToken: 'token',
+      });
+      const root = result.tree.root as Queryable;
+      await press(findPressableByText(root, 'Test Connection'));
+      expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+      act(() => result.tree.unmount());
+    } finally {
+      setMockReducedMotionEnabled(false);
+    }
+  });
+
+  it('uses Android-appropriate keyboard avoidance so the URL/token fields stay reachable', async () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
+    try {
+      const result = await renderOnboarding({ mode: 'add' });
+      const root = result.tree.root as Queryable;
+      const keyboardAvoiding = root.findAll(
+        (node) => node.type === KeyboardAvoidingView,
+      )[0] as Queryable;
+      expect(keyboardAvoiding.props.behavior).toBe('height');
+      act(() => result.tree.unmount());
+    } finally {
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    }
+  });
+
+  describe('typography tokens', () => {
+    it('has no ad hoc numeric fontSize literals in owned onboarding source files', () => {
+      const fs = jest.requireActual('fs') as typeof fsNode;
+      const path = jest.requireActual('path') as typeof pathNode;
+      const dir = __dirname;
+      const offenders: string[] = [];
+      for (const entry of fs.readdirSync(dir)) {
+        if (!/\.tsx?$/.test(entry) || entry.endsWith('.test.tsx') || entry.endsWith('.test.ts')) {
+          continue;
+        }
+        const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
+        const matches = contents.match(/fontSize:\s*[0-9]/g);
+        if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('renders the brand name using the headline semantic role', async () => {
+      const result = await renderOnboarding({ mode: 'initial' });
+      const root = result.tree.root as Queryable;
+      const brandNode = root.findAll(
+        (node) => node.children.map(String).join('') === 'DapperCode',
+      )[0];
+      const style = Array.isArray(brandNode?.props.style)
+        ? Object.assign({}, ...brandNode.props.style)
+        : ((brandNode?.props.style as Record<string, unknown>) ?? {});
+      expect(style.fontSize).toBe(theme.typography.headline.fontSize);
+      act(() => result.tree.unmount());
+    });
+
+    it('renders the compact stepper pill index using the metadata semantic role', async () => {
+      const result = await renderOnboarding({ mode: 'initial' });
+      const root = result.tree.root as Queryable;
+      await press(findPressableByText(root, 'Private connection'));
+      const pillIndexNode = root.findAll(
+        (node) => node.children.map(String).join('') === '1',
+      )[0];
+      const style = Array.isArray(pillIndexNode?.props.style)
+        ? Object.assign({}, ...pillIndexNode.props.style)
+        : ((pillIndexNode?.props.style as Record<string, unknown>) ?? {});
+      expect(style.fontSize).toBe(theme.typography.metadata.fontSize);
+      // 11pt readability floor is preserved via the metadata role rather than a raw literal.
+      expect(style.fontSize).toBeGreaterThanOrEqual(11);
+      act(() => result.tree.unmount());
+    });
   });
 });

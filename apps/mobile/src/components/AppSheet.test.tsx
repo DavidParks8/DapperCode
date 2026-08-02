@@ -1,4 +1,4 @@
-import { StyleSheet, Text } from 'react-native';
+import { Keyboard, StyleSheet, Text, type KeyboardEvent } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -83,6 +83,39 @@ function textOf(tree: ReactTestRenderer): string {
 }
 
 describe('AppSheet', () => {
+  it('waits for an open keyboard to hide before presenting a sheet', () => {
+    const isVisibleSpy = jest.spyOn(Keyboard, 'isVisible').mockReturnValue(true);
+    const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    let handleKeyboardDidHide: ((event: KeyboardEvent) => void) | undefined;
+    const remove = jest.fn();
+    const listenerSpy = jest.spyOn(Keyboard, 'addListener').mockImplementation((event, handler) => {
+      if (event === 'keyboardDidHide') {
+        handleKeyboardDidHide = handler;
+      }
+      return { remove } as unknown as ReturnType<typeof Keyboard.addListener>;
+    });
+    const tree = renderSheet(
+      wrap(
+        <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose a mode">
+          <Text>Mode list</Text>
+        </AppSheet>,
+      ),
+    );
+
+    expect(dismissSpy).toHaveBeenCalledTimes(1);
+    expect(textOf(tree)).not.toContain('Mode list');
+
+    act(() => handleKeyboardDidHide?.({} as KeyboardEvent));
+
+    expect(textOf(tree)).toContain('Mode list');
+
+    act(() => tree.unmount());
+    expect(remove).toHaveBeenCalledTimes(1);
+    listenerSpy.mockRestore();
+    dismissSpy.mockRestore();
+    isVisibleSpy.mockRestore();
+  });
+
   it('opens from an initially hidden state and can reopen after closing', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;

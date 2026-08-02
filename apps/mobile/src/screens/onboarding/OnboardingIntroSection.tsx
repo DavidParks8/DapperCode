@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Animated, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { BrandMark } from '../../components/BrandMark';
 import { ChoiceAction } from '../../components/ChoiceAction';

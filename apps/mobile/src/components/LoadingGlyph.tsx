@@ -9,6 +9,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { useAppTheme } from '../theme';
+import { useReduceMotionPreference } from './useReduceMotionPreference';
+
 export type LoadingGlyphVariant = 'spinner' | 'pulse' | 'bars' | 'ring';
 
 interface LoadingGlyphProps {
@@ -20,8 +23,15 @@ interface LoadingGlyphProps {
 
 const BASE_PHASE = 0.28;
 const PULSE_COUNT = 3;
+/** Static pulse/bar opacity phase used when Reduce Motion is enabled (no looping animation). */
+const STATIC_PHASE = 1;
+/** Static ring scale/opacity used when Reduce Motion is enabled (no looping animation). */
+const STATIC_RING_SCALE = 1;
+const STATIC_RING_OPACITY = 0.72;
 
 export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingGlyphProps) {
+  const theme = useAppTheme();
+  const reduceMotion = useReduceMotionPreference();
   const pulseRefs = useRef(
     Array.from({ length: PULSE_COUNT }, () => new Animated.Value(BASE_PHASE)),
   );
@@ -58,6 +68,13 @@ export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingG
       return;
     }
 
+    if (reduceMotion) {
+      // Freeze on a fully-visible static glyph instead of looping, per the Reduce Motion
+      // accessibility preference.
+      pulses.forEach((phase) => phase.setValue(STATIC_PHASE));
+      return;
+    }
+
     pulses.forEach((phase) => phase.setValue(BASE_PHASE));
     const animation = Animated.loop(
       Animated.stagger(
@@ -85,10 +102,18 @@ export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingG
     return () => {
       animation.stop();
     };
-  }, [pulses, variant]);
+  }, [pulses, reduceMotion, variant]);
 
   useEffect(() => {
     if (variant !== 'ring') {
+      return;
+    }
+
+    if (reduceMotion) {
+      // Freeze on a fully-visible static ring instead of looping, per the Reduce Motion
+      // accessibility preference.
+      ringScale.setValue(STATIC_RING_SCALE);
+      ringOpacity.setValue(STATIC_RING_OPACITY);
       return;
     }
 
@@ -131,7 +156,7 @@ export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingG
     return () => {
       animation.stop();
     };
-  }, [ringOpacity, ringScale, variant]);
+  }, [reduceMotion, ringOpacity, ringScale, variant]);
 
   if (variant === 'spinner') {
     return (
@@ -195,6 +220,7 @@ export function LoadingGlyph({ color, variant, size = 'small', style }: LoadingG
                   width: specs.barWidth,
                   height: specs.barHeight,
                   backgroundColor: color,
+                  borderRadius: theme.radius.full,
                   transform: [
                     {
                       scaleY: phase.interpolate({
@@ -251,7 +277,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   bar: {
-    borderRadius: 999,
     flexShrink: 0,
   },
   ring: {

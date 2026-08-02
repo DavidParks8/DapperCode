@@ -43,12 +43,12 @@ export const createStyles = (theme: AppTheme) =>
     assistantContent: { gap: theme.spacing.xs },
     userMessageText: {
       ...theme.typography.body,
-      color: theme.colors.textPrimary,
+      color: theme.colors.userBubbleText,
     },
     userInlineMentionText: {
-      color: theme.colors.textSecondary,
-      backgroundColor: theme.colors.bgItem,
-      borderColor: theme.colors.userBubbleBorder,
+      color: theme.colors.userBubbleText,
+      backgroundColor: theme.colors.userBubbleInset,
+      borderColor: theme.colors.userBubbleInset,
       borderWidth: StyleSheet.hairlineWidth,
       borderRadius: theme.radius.sm,
       paddingHorizontal: 3,
@@ -61,8 +61,8 @@ export const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.xs,
       borderRadius: theme.radius.sm,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.userBubbleBorder,
-      backgroundColor: theme.colors.bgMain,
+      borderColor: theme.colors.userBubbleInset,
+      backgroundColor: theme.colors.userBubbleInset,
       paddingHorizontal: theme.spacing.sm,
       paddingVertical: theme.spacing.xs,
       maxWidth: '100%',
@@ -70,7 +70,7 @@ export const createStyles = (theme: AppTheme) =>
     userFileChipText: {
       ...theme.typography.caption,
       lineHeight: 16,
-      color: theme.colors.textMuted,
+      color: theme.colors.userBubbleSecondaryText,
       flexShrink: 1,
     },
     markdownImage: {
@@ -116,7 +116,6 @@ export const createStyles = (theme: AppTheme) =>
     reasoningTitle: {
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
-      fontSize: 12,
       letterSpacing: 0,
       textTransform: 'none',
       flex: 1,
@@ -183,10 +182,8 @@ export const createStyles = (theme: AppTheme) =>
       flex: 1,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
+      ...theme.typography.body,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 14,
-      lineHeight: 20,
-      color: theme.colors.textPrimary,
     },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {
@@ -254,7 +251,7 @@ export const createStyles = (theme: AppTheme) =>
       flex: 1,
       lineHeight: 16,
     },
-    toolRowTitleMono: { fontFamily: theme.fonts.monoRegular, fontSize: 12 },
+    toolRowTitleMono: { fontFamily: theme.fonts.monoRegular },
     toolRowTitleError: { color: theme.colors.statusError },
     toolRowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     toolRowBody: {
@@ -278,16 +275,13 @@ export const createStyles = (theme: AppTheme) =>
       borderColor: theme.colors.toolBlockBorder,
     },
     toolOutputLine: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
+      ...theme.typography.mono,
       lineHeight: 16,
       color: theme.colors.textSecondary,
     },
     toolOutputHeader: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
-      color: theme.colors.textMuted,
       marginBottom: 2,
     },
     toolDiffLineAdded: {
@@ -308,15 +302,12 @@ export const createStyles = (theme: AppTheme) =>
       borderColor: theme.colors.inlineCodeBorder,
     },
     toolLocationChipText: {
+      ...theme.typography.metadata,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
-      lineHeight: 15,
       color: theme.colors.inlineCodeText,
     },
     toolTruncatedNote: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      color: theme.colors.textMuted,
+      ...theme.typography.metadata,
     },
     scrollableRowTextViewport: { flex: 1, minWidth: 0, overflow: 'hidden' },
     scrollableRowTextScroll: { width: '100%' },
@@ -341,9 +332,7 @@ export const createStyles = (theme: AppTheme) =>
       paddingHorizontal: 2,
     },
     computerUseTraceSummaryText: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      fontSize: 11,
+      ...theme.typography.metadata,
       fontWeight: '600',
     },
     computerUseTraceStepList: { gap: theme.spacing.xs + 2 },
@@ -356,24 +345,19 @@ export const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.xs,
     },
     computerUseTraceAction: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
-      fontSize: 13,
-      lineHeight: 18,
       fontWeight: '600',
     },
     computerUseTraceInlineMeta: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      lineHeight: 16,
-      fontSize: 11,
+      ...theme.typography.metadata,
       flexShrink: 1,
     },
     subAgentCard: {
       borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.warningBorder,
-      backgroundColor: theme.colors.warningBg,
+      borderColor: theme.colors.subAgentBorder,
+      backgroundColor: theme.colors.subAgentBg,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm + 1,
       // Every row below is a fixed height, so a sub-agent streaming progress never resizes the
@@ -399,11 +383,9 @@ export const createStyles = (theme: AppTheme) =>
       justifyContent: 'center',
     },
     subAgentTitle: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
       flex: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
     subAgentDetailWrap: { marginTop: theme.spacing.xs, paddingLeft: theme.spacing.lg + 2, gap: 2 },
     subAgentDetailRow: {
@@ -428,7 +410,7 @@ export const createStyles = (theme: AppTheme) =>
     subAgentOpenHintPressed: { opacity: 0.6 },
     subAgentOpenHintText: {
       ...theme.typography.caption,
-      color: theme.colors.textMuted,
+      color: theme.colors.subAgentAccent,
       fontWeight: '600',
     },
     timelineCard: {
@@ -447,13 +429,11 @@ export const createStyles = (theme: AppTheme) =>
     timelineCardPressed: { opacity: 0.82 },
     timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
     timelineTitle: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
       flex: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
-    timelineTitleMono: { fontFamily: theme.fonts.monoRegular, fontSize: 12, lineHeight: 18 },
+    timelineTitleMono: { fontFamily: theme.fonts.monoRegular },
     timelineDetailWrap: {
       marginTop: theme.spacing.xs,
       borderTopWidth: StyleSheet.hairlineWidth,
@@ -467,8 +447,7 @@ export const createStyles = (theme: AppTheme) =>
       marginTop: theme.spacing.xs,
     },
     timelineDetailLine: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
+      ...theme.typography.mono,
       lineHeight: 16,
       color: theme.colors.textSecondary,
     },

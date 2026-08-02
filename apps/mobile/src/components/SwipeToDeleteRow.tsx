@@ -209,10 +209,8 @@ function createSwipeToDeleteRowStyles(theme: AppTheme) {
       opacity: 0.82,
     },
     actionLabel: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.white,
-      fontSize: 11,
-      lineHeight: 14,
       fontWeight: '600',
     },
   });

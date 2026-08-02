@@ -3,7 +3,11 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { computeHitSlop } from '../../components/touchTarget';
+import { feedback } from '../../feedback';
 import { useAppTheme, type AppTheme } from '../../theme';
+
+const BACK_ICON_VISIBLE_SIZE = { width: 22, height: 22 };
 
 export interface LegalSection {
   title: string;
@@ -40,6 +44,7 @@ export function LegalScreen({
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const backHitSlop = useMemo(() => computeHitSlop(BACK_ICON_VISIBLE_SIZE), []);
   const [openingDocument, setOpeningDocument] = useState(false);
   const openDocumentDisabled = !documentUrl || openingDocument;
 
@@ -47,7 +52,7 @@ export function LegalScreen({
     if (!documentUrl || openingDocument) {
       return;
     }
-
+    void feedback.selection();
     try {
       setOpeningDocument(true);
       const supported = await Linking.canOpenURL(documentUrl);
@@ -68,7 +73,7 @@ export function LegalScreen({
       <View style={styles.header}>
         <Pressable
           onPress={onBack}
-          hitSlop={8}
+          hitSlop={backHitSlop}
           accessibilityRole="button"
           accessibilityLabel={`Back from ${title}`}
         >
@@ -154,7 +159,7 @@ function toBlocks(body: string): LegalBlock[] {
     );
 }
 
-const createStyles = (theme: AppTheme) =>
+export const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.colors.bgMain },
     header: {
@@ -164,7 +169,7 @@ const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.lg,
       paddingHorizontal: 18,
     },
-    headerTitle: { ...theme.typography.largeTitle, fontSize: 20 },
+    headerTitle: { ...theme.typography.title },
     body: { flex: 1 },
     content: { padding: 18, gap: theme.spacing.xxl, paddingBottom: 48 },
     section: { gap: theme.spacing.sm },
@@ -176,21 +181,15 @@ const createStyles = (theme: AppTheme) =>
     },
     paragraph: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       color: theme.colors.textSecondary,
     },
     bulletRow: { flexDirection: 'row', gap: theme.spacing.sm },
     bulletGlyph: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       color: theme.colors.textMuted,
     },
     bulletText: {
       ...theme.typography.body,
-      fontSize: 15,
-      lineHeight: 22,
       flex: 1,
       color: theme.colors.textSecondary,
     },
@@ -204,7 +203,7 @@ const createStyles = (theme: AppTheme) =>
       borderBottomColor: theme.colors.borderLight,
     },
     linkRowPressed: { opacity: 0.6 },
-    linkLabel: { ...theme.typography.body, fontSize: 15, color: theme.colors.textPrimary },
+    linkLabel: { ...theme.typography.body, color: theme.colors.textPrimary },
     linkLabelDisabled: { color: theme.colors.textMuted },
     documentLabel: { ...theme.typography.caption, color: theme.colors.textMuted },
     documentUrl: { ...theme.typography.mono, color: theme.colors.textSecondary },

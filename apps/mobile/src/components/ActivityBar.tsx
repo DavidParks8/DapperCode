@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { LoadingGlyph } from './LoadingGlyph';
+import { motionDuration } from './motion';
 import { useAppTheme, type AppTheme } from '../theme';
 import type { ActivityTone } from '../state/mainScreen/runtime';
 
@@ -45,7 +46,7 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
 
   return (
     <Animated.View
-      entering={FadeIn.duration(160)}
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       style={[styles.row, stacked ? styles.rowStacked : null]}
     >
       <View style={[styles.iconWrap, stacked ? styles.iconWrapStacked : null]}>
@@ -98,11 +99,8 @@ const createStyles = (theme: AppTheme) =>
       minWidth: 0,
     },
     titleText: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      lineHeight: 15,
+      ...theme.typography.metadata,
       fontWeight: '600',
-      color: theme.colors.textMuted,
     },
     titleTextInline: {
       flex: 1,
@@ -111,11 +109,8 @@ const createStyles = (theme: AppTheme) =>
       color: theme.colors.statusError,
     },
     detailText: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      lineHeight: 14,
+      ...theme.typography.metadata,
       fontWeight: '500',
-      color: theme.colors.textMuted,
       opacity: 0.75,
     },
   });

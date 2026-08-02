@@ -7,6 +7,11 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
+import Animated, { Easing, FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
+
+const MOTION_IMMEDIATE_MS = 120;
+const EASING_DECELERATE = [0, 0, 0.2, 1] as const;
+const EASING_ACCELERATE = [0.4, 0, 1, 1] as const;
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react-native-webview';
 
 import type { AppTheme } from '../../theme';
@@ -284,7 +289,13 @@ export function BrowserPreviewSurface({
       )}
       {loadingPreview ||
       (desktopOverviewEnabled && !nativeOverviewShellEnabled && !overviewReady) ? (
-        <View
+        <Animated.View
+          entering={FadeIn.duration(MOTION_IMMEDIATE_MS)
+            .easing(Easing.bezier(...EASING_DECELERATE))
+            .reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(MOTION_IMMEDIATE_MS)
+            .easing(Easing.bezier(...EASING_ACCELERATE))
+            .reduceMotion(ReduceMotion.System)}
           style={styles.loadingOverlay}
           accessibilityRole="progressbar"
           accessibilityLabel="Loading preview"
@@ -292,7 +303,7 @@ export function BrowserPreviewSurface({
         >
           <ActivityIndicator color={theme.colors.textPrimary} />
           <Text style={styles.loadingText}>Loading preview</Text>
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   );

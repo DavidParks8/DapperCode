@@ -23,7 +23,7 @@ export const createOnboardingLayoutStyles = (theme: AppTheme) =>
     heroIconWrap: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: theme.radius.lg,
       backgroundColor: 'rgba(255, 255, 255, 0.08)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -42,7 +42,7 @@ export const createOnboardingLayoutStyles = (theme: AppTheme) =>
       opacity: 0.75,
     },
     connectTopButton: {
-      minHeight: 32,
+      minHeight: 48,
       borderRadius: theme.radius.full,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
@@ -67,6 +67,9 @@ export const createOnboardingLayoutStyles = (theme: AppTheme) =>
       gap: theme.spacing.md,
     },
     connectRoot: {
+      flex: 1,
+    },
+    connectAnimatedRoot: {
       flex: 1,
     },
     connectFooter: {

@@ -4,7 +4,7 @@ import type { AppTheme } from '../theme';
 export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
   return StyleSheet.create({
     laneHeader: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       paddingHorizontal: theme.spacing.xs,
       flexDirection: 'row',
       alignItems: 'center',
@@ -28,18 +28,14 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       backgroundColor: theme.colors.statusIdle,
     },
     laneTitle: {
-      ...theme.typography.body,
+      ...theme.typography.label,
       flex: 1,
       color: theme.colors.textSecondary,
-      fontSize: 11.5,
-      lineHeight: 15,
       fontWeight: '700',
     },
     laneCount: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 12,
       fontVariant: ['tabular-nums'],
     },
     laneFooter: {
@@ -72,21 +68,16 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       minWidth: 0,
     },
     chatTitle: {
-      ...theme.typography.body,
+      ...theme.typography.subheadline,
       color: theme.colors.textSecondary,
-      fontSize: 13,
-      lineHeight: 17,
-      fontWeight: '600',
     },
     chatTitleSelected: {
       color: theme.colors.textPrimary,
     },
     chatContext: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       marginTop: 5,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 13,
     },
     chatItemMeta: {
       maxWidth: 104,
@@ -96,10 +87,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       flexShrink: 0,
     },
     chatAge: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 12,
       fontVariant: ['tabular-nums'],
     },
     chatState: {
@@ -127,10 +116,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       backgroundColor: theme.colors.statusError,
     },
     chatStateText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 8.5,
-      lineHeight: 11,
       flexShrink: 1,
       textAlign: 'right',
     },

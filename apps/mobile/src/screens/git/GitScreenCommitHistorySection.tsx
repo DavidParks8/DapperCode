@@ -82,6 +82,7 @@ export function GitScreenCommitHistorySection({
                       Boolean(controller.stagingPath) ||
                       Boolean(controller.unstagingPath)
                     }
+                    hitSlop={8}
                     style={({ pressed }) => [
                       styles.bulkActionBtn,
                       styles.bulkActionBtnStage,
@@ -113,6 +114,7 @@ export function GitScreenCommitHistorySection({
                       Boolean(controller.stagingPath) ||
                       Boolean(controller.unstagingPath)
                     }
+                    hitSlop={8}
                     style={({ pressed }) => [
                       styles.bulkActionBtn,
                       styles.bulkActionBtnUnstage,

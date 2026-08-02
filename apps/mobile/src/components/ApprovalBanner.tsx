@@ -1,44 +1,71 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { useMemo, useState } from 'react';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { PendingApproval } from '../api/types';
 import { useAppTheme, type AppTheme } from '../theme';
+import { feedback } from '../feedback';
 import {
   controlAccessibilityState,
   decorativeAccessibilityProps,
   useAccessibilityAnnouncement,
 } from '../accessibility';
+import { computeHitSlop } from './touchTarget';
+import { motionDuration } from './motion';
 
 interface ApprovalBannerProps {
   approval: PendingApproval;
   onResolve: (id: string, optionId: string) => Promise<void>;
 }
 
+/** Approximate visible height of an action button, used to size its touch-target hitSlop. */
+const ACTION_BUTTON_VISIBLE_HEIGHT = 34;
+
 export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
+  const actionButtonHitSlop = useMemo(
+    () => computeHitSlop({ width: 112, height: ACTION_BUTTON_VISIBLE_HEIGHT }),
+    [theme],
+  );
 
-  const handleResolve = async (optionId: string) => {
+  // A remounted or reused card must not carry a stale error from the approval it replaced.
+  useEffect(() => {
+    setResolutionError(null);
+  }, [approval.requestId]);
+
+  const handleResolve = async (optionId: string, destructive: boolean) => {
+    setResolutionError(null);
     try {
       await runApprovalResolution(approval.requestId, optionId, onResolve, setResolving);
-    } catch {
-      // The parent surfaces the resolution error; this card only restores retry controls.
+      // Fire the semantic haptic only after the bridge round-trip succeeds; the parent screen
+      // does not fire its own haptic for this action, so this is the single source of truth.
+      void (destructive ? feedback.warning() : feedback.success());
+    } catch (err) {
+      void feedback.error();
+      // The parent screen may also surface this in a global error banner, but the card must
+      // not depend on that: it renders its own visible error so retrying is never a guess.
+      setResolutionError(err instanceof Error ? err.message : 'Failed to resolve approval.');
     }
   };
 
   const label =
     approval.kind === 'commandExecution' ? (approval.command ?? 'Run command') : 'File change';
   useAccessibilityAnnouncement(
-    resolving ? `Resolving approval: ${resolving}` : `Approval requested. ${label}`,
+    resolving
+      ? `Resolving approval: ${resolving}`
+      : (resolutionError ?? `Approval requested. ${label}`),
   );
 
   return (
     <Animated.View
-      entering={FadeInDown.duration(250)}
+      entering={FadeInDown.duration(motionDuration.layout).reduceMotion(
+        ReduceMotion.System,
+      )}
       style={styles.container}
       accessibilityLiveRegion="assertive"
     >
@@ -62,6 +89,12 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
         </Text>
       ) : null}
 
+      {resolutionError ? (
+        <Text style={styles.resolutionError} accessibilityRole="alert">
+          {resolutionError}
+        </Text>
+      ) : null}
+
       <View style={styles.actions}>
         {approval.options.map((option) => {
           const destructive = option.kind?.toLowerCase().includes('reject') ?? false;
@@ -73,8 +106,9 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
                 destructive ? styles.denyBtn : styles.acceptBtn,
                 pressed && styles.btnPressed,
               ]}
-              onPress={() => void handleResolve(option.id)}
+              onPress={() => void handleResolve(option.id, destructive)}
               disabled={resolving !== null}
+              hitSlop={actionButtonHitSlop}
               accessibilityRole="button"
               accessibilityLabel={option.label}
               accessibilityState={controlAccessibilityState({
@@ -145,15 +179,13 @@ const createStyles = (theme: AppTheme) =>
       marginBottom: theme.spacing.sm,
     },
     title: {
-      ...theme.typography.headline,
+      ...theme.typography.caption,
       color: theme.colors.accent,
-      fontSize: 13,
+      fontWeight: '600',
     },
     command: {
       ...theme.typography.mono,
-      fontSize: 12,
       color: theme.colors.textPrimary,
-      lineHeight: 18,
       backgroundColor: theme.colors.bgItem,
       borderRadius: theme.radius.sm,
       padding: theme.spacing.sm,
@@ -163,6 +195,11 @@ const createStyles = (theme: AppTheme) =>
     reason: {
       ...theme.typography.caption,
       color: theme.colors.textSecondary,
+      marginBottom: theme.spacing.sm,
+    },
+    resolutionError: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
       marginBottom: theme.spacing.sm,
     },
     actions: {
@@ -196,7 +233,7 @@ const createStyles = (theme: AppTheme) =>
       flexBasis: '100%',
     },
     btnText: {
-      fontSize: 13,
+      ...theme.typography.caption,
       fontWeight: '600',
     },
   });

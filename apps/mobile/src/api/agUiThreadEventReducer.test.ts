@@ -257,6 +257,92 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
     );
   });
 
+  it('rebases tool bookkeeping onto the ids a snapshot renamed messages to', () => {
+    // Regression: a snapshot re-stated the turn under the agent's own ids while
+    // the call-to-message map still pointed at the streamed ids, so the tool's
+    // next content event resurrected the streamed message at the end of the
+    // transcript and the tool rendered twice.
+    const toolCallId = 'call_01_v9wRdhhSk6HQ9ws94PUB9680';
+    let state = createAgUiThreadMessageState();
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TOOL_CALL_START, toolCallId, toolCallName: 'bash' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.TOOL_CALL_RESULT,
+        toolCallId,
+        messageId: 'streamed-result',
+        content: 'harness ok ',
+      }),
+    );
+    expect(state.toolCallMessageIdByCallId[toolCallId]).toBe(`tool-call:${toolCallId}`);
+
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [
+          {
+            id: 'item-call',
+            role: 'assistant',
+            content: '',
+            toolCalls: [
+              { id: toolCallId, type: 'function', function: { name: 'bash', arguments: '{}' } },
+            ],
+          },
+          { id: 'item-result', role: 'tool', toolCallId, content: 'harness ok ' },
+          { id: 'item-summary', role: 'assistant', content: 'Harness is functioning.' },
+        ],
+      }),
+    );
+
+    expect(state.toolCallMessageIdByCallId[toolCallId]).toBe('item-call');
+    expect(state.toolResultMessageIdByCallId[toolCallId]).toBe('item-result');
+
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.CUSTOM,
+        name: 'dappercode.dev/tool-content',
+        value: {
+          toolCallId,
+          revision: 'r2',
+          content: [{ type: 'terminal', terminalId: 'term-1', output: 'harness ok 42\n' }],
+          locations: [],
+        },
+      }),
+    );
+
+    expect(state.messages.map((entry) => entry.id)).toEqual([
+      'item-call',
+      'item-result',
+      'item-summary',
+    ]);
+    const result = state.messages.find((entry) => entry.id === 'item-result');
+    expect(result?.role === 'tool' ? result.content : '').toContain('harness ok 42');
+  });
+
+  it('forgets tool bookkeeping a snapshot dropped entirely', () => {
+    const toolCallId = 'call_01_dropped';
+    let state = createAgUiThreadMessageState();
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.TOOL_CALL_START, toolCallId, toolCallName: 'bash' }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: 'item-summary', role: 'assistant', content: 'Different turn.' }],
+      }),
+    );
+
+    expect(state.toolCallMessageIdByCallId[toolCallId]).toBeUndefined();
+    expect(state.toolResultMessageIdByCallId[toolCallId]).toBeUndefined();
+  });
+
   it('keeps streamed parts that still describe the snapshot text', () => {
     let state = createAgUiThreadMessageState();
     state = reduceThreadState(

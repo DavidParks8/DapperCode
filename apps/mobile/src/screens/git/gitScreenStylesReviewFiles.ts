@@ -60,8 +60,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
     reviewStatLabel: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 10,
-      lineHeight: 13,
     },
     reviewStatValue: {
       ...theme.typography.body,
@@ -83,10 +81,10 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
     },
     reviewFileCode: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       width: 24,
       color: theme.colors.textMuted,
-      fontSize: 11,
     },
     reviewFilePath: {
       ...theme.typography.caption,
@@ -95,9 +93,9 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       fontWeight: '600',
     },
     reviewFileStats: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       color: theme.colors.textMuted,
-      fontSize: 11,
     },
     bulkActionBtn: {
       borderRadius: theme.radius.sm,
@@ -154,9 +152,9 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       borderColor: theme.colors.borderLight,
     },
     historyHashBadgeText: {
-      ...theme.typography.mono,
+      ...theme.typography.metadata,
+      fontFamily: theme.typography.mono.fontFamily,
       color: theme.colors.textSecondary,
-      fontSize: 11,
     },
     historyRefRow: {
       flexDirection: 'row',
@@ -212,8 +210,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       ...theme.typography.mono,
       color: theme.colors.textMuted,
       width: 24,
-      fontSize: 12,
-      lineHeight: 18,
     },
     filePath: {
       ...theme.typography.body,
@@ -271,12 +267,10 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
     fileAdded: {
       ...theme.typography.mono,
       color: theme.colors.statusComplete,
-      fontSize: 12,
     },
     fileRemoved: {
       ...theme.typography.mono,
       color: theme.colors.statusError,
-      fontSize: 12,
     },
     emptyFilesText: {
       ...theme.typography.caption,

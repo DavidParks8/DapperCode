@@ -13,14 +13,19 @@ export interface DrawerContentViewModel {
   collapsedLaneKeys: Set<DrawerAttentionLane>;
   folderOptions: DrawerFolderOption[];
   folderPickerVisible: boolean;
+  handleClearSearch: () => void;
   handleDismissFolderPicker: () => void;
   handleClose?: () => void;
   handleDeleteChat: (chatId: string) => Promise<boolean>;
   handleNavigate: (screen: DrawerScreen) => void;
   handleNewChat: () => void;
+  handleOpenConnection: () => void;
   handleOpenFolderPicker: () => void;
+  handleSearchQueryChange: (value: string) => void;
   handleSelectChat: (chatId: string) => void;
   handleSelectFolder: (folderKey: string | null) => void;
+  hasAnySessions: boolean;
+  isSearching: boolean;
   loading: boolean;
   loadingOlderChats: boolean;
   noticeMessages: string[];
@@ -30,6 +35,8 @@ export interface DrawerContentViewModel {
   resolvedEmptyHint: string;
   resolvedEmptyTitle: string;
   retryDeepChatListRef: RefObject<() => Promise<void>>;
+  searchQuery: string;
+  searchResultCount: number;
   selectedChatId: string | null;
   selectedFolderKey: string | null;
   selectedFolderLabel: string;

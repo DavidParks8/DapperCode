@@ -1,12 +1,26 @@
 import { AppState, ScrollView, TextInput, type AppStateStatus } from 'react-native';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
+jest.mock('../../feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    success: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    send: jest.fn().mockResolvedValue(undefined),
+    warning: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+  isReduceMotionPreferred: jest.fn().mockResolvedValue(false),
+}));
 import { router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { HostBridgeApiClient } from '../../api/client';
 import type { Chat, GitStatusResponse } from '../../api/types';
+import { feedback } from '../../feedback';
 import { AppThemeProvider, createAppTheme } from '../../theme';
+import { createGitScreenStyles } from './gitScreenStyles';
 import { GitScreen } from './GitScreen';
 import { GIT_SCREEN_REFRESH_INTERVAL_MS } from './gitScreenController';
 import { mainOpeningChatIdAtom, pendingMainChatIdAtom } from '../../state/chat/atoms';
@@ -232,7 +246,10 @@ async function renderGit(
 }
 
 describe('GitScreen behavior', () => {
-  beforeEach(() => jest.useFakeTimers());
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+  });
   afterEach(() => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
@@ -260,6 +277,53 @@ describe('GitScreen behavior', () => {
   it('surfaces refresh failures', async () => {
     const tree = await renderGit(createApi(new Error('git unavailable')));
     expect(hasText(tree.root as Queryable, 'git unavailable')).toBe(true);
+    // A failed initial load must never show a false "clean" state above the real error.
+    expect(hasText(tree.root as Queryable, 'Working tree clean')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('does not show a false clean state or a repeated full-screen spinner after a rejected initial gitStatus load', async () => {
+    const api = createApi();
+    const nextStatus = deferred<GitStatusResponse>();
+    (api.gitStatus as jest.Mock)
+      .mockRejectedValueOnce(new Error('git unavailable'))
+      .mockImplementationOnce(() => nextStatus.promise);
+
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+
+    // Initial load failed: the real error is surfaced, with no false "clean" claim.
+    expect(hasText(root, 'git unavailable')).toBe(true);
+    expect(hasText(root, 'Working tree clean')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
+
+    // Trigger the periodic poll. Since the initial attempt already settled (even though it
+    // failed), this must be a lightweight background refresh, not a repeated full-screen load
+    // that would remount/fade the sections again.
+    act(() => {
+      jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
+
+    await act(async () => {
+      nextStatus.resolve(cleanStatus);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hasText(root, 'Clean')).toBe(true);
+    expect(hasText(root, 'git unavailable')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
     act(() => tree.unmount());
   });
 
@@ -870,6 +934,146 @@ describe('GitScreen behavior', () => {
     expect(hasText(tree.root as Queryable, 'old-name.ts -> new-name.ts')).toBe(true);
     expect(hasText(tree.root as Queryable, '2 days ago')).toBe(true);
     relativeTime.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('shows accessible empty state when working tree is clean', async () => {
+    const tree = await renderGit(createApi(cleanStatus));
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'Working tree clean')).toBe(true);
+    expect(hasText(root, 'No staged or unstaged changes.')).toBe(true);
+    const emptyStateNode = root.findAll(
+      (node) => node.props.accessibilityLabel === 'Working tree is clean. No changes to stage or commit.',
+    );
+    expect(emptyStateNode.length).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('diff comment button has hitSlop covering the 44pt minimum touch target', async () => {
+    const tree = await renderGit(createApi());
+    const root = tree.root as Queryable;
+    const commentIcons = root.findAll((node) => node.children.includes('add-circle-outline'));
+    let commentButton = commentIcons[0]?.parent as Queryable | null;
+    while (commentButton && typeof commentButton.props.onPress !== 'function') {
+      commentButton = commentButton.parent as Queryable | null;
+    }
+    if (!commentButton) throw new Error('Missing diff comment button');
+    const { hitSlop } = commentButton.props;
+    expect(hitSlop).toBeTruthy();
+    if (typeof hitSlop === 'number') {
+      // uniform hitSlop: effective width = 28 + 2*hitSlop >= 44, height = 23 + 2*hitSlop >= 44
+      expect(28 + hitSlop * 2).toBeGreaterThanOrEqual(44);
+      expect(23 + hitSlop * 2).toBeGreaterThanOrEqual(44);
+    } else if (hitSlop && typeof hitSlop === 'object') {
+      const { top = 0, bottom = 0, left = 0, right = 0 } = hitSlop as Record<string, number>;
+      expect(28 + left + right).toBeGreaterThanOrEqual(44);
+      expect(23 + top + bottom).toBeGreaterThanOrEqual(44);
+    } else {
+      throw new Error('Unexpected hitSlop shape');
+    }
+    act(() => tree.unmount());
+  });
+
+  it('inlineReviewComment style has no fixed minWidth that overflows narrow screens', () => {
+    const testTheme = createAppTheme('dark');
+    const styles = createGitScreenStyles(testTheme) as Record<string, Record<string, unknown>>;
+    const { minWidth } = styles.inlineReviewComment ?? {};
+    expect(minWidth === undefined || minWidth === 0 || (typeof minWidth === 'number' && minWidth < 320)).toBe(true);
+  });
+
+  it('fires selection haptic on stage, unstage, stageAll, unstageAll, branchSwitch', async () => {
+    const api = createApi();
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+
+    await press(root, 'Stage');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Unstage');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Stage all');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Unstage all');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Change branch');
+    const mainBranch = root.findAll((node) => node.props.accessibilityLabel === 'main, Local')[0];
+    act(() => (mainBranch.props.onPress as () => void)());
+    await press(root, 'Switch');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+
+    act(() => tree.unmount());
+  });
+
+  it('fires success haptic on commit/push success and error haptic on failure', async () => {
+    const api = createApi();
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+
+    await press(root, 'Commit');
+    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Push (2)');
+    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    (api.gitCommit as jest.Mock).mockResolvedValueOnce({ committed: false, stderr: '' });
+    await press(root, 'Commit');
+    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    (api.gitPush as jest.Mock).mockResolvedValueOnce({ pushed: false, stderr: '' });
+    await press(root, 'Push (2)');
+    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+
+    act(() => tree.unmount());
+  });
+
+  it('fires selection haptic on save comment and success haptic on submit review', async () => {
+    const api = createApi();
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+
+    const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
+    let commentButton = commentIcon?.parent as Queryable | null;
+    while (commentButton && typeof commentButton.props.onPress !== 'function')
+      commentButton = commentButton.parent as Queryable | null;
+    if (!commentButton) throw new Error('Missing review comment action');
+    act(() => (commentButton.props.onPress as () => void)());
+    const input = root
+      .findAllByType(TextInput)
+      .find((node) => node.props.accessibilityLabel === 'Review comment');
+    if (!input) throw new Error('Missing review input');
+    act(() => input.props.onChangeText('Test note'));
+    jest.clearAllMocks();
+    await press(root, 'Save comment');
+    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    jest.clearAllMocks();
+
+    await press(root, 'Send review to agent');
+    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+
+    act(() => tree.unmount());
+  });
+
+  it('truncation notice renders with informational (non-error) style', async () => {
+    const api = createApi(dirtyStatus); // dirtyStatus has truncated: true
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'Diff preview is limited to 1 KB.')).toBe(true);
+    // The truncation node should not have accessibilityRole="alert" (that's for real errors)
+    const alertNodes = root.findAll((node) => node.props.accessibilityRole === 'alert');
+    const truncationAlerts = alertNodes.filter((node) =>
+      node.children.map(String).join('').includes('Diff preview'),
+    );
+    expect(truncationAlerts).toHaveLength(0);
     act(() => tree.unmount());
   });
 });

@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, type ComponentProps } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 
 import type { WorkspaceSummary } from '../api/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
+import { motionDuration } from './motion';
 import {
   formatWorkspaceMeta,
   showWorkspacePinAction,
@@ -43,6 +45,18 @@ export function WorkspaceTile({
     >
       {({ pressed }) => (
         <View style={[styles.workspaceTileContent, pressed && styles.pressed]}>
+          {selected ? (
+            <Animated.View
+              entering={FadeIn.duration(motionDuration.routine).reduceMotion(
+                ReduceMotion.System,
+              )}
+              exiting={FadeOut.duration(motionDuration.routine).reduceMotion(
+                ReduceMotion.System,
+              )}
+              style={styles.workspaceTileSelectedOverlay}
+              pointerEvents="none"
+            />
+          ) : null}
           <View style={styles.workspaceTileHeader}>
             <Ionicons
               {...decorativeAccessibilityProps}
@@ -67,7 +81,10 @@ export function LoadingRow({ label }: { label: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
   return (
-    <View
+    <Animated.View
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(
+        ReduceMotion.System,
+      )}
       style={styles.statusRow}
       accessibilityRole="progressbar"
       accessibilityLabel={label}
@@ -75,7 +92,7 @@ export function LoadingRow({ label }: { label: string }) {
     >
       <ActivityIndicator color={theme.colors.textPrimary} />
       <Text style={styles.statusText}>{label}</Text>
-    </View>
+    </Animated.View>
   );
 }
 

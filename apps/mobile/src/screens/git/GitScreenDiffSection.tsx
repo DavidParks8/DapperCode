@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
 import type { GitReviewTarget } from './gitDiffReview';
@@ -9,7 +10,29 @@ import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCommonProps) {
   const { derived, diffFileForView } = controller;
 
+  // Only claim a clean working tree once a status fetch has actually succeeded (no active
+  // error) and returned no changes. Falling through to `null` for an initial/failed load
+  // avoids showing a false "Working tree clean" state stacked above the real error banner.
+  const hasLoadedStatus = controller.status !== null;
+  const showCleanState = !controller.error && hasLoadedStatus && !derived.hasChanges;
+
+  if (showCleanState) {
+    return (
+      <View
+        style={styles.cleanStateContainer}
+        accessibilityRole="text"
+        accessibilityLabel="Working tree is clean. No changes to stage or commit."
+      >
+        <Ionicons name="checkmark-circle-outline" size={32} color={theme.colors.textMuted} />
+        <Text style={styles.cleanStateText}>Working tree clean</Text>
+        <Text style={styles.cleanStateSubtext}>No staged or unstaged changes.</Text>
+      </View>
+    );
+  }
+
   if (!derived.hasChanges) {
+    // No changes to render because the status either hasn't loaded successfully yet or the
+    // most recent refresh failed; GitScreen's loading spinner / error banner communicates that.
     return null;
   }
 
@@ -79,6 +102,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                       controller.stagingPath === entry.stagePath ||
                       controller.unstagingPath === entry.stagePath
                     }
+                    hitSlop={8}
                     style={({ pressed }) => [
                       styles.fileActionBtn,
                       styles.fileActionBtnStage,
@@ -110,6 +134,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                       controller.unstagingPath === entry.stagePath ||
                       controller.stagingPath === entry.stagePath
                     }
+                    hitSlop={8}
                     style={({ pressed }) => [
                       styles.fileActionBtn,
                       styles.fileActionBtnUnstage,
@@ -136,7 +161,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
       </View>
 
       {derived.truncationNotice ? (
-        <Text style={styles.errorText}>{derived.truncationNotice}</Text>
+        <Text style={styles.truncationNotice}>{derived.truncationNotice}</Text>
       ) : null}
 
       {derived.parsedDiff.files.length > 0 ? (
@@ -229,144 +254,159 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                     No textual hunks available for this file.
                   </Text>
                 ) : (
-                  <ScrollView
-                    style={[styles.diffVerticalScroll, { maxHeight: derived.diffViewerMaxHeight }]}
-                    contentContainerStyle={styles.diffVerticalContent}
-                    showsVerticalScrollIndicator
-                    nestedScrollEnabled
-                    keyboardShouldPersistTaps="handled"
-                    onTouchStart={controller.disableBodyScroll}
-                    onTouchCancel={controller.enableBodyScroll}
-                    onTouchEnd={controller.enableBodyScroll}
-                    onScrollBeginDrag={controller.disableBodyScroll}
-                    onScrollEndDrag={controller.enableBodyScroll}
-                    onMomentumScrollEnd={controller.enableBodyScroll}
+                  <Animated.View
+                    key={diffFileForView.id}
+                    entering={FadeIn.duration(200)}
                   >
                     <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator
+                      style={[styles.diffVerticalScroll, { maxHeight: derived.diffViewerMaxHeight }]}
+                      contentContainerStyle={styles.diffVerticalContent}
+                      showsVerticalScrollIndicator
                       nestedScrollEnabled
                       keyboardShouldPersistTaps="handled"
                       onTouchStart={controller.disableBodyScroll}
                       onTouchCancel={controller.enableBodyScroll}
                       onTouchEnd={controller.enableBodyScroll}
+                      onScrollBeginDrag={controller.disableBodyScroll}
+                      onScrollEndDrag={controller.enableBodyScroll}
+                      onMomentumScrollEnd={controller.enableBodyScroll}
                     >
-                      <View style={styles.diffLines}>
-                        {diffFileForView.hunks.map((hunk) => (
-                          <View
-                            key={`${hunk.header}:${hunk.oldStart}:${hunk.newStart}`}
-                            style={styles.hunkBlock}
-                          >
-                            <Text style={styles.hunkHeader}>{hunk.header}</Text>
-                            {hunk.lines.map((line, lineIndex) => {
-                              const target = createGitReviewTarget(
-                                diffFileForView,
-                                hunk,
-                                line,
-                                lineIndex,
-                              );
-                              const comment = target
-                                ? controller.reviewComments.find(
-                                    (entry) => entry.anchorKey === target.anchorKey,
-                                  )
-                                : null;
-                              return (
-                                <View key={`${hunk.header}:${lineIndex}`}>
-                                  <View
-                                    style={[
-                                      styles.diffLineRow,
-                                      line.kind === 'add' && styles.diffLineRowAdd,
-                                      line.kind === 'remove' && styles.diffLineRowRemove,
-                                      line.kind === 'meta' && styles.diffLineRowMeta,
-                                    ]}
-                                  >
-                                    <Pressable
-                                      onPress={
-                                        target
-                                          ? () =>
-                                              controller.openReviewComment(
-                                                target as GitReviewTarget,
-                                              )
-                                          : undefined
-                                      }
-                                      disabled={!target}
-                                      hitSlop={4}
-                                      style={({ pressed }) => [
-                                        styles.diffCommentButton,
-                                        comment && styles.diffCommentButtonActive,
-                                        pressed && target && styles.diffCommentButtonPressed,
-                                      ]}
-                                    >
-                                      {target ? (
-                                        <Ionicons
-                                          name={comment ? 'chatbubble' : 'add-circle-outline'}
-                                          size={13}
-                                          color={
-                                            comment
-                                              ? theme.colors.textPrimary
-                                              : theme.colors.textMuted
-                                          }
-                                        />
-                                      ) : null}
-                                    </Pressable>
-                                    <Text style={styles.diffLineNumber}>
-                                      {formatDiffLineNumber(line.oldLineNumber)}
-                                    </Text>
-                                    <Text style={styles.diffLineNumber}>
-                                      {formatDiffLineNumber(line.newLineNumber)}
-                                    </Text>
-                                    <Text
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        onTouchStart={controller.disableBodyScroll}
+                        onTouchCancel={controller.enableBodyScroll}
+                        onTouchEnd={controller.enableBodyScroll}
+                      >
+                        <View style={styles.diffLines}>
+                          {diffFileForView.hunks.map((hunk) => (
+                            <View
+                              key={`${hunk.header}:${hunk.oldStart}:${hunk.newStart}`}
+                              style={styles.hunkBlock}
+                            >
+                              <Text style={styles.hunkHeader}>{hunk.header}</Text>
+                              {hunk.lines.map((line, lineIndex) => {
+                                const target = createGitReviewTarget(
+                                  diffFileForView,
+                                  hunk,
+                                  line,
+                                  lineIndex,
+                                );
+                                const comment = target
+                                  ? controller.reviewComments.find(
+                                      (entry) => entry.anchorKey === target.anchorKey,
+                                    )
+                                  : null;
+                                return (
+                                  <View key={`${hunk.header}:${lineIndex}`}>
+                                    <View
                                       style={[
-                                        styles.diffLinePrefix,
-                                        line.kind === 'add' && styles.diffLinePrefixAdd,
-                                        line.kind === 'remove' && styles.diffLinePrefixRemove,
-                                        line.kind === 'meta' && styles.diffLinePrefixMeta,
+                                        styles.diffLineRow,
+                                        line.kind === 'add' && styles.diffLineRowAdd,
+                                        line.kind === 'remove' && styles.diffLineRowRemove,
+                                        line.kind === 'meta' && styles.diffLineRowMeta,
                                       ]}
                                     >
-                                      {line.prefix}
-                                    </Text>
-                                    <Text selectable style={styles.diffLineText}>
-                                      {line.content || ' '}
-                                    </Text>
-                                  </View>
-                                  {comment ? (
-                                    <View style={styles.inlineReviewComment}>
-                                      <View style={styles.inlineReviewCommentHeader}>
-                                        <Text style={styles.inlineReviewCommentAnchor}>
-                                          {comment.side} line {String(comment.line)}
-                                        </Text>
-                                        <View style={styles.inlineReviewCommentActions}>
-                                          <Pressable
-                                            onPress={() => controller.openReviewComment(comment)}
-                                          >
-                                            <Text style={styles.inlineReviewCommentAction}>
-                                              Edit
-                                            </Text>
-                                          </Pressable>
-                                          <Pressable
-                                            onPress={() =>
-                                              controller.deleteReviewComment(comment.anchorKey)
+                                      <Pressable
+                                        onPress={
+                                          target
+                                            ? () =>
+                                                controller.openReviewComment(
+                                                  target as GitReviewTarget,
+                                                )
+                                            : undefined
+                                        }
+                                        disabled={!target}
+                                        hitSlop={
+                                          target
+                                            ? { top: 11, bottom: 11, left: 8, right: 8 }
+                                            : undefined
+                                        }
+                                        style={({ pressed }) => [
+                                          styles.diffCommentButton,
+                                          comment && styles.diffCommentButtonActive,
+                                          pressed && target && styles.diffCommentButtonPressed,
+                                        ]}
+                                      >
+                                        {target ? (
+                                          <Ionicons
+                                            name={comment ? 'chatbubble' : 'add-circle-outline'}
+                                            size={13}
+                                            color={
+                                              comment
+                                                ? theme.colors.textPrimary
+                                                : theme.colors.textMuted
                                             }
-                                          >
-                                            <Text style={styles.inlineReviewCommentDelete}>
-                                              Delete
-                                            </Text>
-                                          </Pressable>
-                                        </View>
-                                      </View>
-                                      <Text style={styles.inlineReviewCommentText}>
-                                        {comment.comment}
+                                          />
+                                        ) : null}
+                                      </Pressable>
+                                      <Text style={styles.diffLineNumber}>
+                                        {formatDiffLineNumber(line.oldLineNumber)}
+                                      </Text>
+                                      <Text style={styles.diffLineNumber}>
+                                        {formatDiffLineNumber(line.newLineNumber)}
+                                      </Text>
+                                      <Text
+                                        style={[
+                                          styles.diffLinePrefix,
+                                          line.kind === 'add' && styles.diffLinePrefixAdd,
+                                          line.kind === 'remove' && styles.diffLinePrefixRemove,
+                                          line.kind === 'meta' && styles.diffLinePrefixMeta,
+                                        ]}
+                                      >
+                                        {line.prefix}
+                                      </Text>
+                                      <Text selectable style={styles.diffLineText}>
+                                        {line.content || ' '}
                                       </Text>
                                     </View>
-                                  ) : null}
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ))}
-                      </View>
+                                    {comment ? (
+                                      <Animated.View
+                                        entering={FadeIn.duration(200)}
+                                        exiting={FadeOut.duration(120)}
+                                        style={styles.inlineReviewComment}
+                                      >
+                                        <View style={styles.inlineReviewCommentHeader}>
+                                          <Text style={styles.inlineReviewCommentAnchor}>
+                                            {comment.side} line {String(comment.line)}
+                                          </Text>
+                                          <View style={styles.inlineReviewCommentActions}>
+                                            <Pressable
+                                              onPress={() => controller.openReviewComment(comment)}
+                                              hitSlop={8}
+                                            >
+                                              <Text style={styles.inlineReviewCommentAction}>
+                                                Edit
+                                              </Text>
+                                            </Pressable>
+                                            <Pressable
+                                              onPress={() =>
+                                                controller.deleteReviewComment(comment.anchorKey)
+                                              }
+                                              hitSlop={8}
+                                            >
+                                              <Text style={styles.inlineReviewCommentDelete}>
+                                                Delete
+                                              </Text>
+                                            </Pressable>
+                                          </View>
+                                        </View>
+                                        <Text style={styles.inlineReviewCommentText}>
+                                          {comment.comment}
+                                        </Text>
+                                      </Animated.View>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          ))}
+                        </View>
+                      </ScrollView>
                     </ScrollView>
-                  </ScrollView>
+                  </Animated.View>
                 )}
               </>
             ) : null}

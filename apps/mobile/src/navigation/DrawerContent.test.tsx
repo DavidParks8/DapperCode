@@ -1,7 +1,16 @@
 import { useMemo } from 'react';
 jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
 import { router } from 'expo-router';
-import { Alert, AppState, RefreshControl } from 'react-native';
+import {
+  AccessibilityInfo,
+  Alert,
+  AppState,
+  Keyboard,
+  Platform,
+  RefreshControl,
+  StyleSheet,
+  Text,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -23,6 +32,7 @@ import { createEmptyChatSummaryCache, mergeChatSummaryCache } from '../chatSumma
 import * as ChatSummaryCache from '../chatSummaryCache';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+import { createDrawerContentStyles } from './drawerContentStyles';
 import { routes } from './routes';
 import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from './useDrawerChatCollection';
 
@@ -1925,6 +1935,349 @@ describe('DrawerContent session deletion', () => {
 
     expect(harness.api.forgetChat).not.toHaveBeenCalled();
     expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    act(() => tree.unmount());
+  });
+});
+
+describe('DrawerContent session search', () => {
+  function searchInput(root: Queryable): Queryable {
+    return findByLabel(root, 'Search sessions');
+  }
+
+  async function typeSearch(root: Queryable, value: string): Promise<void> {
+    await act(async () => {
+      (searchInput(root).props.onChangeText as (value: string) => void)(value);
+      await Promise.resolve();
+    });
+  }
+
+  it('dismisses the search keyboard before starting a new chat', async () => {
+    const dismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    await press(findByLabel(root, 'New chat'));
+
+    expect(dismissSpy).toHaveBeenCalledTimes(1);
+
+    dismissSpy.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('matches sessions case-insensitively across title, workspace, agent, and status', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'alpha', title: 'Fix login bug', cwd: '/repo/alpha', agentId: 'copilot' }),
+        createChat({ id: 'beta', title: 'Refactor db layer', cwd: '/repo/beta', agentId: 'codex' }),
+        createChat({
+          id: 'gamma',
+          title: 'Unrelated task',
+          cwd: '/repo/gamma',
+          agentId: 'copilot',
+          status: 'error',
+          lastError: 'boom',
+        }),
+      ],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'LOGIN');
+    expect(hasText(root, 'Fix login bug')).toBe(true);
+    expect(hasText(root, 'Refactor db layer')).toBe(false);
+    expect(hasText(root, 'Unrelated task')).toBe(false);
+
+    await typeSearch(root, 'beta');
+    expect(hasText(root, 'Refactor db layer')).toBe(true);
+    expect(hasText(root, 'Fix login bug')).toBe(false);
+
+    await typeSearch(root, 'codex');
+    expect(hasText(root, 'Refactor db layer')).toBe(true);
+    expect(hasText(root, 'Fix login bug')).toBe(false);
+
+    await typeSearch(root, 'failed');
+    expect(hasText(root, 'Unrelated task')).toBe(true);
+    expect(hasText(root, 'Fix login bug')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('preserves urgency lane grouping and order for search matches', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'attn', title: 'Zeta approval chat', cwd: '/repo/z' }),
+        createChat({ id: 'work', title: 'Zeta working chat', cwd: '/repo/z', status: 'running' }),
+        createChat({ id: 'rest', title: 'Zeta recent chat', cwd: '/repo/z' }),
+      ],
+      approvals: [createApproval('attn')],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+    await typeSearch(root, 'zeta');
+
+    expect(findByLabel(root, 'Needs your attention, 1 session')).toBeDefined();
+    expect(findByLabel(root, 'Working now, 1 session')).toBeDefined();
+    expect(findByLabel(root, 'Recent, 1 session')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('forces a previously collapsed lane header to report expanded while a search reveals its matches', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'first', title: 'First recent', cwd: '/repo/first' }),
+        createChat({ id: 'second', title: 'Second recent', cwd: '/repo/second' }),
+      ],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    // Collapse the "Recent" lane before searching.
+    await press(findByLabel(root, 'Recent, 2 sessions'));
+    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: false }),
+    );
+    expect(hasText(root, 'First recent')).toBe(false);
+
+    await typeSearch(root, 'first');
+
+    // Rows for the match render (the search bypasses collapse-filtering), so the header must
+    // now claim expanded too, not still say collapsed while its rows are visibly showing.
+    expect(findByLabel(root, 'Recent, 1 session').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: true }),
+    );
+    expect(hasText(root, 'First recent')).toBe(true);
+
+    await press(findByLabel(root, 'Clear search'));
+
+    // Clearing the search restores the user's manual collapse preference.
+    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: false }),
+    );
+    expect(hasText(root, 'First recent')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('shows a distinct no-results state without hiding the offline notice or connection footer', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Alpha chat', cwd: '/repo/a' })],
+      connected: false,
+    });
+    (harness.api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
+      new Error('capabilities failed'),
+    );
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'nonexistent-session');
+    expect(hasText(root, 'No sessions match')).toBe(true);
+    expect(hasText(root, 'Alpha chat')).toBe(false);
+    expect(findByLabel(root, 'Could not refresh agent names. Retry')).toBeDefined();
+    expect(findByLabel(root, 'Bridge offline. Reconnect or edit connection')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('clears the query, restores the full list, and confirms the field is empty', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' }),
+        createChat({ id: 'beta', title: 'Beta chat', cwd: '/repo/beta' }),
+      ],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    expect(hasText(root, 'Beta chat')).toBe(false);
+
+    await press(findByLabel(root, 'Clear search'));
+    expect(hasText(root, 'Alpha chat')).toBe(true);
+    expect(hasText(root, 'Beta chat')).toBe(true);
+    expect(searchInput(root).props.value).toBe('');
+    act(() => tree.unmount());
+  });
+
+  it('keeps a live-search query stable and current as drawer data streams updates', async () => {
+    let streamBatch:
+      | ((batch: { streamId: string; limit: number; done: boolean; chats: ChatSummary[] }) => void)
+      | undefined;
+    const alpha = createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' });
+    const harness = createHarness();
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      streamBatch = onBatch;
+      onBatch({ streamId: 'stream', limit: 5, done: false, chats: [alpha] });
+      return { streamId: 'stream', cancel: harness.cancelStream };
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+    await typeSearch(root, 'alpha');
+    expect(hasText(root, 'Alpha chat')).toBe(true);
+
+    const beta = createChat({ id: 'beta', title: 'Beta chat', cwd: '/repo/beta' });
+    await act(async () => {
+      streamBatch?.({ streamId: 'stream', limit: 20, done: false, chats: [alpha, beta] });
+      await Promise.resolve();
+    });
+
+    expect(searchInput(root).props.value).toBe('alpha');
+    expect(hasText(root, 'Alpha chat')).toBe(true);
+    expect(hasText(root, 'Beta chat')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  async function settleSearchAnnouncementDebounce(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+  }
+
+  it('announces the debounced result count to screen readers once typing settles', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation();
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    // The single announcement channel is debounced: nothing fires until typing settles.
+    expect(announce).not.toHaveBeenCalled();
+    await settleSearchAnnouncementDebounce();
+    expect(announce).toHaveBeenCalledWith('1 session matches "alpha"');
+    expect(announce).toHaveBeenCalledTimes(1);
+
+    await typeSearch(root, 'nonexistent');
+    await settleSearchAnnouncementDebounce();
+    expect(announce).toHaveBeenCalledWith('No sessions match "nonexistent"');
+    expect(announce).toHaveBeenCalledTimes(2);
+
+    announce.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('coalesces rapid keystrokes into a single announcement instead of one per keystroke', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation();
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    // Simulate fast typing: each keystroke lands well inside the debounce window of the last.
+    await act(async () => {
+      (searchInput(root).props.onChangeText as (value: string) => void)('a');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('al');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('alp');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('alpha');
+    });
+
+    expect(announce).not.toHaveBeenCalled();
+    await settleSearchAnnouncementDebounce();
+
+    // Only the final, settled query is announced — never the intermediate keystrokes.
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('1 session matches "alpha"');
+
+    announce.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('keeps a single announcement channel by omitting live regions from the visual search summary and empty state', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    const summaryText = root.findAll(
+      (node) => textContent(node as Queryable).includes('session matches "alpha"') && node.type === Text,
+    )[0];
+    expect(summaryText?.props.accessibilityLiveRegion).toBeUndefined();
+
+    await typeSearch(root, 'nonexistent');
+    const emptyStateView = root.findAll(
+      (node) => node.props.accessibilityLiveRegion !== undefined && hasText(node as Queryable, 'No sessions match'),
+    )[0];
+    expect(emptyStateView?.props.accessibilityLiveRegion).toBe('none');
+
+    act(() => tree.unmount());
+  });
+
+  it('exposes an accessible label, hint, and a reachable clear action on the search field', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+    const input = searchInput(root);
+    expect(input.props.accessibilityLabel).toBe('Search sessions');
+    expect(input.props.accessibilityHint).toContain('Filters sessions');
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Clear search'),
+    ).toHaveLength(0);
+
+    await typeSearch(root, 'alpha');
+    const clearButton = findByLabel(root, 'Clear search');
+    expect(clearButton.props.accessibilityRole).toBe('button');
+    act(() => tree.unmount());
+  });
+
+  it('sizes the search field container to the platform touch-target minimum, not a spacing token', () => {
+    const flattened = StyleSheet.flatten(createDrawerContentStyles(theme).searchField);
+    expect(flattened.minHeight).toBe(theme.touchTarget.minimum);
+    expect(flattened.minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it('sizes the lane header to the platform touch-target minimum, including 48dp on Android', () => {
+    const flattenedDefault = StyleSheet.flatten(createDrawerContentStyles(theme).laneHeader);
+    expect(flattenedDefault.minHeight).toBe(theme.touchTarget.minimum);
+
+    const originalOS = Platform.OS;
+    Platform.OS = 'android';
+    try {
+      const androidTheme = createAppTheme('dark');
+      expect(androidTheme.touchTarget.minimum).toBe(48);
+      const flattenedAndroid = StyleSheet.flatten(createDrawerContentStyles(androidTheme).laneHeader);
+      expect(flattenedAndroid.minHeight).toBe(48);
+    } finally {
+      Platform.OS = originalOS;
+    }
+  });
+
+  it('does not hide the offline notice or connection footer while a search matches', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+      connected: false,
+    });
+    (harness.api.readBridgeCapabilities as jest.Mock).mockRejectedValueOnce(
+      new Error('capabilities failed'),
+    );
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    expect(hasText(root, 'Alpha chat')).toBe(true);
+    expect(findByLabel(root, 'Could not refresh agent names. Retry')).toBeDefined();
+    expect(findByLabel(root, 'Bridge offline. Reconnect or edit connection')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('opens the connection editor from the drawer footer without routing through a chat', async () => {
+    const harness = createHarness({ connected: false });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+    await press(findByLabel(root, 'Bridge offline. Reconnect or edit connection'));
+    expect(router.push).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'edit'), {
+      withAnchor: true,
+    });
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(router.navigate).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 });

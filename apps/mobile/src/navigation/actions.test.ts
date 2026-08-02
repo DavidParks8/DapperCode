@@ -19,6 +19,7 @@ import {
   chatContextChangedAtom,
   closeGitAtom,
   navigateAtom,
+  openBridgeConnectionAtom,
   openBrowserAtom,
   openChatGitAtom,
   openSubAgentAtom,
@@ -119,7 +120,39 @@ describe('router-backed navigation actions', () => {
     store.set(closeGitAtom);
 
     expect(mockRouter.replace).toHaveBeenCalledWith(routes.onboarding);
+    // replaceRoot dismisses only the route it is about to replace before landing on onboarding;
+    // it must never reach for a chat-specific dismissal while there is no active profile.
+    expect(mockRouter.dismissTo).toHaveBeenCalledWith(routes.onboarding);
+    for (const [href] of mockRouter.dismissTo.mock.calls) {
+      expect(href).toEqual(routes.onboarding);
+    }
+  });
+
+  it('opens the Settings-owned connection editor with an anchored push, never dismissTo/navigate', () => {
+    const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
+    store.set(chatContextChangedAtom, chat('root-thread'));
+
+    store.set(openBridgeConnectionAtom);
+
+    // A plain anchored push both adds the connection screen on top of whatever the drawer was
+    // opened from (a chat, or Settings itself) and forces Settings' own `index` route to be
+    // established beneath it, so it must never route through dismissTo/navigateRoot — see
+    // routeNavigation.ts's dismissToThenApply for why that would risk deleting Settings' index
+    // out of its own stack instead of leaving it in place.
+    expect(mockRouter.push).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'edit'), {
+      withAnchor: true,
+    });
     expect(mockRouter.dismissTo).not.toHaveBeenCalled();
+    expect(mockRouter.navigate).not.toHaveBeenCalled();
+  });
+
+  it('sends openBridgeConnectionAtom to onboarding when no bridge profile exists', () => {
+    const store = createTestStore();
+
+    store.set(openBridgeConnectionAtom);
+
+    expect(mockRouter.replace).toHaveBeenCalledWith(routes.onboarding);
+    expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
   it('dismisses a selected root agent back to its canonical chat', () => {

@@ -133,7 +133,6 @@ const createStyles = (theme: AppTheme) => {
     },
     title: {
       ...theme.typography.headline,
-      fontSize: 17,
     },
     titlePrimary: {
       color: theme.colors.accentText,
