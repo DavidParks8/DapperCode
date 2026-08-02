@@ -5,5 +5,10 @@ export const unstable_settings = {
 };
 
 export default function SettingsLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="connection" options={{ presentation: 'modal', gestureEnabled: true }} />
+    </Stack>
+  );
 }

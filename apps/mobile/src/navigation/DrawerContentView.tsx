@@ -1,26 +1,35 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
+import { computeHitSlop } from '../components/touchTarget';
 import { getDrawerFolderPickerLabels } from './drawerAttention';
 import { formatCompactCount } from './drawerContentHelpers';
 import { SelectionSheet, type SelectionSheetOption } from '../components/SelectionSheet';
 import { DrawerChatList } from './DrawerChatList';
 import { useDrawerContentViewModel } from './drawerContentViewContext';
 
+const CLEAR_SEARCH_HIT_SLOP = computeHitSlop({ width: 28, height: 28 });
+
 export function DrawerContentView() {
   const {
     attentionCount,
     folderOptions,
     folderPickerVisible,
+    handleClearSearch,
     handleClose,
     handleDismissFolderPicker,
     handleNavigate,
     handleNewChat,
+    handleOpenConnection,
     handleOpenFolderPicker,
+    handleSearchQueryChange,
     handleSelectFolder,
+    isSearching,
     recentCount,
+    searchQuery,
+    searchResultCount,
     selectedFolderKey,
     selectedFolderLabel,
     styles,
@@ -106,6 +115,58 @@ export function DrawerContentView() {
               <Text style={styles.statusSummaryText}>{`${String(recentCount)} recent`}</Text>
             </View>
 
+            <View style={styles.searchField}>
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="search"
+                size={16}
+                color={theme.colors.textMuted}
+              />
+              <TextInput
+                accessibilityLabel="Search sessions"
+                accessibilityHint="Filters sessions by title, workspace, agent, or status"
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="never"
+                onChangeText={handleSearchQueryChange}
+                placeholder="Search sessions"
+                placeholderTextColor={theme.colors.textMuted}
+                returnKeyType="search"
+                style={styles.searchInput}
+                value={searchQuery}
+              />
+              {searchQuery.length > 0 ? (
+                <Pressable
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                  hitSlop={CLEAR_SEARCH_HIT_SLOP}
+                  onPress={handleClearSearch}
+                  style={({ pressed }) => [
+                    styles.searchClearButton,
+                    pressed && styles.searchClearButtonPressed,
+                  ]}
+                >
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="close-circle"
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
+
+            {isSearching ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={styles.searchResultSummary}
+              >
+                {searchResultCount === 0
+                  ? `No sessions match "${searchQuery.trim()}"`
+                  : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${searchQuery.trim()}"`}
+              </Text>
+            ) : null}
+
             <Pressable
               accessibilityLabel={`Filter sessions by folder, ${selectedFolderLabel}`}
               accessibilityRole="button"
@@ -138,11 +199,24 @@ export function DrawerContentView() {
         </View>
 
         <View style={styles.footer}>
-          <View
-            accessible
-            accessibilityLabel={wsConnected ? 'Bridge connected' : 'Bridge offline'}
+          <Pressable
+            accessibilityHint={
+              wsConnected
+                ? 'Opens the bridge connection settings.'
+                : 'Opens the bridge connection settings to reconnect.'
+            }
+            accessibilityLabel={
+              wsConnected
+                ? 'Bridge connected. Edit connection'
+                : 'Bridge offline. Reconnect or edit connection'
+            }
             accessibilityLiveRegion="polite"
-            style={styles.connectionStatus}
+            accessibilityRole="button"
+            onPress={handleOpenConnection}
+            style={({ pressed }) => [
+              styles.connectionStatus,
+              pressed && styles.connectionStatusPressed,
+            ]}
           >
             <View
               style={[
@@ -158,7 +232,7 @@ export function DrawerContentView() {
                 {`${formatCompactCount(totalChatCount)} sessions`}
               </Text>
             </View>
-          </View>
+          </Pressable>
           <Pressable
             accessibilityLabel="Open preview browser"
             accessibilityRole="button"

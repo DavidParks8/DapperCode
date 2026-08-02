@@ -19,6 +19,7 @@ export function DrawerChatList() {
     collapsedLaneKeys,
     handleDeleteChat,
     handleSelectChat,
+    isSearching,
     loading,
     loadingOlderChats,
     noticeMessages,
@@ -27,6 +28,7 @@ export function DrawerChatList() {
     resolvedEmptyHint,
     resolvedEmptyTitle,
     retryDeepChatListRef,
+    searchQuery,
     selectedChatId,
     styles,
     theme,
@@ -77,6 +79,11 @@ export function DrawerChatList() {
   }
 
   if (visibleAttentionSections.length === 0) {
+    const trimmedQuery = searchQuery.trim();
+    const emptyTitle = isSearching ? `No sessions match “${trimmedQuery}”` : resolvedEmptyTitle;
+    const emptyHint = isSearching
+      ? 'Try a different title, workspace, agent, or status.'
+      : resolvedEmptyHint;
     return (
       <ScrollView
         contentContainerStyle={styles.emptyListContent}
@@ -95,12 +102,12 @@ export function DrawerChatList() {
         <View accessibilityLiveRegion="polite" style={styles.emptyState}>
           <Ionicons
             {...decorativeAccessibilityProps}
-            name="chatbubbles-outline"
+            name={isSearching ? 'search-outline' : 'chatbubbles-outline'}
             size={21}
             color={theme.colors.textMuted}
           />
-          <Text style={styles.emptyTitle}>{resolvedEmptyTitle}</Text>
-          <Text style={styles.emptyHint}>{resolvedEmptyHint}</Text>
+          <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+          <Text style={styles.emptyHint}>{emptyHint}</Text>
         </View>
       </ScrollView>
     );

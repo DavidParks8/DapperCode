@@ -82,11 +82,24 @@ function ConnectionRoute() {
   return <Text>Connection</Text>;
 }
 
+const formLifecycle: string[] = [];
+
+function FormDraftRoute() {
+  useEffect(() => {
+    formLifecycle.push('mount');
+    return () => {
+      formLifecycle.push('unmount');
+    };
+  }, []);
+  return <Text>Connection form draft</Text>;
+}
+
 const routeLabels = {
   agent: 'Agent route',
   browser: 'Browser route',
   checkout: 'Checkout route',
   connection: 'Connection route',
+  settingsConnection: 'Settings connection route',
   git: 'Git route',
   privacy: 'Privacy route',
   settings: 'Settings route',
@@ -99,6 +112,9 @@ const routeOverrides = {
   'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
   'profiles/[profileId]/(drawer)/settings/privacy': () => <Text>{routeLabels.privacy}</Text>,
   'profiles/[profileId]/(drawer)/settings/terms': () => <Text>{routeLabels.terms}</Text>,
+  'profiles/[profileId]/(drawer)/settings/connection': () => (
+    <Text>{routeLabels.settingsConnection}</Text>
+  ),
   'profiles/[profileId]/(drawer)/chats/[chatId]/git': () => <Text>{routeLabels.git}</Text>,
   'profiles/[profileId]/(drawer)/chats/[chatId]/agents/[threadId]': () => (
     <Text>{routeLabels.agent}</Text>
@@ -115,13 +131,12 @@ const routeOverrides = {
 };
 
 function SettingsConnectionLauncher() {
-  const { chatId = 'new', profileId = 'profile-1' } = useLocalSearchParams<{
-    chatId?: string;
+  const { profileId = 'profile-1' } = useLocalSearchParams<{
     profileId?: string;
   }>();
   useEffect(() => {
-    router.push(routes.connection(profileId, chatId, 'edit'), { withAnchor: true });
-  }, [chatId, profileId]);
+    router.push(routes.settingsConnection(profileId, 'edit'));
+  }, [profileId]);
   return <Text>Settings launcher</Text>;
 }
 
@@ -144,6 +159,7 @@ describe('Expo Router route topology', () => {
   beforeEach(() => {
     mainLifecycle.length = 0;
     mainRenders.length = 0;
+    formLifecycle.length = 0;
     promoteChat = null;
     const data = createDefaultAppStateData();
     data.bridgeProfiles = {
@@ -240,6 +256,7 @@ describe('Expo Router route topology', () => {
     ['/profiles/profile-1/settings', routeLabels.settings],
     ['/profiles/profile-1/settings/privacy', routeLabels.privacy],
     ['/profiles/profile-1/settings/terms', routeLabels.terms],
+    ['/profiles/profile-1/settings/connection?mode=edit', routeLabels.settingsConnection],
     ['/profiles/profile-1/chats/chat-1/git', routeLabels.git],
     ['/profiles/profile-1/chats/chat-1/agents/child', routeLabels.agent],
     ['/profiles/profile-1/chats/chat-1/workspace-picker', routeLabels.workspace],
@@ -432,14 +449,14 @@ describe('Expo Router route topology', () => {
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
   });
 
-  it('anchors the chat index when Settings opens the connection modal', () => {
+  it('anchors the connection modal beneath Settings, not the currently selected chat', () => {
     const result = renderRouter(
       {
         appDir: './src/app',
         overrides: {
           ...baseOverrides,
           'profiles/[profileId]/(drawer)/chats/[chatId]/index': MainRoute,
-          'profiles/[profileId]/(drawer)/chats/[chatId]/connection': ConnectionRoute,
+          'profiles/[profileId]/(drawer)/settings/connection': ConnectionRoute,
           'profiles/[profileId]/(drawer)/settings/index': SettingsConnectionLauncher,
         },
       },
@@ -449,11 +466,13 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1/connection');
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
     expect(screen.getByText('Connection')).toBeTruthy();
-    expect(mainLifecycle).toEqual(['mount']);
+    // Settings never mounted a chat behind the modal, so there is nothing to leak into.
+    expect(mainLifecycle).toEqual([]);
     act(() => router.back());
-    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
+    // Cancelling/back must land on Settings, never on chats/new or any chat.
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings');
   });
 
   it('uses real Drawer history so chat root exits and Settings returns to the live chat', () => {
@@ -504,5 +523,72 @@ describe('Expo Router route topology', () => {
     act(() => navigateRoot(routes.chat('profile-1', 'chat-3')));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-3');
     expect(mainLifecycle).toEqual(['mount']);
+  });
+
+  it('preserves an unrelated Settings push (e.g. Privacy) when root navigation lands on a completely different destination', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          ...routeOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': MainRoute,
+        },
+      },
+      {
+        initialUrl: '/profiles/profile-1/chats/chat-1',
+        wrapper: defaultWrapper,
+      },
+    );
+
+    act(() => navigateRoot(routes.settings('profile-1')));
+    act(() => router.push(routes.privacy('profile-1')));
+    expect(screen.getByText(routeLabels.privacy)).toBeTruthy();
+    expect(countNamedRoutes(result.getRouterState(), 'privacy')).toBe(1);
+
+    // Root navigation to a destination that has nothing to do with Settings (e.g. a push
+    // notification opening a chat) must not reach into Settings' own Stack and collapse the
+    // Privacy screen the user left pushed there.
+    act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
+    expect(countNamedRoutes(result.getRouterState(), 'privacy')).toBe(1);
+
+    // Genuine back navigation into Settings' own history (not another root "land here"
+    // request) still reveals the preserved Privacy screen.
+    act(() => router.back());
+    expect(screen.getByText(routeLabels.privacy)).toBeTruthy();
+  });
+
+  it('preserves an unsaved connection form in the background when an unrelated root navigation happens elsewhere', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': MainRoute,
+          'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
+          'profiles/[profileId]/(drawer)/settings/connection': FormDraftRoute,
+        },
+      },
+      {
+        initialUrl: '/profiles/profile-1/settings/connection?mode=add',
+        wrapper: defaultWrapper,
+      },
+    );
+
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
+    expect(formLifecycle).toEqual(['mount']);
+    expect(countNamedRoutes(result.getRouterState(), 'connection')).toBe(1);
+
+    // Simulate an unrelated root navigation elsewhere (e.g. a push notification opening a
+    // chat) while the user has an in-progress, unsaved "Add bridge" form open. The destination
+    // has nothing to do with Settings, so it must never reach into Settings' own Stack.
+    act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
+
+    // The unsaved form is still there in the background — its screen was never dismissed or
+    // remounted, only the Drawer's focus moved away.
+    expect(countNamedRoutes(result.getRouterState(), 'connection')).toBe(1);
+    expect(formLifecycle).toEqual(['mount']);
   });
 });

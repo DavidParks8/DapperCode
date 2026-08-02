@@ -119,7 +119,12 @@ describe('router-backed navigation actions', () => {
     store.set(closeGitAtom);
 
     expect(mockRouter.replace).toHaveBeenCalledWith(routes.onboarding);
-    expect(mockRouter.dismissTo).not.toHaveBeenCalled();
+    // replaceRoot dismisses only the route it is about to replace before landing on onboarding;
+    // it must never reach for a chat-specific dismissal while there is no active profile.
+    expect(mockRouter.dismissTo).toHaveBeenCalledWith(routes.onboarding);
+    for (const [href] of mockRouter.dismissTo.mock.calls) {
+      expect(href).toEqual(routes.onboarding);
+    }
   });
 
   it('dismisses a selected root agent back to its canonical chat', () => {

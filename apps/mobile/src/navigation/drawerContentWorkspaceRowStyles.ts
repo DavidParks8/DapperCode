@@ -38,8 +38,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
     laneCount: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 12,
+      fontSize: 11,
+      lineHeight: 14,
       fontVariant: ['tabular-nums'],
     },
     laneFooter: {
@@ -85,8 +85,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       ...theme.typography.caption,
       marginTop: 5,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 13,
+      fontSize: 11,
+      lineHeight: 14,
     },
     chatItemMeta: {
       maxWidth: 104,
@@ -98,8 +98,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
     chatAge: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 9.5,
-      lineHeight: 12,
+      fontSize: 11,
+      lineHeight: 14,
       fontVariant: ['tabular-nums'],
     },
     chatState: {
@@ -129,8 +129,8 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
     chatStateText: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
-      fontSize: 8.5,
-      lineHeight: 11,
+      fontSize: 11,
+      lineHeight: 14,
       flexShrink: 1,
       textAlign: 'right',
     },

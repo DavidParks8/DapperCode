@@ -95,6 +95,22 @@ export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null):
   navigateRoot(routes.browser(profileId));
 });
 
+/**
+ * Opens the Settings-owned connection editor directly from the drawer's connection footer, so
+ * an offline/disconnected bridge is one tap from a fix without routing through a specific chat
+ * (there may not be one selected) or leaking the profile's secrets into a chat-scoped URL.
+ */
+export const openBridgeConnectionAtom = atom(null, (get, set): void => {
+  const profileId = activeProfileId(get);
+  if (!profileId) {
+    replaceRoot(routes.onboarding);
+    return;
+  }
+  set(cancelChatTransitionAtom);
+  set(closeDrawerAtom);
+  navigateRoot(routes.settingsConnection(profileId, 'edit'));
+});
+
 export const openChatGitAtom = atom(null, (get, set, chat: Chat): void => {
   const profileId = activeProfileId(get);
   if (!profileId) {

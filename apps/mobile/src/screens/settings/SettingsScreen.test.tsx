@@ -279,13 +279,9 @@ describe('SettingsScreen behavior', () => {
     expect(store.get(workspaceChatLimitAtom)).toBe(10);
 
     await press(findPressableByText(root, 'Primary'));
-    expect(router.push).toHaveBeenCalledWith(routes.connection('profile-1', 'new', 'edit'), {
-      withAnchor: true,
-    });
+    expect(router.push).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'edit'));
     await press(findPressableByText(root, 'Add bridge'));
-    expect(router.push).toHaveBeenCalledWith(routes.connection('profile-1', 'new', 'add'), {
-      withAnchor: true,
-    });
+    expect(router.push).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'add'));
 
     await press(findPressableByText(root, 'Privacy policy'));
     expect(router.push).toHaveBeenCalledWith(routes.privacy('profile-1'));
