@@ -354,6 +354,37 @@ describe('ChatMessage markdown formatting', () => {
     openUrl.mockRestore();
   });
 
+  it('gives the local-preview chip a hitSlop that pads its compact chrome to the platform minimum', () => {
+    const onOpenLocalPreview = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'local-preview-chip',
+        role: 'assistant',
+        content: 'Server ready on http://localhost:3000',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    const root = tree.root as QueryableTestInstance;
+
+    const chip = root
+      .findAllByProps({ accessibilityLabel: 'Open http://localhost:3000/ in Browser' })
+      .find((node) => typeof node.props.onPress === 'function');
+    if (!chip) throw new Error('Expected the local-preview chip to render');
+    const hitSlop = chip.props.hitSlop as
+      | { top: number; bottom: number; left: number; right: number }
+      | undefined;
+
+    // The chip's visible chrome (padding + icon/text row) is well under the 44pt/48dp minimum
+    // touch target, so it must widen its effective tap area via hitSlop rather than relying on
+    // its compact chrome alone.
+    expect(hitSlop).toBeDefined();
+    expect(hitSlop?.top).toBeGreaterThan(0);
+    expect(hitSlop?.bottom).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
   it('renders markdown images only when their source is usable', () => {
     const tree = renderMessage({
       id: 'markdown-images',

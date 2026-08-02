@@ -37,6 +37,11 @@ import {
   toTimelineVisual,
 } from './chatMessageTimelineHelpers';
 import type { ChatMessageProps } from './chatMessageTypes';
+import { computeHitSlop } from './touchTarget';
+
+// The chip's visible height is padding (theme.spacing.sm * 2) plus its icon/text row; its width
+// varies with the URL label, so only the vertical axis is padded up to the platform minimum.
+const LOCAL_PREVIEW_LINK_VISIBLE_SIZE = { width: 160, height: 32 };
 
 function LocalPreviewLinks({
   messageId,
@@ -49,6 +54,7 @@ function LocalPreviewLinks({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const hitSlop = useMemo(() => computeHitSlop(LOCAL_PREVIEW_LINK_VISIBLE_SIZE), []);
   if (!onOpen || urls.length === 0) return null;
   return (
     <View style={styles.localPreviewLinkList}>
@@ -60,6 +66,7 @@ function LocalPreviewLinks({
             styles.localPreviewLink,
             pressed && styles.localPreviewLinkPressed,
           ]}
+          hitSlop={hitSlop}
           accessibilityRole="button"
           accessibilityLabel={`Open ${url} in Browser`}
         >
