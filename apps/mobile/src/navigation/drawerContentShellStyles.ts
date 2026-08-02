@@ -31,17 +31,12 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
     title: {
       ...theme.typography.largeTitle,
       color: theme.colors.textPrimary,
-      fontSize: 27,
-      lineHeight: 31,
-      fontWeight: '700',
       letterSpacing: -0.5,
     },
     subtitle: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       marginTop: 3,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     headerIconButton: {
       width: theme.touchTarget.minimum,
@@ -60,17 +55,13 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       gap: 7,
     },
     statusSummaryAttention: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textSecondary,
-      fontSize: 11,
-      lineHeight: 14,
       fontWeight: '600',
     },
     statusSummaryText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     statusSummarySeparator: {
       width: 3,
@@ -91,19 +82,14 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       backgroundColor: theme.colors.bgCanvasAccent,
     },
     folderFilterLabel: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     folderFilterValue: {
-      ...theme.typography.body,
+      ...theme.typography.label,
       flex: 1,
       minWidth: 0,
       color: theme.colors.accent,
-      fontSize: 12,
-      lineHeight: 16,
-      fontWeight: '600',
       textAlign: 'right',
     },
     searchField: {
@@ -122,8 +108,6 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       minWidth: 0,
       paddingVertical: theme.spacing.xs,
       color: theme.colors.textPrimary,
-      fontSize: 14,
-      lineHeight: 18,
     },
     searchClearButton: {
       width: 28,
@@ -136,11 +120,9 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       backgroundColor: theme.colors.borderLight,
     },
     searchResultSummary: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       marginBottom: theme.spacing.xs,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
     },
     footer: {
       minHeight: 56,
@@ -181,18 +163,14 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       flex: 1,
     },
     connectionTitle: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textSecondary,
-      fontSize: 11,
-      lineHeight: 14,
       fontWeight: '600',
     },
     connectionMeta: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       marginTop: 2,
       color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 13,
     },
     footerBrowserButton: {
       minWidth: 78,
@@ -205,10 +183,8 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       gap: 5,
     },
     footerBrowserText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.accent,
-      fontSize: 11,
-      lineHeight: 14,
       fontWeight: '600',
     },
     footerIconButton: {
