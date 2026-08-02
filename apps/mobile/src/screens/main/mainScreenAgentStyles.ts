@@ -50,10 +50,8 @@ export const createMainScreenAgentStyles = (theme: AppTheme) => {
     modelChipPressed: { opacity: 0.86 },
     sessionMetaChipDisabled: { opacity: 0.5 },
     modelChipText: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textSecondary,
-      fontSize: 11,
-      lineHeight: 14,
       fontWeight: '600',
     },
     fastChipTextEnabled: { color: theme.colors.textPrimary },

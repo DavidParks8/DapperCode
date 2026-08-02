@@ -20,7 +20,6 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     composeIcon: { marginBottom: theme.spacing.lg },
     composeTitle: {
       ...theme.typography.largeTitle,
-      fontSize: 28,
       marginBottom: theme.spacing.xl,
     },
     workspaceSelectBtn: {

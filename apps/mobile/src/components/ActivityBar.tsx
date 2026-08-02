@@ -99,9 +99,7 @@ const createStyles = (theme: AppTheme) =>
       minWidth: 0,
     },
     titleText: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      lineHeight: 15,
+      ...theme.typography.metadata,
       fontWeight: '600',
     },
     titleTextInline: {
@@ -111,9 +109,7 @@ const createStyles = (theme: AppTheme) =>
       color: theme.colors.statusError,
     },
     detailText: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      lineHeight: 14,
+      ...theme.typography.metadata,
       fontWeight: '500',
       opacity: 0.75,
     },

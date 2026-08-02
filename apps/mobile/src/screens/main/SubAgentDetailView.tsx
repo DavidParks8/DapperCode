@@ -426,7 +426,6 @@ const createStyles = (theme: AppTheme) =>
     title: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 17,
     },
     statusBar: {
       flexDirection: 'row',

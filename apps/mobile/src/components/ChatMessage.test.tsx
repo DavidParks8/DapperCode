@@ -195,7 +195,88 @@ describe('ChatMessage markdown formatting', () => {
       throw new Error('Expected heading text to render');
     }
     const headingStyle = StyleSheet.flatten(heading.props.style as never) as { fontSize?: number };
+    // h1 maps to the semantic `headline` role (17pt) rather than a bespoke literal, so the
+    // rendered size must match that token exactly, not just stay under some loose ceiling.
+    expect(headingStyle.fontSize).toBe(theme.typography.headline.fontSize);
     expect(headingStyle.fontSize).toBeLessThanOrEqual(18);
+  });
+
+  it('maps markdown h1-h6 to descending semantic typography roles, not arbitrary literals', () => {
+    const message: ApiChatMessage = {
+      id: 'msg_heading_hierarchy',
+      role: 'assistant',
+      content: [
+        '# LevelOne',
+        '## LevelTwo',
+        '### LevelThree',
+        '#### LevelFour',
+        '##### LevelFive',
+        '###### LevelSix',
+      ].join('\n\n'),
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    const fontSizeFor = (label: string): number | undefined => {
+      const node = root
+        .findAll((n) => n.type === Text)
+        .find((n) => flattenRenderedText(n.props.children).includes(label));
+      if (!node) throw new Error(`Expected "${label}" heading text to render`);
+      const style = StyleSheet.flatten(node.props.style as never) as { fontSize?: number };
+      return style.fontSize;
+    };
+
+    const sizes = [
+      fontSizeFor('LevelOne'),
+      fontSizeFor('LevelTwo'),
+      fontSizeFor('LevelThree'),
+      fontSizeFor('LevelFour'),
+      fontSizeFor('LevelFive'),
+      fontSizeFor('LevelSix'),
+    ];
+
+    // Each level must resolve to one of the theme's named typography roles (never an arbitrary
+    // literal), and the sizes must strictly descend from h1 to h6.
+    const knownRoleSizes = new Set(
+      Object.values(theme.typography).map((role) => role.fontSize),
+    );
+    for (const size of sizes) {
+      expect(size).toBeDefined();
+      expect(knownRoleSizes.has(size as number)).toBe(true);
+    }
+    for (let i = 1; i < sizes.length; i += 1) {
+      expect(sizes[i]!).toBeLessThan(sizes[i - 1]!);
+    }
+
+    act(() => tree.unmount());
+  });
+
+  it('renders inline and block markdown code using the semantic mono typography role', () => {
+    const message: ApiChatMessage = {
+      id: 'msg_code_mono',
+      role: 'assistant',
+      content: 'Run `npm test` or:\n\n```\nnpm test\n```',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const tree = renderMessage(message);
+    const root = tree.root as QueryableTestInstance;
+
+    const codeNodes = root
+      .findAll((node) => node.type === Text)
+      .filter((node) => flattenRenderedText(node.props.children).includes('npm test'));
+    expect(codeNodes.length).toBeGreaterThan(0);
+
+    for (const node of codeNodes) {
+      const style = StyleSheet.flatten(node.props.style as never) as {
+        fontFamily?: string;
+        fontSize?: number;
+      };
+      expect(style.fontFamily).toBe(theme.fonts.monoRegular);
+      expect(style.fontSize).toBe(theme.typography.mono.fontSize);
+    }
+
+    act(() => tree.unmount());
   });
 
   it('repaints when only the ordered parts change', () => {

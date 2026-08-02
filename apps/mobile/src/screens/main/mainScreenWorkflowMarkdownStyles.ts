@@ -17,14 +17,13 @@ export const createWorkflowMarkdownStyles = (theme: AppTheme) =>
     heading1: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 18,
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
     },
     heading2: {
-      ...theme.typography.headline,
+      ...theme.typography.body,
       color: theme.colors.textPrimary,
-      fontSize: 16,
+      fontWeight: '600',
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
     },

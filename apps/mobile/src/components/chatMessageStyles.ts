@@ -275,16 +275,13 @@ export const createStyles = (theme: AppTheme) =>
       borderColor: theme.colors.toolBlockBorder,
     },
     toolOutputLine: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
+      ...theme.typography.mono,
       lineHeight: 16,
       color: theme.colors.textSecondary,
     },
     toolOutputHeader: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
-      color: theme.colors.textMuted,
       marginBottom: 2,
     },
     toolDiffLineAdded: {
@@ -305,15 +302,12 @@ export const createStyles = (theme: AppTheme) =>
       borderColor: theme.colors.inlineCodeBorder,
     },
     toolLocationChipText: {
+      ...theme.typography.metadata,
       fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
-      lineHeight: 15,
       color: theme.colors.inlineCodeText,
     },
     toolTruncatedNote: {
-      ...theme.typography.caption,
-      fontSize: 11,
-      color: theme.colors.textMuted,
+      ...theme.typography.metadata,
     },
     scrollableRowTextViewport: { flex: 1, minWidth: 0, overflow: 'hidden' },
     scrollableRowTextScroll: { width: '100%' },
@@ -338,9 +332,7 @@ export const createStyles = (theme: AppTheme) =>
       paddingHorizontal: 2,
     },
     computerUseTraceSummaryText: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      fontSize: 11,
+      ...theme.typography.metadata,
       fontWeight: '600',
     },
     computerUseTraceStepList: { gap: theme.spacing.xs + 2 },
@@ -353,17 +345,12 @@ export const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.xs,
     },
     computerUseTraceAction: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
-      fontSize: 13,
-      lineHeight: 18,
       fontWeight: '600',
     },
     computerUseTraceInlineMeta: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      lineHeight: 16,
-      fontSize: 11,
+      ...theme.typography.metadata,
       flexShrink: 1,
     },
     subAgentCard: {
@@ -396,11 +383,9 @@ export const createStyles = (theme: AppTheme) =>
       justifyContent: 'center',
     },
     subAgentTitle: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
       flex: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
     subAgentDetailWrap: { marginTop: theme.spacing.xs, paddingLeft: theme.spacing.lg + 2, gap: 2 },
     subAgentDetailRow: {
@@ -444,13 +429,11 @@ export const createStyles = (theme: AppTheme) =>
     timelineCardPressed: { opacity: 0.82 },
     timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
     timelineTitle: {
-      ...theme.typography.body,
+      ...theme.typography.caption,
       color: theme.colors.textPrimary,
       flex: 1,
-      fontSize: 13,
-      lineHeight: 18,
     },
-    timelineTitleMono: { fontFamily: theme.fonts.monoRegular, fontSize: 12, lineHeight: 18 },
+    timelineTitleMono: { fontFamily: theme.fonts.monoRegular },
     timelineDetailWrap: {
       marginTop: theme.spacing.xs,
       borderTopWidth: StyleSheet.hairlineWidth,
@@ -464,8 +447,7 @@ export const createStyles = (theme: AppTheme) =>
       marginTop: theme.spacing.xs,
     },
     timelineDetailLine: {
-      fontFamily: theme.fonts.monoRegular,
-      fontSize: 11,
+      ...theme.typography.mono,
       lineHeight: 16,
       color: theme.colors.textSecondary,
     },

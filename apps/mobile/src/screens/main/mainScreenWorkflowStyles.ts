@@ -166,6 +166,7 @@ export const createMainScreenWorkflowStyles = (theme: AppTheme) =>
     attachmentSuggestionItemPressed: { backgroundColor: theme.colors.bgInput },
     attachmentSuggestionText: { ...theme.typography.caption, color: theme.colors.textPrimary },
     renameModalInput: {
+      ...theme.typography.subheadline,
       color: theme.colors.textPrimary,
       backgroundColor: theme.colors.bgInput,
       borderWidth: 1,
@@ -173,6 +174,5 @@ export const createMainScreenWorkflowStyles = (theme: AppTheme) =>
       borderRadius: 10,
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.sm,
-      fontSize: 15,
     },
   }) as const;

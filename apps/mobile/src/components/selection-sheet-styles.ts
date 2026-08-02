@@ -16,15 +16,12 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
     title: {
       ...theme.typography.headline,
       color: theme.colors.textPrimary,
-      fontSize: 18,
-      lineHeight: 22,
       fontWeight: '700',
     },
     subtitle: {
-      ...theme.typography.caption,
+      ...theme.typography.label,
       color: theme.colors.textMuted,
-      fontSize: 12,
-      lineHeight: 16,
+      fontWeight: '400',
     },
     list: { gap: theme.spacing.sm },
     loadingState: {
@@ -112,10 +109,7 @@ export const createSelectionSheetStyles = (theme: AppTheme) =>
     },
     accessory: { flexShrink: 0, alignItems: 'flex-end', gap: 6 },
     meta: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      fontSize: 11,
-      lineHeight: 14,
+      ...theme.typography.metadata,
       fontWeight: '600',
     },
     footer: {
