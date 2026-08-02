@@ -352,6 +352,7 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
           </View>
         ) : chat ? (
           <ChatTranscriptView
+            scrollRailEnabled={false}
             chat={chat}
             parentChat={detail.parentChat}
             bridgeUrl={bridgeUrl}
