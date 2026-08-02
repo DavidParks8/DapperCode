@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
-import { RootLayout } from '../bootstrap/RootLayout';
-import { AppStateProvider, createAppStore } from '../state/store';
+import { RootLayout } from '@shell/boot/RootLayout';
+import { AppStateProvider, createAppStore } from '@shell/state/store';
 
 export default function AppLayout() {
   const store = useMemo(() => createAppStore(), []);

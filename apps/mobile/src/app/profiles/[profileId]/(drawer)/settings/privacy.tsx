@@ -1,9 +1,9 @@
 import { useRouter } from 'expo-router';
 
-import { env } from '../../../../../config';
-import { PrivacyScreen } from '../../../../../screens/legal/PrivacyScreen';
-import { useDisableDrawerSwipe } from '../../../../../navigation/useDrawerSwipe';
-import { ProfileRouteContent } from '../../../../../navigation/ProfileRouteBoundary';
+import { env } from '@shared/config';
+import { PrivacyScreen } from '../../../../../features/legal/PrivacyScreen';
+import { useDisableDrawerSwipe } from '@shell/navigation/useDrawerSwipe';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
 
 export default function PrivacyRoute() {
   const router = useRouter();

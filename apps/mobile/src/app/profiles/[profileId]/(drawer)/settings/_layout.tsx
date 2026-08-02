@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 
-import { createStackScreenOptions } from '../../../../../navigation/stackScreenOptions';
-import { useAppTheme } from '../../../../../theme';
+import { createStackScreenOptions } from '@shell/navigation/stackScreenOptions';
+import { useAppTheme } from '@shared/theme';
 
 export const unstable_settings = {
   anchor: 'index',

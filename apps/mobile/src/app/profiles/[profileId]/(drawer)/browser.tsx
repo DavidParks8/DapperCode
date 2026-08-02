@@ -1,5 +1,5 @@
-import { BrowserScreen } from '../../../../screens/browser/BrowserScreen';
-import { ProfileRouteContent } from '../../../../navigation/ProfileRouteBoundary';
+import { BrowserScreen } from '../../../../features/browser/screen/BrowserScreen';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
 
 export default function BrowserRoute() {
   return (

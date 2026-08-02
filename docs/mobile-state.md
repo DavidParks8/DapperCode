@@ -1,28 +1,28 @@
 # Mobile state management
 
 The Expo app uses [jotai](https://jotai.org) for state that crosses component boundaries. Everything
-lives under `apps/mobile/src/state`.
+lives under `apps/mobile/src/shell/state`, with feature-owned state under each feature root.
 
 ## Layout
 
 | Path                                       | Contents                                                                                            |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `state/store.ts`                           | `createAppStore()` and the `AppStateProvider` mounted in `src/app/_layout.tsx`                      |
-| `state/types.ts`                           | The `AppStore` type alias                                                                           |
-| `state/appState/atoms.ts`                  | Persisted app-state snapshot plus derived settings/profile/push selectors                           |
-| `state/appState/actions.ts`                | `initialize` / `dispatch` / `dispatchDurable` / `retryPersistence` / `flushPersistence` write atoms |
-| `state/appState/settings.ts`               | Read/write atoms for individual settings (`approvalModeAtom`, …)                                    |
-| `state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms                                                  |
-| `state/bridge/*`                           | Active bridge profile, WS/API clients, profile lifecycle actions                                    |
+| `shell/state/store.ts`                     | `createAppStore()` and the `AppStateProvider` mounted in `src/app/_layout.tsx`                      |
+| `shell/state/types.ts`                     | The `AppStore` type alias                                                                           |
+| `shell/state/appState/atoms.ts`            | Persisted app-state snapshot plus derived settings/profile/push selectors                           |
+| `shell/state/appState/actions.ts`          | `initialize` / `dispatch` / `dispatchDurable` / `retryPersistence` / `flushPersistence` write atoms |
+| `shell/state/appState/settings.ts`         | Read/write atoms for individual settings (`approvalModeAtom`, …)                                    |
+| `shell/state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms                                            |
+| `shell/state/bridge/*`                     | Active bridge profile, WS/API clients, profile lifecycle actions                                    |
 | `src/app/*`                                | Expo Router layouts and thin route adapters; URL paths are navigation state                         |
-| `navigation/routes.ts`                     | Typed builders for canonical profile, chat, settings, and pushed-screen URLs                        |
-| `navigation/actions.ts`                    | Router-backed application commands that also coordinate related domain atoms                        |
-| `state/chat/*`                             | Selected/active/pending chat data and the chat-open transition                                      |
-| `state/drawer/atoms.ts`                    | Imperative access to the Router drawer from custom in-screen headers                                |
-| `state/commands.ts`                        | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
-| `state/theme.ts`                           | Theme derived from settings and the system colour scheme                                            |
-| `state/mainScreen/*`                       | MainScreen screen state, grouped by domain, plus the reset registry                                 |
-| `state/testing.ts`                         | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
+| `shell/navigation/routes.ts`               | Typed builders for canonical profile, chat, settings, and pushed-screen URLs                        |
+| `shell/navigation/actions.ts`              | Router-backed application commands that also coordinate related domain atoms                        |
+| `shell/state/chat/*`                       | Selected/active/pending chat data and the chat-open transition                                      |
+| `shell/state/drawer/atoms.ts`              | Imperative access to the Router drawer from custom in-screen headers                                |
+| `shell/state/commands.ts`                  | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
+| `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
+| `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |
+| `shell/state/testing.ts`                   | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
 
 ## Conventions
 
@@ -42,7 +42,7 @@ lives under `apps/mobile/src/state`.
 
 Expo Router is the only source of truth for navigation. Every screen has a profile-aware URL under
 `/profiles/[profileId]`; chats and sub-agent transcripts use dynamic path parameters. Use the typed
-builders in `navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
+builders in `shell/navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
 use `router.push` for hierarchical drill-in screens, and use `router.back` for one-level dismissal.
 
 Do not put route names, path parameters, current-screen selectors, back-stack state, or drawer
@@ -82,13 +82,13 @@ expect(store.get(selectedChatIdAtom)).toBe('thread-1');
 - `createAppStateHarness(persistence)` exposes the coordinator through a small store-like facade for
   persistence tests.
 - Use `expo-router/testing-library` and `renderRouter` for path, deep-link, stack, and back-navigation
-  assertions. Component tests may use `testing/expoRouterMock` when the URL itself is not under test.
+  assertions. Component tests may use `shared/testing/expoRouterMock` when the URL itself is not under test.
 
 Assert on store state rather than on callback props: screens no longer receive their wiring as props.
 
 ## MainScreen state
 
-Every MainScreen state slot lives in `state/mainScreen/*`; there is no `useState` left in the
+Every MainScreen state slot lives in `features/chat/state/*`; there is no `useState` left in the
 `mainScreen*` modules. Atoms are grouped by domain (`session`, `turn`, `models`, `workspace`,
 `composer`, `modals`, `gitCheckout`, `runtime`, `toolInvocations`).
 
@@ -120,7 +120,7 @@ clears the component-local state the atoms deliberately do not cover:
 
 - Dozens of `useRef` caches in the hook chain (reasoning buffers, model preferences, parent-chat
   cache) and their pending timers.
-- The feature controllers under `screens/controllers/` (`useDraftController`,
+- The feature controllers under `features/chat/composer/controllers/` (`useDraftController`,
   `useAttachmentController`), which own their own `useState` and persistence and are tested
   standalone.
 
@@ -130,7 +130,7 @@ by remounting. Both mechanisms are in place, and both are covered by tests.
 
 ## What is intentionally not in atoms
 
-- **Feature controllers** (`screens/controllers/*`). They are cohesive, separately tested units that
+- **Feature controllers** (`features/chat/composer/controllers/*`). They are cohesive, separately tested units that
   own their state and persistence. Moving them into atoms would relocate complexity, not remove it.
 - **The accumulated `context` in the MainScreen hook chain.** It no longer carries raw state; what
   remains is effects, action callbacks, controllers and ref caches. Several modules named like

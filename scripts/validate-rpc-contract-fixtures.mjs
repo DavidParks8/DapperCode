@@ -22,7 +22,7 @@ const readMobileApiProductionSources = (directory) =>
       return [];
     return [readFileSync(entryPath, 'utf8')];
   });
-const mobileApiSources = readMobileApiProductionSources(path.join(root, 'apps/mobile/src/api'));
+const mobileApiSources = readMobileApiProductionSources(path.join(root, 'apps/mobile/src/bridge'));
 const mobileSource = mobileApiSources.join('\n');
 const attachments = readFileSync(
   path.join(root, 'services/rust-bridge/src/attachments.rs'),

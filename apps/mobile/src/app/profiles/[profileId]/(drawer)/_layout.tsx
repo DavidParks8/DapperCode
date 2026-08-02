@@ -3,11 +3,11 @@ import { Drawer, type DrawerContentComponentProps, useDrawerStatus } from 'expo-
 import { useEffect } from 'react';
 import { useWindowDimensions } from 'react-native';
 
-import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '../../../../bootstrap/appConstants';
-import { DrawerContent } from '../../../../navigation/DrawerContent';
-import { activeBridgeProfileAtom } from '../../../../state/bridge/atoms';
-import { drawerCommandsAtom } from '../../../../state/drawer/atoms';
-import { useAppTheme } from '../../../../theme';
+import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
+import { DrawerContent } from '@shell/navigation/DrawerContent';
+import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
+import { useAppTheme } from '@shared/theme';
 
 export const unstable_settings = {
   anchor: 'chats/[chatId]',

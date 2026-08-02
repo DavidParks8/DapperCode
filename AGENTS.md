@@ -46,9 +46,9 @@ distributions.
 ### Mobile
 
 - `apps/mobile/src/app/_layout.tsx`: Expo Router app shell and root providers
-- `src/api`: bridge client, WebSocket transport, typed contracts
-- `src/state`: jotai atoms for cross-component state (see `docs/mobile-state.md`)
-- `src/screens`: main product surfaces
+- `src/bridge`: bridge client, WebSocket transport, and typed contracts
+- `src/shell/state`: jotai atoms for shell-wide cross-feature state (see `docs/mobile-state.md`)
+- `src/features`: feature-owned product surfaces and state, such as chat
 - `ios`: active Expo native iOS project
 
 `MainScreen.tsx` is large; edit it surgically.
@@ -83,8 +83,9 @@ Do not automatically restart a user bridge during debugging unless explicitly re
   directory (`DAPPERCODE_DATA_DIR` overrides it for tests).
 - Preserve the central data directory, keychain entries, bridge logs, and user-installed agent state.
 - Bridge ports are allocated per workspace, never hard-coded, so parallel worktrees keep working.
-- Cross-component mobile state lives in `apps/mobile/src/state` as jotai atoms; keep state used by a
-  single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
+- Shell-wide cross-component mobile state lives in `apps/mobile/src/shell/state` as jotai atoms;
+  feature-owned state belongs under the owning feature in `apps/mobile/src/features`. Keep state used
+  by a single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.
 - The active iOS project is `apps/mobile/ios`, not the old root `ios` directory.
 - Version changes must keep both Rust lockfiles and mobile metadata synchronized.

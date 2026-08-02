@@ -82,8 +82,8 @@ not sent. Approval notifications never include reply content.
   unregisters the token from the bridge.
 - Preferences and per-profile registration identities persist in the canonical
   app-state store. `optedOut` records an explicit user opt-out.
-- The shared registration logic lives in `src/pushController.ts`, used by both
-  the root Router lifecycle (`src/bootstrap/useAppBridgeLifecycle.ts`) and the Settings toggle so
+- The shared registration logic lives in `src/shell/push/controller.ts`, used by both
+  the root Router lifecycle (`src/shell/boot/useAppBridgeLifecycle.ts`) and the Settings toggle so
   they cannot drift.
 - **Foreground:** while the app is active the banner is suppressed (you are
   already watching, and the result also streams in over the WebSocket).

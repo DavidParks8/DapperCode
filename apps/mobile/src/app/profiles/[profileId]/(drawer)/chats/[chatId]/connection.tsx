@@ -1,8 +1,8 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { ConnectionScreen } from '../../../../../../bootstrap/AppShells';
-import { ProfileRouteContent } from '../../../../../../navigation/ProfileRouteBoundary';
-import type { ConnectionMode } from '../../../../../../navigation/routes';
+import { ConnectionScreen } from '@shell/boot/AppShells';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
+import type { ConnectionMode } from '@shell/navigation/routes';
 
 const MODES = new Set<ConnectionMode>(['add', 'edit', 'reconnect']);
 

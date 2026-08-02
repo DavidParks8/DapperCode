@@ -1,0 +1,41 @@
+import { Ionicons } from '@expo/vector-icons';
+import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import type { AgentDescriptor } from '@bridge/types/types';
+import { getAgentLabel, validAgentIconUri } from '@shared/agents';
+
+interface AgentIconProps {
+  agent?: AgentDescriptor | null;
+  size?: number;
+  style?: StyleProp<ViewStyle>;
+}
+
+export function AgentIcon({ agent, size = 18, style }: AgentIconProps) {
+  const iconUri = validAgentIconUri(agent?.icon);
+  const label = getAgentLabel(agent ? [agent] : [], agent?.agentId);
+  return (
+    <View
+      accessibilityLabel={label}
+      accessibilityRole="image"
+      style={[styles.frame, { width: size, height: size }, style]}
+    >
+      {iconUri ? (
+        <Image
+          source={{ uri: iconUri }}
+          resizeMode="contain"
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        <Ionicons name="hardware-chip-outline" size={size} color="#7f8790" />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  frame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+});

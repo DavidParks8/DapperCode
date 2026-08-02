@@ -1,10 +1,10 @@
 import { useAtomValue } from 'jotai';
 import { Redirect } from 'expo-router';
 
-import { routes } from '../navigation/routes';
-import { bridgeProfilesAtom } from '../state/appState/atoms';
-import { activeBridgeProfileAtom } from '../state/bridge/atoms';
-import { chatSnapshotCacheAtom } from '../state/chat/atoms';
+import { routes } from '@shell/navigation/routes';
+import { bridgeProfilesAtom } from '@shell/state/appState/atoms';
+import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { chatSnapshotCacheAtom } from '@shell/state/chat/atoms';
 
 export default function IndexRoute() {
   const profileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;

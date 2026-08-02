@@ -1,0 +1,45 @@
+import type { HostBridgeApiClient } from '@bridge/client/client';
+import type { Chat, ChatSummary } from '@bridge/types/types';
+import { collectRelatedAgentThreads } from '../threads';
+import { AGENT_THREADS_LIST_LIMIT } from '../../helpers/helpers';
+
+type AgentThreadsApi = Pick<
+  HostBridgeApiClient,
+  'listChats' | 'listLoadedChatIds' | 'getChatSummaries' | 'getChat' | 'peekChat'
+>;
+
+export interface RelatedAgentThreads {
+  rootThreadId: string | null;
+  threads: ChatSummary[];
+}
+
+export class AgentThreadsController {
+  constructor(private readonly api: AgentThreadsApi) {}
+
+  async loadRelated(focusChatId: string, fallback?: Chat | null): Promise<RelatedAgentThreads> {
+    const [listed, loadedIds] = await Promise.all([
+      this.api.listChats({ includeSubAgents: true, limit: AGENT_THREADS_LIST_LIMIT }),
+      this.api.listLoadedChatIds().catch(() => []),
+    ]);
+    const listedIds = new Set(listed.map((chat) => chat.id));
+    // Dedupe before filtering so a bridge response with repeated loaded ids
+    // doesn't grow the missing list and redundantly re-fetch the same chats.
+    const uniqueLoadedIds = Array.from(new Set(loadedIds));
+    const missing = uniqueLoadedIds.filter((id) => !listedIds.has(id));
+    const loadedOnly = await this.api.getChatSummaries(missing);
+    const chats = [...listed, ...loadedOnly];
+    const focus = chats.find((chat) => chat.id === focusChatId) ?? fallback ?? null;
+    return collectRelatedAgentThreads(chats, focus);
+  }
+
+  async loadDetail(threadId: string): Promise<{ chat: Chat; parent: Chat | null }> {
+    const chat = await this.api.getChat(threadId, { forceRefresh: true });
+    if (!chat.parentThreadId) {
+      return { chat, parent: null };
+    }
+    const parent =
+      this.api.peekChat(chat.parentThreadId) ??
+      (await this.api.getChat(chat.parentThreadId).catch(() => null));
+    return { chat, parent };
+  }
+}

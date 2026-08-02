@@ -1,0 +1,186 @@
+import { errorAtom } from '../state/turn';
+import { selectedAcpModeIdAtom, selectedCollaborationModeAtom } from '../state/models';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { useCallback } from 'react';
+import type { Chat } from '@bridge/types/types';
+import type {
+  MainScreenPickerOptionBuildersContext,
+  MainScreenPickerOptionBuildersResult,
+} from '../models/pickerOptionBuilders';
+
+export type MainScreenLocalCommandChatContext = MainScreenPickerOptionBuildersContext &
+  MainScreenPickerOptionBuildersResult;
+
+export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandChatContext) {
+  const {
+    activeAgentId,
+    activeApprovalPolicy,
+    activeEffort,
+    activeModelId,
+    activeServiceTier,
+    api,
+    preferredStartCwd,
+    scrollToBottomIfPinned,
+    selectedChatId,
+    selectedChatIdRef,
+    selectedChatRef,
+    setSelectedChat,
+    setSelectedChatId,
+  } = context;
+  const setError = useSetAtom(errorAtom);
+  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
+
+  const appendLocalAssistantMessage = useCallback(
+    (content: string, targetChatId?: string | null) => {
+      const normalized = content.trim();
+      if (!normalized) {
+        return;
+      }
+
+      const chatId = targetChatId ?? selectedChatIdRef.current;
+      if (!chatId) {
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      setSelectedChat((prev) => {
+        const baseChat =
+          prev?.id === chatId
+            ? prev
+            : selectedChatRef.current?.id === chatId
+              ? selectedChatRef.current
+              : null;
+        if (!baseChat) {
+          return prev;
+        }
+        const updated = {
+          ...baseChat,
+          updatedAt: createdAt,
+          lastMessagePreview: normalized.slice(0, 120),
+          messages: [
+            ...baseChat.messages,
+            {
+              id: `local-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content: normalized,
+              createdAt,
+            },
+          ],
+        } satisfies Chat;
+        selectedChatRef.current = updated;
+        return updated;
+      });
+      scrollToBottomIfPinned(true);
+    },
+    [scrollToBottomIfPinned, selectedChatIdRef, selectedChatRef, setSelectedChat],
+  );
+
+  const ensureLocalCommandChat = useCallback(
+    async (command: string): Promise<string | null> => {
+      const appendCommand = (baseChat: Chat): string => {
+        const createdAt = new Date().toISOString();
+        const localChat = {
+          ...baseChat,
+          updatedAt: createdAt,
+          lastMessagePreview: command,
+          messages: [
+            ...baseChat.messages,
+            {
+              id: `local-command-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'user' as const,
+              content: command,
+              createdAt,
+            },
+          ],
+        } satisfies Chat;
+        selectedChatIdRef.current = localChat.id;
+        selectedChatRef.current = localChat;
+        setSelectedChatId(localChat.id);
+        setSelectedChat(localChat);
+        return localChat.id;
+      };
+
+      const current = selectedChatRef.current;
+      if (selectedChatId && current?.id === selectedChatId) {
+        return appendCommand(current);
+      }
+
+      try {
+        const created = await api.createChat({
+          agentId: activeAgentId ?? undefined,
+          cwd: preferredStartCwd ?? undefined,
+          model: activeModelId ?? undefined,
+          effort: activeEffort ?? undefined,
+          serviceTier: activeServiceTier ?? undefined,
+          approvalPolicy: activeApprovalPolicy,
+          collaborationMode: selectedCollaborationMode,
+          agentMode: selectedAcpModeId,
+        });
+        const chatId = appendCommand(created);
+        setError(null);
+        return chatId;
+      } catch (err) {
+        setError((err as Error).message);
+        return null;
+      }
+    },
+    [
+      activeAgentId,
+      activeApprovalPolicy,
+      activeEffort,
+      activeModelId,
+      activeServiceTier,
+      api,
+      preferredStartCwd,
+      selectedAcpModeId,
+      selectedChatId,
+      selectedChatIdRef,
+      selectedChatRef,
+      selectedCollaborationMode,
+      setError,
+      setSelectedChat,
+      setSelectedChatId,
+    ],
+  );
+
+  const appendLocalSystemMessage = useCallback(
+    (content: string) => {
+      const normalized = content.trim();
+      if (!normalized || !selectedChatId) {
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      setSelectedChat((prev) => {
+        if (!prev || prev.id !== selectedChatId) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          updatedAt: createdAt,
+          messages: [
+            ...prev.messages,
+            {
+              id: `local-system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'system',
+              content: normalized,
+              createdAt,
+            },
+          ],
+        };
+      });
+      scrollToBottomIfPinned(true);
+    },
+    [scrollToBottomIfPinned, selectedChatId, setSelectedChat],
+  );
+
+  return {
+    appendLocalAssistantMessage,
+    ensureLocalCommandChat,
+    appendLocalSystemMessage,
+  };
+}
+
+export type MainScreenLocalCommandChatResult = ReturnType<typeof useMainScreenLocalCommandChat>;

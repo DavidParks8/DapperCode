@@ -1,13 +1,10 @@
 import { useAtomValue } from 'jotai';
 import { useLocalSearchParams } from 'expo-router';
 
-import { usePromoteNewChatRoute } from '../../../../../../navigation/usePromoteNewChatRoute';
-import {
-  ProfileRouteContent,
-  useProfileRouteReady,
-} from '../../../../../../navigation/ProfileRouteBoundary';
-import { MainScreen } from '../../../../../../screens/main/MainScreen';
-import { selectedChatIdAtom } from '../../../../../../state/chat/atoms';
+import { usePromoteNewChatRoute } from '@shell/navigation/usePromoteNewChatRoute';
+import { ProfileRouteContent, useProfileRouteReady } from '@shell/navigation/ProfileRouteBoundary';
+import { MainScreen } from '../../../../../../features/chat/screen/MainScreen';
+import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 
 export default function ChatIndexRoute() {
   const { chatId, profileId } = useLocalSearchParams<{ chatId: string; profileId: string }>();

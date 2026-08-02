@@ -1,4 +1,4 @@
-import { RouteErrorScreen } from '../navigation/RouteErrorScreen';
+import { RouteErrorScreen } from '@shell/navigation/RouteErrorScreen';
 
 export default function NotFoundRoute() {
   return (

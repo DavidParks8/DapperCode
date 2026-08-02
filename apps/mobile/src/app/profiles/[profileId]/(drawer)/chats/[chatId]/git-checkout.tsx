@@ -1,6 +1,6 @@
-import { GitCheckoutScreen } from '../../../../../../screens/gitCheckout/GitCheckoutScreen';
-import { useDisableDrawerSwipe } from '../../../../../../navigation/useDrawerSwipe';
-import { ProfileRouteContent } from '../../../../../../navigation/ProfileRouteBoundary';
+import { GitCheckoutScreen } from '../../../../../../features/workspace/checkout/Screen';
+import { useDisableDrawerSwipe } from '@shell/navigation/useDrawerSwipe';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
 
 export default function GitCheckoutRoute() {
   useDisableDrawerSwipe();

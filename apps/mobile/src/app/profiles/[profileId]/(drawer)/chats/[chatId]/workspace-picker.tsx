@@ -1,6 +1,6 @@
-import { WorkspacePickerScreen } from '../../../../../../screens/workspacePicker/WorkspacePickerScreen';
-import { useDisableDrawerSwipe } from '../../../../../../navigation/useDrawerSwipe';
-import { ProfileRouteContent } from '../../../../../../navigation/ProfileRouteBoundary';
+import { WorkspacePickerScreen } from '../../../../../../features/workspace/picker/Screen';
+import { useDisableDrawerSwipe } from '@shell/navigation/useDrawerSwipe';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
 
 export default function WorkspacePickerRoute() {
   useDisableDrawerSwipe();

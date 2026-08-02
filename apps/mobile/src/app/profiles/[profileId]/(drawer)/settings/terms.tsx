@@ -1,9 +1,9 @@
 import { useRouter } from 'expo-router';
 
-import { env } from '../../../../../config';
-import { TermsScreen } from '../../../../../screens/legal/TermsScreen';
-import { useDisableDrawerSwipe } from '../../../../../navigation/useDrawerSwipe';
-import { ProfileRouteContent } from '../../../../../navigation/ProfileRouteBoundary';
+import { env } from '@shared/config';
+import { TermsScreen } from '../../../../../features/legal/TermsScreen';
+import { useDisableDrawerSwipe } from '@shell/navigation/useDrawerSwipe';
+import { ProfileRouteContent } from '@shell/navigation/ProfileRouteBoundary';
 
 export default function TermsRoute() {
   const router = useRouter();

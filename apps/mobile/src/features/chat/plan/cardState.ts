@@ -1,0 +1,54 @@
+import type { CollaborationMode, TurnPlanStep } from '@bridge/types/types';
+
+export interface PlanCardStateLike {
+  explanation: string | null;
+  steps: TurnPlanStep[];
+}
+
+export type WorkflowCardMode = 'plan' | 'approval' | 'execution';
+
+export interface ResolveWorkflowCardModeArgs {
+  collaborationMode: CollaborationMode;
+  hasStructuredPlan: boolean;
+  hasPlanApprovalPrompt: boolean;
+}
+
+export interface ShouldCollapseWorkflowCardForKeyboardArgs {
+  collapsed: boolean;
+  keyboardVisible: boolean;
+  mode: WorkflowCardMode | null;
+  threadId: string | null | undefined;
+}
+
+export function hasStructuredPlanCardContent(plan: PlanCardStateLike | null | undefined): boolean {
+  return Boolean(plan && (plan.steps.length > 0 || plan.explanation?.trim()));
+}
+
+export function resolveWorkflowCardMode({
+  collaborationMode,
+  hasStructuredPlan,
+  hasPlanApprovalPrompt,
+}: ResolveWorkflowCardModeArgs): WorkflowCardMode | null {
+  if (hasPlanApprovalPrompt) {
+    return 'approval';
+  }
+
+  if (hasStructuredPlan && collaborationMode === 'default') {
+    return 'execution';
+  }
+
+  if (hasStructuredPlan) {
+    return 'plan';
+  }
+
+  return null;
+}
+
+export function shouldCollapseWorkflowCardForKeyboard({
+  collapsed,
+  keyboardVisible,
+  mode,
+  threadId,
+}: ShouldCollapseWorkflowCardForKeyboardArgs): boolean {
+  return Boolean(threadId && keyboardVisible && mode && !collapsed);
+}

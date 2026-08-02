@@ -6,8 +6,7 @@ const reactHooks = require('eslint-plugin-react-hooks');
 
 const jestFiles = [
   '**/*.{test,spec}.{ts,tsx}',
-  'src/__testharness__/**/*.{ts,tsx}',
-  'src/testing/**/*.{ts,tsx}',
+  'src/shared/testing/**/*.{ts,tsx}',
 ];
 
 module.exports = [
@@ -86,7 +85,7 @@ module.exports = [
   {
     // Flat-config overrides cannot target individual callbacks; this exact adapter file and the two
     // rules affected by react-native-markdown-display's `any` styles argument are the narrowest scope.
-    files: ['src/components/chatMessageMarkdownRules.tsx'],
+    files: ['src/features/chat/message/markdownRules.tsx'],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',

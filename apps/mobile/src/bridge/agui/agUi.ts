@@ -1,0 +1,49 @@
+import { EventSchemas, EventType, type AGUIEvent } from '@ag-ui/core';
+
+import type { RpcNotification } from '@bridge/types/types';
+import { SUPPORTED_AG_UI_EVENT_TYPES } from '@bridge/agui/agUiMessagesState';
+import { nonEmptyString, record } from '@bridge/agui/agUiValueReaders';
+
+export { renderAgUiCustomContent } from '@bridge/agui/agUiContent';
+export {
+  createAgUiThreadMessageState,
+  reduceAgUiMessageState as updateAgUiLiveAssistantMessages,
+} from '@bridge/agui/agUiMessages';
+export type {
+  AgUiMessageState as AgUiLiveAssistantMessages,
+  AgUiThreadMessageState as AgUiLiveAssistantMessage,
+} from '@bridge/agui/agUiMessages';
+
+export interface AgUiEventEnvelope {
+  threadId: string;
+  runId: string;
+  sourceTurnId?: string;
+  event: AGUIEvent;
+}
+
+export function parseAgUiEventNotification(
+  notification: RpcNotification,
+): AgUiEventEnvelope | null {
+  if (notification.method !== 'bridge/agui.event') {
+    return null;
+  }
+  const params = record(notification.params);
+  const threadId = nonEmptyString(params?.['threadId']);
+  const runId = nonEmptyString(params?.['runId']);
+  const sourceTurnId = nonEmptyString(params?.['sourceTurnId']) ?? undefined;
+  const parsedEvent = EventSchemas.safeParse(params?.['event']);
+  if (!threadId || !runId || !parsedEvent.success) {
+    return null;
+  }
+  const event = parsedEvent.data;
+  if (!SUPPORTED_AG_UI_EVENT_TYPES.has(event.type)) {
+    return null;
+  }
+  if (
+    (event.type === EventType.RUN_STARTED || event.type === EventType.RUN_FINISHED) &&
+    (event.threadId !== threadId || event.runId !== runId)
+  ) {
+    return null;
+  }
+  return { threadId, runId, sourceTurnId, event };
+}
