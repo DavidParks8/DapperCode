@@ -2,6 +2,10 @@ import type { ReactNode } from 'react';
 import { View } from 'react-native';
 
 export interface MockGestureEvent {
+  x?: number;
+  y?: number;
+  absoluteX?: number;
+  absoluteY?: number;
   translationX?: number;
   translationY?: number;
   velocityX?: number;

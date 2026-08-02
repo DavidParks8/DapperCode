@@ -1,13 +1,8 @@
 import { HostBridgeWsClientSocketTransportLayer } from './HostBridgeWsClientSocketTransportLayer';
 import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
 import { BridgeProtocolVersionError, isRpcRequestError } from './wsErrors';
-import {
-  readEventId,
-  readNumber,
-  readString,
-  toAgUiTurnCompletionSnapshot,
-  toRecord,
-} from './wsEventParsingInternals';
+import { readIntegerLike, readString, toRecord } from '../runtimeValidation';
+import { readEventId, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
 import {
   type BridgeSnapshotRequiredParams,
   type BridgeSnapshotRequiredReason,
@@ -74,14 +69,14 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
         return;
       }
       const identityResult = this.applyStreamIdentity(
-        readNumber(response.protocolVersion),
+        readIntegerLike(response.protocolVersion),
         readString(response.streamId),
       );
       if (identityResult === 'unsupported' || identityResult === 'changed') {
         return;
       }
-      const latestEventId = readNumber(response.latestEventId);
-      const earliestEventId = readNumber(response.earliestEventId);
+      const latestEventId = readIntegerLike(response.latestEventId);
+      const earliestEventId = readIntegerLike(response.earliestEventId);
       if (latestEventId !== null && latestEventId < cursor) {
         this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
         return;

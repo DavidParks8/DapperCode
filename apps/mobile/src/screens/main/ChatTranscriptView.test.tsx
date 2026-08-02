@@ -1,8 +1,15 @@
+import * as Haptics from 'expo-haptics';
 import { FlatList, Keyboard, Platform, Pressable } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Chat } from '../../api/types';
 import { createAgUiThreadMessageState } from '../../api/agUiMessages';
+import { ChatScrollRail } from '../../components/chatScrollRail/ChatScrollRail';
+import {
+  CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS,
+  CHAT_SCROLL_RAIL_TOUCH_WIDTH,
+} from '../../components/chatScrollRail/chatScrollRailGeometry';
+import { mockGestureByTestId, resetMockGestures } from '../../testing/gestureHandlerMock';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { FadeIn, FadeOut, ReduceMotion } from '../../testing/reanimatedMock';
@@ -28,6 +35,7 @@ type Queryable = ReactTestInstance & {
     onScroll: jest.Mock;
     onScrollBeginDrag: jest.Mock;
     onScrollEndDrag: jest.Mock;
+    onViewableItemsChanged: jest.Mock;
     renderItem: (info: Record<string, unknown>) => React.ReactElement;
   };
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
@@ -127,6 +135,296 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
     ),
   );
 }
+
+describe('ChatTranscriptView magical scroll rail', () => {
+  beforeEach(() => {
+    resetMockGestures();
+    jest.mocked(Haptics.impactAsync).mockClear();
+    jest.mocked(Haptics.selectionAsync).mockClear();
+  });
+
+  it('renders one fixed-pitch bar per user message and configures delayed edge activation', () => {
+    const messages: Chat['messages'] = [
+      { id: 'u1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'approval', role: 'system', content: 'Approved', createdAt: '2026-08-01T00:00:01Z' },
+      { id: 'a1', role: 'assistant', content: 'Reply', createdAt: '2026-08-01T00:00:02Z' },
+      { id: 'u2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:03Z' },
+    ];
+    const tree = render({ chat: makeChat({ messages }) });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+
+    expect(tree.root.findAllByProps({ testID: 'chat-scroll-rail-bar-u1' }).length).toBeGreaterThan(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'chat-scroll-rail-bar-u2' }).length).toBeGreaterThan(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'chat-scroll-rail-bar-approval' })).toHaveLength(0);
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    expect(gesture.config.hitSlop).toEqual({ width: CHAT_SCROLL_RAIL_TOUCH_WIDTH, right: 0 });
+    expect(gesture.config.activateAfterLongPress).toBe(CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS);
+    expect(gesture.config.maxPointers).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it('suppresses pinned scrolling, jumps without animation, haptically ticks, and restores release state', () => {
+    const messages: Chat['messages'] = [
+      { id: 'u1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'a1', role: 'assistant', content: 'Reply', createdAt: '2026-08-01T00:00:01Z' },
+      { id: 'u2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+    ];
+    const scrollToIndex = jest.fn();
+    const scrollToOffset = jest.fn();
+    const scrollRef = {
+      current: null,
+    } as React.MutableRefObject<FlatList<never> | null>;
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: true },
+    };
+    const onScrollInteractionStart = jest.fn();
+    const onPinnedAutoScroll = jest.fn();
+    const tree = render({
+      chat: makeChat({ messages }),
+      scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
+      autoScrollStateRef,
+      onScrollInteractionStart,
+      onPinnedAutoScroll,
+    });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+    scrollRef.current = { scrollToIndex, scrollToOffset } as unknown as FlatList<never>;
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+
+    act(() => {
+      gesture.onStart?.({ y: 136 });
+    });
+    expect(Haptics.impactAsync).toHaveBeenCalledWith(Haptics.ImpactFeedbackStyle.Light);
+    expect(onScrollInteractionStart).toHaveBeenCalledTimes(1);
+    expect(autoScrollStateRef.current).toEqual({
+      shouldStickToBottom: false,
+      isUserInteracting: true,
+      isMomentumScrolling: false,
+    });
+    expect(getList(tree).props.scrollEnabled).toBe(false);
+    expect(scrollToIndex).toHaveBeenLastCalledWith({
+      index: expect.any(Number),
+      animated: false,
+      viewPosition: 1,
+    });
+
+    act(() => {
+      gesture.onUpdate?.({ y: 164 });
+      getList(tree).props.onContentSizeChange(320, 1200);
+    });
+    expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
+    expect(autoScrollStateRef.current.isUserInteracting).toBe(true);
+    expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
+
+    act(() => {
+      gesture.onFinalize?.({ y: 164 });
+    });
+    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(autoScrollStateRef.current.isUserInteracting).toBe(false);
+    const settledJumpCount = scrollToIndex.mock.calls.length;
+    update(tree, {
+      chat: makeChat({
+        messages: [
+          ...messages,
+          {
+            id: 'stream-update',
+            role: 'assistant',
+            content: 'More',
+            createdAt: '2026-08-01T00:00:03Z',
+          },
+        ],
+      }),
+      scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
+      autoScrollStateRef,
+      onScrollInteractionStart,
+      onPinnedAutoScroll,
+    });
+    expect(scrollToIndex).toHaveBeenCalledTimes(settledJumpCount);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the collapsed rail visible only on wide viewports', () => {
+    const shared = { value: 0 };
+    const anchors = [{ messageId: 'u1', transcriptIndex: 0 }];
+    let phoneTree: ReactTestRenderer | undefined;
+    act(() => {
+      phoneTree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ChatScrollRail
+            anchors={anchors}
+            activeIndex={0}
+            windowStart={0}
+            capacity={8}
+            viewportHeight={300}
+            alwaysVisible={false}
+            engaged={shared as never}
+            fingerY={shared as never}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const phoneRail = (phoneTree as QueryableRenderer).root.findByProps({
+      testID: 'chat-scroll-rail',
+    }) as Queryable;
+    expect((phoneRail.props.style as Array<{ opacity?: number }>)[1]?.opacity).toBe(0);
+    act(() => phoneTree?.unmount());
+
+    let tabletTree: ReactTestRenderer | undefined;
+    act(() => {
+      tabletTree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <ChatScrollRail
+            anchors={anchors}
+            activeIndex={0}
+            windowStart={0}
+            capacity={8}
+            viewportHeight={500}
+            alwaysVisible
+            engaged={shared as never}
+            fingerY={shared as never}
+          />
+        </AppThemeProvider>,
+      );
+    });
+    const tabletRail = (tabletTree as QueryableRenderer).root.findByProps({
+      testID: 'chat-scroll-rail',
+    }) as Queryable;
+    expect((tabletRail.props.style as Array<{ opacity?: number }>)[1]?.opacity).toBe(1);
+    act(() => tabletTree?.unmount());
+  });
+
+  it('ignores a finalized edge gesture that never reached its long-press start', () => {
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+    };
+    const tree = render({
+      chat: makeChat({ messages: makeMessages(4) }),
+      autoScrollStateRef,
+    });
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    act(() => gesture.onFinalize?.({ y: 120 }));
+    expect(autoScrollStateRef.current).toEqual({
+      shouldStickToBottom: true,
+      isUserInteracting: false,
+      isMomentumScrolling: false,
+    });
+    act(() => tree.unmount());
+  });
+
+  it('does not engage the rail when the transcript has no user messages', () => {
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+    };
+    const onScrollInteractionStart = jest.fn();
+    const tree = render({ autoScrollStateRef, onScrollInteractionStart });
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    act(() => gesture.onStart?.({ y: 120 }));
+
+    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(onScrollInteractionStart).not.toHaveBeenCalled();
+    expect(Haptics.impactAsync).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('cancels an engaged rail when the chat changes', () => {
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+    };
+    const tree = render({
+      chat: makeChat({ id: 'first', messages: makeMessages(6) }),
+      autoScrollStateRef,
+    });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    act(() => gesture.onStart?.({ y: 140 }));
+    expect(getList(tree).props.scrollEnabled).toBe(false);
+
+    update(tree, {
+      chat: makeChat({ id: 'second', messages: makeMessages(4) }),
+      autoScrollStateRef,
+    });
+    expect(getList(tree).props.scrollEnabled).toBe(true);
+    expect(autoScrollStateRef.current.isUserInteracting).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('re-centers the rail on the current position when chats switch with equal anchor counts', () => {
+    const scrollToIndex = jest.fn();
+    const scrollRef = {
+      current: null,
+    } as React.MutableRefObject<FlatList<never> | null>;
+    const first = makeChat({ id: 'first-long', messages: makeMessages(80) });
+    const second = makeChat({ id: 'second-long', messages: makeMessages(80) });
+    const tree = render({
+      chat: first,
+      scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
+    });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+
+    update(tree, {
+      chat: second,
+      scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
+    });
+    scrollRef.current = {
+      scrollToIndex,
+      scrollToOffset: jest.fn(),
+    } as unknown as FlatList<never>;
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    act(() => gesture.onStart?.({ y: 148 }));
+
+    expect(scrollToIndex).toHaveBeenCalledWith({
+      index: expect.any(Number),
+      animated: false,
+      viewPosition: 1,
+    });
+    expect((scrollToIndex.mock.calls[0]?.[0] as { index: number }).index).toBeLessThan(20);
+    act(() => gesture.onFinalize?.({ y: 148 }));
+    act(() => tree.unmount());
+  });
+
+  it('tracks the visual top with viewport coverage viewability', () => {
+    const scrollToIndex = jest.fn();
+    const scrollRef = {
+      current: null,
+    } as React.MutableRefObject<FlatList<never> | null>;
+    const tree = render({
+      chat: makeChat({ messages: makeMessages(80) }),
+      scrollRef: scrollRef as ChatTranscriptViewProps['scrollRef'],
+    });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+    let list = getList(tree);
+    expect(list.props.viewabilityConfig).toEqual({ viewAreaCoveragePercentThreshold: 1 });
+    const oldestDisplayItem = list.props.data[79];
+    act(() =>
+      list.props.onViewableItemsChanged({
+        viewableItems: [
+          {
+            index: 79,
+            item: oldestDisplayItem,
+            key: 'oldest',
+            isViewable: true,
+          },
+        ],
+        changed: [],
+      }),
+    );
+
+    list = getList(tree);
+    scrollRef.current = {
+      scrollToIndex,
+      scrollToOffset: jest.fn(),
+    } as unknown as FlatList<never>;
+    const gesture = mockGestureByTestId('chat-scroll-rail-pan');
+    act(() => gesture.onStart?.({ y: 28 }));
+    expect((scrollToIndex.mock.calls[0]?.[0] as { index: number }).index).toBeGreaterThan(60);
+    act(() => gesture.onFinalize?.({ y: 28 }));
+    act(() => tree.unmount());
+  });
+});
 
 describe('ChatTranscriptView continuation', () => {
   it('renders load, loading, retry, exhausted, and unavailable boundary states', () => {
@@ -538,6 +836,7 @@ describe('ChatTranscriptView continuation', () => {
       { onOpenSubAgentThread: jest.fn() },
       { continuationState: { loading: false, error: null, exhausted: false, unavailableCount: 0 } },
       { onLoadEarlier: jest.fn() },
+      { scrollRailEnabled: false },
     ];
     for (const variant of propVariants) {
       const variantTree = render({ chat: stableChat });

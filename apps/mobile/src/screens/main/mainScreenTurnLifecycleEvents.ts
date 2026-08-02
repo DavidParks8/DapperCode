@@ -3,14 +3,13 @@ import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { screenSetter } from '../../state/mainScreen/registry';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
+import { readString, toRecord } from '../../runtimeValidation';
 import { mergeChatSummaryPreservingMessages } from './mainScreenChatState';
 import {
   RUN_WATCHDOG_MS,
   EXTERNAL_RUNNING_STATUS_HINTS,
   EXTERNAL_ERROR_STATUS_HINTS,
   EXTERNAL_COMPLETE_STATUS_HINTS,
-  toRecord,
-  readString,
   buildNextPlanStateFromUpdate,
   toTurnPlanUpdate,
   describeCompletedToolEvent,

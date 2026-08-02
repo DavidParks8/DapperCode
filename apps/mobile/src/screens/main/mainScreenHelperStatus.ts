@@ -5,7 +5,7 @@ import type {
   ChatMessage as ChatTranscriptMessage,
 } from '../../api/types';
 import { getMessageText } from '../../api/messages';
-import { readString, readStringArray, toRecord } from './mainScreenHelperPayloads';
+import { readNonEmptyStringArray, readString, toRecord } from '../../runtimeValidation';
 import { stripMarkdownInline, toTickerSnippet } from './mainScreenHelperTimeline';
 import {
   LIKELY_RUNNING_RECENT_UPDATE_MS,
@@ -415,7 +415,8 @@ export function toPendingApproval(value: unknown): PendingApproval | null {
     command: readString(record.command) ?? undefined,
     cwd: readString(record.cwd) ?? undefined,
     grantRoot: readString(record.grantRoot) ?? undefined,
-    proposedExecpolicyAmendment: readStringArray(record.proposedExecpolicyAmendment) ?? undefined,
+    proposedExecpolicyAmendment:
+      readNonEmptyStringArray(record.proposedExecpolicyAmendment) ?? undefined,
     options: Array.isArray(record.options)
       ? record.options.flatMap((value) => {
           const option = toRecord(value);

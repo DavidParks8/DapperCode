@@ -94,5 +94,6 @@ screenshots/
 screenshot-preview.png
 .playwright-mcp/
 .playwright-cli/
+/.opencode/goals/state.json.lock/
 /demo/
 /output/

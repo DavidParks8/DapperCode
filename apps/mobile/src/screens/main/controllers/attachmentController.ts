@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard } from 'react-native';
 
 import type { HostBridgeApiClient } from '../../../api/client';
 import type { Chat, LocalImageInput, MentionInput } from '../../../api/types';
@@ -297,7 +298,10 @@ export function useAttachmentController({
     mentionSuggestions: (query) =>
       toAttachmentPathSuggestions(fileCandidates, query, pendingMentionPaths),
     openMenu: () => {
-      if (!pickerInProgressRef.current && !uploading) setAttachmentMenuVisible(true);
+      if (!pickerInProgressRef.current && !uploading) {
+        Keyboard.dismiss();
+        setAttachmentMenuVisible(true);
+      }
     },
     closeMenu: () => setAttachmentMenuVisible(false),
     requestMenuAction: (action) => {

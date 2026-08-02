@@ -17,6 +17,7 @@ import { TABLET_SIDEBAR_WIDTH } from '../bootstrap/appConstants';
 interface DrawerScreenOptions {
   drawerStyle: { width: number };
   drawerType: 'front' | 'permanent';
+  sceneStyle: { backgroundColor: string };
   swipeEnabled: boolean;
 }
 
@@ -46,6 +47,7 @@ describe('DrawerLayout responsive sizing', () => {
       drawerType: 'front',
       swipeEnabled: true,
       drawerStyle: { width: 430 },
+      sceneStyle: { backgroundColor: '#000000' },
     });
 
     act(() => tree.update(<ResponsiveDrawerLayout width={1024} />));

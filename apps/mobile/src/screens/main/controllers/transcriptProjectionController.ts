@@ -33,18 +33,20 @@ export function projectTranscript({
   now?: () => string;
 }): TranscriptProjection {
   const child = getVisibleTranscriptMessages(filterReasoningMessages(chat.messages), showToolCalls);
-  const inherited =
+  const parentMessages =
     chat.parentThreadId && parentChat
-      ? trimInheritedParentMessages(
-          getVisibleTranscriptMessages(filterReasoningMessages(parentChat.messages), showToolCalls),
-          child,
-          chat.id,
-        )
-      : { messages: child, hiddenInheritedMessageCount: 0 };
+      ? getVisibleTranscriptMessages(filterReasoningMessages(parentChat.messages), showToolCalls)
+      : null;
+  const inherited = parentMessages
+    ? trimInheritedParentMessages(parentMessages, child, chat.id)
+    : { messages: child, hiddenInheritedMessageCount: 0 };
   let messages = dedupeTransientUserMessages(
     syncVisibleSubAgentStatuses(inherited.messages, threadStatuses),
   );
-  const liveMessages = liveMessageState?.messages ?? [];
+  const rawLiveMessages = liveMessageState?.messages ?? [];
+  const liveMessages = parentMessages
+    ? trimInheritedParentMessages(parentMessages, rawLiveMessages, chat.id).messages
+    : rawLiveMessages;
   const replacedMessageIds = new Set(
     Object.values(liveMessageState?.replacesMessageIdByMessageId ?? {}),
   );

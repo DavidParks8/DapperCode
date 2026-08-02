@@ -63,6 +63,8 @@ export const interpolate = (
   const ratio = (value - inputMin) / (inputMax - inputMin);
   return outputMin + ratio * (outputMax - outputMin);
 };
+export const interpolateColor = (_value: number, _input: number[], output: string[]) =>
+  output[output.length - 1];
 export const runOnJS =
   <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
   (...args: Args) =>

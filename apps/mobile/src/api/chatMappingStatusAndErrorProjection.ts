@@ -1,12 +1,11 @@
+import { readString, toRecord } from '../runtimeValidation';
 import {
   normalizeLifecycleStatus,
   type RawAcpSnapshot,
   type RawThread,
   type RawThreadStatus,
   type RawTurn,
-  readString,
   readTimestampSeconds,
-  toRecord,
 } from './chatMappingRawTypesAndReaders';
 import { toRawAcpSnapshot, toRawTurn } from './chatMappingSnapshotAndSummaryProjection';
 import { type ChatStatus } from './types';

@@ -1744,7 +1744,7 @@ describe('chatMapping', () => {
   it('covers primitive readers, preview truncation, and malformed raw payloads', () => {
     expect(toRecord(null)).toBeNull();
     expect(toRecord('value')).toBeNull();
-    expect(toRecord([])).toEqual([]);
+    expect(toRecord([])).toBeNull();
     expect(readString(1)).toBeNull();
     expect(readString('value')).toBe('value');
     expect(toPreview('  short\n preview ')).toBe('short preview');
@@ -2132,7 +2132,7 @@ describe('chatMapping', () => {
     });
 
     it('maps alternate primitive, timestamp, lifecycle, title, source, and error shapes', () => {
-      expect(toRecord([])).toBeTruthy();
+      expect(toRecord([])).toBeNull();
       expect(toRecord(null)).toBeNull();
       expect(readString(4)).toBeNull();
       expect(toPreview(` ${'word '.repeat(50)}`)).toHaveLength(180);

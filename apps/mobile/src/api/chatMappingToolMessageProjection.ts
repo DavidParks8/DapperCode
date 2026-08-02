@@ -13,12 +13,8 @@ import {
   toFileChangeTargetLabel,
   toNestedOutput,
 } from './chatMappingToolArgumentParsers';
-import {
-  readFileChangePaths,
-  readNumber,
-  readString,
-  toRecord,
-} from './chatMappingRawTypesAndReaders';
+import { readFileChangePaths } from './chatMappingRawTypesAndReaders';
+import { readCoercedFiniteNumber, readString, toRecord } from '../runtimeValidation';
 import { toStructuredPreview, withNestedDetail } from './chatMappingStructuredContentPreview';
 
 export function toToolLikeMessage(item: Record<string, unknown>): string | null {
@@ -41,7 +37,8 @@ export function toToolLikeMessage(item: Record<string, unknown>): string | null 
     const output =
       normalizeMultiline(readString(item.aggregatedOutput), 2400) ??
       normalizeMultiline(readString(item.aggregated_output), 2400);
-    const exitCode = readNumber(item.exitCode) ?? readNumber(item.exit_code);
+    const exitCode =
+      readCoercedFiniteNumber(item.exitCode) ?? readCoercedFiniteNumber(item.exit_code);
     const title =
       status === 'failed' || status === 'error'
         ? `• Command failed \`${command}\``

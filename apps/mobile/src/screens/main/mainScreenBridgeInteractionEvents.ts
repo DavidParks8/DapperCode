@@ -10,9 +10,8 @@ import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { screenSetter } from '../../state/mainScreen/registry';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
+import { readString, toRecord } from '../../runtimeValidation';
 import {
-  toRecord,
-  readString,
   toPendingUserInputRequest,
   buildUserInputDrafts,
   parseBridgeThreadQueueState,

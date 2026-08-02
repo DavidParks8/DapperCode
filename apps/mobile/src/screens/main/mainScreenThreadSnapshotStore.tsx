@@ -1,12 +1,11 @@
 import { useCallback, useEffect } from 'react';
 import type { BridgeUiSurface } from '../../api/types';
+import { readNonNegativeIntegerLike, toRecord } from '../../runtimeValidation';
 import {
   type ActivePlanState,
   type ThreadContextUsage,
   RUN_WATCHDOG_MS,
   type ChatModelPreference,
-  toRecord,
-  readIntegerLike,
 } from './mainScreenHelpers';
 import type {
   MainScreenLocalTranscriptActionsContext,
@@ -143,21 +142,22 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
       toRecord(infoRecord?.lastTokenUsage);
 
     const totalTokens =
-      readIntegerLike(totalRecord?.totalTokens) ?? readIntegerLike(totalRecord?.total_tokens);
+      readNonNegativeIntegerLike(totalRecord?.totalTokens) ??
+      readNonNegativeIntegerLike(totalRecord?.total_tokens);
 
     const lastTokens =
-      readIntegerLike(lastRecord?.totalTokens) ??
-      readIntegerLike(lastRecord?.total_tokens) ??
+      readNonNegativeIntegerLike(lastRecord?.totalTokens) ??
+      readNonNegativeIntegerLike(lastRecord?.total_tokens) ??
       (totalTokens !== null ? 0 : null);
     const modelContextWindow =
-      readIntegerLike(record.modelContextWindow) ??
-      readIntegerLike(record.model_context_window) ??
-      readIntegerLike(turnRecord?.modelContextWindow) ??
-      readIntegerLike(turnRecord?.model_context_window) ??
-      readIntegerLike(tokenUsageRecord?.modelContextWindow) ??
-      readIntegerLike(tokenUsageRecord?.model_context_window) ??
-      readIntegerLike(infoRecord?.modelContextWindow) ??
-      readIntegerLike(infoRecord?.model_context_window);
+      readNonNegativeIntegerLike(record.modelContextWindow) ??
+      readNonNegativeIntegerLike(record.model_context_window) ??
+      readNonNegativeIntegerLike(turnRecord?.modelContextWindow) ??
+      readNonNegativeIntegerLike(turnRecord?.model_context_window) ??
+      readNonNegativeIntegerLike(tokenUsageRecord?.modelContextWindow) ??
+      readNonNegativeIntegerLike(tokenUsageRecord?.model_context_window) ??
+      readNonNegativeIntegerLike(infoRecord?.modelContextWindow) ??
+      readNonNegativeIntegerLike(infoRecord?.model_context_window);
 
     if (totalTokens === null && modelContextWindow === null) {
       return null;

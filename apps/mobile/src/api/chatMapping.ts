@@ -1,4 +1,5 @@
-export { toRecord, readString, toPreview } from './chatMappingRawTypesAndReaders';
+export { readString, toRecord } from '../runtimeValidation';
+export { toPreview } from './chatMappingRawTypesAndReaders';
 export { toRawThread } from './chatMappingStatusAndErrorProjection';
 export { mapChatSummary } from './chatMappingSnapshotAndSummaryProjection';
 export { mapChat, applySnapshotToChat } from './chatMappingChatProjection';

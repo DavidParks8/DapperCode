@@ -11,11 +11,9 @@ import { screenSetter } from '../../state/mainScreen/registry';
 import { startNewChatAtom } from '../../navigation/actions';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
+import { readFiniteNumber, readString, toRecord } from '../../runtimeValidation';
 import {
   RUN_WATCHDOG_MS,
-  toRecord,
-  readString,
-  readNumber,
   describeStartedToolEvent,
   extractNotificationThreadId,
 } from './mainScreenHelpers';
@@ -60,7 +58,7 @@ export function processThreadStateEvents(
 
   if (event.method === 'bridge/events/snapshotRequired') {
     const params = toRecord(event.params);
-    const resumeAfterEventId = readNumber(params?.resumeAfterEventId);
+    const resumeAfterEventId = readFiniteNumber(params?.resumeAfterEventId);
     const reason = readString(params?.reason);
     clearRunWatchdog();
     setActiveCommands([]);

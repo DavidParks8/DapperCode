@@ -14,7 +14,7 @@ import {
   normalizeServiceTier,
   toSelectedServiceTier,
 } from './mainScreenHelperPreferences';
-import { readString, toRecord } from './mainScreenHelperPayloads';
+import { readString, toRecord } from '../../runtimeValidation';
 import type { ActivePlanState, ChatModelPreference } from './mainScreenHelperTypes';
 import {
   CHAT_BRIDGE_UI_SURFACES_FILE,

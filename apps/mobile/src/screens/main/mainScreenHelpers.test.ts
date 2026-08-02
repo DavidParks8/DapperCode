@@ -9,6 +9,14 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import * as helpers from './mainScreenHelpers';
 import {
+  readBoolean,
+  readFiniteNumber,
+  readNonEmptyStringArray,
+  readNonNegativeIntegerLike,
+  readString,
+  toRecord,
+} from '../../runtimeValidation';
+import {
   agentModelPreferenceKey,
   lastUsedModelPreference,
   withLastUsedModelPreference,
@@ -318,23 +326,24 @@ describe('mainScreenHelpers branch behavior', () => {
   });
 
   it('reads primitive payload values defensively', () => {
-    expect(helpers.toRecord({ ok: true })).toEqual({ ok: true });
-    expect(helpers.toRecord(null)).toBeNull();
-    expect(helpers.toRecord('x')).toBeNull();
-    expect(helpers.readString('x')).toBe('x');
-    expect(helpers.readString(1)).toBeNull();
-    expect(helpers.readStringArray('x')).toBeNull();
-    expect(helpers.readStringArray([1, 'a', false])).toEqual(['a']);
-    expect(helpers.readStringArray([1])).toBeNull();
-    expect(helpers.readNumber(2)).toBe(2);
-    expect(helpers.readNumber(Number.NaN)).toBeNull();
-    expect(helpers.readIntegerLike(3.9)).toBe(3);
-    expect(helpers.readIntegerLike(-2)).toBe(0);
-    expect(helpers.readIntegerLike(' 4.8 ')).toBe(4);
-    expect(helpers.readIntegerLike('')).toBeNull();
-    expect(helpers.readIntegerLike('wat')).toBeNull();
-    expect(helpers.readBoolean(false)).toBe(false);
-    expect(helpers.readBoolean('false')).toBeNull();
+    expect(toRecord({ ok: true })).toEqual({ ok: true });
+    expect(toRecord(null)).toBeNull();
+    expect(toRecord('x')).toBeNull();
+    expect(toRecord([])).toBeNull();
+    expect(readString('x')).toBe('x');
+    expect(readString(1)).toBeNull();
+    expect(readNonEmptyStringArray('x')).toBeNull();
+    expect(readNonEmptyStringArray([1, 'a', false])).toEqual(['a']);
+    expect(readNonEmptyStringArray([1])).toBeNull();
+    expect(readFiniteNumber(2)).toBe(2);
+    expect(readFiniteNumber(Number.NaN)).toBeNull();
+    expect(readNonNegativeIntegerLike(3.9)).toBe(3);
+    expect(readNonNegativeIntegerLike(-2)).toBe(0);
+    expect(readNonNegativeIntegerLike(' 4.8 ')).toBe(4);
+    expect(readNonNegativeIntegerLike('')).toBeNull();
+    expect(readNonNegativeIntegerLike('wat')).toBeNull();
+    expect(readBoolean(false)).toBe(false);
+    expect(readBoolean('false')).toBeNull();
   });
 
   it('merges context usage and plan deltas across matching turns', () => {
@@ -1026,9 +1035,9 @@ describe('mainScreenHelpers branch behavior', () => {
 
   it('merges persisted plan snapshots without clobbering newer live plan state', () => {
     // No live snapshot exists for this thread yet, so the persisted value applies.
-    expect(
-      helpers.mergePersistedPlanSnapshots({ 'thread-1': plan }, {}),
-    ).toEqual({ 'thread-1': plan });
+    expect(helpers.mergePersistedPlanSnapshots({ 'thread-1': plan }, {})).toEqual({
+      'thread-1': plan,
+    });
 
     // A live plan event landed for this thread before the persisted read
     // resolved (its `plan` key is set); that live plan must win over the

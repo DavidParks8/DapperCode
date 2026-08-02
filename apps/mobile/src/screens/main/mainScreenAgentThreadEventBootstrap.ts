@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification } from '../../api/agUi';
+import { toRecord } from '../../runtimeValidation';
 import {
-  toRecord,
   extractNotificationThreadId,
   extractNotificationParentThreadId,
 } from './mainScreenHelpers';

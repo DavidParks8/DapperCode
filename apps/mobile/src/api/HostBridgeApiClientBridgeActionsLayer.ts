@@ -1,5 +1,6 @@
 import { HostBridgeApiClientTurnLifecycleLayer } from './HostBridgeApiClientTurnLifecycleLayer';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fetch } from 'expo/fetch';
+import { File } from 'expo-file-system';
 import { normalizeCwd } from './clientChatListInternals';
 import { readString, toRecord } from './chatMapping';
 import {
@@ -62,18 +63,21 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
     if (body.fileName?.trim()) parameters.fileName = body.fileName.trim();
     if (body.mimeType?.trim()) parameters.mimeType = body.mimeType.trim();
     if (body.threadId?.trim()) parameters.threadId = body.threadId.trim();
-    const result = await FileSystem.uploadAsync(`${this.bridgeUrl}/attachments`, body.uri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName: 'file',
-      mimeType: body.mimeType,
-      parameters,
+    const file = new File(body.uri);
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(parameters)) {
+      formData.append(key, value);
+    }
+    formData.append('file', file);
+    const result = await fetch(`${this.bridgeUrl}/attachments`, {
+      method: 'POST',
       headers: this.authToken ? { Authorization: `Bearer ${this.authToken}` } : undefined,
-      sessionType: FileSystem.FileSystemSessionType.FOREGROUND,
+      body: formData,
     });
+    const responseBody = await result.text();
     let payload: unknown;
     try {
-      payload = JSON.parse(result.body);
+      payload = JSON.parse(responseBody);
     } catch {
       payload = null;
     }

@@ -1,12 +1,10 @@
 import type { RpcNotification } from '../../api/types';
+import { readFiniteNumber, readString, toRecord } from '../../runtimeValidation';
 import { screenSetter } from '../../state/mainScreen/registry';
 import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
 import { activePlanAtom } from '../../state/mainScreen/turn';
 import {
   RUN_WATCHDOG_MS,
-  toRecord,
-  readString,
-  readNumber,
   buildNextPlanStateFromDelta,
   extractFirstBoldSnippet,
   toReasoningActivityDetail,
@@ -94,7 +92,7 @@ export function processPlanAndReasoningEvents(
 
     bumpRunWatchdog();
     const itemId = readString(params?.itemId);
-    const summaryIndex = readNumber(params?.summaryIndex);
+    const summaryIndex = readFiniteNumber(params?.summaryIndex);
     const summaryKey = itemId && summaryIndex !== null ? `${itemId}:${String(summaryIndex)}` : null;
     if (summaryKey && reasoningSummaryRef.current[summaryKey] === undefined) {
       reasoningSummaryRef.current[summaryKey] = '';
@@ -131,7 +129,7 @@ export function processPlanAndReasoningEvents(
 
     bumpRunWatchdog();
     const itemId = readString(params?.itemId);
-    const summaryIndex = readNumber(params?.summaryIndex);
+    const summaryIndex = readFiniteNumber(params?.summaryIndex);
     const summaryKey = itemId && summaryIndex !== null ? `${itemId}:${String(summaryIndex)}` : null;
 
     let heading = extractFirstBoldSnippet(delta, 56);

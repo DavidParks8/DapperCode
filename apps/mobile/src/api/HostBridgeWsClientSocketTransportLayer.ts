@@ -2,13 +2,8 @@ import { HostBridgeWsClientConnectionLayer } from './HostBridgeWsClientConnectio
 import { HostBridgeWsClientCore } from './HostBridgeWsClientCore';
 import { Platform } from 'react-native';
 import { RpcRequestError } from './wsErrors';
-import {
-  readEventId,
-  readNumber,
-  readString,
-  toAgUiTurnCompletionSnapshot,
-  toRecord,
-} from './wsEventParsingInternals';
+import { readIntegerLike, readString, toRecord } from '../runtimeValidation';
+import { readEventId, toAgUiTurnCompletionSnapshot } from './wsEventParsingInternals';
 import { type ReactNativeWebSocketConstructor } from './wsTypes';
 import { type RpcNotification } from './types';
 
@@ -161,7 +156,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       return;
     }
     const params = toRecord(record.params);
-    const protocolVersion = readNumber(record.protocolVersion);
+    const protocolVersion = readIntegerLike(record.protocolVersion);
     const streamId = readString(record.streamId);
     const identityResult = this.applyStreamIdentity(protocolVersion, streamId);
     if (identityResult === 'unsupported') {

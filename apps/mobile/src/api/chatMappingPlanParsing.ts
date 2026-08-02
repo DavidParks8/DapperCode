@@ -1,4 +1,4 @@
-import { readString, toRecord } from './chatMappingRawTypesAndReaders';
+import { readString, toRecord } from '../runtimeValidation';
 import { stringifyStructuredContentEntries } from './chatMappingStructuredContentPreview';
 import { type ChatMessagePart, type ChatPlanSnapshot, type TurnPlanStep } from './types';
 

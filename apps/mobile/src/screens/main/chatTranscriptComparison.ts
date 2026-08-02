@@ -24,7 +24,8 @@ export function areChatTranscriptViewPropsEqual(
     previous.liveMessageState === next.liveMessageState &&
     previous.onOpenSubAgentThread === next.onOpenSubAgentThread &&
     previous.continuationState === next.continuationState &&
-    previous.onLoadEarlier === next.onLoadEarlier
+    previous.onLoadEarlier === next.onLoadEarlier &&
+    previous.scrollRailEnabled === next.scrollRailEnabled
   );
 }
 

@@ -1,9 +1,8 @@
+import { readString, toRecord } from '../runtimeValidation';
 import {
   normalizeLifecycleStatus,
   type RawThread,
   type RawTurn,
-  readString,
-  toRecord,
 } from './chatMappingRawTypesAndReaders';
 import { normalizeType } from './chatMappingToolArgumentParsers';
 import { toPlanSnapshot } from './chatMappingPlanParsing';
