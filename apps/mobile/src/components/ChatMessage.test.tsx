@@ -914,6 +914,29 @@ describe('ChatMessage user bubble', () => {
     });
   };
 
+  it('renders user messages with the accessible iMessage-blue palette', () => {
+    const theme = createAppTheme('dark');
+    const tree = renderMessage({
+      id: 'user-blue',
+      role: 'user',
+      content: 'A wrapped user message.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root as QueryableTestInstance;
+    const bubbleStyle = (StyleSheet.flatten(
+      root.findByProps({ testID: 'user-message-bubble' }).props.style as never,
+    ) ?? {}) as { backgroundColor?: string; borderColor?: string };
+    const textStyle = (StyleSheet.flatten(findUserText(root).props.style as never) ?? {}) as {
+      color?: string;
+    };
+
+    expect(bubbleStyle.backgroundColor).toBe(theme.colors.userBubble);
+    expect(bubbleStyle.borderColor).toBe(theme.colors.userBubbleBorder);
+    expect(textStyle.color).toBe(theme.colors.userBubbleText);
+
+    act(() => tree.unmount());
+  });
+
   it('hugs the widest rendered line instead of filling the allowed width', () => {
     const tree = renderMessage({
       id: 'user-hug',

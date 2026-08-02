@@ -166,6 +166,22 @@ describe('theme', () => {
     }
   });
 
+  it('uses an accessible iMessage-style blue for user messages in every palette', () => {
+    const palettes = [
+      createAppTheme('dark', 'classic'),
+      createAppTheme('dark', 'grey'),
+      createAppTheme('light'),
+    ];
+
+    for (const theme of palettes) {
+      expect(theme.colors.userBubble).toBe('#006FE6');
+      expect(theme.colors.userBubbleText).toBe('#FFFFFF');
+      expect(
+        contrastRatio(theme.colors.userBubble, theme.colors.userBubbleText),
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_CONTRAST);
+    }
+  });
+
   it('exposes an expanded radius scale while preserving existing steps', () => {
     expect(radius.xs).toBe(4);
     expect(radius.sm).toBe(8);

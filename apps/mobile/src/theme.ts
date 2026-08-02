@@ -26,6 +26,9 @@ export interface AppColors {
   accentText: string;
   userBubble: string;
   userBubbleBorder: string;
+  userBubbleText: string;
+  userBubbleSecondaryText: string;
+  userBubbleInset: string;
   assistantBubbleBg: string;
   assistantBubbleBorder: string;
   inlineCodeBg: string;
@@ -111,8 +114,11 @@ const darkClassicColors: AppColors = {
   accent: '#C7BFFF',
   accentPressed: '#AFA0FF',
   accentText: '#000000',
-  userBubble: '#262A31',
-  userBubbleBorder: 'rgba(212, 219, 232, 0.32)',
+  userBubble: '#006FE6',
+  userBubbleBorder: 'transparent',
+  userBubbleText: '#FFFFFF',
+  userBubbleSecondaryText: 'rgba(255, 255, 255, 0.82)',
+  userBubbleInset: 'rgba(255, 255, 255, 0.16)',
   assistantBubbleBg: 'transparent',
   assistantBubbleBorder: 'transparent',
   inlineCodeBg: '#2A303A',
@@ -161,8 +167,11 @@ const darkGreyColors: AppColors = {
   accent: '#C7BFFF',
   accentPressed: '#AFA0FF',
   accentText: '#1e1e1e',
-  userBubble: '#2d2d30',
-  userBubbleBorder: 'rgba(255, 255, 255, 0.14)',
+  userBubble: '#006FE6',
+  userBubbleBorder: 'transparent',
+  userBubbleText: '#FFFFFF',
+  userBubbleSecondaryText: 'rgba(255, 255, 255, 0.82)',
+  userBubbleInset: 'rgba(255, 255, 255, 0.16)',
   assistantBubbleBg: 'transparent',
   assistantBubbleBorder: 'transparent',
   inlineCodeBg: '#1e1e1e',
@@ -210,8 +219,11 @@ const lightColors: AppColors = {
   accent: '#4C3FCB',
   accentPressed: '#3C2FB0',
   accentText: '#FFFFFF',
-  userBubble: '#EFF3F7',
-  userBubbleBorder: 'rgba(67, 96, 126, 0.24)',
+  userBubble: '#006FE6',
+  userBubbleBorder: 'transparent',
+  userBubbleText: '#FFFFFF',
+  userBubbleSecondaryText: 'rgba(255, 255, 255, 0.82)',
+  userBubbleInset: 'rgba(255, 255, 255, 0.16)',
   assistantBubbleBg: 'transparent',
   assistantBubbleBorder: 'transparent',
   inlineCodeBg: '#DFE8F2',

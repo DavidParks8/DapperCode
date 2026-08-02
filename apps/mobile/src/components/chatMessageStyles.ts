@@ -43,12 +43,12 @@ export const createStyles = (theme: AppTheme) =>
     assistantContent: { gap: theme.spacing.xs },
     userMessageText: {
       ...theme.typography.body,
-      color: theme.colors.textPrimary,
+      color: theme.colors.userBubbleText,
     },
     userInlineMentionText: {
-      color: theme.colors.textSecondary,
-      backgroundColor: theme.colors.bgItem,
-      borderColor: theme.colors.userBubbleBorder,
+      color: theme.colors.userBubbleText,
+      backgroundColor: theme.colors.userBubbleInset,
+      borderColor: theme.colors.userBubbleInset,
       borderWidth: StyleSheet.hairlineWidth,
       borderRadius: theme.radius.sm,
       paddingHorizontal: 3,
@@ -61,8 +61,8 @@ export const createStyles = (theme: AppTheme) =>
       gap: theme.spacing.xs,
       borderRadius: theme.radius.sm,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.userBubbleBorder,
-      backgroundColor: theme.colors.bgMain,
+      borderColor: theme.colors.userBubbleInset,
+      backgroundColor: theme.colors.userBubbleInset,
       paddingHorizontal: theme.spacing.sm,
       paddingVertical: theme.spacing.xs,
       maxWidth: '100%',
@@ -70,7 +70,7 @@ export const createStyles = (theme: AppTheme) =>
     userFileChipText: {
       ...theme.typography.caption,
       lineHeight: 16,
-      color: theme.colors.textMuted,
+      color: theme.colors.userBubbleSecondaryText,
       flexShrink: 1,
     },
     markdownImage: {
