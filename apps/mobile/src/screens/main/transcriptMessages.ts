@@ -35,41 +35,17 @@ export type TranscriptDisplayItem =
 /** Keeps a computer-use trace bounded so very long runs don’t dominate the transcript. */
 export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
+const HIDDEN_TRANSCRIPT_MARKERS = [
+  'FINAL_TASK_RESULT_JSON',
+  'Current working directory is:',
+  'You are operating in task worktree',
+] as const;
+
 export function getVisibleTranscriptMessages(
   messages: ChatMessage[],
   showToolCalls: boolean,
 ): ChatMessage[] {
-  const filtered = messages.filter((msg) => {
-    const text = getMessageText(msg);
-    const hasToolCalls = getToolCallDisplayLines(msg).length > 0;
-    if (
-      !showToolCalls &&
-      (msg.role === 'tool' ||
-        hasToolCalls ||
-        Boolean(msg.toolMeta) ||
-        (msg.role === 'system' && isLegacyToolTimelineContent(text)) ||
-        (msg.role === 'activity' &&
-          msg.activityType !== SUBAGENT_ACTIVITY_TYPE &&
-          msg.activityType !== COMPACTION_ACTIVITY_TYPE))
-    ) {
-      return false;
-    }
-    if (text.includes('FINAL_TASK_RESULT_JSON')) {
-      return false;
-    }
-    if (text.includes('Current working directory is:')) {
-      return false;
-    }
-    if (text.includes('You are operating in task worktree')) {
-      return false;
-    }
-    if (msg.role === 'assistant' && !text.trim() && !hasToolCalls && !msg.toolMeta) {
-      return false;
-    }
-    return true;
-  });
-
-  return filtered;
+  return messages.filter((message) => shouldDisplayTranscriptMessage(message, showToolCalls));
 }
 
 export function buildTranscriptDisplayItems(messages: ChatMessage[]): TranscriptDisplayItem[] {
@@ -163,6 +139,56 @@ function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
       }),
     )
   );
+}
+
+function shouldDisplayTranscriptMessage(message: ChatMessage, showToolCalls: boolean): boolean {
+  const text = getMessageText(message);
+  const hasToolCalls = getToolCallDisplayLines(message).length > 0;
+
+  return !(
+    shouldHideToolTranscriptMessage(message, text, hasToolCalls, showToolCalls) ||
+    hasHiddenTranscriptMarker(text) ||
+    isBlankAssistantTranscriptMessage(message, text, hasToolCalls)
+  );
+}
+
+function shouldHideToolTranscriptMessage(
+  message: ChatMessage,
+  text: string,
+  hasToolCalls: boolean,
+  showToolCalls: boolean,
+): boolean {
+  if (showToolCalls) {
+    return false;
+  }
+
+  return (
+    message.role === 'tool' ||
+    hasToolCalls ||
+    Boolean(message.toolMeta) ||
+    (message.role === 'system' && isLegacyToolTimelineContent(text)) ||
+    isHiddenActivityTranscriptMessage(message)
+  );
+}
+
+function isHiddenActivityTranscriptMessage(message: ChatMessage): boolean {
+  return (
+    message.role === 'activity' &&
+    message.activityType !== SUBAGENT_ACTIVITY_TYPE &&
+    message.activityType !== COMPACTION_ACTIVITY_TYPE
+  );
+}
+
+function hasHiddenTranscriptMarker(text: string): boolean {
+  return HIDDEN_TRANSCRIPT_MARKERS.some((marker) => text.includes(marker));
+}
+
+function isBlankAssistantTranscriptMessage(
+  message: ChatMessage,
+  text: string,
+  hasToolCalls: boolean,
+): boolean {
+  return message.role === 'assistant' && !text.trim() && !hasToolCalls && !message.toolMeta;
 }
 
 function isToolTranscriptMessage(message: ChatMessage): boolean {

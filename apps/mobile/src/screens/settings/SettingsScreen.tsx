@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { AgentDescriptor, BridgeCapabilities } from '../../api/types';
+import type { WorkspaceChatLimit } from '../../appSettings';
 import { AgentIcon } from '../../components/AgentIcon';
 import { feedback } from '../../feedback';
 import { disablePush, enablePush, updatePushEvents } from '../../pushController';
@@ -38,6 +39,170 @@ import { drawerCommandsAtom } from '../../state/drawer/atoms';
 import { routes } from '../../navigation/routes';
 import { replaceRoot } from '../../navigation/routeNavigation';
 import { useAppTheme, type AppTheme } from '../../theme';
+
+function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
+  if (current === 5) {
+    return 10;
+  }
+  if (current === 10) {
+    return 25;
+  }
+  if (current === 25) {
+    return null;
+  }
+  return 5;
+}
+
+interface ConnectionSectionProps {
+  activeBridgeProfile: { id: string; name: string } | null;
+  activeBridgeProfileId: string | null;
+  bridgeConnected: boolean;
+  bridgeProfiles: { id: string; name: string }[];
+  profileId: string;
+  router: ReturnType<typeof useRouter>;
+}
+
+function ConnectionSection({
+  activeBridgeProfile,
+  activeBridgeProfileId,
+  bridgeConnected,
+  bridgeProfiles,
+  profileId,
+  router,
+}: ConnectionSectionProps) {
+  return (
+    <Section title="Connection">
+      <Row
+        label={activeBridgeProfile?.name ?? 'Current bridge'}
+        value={bridgeConnected ? 'Connected' : 'Disconnected'}
+        onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
+      />
+      <Row
+        label="Add bridge"
+        onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
+      />
+      {bridgeProfiles.map((profile) => (
+        <Row
+          key={profile.id}
+          label={profile.name}
+          value={profile.id === activeBridgeProfileId ? 'Active' : undefined}
+          onPress={() => replaceRoot(routes.newChat(profile.id))}
+        />
+      ))}
+    </Section>
+  );
+}
+
+interface InstalledAgentsSectionProps {
+  loading: boolean;
+  capabilities: BridgeCapabilities | null | undefined;
+  theme: AppTheme;
+}
+
+function InstalledAgentsSection({ loading, capabilities, theme }: InstalledAgentsSectionProps) {
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  return (
+    <Section title="Installed ACP agents">
+      {loading ? <ActivityIndicator color={theme.colors.accent} /> : null}
+      {!loading && (capabilities?.agents.length ?? 0) === 0 ? (
+        <Text style={styles.muted}>No agents reported by this bridge.</Text>
+      ) : null}
+      {capabilities?.agents.map((agent) => (
+        <AgentRow key={agent.agentId} agent={agent} capabilities={capabilities} />
+      ))}
+    </Section>
+  );
+}
+
+interface ChatSettingsSectionProps {
+  approvalMode: string;
+  setApprovalMode: (mode: 'normal' | 'yolo') => void;
+  showToolCalls: boolean;
+  setShowToolCalls: (value: boolean) => void;
+  workspaceChatLimit: WorkspaceChatLimit;
+  setWorkspaceChatLimit: (value: WorkspaceChatLimit) => void;
+}
+
+function ChatSettingsSection({
+  approvalMode,
+  setApprovalMode,
+  showToolCalls,
+  setShowToolCalls,
+  workspaceChatLimit,
+  setWorkspaceChatLimit,
+}: ChatSettingsSectionProps) {
+  return (
+    <Section title="Chat">
+      <Toggle
+        label="Require approvals"
+        value={approvalMode !== 'yolo'}
+        onChange={(value) => setApprovalMode(value ? 'normal' : 'yolo')}
+      />
+      <Toggle label="Show tool calls" value={showToolCalls} onChange={setShowToolCalls} />
+      <Row
+        label="Chats per workspace"
+        value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
+        onPress={() => setWorkspaceChatLimit(cycleWorkspaceChatLimit(workspaceChatLimit))}
+      />
+    </Section>
+  );
+}
+
+interface NotificationsSectionProps {
+  pushSettings: {
+    optedOut: boolean;
+    events: { turnCompleted: boolean; approvalRequested: boolean };
+  };
+  pushBusy: boolean;
+  updatePush: (value: boolean) => void | Promise<void>;
+  updatePushEvent: (
+    key: 'turnCompleted' | 'approvalRequested',
+    value: boolean,
+  ) => void | Promise<void>;
+}
+
+function NotificationsSection({
+  pushSettings,
+  pushBusy,
+  updatePush,
+  updatePushEvent,
+}: NotificationsSectionProps) {
+  return (
+    <Section title="Notifications">
+      <Toggle
+        label="Push notifications"
+        value={!pushSettings.optedOut}
+        disabled={pushBusy}
+        onChange={(value) => void updatePush(value)}
+      />
+      <Toggle
+        label="Turn completed"
+        value={pushSettings.events.turnCompleted}
+        onChange={(value) => void updatePushEvent('turnCompleted', value)}
+      />
+      <Toggle
+        label="Approval requested"
+        value={pushSettings.events.approvalRequested}
+        onChange={(value) => void updatePushEvent('approvalRequested', value)}
+      />
+    </Section>
+  );
+}
+
+function LegalSection({
+  profileId,
+  router,
+}: {
+  profileId: string;
+  router: ReturnType<typeof useRouter>;
+}) {
+  return (
+    <Section title="Legal">
+      <Row label="Privacy policy" onPress={() => router.push(routes.privacy(profileId))} />
+      <Row label="Terms of service" onPress={() => router.push(routes.terms(profileId))} />
+    </Section>
+  );
+}
 
 export function SettingsScreen() {
   const theme = useAppTheme();
@@ -69,12 +234,17 @@ export function SettingsScreen() {
   const [pushBusy, setPushBusy] = useState(false);
 
   const updatePush = async (enabled: boolean) => {
-    if (!api || !activeBridgeProfileId || pushBusy) return;
+    if (!api || !activeBridgeProfileId || pushBusy) {
+      return;
+    }
     setPushBusy(true);
     setError(null);
     try {
-      if (enabled) await enablePush(api, store, activeBridgeProfileId);
-      else await disablePush(api, store, activeBridgeProfileId);
+      if (enabled) {
+        await enablePush(api, store, activeBridgeProfileId);
+      } else {
+        await disablePush(api, store, activeBridgeProfileId);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not update notifications.');
     } finally {
@@ -83,7 +253,9 @@ export function SettingsScreen() {
   };
 
   const updatePushEvent = async (key: 'turnCompleted' | 'approvalRequested', value: boolean) => {
-    if (!api || !activeBridgeProfileId) return;
+    if (!api || !activeBridgeProfileId) {
+      return;
+    }
     await updatePushEvents(api, store, activeBridgeProfileId, {
       ...pushSettings.events,
       [key]: value,
@@ -111,83 +283,34 @@ export function SettingsScreen() {
         {capabilitiesError ? <Notice text={capabilitiesError} /> : null}
         {error ? <Notice text={error} /> : null}
 
-        <Section title="Connection">
-          <Row
-            label={activeBridgeProfile?.name ?? 'Current bridge'}
-            value={bridgeConnected ? 'Connected' : 'Disconnected'}
-            onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
-          />
-          <Row
-            label="Add bridge"
-            onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
-          />
-          {bridgeProfiles.map((profile) => (
-            <Row
-              key={profile.id}
-              label={profile.name}
-              value={profile.id === activeBridgeProfileId ? 'Active' : undefined}
-              onPress={() => replaceRoot(routes.newChat(profile.id))}
-            />
-          ))}
-        </Section>
+        <ConnectionSection
+          activeBridgeProfile={activeBridgeProfile}
+          activeBridgeProfileId={activeBridgeProfileId}
+          bridgeConnected={bridgeConnected}
+          bridgeProfiles={bridgeProfiles}
+          profileId={profileId}
+          router={router}
+        />
 
-        <Section title="Installed ACP agents">
-          {loading ? <ActivityIndicator color={theme.colors.accent} /> : null}
-          {!loading && (capabilities?.agents.length ?? 0) === 0 ? (
-            <Text style={styles.muted}>No agents reported by this bridge.</Text>
-          ) : null}
-          {capabilities?.agents.map((agent) => (
-            <AgentRow key={agent.agentId} agent={agent} capabilities={capabilities} />
-          ))}
-        </Section>
+        <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-        <Section title="Chat">
-          <Toggle
-            label="Require approvals"
-            value={approvalMode !== 'yolo'}
-            onChange={(value) => setApprovalMode(value ? 'normal' : 'yolo')}
-          />
-          <Toggle label="Show tool calls" value={showToolCalls} onChange={setShowToolCalls} />
-          <Row
-            label="Chats per workspace"
-            value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
-            onPress={() =>
-              setWorkspaceChatLimit(
-                workspaceChatLimit === 5
-                  ? 10
-                  : workspaceChatLimit === 10
-                    ? 25
-                    : workspaceChatLimit === 25
-                      ? null
-                      : 5,
-              )
-            }
-          />
-        </Section>
+        <ChatSettingsSection
+          approvalMode={approvalMode}
+          setApprovalMode={setApprovalMode}
+          showToolCalls={showToolCalls}
+          setShowToolCalls={setShowToolCalls}
+          workspaceChatLimit={workspaceChatLimit}
+          setWorkspaceChatLimit={setWorkspaceChatLimit}
+        />
 
-        <Section title="Notifications">
-          <Toggle
-            label="Push notifications"
-            value={!pushSettings.optedOut}
-            disabled={pushBusy}
-            onChange={(value) => void updatePush(value)}
-          />
-          <Toggle
-            label="Turn completed"
-            value={pushSettings.events.turnCompleted}
-            onChange={(value) => void updatePushEvent('turnCompleted', value)}
-          />
-          <Toggle
-            label="Approval requested"
-            value={pushSettings.events.approvalRequested}
-            onChange={(value) => void updatePushEvent('approvalRequested', value)}
-          />
-        </Section>
+        <NotificationsSection
+          pushSettings={pushSettings}
+          pushBusy={pushBusy}
+          updatePush={updatePush}
+          updatePushEvent={updatePushEvent}
+        />
 
-        <Section title="Legal">
-          <Row label="Privacy policy" onPress={() => router.push(routes.privacy(profileId))} />
-          <Row label="Terms of service" onPress={() => router.push(routes.terms(profileId))} />
-        </Section>
+        <LegalSection profileId={profileId} router={router} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -247,7 +370,9 @@ function Row({ label, value, onPress }: { label: string; value?: string; onPress
       accessibilityRole={onPress ? 'button' : undefined}
       disabled={!onPress}
       onPress={() => {
-        if (!onPress) return;
+        if (!onPress) {
+          return;
+        }
         void feedback.selection();
         onPress();
       }}

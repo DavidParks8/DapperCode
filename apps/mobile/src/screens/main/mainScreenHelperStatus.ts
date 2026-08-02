@@ -25,6 +25,186 @@ export function normalizeExternalStatusHint(value: string | null | undefined): s
   return normalized.length > 0 ? normalized : null;
 }
 
+type NotificationRecord = Record<string, unknown>;
+
+const THREAD_ID_FIELDS = ['thread_id', 'threadId', 'conversation_id', 'conversationId'] as const;
+const PARENT_THREAD_ID_FIELDS = ['parent_thread_id', 'parentThreadId'] as const;
+const TURN_THREAD_ID_FIELDS = ['thread_id', 'threadId'] as const;
+const THREAD_RECORD_FIELDS = ['thread', 'threadState', 'thread_state'] as const;
+const STATUS_FIELDS = ['status', 'threadStatus', 'thread_status', 'state', 'phase'] as const;
+const TYPED_STATUS_FIELDS = ['type', 'status', 'state', 'phase'] as const;
+
+interface NotificationLookupContext {
+  msg: NotificationRecord | null;
+  threadRecord: NotificationRecord | null;
+  threadSourceRecord: NotificationRecord | null;
+  turnRecord: NotificationRecord | null;
+  sourceRecord: NotificationRecord | null;
+  subagentThreadSpawnRecord: NotificationRecord | null;
+  threadSubagentThreadSpawnRecord: NotificationRecord | null;
+}
+
+function firstRecord(candidates: readonly unknown[]): NotificationRecord | null {
+  for (const candidate of candidates) {
+    const record = toRecord(candidate);
+    if (record) {
+      return record;
+    }
+  }
+  return null;
+}
+
+function readFirstStringFromRecord(
+  record: NotificationRecord | null | undefined,
+  keys: readonly string[],
+): string | null {
+  if (!record) {
+    return null;
+  }
+  for (const key of keys) {
+    const value = readString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function readFirstAvailableString(
+  sources: ReadonlyArray<{
+    record: NotificationRecord | null | undefined;
+    keys: readonly string[];
+  }>,
+): string | null {
+  for (const source of sources) {
+    const value = readFirstStringFromRecord(source.record, source.keys);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractThreadSpawnRecord(record: NotificationRecord | null): NotificationRecord | null {
+  const subagentRecord = firstRecord([record?.subagent, record?.subAgent]);
+  return firstRecord([subagentRecord?.thread_spawn]);
+}
+
+function resolveNotificationLookupContext(
+  params: NotificationRecord | null,
+  msgArg?: NotificationRecord | null,
+): NotificationLookupContext {
+  const msg = firstRecord([msgArg, params?.msg]);
+  const threadRecord = firstRecord([
+    params?.thread,
+    params?.threadState,
+    params?.thread_state,
+    msg?.thread,
+  ]);
+  const threadSourceRecord = firstRecord([threadRecord?.source]);
+  const turnRecord = firstRecord([params?.turn, msg?.turn]);
+  const sourceRecord = firstRecord([params?.source, msg?.source]);
+
+  return {
+    msg,
+    threadRecord,
+    threadSourceRecord,
+    turnRecord,
+    sourceRecord,
+    subagentThreadSpawnRecord: extractThreadSpawnRecord(sourceRecord),
+    threadSubagentThreadSpawnRecord: extractThreadSpawnRecord(threadSourceRecord),
+  };
+}
+
+function extractStatusHintFromCandidate(candidate: unknown): string | null {
+  const direct = normalizeExternalStatusHint(readString(candidate));
+  if (direct) {
+    return direct;
+  }
+
+  const candidateRecord = toRecord(candidate);
+  return candidateRecord
+    ? normalizeExternalStatusHint(readFirstStringFromRecord(candidateRecord, TYPED_STATUS_FIELDS))
+    : null;
+}
+
+function extractNestedThreadStatusHint(threadRecord: NotificationRecord | null): string | null {
+  if (!threadRecord) {
+    return null;
+  }
+
+  const status = readFirstAvailableString([
+    { record: threadRecord, keys: ['status'] },
+    { record: toRecord(threadRecord.status), keys: ['type'] },
+    { record: threadRecord, keys: ['state', 'phase'] },
+    { record: toRecord(threadRecord.lifecycle), keys: ['status'] },
+  ]);
+  return normalizeExternalStatusHint(status);
+}
+
+function isPendingApprovalKind(value: string | null): value is PendingApproval['kind'] {
+  return value === 'commandExecution' || value === 'fileChange';
+}
+
+function extractPendingApprovalBase(record: NotificationRecord) {
+  const requestId = readFirstStringFromRecord(record, ['requestId', 'id']);
+  const kind = readString(record.kind);
+  const threadId = readString(record.threadId);
+  const turnId = readString(record.turnId);
+  const itemId = readString(record.itemId);
+  const requestedAt = readString(record.requestedAt);
+
+  if (
+    !requestId ||
+    !isPendingApprovalKind(kind) ||
+    !threadId ||
+    !turnId ||
+    !itemId ||
+    !requestedAt
+  ) {
+    return null;
+  }
+
+  return {
+    requestId,
+    kind,
+    threadId,
+    turnId,
+    itemId,
+    requestedAt,
+  };
+}
+
+function extractPendingApprovalOption(value: unknown): PendingApproval['options'][number] | null {
+  const option = toRecord(value);
+  const optionId = readString(option?.id);
+  const label = readFirstStringFromRecord(option, ['label', 'name']);
+  if (!optionId || !label) {
+    return null;
+  }
+
+  return {
+    id: optionId,
+    label,
+    kind: readString(option?.kind) ?? undefined,
+  };
+}
+
+function extractPendingApprovalOptions(value: unknown): PendingApproval['options'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const options: PendingApproval['options'] = [];
+  for (const optionValue of value) {
+    const option = extractPendingApprovalOption(optionValue);
+    if (option) {
+      options.push(option);
+    }
+  }
+  return options;
+}
+
 export function extractNotificationThreadId(
   params: Record<string, unknown> | null,
   msgArg?: Record<string, unknown> | null,
@@ -33,52 +213,17 @@ export function extractNotificationThreadId(
     return null;
   }
 
-  const msg = msgArg ?? toRecord(params?.msg);
-  const threadRecord =
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
-  const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
-  );
-  const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
-  );
-
-  return (
-    readString(msg?.thread_id) ??
-    readString(msg?.threadId) ??
-    readString(msg?.conversation_id) ??
-    readString(msg?.conversationId) ??
-    readString(params?.thread_id) ??
-    readString(params?.threadId) ??
-    readString(params?.conversation_id) ??
-    readString(params?.conversationId) ??
-    readString(threadRecord?.id) ??
-    readString(threadRecord?.thread_id) ??
-    readString(threadRecord?.threadId) ??
-    readString(threadRecord?.conversation_id) ??
-    readString(threadRecord?.conversationId) ??
-    readString(turnRecord?.thread_id) ??
-    readString(turnRecord?.threadId) ??
-    readString(sourceRecord?.thread_id) ??
-    readString(sourceRecord?.threadId) ??
-    readString(sourceRecord?.conversation_id) ??
-    readString(sourceRecord?.conversationId) ??
-    readString(sourceRecord?.parent_thread_id) ??
-    readString(sourceRecord?.parentThreadId) ??
-    readString(subagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(subagentThreadSpawnRecord?.parentThreadId) ??
-    readString(threadSourceRecord?.parent_thread_id) ??
-    readString(threadSourceRecord?.parentThreadId) ??
-    readString(threadSubagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(threadSubagentThreadSpawnRecord?.parentThreadId) ??
-    null
-  );
+  const context = resolveNotificationLookupContext(params, msgArg);
+  return readFirstAvailableString([
+    { record: context.msg, keys: THREAD_ID_FIELDS },
+    { record: params, keys: THREAD_ID_FIELDS },
+    { record: context.threadRecord, keys: ['id', ...THREAD_ID_FIELDS] },
+    { record: context.turnRecord, keys: TURN_THREAD_ID_FIELDS },
+    { record: context.sourceRecord, keys: [...THREAD_ID_FIELDS, ...PARENT_THREAD_ID_FIELDS] },
+    { record: context.subagentThreadSpawnRecord, keys: PARENT_THREAD_ID_FIELDS },
+    { record: context.threadSourceRecord, keys: PARENT_THREAD_ID_FIELDS },
+    { record: context.threadSubagentThreadSpawnRecord, keys: PARENT_THREAD_ID_FIELDS },
+  ]);
 }
 
 export function extractNotificationParentThreadId(
@@ -89,32 +234,13 @@ export function extractNotificationParentThreadId(
     return null;
   }
 
-  const msg = msgArg ?? toRecord(params?.msg);
-  const threadRecord =
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
-  const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
-  );
-  const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
-  );
-
-  return (
-    readString(sourceRecord?.parent_thread_id) ??
-    readString(sourceRecord?.parentThreadId) ??
-    readString(subagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(subagentThreadSpawnRecord?.parentThreadId) ??
-    readString(threadSourceRecord?.parent_thread_id) ??
-    readString(threadSourceRecord?.parentThreadId) ??
-    readString(threadSubagentThreadSpawnRecord?.parent_thread_id) ??
-    readString(threadSubagentThreadSpawnRecord?.parentThreadId) ??
-    null
-  );
+  const context = resolveNotificationLookupContext(params, msgArg);
+  return readFirstAvailableString([
+    { record: context.sourceRecord, keys: PARENT_THREAD_ID_FIELDS },
+    { record: context.subagentThreadSpawnRecord, keys: PARENT_THREAD_ID_FIELDS },
+    { record: context.threadSourceRecord, keys: PARENT_THREAD_ID_FIELDS },
+    { record: context.threadSubagentThreadSpawnRecord, keys: PARENT_THREAD_ID_FIELDS },
+  ]);
 }
 
 export function extractExternalStatusHint(params: Record<string, unknown> | null): string | null {
@@ -122,45 +248,14 @@ export function extractExternalStatusHint(params: Record<string, unknown> | null
     return null;
   }
 
-  const directCandidates: unknown[] = [
-    params.status,
-    params.threadStatus,
-    params.thread_status,
-    params.state,
-    params.phase,
-  ];
-  for (const candidate of directCandidates) {
-    const direct = normalizeExternalStatusHint(readString(candidate));
-    if (direct) {
-      return direct;
-    }
-
-    const candidateRecord = toRecord(candidate);
-    const typed = normalizeExternalStatusHint(
-      readString(candidateRecord?.type) ??
-        readString(candidateRecord?.status) ??
-        readString(candidateRecord?.state) ??
-        readString(candidateRecord?.phase),
-    );
-    if (typed) {
-      return typed;
+  for (const key of STATUS_FIELDS) {
+    const hint = extractStatusHintFromCandidate(params[key]);
+    if (hint) {
+      return hint;
     }
   }
 
-  const threadRecord =
-    toRecord(params.thread) ?? toRecord(params.threadState) ?? toRecord(params.thread_state);
-  if (!threadRecord) {
-    return null;
-  }
-
-  const nestedThreadStatus = normalizeExternalStatusHint(
-    readString(threadRecord.status) ??
-      readString(toRecord(threadRecord.status)?.type) ??
-      readString(threadRecord.state) ??
-      readString(threadRecord.phase) ??
-      readString(toRecord(threadRecord.lifecycle)?.status),
-  );
-  return nestedThreadStatus;
+  return extractNestedThreadStatusHint(firstRecord(THREAD_RECORD_FIELDS.map((key) => params[key])));
 }
 
 export function isChatSummaryLikelyRunning(chat: ChatSummary): boolean {
@@ -382,50 +477,23 @@ export function toPendingApproval(value: unknown): PendingApproval | null {
     return null;
   }
 
-  const requestId = readString(record.requestId) ?? readString(record.id);
-  const kind = readString(record.kind);
-  const threadId = readString(record.threadId);
-  const turnId = readString(record.turnId);
-  const itemId = readString(record.itemId);
-  const requestedAt = readString(record.requestedAt);
-
-  if (
-    !requestId ||
-    !kind ||
-    !threadId ||
-    !turnId ||
-    !itemId ||
-    !requestedAt ||
-    (kind !== 'commandExecution' && kind !== 'fileChange')
-  ) {
+  const approval = extractPendingApprovalBase(record);
+  if (!approval) {
     return null;
   }
 
   return {
-    requestId,
+    ...approval,
     agentId: readString(record.agentId) ?? '',
-    kind,
-    threadId,
-    turnId,
-    itemId,
-    title: readString(record.title) ?? readString(record.reason) ?? '',
-    message: readString(record.message) ?? readString(record.reason) ?? '',
-    requestedAt,
+    title: readFirstStringFromRecord(record, ['title', 'reason']) ?? '',
+    message: readFirstStringFromRecord(record, ['message', 'reason']) ?? '',
     reason: readString(record.reason) ?? undefined,
     command: readString(record.command) ?? undefined,
     cwd: readString(record.cwd) ?? undefined,
     grantRoot: readString(record.grantRoot) ?? undefined,
     proposedExecpolicyAmendment:
       readNonEmptyStringArray(record.proposedExecpolicyAmendment) ?? undefined,
-    options: Array.isArray(record.options)
-      ? record.options.flatMap((value) => {
-          const option = toRecord(value);
-          const optionId = readString(option?.id);
-          const label = readString(option?.label) ?? readString(option?.name);
-          const optionKind = readString(option?.kind);
-          return optionId && label ? [{ id: optionId, label, kind: optionKind ?? undefined }] : [];
-        })
-      : [],
+    options: extractPendingApprovalOptions(record.options),
   };
 }
 

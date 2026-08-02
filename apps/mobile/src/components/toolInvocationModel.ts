@@ -2,6 +2,7 @@ import type { Ionicons } from '@expo/vector-icons';
 
 import { getMessageText, getToolCallDisplayLines } from '../api/messages';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '../api/types';
+import { lookupDispatchEntry } from '../runtimeValidation';
 import { parseTimelineEntries, toTimelineVisual } from './chatMessageTimelineHelpers';
 
 export interface ToolInvocationLocation {
@@ -65,7 +66,9 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
 
   const draftFor = (id: string): ToolInvocationDraft => {
     const existing = drafts.get(id);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     const created: ToolInvocationDraft = {
       id,
       meta: null,
@@ -82,7 +85,9 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
     const callId = meta?.toolCallId ?? toolCallIdOf(message);
     if (callId) {
       const draft = draftFor(callId);
-      if (meta) draft.meta = meta;
+      if (meta) {
+        draft.meta = meta;
+      }
       const parsed = readToolMessage(message, Boolean(meta ?? draft.meta));
       draft.legacyTitle ??= parsed.title;
       appendLines(draft.textLines, parsed.lines);
@@ -107,18 +112,69 @@ interface ToolInvocationDraft {
   legacyTitle: string | null;
 }
 
-function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocation | null {
-  if (!draft) return null;
+function resolveInvocationTitleInfo(
+  draft: ToolInvocationDraft,
+): { title: string; rawLines: string[] } | null {
   const meta = draft.meta;
+  const metaTitle = meta?.title.trim() ?? '';
   const legacyTitle = draft.legacyTitle?.trim() ?? '';
   const fallbackTitle = draft.textLines[0]?.trim() ?? '';
-  const title = meta?.title.trim() || legacyTitle || fallbackTitle;
-  if (!title) return null;
+  const title = metaTitle || legacyTitle || fallbackTitle;
+  if (!title) {
+    return null;
+  }
   // A title lifted out of the output must not also be printed inside it.
-  const rawLines = meta?.title.trim() || legacyTitle ? draft.textLines : draft.textLines.slice(1);
+  const rawLines = metaTitle || legacyTitle ? draft.textLines : draft.textLines.slice(1);
+  return { title, rawLines };
+}
+
+function resolveInvocationMetaFields(
+  meta: ChatToolMeta | null,
+  title: string,
+): {
+  kind: ChatToolKind;
+  status: ChatToolStatus;
+  monospaceTitle: boolean;
+  isError: boolean;
+  truncated: boolean;
+} {
   const legacyVisual = meta ? null : toTimelineVisual(title);
   const kind = meta?.kind ?? 'other';
   const status = meta?.status ?? 'completed';
+  return {
+    kind,
+    status,
+    monospaceTitle: meta ? kind === 'execute' : legacyVisual?.useMonospaceTitle === true,
+    isError: status === 'failed' || legacyVisual?.isError === true,
+    truncated: meta?.truncated === true,
+  };
+}
+
+function computeInvocationEmpty(
+  textLines: string[],
+  parsed: ParsedStructuredContent,
+  locations: ToolInvocationLocation[],
+): boolean {
+  return (
+    textLines.length === 0 &&
+    parsed.diffs.length === 0 &&
+    parsed.terminals.length === 0 &&
+    parsed.images.length === 0 &&
+    locations.length === 0
+  );
+}
+
+function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocation | null {
+  if (!draft) {
+    return null;
+  }
+  const titleInfo = resolveInvocationTitleInfo(draft);
+  if (!titleInfo) {
+    return null;
+  }
+  const { title, rawLines } = titleInfo;
+  const meta = draft.meta;
+  const metaFields = resolveInvocationMetaFields(meta, title);
   const parsed = parseStructuredContent(meta?.content);
   const locations = parseLocations(meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
@@ -128,29 +184,28 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   );
   return {
     id: draft.id,
-    kind,
-    status,
+    kind: metaFields.kind,
+    status: metaFields.status,
     title: stripBullet(title),
-    monospaceTitle: meta ? kind === 'execute' : legacyVisual?.useMonospaceTitle === true,
-    isError: status === 'failed' || legacyVisual?.isError === true,
+    monospaceTitle: metaFields.monospaceTitle,
+    isError: metaFields.isError,
     locations,
     diffs: parsed.diffs,
     terminals: parsed.terminals,
     textLines,
     images: parsed.images,
-    truncated: meta?.truncated === true,
-    empty:
-      textLines.length === 0 &&
-      parsed.diffs.length === 0 &&
-      parsed.terminals.length === 0 &&
-      parsed.images.length === 0 &&
-      locations.length === 0,
+    truncated: metaFields.truncated,
+    empty: computeInvocationEmpty(textLines, parsed, locations),
   };
 }
 
 function toolCallIdOf(message: ChatMessage): string | null {
-  if (message.role === 'tool') return message.toolCallId || null;
-  if (message.role === 'assistant') return message.toolCalls?.[0]?.id ?? null;
+  if (message.role === 'tool') {
+    return message.toolCallId || null;
+  }
+  if (message.role === 'assistant') {
+    return message.toolCalls?.[0]?.id ?? null;
+  }
   return null;
 }
 
@@ -165,8 +220,12 @@ function readToolMessage(
 ): { title: string | null; lines: string[] } {
   const isToolCall = message.role === 'assistant';
   const text = isToolCall ? getToolCallDisplayLines(message).join('\n') : getMessageText(message);
-  if (!text.trim()) return { title: null, lines: [] };
-  if (hasMeta) return { title: null, lines: isToolCall ? [] : text.split('\n') };
+  if (!text.trim()) {
+    return { title: null, lines: [] };
+  }
+  if (hasMeta) {
+    return { title: null, lines: isToolCall ? [] : text.split('\n') };
+  }
   const entries = parseTimelineEntries(text);
   if (entries?.length) {
     return {
@@ -187,9 +246,13 @@ interface LegacyInvocation {
 }
 
 function legacyInvocations(message: ChatMessage): LegacyInvocation[] {
-  if (message.role !== 'system' && message.role !== 'tool') return [];
+  if (message.role !== 'system' && message.role !== 'tool') {
+    return [];
+  }
   const entries = parseTimelineEntries(getMessageText(message));
-  if (!entries?.length) return [];
+  if (!entries?.length) {
+    return [];
+  }
   return entries.map((entry, index) => ({
     id: `${message.id}-${String(index)}`,
     title: entry.title,
@@ -199,7 +262,9 @@ function legacyInvocations(message: ChatMessage): LegacyInvocation[] {
 
 function appendLines(target: string[], lines: string[]): void {
   for (const line of lines) {
-    if (target[target.length - 1] === line && !line.trim()) continue;
+    if (target[target.length - 1] === line && !line.trim()) {
+      continue;
+    }
     target.push(line);
   }
 }
@@ -223,66 +288,109 @@ function parseStructuredContent(content: unknown): ParsedStructuredContent {
   return parsed;
 }
 
+function visitDiffContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
+  const path = asString(entry.path) ?? 'file';
+  const newText = asString(entry.newText) ?? asString(entry.new_text) ?? '';
+  const oldText = asString(entry.oldText) ?? asString(entry.old_text) ?? null;
+  parsed.diffs.push({ path, oldText, newText });
+  parsed.suppressedLines.add(`[diff: ${path}]`);
+  for (const text of [oldText, newText]) {
+    if (text) {
+      for (const line of text.split('\n')) {
+        parsed.suppressedLines.add(line.trim());
+      }
+    }
+  }
+}
+
+function visitTerminalContent(
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+): void {
+  const terminalId = asString(entry.terminalId) ?? asString(entry.terminal_id) ?? null;
+  const output = collectText([entry.output, entry.content]);
+  parsed.terminals.push({ terminalId, output });
+  parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
+  for (const line of output.split('\n')) {
+    parsed.suppressedLines.add(line.trim());
+  }
+}
+
+function visitImageContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
+  const source =
+    asString(entry.url) ??
+    asString(entry.imageUrl) ??
+    asString(entry.image_url) ??
+    toDataUrl(entry);
+  if (source) {
+    parsed.images.push(source);
+    parsed.suppressedLines.add(`[image: ${source}]`);
+  }
+  parsed.suppressedLines.add('[image]');
+}
+
+function visitNestedStructuredContent(
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+  depth: number,
+): void {
+  for (const nested of Object.values(entry)) {
+    if (nested && typeof nested === 'object') {
+      visitStructuredContent(nested, parsed, depth + 1);
+    }
+  }
+}
+
+type StructuredContentVisitor = (
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+  depth: number,
+) => void;
+
+const STRUCTURED_CONTENT_VISITORS: Partial<Record<string, StructuredContentVisitor>> = {
+  diff: (entry, parsed) => visitDiffContent(entry, parsed),
+  terminal: (entry, parsed) => visitTerminalContent(entry, parsed),
+  image: (entry, parsed) => visitImageContent(entry, parsed),
+  content: (entry, parsed, depth) => visitStructuredContent(entry.content, parsed, depth + 1),
+};
+
 function visitStructuredContent(
   value: unknown,
   parsed: ParsedStructuredContent,
   depth: number,
 ): void {
-  if (depth > 4 || value == null) return;
+  if (depth > 4 || value == null) {
+    return;
+  }
   if (Array.isArray(value)) {
-    for (const entry of value) visitStructuredContent(entry, parsed, depth + 1);
+    for (const entry of value) {
+      visitStructuredContent(entry, parsed, depth + 1);
+    }
     return;
   }
   const entry = asRecord(value);
-  if (!entry) return;
+  if (!entry) {
+    return;
+  }
   const type = normalizedType(entry.type);
-  if (type === 'diff') {
-    const path = asString(entry.path) ?? 'file';
-    const newText = asString(entry.newText) ?? asString(entry.new_text) ?? '';
-    const oldText = asString(entry.oldText) ?? asString(entry.old_text) ?? null;
-    parsed.diffs.push({ path, oldText, newText });
-    parsed.suppressedLines.add(`[diff: ${path}]`);
-    for (const text of [oldText, newText]) {
-      if (text) for (const line of text.split('\n')) parsed.suppressedLines.add(line.trim());
-    }
+  const visitor = lookupDispatchEntry(STRUCTURED_CONTENT_VISITORS, type);
+  if (visitor) {
+    visitor(entry, parsed, depth);
     return;
   }
-  if (type === 'terminal') {
-    const terminalId = asString(entry.terminalId) ?? asString(entry.terminal_id) ?? null;
-    const output = collectText([entry.output, entry.content]);
-    parsed.terminals.push({ terminalId, output });
-    parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
-    for (const line of output.split('\n')) parsed.suppressedLines.add(line.trim());
-    return;
-  }
-  if (type === 'image') {
-    const source =
-      asString(entry.url) ??
-      asString(entry.imageUrl) ??
-      asString(entry.image_url) ??
-      toDataUrl(entry);
-    if (source) {
-      parsed.images.push(source);
-      parsed.suppressedLines.add(`[image: ${source}]`);
-    }
-    parsed.suppressedLines.add('[image]');
-    return;
-  }
-  if (type === 'content') {
-    visitStructuredContent(entry.content, parsed, depth + 1);
-    return;
-  }
-  for (const nested of Object.values(entry)) {
-    if (nested && typeof nested === 'object') visitStructuredContent(nested, parsed, depth + 1);
-  }
+  visitNestedStructuredContent(entry, parsed, depth);
 }
 
 function parseLocations(value: unknown): ToolInvocationLocation[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
   return value.flatMap((entry) => {
     const location = asRecord(entry);
     const path = asString(location?.path);
-    if (!path) return [];
+    if (!path) {
+      return [];
+    }
     const line = location?.line;
     return [{ path, ...(typeof line === 'number' ? { line } : {}) }];
   });
@@ -291,25 +399,39 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
 function collectText(values: unknown[]): string {
   const lines: string[] = [];
   const visit = (value: unknown, depth: number) => {
-    if (depth > 4 || value == null) return;
+    if (depth > 4 || value == null) {
+      return;
+    }
     if (typeof value === 'string') {
-      if (value) lines.push(value);
+      if (value) {
+        lines.push(value);
+      }
       return;
     }
     if (Array.isArray(value)) {
-      for (const entry of value) visit(entry, depth + 1);
+      for (const entry of value) {
+        visit(entry, depth + 1);
+      }
       return;
     }
     const entry = asRecord(value);
-    if (!entry) return;
-    if (normalizedType(entry.type) === 'text') {
-      const text = asString(entry.text);
-      if (text) lines.push(text);
+    if (!entry) {
       return;
     }
-    for (const nested of Object.values(entry)) visit(nested, depth + 1);
+    if (normalizedType(entry.type) === 'text') {
+      const text = asString(entry.text);
+      if (text) {
+        lines.push(text);
+      }
+      return;
+    }
+    for (const nested of Object.values(entry)) {
+      visit(nested, depth + 1);
+    }
   };
-  for (const value of values) visit(value, 0);
+  for (const value of values) {
+    visit(value, 0);
+  }
   return lines.join('\n');
 }
 

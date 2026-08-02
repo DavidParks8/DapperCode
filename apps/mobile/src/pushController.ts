@@ -17,7 +17,9 @@ export async function syncPushRegistration(
 ): Promise<PushSyncResult> {
   const initialSettings = store.get(pushSettingsAtom);
   let registration = initialSettings.registrations.find((entry) => entry.profileId === profileId);
-  if (initialSettings.optedOut && !registration) return { status: 'optedOut' };
+  if (initialSettings.optedOut && !registration) {
+    return { status: 'optedOut' };
+  }
   if (!registration) {
     const registrationId = `push-${Crypto.randomUUID()}`;
     const state = await store.set(dispatchDurableAppStateAtom, {
@@ -48,7 +50,9 @@ export async function syncPushRegistration(
   }
 
   const token = await requestPushRegistration();
-  if (!token) return { status: 'unavailable' };
+  if (!token) {
+    return { status: 'unavailable' };
+  }
 
   await api.registerPushDevice({
     profileId: registration.profileId,
@@ -95,5 +99,7 @@ export async function updatePushEvents(
     type: 'push/update',
     patch: { events },
   });
-  if (!state.push.optedOut) await syncPushRegistration(api, store, profileId);
+  if (!state.push.optedOut) {
+    await syncPushRegistration(api, store, profileId);
+  }
 }

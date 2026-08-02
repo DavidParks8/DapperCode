@@ -14,26 +14,33 @@ export function buildUserInputAnswers(
   const answers: Record<string, UserInputValue> = {};
   for (const question of request.questions) {
     const draft = (drafts[question.id] ?? '').trim();
-    if (!draft && !question.required) continue;
+    if (!draft && !question.required) {
+      continue;
+    }
     if (!draft) {
       return { error: `Please answer "${question.header}"` };
     }
     switch (question.fieldType ?? 'string') {
       case 'integer': {
         const value = Number(draft);
-        if (!Number.isInteger(value)) return { error: `"${question.header}" must be an integer` };
+        if (!Number.isInteger(value)) {
+          return { error: `"${question.header}" must be an integer` };
+        }
         answers[question.id] = value;
         break;
       }
       case 'number': {
         const value = Number(draft);
-        if (!Number.isFinite(value)) return { error: `"${question.header}" must be a number` };
+        if (!Number.isFinite(value)) {
+          return { error: `"${question.header}" must be a number` };
+        }
         answers[question.id] = value;
         break;
       }
       case 'boolean':
-        if (draft !== 'true' && draft !== 'false')
+        if (draft !== 'true' && draft !== 'false') {
           return { error: `"${question.header}" must be true or false` };
+        }
         answers[question.id] = draft === 'true';
         break;
       case 'string-array':
@@ -76,7 +83,9 @@ export class ApprovalController {
     drafts: Readonly<Record<string, string>>,
   ): Promise<string | null> {
     const result = buildUserInputAnswers(request, drafts);
-    if ('error' in result) return result.error;
+    if ('error' in result) {
+      return result.error;
+    }
     await this.api.resolveUserInput(request.requestId, { answers: result.answers });
     return null;
   }

@@ -13,7 +13,12 @@ import Animated, {
 } from 'react-native-reanimated';
 import Markdown from 'react-native-markdown-display';
 
-import type { BridgeUiAction, BridgeUiBlock, BridgeUiProgressBlock, BridgeUiSurface } from '../api/types';
+import type {
+  BridgeUiAction,
+  BridgeUiBlock,
+  BridgeUiProgressBlock,
+  BridgeUiSurface,
+} from '../api/types';
 import {
   formatNumber,
   getChecklistGlyph,

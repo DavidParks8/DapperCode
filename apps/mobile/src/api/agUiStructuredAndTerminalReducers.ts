@@ -69,11 +69,17 @@ export function reduceToolText(
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId);
-  if (toolCallId && current.subagentToolCallIds[toolCallId]) return current;
+  if (toolCallId && current.subagentToolCallIds[toolCallId]) {
+    return current;
+  }
   const revision = nonEmptyString(value?.revision);
   const content = typeof value?.content === 'string' ? value.content : null;
-  if (!toolCallId || !revision || content === null) return current;
-  if (current.toolTextRevisionByCallId[toolCallId] === revision) return current;
+  if (!toolCallId || !revision || content === null) {
+    return current;
+  }
+  if (current.toolTextRevisionByCallId[toolCallId] === revision) {
+    return current;
+  }
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const structured = current.structuredTextByCallId[toolCallId] ?? '';
   const joined = appendToolText(content, structured);
@@ -104,24 +110,21 @@ export function reduceToolContent(
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
-  if (current.subagentToolCallIds[toolCallId]) return current;
+  if (current.subagentToolCallIds[toolCallId]) {
+    return current;
+  }
   const revision = nonEmptyString(value?.revision) ?? JSON.stringify(value);
-  if (current.structuredRevisionByCallId[toolCallId] === revision) return current;
-  const structured =
-    Array.isArray(value?.content) &&
-    value.content.length === 0 &&
-    Array.isArray(value?.locations) &&
-    value.locations.length === 0
-      ? ''
-      : renderAgUiCustomContent(value);
+  if (current.structuredRevisionByCallId[toolCallId] === revision) {
+    return current;
+  }
+  const structured = renderToolStructuredContent(value);
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const existing = findMessage(current, messageId);
   const existingText = existing?.role === 'tool' ? existing.content : '';
-  const previousStructured = current.structuredTextByCallId[toolCallId] ?? '';
-  const base =
-    previousStructured && existingText.endsWith(previousStructured)
-      ? existingText.slice(0, -previousStructured.length).trimEnd()
-      : existingText;
+  const base = withoutPreviousStructuredText(
+    existingText,
+    current.structuredTextByCallId[toolCallId] ?? '',
+  );
   const joined = appendToolText(base, structured);
   const next = upsertToolResult(
     current,
@@ -154,40 +157,32 @@ export function reduceToolContent(
   };
 }
 
+function renderToolStructuredContent(value: Record<string, unknown> | null): string {
+  const emptyContent = Array.isArray(value?.content) && value.content.length === 0;
+  const emptyLocations = Array.isArray(value?.locations) && value.locations.length === 0;
+  return emptyContent && emptyLocations ? '' : renderAgUiCustomContent(value);
+}
+
+function withoutPreviousStructuredText(text: string, previousStructured: string): string {
+  return previousStructured && text.endsWith(previousStructured)
+    ? text.slice(0, -previousStructured.length).trimEnd()
+    : text;
+}
+
 export function reduceSubagentActivity(
   current: AgUiThreadMessageState,
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
-  const receiverThreadIds = Array.isArray(value?.receiverThreadIds)
-    ? value.receiverThreadIds.map(nonEmptyString).filter((id): id is string => Boolean(id))
-    : [];
-  if (receiverThreadIds.length === 0) return current;
-  const meta: ChatMessageSubAgentMeta = {
-    toolCallId,
-    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
-    senderThreadId: nonEmptyString(value?.senderThreadId) ?? envelope.threadId,
-    receiverThreadIds: Array.from(new Set(receiverThreadIds)),
-    agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
-  };
+  const receiverThreadIds = readReceiverThreadIds(value?.receiverThreadIds);
+  if (receiverThreadIds.length === 0) {
+    return current;
+  }
+  const meta = createSubagentMeta(toolCallId, receiverThreadIds, value, envelope.threadId);
   const resultPreview = nonEmptyString(value?.resultPreview);
-  const text = [
-    meta.agentStatus === 'completed' ? '• Spawned sub-agent' : '• Spawning sub-agent',
-    `  Thread: ${receiverThreadIds[0]}`,
-    meta.agentStatus ? `  Status: ${meta.agentStatus}` : null,
-    resultPreview ? `  Result: ${resultPreview}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-  const messages = current.messages.filter(
-    (message) =>
-      !(
-        message.id === `tool-call:${toolCallId}` ||
-        message.id === `tool-result:${toolCallId}` ||
-        message.id === `subagent:${toolCallId}`
-      ),
-  );
+  const text = formatSubagentActivity(meta, receiverThreadIds[0], resultPreview);
+  const messages = withoutSubagentMessages(current.messages, toolCallId);
   return upsertMessage(
     {
       ...current,
@@ -208,12 +203,59 @@ export function reduceSubagentActivity(
   );
 }
 
+function readReceiverThreadIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(nonEmptyString).filter((id): id is string => Boolean(id))
+    : [];
+}
+
+function createSubagentMeta(
+  toolCallId: string,
+  receiverThreadIds: string[],
+  value: Record<string, unknown> | null,
+  threadId: string,
+): ChatMessageSubAgentMeta {
+  return {
+    toolCallId,
+    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
+    senderThreadId: nonEmptyString(value?.senderThreadId) ?? threadId,
+    receiverThreadIds: Array.from(new Set(receiverThreadIds)),
+    agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
+  };
+}
+
+function formatSubagentActivity(
+  meta: ChatMessageSubAgentMeta,
+  receiverThreadId: string,
+  resultPreview: string | null,
+): string {
+  return [
+    meta.agentStatus === 'completed' ? '• Spawned sub-agent' : '• Spawning sub-agent',
+    `  Thread: ${receiverThreadId}`,
+    meta.agentStatus ? `  Status: ${meta.agentStatus}` : null,
+    resultPreview ? `  Result: ${resultPreview}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function withoutSubagentMessages(messages: ChatMessage[], toolCallId: string): ChatMessage[] {
+  const removedIds = new Set([
+    `tool-call:${toolCallId}`,
+    `tool-result:${toolCallId}`,
+    `subagent:${toolCallId}`,
+  ]);
+  return messages.filter((message) => !removedIds.has(message.id));
+}
+
 export function markTerminal(
   current: AgUiThreadMessageState,
   messageId: string,
 ): AgUiThreadMessageState {
   const messages = settleReasoningMessages(current.messages, new Set([messageId]));
-  if (current.terminalMessageIds.includes(messageId) && messages === current.messages) return current;
+  if (current.terminalMessageIds.includes(messageId) && messages === current.messages) {
+    return current;
+  }
   return {
     ...current,
     messages,
@@ -230,7 +272,9 @@ export function markRunTerminal(
   const ids = Object.entries(current.runByMessageId)
     .filter(([, messageRunId]) => messageRunId === runId)
     .map(([messageId]) => messageId);
-  if (ids.length === 0) return current;
+  if (ids.length === 0) {
+    return current;
+  }
   const idSet = new Set(ids);
   return {
     ...current,
@@ -245,11 +289,7 @@ function settleReasoningMessages(
 ): ChatMessage[] {
   let changed = false;
   const settled = messages.map((message) => {
-    if (
-      message.role !== 'reasoning' ||
-      message.pending !== true ||
-      !terminalIds.has(message.id)
-    ) {
+    if (message.role !== 'reasoning' || message.pending !== true || !terminalIds.has(message.id)) {
       return message;
     }
     changed = true;
@@ -277,7 +317,9 @@ export function updateEncryptedValue(
   }
   const messageId = current.toolCallMessageIdByCallId[entityId];
   const message = messageId ? findMessage(current, messageId) : undefined;
-  if (!message || message.role !== 'assistant') return current;
+  if (!message || message.role !== 'assistant') {
+    return current;
+  }
   return upsertMessage(
     current,
     {

@@ -54,6 +54,8 @@ export const DrawerContentViewContext = createContext<DrawerContentViewModel | n
 
 export function useDrawerContentViewModel(): DrawerContentViewModel {
   const value = useContext(DrawerContentViewContext);
-  if (!value) throw new Error('DrawerContentView requires DrawerContentViewContext');
+  if (!value) {
+    throw new Error('DrawerContentView requires DrawerContentViewContext');
+  }
   return value;
 }

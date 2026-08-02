@@ -10,7 +10,6 @@ jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanim
 
 import { FadeInUp, ReduceMotion } from '../testing/reanimatedMock';
 
-
 type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children'> & {
   props: Record<string, unknown>;
   children: Array<QueryableInstance | string>;
@@ -35,7 +34,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 

@@ -159,9 +159,8 @@ export function MainScreen() {
     ...chatLoadPipelineContext,
     ...chatNavigationResult,
   };
-  const agentThreadSelectorStateResult = useMainScreenAgentThreadSelectorState(
-    chatNavigationContext,
-  );
+  const agentThreadSelectorStateResult =
+    useMainScreenAgentThreadSelectorState(chatNavigationContext);
   const agentThreadSelectorStateContext = {
     ...chatNavigationContext,
     ...agentThreadSelectorStateResult,

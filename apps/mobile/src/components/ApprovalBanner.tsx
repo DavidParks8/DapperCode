@@ -30,7 +30,7 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
   const [resolutionError, setResolutionError] = useState<string | null>(null);
   const actionButtonHitSlop = useMemo(
     () => computeHitSlop({ width: 112, height: ACTION_BUTTON_VISIBLE_HEIGHT }),
-    [theme],
+    [],
   );
 
   // A remounted or reused card must not carry a stale error from the approval it replaced.
@@ -63,9 +63,7 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
 
   return (
     <Animated.View
-      entering={FadeInDown.duration(motionDuration.layout).reduceMotion(
-        ReduceMotion.System,
-      )}
+      entering={FadeInDown.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
       style={styles.container}
       accessibilityLiveRegion="assertive"
     >

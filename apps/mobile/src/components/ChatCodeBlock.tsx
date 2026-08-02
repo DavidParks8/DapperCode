@@ -99,16 +99,27 @@ function normalizeLanguage(sourceInfo?: string | null): {
 }
 
 function tokenStyle(type: string, styles: ReturnType<typeof createStyles>): TextStyle | undefined {
-  if (['comment', 'prolog', 'doctype', 'cdata'].includes(type)) return styles.syntaxComment;
-  if (['keyword', 'atrule', 'important'].includes(type)) return styles.syntaxKeyword;
-  if (['string', 'char', 'attr-value', 'inserted', 'builtin'].includes(type))
+  if (['comment', 'prolog', 'doctype', 'cdata'].includes(type)) {
+    return styles.syntaxComment;
+  }
+  if (['keyword', 'atrule', 'important'].includes(type)) {
+    return styles.syntaxKeyword;
+  }
+  if (['string', 'char', 'attr-value', 'inserted', 'builtin'].includes(type)) {
     return styles.syntaxString;
-  if (['number', 'boolean', 'constant', 'symbol'].includes(type)) return styles.syntaxNumber;
-  if (['function', 'class-name'].includes(type)) return styles.syntaxFunction;
-  if (['property', 'tag', 'selector', 'attr-name', 'deleted'].includes(type))
+  }
+  if (['number', 'boolean', 'constant', 'symbol'].includes(type)) {
+    return styles.syntaxNumber;
+  }
+  if (['function', 'class-name'].includes(type)) {
+    return styles.syntaxFunction;
+  }
+  if (['property', 'tag', 'selector', 'attr-name', 'deleted'].includes(type)) {
     return styles.syntaxProperty;
-  if (['operator', 'entity', 'url', 'regex', 'variable'].includes(type))
+  }
+  if (['operator', 'entity', 'url', 'regex', 'variable'].includes(type)) {
     return styles.syntaxOperator;
+  }
   return undefined;
 }
 
@@ -117,7 +128,9 @@ function renderTokens(
   styles: ReturnType<typeof createStyles>,
   path = 'token',
 ): ReactNode {
-  if (typeof tokens === 'string') return tokens;
+  if (typeof tokens === 'string') {
+    return tokens;
+  }
   if (Array.isArray(tokens)) {
     return tokens.map((token, index) => (
       <Text key={`${path}-${String(index)}`}>
@@ -156,7 +169,9 @@ export function ChatCodeBlock({
 
   useEffect(
     () => () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
     },
     [],
   );
@@ -166,7 +181,9 @@ export function ChatCodeBlock({
       .then(() => {
         void feedback.success();
         setCopyStatus('copied');
-        if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+        if (resetTimerRef.current) {
+          clearTimeout(resetTimerRef.current);
+        }
         resetTimerRef.current = setTimeout(() => setCopyStatus('idle'), COPY_STATUS_RESET_MS);
       })
       .catch(() => {

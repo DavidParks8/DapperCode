@@ -18,7 +18,9 @@ export function rememberReplacement(
   messageId: string,
   replacesMessageId: string | null,
 ): AgUiThreadMessageState {
-  if (!replacesMessageId) return current;
+  if (!replacesMessageId) {
+    return current;
+  }
   return {
     ...current,
     replacesMessageIdByMessageId: {

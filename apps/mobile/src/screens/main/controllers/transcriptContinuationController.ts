@@ -44,15 +44,9 @@ export class TranscriptContinuationController {
 
   async loadEarlier(chat: Chat): Promise<TranscriptContinuationResult> {
     const snapshot = chat.acpSnapshot;
-    const revision = snapshot?.continuation?.revision;
-    const beforeCursor = [
-      snapshot?.messageCollection,
-      snapshot?.reasoningCollection,
-      snapshot?.toolCollection,
-    ].find(
-      (collection) => collection && collection.omittedCount > 0 && collection.beforeCursor,
-    )?.beforeCursor;
     const baseState = getTranscriptContinuationState(chat);
+    const revision = snapshot?.continuation?.revision;
+    const beforeCursor = this.readBeforeCursor(snapshot);
     if (!snapshot || revision === undefined || !beforeCursor) {
       return { kind: 'merged', chat, state: baseState };
     }
@@ -60,6 +54,27 @@ export class TranscriptContinuationController {
       return { kind: 'merged', chat, state: { ...baseState, loading: true } };
     }
 
+    return this.readEarlierPage(chat, snapshot, beforeCursor, revision, baseState);
+  }
+
+  private readBeforeCursor(chatSnapshot: Chat['acpSnapshot']): string | null {
+    return (
+      [
+        chatSnapshot?.messageCollection,
+        chatSnapshot?.reasoningCollection,
+        chatSnapshot?.toolCollection,
+      ].find((collection) => collection && collection.omittedCount > 0 && collection.beforeCursor)
+        ?.beforeCursor ?? null
+    );
+  }
+
+  private async readEarlierPage(
+    chat: Chat,
+    snapshot: NonNullable<Chat['acpSnapshot']>,
+    beforeCursor: string,
+    revision: number,
+    baseState: TranscriptContinuationState,
+  ): Promise<TranscriptContinuationResult> {
     this.inFlightCursor = beforeCursor;
     try {
       const page = await this.api.readSnapshotPage({

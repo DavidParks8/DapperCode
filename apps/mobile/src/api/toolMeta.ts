@@ -35,7 +35,9 @@ export function toToolStatus(value: unknown): ChatToolStatus {
 export function parseToolMeta(value: unknown, fallbackToolCallId?: string): ChatToolMeta | null {
   const entry = record(value);
   const toolCallId = nonEmptyString(entry?.toolCallId) ?? fallbackToolCallId;
-  if (!entry || !toolCallId) return null;
+  if (!entry || !toolCallId) {
+    return null;
+  }
   const kind = toToolKind(entry.kind);
   return {
     toolCallId,
@@ -56,7 +58,9 @@ export function mergeToolMeta(
   previous: ChatToolMeta | undefined,
   next: ChatToolMeta,
 ): ChatToolMeta {
-  if (!previous) return next;
+  if (!previous) {
+    return next;
+  }
   return {
     ...previous,
     ...next,
@@ -90,7 +94,9 @@ export function withToolStructured(
 }
 
 export function messageReferencesToolCall(message: ChatMessage, toolCallId: string): boolean {
-  if (message.role === 'tool') return message.toolCallId === toolCallId;
+  if (message.role === 'tool') {
+    return message.toolCallId === toolCallId;
+  }
   if (message.role === 'assistant') {
     return (message.toolCalls ?? []).some((call) => call.id === toolCallId);
   }
@@ -101,9 +107,13 @@ export function messageReferencesToolCall(message: ChatMessage, toolCallId: stri
 export function attachToolMeta(messages: ChatMessage[], meta: ChatToolMeta): ChatMessage[] {
   let changed = false;
   const next = messages.map((message) => {
-    if (!messageReferencesToolCall(message, meta.toolCallId)) return message;
+    if (!messageReferencesToolCall(message, meta.toolCallId)) {
+      return message;
+    }
     const merged = mergeToolMeta(message.toolMeta, meta);
-    if (message.toolMeta && shallowEqualMeta(message.toolMeta, merged)) return message;
+    if (message.toolMeta && shallowEqualMeta(message.toolMeta, merged)) {
+      return message;
+    }
     changed = true;
     return { ...message, toolMeta: merged } as ChatMessage;
   });

@@ -56,9 +56,12 @@ describe('matchesDrawerSearch', () => {
   });
 
   it('matches case-insensitively against the title', () => {
-    expect(matchesDrawerSearch(row({ chat: chat('Fix Login Bug', '2026-07-20T00:00:00.000Z') }), 'login')).toBe(
-      true,
-    );
+    expect(
+      matchesDrawerSearch(
+        row({ chat: chat('Fix Login Bug', '2026-07-20T00:00:00.000Z') }),
+        'login',
+      ),
+    ).toBe(true);
   });
 
   it('matches against workspace/folder label', () => {

@@ -18,10 +18,14 @@ export function parseMessageBlocks(
   const blocks: MessageBlock[] = [];
   const pendingTextLines: string[] = [];
   const flushTextBlock = () => {
-    if (pendingTextLines.length === 0) return;
+    if (pendingTextLines.length === 0) {
+      return;
+    }
     const value = pendingTextLines.join('\n');
     pendingTextLines.length = 0;
-    if (value.trim()) blocks.push({ kind: 'text', value });
+    if (value.trim()) {
+      blocks.push({ kind: 'text', value });
+    }
   };
 
   for (const line of content.split('\n')) {
@@ -38,7 +42,9 @@ export function parseMessageBlocks(
     const fileMatch = line.match(/^\[file:\s*(.+?)\]$/i);
     if (fileMatch) {
       const label = toLocalFileReferenceLabel(fileMatch[1]) ?? toPathBasename(fileMatch[1]);
-      if (textContainsMentionLabel(pendingTextLines.join('\n'), label)) continue;
+      if (textContainsMentionLabel(pendingTextLines.join('\n'), label)) {
+        continue;
+      }
       flushTextBlock();
       blocks.push({ kind: 'file', value: label });
       continue;
@@ -54,27 +60,40 @@ export function messagePartToBlocks(
   bridgeUrl: string | null,
   bridgeToken: string | null,
 ): MessageBlock[] {
-  if (part.type === 'text') return part.text ? [{ kind: 'text', value: part.text }] : [];
+  if (part.type === 'text') {
+    return part.text ? [{ kind: 'text', value: part.text }] : [];
+  }
   if (part.type === 'image') {
-    const sourceValue =
-      part.url ??
-      part.uri ??
-      (part.data && part.mimeType ? `data:${part.mimeType};base64,${part.data}` : null);
-    const source = sourceValue ? toMarkdownImageSource(sourceValue, bridgeUrl, bridgeToken) : null;
-    return source
-      ? [{ kind: 'image', source, accessibilityLabel: 'Attached image' }]
-      : [{ kind: 'file', value: '[image]' }];
+    return imagePartToBlocks(part, bridgeUrl, bridgeToken);
   }
   if (part.type === 'audio') {
     return [{ kind: 'file', value: `[audio${part.mimeType ? `: ${part.mimeType}` : ''}]` }];
   }
-  if (part.type === 'resourceLink') return [{ kind: 'file', value: part.name ?? part.uri }];
+  if (part.type === 'resourceLink') {
+    return [{ kind: 'file', value: part.name ?? part.uri }];
+  }
   const label = typeof part.resource.uri === 'string' ? part.resource.uri : '[embedded resource]';
   const blocks: MessageBlock[] = [{ kind: 'file', value: label }];
   if (typeof part.resource.text === 'string' && part.resource.text) {
     blocks.push({ kind: 'text', value: part.resource.text });
   }
   return blocks;
+}
+
+function imagePartToBlocks(
+  part: Extract<ChatMessagePart, { type: 'image' }>,
+  bridgeUrl: string | null,
+  bridgeToken: string | null,
+): MessageBlock[] {
+  const sourceValue = [
+    part.url,
+    part.uri,
+    part.data && part.mimeType ? `data:${part.mimeType};base64,${part.data}` : null,
+  ].find((value): value is string => Boolean(value));
+  const source = sourceValue ? toMarkdownImageSource(sourceValue, bridgeUrl, bridgeToken) : null;
+  return source
+    ? [{ kind: 'image', source, accessibilityLabel: 'Attached image' }]
+    : [{ kind: 'file', value: '[image]' }];
 }
 
 export function toTimelineDetailPreview(
@@ -87,12 +106,17 @@ export function toTimelineDetailPreview(
   if (/^•\s*Viewed image\b/i.test(entry.title)) {
     const path = entry.details[0]?.trim();
     const source = path ? toMarkdownImageSource(path, bridgeUrl, bridgeToken) : null;
-    if (path && source) images.push({ source, accessibilityLabel: toPathBasename(path) });
+    if (path && source) {
+      images.push({ source, accessibilityLabel: toPathBasename(path) });
+    }
   }
   for (const detail of entry.details) {
     const inlineImage = toInlineImagePreviewFromMarkerLine(detail, bridgeUrl, bridgeToken);
-    if (inlineImage) images.push(inlineImage);
-    else textDetails.push(detail);
+    if (inlineImage) {
+      images.push(inlineImage);
+    } else {
+      textDetails.push(detail);
+    }
   }
   return { textDetails, images };
 }
@@ -103,7 +127,9 @@ function toInlineImagePreviewFromMarkerLine(
   bridgeToken: string | null,
 ): TimelineDetailMediaPreview | null {
   const match = line.trim().match(/^\[(?:local )?image:\s*(.+?)\]$/i);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   const source = toMarkdownImageSource(match[1], bridgeUrl, bridgeToken);
   return source ? { source, accessibilityLabel: toPathBasename(match[1]) } : null;
 }
@@ -114,35 +140,46 @@ export function isViewedImageEntry(title: string, textDetails: string[]): boolea
 
 export function toPathBasename(path: string): string {
   const normalizedPath = path.trim().replace(/\\/g, '/');
-  if (!normalizedPath || /^data:image\//i.test(normalizedPath)) return 'image';
+  if (!normalizedPath || /^data:image\//i.test(normalizedPath)) {
+    return 'image';
+  }
   return normalizedPath.split('/').filter(Boolean).pop() ?? normalizedPath;
 }
 
 function textContainsMentionLabel(text: string, label: string): boolean {
   const trimmedLabel = label.trim();
-  if (!trimmedLabel) return false;
+  if (!trimmedLabel) {
+    return false;
+  }
   const escaped = trimmedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|[^\\w])@${escaped}(?=$|[^\\w])`, 'i').test(text);
 }
 
 export function toLocalFileReferenceLabel(href: string): string | null {
   let normalizedHref = href.trim();
-  if (!normalizedHref) return null;
+  if (!normalizedHref) {
+    return null;
+  }
   try {
     normalizedHref = decodeURIComponent(normalizedHref);
   } catch {
     /* Keep original href. */
   }
-  if (normalizedHref.startsWith('file://'))
+  if (normalizedHref.startsWith('file://')) {
     normalizedHref = normalizedHref.replace(/^file:\/\//, '');
-  if (!normalizedHref.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(normalizedHref)) return null;
+  }
+  if (!normalizedHref.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(normalizedHref)) {
+    return null;
+  }
   const anchorLineMatch = normalizedHref.match(/#L(\d+)(?:C\d+)?$/i);
   const suffixLineMatch = normalizedHref.match(/:(\d+)(?::\d+)?$/);
   const line = anchorLineMatch?.[1] ?? suffixLineMatch?.[1] ?? null;
   const lineMatch = anchorLineMatch ?? suffixLineMatch;
   const pathOnly = lineMatch ? normalizedHref.slice(0, -lineMatch[0].length) : normalizedHref;
   const basename = pathOnly.split(/[\\/]/).filter(Boolean).pop();
-  if (!basename) return line ? `line ${line}` : null;
+  if (!basename) {
+    return line ? `line ${line}` : null;
+  }
   return line ? `${basename}:${line}` : basename;
 }
 
@@ -155,6 +192,8 @@ export function openMarkdownLink(
     onOpenLocalPreview(href);
     return;
   }
-  if (onLinkPress?.(href) === false) return;
+  if (onLinkPress?.(href) === false) {
+    return;
+  }
   void Linking.openURL(href).catch(() => {});
 }

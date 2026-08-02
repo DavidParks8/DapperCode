@@ -54,36 +54,35 @@ export function stringifyStructuredContentEntry(entry: unknown): string[] {
     return text ? [text] : [];
   }
   const entryType = normalizeType(readString(entryRecord.type) ?? '');
-  if (
-    entryType === 'text' ||
-    entryType === 'inputtext' ||
-    entryType === 'outputtext' ||
-    entryType === 'summarytext'
-  ) {
+  if (isStructuredTextType(entryType)) {
     const text = readStructuredText(entryRecord);
     return text ? [text] : [];
   }
-  if (entryType === 'image' || entryType === 'inputimage') {
-    const localImagePath = readStructuredLocalImagePath(entryRecord);
-    if (localImagePath) {
-      return [`[local image: ${localImagePath}]`];
-    }
-    const imageUrl = readStructuredImageUrl(entryRecord);
-    return imageUrl ? [`[image: ${imageUrl}]`] : [];
-  }
-  if (entryType === 'localimage') {
-    const localImagePath = readStructuredLocalImagePath(entryRecord);
-    if (localImagePath) {
-      return [`[local image: ${localImagePath}]`];
-    }
-    const imageUrl = readStructuredImageUrl(entryRecord);
-    return imageUrl ? [`[image: ${imageUrl}]`] : [];
+  if (isStructuredImageType(entryType)) {
+    return stringifyStructuredImage(entryRecord);
   }
   if (entryType === 'mention') {
     const mentionPath = readStructuredMentionPath(entryRecord);
     return mentionPath ? [`[file: ${mentionPath}]`] : [];
   }
   return [];
+}
+
+function isStructuredTextType(type: string): boolean {
+  return ['text', 'inputtext', 'outputtext', 'summarytext'].includes(type);
+}
+
+function isStructuredImageType(type: string): boolean {
+  return ['image', 'inputimage', 'localimage'].includes(type);
+}
+
+function stringifyStructuredImage(entry: Record<string, unknown>): string[] {
+  const localImagePath = readStructuredLocalImagePath(entry);
+  if (localImagePath) {
+    return [`[local image: ${localImagePath}]`];
+  }
+  const imageUrl = readStructuredImageUrl(entry);
+  return imageUrl ? [`[image: ${imageUrl}]`] : [];
 }
 
 export function readStructuredText(entryRecord: Record<string, unknown>): string | null {
@@ -96,26 +95,47 @@ export function readStructuredText(entryRecord: Record<string, unknown>): string
 
 export function readStructuredImageUrl(entryRecord: Record<string, unknown>): string | null {
   const data = toRecord(entryRecord.data);
-  const inlineImageData =
-    readString(entryRecord.data)?.trim() ?? readString(data?.data)?.trim() ?? null;
-  const inlineImageMimeType =
-    readString(entryRecord.mimeType)?.trim() ??
-    readString(entryRecord.mime_type)?.trim() ??
-    readString(data?.mimeType)?.trim() ??
-    readString(data?.mime_type)?.trim() ??
-    null;
-  if (inlineImageData && inlineImageMimeType) {
-    return `data:${inlineImageMimeType};base64,${inlineImageData}`;
-  }
   return (
-    readString(entryRecord.url)?.trim() ??
-    readString(entryRecord.image_url)?.trim() ??
-    readString(entryRecord.imageUrl)?.trim() ??
-    readString(data?.url)?.trim() ??
-    readString(data?.image_url)?.trim() ??
-    readString(data?.imageUrl)?.trim() ??
-    null
+    readInlineImageDataUrl(entryRecord, data) ?? readStructuredImageUrlValue(entryRecord, data)
   );
+}
+
+function readInlineImageDataUrl(
+  entry: Record<string, unknown>,
+  data: Record<string, unknown> | null,
+): string | null {
+  const imageData = firstTrimmedString([entry.data, data?.data]);
+  const mimeType = firstTrimmedString([
+    entry.mimeType,
+    entry.mime_type,
+    data?.mimeType,
+    data?.mime_type,
+  ]);
+  return imageData && mimeType ? `data:${mimeType};base64,${imageData}` : null;
+}
+
+function readStructuredImageUrlValue(
+  entry: Record<string, unknown>,
+  data: Record<string, unknown> | null,
+): string | null {
+  return firstTrimmedString([
+    entry.url,
+    entry.image_url,
+    entry.imageUrl,
+    data?.url,
+    data?.image_url,
+    data?.imageUrl,
+  ]);
+}
+
+function firstTrimmedString(values: unknown[]): string | null {
+  for (const value of values) {
+    const text = readString(value)?.trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
 }
 
 export function readStructuredLocalImagePath(entryRecord: Record<string, unknown>): string | null {

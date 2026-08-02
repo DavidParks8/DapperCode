@@ -52,20 +52,14 @@ function ShimmerBone({
   const shimmerStyle = useAnimatedStyle(() => ({
     transform: [
       {
-        translateX:
-          -SHIMMER_WIDTH + progress.value * (containerWidth + SHIMMER_WIDTH) - offset,
+        translateX: -SHIMMER_WIDTH + progress.value * (containerWidth + SHIMMER_WIDTH) - offset,
       },
     ],
   }));
 
   return (
     <Animated.View
-      style={[
-        styles.bone,
-        { backgroundColor: theme.colors.borderLight },
-        pulseStyle,
-        style,
-      ]}
+      style={[styles.bone, { backgroundColor: theme.colors.borderLight }, pulseStyle, style]}
     >
       {!reduceMotion && containerWidth > 0 ? (
         <Animated.View style={[styles.shimmerBand, shimmerStyle]}>
@@ -95,7 +89,9 @@ export function SubAgentTranscriptShimmer() {
   const userContentOffset = userBubbleOffset + theme.spacing.lg;
 
   useEffect(() => {
-    if (containerWidth <= 0) return;
+    if (containerWidth <= 0) {
+      return;
+    }
 
     progress.value = 0;
     const shimmerDurationMs =

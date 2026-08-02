@@ -40,7 +40,9 @@ export function getSubAgentMeta(
 }
 
 export function getToolCallDisplayLines(message: Message | ChatMessage): string[] {
-  if (message.role !== 'assistant' || !message.toolCalls?.length) return [];
+  if (message.role !== 'assistant' || !message.toolCalls?.length) {
+    return [];
+  }
   return message.toolCalls.map((call) => {
     const args = call.function.arguments.trim();
     return [`• Called tool \`${call.function.name}\``, args && args !== '{}' ? `  ${args}` : null]

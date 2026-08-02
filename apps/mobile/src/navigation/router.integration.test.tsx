@@ -174,11 +174,17 @@ const baseOverrides = {
 };
 
 function countNamedRoutes(state: unknown, routeName: string): number {
-  if (!state || typeof state !== 'object') return 0;
+  if (!state || typeof state !== 'object') {
+    return 0;
+  }
   const routesValue = (state as { routes?: unknown }).routes;
-  if (!Array.isArray(routesValue)) return 0;
+  if (!Array.isArray(routesValue)) {
+    return 0;
+  }
   return routesValue.reduce((count, route) => {
-    if (!route || typeof route !== 'object') return count;
+    if (!route || typeof route !== 'object') {
+      return count;
+    }
     const record = route as { name?: unknown; state?: unknown };
     return count + (record.name === routeName ? 1 : 0) + countNamedRoutes(record.state, routeName);
   }, 0);
@@ -188,15 +194,21 @@ function findStackContaining(
   state: unknown,
   routeName: string,
 ): { routes: Array<{ name?: unknown }> } | null {
-  if (!state || typeof state !== 'object') return null;
+  if (!state || typeof state !== 'object') {
+    return null;
+  }
   const routesValue = (state as { routes?: unknown }).routes;
-  if (!Array.isArray(routesValue)) return null;
+  if (!Array.isArray(routesValue)) {
+    return null;
+  }
   if (routesValue.some((route) => (route as { name?: unknown }).name === routeName)) {
     return state as { routes: Array<{ name?: unknown }> };
   }
   for (const route of routesValue) {
     const found = findStackContaining((route as { state?: unknown }).state, routeName);
-    if (found) return found;
+    if (found) {
+      return found;
+    }
   }
   return null;
 }
@@ -689,7 +701,9 @@ describe('Expo Router route topology', () => {
           ...baseOverrides,
           'profiles/[profileId]/(drawer)/chats/[chatId]/index': ChatFooterConnectionLauncher,
           'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
-          'profiles/[profileId]/(drawer)/settings/privacy': () => <Text>{routeLabels.privacy}</Text>,
+          'profiles/[profileId]/(drawer)/settings/privacy': () => (
+            <Text>{routeLabels.privacy}</Text>
+          ),
           // `settings/connection` is intentionally NOT overridden — the real route file (with
           // its `onSaved` wiring) must be exercised for this regression to be meaningful.
         },

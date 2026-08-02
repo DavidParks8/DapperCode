@@ -14,6 +14,48 @@ import type {
 export type MainScreenAgentThreadEventBootstrapContext = MainScreenAgentThreadSelectorStateContext &
   MainScreenAgentThreadSelectorStateResult;
 
+function isAgUiLifecycleEvent(event: RpcNotification): boolean {
+  const agUi = parseAgUiEventNotification(event);
+  return Boolean(
+    agUi &&
+    (agUi.event.type === 'RUN_STARTED' ||
+      agUi.event.type === 'RUN_FINISHED' ||
+      agUi.event.type === 'RUN_ERROR'),
+  );
+}
+
+function shouldHandleAgentThreadEvent(event: RpcNotification): boolean {
+  return (
+    event.method === 'thread/started' ||
+    event.method === 'thread/name/updated' ||
+    event.method === 'thread/status/changed' ||
+    isAgUiLifecycleEvent(event)
+  );
+}
+
+function shouldRefreshAgentThreadList(params: {
+  event: RpcNotification;
+  currentThreadId: string;
+  currentRootThreadId: string;
+}): boolean {
+  const { event, currentThreadId, currentRootThreadId } = params;
+  const agUi = parseAgUiEventNotification(event);
+  const paramsRecord = toRecord(event.params);
+  const eventThreadId = agUi?.threadId ?? extractNotificationThreadId(paramsRecord);
+  const eventParentThreadId = extractNotificationParentThreadId(paramsRecord);
+
+  if (!eventThreadId) {
+    return eventParentThreadId === currentThreadId || eventParentThreadId === currentRootThreadId;
+  }
+
+  return (
+    eventThreadId === currentThreadId ||
+    eventThreadId === currentRootThreadId ||
+    eventParentThreadId === currentThreadId ||
+    eventParentThreadId === currentRootThreadId
+  );
+}
+
 export function useMainScreenAgentThreadEventBootstrap(
   context: MainScreenAgentThreadEventBootstrapContext,
 ) {
@@ -21,18 +63,7 @@ export function useMainScreenAgentThreadEventBootstrap(
 
   useEffect(() => {
     return ws.onEvent((event: RpcNotification) => {
-      const agUi = parseAgUiEventNotification(event);
-      const agUiLifecycle =
-        agUi &&
-        (agUi.event.type === 'RUN_STARTED' ||
-          agUi.event.type === 'RUN_FINISHED' ||
-          agUi.event.type === 'RUN_ERROR');
-      if (
-        event.method !== 'thread/started' &&
-        event.method !== 'thread/name/updated' &&
-        event.method !== 'thread/status/changed' &&
-        !agUiLifecycle
-      ) {
+      if (!shouldHandleAgentThreadEvent(event)) {
         return;
       }
 
@@ -42,22 +73,13 @@ export function useMainScreenAgentThreadEventBootstrap(
         return;
       }
 
-      const params = toRecord(event.params);
-      const eventThreadId = agUi?.threadId ?? extractNotificationThreadId(params);
-      const eventParentThreadId = extractNotificationParentThreadId(params);
-      if (
-        eventThreadId &&
-        eventThreadId !== currentThreadId &&
-        eventThreadId !== currentRootThreadId &&
-        eventParentThreadId !== currentThreadId &&
-        eventParentThreadId !== currentRootThreadId
-      ) {
+      if (!shouldRefreshAgentThreadList({ event, currentThreadId, currentRootThreadId })) {
         return;
       }
 
       scheduleAgentThreadsRefresh(currentThreadId);
     });
-  }, [scheduleAgentThreadsRefresh, ws]);
+  }, [agentRootThreadIdRef, chatIdRef, scheduleAgentThreadsRefresh, ws]);
 
   return {};
 }

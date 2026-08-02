@@ -160,9 +160,7 @@ describe('transcriptProjectionController', () => {
       parentChat: null,
       showToolCalls: true,
       threadStatuses: new Map(),
-      liveMessageState: liveState([
-        { ...persistedReasoning, createdAt: 'live', pending: true },
-      ]),
+      liveMessageState: liveState([{ ...persistedReasoning, createdAt: 'live', pending: true }]),
     });
 
     expect(projection.messages).toEqual([

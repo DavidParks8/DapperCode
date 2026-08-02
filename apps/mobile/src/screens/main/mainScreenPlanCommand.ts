@@ -74,13 +74,159 @@ export async function executePlanCommand(
   const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
   const setActivity = screenSetter(store, activityAtom);
   const lowered = argText.toLowerCase();
-  if (!argText || lowered === 'on' || lowered === 'enable' || lowered === 'enabled') {
-    setSelectedCollaborationMode('plan');
+  const setPlanMode = (mode: 'plan' | 'default', title: string) => {
+    setSelectedCollaborationMode(mode);
     setActivity({
       tone: 'complete',
-      title: 'Plan mode enabled',
+      title,
     });
     setError(null);
+  };
+
+  const resetPlanTurnState = (activityTitle: string, targetChatId?: string) => {
+    setActiveTurnId(null);
+    setStoppingTurn(false);
+    stopRequestedRef.current = false;
+    setActivePlan(null);
+    if (targetChatId) {
+      cacheThreadPlan(targetChatId, null);
+    }
+    setPendingUserInputRequest(null);
+    setUserInputDrafts({});
+    setUserInputError(null);
+    setResolvingUserInput(false);
+    setActivity({
+      tone: 'running',
+      title: activityTitle,
+    });
+  };
+
+  const createOptimisticMessage = (): ChatTranscriptMessage => ({
+    id: `msg-${Date.now()}`,
+    role: 'user',
+    content: argText,
+    createdAt: new Date().toISOString(),
+  });
+
+  const beginPlanSubmission = () =>
+    submissionController.begin(
+      { ...draftController.snapshot(), value: argText },
+      { mentions: [], localImages: [] },
+    );
+
+  const createPlanChat = (submissionId: string) =>
+    turnExecutionController.create(
+      {
+        agentId: activeAgentId ?? undefined,
+        cwd: preferredStartCwd ?? undefined,
+        model: activeModelId ?? undefined,
+        effort: activeEffort ?? undefined,
+        serviceTier: activeServiceTier ?? undefined,
+        approvalPolicy: activeApprovalPolicy,
+        collaborationMode: 'plan',
+        agentMode: selectedAcpModeId,
+      },
+      submissionId,
+    );
+
+  const createNewChatVisibility = () => {
+    let createdChatId: string | null = null;
+    let adoptedCreatedChat = false;
+    return {
+      markCreated(id: string) {
+        createdChatId = id;
+      },
+      markAdopted() {
+        adoptedCreatedChat = true;
+      },
+      getCreatedChatId() {
+        return createdChatId;
+      },
+      isVisible() {
+        return createdChatId
+          ? selectedChatIdRef.current === createdChatId ||
+              (adoptedCreatedChat && selectedChatIdRef.current === null)
+          : selectedChatIdRef.current === null;
+      },
+    };
+  };
+
+  const adoptCreatedPlanChat = (
+    created: Awaited<ReturnType<typeof createPlanChat>>,
+    optimisticMessage: ChatTranscriptMessage,
+  ) => {
+    if (selectedChatIdRef.current !== null) {
+      return;
+    }
+    setSelectedChatId(created.id);
+    setSelectedChat({
+      ...created,
+      status: 'running',
+      updatedAt: new Date().toISOString(),
+      statusUpdatedAt: new Date().toISOString(),
+      lastMessagePreview: argText.slice(0, 50),
+      messages: [...created.messages, optimisticMessage],
+    });
+    setActivity({
+      tone: 'running',
+      title: 'Sending plan prompt',
+    });
+    bumpRunWatchdog();
+  };
+
+  const sendPlanPrompt = (chatId: string, cwd: string | null | undefined, submissionId: string) =>
+    turnExecutionController.send(
+      chatId,
+      {
+        content: argText,
+        cwd: cwd ?? preferredStartCwd ?? undefined,
+        model: activeModelId ?? undefined,
+        effort: activeEffort ?? undefined,
+        serviceTier: activeServiceTier ?? undefined,
+        approvalPolicy: activeApprovalPolicy,
+        collaborationMode: 'plan',
+        agent: null,
+      },
+      submissionId,
+      (turnId) => registerTurnStarted(chatId, turnId),
+    );
+
+  const finalizeNewChatPlanSuccess = (
+    createdChatId: string,
+    resolvedUpdated: Awaited<ReturnType<typeof sendPlanPrompt>>,
+    isStillVisible: boolean,
+  ) => {
+    const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated);
+    if (autoEnabledPlan && isStillVisible) {
+      setSelectedCollaborationMode('plan');
+    }
+    rememberChatModelPreference(
+      createdChatId,
+      activeModelId,
+      selectedEffort ?? activeEffort,
+      activeServiceTier,
+    );
+    if (!isStillVisible) {
+      return;
+    }
+    setSelectedChat(resolvedUpdated);
+    setError(null);
+    setActivity({
+      tone: 'complete',
+      title: 'Turn completed',
+      detail: autoEnabledPlan ? 'Plan mode enabled for the next turn' : undefined,
+    });
+    clearRunWatchdog();
+  };
+
+  const restoreFailedPlanDraft = (planSubmission: ReturnType<typeof beginPlanSubmission>) => {
+    if (submissionController.fail(planSubmission, draftController.snapshot())) {
+      setDraft(planSubmission.draft);
+    }
+  };
+
+  if (!argText || lowered === 'on' || lowered === 'enable' || lowered === 'enabled') {
+    setPlanMode('plan', 'Plan mode enabled');
     return true;
   }
 
@@ -91,94 +237,94 @@ export async function executePlanCommand(
     lowered === 'default' ||
     lowered === 'chat'
   ) {
-    setSelectedCollaborationMode('default');
-    setActivity({
-      tone: 'complete',
-      title: 'Default mode enabled',
-    });
-    setError(null);
+    setPlanMode('default', 'Default mode enabled');
     return true;
   }
 
-  setSelectedCollaborationMode('plan');
-  if (!selectedChatId) {
-    const planSubmission = submissionController.begin(
-      { ...draftController.snapshot(), value: argText },
-      { mentions: [], localImages: [] },
-    );
-    let createdChatId: string | null = null;
-    let adoptedCreatedChat = false;
-    const isCreatedChatVisible = () =>
-      createdChatId
-        ? selectedChatIdRef.current === createdChatId ||
-          (adoptedCreatedChat && selectedChatIdRef.current === null)
-        : selectedChatIdRef.current === null;
-    const optimisticMessage: ChatTranscriptMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: argText,
-      createdAt: new Date().toISOString(),
-    };
+  const runPlanForNewChat = async (): Promise<boolean> => {
+    const planSubmission = beginPlanSubmission();
+    const optimisticMessage = createOptimisticMessage();
+    const visibility = createNewChatVisibility();
 
     setDraft('');
     submissionController.markCleared(planSubmission, draftController.snapshot().revision);
     try {
       setCreating(true);
-      setActiveTurnId(null);
-      setStoppingTurn(false);
-      stopRequestedRef.current = false;
-      setActivePlan(null);
-      setPendingUserInputRequest(null);
-      setUserInputDrafts({});
-      setUserInputError(null);
-      setResolvingUserInput(false);
-      setActivity({
-        tone: 'running',
-        title: 'Creating chat',
-      });
-      const created = await turnExecutionController.create(
-        {
-          agentId: activeAgentId ?? undefined,
-          cwd: preferredStartCwd ?? undefined,
-          model: activeModelId ?? undefined,
-          effort: activeEffort ?? undefined,
-          serviceTier: activeServiceTier ?? undefined,
-          approvalPolicy: activeApprovalPolicy,
-          collaborationMode: 'plan',
-          agentMode: selectedAcpModeId,
-        },
-        planSubmission.id,
-      );
-      createdChatId = created.id;
-      if (activeAgentId) onLastUsedThreadSettingsChange?.(activeAgentId, 'plan');
+      resetPlanTurnState('Creating chat');
+      const created = await createPlanChat(planSubmission.id);
+      visibility.markCreated(created.id);
+      if (activeAgentId) {
+        onLastUsedThreadSettingsChange?.(activeAgentId, 'plan');
+      }
 
       queueOptimisticUserMessage(created.id, optimisticMessage, {
         baseChat: created,
       });
       if (selectedChatIdRef.current === null) {
-        adoptedCreatedChat = true;
-        setSelectedChatId(created.id);
-        setSelectedChat({
-          ...created,
-          status: 'running',
-          updatedAt: new Date().toISOString(),
-          statusUpdatedAt: new Date().toISOString(),
-          lastMessagePreview: argText.slice(0, 50),
-          messages: [...created.messages, optimisticMessage],
-        });
-
-        setActivity({
-          tone: 'running',
-          title: 'Sending plan prompt',
-        });
-        bumpRunWatchdog();
+        visibility.markAdopted();
+        adoptCreatedPlanChat(created, optimisticMessage);
       }
 
+      const updated = await sendPlanPrompt(created.id, created.cwd, planSubmission.id);
+      const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
+      finalizeNewChatPlanSuccess(created.id, resolvedUpdated, visibility.isVisible());
+      submissionController.succeed(planSubmission);
+    } catch (err) {
+      restoreFailedPlanDraft(planSubmission);
+      if (visibility.getCreatedChatId()) {
+        discardOptimisticUserMessage(visibility.getCreatedChatId()!, optimisticMessage.id);
+      }
+      if (visibility.isVisible()) {
+        handleTurnFailure(err);
+      }
+    } finally {
+      if (visibility.isVisible()) {
+        setCreating(false);
+      }
+    }
+    return true;
+  };
+
+  const runPlanForExistingChat = async (targetChatId: string): Promise<boolean> => {
+    const optimisticMessage = createOptimisticMessage();
+    const planSubmission = beginPlanSubmission();
+
+    try {
+      setSending(true);
+      resetPlanTurnState('Sending plan prompt', targetChatId);
+      bumpRunWatchdog();
+      setDraft('');
+      submissionController.markCleared(planSubmission, draftController.snapshot().revision);
+      queueOptimisticUserMessage(targetChatId, optimisticMessage);
+      setSelectedChat((prev) => {
+        const baseChat =
+          selectedChat?.id === targetChatId
+            ? selectedChat
+            : prev?.id === targetChatId
+              ? prev
+              : prev;
+        if (!baseChat) {
+          return prev;
+        }
+        const nowIso = new Date().toISOString();
+        return {
+          ...baseChat,
+          status: 'running',
+          updatedAt: nowIso,
+          statusUpdatedAt: nowIso,
+          lastError: undefined,
+          lastMessagePreview:
+            normalizeChatMessageMatchContent(getMessageText(optimisticMessage)).slice(0, 120) ||
+            baseChat.lastMessagePreview,
+          messages: [...baseChat.messages, optimisticMessage],
+        };
+      });
+      scrollToBottomReliable(true);
       const updated = await turnExecutionController.send(
-        created.id,
+        targetChatId,
         {
           content: argText,
-          cwd: created.cwd ?? preferredStartCwd ?? undefined,
+          cwd: selectedChat?.cwd,
           model: activeModelId ?? undefined,
           effort: activeEffort ?? undefined,
           serviceTier: activeServiceTier ?? undefined,
@@ -187,27 +333,21 @@ export async function executePlanCommand(
           agent: null,
         },
         planSubmission.id,
-        (turnId) => registerTurnStarted(created.id, turnId),
+        (turnId) => registerTurnStarted(targetChatId, turnId),
       );
       const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
-      const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated);
-      const isStillVisible = isCreatedChatVisible();
-      if (autoEnabledPlan && isStillVisible) {
-        setSelectedCollaborationMode('plan');
-      }
       rememberChatModelPreference(
-        created.id,
+        targetChatId,
         activeModelId,
         selectedEffort ?? activeEffort,
         activeServiceTier,
       );
-      if (isStillVisible) {
+      if (selectedChatIdRef.current === targetChatId) {
         setSelectedChat(resolvedUpdated);
         setError(null);
         setActivity({
           tone: 'complete',
           title: 'Turn completed',
-          detail: autoEnabledPlan ? 'Plan mode enabled for the next turn' : undefined,
         });
         clearRunWatchdog();
       }
@@ -216,116 +356,18 @@ export async function executePlanCommand(
       if (submissionController.fail(planSubmission, draftController.snapshot())) {
         setDraft(planSubmission.draft);
       }
-      if (createdChatId) {
-        discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
-      }
-      if (isCreatedChatVisible()) {
+      discardOptimisticUserMessage(targetChatId, optimisticMessage.id);
+      if (selectedChatIdRef.current === targetChatId) {
         handleTurnFailure(err);
       }
     } finally {
-      if (isCreatedChatVisible()) {
-        setCreating(false);
+      if (selectedChatIdRef.current === targetChatId) {
+        setSending(false);
       }
     }
     return true;
-  }
-
-  const optimisticMessage: ChatTranscriptMessage = {
-    id: `msg-${Date.now()}`,
-    role: 'user',
-    content: argText,
-    createdAt: new Date().toISOString(),
   };
-  const targetChatId = selectedChatId;
-  const planSubmission = submissionController.begin(
-    { ...draftController.snapshot(), value: argText },
-    { mentions: [], localImages: [] },
-  );
 
-  try {
-    setSending(true);
-    setActiveTurnId(null);
-    setStoppingTurn(false);
-    stopRequestedRef.current = false;
-    setActivePlan(null);
-    cacheThreadPlan(targetChatId, null);
-    setPendingUserInputRequest(null);
-    setUserInputDrafts({});
-    setUserInputError(null);
-    setResolvingUserInput(false);
-    setActivity({
-      tone: 'running',
-      title: 'Sending plan prompt',
-    });
-    bumpRunWatchdog();
-    setDraft('');
-    submissionController.markCleared(planSubmission, draftController.snapshot().revision);
-    queueOptimisticUserMessage(targetChatId, optimisticMessage);
-    setSelectedChat((prev) => {
-      const baseChat =
-        selectedChat?.id === targetChatId ? selectedChat : prev?.id === targetChatId ? prev : prev;
-      if (!baseChat) {
-        return prev;
-      }
-      const nowIso = new Date().toISOString();
-      return {
-        ...baseChat,
-        status: 'running',
-        updatedAt: nowIso,
-        statusUpdatedAt: nowIso,
-        lastError: undefined,
-        lastMessagePreview:
-          normalizeChatMessageMatchContent(getMessageText(optimisticMessage)).slice(0, 120) ||
-          baseChat.lastMessagePreview,
-        messages: [...baseChat.messages, optimisticMessage],
-      };
-    });
-    scrollToBottomReliable(true);
-    const updated = await turnExecutionController.send(
-      targetChatId,
-      {
-        content: argText,
-        cwd: selectedChat?.cwd,
-        model: activeModelId ?? undefined,
-        effort: activeEffort ?? undefined,
-        serviceTier: activeServiceTier ?? undefined,
-        approvalPolicy: activeApprovalPolicy,
-        collaborationMode: 'plan',
-        agent: null,
-      },
-      planSubmission.id,
-      (turnId) => registerTurnStarted(targetChatId, turnId),
-    );
-    const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
-    rememberChatModelPreference(
-      targetChatId,
-      activeModelId,
-      selectedEffort ?? activeEffort,
-      activeServiceTier,
-    );
-    if (selectedChatIdRef.current === targetChatId) {
-      setSelectedChat(resolvedUpdated);
-      setError(null);
-      setActivity({
-        tone: 'complete',
-        title: 'Turn completed',
-      });
-      clearRunWatchdog();
-    }
-    submissionController.succeed(planSubmission);
-  } catch (err) {
-    if (submissionController.fail(planSubmission, draftController.snapshot())) {
-      setDraft(planSubmission.draft);
-    }
-    discardOptimisticUserMessage(targetChatId, optimisticMessage.id);
-    if (selectedChatIdRef.current === targetChatId) {
-      handleTurnFailure(err);
-    }
-  } finally {
-    if (selectedChatIdRef.current === targetChatId) {
-      setSending(false);
-    }
-  }
-
-  return true;
+  setSelectedCollaborationMode('plan');
+  return selectedChatId ? runPlanForExistingChat(selectedChatId) : runPlanForNewChat();
 }

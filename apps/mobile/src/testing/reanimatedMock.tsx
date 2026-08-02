@@ -59,7 +59,9 @@ export const interpolate = (
 ) => {
   const [inputMin, inputMax] = input;
   const [outputMin, outputMax] = output;
-  if (inputMax === inputMin) return outputMin;
+  if (inputMax === inputMin) {
+    return outputMin;
+  }
   const ratio = (value - inputMin) / (inputMax - inputMin);
   return outputMin + ratio * (outputMax - outputMin);
 };

@@ -135,9 +135,7 @@ export function describeCompletedToolEvent(
   item: Record<string, unknown> | null,
 ): { eventType: string; detail: string } | null {
   const itemType = readString(item?.type);
-  const rawStatus = readString(item?.status);
-  const status: 'complete' | 'error' =
-    rawStatus === 'failed' || rawStatus === 'error' ? 'error' : 'complete';
+  const status = readCompletedToolStatus(item);
 
   if (itemType === 'commandExecution') {
     const command = toTickerSnippet(readString(item?.command), 80) ?? 'Command';
@@ -148,16 +146,9 @@ export function describeCompletedToolEvent(
   }
 
   if (itemType === 'fileChange') {
-    const changedPaths = readCompletedFileChangePaths(item);
-    const changedFileLabel =
-      changedPaths.length === 0
-        ? 'File changes'
-        : changedPaths.length === 1
-          ? `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 48) ?? 'file'}`
-          : `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
     return {
       eventType: 'file_change.completed',
-      detail: buildToolEventDetail(changedFileLabel, status),
+      detail: buildToolEventDetail(buildCompletedFileChangeLabel(item), status),
     };
   }
 
@@ -179,6 +170,24 @@ export function describeCompletedToolEvent(
   }
 
   return null;
+}
+
+function readCompletedToolStatus(item: Record<string, unknown> | null): 'complete' | 'error' {
+  const rawStatus = readString(item?.status);
+  return rawStatus === 'failed' || rawStatus === 'error' ? 'error' : 'complete';
+}
+
+function buildCompletedFileChangeLabel(item: Record<string, unknown> | null): string {
+  const changedPaths = readCompletedFileChangePaths(item);
+  if (changedPaths.length === 0) {
+    return 'File changes';
+  }
+
+  if (changedPaths.length === 1) {
+    return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 48) ?? 'file'}`;
+  }
+
+  return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(changedPaths[0]), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
 }
 
 export function describeWebSearchToolEvent(
@@ -204,24 +213,25 @@ export function readCompletedFileChangePaths(item: Record<string, unknown> | nul
   const paths: string[] = [];
 
   for (const change of rawChanges) {
-    const changeRecord = toRecord(change);
-    const path =
-      readString(change)?.trim() ??
-      readString(changeRecord?.path)?.trim() ??
-      readString(changeRecord?.filePath)?.trim() ??
-      readString(changeRecord?.file_path)?.trim();
-    if (!path) {
+    const normalizedPath = readCompletedFileChangePath(change);
+    if (!normalizedPath || seen.has(normalizedPath)) {
       continue;
     }
-    const normalized = path.replace(/\\/g, '/');
-    if (seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    paths.push(normalized);
+    seen.add(normalizedPath);
+    paths.push(normalizedPath);
   }
 
   return paths;
+}
+
+function readCompletedFileChangePath(change: unknown): string | null {
+  const changeRecord = toRecord(change);
+  const path =
+    readString(change)?.trim() ??
+    readString(changeRecord?.path)?.trim() ??
+    readString(changeRecord?.filePath)?.trim() ??
+    readString(changeRecord?.file_path)?.trim();
+  return path ? path.replace(/\\/g, '/') : null;
 }
 
 export function toFileChangeTargetLabel(path: string): string {

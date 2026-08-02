@@ -2,12 +2,23 @@ import { normalizeBridgeUrlInput } from '../../bridgeUrl';
 
 export type PairingPayload = { bridgeToken: string; bridgeUrl?: string };
 
+const PAIRING_TYPES = new Set([
+  '',
+  'dappercode-bridge-pair',
+  'dappercode/bridge-pair',
+  'dappercode-bridge-token',
+  'dappercode/bridge-token',
+]);
+
 export function parsePairingPayload(rawValue: string): PairingPayload | null {
   const raw = rawValue.trim();
   if (!raw) {
     return null;
   }
+  return parseJsonPairingPayload(raw) ?? parseUriPairingPayload(raw);
+}
 
+function parseJsonPairingPayload(raw: string): PairingPayload | null {
   try {
     const parsed = JSON.parse(raw) as {
       type?: unknown;
@@ -17,34 +28,16 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
       token?: unknown;
     };
     const type = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : '';
-    const bridgeUrlRaw =
-      typeof parsed.bridgeUrl === 'string'
-        ? parsed.bridgeUrl
-        : typeof parsed.url === 'string'
-          ? parsed.url
-          : '';
-    const bridgeTokenRaw =
-      typeof parsed.bridgeToken === 'string'
-        ? parsed.bridgeToken
-        : typeof parsed.token === 'string'
-          ? parsed.token
-          : '';
-    const bridgeUrl = normalizeBridgeUrlInput(bridgeUrlRaw) ?? undefined;
-    const bridgeToken = bridgeTokenRaw.trim();
-    if (
-      bridgeToken &&
-      (type === 'dappercode-bridge-pair' ||
-        type === 'dappercode/bridge-pair' ||
-        type === 'dappercode-bridge-token' ||
-        type === 'dappercode/bridge-token' ||
-        !type)
-    ) {
-      return bridgeUrl ? { bridgeToken, bridgeUrl } : { bridgeToken };
-    }
+    const bridgeUrl =
+      normalizeBridgeUrlInput(firstString(parsed.bridgeUrl, parsed.url)) ?? undefined;
+    const bridgeToken = firstString(parsed.bridgeToken, parsed.token).trim();
+    return bridgeToken && PAIRING_TYPES.has(type) ? toPairingPayload(bridgeToken, bridgeUrl) : null;
   } catch {
-    // Try URI form fallback below.
+    return null;
   }
+}
 
+function parseUriPairingPayload(raw: string): PairingPayload | null {
   try {
     const parsed = new URL(raw);
     if (parsed.protocol !== 'dappercode:') {
@@ -52,18 +45,22 @@ export function parsePairingPayload(rawValue: string): PairingPayload | null {
     }
     const bridgeUrl =
       normalizeBridgeUrlInput(
-        parsed.searchParams.get('bridgeUrl') ?? parsed.searchParams.get('url') ?? '',
+        firstString(parsed.searchParams.get('bridgeUrl'), parsed.searchParams.get('url')),
       ) ?? undefined;
-    const bridgeToken = (
-      parsed.searchParams.get('bridgeToken') ??
-      parsed.searchParams.get('token') ??
-      ''
+    const bridgeToken = firstString(
+      parsed.searchParams.get('bridgeToken'),
+      parsed.searchParams.get('token'),
     ).trim();
-    if (!bridgeToken) {
-      return null;
-    }
-    return bridgeUrl ? { bridgeToken, bridgeUrl } : { bridgeToken };
+    return bridgeToken ? toPairingPayload(bridgeToken, bridgeUrl) : null;
   } catch {
     return null;
   }
+}
+
+function firstString(...values: unknown[]): string {
+  return values.find((value): value is string => typeof value === 'string') ?? '';
+}
+
+function toPairingPayload(bridgeToken: string, bridgeUrl: string | undefined): PairingPayload {
+  return bridgeUrl ? { bridgeToken, bridgeUrl } : { bridgeToken };
 }

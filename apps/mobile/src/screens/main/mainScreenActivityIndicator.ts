@@ -22,69 +22,99 @@ export interface ActivityIndicatorInputs {
  * Extracted from the header hook so the indicator can be asserted at each step of
  * a sequence rather than only at the end of a rendered turn.
  */
-export function resolveVisibleActivity(inputs: ActivityIndicatorInputs): ActivityState {
-  const {
-    activity,
-    heldActivity,
-    isLoading,
-    isOpeningChat,
-    isTurnLikelyRunning,
-    pendingApproval,
-    pendingUserInputRequest,
-    selectedChatStatus,
-    turnFailureDetail,
-  } = inputs;
+function resolveOpeningChatActivity({
+  isOpeningChat,
+}: Pick<ActivityIndicatorInputs, 'isOpeningChat'>): ActivityState | null {
+  return isOpeningChat ? { tone: 'running', title: 'Opening chat' } : null;
+}
 
-  if (isOpeningChat) {
-    return { tone: 'running', title: 'Opening chat' };
+function resolvePendingApprovalActivity(
+  pendingApproval: ActivityIndicatorInputs['pendingApproval'],
+): ActivityState | null {
+  if (!pendingApproval) {
+    return null;
   }
 
-  if (pendingApproval) {
-    return {
-      tone: 'idle',
-      title: 'Waiting for approval',
-      detail:
-        pendingApproval.command ??
-        (pendingApproval.kind === 'commandExecution' ? 'Run command' : 'File change'),
-    };
-  }
+  return {
+    tone: 'idle',
+    title: 'Waiting for approval',
+    detail:
+      pendingApproval.command ??
+      (pendingApproval.kind === 'commandExecution' ? 'Run command' : 'File change'),
+  };
+}
 
-  if (pendingUserInputRequest) {
-    return { tone: 'idle', title: 'Waiting for input' };
-  }
+function resolvePendingUserInputActivity(
+  pendingUserInputRequest: ActivityIndicatorInputs['pendingUserInputRequest'],
+): ActivityState | null {
+  return pendingUserInputRequest ? { tone: 'idle', title: 'Waiting for input' } : null;
+}
 
-  if (activity.tone === 'error' && activity.title !== 'Turn failed') {
-    return activity;
-  }
+function resolveBlockingErrorActivity(activity: ActivityState): ActivityState | null {
+  return activity.tone === 'error' && activity.title !== 'Turn failed' ? activity : null;
+}
 
-  if (heldActivity && !isLoading && !isTurnLikelyRunning) {
-    return heldActivity;
-  }
+function resolveHeldVisibleActivity(
+  heldActivity: ActivityIndicatorInputs['heldActivity'],
+  isLoading: boolean,
+  isTurnLikelyRunning: boolean,
+): ActivityState | null {
+  return heldActivity && !isLoading && !isTurnLikelyRunning ? heldActivity : null;
+}
 
-  if (
+function resolveRunningActivity(inputs: ActivityIndicatorInputs): ActivityState | null {
+  const { activity, isLoading, isTurnLikelyRunning, selectedChatStatus } = inputs;
+  const shouldShowRunning =
     isLoading ||
     isTurnLikelyRunning ||
-    (activity.tone === 'running' && selectedChatStatus !== 'complete')
-  ) {
-    // Reuse the detailed title only when the activity is itself a running one.
-    // Otherwise a settled title like "Ready" gets shown next to a spinner.
-    const runningTitle = (activity.tone === 'running' ? activity.title.trim() : '') || 'Working';
-    return {
-      tone: 'running',
-      title: runningTitle,
-      detail: activity.tone === 'running' ? activity.detail : undefined,
-    };
+    (activity.tone === 'running' && selectedChatStatus !== 'complete');
+  if (!shouldShowRunning) {
+    return null;
   }
 
-  if (!isLoading && !isTurnLikelyRunning && selectedChatStatus === 'complete') {
-    return { tone: 'complete', title: 'Turn completed' };
-  }
+  const runningTitle = (activity.tone === 'running' ? activity.title.trim() : '') || 'Working';
+  return {
+    tone: 'running',
+    title: runningTitle,
+    detail: activity.tone === 'running' ? activity.detail : undefined,
+  };
+}
 
-  if (activity.tone === 'error' && activity.title === 'Turn failed') {
-    return { tone: 'error', title: 'Turn failed', detail: turnFailureDetail ?? undefined };
-  }
+function resolveCompletedActivity(
+  isLoading: boolean,
+  isTurnLikelyRunning: boolean,
+  selectedChatStatus: ActivityIndicatorInputs['selectedChatStatus'],
+): ActivityState | null {
+  return !isLoading && !isTurnLikelyRunning && selectedChatStatus === 'complete'
+    ? { tone: 'complete', title: 'Turn completed' }
+    : null;
+}
 
-  return activity;
+function resolveTurnFailureActivity(
+  activity: ActivityState,
+  turnFailureDetail: string | null,
+): ActivityState | null {
+  return activity.tone === 'error' && activity.title === 'Turn failed'
+    ? { tone: 'error', title: 'Turn failed', detail: turnFailureDetail ?? undefined }
+    : null;
+}
+
+export function resolveVisibleActivity(inputs: ActivityIndicatorInputs): ActivityState {
+  return (
+    resolveOpeningChatActivity(inputs) ??
+    resolvePendingApprovalActivity(inputs.pendingApproval) ??
+    resolvePendingUserInputActivity(inputs.pendingUserInputRequest) ??
+    resolveBlockingErrorActivity(inputs.activity) ??
+    resolveHeldVisibleActivity(inputs.heldActivity, inputs.isLoading, inputs.isTurnLikelyRunning) ??
+    resolveRunningActivity(inputs) ??
+    resolveCompletedActivity(
+      inputs.isLoading,
+      inputs.isTurnLikelyRunning,
+      inputs.selectedChatStatus,
+    ) ??
+    resolveTurnFailureActivity(inputs.activity, inputs.turnFailureDetail) ??
+    inputs.activity
+  );
 }
 
 /** The status the header actually shows, once a disconnected bridge is applied. */

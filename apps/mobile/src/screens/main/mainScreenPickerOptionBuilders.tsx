@@ -110,7 +110,16 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
           ]
         : []),
     ];
-  }, [applyAcpConfigOption, modeConfig, selectedCollaborationMode, supportsPlanMode]);
+  }, [
+    applyAcpConfigOption,
+    modeConfig,
+    selectedCollaborationMode,
+    setCollaborationModeMenuVisible,
+    setError,
+    setSelectedAcpModeId,
+    setSelectedCollaborationMode,
+    supportsPlanMode,
+  ]);
 
   const agentPickerOptions = useMemo<SelectionSheetOption[]>(
     () =>

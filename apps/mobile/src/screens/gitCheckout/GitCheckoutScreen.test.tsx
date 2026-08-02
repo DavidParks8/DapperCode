@@ -105,7 +105,9 @@ async function renderScreen(store: AppStore): Promise<ReactTestRenderer> {
     );
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected GitCheckoutScreen tree');
+  if (!tree) {
+    throw new Error('Expected GitCheckoutScreen tree');
+  }
   return tree;
 }
 
@@ -179,14 +181,10 @@ describe('GitCheckoutScreen', () => {
       const tree = await renderScreen(store);
       const root = tree.root as Queryable;
 
-      const urlInputs = root.findAll(
-        (n) => n.props.accessibilityLabel === 'Repository URL',
-      );
+      const urlInputs = root.findAll((n) => n.props.accessibilityLabel === 'Repository URL');
       expect(urlInputs[0]?.props.editable).toBe(false);
 
-      const cancelBtn = root.findAll(
-        (n) => n.props.accessibilityLabel === 'Cancel git checkout',
-      );
+      const cancelBtn = root.findAll((n) => n.props.accessibilityLabel === 'Cancel git checkout');
       expect(cancelBtn[0]?.props.disabled).toBe(true);
 
       act(() => tree.unmount());
@@ -330,8 +328,7 @@ describe('GitCheckoutScreen', () => {
 
       const backBtn = root.findAll((n) => n.props.accessibilityLabel === 'Back')[0];
       const hitSlop = backBtn?.props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
 
       // Back button is 36×36; hitSlop must expand to at least 44 (iOS minimum)
       expect(hitSlop).toBeDefined();
@@ -348,12 +345,10 @@ describe('GitCheckoutScreen', () => {
       const tree = await renderScreen(store);
       const root = tree.root as Queryable;
 
-      const titleNode = root.findAll(
-        (n) => n.children.map(String).join('') === 'Git checkout',
-      )[0];
+      const titleNode = root.findAll((n) => n.children.map(String).join('') === 'Git checkout')[0];
       const style = Array.isArray(titleNode?.props.style)
         ? Object.assign({}, ...titleNode.props.style)
-        : (titleNode?.props.style as Record<string, unknown>) ?? {};
+        : ((titleNode?.props.style as Record<string, unknown>) ?? {});
 
       // Screen-title baseline uses the `title` role (22pt), one step below `largeTitle`.
       expect(style.fontSize).toBe(22);

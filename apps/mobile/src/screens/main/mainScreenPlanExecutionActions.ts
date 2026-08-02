@@ -39,63 +39,66 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
   const setPlanPanelCollapsedByThread = useSetAtom(planPanelCollapsedByThreadAtom);
   const setPendingPlanImplementationPrompts = useSetAtom(pendingPlanImplementationPromptsAtom);
 
+  // Derived during render so the auto-enable effect keeps depending on the decision itself rather
+  // than on the chat object, which is rebuilt on every transcript update.
+  const selectedThreadId = selectedChat?.id ?? null;
+  const latestPlanTurnId = selectedChat?.latestTurnPlan?.turnId?.trim() ?? '';
+  const hasLatestTurnPlan = Boolean(selectedChat?.latestTurnPlan);
+  // Agents that cannot run a plan turn still publish plan/to-do updates, so
+  // never flip the composer into plan mode on their behalf.
+  const canAutoEnablePlanMode = selectedChat
+    ? shouldAutoEnablePlanModeFromChat(selectedChat, supportsPlanMode)
+    : false;
+
   useEffect(() => {
-    // Agents that cannot run a plan turn still publish plan/to-do updates, so
-    // never flip the composer into plan mode on their behalf.
-    if (
-      !selectedChat ||
-      isOpeningChat ||
-      !shouldAutoEnablePlanModeFromChat(selectedChat, supportsPlanMode)
-    ) {
-      return;
-    }
-
-    const latestPlanTurnId = selectedChat.latestTurnPlan?.turnId?.trim();
-    if (!latestPlanTurnId) {
+    if (!selectedThreadId || isOpeningChat || !canAutoEnablePlanMode || !latestPlanTurnId) {
       return;
     }
 
     if (
-      dismissedPlanImplementationTurnIdByThreadRef.current[selectedChat.id] === latestPlanTurnId
+      dismissedPlanImplementationTurnIdByThreadRef.current[selectedThreadId] === latestPlanTurnId
     ) {
       return;
     }
 
-    if (autoEnabledPlanTurnIdByThreadRef.current[selectedChat.id] === latestPlanTurnId) {
+    if (autoEnabledPlanTurnIdByThreadRef.current[selectedThreadId] === latestPlanTurnId) {
       return;
     }
 
-    autoEnabledPlanTurnIdByThreadRef.current[selectedChat.id] = latestPlanTurnId;
+    autoEnabledPlanTurnIdByThreadRef.current[selectedThreadId] = latestPlanTurnId;
     setSelectedCollaborationMode('plan');
   }, [
+    autoEnabledPlanTurnIdByThreadRef,
+    canAutoEnablePlanMode,
+    dismissedPlanImplementationTurnIdByThreadRef,
     isOpeningChat,
-    selectedChat?.id,
-    selectedChat?.latestTurnPlan?.turnId,
-    selectedChat?.latestTurnStatus,
-    supportsPlanMode,
+    latestPlanTurnId,
+    selectedThreadId,
+    setSelectedCollaborationMode,
   ]);
 
   useEffect(() => {
-    const threadId = selectedChat?.id;
     if (
-      !threadId ||
+      !selectedThreadId ||
       isOpeningChat ||
-      selectedChat?.latestTurnPlan ||
+      hasLatestTurnPlan ||
       selectedCollaborationMode !== 'plan'
     ) {
       return;
     }
 
-    if (!autoEnabledPlanTurnIdByThreadRef.current[threadId]) {
+    if (!autoEnabledPlanTurnIdByThreadRef.current[selectedThreadId]) {
       return;
     }
 
     setSelectedCollaborationMode('default');
   }, [
+    autoEnabledPlanTurnIdByThreadRef,
+    hasLatestTurnPlan,
     isOpeningChat,
-    selectedChat?.id,
-    selectedChat?.latestTurnPlan?.turnId,
     selectedCollaborationMode,
+    selectedThreadId,
+    setSelectedCollaborationMode,
   ]);
 
   useEffect(() => {
@@ -133,7 +136,13 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     }
     setSelectedCollaborationMode('plan');
     clearPendingPlanImplementationPrompt(selectedChatId);
-  }, [clearPendingPlanImplementationPrompt, selectedChatId, selectedPlanImplementationPrompt]);
+  }, [
+    clearPendingPlanImplementationPrompt,
+    dismissedPlanImplementationTurnIdByThreadRef,
+    selectedChatId,
+    selectedPlanImplementationPrompt,
+    setSelectedCollaborationMode,
+  ]);
 
   const implementPlan = useCallback(async () => {
     if (!selectedChatId) {
@@ -163,10 +172,12 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
     }
   }, [
     clearPendingPlanImplementationPrompt,
-    pendingPlanImplementationPrompts,
+    dismissedPlanImplementationTurnIdByThreadRef,
     selectedChatId,
     selectedPlanImplementationPrompt,
     sendMessageContent,
+    setPendingPlanImplementationPrompts,
+    setSelectedCollaborationMode,
   ]);
 
   useEffect(() => {
@@ -198,7 +209,12 @@ export function useMainScreenPlanExecutionActions(context: MainScreenPlanExecuti
         [threadId]: false,
       };
     });
-  }, [selectedChat?.id, selectedThreadPlan?.turnId]);
+  }, [
+    planPanelLastTurnByThreadRef,
+    selectedChat?.id,
+    selectedThreadPlan?.turnId,
+    setPlanPanelCollapsedByThread,
+  ]);
 
   return {
     stayInPlanMode,

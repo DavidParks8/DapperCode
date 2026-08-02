@@ -9,7 +9,12 @@ import { workspaceChatLimitAtom } from '../state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '../state/bridge/hooks';
 import { useBridgeCapabilitiesResource } from '../state/bridge/capabilities';
 import { selectedChatIdAtom } from '../state/chat/atoms';
-import { navigateAtom, openBridgeConnectionAtom, selectChatAtom, startNewChatAtom } from './actions';
+import {
+  navigateAtom,
+  openBridgeConnectionAtom,
+  selectChatAtom,
+  startNewChatAtom,
+} from './actions';
 import { useAppTheme } from '../theme';
 import { buildDrawerAttentionModel, type DrawerAttentionLane } from './drawerAttention';
 import { createDrawerContentStyles } from './drawerContentStyles';
@@ -91,7 +96,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
     error: capabilitiesError,
     refresh: refreshAgentMetadata,
   } = useBridgeCapabilitiesResource();
-  const agents = bridgeCapabilities?.agents ?? [];
+  const agents = useMemo(() => bridgeCapabilities?.agents ?? [], [bridgeCapabilities?.agents]);
   const agentMetadataError = capabilitiesError ? 'Could not refresh agent names.' : null;
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(new Set());

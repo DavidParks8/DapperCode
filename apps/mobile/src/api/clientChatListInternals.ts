@@ -177,53 +177,8 @@ export function readTimestampIso(value: unknown): string | null {
 
 export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
   const record = toRecord(value) ?? {};
-  const entries = (Array.isArray(record.entries) ? record.entries : []).flatMap<SnapshotPageEntry>(
-    (value) => {
-      const entry = toRecord(value);
-      const sequence = readFiniteNumber(entry?.sequence);
-      const kind = readString(entry?.kind);
-      const canonicalId = readString(entry?.canonicalId)?.trim();
-      if (
-        sequence === null ||
-        !canonicalId ||
-        (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool')
-      ) {
-        return [];
-      }
-      const message = toRecord(entry?.message);
-      const tool = toRecord(entry?.tool);
-      return [
-        {
-          sequence,
-          kind,
-          canonicalId,
-          message: message
-            ? {
-                id: readString(message.id) ?? canonicalId,
-                role: readString(message.role) ?? '',
-                parts: Array.isArray(message.parts) ? message.parts : [],
-                truncated: message.truncated === true,
-              }
-            : undefined,
-          tool: tool
-            ? {
-                id: readString(tool.id) ?? canonicalId,
-                generation: readFiniteNumber(tool.generation),
-                kind: readString(tool.kind) ?? '',
-                status: readString(tool.status) ?? '',
-                title: readString(tool.title) ?? '',
-                content: readString(tool.content) ?? '',
-                structuredContent: Array.isArray(tool.structuredContent)
-                  ? tool.structuredContent
-                  : [],
-                locations: Array.isArray(tool.locations) ? tool.locations : [],
-                truncated: tool.truncated === true,
-                subagent: tool.subagent === true,
-              }
-            : undefined,
-        },
-      ];
-    },
+  const entries = (Array.isArray(record.entries) ? record.entries : []).flatMap(
+    parseSnapshotPageEntry,
   );
   return {
     entries,
@@ -235,6 +190,61 @@ export function readSnapshotPageResponse(value: unknown): SnapshotPageResponse {
     earliestAvailableSequence: readFiniteNumber(record.earliestAvailableSequence),
     latestAvailableSequence: readFiniteNumber(record.latestAvailableSequence),
     revision: readFiniteNumber(record.revision) ?? 0,
+  };
+}
+
+function parseSnapshotPageEntry(value: unknown): SnapshotPageEntry[] {
+  const entry = toRecord(value);
+  const sequence = readFiniteNumber(entry?.sequence);
+  const kind = readString(entry?.kind);
+  const canonicalId = readString(entry?.canonicalId)?.trim();
+  if (sequence === null || !canonicalId || !isSnapshotPageEntryKind(kind)) {
+    return [];
+  }
+  return [
+    {
+      sequence,
+      kind,
+      canonicalId,
+      message: parseSnapshotPageMessage(entry?.message, canonicalId),
+      tool: parseSnapshotPageTool(entry?.tool, canonicalId),
+    },
+  ];
+}
+
+function isSnapshotPageEntryKind(kind: string | null): kind is 'message' | 'reasoning' | 'tool' {
+  return kind === 'message' || kind === 'reasoning' || kind === 'tool';
+}
+
+function parseSnapshotPageMessage(value: unknown, canonicalId: string) {
+  const message = toRecord(value);
+  if (!message) {
+    return undefined;
+  }
+  return {
+    id: readString(message.id) ?? canonicalId,
+    role: readString(message.role) ?? '',
+    parts: Array.isArray(message.parts) ? message.parts : [],
+    truncated: message.truncated === true,
+  };
+}
+
+function parseSnapshotPageTool(value: unknown, canonicalId: string) {
+  const tool = toRecord(value);
+  if (!tool) {
+    return undefined;
+  }
+  return {
+    id: readString(tool.id) ?? canonicalId,
+    generation: readFiniteNumber(tool.generation),
+    kind: readString(tool.kind) ?? '',
+    status: readString(tool.status) ?? '',
+    title: readString(tool.title) ?? '',
+    content: readString(tool.content) ?? '',
+    structuredContent: Array.isArray(tool.structuredContent) ? tool.structuredContent : [],
+    locations: Array.isArray(tool.locations) ? tool.locations : [],
+    truncated: tool.truncated === true,
+    subagent: tool.subagent === true,
   };
 }
 

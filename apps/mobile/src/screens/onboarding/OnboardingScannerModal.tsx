@@ -93,9 +93,7 @@ export function OnboardingScannerModal({
           <Text style={styles.scannerHintText}>Scan the pairing QR to fill the URL and token.</Text>
           {scannerError ? (
             <Animated.Text
-              entering={FadeIn.duration(motionDuration.immediate).reduceMotion(
-                ReduceMotion.System,
-              )}
+              entering={FadeIn.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
               accessibilityRole="alert"
               accessibilityLiveRegion="assertive"
               style={styles.errorText}

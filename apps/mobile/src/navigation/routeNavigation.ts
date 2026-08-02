@@ -57,4 +57,3 @@ export function navigateRoot(href: Href): void {
 export function replaceRoot(href: Href): void {
   dismissToThenApply(href, router.replace);
 }
-

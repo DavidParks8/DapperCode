@@ -107,7 +107,9 @@ export const activeWorkspaceIdentityAtom = derivedScreenAtom(
 
 export const workspaceRootsResourceAtom = derivedScreenAtom((get): WorkspaceRootsResource => {
   const identity = get(activeWorkspaceIdentityAtom);
-  if (!identity) return EMPTY_WORKSPACE_ROOTS;
+  if (!identity) {
+    return EMPTY_WORKSPACE_ROOTS;
+  }
   const cached = get(workspaceRootsByProfileAtom)[identity.profileId];
   return cached?.identityKey === identity.identityKey ? cached : EMPTY_WORKSPACE_ROOTS;
 });
@@ -123,7 +125,9 @@ export const workspaceRootsAtom = derivedScreenAtom(
   (get) => get(workspaceRootsResourceAtom).data,
   (get, set, update: SetStateAction<WorkspaceSummary[]>): void => {
     const identity = get(activeWorkspaceIdentityAtom);
-    if (!identity) return;
+    if (!identity) {
+      return;
+    }
     const current = get(workspaceRootsResourceAtom);
     const data = typeof update === 'function' ? update(current.data) : update;
     set(workspaceRootsByProfileAtom, (resources) => ({
@@ -137,7 +141,9 @@ export const workspaceBridgeRootAtom = derivedScreenAtom(
   (get) => get(workspaceRootsResourceAtom).bridgeRoot,
   (get, set, update: SetStateAction<string | null>): void => {
     const identity = get(activeWorkspaceIdentityAtom);
-    if (!identity) return;
+    if (!identity) {
+      return;
+    }
     const current = get(workspaceRootsResourceAtom);
     const bridgeRoot = typeof update === 'function' ? update(current.bridgeRoot) : update;
     set(workspaceRootsByProfileAtom, (resources) => ({
@@ -171,7 +177,9 @@ export const favoriteWorkspacePathsAtom = derivedScreenAtom(
   (get) => get(workspaceFavoritesResourceAtom).data,
   (get, set, update: SetStateAction<string[]>): void => {
     const profileId = activeProfileId(get);
-    if (!profileId) return;
+    if (!profileId) {
+      return;
+    }
     const current = get(workspaceFavoritesResourceAtom);
     const data = typeof update === 'function' ? update(current.data) : update;
     set(workspaceFavoritesByProfileAtom, (resources) => ({
@@ -197,13 +205,17 @@ const workspaceBrowseCacheByProfileAtom = screenAtom<
 export const workspaceBrowseCacheAtom = derivedScreenAtom(
   (get) => {
     const identity = get(activeWorkspaceIdentityAtom);
-    if (!identity) return {};
+    if (!identity) {
+      return {};
+    }
     const cached = get(workspaceBrowseCacheByProfileAtom)[identity.profileId];
     return cached?.identityKey === identity.identityKey ? cached.entries : {};
   },
   (get, set, update: SetStateAction<Record<string, FileSystemListResponse>>): void => {
     const identity = get(activeWorkspaceIdentityAtom);
-    if (!identity) return;
+    if (!identity) {
+      return;
+    }
     const current = get(workspaceBrowseCacheAtom);
     const entries = typeof update === 'function' ? update(current) : update;
     set(workspaceBrowseCacheByProfileAtom, (resources) => ({

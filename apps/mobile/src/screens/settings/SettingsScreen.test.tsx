@@ -151,9 +151,12 @@ function hasText(root: Queryable, text: string): boolean {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function')
+  while (current && typeof current.props.onPress !== 'function') {
     current = current.parent as Queryable | null;
-  if (!current) throw new Error(`Missing pressable: ${text}`);
+  }
+  if (!current) {
+    throw new Error(`Missing pressable: ${text}`);
+  }
   return current;
 }
 
@@ -164,7 +167,9 @@ function findToggle(root: Queryable, label: string): Queryable {
     const toggle = current.findAll(
       (node) => node.type === Switch || typeof node.props.onValueChange === 'function',
     )[0];
-    if (toggle) return toggle;
+    if (toggle) {
+      return toggle;
+    }
     current = current.parent as Queryable | null;
   }
   throw new Error(`Missing toggle: ${label}`);
@@ -172,13 +177,17 @@ function findToggle(root: Queryable, label: string): Queryable {
 
 function getPressCallback(node: Queryable): PressCallback {
   const callback = node.props.onPress;
-  if (typeof callback !== 'function') throw new Error('Expected onPress callback');
+  if (typeof callback !== 'function') {
+    throw new Error('Expected onPress callback');
+  }
   return callback as PressCallback;
 }
 
 function getToggleCallback(node: Queryable): ToggleCallback {
   const callback = node.props.onValueChange;
-  if (typeof callback !== 'function') throw new Error('Expected onValueChange callback');
+  if (typeof callback !== 'function') {
+    throw new Error('Expected onValueChange callback');
+  }
   return callback as ToggleCallback;
 }
 
@@ -247,7 +256,9 @@ async function renderSettings(
     await Promise.resolve();
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected SettingsScreen tree');
+  if (!tree) {
+    throw new Error('Expected SettingsScreen tree');
+  }
   return { tree, api, store };
 }
 

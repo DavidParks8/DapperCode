@@ -36,7 +36,9 @@ function renderConnection(
       withAppStore(store, <ConnectionScreen mode={mode} profileId="profile-1" {...extraProps} />),
     );
   });
-  if (!tree) throw new Error('Expected connection screen');
+  if (!tree) {
+    throw new Error('Expected connection screen');
+  }
   return tree;
 }
 

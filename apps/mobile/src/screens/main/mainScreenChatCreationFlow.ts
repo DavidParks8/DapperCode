@@ -17,21 +17,23 @@ import {
 import { activityAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
-import type { Chat, ChatMessage as ChatTranscriptMessage } from '../../api/types';
-import {
-  toMentionInput,
-  toOptimisticUserContent,
-  countUserMessages,
-  shouldAutoEnablePlanModeFromChat,
-} from './mainScreenHelpers';
+import { shouldAutoEnablePlanModeFromChat } from './mainScreenHelpers';
 import type {
   MainScreenAgentThreadEventBootstrapContext,
   MainScreenAgentThreadEventBootstrapResult,
 } from './mainScreenAgentThreadEventBootstrap';
+import {
+  buildOptimisticChatSetup,
+  createChatVisibilityTracker,
+  createOnChatCreatedHandler,
+  handleCreateChatFailure,
+  resetChatCreationUi,
+  showOptimisticChatIfNeeded,
+  updateCreatedChatActivity,
+} from './mainScreenChatCreationHelpers';
 
 export type MainScreenChatCreationFlowContext = MainScreenAgentThreadEventBootstrapContext &
   MainScreenAgentThreadEventBootstrapResult;
-
 export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlowContext) {
   const {
     activeAgentId,
@@ -43,7 +45,6 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     bumpRunWatchdog,
     clearRunWatchdog,
     discardOptimisticUserMessage,
-    draft,
     draftController,
     handleSlashCommand,
     handleTurnFailure,
@@ -96,74 +97,59 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   const createChat = useCallback(async () => {
     const draftSnapshot = draftController.snapshot();
     const content = draftSnapshot.value.trim();
-    if (!content) return;
+    if (!content) {
+      return;
+    }
 
     if (await handleSlashCommand(content)) {
       setDraft('');
       return;
     }
 
-    const turnMentions = pendingMentionPaths.map((path) => toMentionInput(path, preferredStartCwd));
-    const turnLocalImages = pendingLocalImagePaths.map((path) => ({ path }));
-    const submission = submissionController.begin(draftSnapshot, {
-      mentions: pendingMentionPaths,
-      localImages: pendingLocalImagePaths,
+    const {
+      submission,
+      turnMentions,
+      turnLocalImages,
+      optimisticMessage,
+      optimisticChatId,
+      optimisticChat,
+    } = buildOptimisticChatSetup({
+      draftSnapshot,
+      content,
+      pendingMentionPaths,
+      pendingLocalImagePaths,
+      preferredStartCwd,
+      activeAgentId,
+      preferredAgentId,
+      submissionController,
     });
-    const optimisticContent = toOptimisticUserContent(content, turnMentions, turnLocalImages);
-
-    const optimisticMessage: ChatTranscriptMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: optimisticContent,
-      createdAt: new Date().toISOString(),
-    };
-    const optimisticChatId = `pending-${submission.id}`;
-    const optimisticCreatedAt = new Date().toISOString();
-    const optimisticChat: Chat = {
-      id: optimisticChatId,
-      title: '',
-      status: 'running',
-      activeTurnId: null,
-      createdAt: optimisticCreatedAt,
-      updatedAt: optimisticCreatedAt,
-      statusUpdatedAt: optimisticCreatedAt,
-      lastMessagePreview: content.slice(0, 50),
-      cwd: preferredStartCwd ?? '',
-      agentId: activeAgentId ?? preferredAgentId ?? 'unknown',
-      messages: [optimisticMessage],
-    };
 
     attachmentController.beginSubmission();
     setDraft('');
     submissionController.markCleared(submission, draftController.snapshot().revision);
-    if (selectedChatIdRef.current === null) {
-      selectedChatIdRef.current = optimisticChatId;
-      selectedChatRef.current = optimisticChat;
-      setSelectedChatId(optimisticChatId);
-      setSelectedChat(optimisticChat);
-      scrollToBottomReliable(true);
-    }
+    showOptimisticChatIfNeeded({
+      selectedChatIdRef,
+      selectedChatRef,
+      optimisticChatId,
+      optimisticChat,
+      setSelectedChatId,
+      setSelectedChat,
+      scrollToBottomReliable,
+    });
 
-    let createdChatId: string | null = null;
-    let adoptedCreatedChat = false;
-    const isCreatedChatVisible = () =>
-      createdChatId
-        ? selectedChatIdRef.current === createdChatId ||
-          (adoptedCreatedChat && selectedChatIdRef.current === null)
-        : selectedChatIdRef.current === null || selectedChatIdRef.current === optimisticChatId;
+    const tracker = createChatVisibilityTracker(selectedChatIdRef, optimisticChatId);
     try {
-      setCreating(true);
-      setActiveTurnId(null);
-      setStoppingTurn(false);
-      stopRequestedRef.current = false;
-      setActivePlan(null);
-      setPendingUserInputRequest(null);
-      setUserInputDrafts({});
-      setUserInputError(null);
-      setResolvingUserInput(false);
-      setActivity({
-        tone: 'running',
-        title: 'Creating chat',
+      resetChatCreationUi({
+        setCreating,
+        setActiveTurnId,
+        setStoppingTurn,
+        stopRequestedRef,
+        setActivePlan,
+        setPendingUserInputRequest,
+        setUserInputDrafts,
+        setUserInputError,
+        setResolvingUserInput,
+        setActivity,
       });
       const updated = await turnExecutionController.createAndStart({
         submissionId: submission.id,
@@ -188,49 +174,33 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
           approvalPolicy: activeApprovalPolicy,
           collaborationMode: selectedCollaborationMode,
         }),
-        onCreated: (created) => {
-          createdChatId = created.id;
-          if (activeAgentId)
-            onLastUsedThreadSettingsChange?.(activeAgentId, selectedCollaborationMode);
-          queueOptimisticUserMessage(created.id, optimisticMessage, {
-            baseChat: created,
-            userOrdinal: 1,
-          });
-          if (
-            selectedChatIdRef.current === null ||
-            selectedChatIdRef.current === optimisticChatId
-          ) {
-            adoptedCreatedChat = true;
-            selectedChatIdRef.current = created.id;
-            setSelectedChatId(created.id);
-            const visibleCreatedChat = {
-              ...created,
-              status: 'running',
-              updatedAt: new Date().toISOString(),
-              statusUpdatedAt: new Date().toISOString(),
-              lastMessagePreview: content.slice(0, 50),
-              messages:
-                countUserMessages(created.messages) > 0
-                  ? created.messages
-                  : [...created.messages, optimisticMessage],
-            } satisfies Chat;
-            selectedChatRef.current = visibleCreatedChat;
-            setSelectedChat(visibleCreatedChat);
-            scrollToBottomReliable(true);
-            setActivity({ tone: 'running', title: 'Working' });
-            bumpRunWatchdog();
-          }
-        },
+        onCreated: createOnChatCreatedHandler({
+          tracker,
+          activeAgentId,
+          selectedCollaborationMode,
+          onLastUsedThreadSettingsChange,
+          queueOptimisticUserMessage,
+          optimisticMessage,
+          selectedChatIdRef,
+          optimisticChatId,
+          setSelectedChatId,
+          selectedChatRef,
+          setSelectedChat,
+          scrollToBottomReliable,
+          setActivity,
+          bumpRunWatchdog,
+          content,
+        }),
         onTurnStarted: registerTurnStarted,
       });
       const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
       const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
-      const isStillVisible = isCreatedChatVisible();
+      const isStillVisible = tracker.isVisible();
       if (autoEnabledPlan && isStillVisible) {
         setSelectedCollaborationMode('plan');
       }
       rememberChatModelPreference(
-        createdChatId,
+        tracker.createdChatId,
         activeModelId,
         selectedEffort ?? activeEffort,
         activeServiceTier,
@@ -243,69 +213,42 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         setSelectedChat(resolvedUpdated);
         attachmentController.finishSubmission(true);
         setError(null);
-        if (resolvedUpdated.status === 'complete') {
-          setActivity({
-            tone: 'complete',
-            title: 'Turn completed',
-            detail:
-              autoEnabledPlan && selectedCollaborationMode !== 'plan'
-                ? 'Plan mode enabled for the next turn'
-                : undefined,
-          });
-          clearRunWatchdog();
-        } else if (resolvedUpdated.status === 'error') {
-          setActivity({
-            tone: 'error',
-            title: 'Turn failed',
-            detail: resolvedUpdated.lastError ?? undefined,
-          });
-          clearRunWatchdog();
-        } else {
-          // 'running' or 'idle' (server may not have started yet) — keep working
-          setActivity({
-            tone: 'running',
-            title: 'Working',
-          });
-          bumpRunWatchdog();
-        }
+        updateCreatedChatActivity({
+          resolvedUpdated,
+          autoEnabledPlan,
+          selectedCollaborationMode,
+          setActivity,
+          clearRunWatchdog,
+          bumpRunWatchdog,
+        });
       }
     } catch (err) {
-      const currentDraft = draftController.snapshot();
-      const shouldRestoreDraft =
-        !createdChatId ||
-        submissionController.fail(submission, currentDraft) ||
-        Boolean(
-          createdChatId &&
-          adoptedCreatedChat &&
-          selectedChatIdRef.current === createdChatId &&
-          currentDraft.value === '',
-        );
-      attachmentController.finishSubmission(false, shouldRestoreDraft);
-      if (shouldRestoreDraft) {
-        pendingRestoredDraftRef.current = submission.draft;
-        setDraft(submission.draft);
-      }
-      if (createdChatId) {
-        discardOptimisticUserMessage(createdChatId, optimisticMessage.id);
-      }
-      if (!createdChatId && selectedChatIdRef.current === optimisticChatId) {
-        selectedChatIdRef.current = null;
-        selectedChatRef.current = null;
-        setSelectedChatId(null);
-        setSelectedChat(null);
-      }
-      if (isCreatedChatVisible()) {
-        handleTurnFailure(err);
-      }
+      handleCreateChatFailure({
+        draftController,
+        submissionController,
+        submission,
+        tracker,
+        attachmentController,
+        pendingRestoredDraftRef,
+        setDraft,
+        discardOptimisticUserMessage,
+        optimisticMessage,
+        selectedChatIdRef,
+        selectedChatRef,
+        optimisticChatId,
+        setSelectedChatId,
+        setSelectedChat,
+        handleTurnFailure,
+        error: err,
+      });
     } finally {
-      if (isCreatedChatVisible()) {
+      if (tracker.isVisible()) {
         setCreating(false);
       }
     }
   }, [
     turnExecutionController,
     attachmentController,
-    draft,
     draftController,
     activeEffort,
     activeAgentId,
@@ -325,9 +268,30 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     mergeChatWithPendingOptimisticMessages,
     onLastUsedThreadSettingsChange,
     queueOptimisticUserMessage,
+    preferredAgentId,
     rememberChatModelPreference,
     scrollToBottomReliable,
+    selectedAcpModeId,
+    selectedChatIdRef,
+    selectedChatRef,
+    selectedEffort,
+    setActivePlan,
+    setActiveTurnId,
+    setActivity,
+    setCreating,
+    setDraft,
+    setError,
+    setPendingUserInputRequest,
+    setResolvingUserInput,
+    setSelectedChat,
+    setSelectedChatId,
+    setSelectedCollaborationMode,
+    setStoppingTurn,
+    setUserInputDrafts,
+    setUserInputError,
+    stopRequestedRef,
     submissionController,
+    supportsPlanMode,
   ]);
 
   return {

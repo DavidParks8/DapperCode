@@ -11,7 +11,9 @@ function readMarkdownAttr(value: unknown): string | null {
 }
 
 function readFenceLanguage(node: object): string | null {
-  if (!('sourceInfo' in node)) return null;
+  if (!('sourceInfo' in node)) {
+    return null;
+  }
   return readMarkdownAttr(node.sourceInfo);
 }
 
@@ -110,12 +112,13 @@ export function createMarkdownRules(
     ),
     link: (node, children, _parent, styles, onLinkPress) => {
       const href = readMarkdownAttr(node.attributes.href);
-      if (!href)
+      if (!href) {
         return (
           <SelectableMessageText key={node.key} style={styles.link}>
             {children}
           </SelectableMessageText>
         );
+      }
       const localFileReference = toLocalFileReferenceLabel(href);
       if (localFileReference) {
         return (
@@ -136,9 +139,13 @@ export function createMarkdownRules(
     },
     image: (node) => {
       const src = readMarkdownAttr(node.attributes.src);
-      if (!src) return null;
+      if (!src) {
+        return null;
+      }
       const source = toMarkdownImageSource(src, bridgeUrl, bridgeToken);
-      if (!source) return null;
+      if (!source) {
+        return null;
+      }
       const alt = readMarkdownAttr(node.attributes.alt);
       return <MarkdownImage key={node.key} source={source} accessibilityLabel={alt ?? undefined} />;
     },

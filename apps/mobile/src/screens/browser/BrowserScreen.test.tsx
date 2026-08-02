@@ -41,7 +41,15 @@ jest.mock('react-native-reanimated', () => {
   return {
     __esModule: true,
     default: Animated,
-    Easing: { bezier: () => 'bezier', linear: 'linear', in: (v: unknown) => v, out: (v: unknown) => v, inOut: (v: unknown) => v, ease: 'ease', cubic: 'cubic' },
+    Easing: {
+      bezier: () => 'bezier',
+      linear: 'linear',
+      in: (v: unknown) => v,
+      out: (v: unknown) => v,
+      inOut: (v: unknown) => v,
+      ease: 'ease',
+      cubic: 'cubic',
+    },
     FadeIn: makeChain(),
     FadeOut: makeChain(),
     FadeInDown: makeChain(),
@@ -101,7 +109,9 @@ type PropHandler = (...args: never[]) => unknown;
 
 function readHandler<Handler extends PropHandler>(node: Queryable, property: string): Handler {
   const handler = node.props[property];
-  if (typeof handler !== 'function') throw new Error(`Missing handler: ${property}`);
+  if (typeof handler !== 'function') {
+    throw new Error(`Missing handler: ${property}`);
+  }
   return handler as Handler;
 }
 
@@ -180,7 +190,9 @@ function exercisePressableStyles(root: Queryable): void {
 
 function findByLabel(root: Queryable, label: string): Queryable {
   const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-  if (!node) throw new Error(`Missing label: ${label}`);
+  if (!node) {
+    throw new Error(`Missing label: ${label}`);
+  }
   return node;
 }
 
@@ -190,7 +202,9 @@ function findPressableByText(root: Queryable, text: string): Queryable {
   while (current && typeof current.props.onPress !== 'function') {
     current = current.parent;
   }
-  if (!current) throw new Error(`Missing pressable: ${text}`);
+  if (!current) {
+    throw new Error(`Missing pressable: ${text}`);
+  }
   return current;
 }
 
@@ -265,7 +279,9 @@ async function renderBrowser(
     await Promise.resolve();
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected BrowserScreen tree');
+  if (!tree) {
+    throw new Error('Expected BrowserScreen tree');
+  }
   return { tree, api, store, ref };
 }
 
@@ -380,7 +396,9 @@ describe('BrowserScreen behavior', () => {
     expect(result.api.createBrowserPreviewSession).toHaveBeenCalledWith('http://127.0.0.1:3000/');
     expect(result.store.get(recentBrowserTargetUrlsAtom)).toEqual(['http://127.0.0.1:3000/']);
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing WebView');
+    if (!webView) {
+      throw new Error('Missing WebView');
+    }
     expect(result.ref.current?.handleHardwareBackPress()).toBe(false);
     await invoke(webView, 'onNavigationStateChange', {
       url: 'http://bridge:4173/preview/session-1/page',
@@ -496,7 +514,9 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing WebView');
+    if (!webView) {
+      throw new Error('Missing WebView');
+    }
     await act(async () => {
       const shouldStartLoad = readHandler<(request: { url: string }) => boolean>(
         webView,
@@ -538,12 +558,16 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Desktop Full viewport'));
     exercisePressableStyles(root);
     const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
-    if (!viewport) throw new Error('Missing desktop viewport');
+    if (!viewport) {
+      throw new Error('Missing desktop viewport');
+    }
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 0, height: 0 } } });
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 360, height: 640 } } });
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 360, height: 640 } } });
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing desktop WebView');
+    if (!webView) {
+      throw new Error('Missing desktop WebView');
+    }
     await invoke(webView, 'onMessage', { nativeEvent: { data: 'not-json' } });
     await invoke(webView, 'onMessage', {
       nativeEvent: { data: JSON.stringify({ type: 'other' }) },
@@ -595,9 +619,13 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop viewport'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing overview WebView');
+    if (!webView) {
+      throw new Error('Missing overview WebView');
+    }
     const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
-    if (!viewport) throw new Error('Missing overview viewport');
+    if (!viewport) {
+      throw new Error('Missing overview viewport');
+    }
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 390, height: 700 } } });
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 390, height: 700 } } });
     await invoke(webView, 'onMessage', { nativeEvent: { data: 'bad-json' } });
@@ -633,12 +661,16 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     let iframe = root.findAll((node) => node.type === 'iframe')[0];
-    if (!iframe) throw new Error('Missing mobile iframe');
+    if (!iframe) {
+      throw new Error('Missing mobile iframe');
+    }
     await invoke(iframe, 'onLoad');
     await invoke(findByLabel(root, 'Reload preview'));
     await invoke(findByLabel(root, 'Desktop viewport'));
     iframe = root.findAll((node) => node.type === 'iframe')[0];
-    if (!iframe) throw new Error('Missing desktop iframe');
+    if (!iframe) {
+      throw new Error('Missing desktop iframe');
+    }
     await invoke(iframe, 'onLoad');
     expect(findByLabel(root, 'Back').props.disabled).toBe(true);
     act(() => result.tree.unmount());
@@ -686,7 +718,9 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing WebView');
+    if (!webView) {
+      throw new Error('Missing WebView');
+    }
     await invoke(webView, 'onNavigationStateChange', {
       url: '',
       title: '',
@@ -708,7 +742,9 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Open preview'));
     await invoke(findByLabel(root, 'Desktop Full viewport'));
     let webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing shell WebView');
+    if (!webView) {
+      throw new Error('Missing shell WebView');
+    }
     await invoke(webView, 'onNavigationStateChange', {
       url: 'ignored',
       title: 'Ignored',
@@ -749,7 +785,9 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     exercisePressableStyles(root);
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing Android WebView');
+    if (!webView) {
+      throw new Error('Missing Android WebView');
+    }
     expect(webView.props.contentMode).toBe('mobile');
     expect(webView.props.userAgent).toBeUndefined();
     await invoke(webView, 'onNavigationStateChange', {
@@ -808,10 +846,14 @@ describe('BrowserScreen behavior', () => {
     await invoke(findByLabel(root, 'Desktop viewport'));
     exercisePressableStyles(root);
     const viewport = root.findAll((node) => typeof node.props.onLayout === 'function')[0];
-    if (!viewport) throw new Error('Missing native desktop viewport');
+    if (!viewport) {
+      throw new Error('Missing native desktop viewport');
+    }
     await invoke(viewport, 'onLayout', { nativeEvent: { layout: { width: 800, height: 600 } } });
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing native desktop WebView');
+    if (!webView) {
+      throw new Error('Missing native desktop WebView');
+    }
     expect(webView.props.contentMode).toBe('desktop');
     expect(webView.props.userAgent).toContain('Mozilla/5.0');
     await invoke(webView, 'onMessage', {
@@ -892,7 +934,9 @@ describe('BrowserScreen behavior', () => {
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing WebView');
+    if (!webView) {
+      throw new Error('Missing WebView');
+    }
 
     // Trigger loading
     await invoke(webView, 'onLoadStart');
@@ -927,7 +971,9 @@ describe('BrowserScreen behavior', () => {
 
     // Set navigation state so Back/Forward become active
     const webView = root.findAll((node) => node.type === 'mock-web-view')[0];
-    if (!webView) throw new Error('Missing WebView');
+    if (!webView) {
+      throw new Error('Missing WebView');
+    }
     await invoke(webView, 'onNavigationStateChange', {
       url: 'http://bridge:4173/preview/session-1/page',
       title: 'Page',
@@ -950,5 +996,4 @@ describe('BrowserScreen behavior', () => {
 
     act(() => result.tree.unmount());
   });
-
 });

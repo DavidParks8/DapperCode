@@ -92,7 +92,16 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         }
       }
     },
-    [agentThreadsController],
+    [
+      agentThreadsController,
+      agentThreadsRequestRef,
+      chatIdRef,
+      selectedChatRef,
+      setAgentRootThreadId,
+      setError,
+      setLoadingAgentThreads,
+      setRelatedAgentThreads,
+    ],
   );
 
   const scheduleAgentThreadsRefresh = useCallback(
@@ -112,7 +121,7 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         void refreshAgentThreads(activeChatId);
       }, 220);
     },
-    [refreshAgentThreads],
+    [agentThreadsRefreshTimerRef, chatIdRef, refreshAgentThreads],
   );
 
   useEffect(() => {
@@ -130,7 +139,16 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
     }
 
     void refreshAgentThreads(selectedChatId);
-  }, [refreshAgentThreads, selectedChatId]);
+  }, [
+    agentThreadsRefreshTimerRef,
+    agentThreadsRequestRef,
+    refreshAgentThreads,
+    selectedChatId,
+    setAgentRootThreadId,
+    setAgentThreadMenuVisible,
+    setLoadingAgentThreads,
+    setRelatedAgentThreads,
+  ]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -175,7 +193,16 @@ export function useMainScreenAgentThreadsRefresh(context: MainScreenAgentThreads
         clearTimeout(timer);
       }
     };
-  }, [agentRootThreadId, refreshAgentThreads, relatedAgentThreads.length, selectedChatId]);
+  }, [
+    activeTurnIdRef,
+    agentRootThreadId,
+    appStateRef,
+    chatIdRef,
+    refreshAgentThreads,
+    relatedAgentThreads.length,
+    runWatchdogUntilRef,
+    selectedChatId,
+  ]);
 
   useEffect(
     () => () => {

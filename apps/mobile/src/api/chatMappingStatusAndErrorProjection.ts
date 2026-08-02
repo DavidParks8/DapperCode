@@ -10,6 +10,17 @@ import {
 import { toRawAcpSnapshot, toRawTurn } from './chatMappingSnapshotAndSummaryProjection';
 import { type ChatStatus } from './types';
 
+const RUNNING_STATUSES = new Set(['inprogress', 'running', 'active', 'queued', 'pending']);
+const ERROR_STATUSES = new Set([
+  'failed',
+  'interrupted',
+  'error',
+  'aborted',
+  'cancelled',
+  'canceled',
+]);
+const COMPLETED_STATUSES = new Set(['completed', 'complete', 'success', 'succeeded']);
+
 export function readErrorMessage(value: unknown, depth = 0): string | null {
   if (depth > 3) {
     return null;
@@ -67,49 +78,41 @@ export function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): Cha
   const lastTurn = hasTurns ? turns[turns.length - 1] : null;
   const lastTurnStatus = normalizeLifecycleStatus(readString(lastTurn?.status));
   const isIdleLikeStatus = statusType === 'idle' || statusType === 'notloaded';
-  if (
-    lastTurnStatus === 'inprogress' ||
-    lastTurnStatus === 'running' ||
-    lastTurnStatus === 'active' ||
-    lastTurnStatus === 'queued' ||
-    lastTurnStatus === 'pending'
-  ) {
-    // Some thread/read payloads can return stale turn state while the thread // itself is already idle/notLoaded. Prefer the thread lifecycle in that case.
-    if (isIdleLikeStatus) {
-      return hasTurns ? 'complete' : 'idle';
-    }
-    return 'running';
+  const turnStatus = mapLastTurnStatus(lastTurnStatus, hasTurns, isIdleLikeStatus);
+  if (turnStatus) {
+    return turnStatus;
   }
-  if (
-    lastTurnStatus === 'failed' ||
-    lastTurnStatus === 'interrupted' ||
-    lastTurnStatus === 'error' ||
-    lastTurnStatus === 'aborted' ||
-    lastTurnStatus === 'cancelled' ||
-    lastTurnStatus === 'canceled'
-  ) {
+  return mapThreadLifecycleStatus(statusType, hasTurns, isIdleLikeStatus);
+}
+
+function mapLastTurnStatus(
+  status: string | null,
+  hasTurns: boolean,
+  isIdleLikeStatus: boolean,
+): ChatStatus | null {
+  const knownStatus = status ?? '';
+  if (RUNNING_STATUSES.has(knownStatus)) {
+    return isIdleLikeStatus ? (hasTurns ? 'complete' : 'idle') : 'running';
+  }
+  if (ERROR_STATUSES.has(knownStatus)) {
     return 'error';
   }
-  if (
-    lastTurnStatus === 'completed' ||
-    lastTurnStatus === 'complete' ||
-    lastTurnStatus === 'success' ||
-    lastTurnStatus === 'succeeded'
-  ) {
-    return 'complete';
-  }
-  if (statusType === 'systemerror' || statusType === 'error' || statusType === 'failed') {
+  return COMPLETED_STATUSES.has(knownStatus) ? 'complete' : null;
+}
+
+function mapThreadLifecycleStatus(
+  statusType: string | null,
+  hasTurns: boolean,
+  isIdleLikeStatus: boolean,
+): ChatStatus {
+  const knownStatus = statusType ?? '';
+  if (knownStatus === 'systemerror' || knownStatus === 'error' || knownStatus === 'failed') {
     return 'error';
   }
-  if (
-    statusType === 'running' ||
-    statusType === 'inprogress' ||
-    statusType === 'queued' ||
-    statusType === 'pending'
-  ) {
+  if (RUNNING_STATUSES.has(knownStatus) && knownStatus !== 'active') {
     return 'running';
   }
-  if (statusType === 'active') {
+  if (knownStatus === 'active') {
     // Some backends keep a thread "active" while loaded in memory even when no // turn is running. If there is no in-progress turn, avoid false "working" UI.
     return hasTurns ? 'complete' : 'idle';
   }
@@ -123,26 +126,10 @@ export function extractLastError(turns: RawTurn[]): string | null {
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const turn = turns[i];
     const turnStatus = normalizeLifecycleStatus(readString(turn.status));
-    if (
-      turnStatus !== 'failed' &&
-      turnStatus !== 'interrupted' &&
-      turnStatus !== 'error' &&
-      turnStatus !== 'aborted' &&
-      turnStatus !== 'cancelled' &&
-      turnStatus !== 'canceled'
-    ) {
+    if (!ERROR_STATUSES.has(turnStatus ?? '')) {
       continue;
     }
-    const message =
-      readErrorMessage(turn.error) ??
-      readErrorMessage(turn.message) ??
-      readErrorMessage(turn.errorMessage) ??
-      readErrorMessage(turn.error_message) ??
-      readErrorMessage(turn.detail) ??
-      readErrorMessage(turn.details) ??
-      readErrorMessage(turn.reason) ??
-      readErrorMessage(turn.description) ??
-      readErrorMessage(turn.stderr);
+    const message = readTurnErrorMessage(turn);
     if (message) {
       return message;
     }
@@ -151,14 +138,29 @@ export function extractLastError(turns: RawTurn[]): string | null {
   return null;
 }
 
+function readTurnErrorMessage(turn: RawTurn): string | null {
+  for (const value of [
+    turn.error,
+    turn.message,
+    turn.errorMessage,
+    turn.error_message,
+    turn.detail,
+    turn.details,
+    turn.reason,
+    turn.description,
+    turn.stderr,
+  ]) {
+    const message = readErrorMessage(value);
+    if (message) {
+      return message;
+    }
+  }
+  return null;
+}
+
 export function toRawThread(value: unknown): RawThread {
   const record = toRecord(value) ?? {};
-  const threadName =
-    readString(record.name) ??
-    readString(record.title) ??
-    readString(record.threadName) ??
-    readString(record.thread_name) ??
-    undefined;
+  const threadName = firstString(record.name, record.title, record.threadName, record.thread_name);
   return {
     id: readString(record.id) ?? undefined,
     agentId: record.agentId,
@@ -166,9 +168,8 @@ export function toRawThread(value: unknown): RawThread {
     title: threadName,
     preview: readString(record.preview) ?? undefined,
     modelProvider: readString(record.modelProvider) ?? undefined,
-    agentNickname:
-      readString(record.agentNickname) ?? readString(record.agent_nickname) ?? undefined,
-    agentRole: readString(record.agentRole) ?? readString(record.agent_role) ?? undefined,
+    agentNickname: firstString(record.agentNickname, record.agent_nickname),
+    agentRole: firstString(record.agentRole, record.agent_role),
     createdAt: readTimestampSeconds(record.createdAt) ?? undefined,
     updatedAt: readTimestampSeconds(record.updatedAt) ?? undefined,
     status: (record.status as RawThreadStatus) ?? undefined,
@@ -179,4 +180,14 @@ export function toRawThread(value: unknown): RawThread {
       ? (record.turns.map((turn) => toRawTurn(turn)).filter(Boolean) as RawTurn[])
       : undefined,
   };
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = readString(value);
+    if (text) {
+      return text;
+    }
+  }
+  return undefined;
 }

@@ -42,6 +42,15 @@ import {
   type SendChatMessageRequest,
 } from './types';
 
+function emptyPreparedTurn(threadId: string): PreparedTurnRequest {
+  return {
+    content: '',
+    mentions: [],
+    localImages: [],
+    turnStartParams: { threadId, input: [] },
+  };
+}
+
 export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridgeApiClientBridgeActionsLayer {
   gitPush(cwd?: string): Promise<GitPushResponse> {
     const normalizedCwd = normalizeCwd(cwd);
@@ -56,62 +65,80 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
   ): Promise<PreparedTurnRequest> {
     const content = body.content.trim();
     if (!content) {
-      return {
-        content: '',
-        mentions: [],
-        localImages: [],
-        turnStartParams: { threadId: id, input: [] },
-      };
+      return emptyPreparedTurn(id);
     }
     if ((body.role ?? 'user') !== 'user') {
       throw new Error('Only user role is supported in bridge/chat messaging');
     }
-    const normalizedCwd = normalizeCwd(body.cwd);
-    const normalizedModel = normalizeModel(body.model);
-    const normalizedEffort = normalizeEffort(body.effort);
-    const normalizedServiceTier = normalizeServiceTier(body.serviceTier);
-    const normalizedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
-    const normalizedMentions = normalizeMentions(body.mentions);
-    const normalizedLocalImages = normalizeLocalImages(body.localImages);
-    const requestedCollaborationMode = normalizeCollaborationMode(body.collaborationMode);
-    const requestedAgent = normalizeAgentName(body.agent);
-    let resumedThreadSettings: AppServerThreadRuntimeSettings | null = null;
-    if (!options?.skipResume) {
-      resumedThreadSettings = await this.resumeThread(id, {
-        model: normalizedModel,
-        cwd: normalizedCwd,
-        approvalPolicy: normalizedApprovalPolicy,
-      });
-    }
-    const effectiveModel = normalizedModel ?? resumedThreadSettings?.model ?? null;
-    const effectiveEffort = requestedCollaborationMode
-      ? (normalizedEffort ?? resumedThreadSettings?.effort ?? null)
-      : normalizedEffort;
+    return this.prepareNonEmptyTurnRequest(id, content, this.readTurnSettings(body), options);
+  }
+  private readTurnSettings(body: SendChatMessageRequest) {
+    return {
+      cwd: normalizeCwd(body.cwd),
+      model: normalizeModel(body.model),
+      effort: normalizeEffort(body.effort),
+      serviceTier: normalizeServiceTier(body.serviceTier),
+      approvalPolicy: normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted',
+      mentions: normalizeMentions(body.mentions),
+      localImages: normalizeLocalImages(body.localImages),
+      collaborationMode: normalizeCollaborationMode(body.collaborationMode),
+      agent: normalizeAgentName(body.agent),
+    };
+  }
+  private async prepareNonEmptyTurnRequest(
+    id: string,
+    content: string,
+    settings: ReturnType<HostBridgeApiClientTurnPreparationLayer['readTurnSettings']>,
+    options: PrepareTurnRequestOptions | undefined,
+  ): Promise<PreparedTurnRequest> {
+    const resumedThreadSettings = await this.resumeTurnThread(id, options, {
+      model: settings.model,
+      cwd: settings.cwd,
+      approvalPolicy: settings.approvalPolicy,
+    });
+    const effectiveModel = settings.model ?? resumedThreadSettings?.model ?? null;
+    const effectiveEffort = settings.collaborationMode
+      ? (settings.effort ?? resumedThreadSettings?.effort ?? null)
+      : settings.effort;
     const normalizedCollaborationMode = toTurnCollaborationMode(
-      requestedCollaborationMode,
+      settings.collaborationMode,
       effectiveModel,
       effectiveEffort,
     );
     return {
       content,
-      mentions: normalizedMentions,
-      localImages: normalizedLocalImages,
+      mentions: settings.mentions,
+      localImages: settings.localImages,
       turnStartParams: {
         threadId: id,
-        input: buildTurnInput(content, normalizedMentions, normalizedLocalImages),
-        cwd: normalizedCwd ?? null,
-        approvalPolicy: normalizedApprovalPolicy,
+        input: buildTurnInput(content, settings.mentions, settings.localImages),
+        cwd: settings.cwd ?? null,
+        approvalPolicy: settings.approvalPolicy,
         sandboxPolicy: null,
         model: effectiveModel ?? null,
         effort: effectiveEffort ?? null,
-        serviceTier: normalizedServiceTier ?? null,
+        serviceTier: settings.serviceTier ?? null,
         summary: 'auto',
         personality: null,
         outputSchema: null,
         collaborationMode: normalizedCollaborationMode,
-        agent: requestedAgent,
+        agent: settings.agent,
       },
     };
+  }
+  private async resumeTurnThread(
+    threadId: string,
+    options: PrepareTurnRequestOptions | undefined,
+    settings: {
+      model: string | null;
+      cwd: string | null;
+      approvalPolicy: NonNullable<ReturnType<typeof normalizeApprovalPolicy>>;
+    },
+  ): Promise<AppServerThreadRuntimeSettings | null> {
+    if (options?.skipResume) {
+      return null;
+    }
+    return this.resumeThread(threadId, settings);
   }
   protected mapChatWithCachedTitle(rawThreadValue: unknown): Chat {
     const rawThread = toRawThread(rawThreadValue);

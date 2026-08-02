@@ -43,6 +43,18 @@ export function toRecord(value: unknown): Record<string, unknown> | null {
   return result.success ? result.output : null;
 }
 
+/**
+ * Looks up a dispatch table entry by an untrusted, wire-supplied key. Plain object literals inherit
+ * from `Object.prototype`, so keys such as `toString` or `constructor` would otherwise resolve to
+ * inherited members and be invoked.
+ */
+export function lookupDispatchEntry<TEntry>(
+  table: Readonly<Partial<Record<string, TEntry>>>,
+  key: string,
+): TEntry | undefined {
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
 export function readString(value: unknown): string | null {
   const result = v.safeParse(stringSchema, value);
   return result.success ? result.output : null;

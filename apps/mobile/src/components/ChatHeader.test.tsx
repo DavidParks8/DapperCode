@@ -49,7 +49,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -69,7 +71,9 @@ function hostNodes(root: QueryableInstance): QueryableInstance[] {
 
 function findHost(root: QueryableInstance, label: string): QueryableInstance {
   const match = hostNodes(root).find((node) => node.props.accessibilityLabel === label);
-  if (!match) throw new Error(`Missing host node: ${label}`);
+  if (!match) {
+    throw new Error(`Missing host node: ${label}`);
+  }
   return match;
 }
 
@@ -81,7 +85,9 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
   const match = root.findAll(
     (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
-  if (!match) throw new Error(`Missing pressable: ${label}`);
+  if (!match) {
+    throw new Error(`Missing pressable: ${label}`);
+  }
   return match;
 }
 
@@ -92,7 +98,9 @@ function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
 }
 
@@ -103,7 +111,9 @@ function findType(root: QueryableInstance, type: unknown): QueryableInstance {
 /** The native scroll view backing the header title. */
 function titleScrollHost(root: QueryableInstance): QueryableInstance {
   const match = hostNodes(root).find((node) => node.type === 'RCTScrollView');
-  if (!match) throw new Error('Title scroll view is not rendered');
+  if (!match) {
+    throw new Error('Title scroll view is not rendered');
+  }
   return match;
 }
 
@@ -130,7 +140,9 @@ function pressAncestors(node: QueryableInstance): QueryableInstance[] {
   const pressables: QueryableInstance[] = [];
   let current = node.parent;
   while (current) {
-    if (typeof current.props.onPress === 'function') pressables.push(current);
+    if (typeof current.props.onPress === 'function') {
+      pressables.push(current);
+    }
     current = current.parent;
   }
   return pressables;
@@ -212,7 +224,9 @@ function createTitleScroller(
 
   const recordVisible = () => {
     const [start, end] = visibleRange();
-    for (let index = start; index < end; index += 1) seen.add(index);
+    for (let index = start; index < end; index += 1) {
+      seen.add(index);
+    }
   };
 
   const emit = (nextOffset: number) => {
@@ -531,8 +545,7 @@ describe('ChatHeader', () => {
 
     const expectMinimumHitSlop = (label: string) => {
       const hitSlop = findPressable(root, label).props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);
       expect(hitSlop!.bottom).toBeGreaterThan(0);

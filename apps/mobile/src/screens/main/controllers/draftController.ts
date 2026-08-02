@@ -32,12 +32,16 @@ interface WebStorageLike {
 const webDraftStorage: DraftStorage = {
   read: async (key) => {
     const value = getWebStorage()?.getItem(key);
-    if (value == null) throw new Error('missing');
+    if (value == null) {
+      throw new Error('missing');
+    }
     return value;
   },
   write: async (key, value) => {
     const storage = getWebStorage();
-    if (!storage) throw new Error('Browser storage is unavailable.');
+    if (!storage) {
+      throw new Error('Browser storage is unavailable.');
+    }
     storage.setItem(key, value);
   },
   exists: async (key) => getWebStorage()?.getItem(key) != null,
@@ -147,7 +151,9 @@ export function useDraftController(
 
   const setDraft = useCallback<React.Dispatch<React.SetStateAction<string>>>((next) => {
     const value = typeof next === 'function' ? next(draftRef.current) : next;
-    if (value === draftRef.current) return;
+    if (value === draftRef.current) {
+      return;
+    }
     draftRef.current = value;
     revisionRef.current += 1;
     unsyncedEditRef.current = true;
@@ -156,14 +162,18 @@ export function useDraftController(
 
   const persist = useCallback(
     async (entries: Readonly<Record<string, string>>) => {
-      if (!dirtyRef.current) return;
+      if (!dirtyRef.current) {
+        return;
+      }
       if (!paths.target) {
         reportPersistenceError('write', new Error('Persistence path is unavailable.'));
         return;
       }
       try {
         await resolvedStorage.write(paths.target, serializeDraftEntries(entries));
-        if (entriesRef.current === entries) dirtyRef.current = false;
+        if (entriesRef.current === entries) {
+          dirtyRef.current = false;
+        }
         setPersistenceError(null);
       } catch (cause) {
         reportPersistenceError('write', cause);
@@ -173,7 +183,9 @@ export function useDraftController(
   );
 
   const schedulePersist = useCallback(() => {
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    if (persistTimerRef.current) {
+      clearTimeout(persistTimerRef.current);
+    }
     persistTimerRef.current = setTimeout(() => {
       persistTimerRef.current = null;
       void persist(entriesRef.current);
@@ -201,18 +213,26 @@ export function useDraftController(
           transform: (raw) => migrateLegacyDraftEntries(raw, normalizedProfileId),
         });
       } catch (cause) {
-        if (!cancelled) reportPersistenceError('migrate', cause);
+        if (!cancelled) {
+          reportPersistenceError('migrate', cause);
+        }
       }
 
       if (paths.target) {
         try {
           const raw = await resolvedStorage.read(paths.target);
-          if (!cancelled) entriesRef.current = parseChatDrafts(raw);
+          if (!cancelled) {
+            entriesRef.current = parseChatDrafts(raw);
+          }
         } catch {
-          if (!cancelled) entriesRef.current = {};
+          if (!cancelled) {
+            entriesRef.current = {};
+          }
         }
       }
-      if (!cancelled) setLoaded(true);
+      if (!cancelled) {
+        setLoaded(true);
+      }
     };
 
     void load();
@@ -222,7 +242,9 @@ export function useDraftController(
   }, [normalizedProfileId, paths, reportPersistenceError, resolvedStorage]);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded) {
+      return;
+    }
     scopeKeyRef.current = scopeKey;
     // Persisted entries may have finished loading after the user already started typing into
     // this same scope (e.g. rapid typing right after navigating, before the read resolved).
@@ -243,10 +265,14 @@ export function useDraftController(
   }, [loaded, scopeKey, schedulePersist, setOwner]);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded) {
+      return;
+    }
     const owner = ownerKeyRef.current;
     const previous = entriesRef.current[owner] ?? '';
-    if (previous === draft) return;
+    if (previous === draft) {
+      return;
+    }
     entriesRef.current = updateDraftEntries(entriesRef.current, owner, draft);
     dirtyRef.current = true;
     schedulePersist();
@@ -254,7 +280,9 @@ export function useDraftController(
 
   useEffect(
     () => () => {
-      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+      if (persistTimerRef.current) {
+        clearTimeout(persistTimerRef.current);
+      }
       void persist(entriesRef.current);
     },
     [persist],
@@ -277,7 +305,9 @@ export function useDraftController(
 }
 
 function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  if (typeof globalThis !== 'object' || globalThis === null) {
+    return null;
+  }
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'

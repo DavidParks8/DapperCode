@@ -1187,8 +1187,11 @@ describe('HostBridgeWsClient', () => {
       socket.simulateOpen();
       const request = client.request(`pending/${event}`);
       await Promise.resolve();
-      if (event === 'close') socket.simulateClose();
-      else socket.simulateError();
+      if (event === 'close') {
+        socket.simulateClose();
+      } else {
+        socket.simulateError();
+      }
       await expect(request).rejects.toThrow(
         `Bridge websocket ${event === 'close' ? 'closed' : 'error'}`,
       );
@@ -1341,6 +1344,55 @@ describe('HostBridgeWsClient', () => {
         (call) => JSON.parse(String(call[0])).method === 'bridge/events/replay',
       ),
     ).toHaveLength(1);
+  });
+
+  /**
+   * Reproduces a redelivered connection-state event forcing a needless replay.
+   *
+   * A numbered `bridge/connection/state` notification is the bridge announcing it is back, and it
+   * schedules a replay so nothing is missed. A redelivery of an event we have already seen tells
+   * us nothing new, so the original ordering code returned before it could reach that scheduling.
+   * Scheduling on a duplicate re-requests the whole tail of the stream on every retransmit.
+   */
+  describe('a redelivered connection-state event does not re-request the stream', () => {
+    function connectAtEventOne() {
+      const client = new HostBridgeWsClient('http://localhost:8787');
+      client.connect();
+      const socket = latestMockSocket();
+      socket.simulateOpen();
+      simulateConnectionIdentity(socket, 'stream-duplicate');
+      socket.simulateMessage(JSON.stringify({ method: 'event', eventId: 1, params: {} }));
+      return socket;
+    }
+
+    function connectionState(eventId: number): string {
+      return JSON.stringify({
+        method: 'bridge/connection/state',
+        protocolVersion: 2,
+        streamId: 'stream-duplicate',
+        eventId,
+        params: { status: 'connected', at: '2026-07-17T00:00:01.000Z' },
+      });
+    }
+
+    it('skips replay for an already-seen event id', async () => {
+      const socket = connectAtEventOne();
+      expect(readLatestReplayRequest(socket)).toBeUndefined();
+
+      socket.simulateMessage(connectionState(1));
+      await Promise.resolve();
+
+      expect(readLatestReplayRequest(socket)).toBeUndefined();
+    });
+
+    it('still replays for a newly seen event id', async () => {
+      const socket = connectAtEventOne();
+
+      socket.simulateMessage(connectionState(2));
+      await Promise.resolve();
+
+      expect(readLatestReplayRequest(socket)).toBeDefined();
+    });
   });
 
   it.each([

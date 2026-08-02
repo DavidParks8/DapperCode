@@ -62,13 +62,17 @@ function openModelSelector(
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Model selector did not render');
+  if (!tree) {
+    throw new Error('Model selector did not render');
+  }
   return { tree, root: tree.root as unknown as Queryable, closeModelModal };
 }
 
 function findByTestId(root: Queryable, testID: string): Queryable {
   const match = root.findAll((node) => node.props.testID === testID)[0];
-  if (!match) throw new Error(`Missing node: ${testID}`);
+  if (!match) {
+    throw new Error(`Missing node: ${testID}`);
+  }
   return match;
 }
 
@@ -101,7 +105,9 @@ describe('MainScreenModelAndEffortSheets', () => {
     const { tree, root } = openModelSelector({ top: 0, left: 0, right: 0, bottom: 0 });
 
     const content = root.findAll((node) => node.props.testID === 'app-sheet-content')[0];
-    if (!content) throw new Error('Missing model selector content');
+    if (!content) {
+      throw new Error('Missing model selector content');
+    }
     const contentStyle = flattenStyle(content.props.style);
     expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,
@@ -113,7 +119,9 @@ describe('MainScreenModelAndEffortSheets', () => {
     const { tree, root } = openModelSelector({ top: 47, left: 0, right: 0, bottom: 34 });
 
     const modal = root.findAll((node) => typeof node.props.onDismiss === 'function')[0];
-    if (!modal) throw new Error('Missing model selector sheet');
+    if (!modal) {
+      throw new Error('Missing model selector sheet');
+    }
     const handle = flattenStyle(modal.props.handleStyle);
     const indicator = flattenStyle(modal.props.handleIndicatorStyle);
     expect(
@@ -148,7 +156,9 @@ describe('MainScreenModelAndEffortSheets', () => {
         </SafeAreaProvider>,
       );
     });
-    if (!tree) throw new Error('Effort sheet did not render');
+    if (!tree) {
+      throw new Error('Effort sheet did not render');
+    }
     const effortTree = tree;
     const root = effortTree.root as unknown as Queryable;
     const close = findByTestId(root, 'selection-sheet-close');

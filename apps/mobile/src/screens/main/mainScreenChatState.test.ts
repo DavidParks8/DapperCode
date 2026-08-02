@@ -162,7 +162,6 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
       serverReasoning,
     ]);
   });
-
 });
 
 describe('modelOptionsFromAcpConfig', () => {

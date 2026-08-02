@@ -42,7 +42,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -60,7 +62,9 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
   const match = root.findAll(
     (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
-  if (!match) throw new Error(`Missing pressable: ${label}`);
+  if (!match) {
+    throw new Error(`Missing pressable: ${label}`);
+  }
   return match;
 }
 
@@ -75,7 +79,9 @@ function flattenStyle(style: unknown): Record<string, number | string | undefine
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return callback(...args);
 }
 
@@ -160,12 +166,16 @@ describe('SelectionSheet', () => {
     const eyebrowText = root.findAll(
       (node) => node.type === Text && textContent(node) === 'Workspace',
     )[0];
-    if (!eyebrowText) throw new Error('Missing eyebrow text');
+    if (!eyebrowText) {
+      throw new Error('Missing eyebrow text');
+    }
     const eyebrowStyle = flattenStyle(eyebrowText.props.style);
     const badgeText = root.findAll(
       (node) => node.type === Text && textContent(node) === 'Active',
     )[0];
-    if (!badgeText) throw new Error('Missing badge text');
+    if (!badgeText) {
+      throw new Error('Missing badge text');
+    }
     const badgeTextStyle = flattenStyle(badgeText.props.style);
 
     // Both styles must adopt theme.typography.metadata (11/14) instead of the old sub-11pt
@@ -228,7 +238,9 @@ describe('SelectionSheet', () => {
     const root = queryRoot(tree);
 
     const footer = root.findAll((node) => node.props.testID === 'selection-sheet-footer')[0];
-    if (!footer) throw new Error('Missing selection sheet footer');
+    if (!footer) {
+      throw new Error('Missing selection sheet footer');
+    }
     const footerStyle = flattenStyle(footer.props.style);
     // Right aligning the button parked it in the screen's rounded bottom corner, where it was
     // visually clipped.
@@ -272,11 +284,13 @@ describe('SelectionSheet', () => {
         </SafeAreaProvider>,
       );
     });
-    if (!tree) throw new Error('Component did not render');
-    const content = queryRoot(tree).findAll(
-      (node) => node.props.testID === 'app-sheet-content',
-    )[0];
-    if (!content) throw new Error('Missing sheet content');
+    if (!tree) {
+      throw new Error('Component did not render');
+    }
+    const content = queryRoot(tree).findAll((node) => node.props.testID === 'app-sheet-content')[0];
+    if (!content) {
+      throw new Error('Missing sheet content');
+    }
     const contentStyle = flattenStyle(content.props.style);
     expect(Number(contentStyle.paddingBottom ?? 0)).toBeGreaterThanOrEqual(
       SHEET_CORNER_CLEARANCE + spacing.lg,

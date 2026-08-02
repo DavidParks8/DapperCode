@@ -1,11 +1,4 @@
-import {
-  activeBridgeUiSurfacesAtom,
-  pendingApprovalAtom,
-  pendingUserInputRequestAtom,
-} from '../../state/mainScreen/turn';
-import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
-import { useAtomValue } from 'jotai';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type {
   MainScreenChatCreationFlowContext,
   MainScreenChatCreationFlowResult,
@@ -16,78 +9,17 @@ export type MainScreenSendMessageHandlerContext = MainScreenChatCreationFlowCont
   MainScreenChatCreationFlowResult;
 
 export function useMainScreenSendMessageHandler(context: MainScreenSendMessageHandlerContext) {
-  const {
-    activeAgentId,
-    activeApprovalPolicy,
-    activeEffort,
-    activeModelId,
-    activeServiceTier,
-    api,
-    attachmentController,
-    bumpRunWatchdog,
-    cacheThreadPlan,
-    cacheThreadQueueState,
-    clearRunWatchdog,
-    discardOptimisticQueuedMessage,
-    discardOptimisticUserMessage,
-    draftController,
-    handleSlashCommand,
-    handleTurnFailure,
-    mergeChatWithPendingOptimisticMessages,
-    pendingLocalImagePaths,
-    pendingMentionPaths,
-    queueOptimisticQueuedMessage,
-    queueOptimisticUserMessage,
-    registerTurnStarted,
-    rememberChatModelPreference,
-    replaceThreadBridgeUiSurfaces,
-    scrollToBottomReliable,
-    selectedChat,
-    selectedChatId,
-    submissionController,
-  } = context;
-  const pendingApproval = useAtomValue(pendingApprovalAtom);
-  const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
-  const activeBridgeUiSurfaces = useAtomValue(activeBridgeUiSurfacesAtom);
-  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  // `executeSendMessage` consumes the whole composition context and reads live screen state from
+  // the jotai store at call time. The context object is rebuilt on every render, so it is held in
+  // a ref: the sender stays referentially stable for the callbacks, refs and effects that depend
+  // on it while still running against the latest context.
+  const contextRef = useRef(context);
+  contextRef.current = context;
 
   const sendMessageContent = useCallback(
     (rawContent: string, options?: SendMessageOptions) =>
-      executeSendMessage(context, rawContent, options),
-    [
-      activeAgentId,
-      activeEffort,
-      activeModelId,
-      activeApprovalPolicy,
-      activeServiceTier,
-      api,
-      attachmentController,
-      activeBridgeUiSurfaces,
-      draftController,
-      cacheThreadPlan,
-      cacheThreadQueueState,
-      handleSlashCommand,
-      pendingMentionPaths,
-      pendingLocalImagePaths,
-      pendingApproval?.requestId,
-      pendingUserInputRequest?.requestId,
-      selectedCollaborationMode,
-      selectedChat,
-      selectedChatId,
-      handleTurnFailure,
-      bumpRunWatchdog,
-      clearRunWatchdog,
-      discardOptimisticUserMessage,
-      discardOptimisticQueuedMessage,
-      mergeChatWithPendingOptimisticMessages,
-      queueOptimisticUserMessage,
-      queueOptimisticQueuedMessage,
-      registerTurnStarted,
-      replaceThreadBridgeUiSurfaces,
-      rememberChatModelPreference,
-      scrollToBottomReliable,
-      submissionController,
-    ],
+      executeSendMessage(contextRef.current, rawContent, options),
+    [],
   );
 
   return {

@@ -45,6 +45,53 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       });
     this.replayInFlight = replayPromise;
   }
+  protected classifyReplayRequestError(error: unknown): 'unsupported' | 'fatal' {
+    return isRpcRequestError(error) && error.code === -32601 ? 'unsupported' : 'fatal';
+  }
+  protected checkReplayPageIntegrity(
+    cursor: number,
+    earliestEventId: number | null,
+    latestEventId: number | null,
+  ): BridgeSnapshotRequiredReason | null {
+    if (latestEventId !== null && latestEventId < cursor) {
+      return 'replayInconsistent';
+    }
+    if (earliestEventId !== null && earliestEventId > cursor + 1) {
+      return 'replayTruncated';
+    }
+    if (earliestEventId === null && latestEventId !== null && latestEventId > cursor) {
+      return 'replayTruncated';
+    }
+    return null;
+  }
+  protected applyReplayEvents(events: unknown[]): void {
+    for (const entry of events) {
+      const record = toRecord(entry);
+      if (!record) {
+        continue;
+      }
+      this.handleNotificationRecord(record, { source: 'replay' });
+    }
+  }
+  protected extractPageEventIds(events: unknown[]): number[] {
+    return events
+      .map((entry) => toRecord(entry))
+      .map((entry) => (entry ? readEventId(entry) : null))
+      .filter((eventId): eventId is number => eventId !== null);
+  }
+  protected resolveReplayTargetEventId(
+    targetEventId: number | null,
+    latestEventId: number | null,
+    pageEventIds: number[],
+  ): number | null {
+    if (targetEventId !== null) {
+      return targetEventId;
+    }
+    if (latestEventId !== null) {
+      return latestEventId;
+    }
+    return pageEventIds.length > 0 ? Math.max(...pageEventIds) : null;
+  }
   protected async replayMissedEvents(generation: number): Promise<void> {
     if (!this.replaySupported) {
       return;
@@ -59,7 +106,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
           limit: 200,
         });
       } catch (error) {
-        if (isRpcRequestError(error) && error.code === -32601) {
+        if (this.classifyReplayRequestError(error) === 'unsupported') {
           this.replaySupported = false;
           return;
         }
@@ -77,47 +124,26 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       }
       const latestEventId = readIntegerLike(response.latestEventId);
       const earliestEventId = readIntegerLike(response.earliestEventId);
-      if (latestEventId !== null && latestEventId < cursor) {
-        this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
+      const integrityFailure = this.checkReplayPageIntegrity(
+        cursor,
+        earliestEventId,
+        latestEventId,
+      );
+      if (integrityFailure) {
+        this.resetDeliveryEpoch(integrityFailure, earliestEventId, latestEventId);
         return;
-      }
-      if (earliestEventId !== null && earliestEventId > cursor + 1) {
-        this.resetDeliveryEpoch('replayTruncated', earliestEventId, latestEventId);
-        return;
-      }
-      if (earliestEventId === null && latestEventId !== null && latestEventId > cursor) {
-        this.resetDeliveryEpoch('replayTruncated', earliestEventId, latestEventId);
-        return;
-      }
-      if (targetEventId === null) {
-        targetEventId = latestEventId;
       }
       const events = Array.isArray(response.events) ? response.events : [];
-      for (const entry of events) {
-        const record = toRecord(entry);
-        if (!record) {
-          continue;
-        }
-        this.handleNotificationRecord(record, { source: 'replay' });
-      }
+      this.applyReplayEvents(events);
       const previousCursor = cursor;
       cursor = this.lastSeenEventId;
-      const pageEventIds = events
-        .map((entry) => toRecord(entry))
-        .map((entry) => (entry ? readEventId(entry) : null))
-        .filter((eventId): eventId is number => eventId !== null);
-      if (targetEventId === null && pageEventIds.length > 0) {
-        targetEventId = Math.max(...pageEventIds);
-      }
+      const pageEventIds = this.extractPageEventIds(events);
+      targetEventId = this.resolveReplayTargetEventId(targetEventId, latestEventId, pageEventIds);
       if (targetEventId === null || cursor >= targetEventId) {
         return;
       }
       const hasMore = response.hasMore === true;
-      if (!hasMore) {
-        this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
-        return;
-      }
-      if (cursor <= previousCursor) {
+      if (!hasMore || cursor <= previousCursor) {
         this.resetDeliveryEpoch('replayInconsistent', earliestEventId, latestEventId);
         return;
       }

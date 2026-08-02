@@ -11,7 +11,12 @@ import { screenSetter } from '../../state/mainScreen/registry';
 import { startNewChatAtom } from '../../navigation/actions';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
-import { readFiniteNumber, readString, toRecord } from '../../runtimeValidation';
+import {
+  lookupDispatchEntry,
+  readFiniteNumber,
+  readString,
+  toRecord,
+} from '../../runtimeValidation';
 import {
   RUN_WATCHDOG_MS,
   describeStartedToolEvent,
@@ -19,232 +24,249 @@ import {
 } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
 
+type ThreadStateEventMethod =
+  | 'bridge/events/snapshotRequired'
+  | 'thread/name/updated'
+  | 'thread/deleted'
+  | 'thread/tokenUsage/updated'
+  | 'item/started';
+
+const THREAD_STATE_RUNNING_ITEM_TYPES = new Set([
+  'commandExecution',
+  'fileChange',
+  'mcpToolCall',
+  'reasoning',
+]);
+
+const CURRENT_THREAD_STATE_RUNNING_ITEM_TYPES = new Set([
+  ...THREAD_STATE_RUNNING_ITEM_TYPES,
+  'toolCall',
+]);
+
 export function processThreadStateEvents(
   context: MainScreenWsEventRouterContext,
   event: RpcNotification,
   currentId: string | null,
 ): void {
-  const {
-    clearRunWatchdog,
-    setActiveCommands,
-    setStreamingText,
-    replaceThreadBridgeUiSurfaces,
-    reasoningSummaryRef,
-    reasoningBufferRef,
-    recoverReplayGap,
-    scheduleAgentThreadsRefresh,
-    setSelectedChat,
-    loadChat,
-    readThreadContextUsage,
-    cacheThreadContextUsage,
-    planItemTurnIdByThreadRef,
-    cacheThreadTurnState,
-    cacheThreadActiveCommand,
-    cacheThreadActivity,
-    bumpRunWatchdog,
-    pushActiveCommand,
-    upsertLiveReasoningMessage,
-    store,
-    agentDetailThreadId,
-  } = context;
-  const setPendingApproval = screenSetter(store, pendingApprovalAtom);
-  const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
-  const setActivePlan = screenSetter(store, activePlanAtom);
-  const setActiveBridgeUiSurfaces = screenSetter(store, activeBridgeUiSurfacesAtom);
-  const setLiveAssistantByThread = screenSetter(store, liveAssistantByThreadAtom);
-  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
-  const setSelectedCollaborationMode = screenSetter(store, selectedCollaborationModeAtom);
-  const setActivity = screenSetter(store, activityAtom);
-
-  if (event.method === 'bridge/events/snapshotRequired') {
-    const params = toRecord(event.params);
-    const resumeAfterEventId = readFiniteNumber(params?.resumeAfterEventId);
-    const reason = readString(params?.reason);
-    clearRunWatchdog();
-    setActiveCommands([]);
-    setStreamingText(null);
-    setLiveAssistantByThread({});
-    setActiveTurnId(null);
-    setPendingApproval(null);
-    setPendingUserInputRequest(null);
-    setActivePlan(null);
-    setActiveBridgeUiSurfaces([]);
-    if (currentId) {
-      replaceThreadBridgeUiSurfaces(currentId, []);
-    }
-    reasoningSummaryRef.current = {};
-    reasoningBufferRef.current = '';
-    recoverReplayGap(resumeAfterEventId, reason !== 'recoveryOverflow');
-    if (agentDetailThreadId) {
-      scheduleAgentThreadsRefresh(agentDetailThreadId);
-    }
+  const handler = lookupDispatchEntry(THREAD_STATE_EVENT_HANDLERS, event.method);
+  if (!handler) {
     return;
   }
 
-  if (event.method === 'thread/name/updated') {
-    const params = toRecord(event.params);
-    const threadId = extractNotificationThreadId(params);
-    if (!threadId || threadId !== currentId) {
-      return;
-    }
+  handler(createThreadStateEventContext(context), event, currentId);
+}
 
-    const threadName = readString(params?.threadName) ?? readString(params?.thread_name);
-    if (threadName && threadName.trim()) {
-      setSelectedChat((prev) =>
-        prev
-          ? {
-              ...prev,
-              title: threadName,
-            }
-          : prev,
-      );
-    } else {
-      loadChat(threadId, { preserveRuntimeState: true }).catch(() => {});
-    }
+type ThreadStateEventContext = ReturnType<typeof createThreadStateEventContext>;
+type ThreadStateEventHandler = (
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+) => void;
+
+const THREAD_STATE_EVENT_HANDLERS: Record<ThreadStateEventMethod, ThreadStateEventHandler> = {
+  'bridge/events/snapshotRequired': handleSnapshotRequiredEvent,
+  'thread/name/updated': handleThreadNameUpdatedEvent,
+  'thread/deleted': handleThreadDeletedEvent,
+  'thread/tokenUsage/updated': handleThreadTokenUsageUpdatedEvent,
+  'item/started': handleItemStartedEvent,
+};
+
+function createThreadStateEventContext(context: MainScreenWsEventRouterContext) {
+  const { store } = context;
+  return {
+    ...context,
+    setPendingApproval: screenSetter(store, pendingApprovalAtom),
+    setPendingUserInputRequest: screenSetter(store, pendingUserInputRequestAtom),
+    setActivePlan: screenSetter(store, activePlanAtom),
+    setActiveBridgeUiSurfaces: screenSetter(store, activeBridgeUiSurfacesAtom),
+    setLiveAssistantByThread: screenSetter(store, liveAssistantByThreadAtom),
+    setActiveTurnId: screenSetter(store, activeTurnIdAtom),
+    setSelectedCollaborationMode: screenSetter(store, selectedCollaborationModeAtom),
+    setActivity: screenSetter(store, activityAtom),
+  };
+}
+
+function handleSnapshotRequiredEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+): void {
+  const params = toRecord(event.params);
+  const resumeAfterEventId = readFiniteNumber(params?.resumeAfterEventId);
+  const reason = readString(params?.reason);
+  context.clearRunWatchdog();
+  context.setActiveCommands([]);
+  context.setStreamingText(null);
+  context.setLiveAssistantByThread({});
+  context.setActiveTurnId(null);
+  context.setPendingApproval(null);
+  context.setPendingUserInputRequest(null);
+  context.setActivePlan(null);
+  context.setActiveBridgeUiSurfaces([]);
+  if (currentId) {
+    context.replaceThreadBridgeUiSurfaces(currentId, []);
+  }
+  context.reasoningSummaryRef.current = {};
+  context.reasoningBufferRef.current = '';
+  context.recoverReplayGap(resumeAfterEventId, reason !== 'recoveryOverflow');
+  if (context.agentDetailThreadId) {
+    context.scheduleAgentThreadsRefresh(context.agentDetailThreadId);
+  }
+}
+
+function handleThreadNameUpdatedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+): void {
+  const params = toRecord(event.params);
+  const threadId = extractNotificationThreadId(params);
+  if (!threadId || threadId !== currentId) {
     return;
   }
 
-  if (event.method === 'thread/deleted') {
-    const params = toRecord(event.params);
-    const threadId = extractNotificationThreadId(params);
-    if (!threadId || threadId !== currentId) {
-      return;
-    }
-    // The thread is gone on the agent, so keeping it open would only surface stale history.
-    store.set(startNewChatAtom);
+  const threadName = readString(params?.threadName) ?? readString(params?.thread_name);
+  if (threadName && threadName.trim()) {
+    context.setSelectedChat((prev) =>
+      prev
+        ? {
+            ...prev,
+            title: threadName,
+          }
+        : prev,
+    );
     return;
   }
 
-  if (event.method === 'thread/tokenUsage/updated') {
-    const params = toRecord(event.params);
-    const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
-    const contextUsage = readThreadContextUsage(params);
-    if (!threadId || !contextUsage) {
-      return;
-    }
-    cacheThreadContextUsage(threadId, contextUsage);
-    if (threadId === currentId) {
-    }
+  context.loadChat(threadId, { preserveRuntimeState: true }).catch(() => {});
+}
+
+function handleThreadDeletedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+): void {
+  const params = toRecord(event.params);
+  const threadId = extractNotificationThreadId(params);
+  if (!threadId || threadId !== currentId) {
     return;
   }
 
-  if (event.method === 'item/started') {
-    const params = toRecord(event.params);
-    const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
-    if (!threadId) {
-      return;
-    }
-    const item = toRecord(params?.item);
-    const itemType = readString(item?.type);
-    const itemTurnId = readString(params?.turnId) ?? readString(params?.turn_id) ?? null;
-    if (itemType === 'plan' && itemTurnId) {
-      planItemTurnIdByThreadRef.current[threadId] = itemTurnId;
-    }
-    if (threadId !== currentId) {
-      cacheThreadTurnState(threadId, {
-        runWatchdogUntil: Date.now() + RUN_WATCHDOG_MS,
-      });
-      const startedToolEvent = describeStartedToolEvent(item);
-      if (startedToolEvent) {
-        cacheThreadActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
-      }
-      if (itemType === 'commandExecution') {
-        cacheThreadActivity(threadId, {
-          tone: 'running',
-          title: 'Working',
-        });
-        return;
-      }
+  // The thread is gone on the agent, so keeping it open would only surface stale history.
+  context.store.set(startNewChatAtom);
+}
 
-      if (itemType === 'fileChange') {
-        cacheThreadActivity(threadId, {
-          tone: 'running',
-          title: 'Working',
-        });
-        return;
-      }
-
-      if (itemType === 'mcpToolCall') {
-        cacheThreadActivity(threadId, {
-          tone: 'running',
-          title: 'Working',
-        });
-        return;
-      }
-
-      if (itemType === 'plan') {
-        cacheThreadActivity(threadId, {
-          tone: 'running',
-          title: 'Planning',
-        });
-        return;
-      }
-
-      if (itemType === 'reasoning') {
-        cacheThreadActivity(threadId, {
-          tone: 'running',
-          title: 'Working',
-        });
-        return;
-      }
-      return;
-    }
-
-    bumpRunWatchdog();
-    const startedToolEvent = describeStartedToolEvent(item);
-    if (startedToolEvent) {
-      cacheThreadActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
-      pushActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
-    }
-
-    if (itemType === 'commandExecution') {
-      setActivity({
-        tone: 'running',
-        title: 'Working',
-      });
-      return;
-    }
-
-    if (itemType === 'fileChange') {
-      setActivity({
-        tone: 'running',
-        title: 'Working',
-      });
-      return;
-    }
-
-    if (itemType === 'mcpToolCall') {
-      setActivity({
-        tone: 'running',
-        title: 'Working',
-      });
-      return;
-    }
-
-    if (itemType === 'toolCall') {
-      setActivity({
-        tone: 'running',
-        title: 'Working',
-      });
-      return;
-    }
-
-    if (itemType === 'plan') {
-      setSelectedCollaborationMode('plan');
-      setActivity({
-        tone: 'running',
-        title: 'Planning',
-      });
-      return;
-    }
-
-    if (itemType === 'reasoning') {
-      upsertLiveReasoningMessage(threadId);
-      setActivity({
-        tone: 'running',
-        title: 'Working',
-      });
-      return;
-    }
+function handleThreadTokenUsageUpdatedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+): void {
+  const params = toRecord(event.params);
+  const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
+  const contextUsage = context.readThreadContextUsage(params);
+  if (!threadId || !contextUsage) {
+    return;
   }
+
+  context.cacheThreadContextUsage(threadId, contextUsage);
+}
+
+function handleItemStartedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+): void {
+  const params = toRecord(event.params);
+  const threadId = readString(params?.threadId) ?? readString(params?.thread_id);
+  if (!threadId) {
+    return;
+  }
+
+  const item = toRecord(params?.item);
+  const itemType = readString(item?.type);
+  const itemTurnId = readString(params?.turnId) ?? readString(params?.turn_id) ?? null;
+  if (itemType === 'plan' && itemTurnId) {
+    context.planItemTurnIdByThreadRef.current[threadId] = itemTurnId;
+  }
+
+  if (threadId !== currentId) {
+    handleNonCurrentItemStarted(context, threadId, item, itemType);
+    return;
+  }
+
+  handleCurrentItemStarted(context, threadId, item, itemType);
+}
+
+function handleNonCurrentItemStarted(
+  context: ThreadStateEventContext,
+  threadId: string,
+  item: Record<string, unknown> | null,
+  itemType: string | null,
+): void {
+  context.cacheThreadTurnState(threadId, {
+    runWatchdogUntil: Date.now() + RUN_WATCHDOG_MS,
+  });
+  const startedToolEvent = describeStartedToolEvent(item);
+  if (startedToolEvent) {
+    context.cacheThreadActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
+  }
+
+  const activityTitle = getThreadStateItemActivityTitle(itemType, false);
+  if (!activityTitle) {
+    return;
+  }
+
+  context.cacheThreadActivity(threadId, {
+    tone: 'running',
+    title: activityTitle,
+  });
+}
+
+function handleCurrentItemStarted(
+  context: ThreadStateEventContext,
+  threadId: string,
+  item: Record<string, unknown> | null,
+  itemType: string | null,
+): void {
+  context.bumpRunWatchdog();
+  const startedToolEvent = describeStartedToolEvent(item);
+  if (startedToolEvent) {
+    context.cacheThreadActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
+    context.pushActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
+  }
+
+  if (itemType === 'plan') {
+    context.setSelectedCollaborationMode('plan');
+    context.setActivity({
+      tone: 'running',
+      title: 'Planning',
+    });
+    return;
+  }
+
+  if (itemType === 'reasoning') {
+    context.upsertLiveReasoningMessage(threadId);
+  }
+
+  if (!getThreadStateItemActivityTitle(itemType, true)) {
+    return;
+  }
+
+  context.setActivity({
+    tone: 'running',
+    title: 'Working',
+  });
+}
+
+function getThreadStateItemActivityTitle(
+  itemType: string | null,
+  isCurrentThread: boolean,
+): 'Working' | 'Planning' | null {
+  if (itemType === 'plan') {
+    return 'Planning';
+  }
+
+  const supportedTypes = isCurrentThread
+    ? CURRENT_THREAD_STATE_RUNNING_ITEM_TYPES
+    : THREAD_STATE_RUNNING_ITEM_TYPES;
+  return itemType && supportedTypes.has(itemType) ? 'Working' : null;
 }

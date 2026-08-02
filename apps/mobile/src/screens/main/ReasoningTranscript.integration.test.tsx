@@ -70,7 +70,9 @@ function renderTranscript(
       </AppThemeProvider>,
     );
   });
-  if (!tree) throw new Error('Expected transcript tree');
+  if (!tree) {
+    throw new Error('Expected transcript tree');
+  }
   return tree;
 }
 

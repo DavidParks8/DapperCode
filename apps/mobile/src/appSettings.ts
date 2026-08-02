@@ -161,7 +161,9 @@ function normalizeAgentId(value: unknown): AgentId | null {
 function normalizeAgentSettings(value: unknown): AgentDefaultSettingsMap {
   const normalized: AgentDefaultSettingsMap = {};
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-  if (!record) return normalized;
+  if (!record) {
+    return normalized;
+  }
   for (const [rawAgentId, rawEntry] of Object.entries(record)) {
     const agentId = normalizeAgentId(rawAgentId);
     const entry =

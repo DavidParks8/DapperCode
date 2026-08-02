@@ -38,7 +38,9 @@ export function usePushNotificationsLifecycle(): void {
 
     const subscription = addNotificationResponseListener((event) => controller.handle(event));
     void getInitialNotificationResponse().then((event) => {
-      if (event) controller.handle(event);
+      if (event) {
+        controller.handle(event);
+      }
     });
     return () => {
       subscription.remove();

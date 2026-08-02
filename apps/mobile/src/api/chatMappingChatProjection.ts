@@ -48,87 +48,58 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
   } // Legacy shape used by older adapters.
   const legacyKind = readString(sourceRecord.kind);
   if (legacyKind) {
-    return {
-      kind: legacyKind,
-      parentThreadId:
-        readString(sourceRecord.parentThreadId) ??
-        readString(sourceRecord.parent_thread_id) ??
-        undefined,
-      subAgentDepth:
-        readCoercedFiniteNumber(sourceRecord.depth) ??
-        readCoercedFiniteNumber(sourceRecord.agentDepth) ??
-        readCoercedFiniteNumber(sourceRecord.agent_depth) ??
-        undefined,
-    };
+    return withSourceFields(legacyKind, sourceRecord);
   }
   // Current app-server shape: { subAgent: ... } tagged union.
   const subAgentValue = sourceRecord.subAgent ?? sourceRecord.subagent;
   if (subAgentValue !== undefined) {
-    const subAgent = subAgentValue;
-    if (typeof subAgent === 'string') {
-      const kind =
-        subAgent === 'review'
-          ? 'subAgentReview'
-          : subAgent === 'compact'
-            ? 'subAgentCompact'
-            : subAgent === 'memory_consolidation'
-              ? 'subAgentOther'
-              : 'subAgent';
-      return { kind };
-    }
-    const subAgentRecord = toRecord(subAgent);
-    if (!subAgentRecord) {
-      return { kind: 'subAgent' };
-    }
-    const threadSpawn = toRecord(subAgentRecord.thread_spawn);
-    if (threadSpawn) {
-      return {
-        kind: 'subAgentThreadSpawn',
-        parentThreadId:
-          readString(threadSpawn.parentThreadId) ??
-          readString(threadSpawn.parent_thread_id) ??
-          undefined,
-        subAgentDepth:
-          readCoercedFiniteNumber(threadSpawn.depth) ??
-          readCoercedFiniteNumber(threadSpawn.agentDepth) ??
-          readCoercedFiniteNumber(threadSpawn.agent_depth) ??
-          undefined,
-      };
-    }
-    if (readString(subAgentRecord.other)) {
-      return {
-        kind: 'subAgentOther',
-      };
-    }
-    return {
-      kind: 'subAgent',
-      parentThreadId:
-        readString(subAgentRecord.parentThreadId) ??
-        readString(subAgentRecord.parent_thread_id) ??
-        undefined,
-      subAgentDepth:
-        readCoercedFiniteNumber(subAgentRecord.depth) ??
-        readCoercedFiniteNumber(subAgentRecord.agentDepth) ??
-        readCoercedFiniteNumber(subAgentRecord.agent_depth) ??
-        undefined,
-    };
+    return readSubAgentSourceMetadata(subAgentValue);
   }
   const typeKind = readString(sourceRecord.type);
   if (typeKind && typeKind.startsWith('subAgent')) {
-    return {
-      kind: typeKind,
-      parentThreadId:
-        readString(sourceRecord.parentThreadId) ??
-        readString(sourceRecord.parent_thread_id) ??
-        undefined,
-      subAgentDepth:
-        readCoercedFiniteNumber(sourceRecord.depth) ??
-        readCoercedFiniteNumber(sourceRecord.agentDepth) ??
-        readCoercedFiniteNumber(sourceRecord.agent_depth) ??
-        undefined,
-    };
+    return withSourceFields(typeKind, sourceRecord);
   }
   return {};
+}
+
+function readSubAgentSourceMetadata(subAgent: unknown): ThreadSourceMetadata {
+  if (typeof subAgent === 'string') {
+    return { kind: subAgentKind(subAgent) };
+  }
+  const subAgentRecord = toRecord(subAgent);
+  if (!subAgentRecord) {
+    return { kind: 'subAgent' };
+  }
+  const threadSpawn = toRecord(subAgentRecord.thread_spawn);
+  if (threadSpawn) {
+    return withSourceFields('subAgentThreadSpawn', threadSpawn);
+  }
+  return readString(subAgentRecord.other)
+    ? { kind: 'subAgentOther' }
+    : withSourceFields('subAgent', subAgentRecord);
+}
+
+function subAgentKind(subAgent: string): string {
+  if (subAgent === 'review') {
+    return 'subAgentReview';
+  }
+  if (subAgent === 'compact') {
+    return 'subAgentCompact';
+  }
+  return subAgent === 'memory_consolidation' ? 'subAgentOther' : 'subAgent';
+}
+
+function withSourceFields(kind: string, source: Record<string, unknown>): ThreadSourceMetadata {
+  return {
+    kind,
+    parentThreadId:
+      readString(source.parentThreadId) ?? readString(source.parent_thread_id) ?? undefined,
+    subAgentDepth:
+      readCoercedFiniteNumber(source.depth) ??
+      readCoercedFiniteNumber(source.agentDepth) ??
+      readCoercedFiniteNumber(source.agent_depth) ??
+      undefined,
+  };
 }
 
 export function mapChat(raw: RawThread): Chat {
@@ -151,24 +122,35 @@ export function mapChat(raw: RawThread): Chat {
     latestTurnPlan: plans.latestTurnPlan,
     latestTurnStatus: plans.latestTurnStatus,
     activeTurnId: plans.activeTurnId,
-    acpUsage: raw.acpSnapshot
-      ? {
-          used: raw.acpSnapshot.usage.used ?? null,
-          size: raw.acpSnapshot.usage.size ?? null,
-          cost: raw.acpSnapshot.usage.cost ?? null,
-        }
-      : null,
-    acpMode: raw.acpSnapshot?.mode ?? null,
-    acpConfig: raw.acpSnapshot?.config ?? [],
-    acpCommands: raw.acpSnapshot?.commands ?? [],
-    acpActive: raw.acpSnapshot
-      ? {
-          runId: raw.acpSnapshot.active.runId ?? null,
-          sourceTurnId: raw.acpSnapshot.active.sourceTurnId ?? null,
-          generation: raw.acpSnapshot.active.generation ?? null,
-          toolIds: raw.acpSnapshot.active.toolIds,
-        }
-      : null,
+    ...mapAcpSnapshotFields(raw.acpSnapshot),
+  };
+}
+
+function mapAcpSnapshotFields(snapshot: RawThread['acpSnapshot']) {
+  if (!snapshot) {
+    return {
+      acpUsage: null,
+      acpMode: null,
+      acpConfig: [],
+      acpCommands: [],
+      acpActive: null,
+    };
+  }
+  return {
+    acpUsage: {
+      used: snapshot.usage.used ?? null,
+      size: snapshot.usage.size ?? null,
+      cost: snapshot.usage.cost ?? null,
+    },
+    acpMode: snapshot.mode ?? null,
+    acpConfig: snapshot.config ?? [],
+    acpCommands: snapshot.commands ?? [],
+    acpActive: {
+      runId: snapshot.active.runId ?? null,
+      sourceTurnId: snapshot.active.sourceTurnId ?? null,
+      generation: snapshot.active.generation ?? null,
+      toolIds: snapshot.active.toolIds,
+    },
   };
 }
 

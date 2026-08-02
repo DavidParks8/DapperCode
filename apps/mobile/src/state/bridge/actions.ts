@@ -1,4 +1,4 @@
-import { atom } from 'jotai';
+import { atom, type Getter } from 'jotai';
 
 import { normalizeBridgeToken, type BridgeProfileDraft } from '../../bridgeProfiles';
 import { normalizeBridgeUrlInput } from '../../bridgeUrl';
@@ -30,31 +30,50 @@ export interface SaveBridgeProfileInput {
   profileId?: string | null;
 }
 
+function normalizeSaveBridgeProfileInput(draft: OnboardingBridgeProfileDraft) {
+  const normalized = normalizeBridgeUrlInput(draft.bridgeUrl);
+  const normalizedToken = normalizeBridgeToken(draft.bridgeToken);
+  if (!normalized || !normalizedToken) {
+    throw new Error('Bridge URL and token are required.');
+  }
+  return { normalized, normalizedToken };
+}
+
+function resolveSaveBridgeProfileDraft(
+  get: Getter,
+  input: SaveBridgeProfileInput,
+  normalized: string,
+  normalizedToken: string,
+): { nextDraft: BridgeProfileDraft; bridgeIdentityChanged: boolean } {
+  const { mode, profileId } = input;
+  const nextDraft: BridgeProfileDraft = {
+    id: mode === 'edit' ? (profileId ?? get(activeBridgeProfileAtom)?.id ?? null) : null,
+    bridgeUrl: normalized,
+    bridgeToken: normalizedToken,
+    activate: true,
+  };
+  const editedProfile = nextDraft.id
+    ? (get(bridgeProfileStoreAtom).profiles.find((profile) => profile.id === nextDraft.id) ?? null)
+    : null;
+  const bridgeIdentityChanged = Boolean(
+    editedProfile &&
+    (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken),
+  );
+  return { nextDraft, bridgeIdentityChanged };
+}
+
 export const saveBridgeProfileAtom = atom(
   null,
   async (get, set, input: SaveBridgeProfileInput): Promise<string> => {
-    const { draft, mode, profileId } = input;
-    const normalized = normalizeBridgeUrlInput(draft.bridgeUrl);
-    const normalizedToken = normalizeBridgeToken(draft.bridgeToken);
-    if (!normalized || !normalizedToken) {
-      throw new Error('Bridge URL and token are required.');
-    }
+    const { normalized, normalizedToken } = normalizeSaveBridgeProfileInput(input.draft);
 
     set(bridgeProfileTransitioningAtom, true);
     try {
-      const nextDraft: BridgeProfileDraft = {
-        id: mode === 'edit' ? (profileId ?? get(activeBridgeProfileAtom)?.id ?? null) : null,
-        bridgeUrl: normalized,
-        bridgeToken: normalizedToken,
-        activate: true,
-      };
-      const editedProfile = nextDraft.id
-        ? (get(bridgeProfileStoreAtom).profiles.find((profile) => profile.id === nextDraft.id) ??
-          null)
-        : null;
-      const bridgeIdentityChanged = Boolean(
-        editedProfile &&
-        (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken),
+      const { nextDraft, bridgeIdentityChanged } = resolveSaveBridgeProfileDraft(
+        get,
+        input,
+        normalized,
+        normalizedToken,
       );
       const nextState = await set(dispatchDurableAppStateAtom, {
         type: 'profiles/save',

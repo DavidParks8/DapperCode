@@ -41,23 +41,31 @@ function typeName(node: Queryable): string {
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function')
+  while (current && typeof current.props.onPress !== 'function') {
     current = current.parent as Queryable | null;
-  if (!current) throw new Error(`Missing pressable: ${text}`);
+  }
+  if (!current) {
+    throw new Error(`Missing pressable: ${text}`);
+  }
   return current;
 }
 
 function findPressableAncestor(node: Queryable): Queryable {
   let current: Queryable | null = node;
-  while (current && typeof current.props.onPress !== 'function')
+  while (current && typeof current.props.onPress !== 'function') {
     current = current.parent as Queryable | null;
-  if (!current) throw new Error('Missing pressable ancestor');
+  }
+  if (!current) {
+    throw new Error('Missing pressable ancestor');
+  }
   return current;
 }
 
 function getPressCallback(node: Queryable): PressCallback {
   const callback = node.props.onPress;
-  if (typeof callback !== 'function') throw new Error('Expected onPress callback');
+  if (typeof callback !== 'function') {
+    throw new Error('Expected onPress callback');
+  }
   return callback as PressCallback;
 }
 
@@ -75,8 +83,11 @@ function effectiveSize(
   hitSlop: { top?: number; bottom?: number; left?: number; right?: number } | number | undefined,
   axis: 'vertical' | 'horizontal',
 ): number {
-  if (typeof hitSlop === 'number') return visible + hitSlop * 2;
-  const [a, b] = axis === 'vertical' ? [hitSlop?.top, hitSlop?.bottom] : [hitSlop?.left, hitSlop?.right];
+  if (typeof hitSlop === 'number') {
+    return visible + hitSlop * 2;
+  }
+  const [a, b] =
+    axis === 'vertical' ? [hitSlop?.top, hitSlop?.bottom] : [hitSlop?.left, hitSlop?.right];
   return visible + (a ?? 0) + (b ?? 0);
 }
 
@@ -96,7 +107,9 @@ async function renderPrivacy(url: string | null, onBack = jest.fn()): Promise<Re
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Expected privacy screen tree');
+  if (!tree) {
+    throw new Error('Expected privacy screen tree');
+  }
   return tree;
 }
 
@@ -201,9 +214,7 @@ describe('PrivacyScreen behavior', () => {
     const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
     const backBtn = findPressableAncestor(backIcon);
     const hitSlop = backBtn.props.hitSlop as
-      | { top?: number; bottom?: number; left?: number; right?: number }
-      | number
-      | undefined;
+      { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
     const iconSize = 22;
     expect(effectiveSize(iconSize, hitSlop, 'vertical')).toBeGreaterThanOrEqual(
       theme.touchTarget.minimum,
@@ -248,9 +259,7 @@ describe('PrivacyScreen behavior', () => {
       const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
       const backBtn = findPressableAncestor(backIcon);
       const hitSlop = backBtn.props.hitSlop as
-        | { top?: number; bottom?: number; left?: number; right?: number }
-        | number
-        | undefined;
+        { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
       expect(effectiveSize(22, hitSlop, 'vertical')).toBeGreaterThanOrEqual(48);
       expect(effectiveSize(22, hitSlop, 'horizontal')).toBeGreaterThanOrEqual(48);
       const openBtn = findPressableByText(root, button);

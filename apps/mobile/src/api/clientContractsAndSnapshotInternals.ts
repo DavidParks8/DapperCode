@@ -73,8 +73,12 @@ export function mergeSnapshotPage(
     if (!existed) {
       addedByKind.set(entry.kind, (addedByKind.get(entry.kind) ?? 0) + 1);
     }
-    if (entry.message) messages.set(entry.message.id, entry.message);
-    if (entry.tool) tools.set(entry.tool.id, entry.tool);
+    if (entry.message) {
+      messages.set(entry.message.id, entry.message);
+    }
+    if (entry.tool) {
+      tools.set(entry.tool.id, entry.tool);
+    }
   }
   const updateCollection = (
     metadata: RawAcpSnapshot['messageCollection'],

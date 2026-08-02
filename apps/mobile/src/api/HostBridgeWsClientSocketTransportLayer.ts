@@ -151,62 +151,118 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     record: Record<string, unknown>,
     options?: { source?: 'live' | 'replay' },
   ): void {
-    const method = readString(record.method);
-    if (!method) {
+    const notification = this.readNotification(record);
+    if (!notification) {
       return;
     }
-    const params = toRecord(record.params);
+    const { method, protocolVersion, identityResult, eventId, event } = notification;
+    if (!this.deliverNotification(event, eventId, protocolVersion, options)) {
+      return;
+    }
+    this.scheduleConnectionReplay(method, identityResult);
+  }
+  private readNotification(record: Record<string, unknown>) {
+    const method = readString(record.method);
+    if (!method) {
+      return null;
+    }
     const protocolVersion = readIntegerLike(record.protocolVersion);
     const streamId = readString(record.streamId);
     const identityResult = this.applyStreamIdentity(protocolVersion, streamId);
     if (identityResult === 'unsupported') {
-      return;
+      return null;
     }
     const eventId = readEventId(record);
-    const event: RpcNotification = { method, params };
-    if (protocolVersion !== null) {
-      event.protocolVersion = protocolVersion;
-    }
-    if (streamId) {
-      event.streamId = streamId;
-    }
-    if (eventId !== null) {
-      event.eventId = eventId;
-    }
+    const event = this.createNotification(
+      method,
+      toRecord(record.params),
+      protocolVersion,
+      streamId,
+      eventId,
+    );
+    return { method, protocolVersion, identityResult, eventId, event };
+  }
+  private createNotification(
+    method: string,
+    params: Record<string, unknown> | null,
+    protocolVersion: number | null,
+    streamId: string | null,
+    eventId: number | null,
+  ): RpcNotification {
+    return {
+      method,
+      params,
+      ...(protocolVersion !== null ? { protocolVersion } : {}),
+      ...(streamId ? { streamId } : {}),
+      ...(eventId !== null ? { eventId } : {}),
+    };
+  }
+  /** Returns false when the original delivery path bailed out before connection replay. */
+  private deliverNotification(
+    event: RpcNotification,
+    eventId: number | null,
+    protocolVersion: number | null,
+    options: { source?: 'live' | 'replay' } | undefined,
+  ): boolean {
     if (eventId === null) {
-      const completion = toAgUiTurnCompletionSnapshot(event);
-      if (completion?.turnId) {
-        this.rememberTurnCompletion(completion);
-      }
-      this.emitEvent(event);
-    } else {
-      if (protocolVersion === null && eventId === 1 && this.lastSeenEventId > 1) {
-        this.resetDeliveryEpoch('streamChanged', null, null);
-      }
-      if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) {
-        return;
-      }
-      if (this.lastSeenEventId === 0 && !this.awaitingFreshRecoveryBaseline) {
-        this.emitNumberedEvent(event);
-      } else {
-        this.pendingEvents.set(eventId, event);
-        if (
-          this.recoveryWatermark !== null &&
-          this.pendingEvents.size > HostBridgeWsClientCore.MAX_RECOVERY_BUFFERED_EVENTS
-        ) {
-          this.handleRecoveryBufferOverflow();
-          return;
-        }
-        if (options?.source === 'replay') {
-          this.drainPendingEvents();
-        } else if (!this.replayInFlight) {
-          this.drainPendingEvents();
-          if (this.hasPendingGap()) {
-            this.scheduleReplay();
-          }
-        }
+      this.deliverUnnumberedEvent(event);
+      return true;
+    }
+    return this.deliverNumberedNotification(event, eventId, protocolVersion, options);
+  }
+  private deliverUnnumberedEvent(event: RpcNotification): void {
+    const completion = toAgUiTurnCompletionSnapshot(event);
+    if (completion?.turnId) {
+      this.rememberTurnCompletion(completion);
+    }
+    this.emitEvent(event);
+  }
+  private deliverNumberedNotification(
+    event: RpcNotification,
+    eventId: number,
+    protocolVersion: number | null,
+    options: { source?: 'live' | 'replay' } | undefined,
+  ): boolean {
+    if (protocolVersion === null && eventId === 1 && this.lastSeenEventId > 1) {
+      this.resetDeliveryEpoch('streamChanged', null, null);
+    }
+    if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) {
+      return false;
+    }
+    if (this.lastSeenEventId === 0 && !this.awaitingFreshRecoveryBaseline) {
+      this.emitNumberedEvent(event);
+      return true;
+    }
+    this.pendingEvents.set(eventId, event);
+    if (this.hasRecoveryBufferOverflow()) {
+      this.handleRecoveryBufferOverflow();
+      return false;
+    }
+    this.drainOrReplayPendingEvents(options);
+    return true;
+  }
+  private hasRecoveryBufferOverflow(): boolean {
+    return (
+      this.recoveryWatermark !== null &&
+      this.pendingEvents.size > HostBridgeWsClientCore.MAX_RECOVERY_BUFFERED_EVENTS
+    );
+  }
+  private drainOrReplayPendingEvents(options: { source?: 'live' | 'replay' } | undefined): void {
+    if (options?.source === 'replay') {
+      this.drainPendingEvents();
+      return;
+    }
+    if (!this.replayInFlight) {
+      this.drainPendingEvents();
+      if (this.hasPendingGap()) {
+        this.scheduleReplay();
       }
     }
+  }
+  private scheduleConnectionReplay(
+    method: string,
+    identityResult: 'missing' | 'initial' | 'same' | 'changed' | 'unsupported',
+  ): void {
     if (
       method === 'bridge/connection/state' &&
       (identityResult === 'same' || identityResult === 'missing') &&

@@ -174,12 +174,8 @@ describe('useDrawerChatCollection schedulePersistence purge barrier', () => {
     const [persistedProfileId, persistedSummaries, , persistedGeneration] =
       persistChatSummaries.mock.calls[0];
     expect(persistedProfileId).toBe(profileId);
-    expect((persistedSummaries as ChatSummary[]).map((chat) => chat.id)).toEqual([
-      'post-purge',
-    ]);
-    expect(persistedGeneration).toBe(
-      ChatSummaryCache.getChatSummaryCacheGeneration(profileId),
-    );
+    expect((persistedSummaries as ChatSummary[]).map((chat) => chat.id)).toEqual(['post-purge']);
+    expect(persistedGeneration).toBe(ChatSummaryCache.getChatSummaryCacheGeneration(profileId));
   });
 
   it('still coalesces multiple schedules into one write when no purge lands (regression guard)', async () => {
@@ -241,8 +237,8 @@ describe('useDrawerChatCollection schedulePersistence purge barrier', () => {
     // right away rather than waiting for the debounce timer.
     expect(persistChatSummaries).toHaveBeenCalledTimes(1);
     expect(persistChatSummaries.mock.calls[0][0]).toBe('profile-switch-a');
-    expect(
-      (persistChatSummaries.mock.calls[0][1] as ChatSummary[]).map((chat) => chat.id),
-    ).toEqual(['for-a']);
+    expect((persistChatSummaries.mock.calls[0][1] as ChatSummary[]).map((chat) => chat.id)).toEqual(
+      ['for-a'],
+    );
   });
 });

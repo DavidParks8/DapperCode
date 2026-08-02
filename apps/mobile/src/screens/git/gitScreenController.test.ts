@@ -44,7 +44,9 @@ function statusFor(cwd: string, overrides: Partial<GitStatusResponse> = {}): Git
 
 function createApi() {
   const methods: Record<string, jest.Mock> = {
-    gitStatus: jest.fn().mockImplementation((cwd?: string) => Promise.resolve(statusFor(cwd ?? ''))),
+    gitStatus: jest
+      .fn()
+      .mockImplementation((cwd?: string) => Promise.resolve(statusFor(cwd ?? ''))),
     gitDiff: jest.fn().mockImplementation((cwd?: string) =>
       Promise.resolve({
         diff: '',
@@ -56,9 +58,10 @@ function createApi() {
       }),
     ),
     gitHistory: jest.fn().mockResolvedValue({ commits: [] }),
-    gitBranches: jest
-      .fn()
-      .mockResolvedValue({ current: 'main', branches: [{ name: 'main', remote: false, current: true }] }),
+    gitBranches: jest.fn().mockResolvedValue({
+      current: 'main',
+      branches: [{ name: 'main', remote: false, current: true }],
+    }),
     gitCommit: jest.fn().mockResolvedValue({ committed: true, stderr: '' }),
     gitPush: jest.fn().mockResolvedValue({ pushed: true, stderr: '' }),
     gitSwitch: jest.fn().mockResolvedValue({ switched: true, stderr: '', stdout: '' }),
@@ -159,9 +162,7 @@ describe('useGitScreenController committed cwd handling', () => {
       harness.current.setCommitMessage('chore: checkpoint');
       await harness.current.commit();
     });
-    expect(api.gitCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: '/committed' }),
-    );
+    expect(api.gitCommit).toHaveBeenCalledWith(expect.objectContaining({ cwd: '/committed' }));
 
     await act(async () => {
       await harness.current.push();

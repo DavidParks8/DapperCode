@@ -82,7 +82,14 @@ export function useMainScreenModeConfigurationSession(
         }
       }
     },
-    [activeAgentId, api],
+    [
+      activeAgentId,
+      api,
+      modelOptionsRequestRef,
+      setError,
+      setLoadingModels,
+      setModelOptionsByAgent,
+    ],
   );
 
   const openModelModal = useCallback(() => {
@@ -94,11 +101,11 @@ export function useMainScreenModeConfigurationSession(
     }
     setModelModalVisible(true);
     void refreshModelOptions({ silent: hasCachedModels });
-  }, [activeAgentId, api, refreshModelOptions]);
+  }, [activeAgentId, api, refreshModelOptions, setModelModalVisible, setModelOptionsByAgent]);
 
   const closeModelModal = useCallback(() => {
     setModelModalVisible(false);
-  }, []);
+  }, [setModelModalVisible]);
 
   const openAgentModal = useCallback(() => {
     if (selectedChatId) {
@@ -106,11 +113,11 @@ export function useMainScreenModeConfigurationSession(
     }
     setAgentModalVisible(true);
     setError(null);
-  }, [selectedChatId]);
+  }, [selectedChatId, setAgentModalVisible, setError]);
 
   const closeAgentModal = useCallback(() => {
     setAgentModalVisible(false);
-  }, []);
+  }, [setAgentModalVisible]);
 
   const openEffortModal = useCallback(
     (modelId?: string | null) => {
@@ -124,12 +131,12 @@ export function useMainScreenModeConfigurationSession(
       setEffortModalVisible(true);
       setError(null);
     },
-    [effectiveModelId],
+    [effectiveModelId, setEffortModalVisible, setEffortPickerModelId, setError],
   );
 
   const closeEffortModal = useCallback(() => {
     setEffortModalVisible(false);
-  }, []);
+  }, [setEffortModalVisible]);
 
   const applyAcpConfigOption = useCallback(
     async (config: AcpConfigOption | null, value: string): Promise<Chat | null> => {
@@ -146,7 +153,7 @@ export function useMainScreenModeConfigurationSession(
         return null;
       }
     },
-    [api, selectedChatId],
+    [api, selectedChatId, selectedChatRef, setError, setSelectedChat],
   );
 
   const selectEffort = useCallback(
@@ -191,6 +198,9 @@ export function useMainScreenModeConfigurationSession(
       rememberChatModelPreference,
       saveChatModelPreferences,
       selectedChatId,
+      setEffortModalVisible,
+      setError,
+      setSelectedEffort,
     ],
   );
 

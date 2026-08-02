@@ -50,7 +50,9 @@ function findModal(tree: ReactTestRenderer): Queryable {
   const match = (tree.root as unknown as Queryable).findAll(
     (node) => typeof node.props.onDismiss === 'function',
   )[0];
-  if (!match) throw new Error('Expected a bottom sheet modal');
+  if (!match) {
+    throw new Error('Expected a bottom sheet modal');
+  }
   return match;
 }
 
@@ -58,7 +60,9 @@ function findContentContainerStyle(tree: ReactTestRenderer): FlatStyle {
   const match = (tree.root as unknown as Queryable).findAll(
     (node) => node.props.testID === 'app-sheet-content',
   )[0];
-  if (!match) throw new Error('Expected sheet content');
+  if (!match) {
+    throw new Error('Expected sheet content');
+  }
   return flatten(match.props.style);
 }
 
@@ -74,7 +78,9 @@ function renderSheet(node: React.ReactElement): ReactTestRenderer {
   act(() => {
     tree = renderer.create(node);
   });
-  if (!tree) throw new Error('Expected sheet tree');
+  if (!tree) {
+    throw new Error('Expected sheet tree');
+  }
   return tree;
 }
 
@@ -128,7 +134,9 @@ describe('AppSheet', () => {
         ),
       );
     });
-    if (!tree) throw new Error('Expected sheet tree');
+    if (!tree) {
+      throw new Error('Expected sheet tree');
+    }
     expect(textOf(tree)).not.toContain('Sheet body');
 
     act(() => {
@@ -182,7 +190,9 @@ describe('AppSheet', () => {
         ),
       );
     });
-    if (!tree) throw new Error('Expected sheet tree');
+    if (!tree) {
+      throw new Error('Expected sheet tree');
+    }
     expect(textOf(tree)).toContain('Scrollable body');
 
     const sheet = (tree.root as unknown as Queryable).findAll(
@@ -211,7 +221,9 @@ describe('AppSheet', () => {
         ),
       );
     });
-    if (!tree) throw new Error('Expected sheet tree');
+    if (!tree) {
+      throw new Error('Expected sheet tree');
+    }
     expect(textOf(tree)).toContain('Locked body');
     act(() => tree?.unmount());
   });

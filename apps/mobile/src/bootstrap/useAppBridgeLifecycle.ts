@@ -114,7 +114,9 @@ export function useAppBridgeLifecycle(): void {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryDelay = 1000;
     const attempt = () => {
-      if (cancelled || inFlight || !ws.isConnected) return;
+      if (cancelled || inFlight || !ws.isConnected) {
+        return;
+      }
       inFlight = true;
       void syncPushRegistration(api, store, activeBridgeProfileId)
         .then(() => {
@@ -141,7 +143,9 @@ export function useAppBridgeLifecycle(): void {
     return () => {
       cancelled = true;
       unsubscribe();
-      if (retryTimer) clearTimeout(retryTimer);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
     };
   }, [activeBridgeProfileId, api, isOnboarding, store, ws]);
 
@@ -242,8 +246,13 @@ export function useAppBridgeLifecycle(): void {
     return bindChatSnapshotBackgroundFlush(persistScheduler);
   }, [persistScheduler]);
 
+  // Only the hydration transition (undefined -> resolved) may gate persistence. Depending on the
+  // cache value itself would re-run this effect for the write it just made and reschedule the
+  // debounce forever.
+  const chatSnapshotCacheHydrated = chatSnapshotCache !== undefined;
+
   useEffect(() => {
-    if (!activeBridgeProfileId || !settingsLoaded || chatSnapshotCache === undefined) {
+    if (!activeBridgeProfileId || !settingsLoaded || !chatSnapshotCacheHydrated) {
       return;
     }
 
@@ -267,5 +276,13 @@ export function useAppBridgeLifecycle(): void {
     return () => {
       persistScheduler.cancel();
     };
-  }, [activeBridgeProfileId, activeChat, persistScheduler, selectedChatId, settingsLoaded, store]);
+  }, [
+    activeBridgeProfileId,
+    activeChat,
+    chatSnapshotCacheHydrated,
+    persistScheduler,
+    selectedChatId,
+    settingsLoaded,
+    store,
+  ]);
 }

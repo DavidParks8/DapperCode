@@ -12,25 +12,18 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef } from 'react';
 import type { CollaborationMode } from '../../api/types';
 import { selectAgentId } from '../../agents';
-import { formatModelOptionLabel } from '../../modelOptions';
-import {
-  normalizeModelId,
-  normalizeReasoningEffort,
-  normalizeServiceTier,
-  toSelectedServiceTier,
-  resolveSelectedServiceTier,
-  formatCollaborationModeLabel,
-  formatReasoningEffort,
-} from './mainScreenHelpers';
+import { toSelectedServiceTier } from './mainScreenHelpers';
 import type {
   MainScreenSelectedRuntimeSelectorsContext,
   MainScreenSelectedRuntimeSelectorsResult,
 } from './mainScreenSelectedRuntimeSelectors';
 import { effortPickerModelIdAtom } from '../../state/mainScreen/modals';
-
+import {
+  deriveModelCatalogState,
+  shouldResetSelectedEffort,
+} from './mainScreenModelCatalogDerivation';
 export type MainScreenModelCatalogStateContext = MainScreenSelectedRuntimeSelectorsContext &
   MainScreenSelectedRuntimeSelectorsResult;
-
 export function useMainScreenModelCatalogState(context: MainScreenModelCatalogStateContext) {
   const {
     chatModelPreferencesLoaded,
@@ -65,31 +58,25 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
   const selectionChatIdRef = useRef(selectedChatId);
   const selectionBelongsToCurrentChat = selectionChatIdRef.current === selectedChatId;
-
   useEffect(() => {
     if (selectedChatId) {
       return;
     }
-
     if (bridgeCapabilities) {
       setPendingAgentId(selectAgentId(pendingAgentId ?? preferredAgentId, bridgeCapabilities));
     }
-  }, [bridgeCapabilities, pendingAgentId, preferredAgentId, selectedChatId]);
-
+  }, [bridgeCapabilities, pendingAgentId, preferredAgentId, selectedChatId, setPendingAgentId]);
   useEffect(() => {
     if (!chatModelPreferencesLoaded) {
       return;
     }
-
     const chatId = selectedChatId?.trim();
     if (!chatId) {
       return;
     }
-
     const preference = chatModelPreferencesRef.current[chatId];
     setSelectedServiceTier(toSelectedServiceTier(preference?.serviceTier ?? null));
-  }, [chatModelPreferencesLoaded, selectedChatId]);
-
+  }, [chatModelPreferencesLoaded, chatModelPreferencesRef, selectedChatId, setSelectedServiceTier]);
   useEffect(() => {
     if (selectionChatIdRef.current === selectedChatId) {
       return;
@@ -97,13 +84,11 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     selectionChatIdRef.current = selectedChatId;
     setSelectedModelId(null);
     setSelectedEffort(null);
-  }, [selectedChatId]);
-
+  }, [selectedChatId, setSelectedEffort, setSelectedModelId]);
   useEffect(() => {
     if (selectedChatId) {
       return;
     }
-
     setSelectedModelId(preferredDefaultModelId);
     setSelectedEffort(preferredDefaultEffort);
     setSelectedServiceTier(preferredServiceTier);
@@ -116,79 +101,58 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     preferredCollaborationMode,
     preferredServiceTier,
     selectedChatId,
+    setSelectedCollaborationMode,
+    setSelectedEffort,
+    setSelectedModelId,
+    setSelectedServiceTier,
   ]);
-
-  const authoritativeModelId = selectedChatId ? normalizeModelId(modelConfig?.value) : null;
-  const authoritativeEffort = selectedChatId ? normalizeReasoningEffort(effortConfig?.value) : null;
-  const localSelectedModelId = selectionBelongsToCurrentChat ? selectedModelId : null;
-  const localSelectedEffort = selectionBelongsToCurrentChat ? selectedEffort : null;
-  const requestedModelId = selectedChatId
-    ? (authoritativeModelId ?? localSelectedModelId)
-    : (localSelectedModelId ?? preferredDefaultModelId);
-  const serverDefaultModel = modelOptions.find((model) => model.isDefault) ?? null;
-  const serverDefaultModelId = serverDefaultModel?.id ?? null;
-  const selectedModel = requestedModelId
-    ? (modelOptions.find((model) => model.id === requestedModelId) ?? null)
-    : null;
-  const preferredDefaultModel =
-    !selectedChatId && preferredDefaultModelId
-      ? (modelOptions.find((model) => model.id === preferredDefaultModelId) ?? null)
-      : null;
-  const activeModel =
-    selectedModel ??
-    (requestedModelId ? null : (preferredDefaultModel ?? serverDefaultModel)) ??
-    null;
-  const unresolvedDefaultModelId = requestedModelId && !activeModel ? requestedModelId : null;
-  // Defaults are effective display values, not explicit turn overrides.
-  const activeModelId = requestedModelId;
-  const effectiveModelId = requestedModelId ?? serverDefaultModelId;
-  const effortPickerModel = effortPickerModelId
-    ? (modelOptions.find((model) => model.id === effortPickerModelId) ?? null)
-    : activeModel;
-  const effortPickerOptions = effortPickerModel?.reasoningEffort ?? [];
-  const effortPickerDefault = effortPickerModel?.defaultReasoningEffort ?? null;
-  const activeModelEffortOptions = activeModel?.reasoningEffort ?? [];
-  const activeModelDefaultEffort = activeModel?.defaultReasoningEffort ?? null;
-  const requestedEffort =
-    authoritativeEffort ?? localSelectedEffort ?? (!selectedChatId ? preferredDefaultEffort : null);
-  const appliedServiceTierForSelectedChat = toSelectedServiceTier(
-    selectedChatId
-      ? normalizeServiceTier(chatModelPreferencesRef.current[selectedChatId]?.serviceTier ?? null)
-      : defaultServiceTier,
-  );
-  const activeServiceTier = supportsFastMode
-    ? resolveSelectedServiceTier(selectedServiceTier, selectedChatId ? null : defaultServiceTier)
-    : null;
-  const fastModeEnabled = activeServiceTier === 'fast';
-  const supportsSelectedEffort = Boolean(
-    requestedEffort &&
-    (authoritativeEffort ||
-      activeModelEffortOptions.some((option) => option.effort === requestedEffort)),
-  );
-  const activeEffort = supportsSelectedEffort ? requestedEffort : null;
-  const effectiveEffort = activeEffort ?? activeModelDefaultEffort;
-  const activeModelLabel = activeModel
-    ? formatModelOptionLabel(activeModel)
-    : effectiveModelId
-      ? effectiveModelId
-      : 'Server default model';
-  const activeEffortLabel = effectiveEffort
-    ? formatReasoningEffort(effectiveEffort)
-    : 'Model default';
-  const collaborationModeLabel =
-    modeConfig?.options?.find((option) => option.value === modeConfig.value)?.name ??
-    modeConfig?.value ??
-    (selectedAcpModeId && !['build', 'plan'].includes(selectedAcpModeId)
-      ? selectedAcpModeId
-      : formatCollaborationModeLabel(selectedCollaborationMode));
-  const hasPendingServiceTierChange =
-    Boolean(selectedChatId) && appliedServiceTierForSelectedChat !== activeServiceTier;
-  const fastModeLabel = hasPendingServiceTierChange
-    ? `${fastModeEnabled ? 'Fast mode on' : 'Fast mode off'} · next message`
-    : fastModeEnabled
-      ? 'Fast mode on'
-      : 'Fast mode off';
-
+  const {
+    serverDefaultModel,
+    serverDefaultModelId,
+    selectedModel,
+    preferredDefaultModel,
+    activeModel,
+    unresolvedDefaultModelId,
+    activeModelId,
+    effectiveModelId,
+    effortPickerModel,
+    effortPickerOptions,
+    effortPickerDefault,
+    activeModelEffortOptions,
+    activeModelDefaultEffort,
+    requestedEffort,
+    appliedServiceTierForSelectedChat,
+    activeServiceTier,
+    fastModeEnabled,
+    supportsSelectedEffort,
+    activeEffort,
+    effectiveEffort,
+    activeModelLabel,
+    activeEffortLabel,
+    collaborationModeLabel,
+    hasPendingServiceTierChange,
+    fastModeLabel,
+    localSelectedModelId,
+    localSelectedEffort,
+  } = deriveModelCatalogState({
+    selectedChatId,
+    selectionBelongsToCurrentChat,
+    modelConfig,
+    effortConfig,
+    modeConfig,
+    modelOptions,
+    preferredDefaultModelId,
+    preferredDefaultEffort,
+    chatModelPreferencesRef,
+    defaultServiceTier,
+    selectedServiceTier,
+    supportsFastMode,
+    selectedAcpModeId,
+    selectedCollaborationMode,
+    effortPickerModelId,
+    selectedModelId,
+    selectedEffort,
+  });
   // Auto-transition complete/error → idle after 3s so the bar hides.
   useEffect(() => {
     if (activity.tone !== 'complete' && activity.tone !== 'error') {
@@ -198,34 +162,12 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
       setActivity({ tone: 'idle', title: 'Ready' });
     }, 3000);
     return () => clearTimeout(timer);
-  }, [activity.tone]);
-
+  }, [activity.tone, setActivity]);
   useEffect(() => {
-    if (!localSelectedEffort) {
-      return;
-    }
-
-    if (!localSelectedModelId) {
-      return;
-    }
-
-    if (!activeModel) {
-      return;
-    }
-
-    const effortOptions = activeModel.reasoningEffort ?? [];
-    if (effortOptions.length === 0) {
-      return;
-    }
-
-    const supportsSelectedEffort = effortOptions.some(
-      (option) => option.effort === localSelectedEffort,
-    );
-    if (!supportsSelectedEffort) {
+    if (shouldResetSelectedEffort(activeModel, localSelectedEffort, localSelectedModelId)) {
       setSelectedEffort(null);
     }
-  }, [activeModel, localSelectedEffort, localSelectedModelId]);
-
+  }, [activeModel, localSelectedEffort, localSelectedModelId, setSelectedEffort]);
   return {
     serverDefaultModel,
     serverDefaultModelId,
@@ -254,5 +196,4 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     fastModeLabel,
   };
 }
-
 export type MainScreenModelCatalogStateResult = ReturnType<typeof useMainScreenModelCatalogState>;

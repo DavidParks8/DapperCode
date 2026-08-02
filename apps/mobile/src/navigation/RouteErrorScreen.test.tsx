@@ -25,7 +25,9 @@ describe('RouteErrorScreen', () => {
         </AppThemeProvider>,
       );
     });
-    if (!tree) throw new Error('Expected route error screen');
+    if (!tree) {
+      throw new Error('Expected route error screen');
+    }
     const button = (tree.root as Queryable).findAll(
       (node) => node.props.accessibilityRole === 'button',
     )[0];
@@ -44,7 +46,9 @@ describe('RouteErrorScreen', () => {
         </AppThemeProvider>,
       );
     });
-    if (!tree) throw new Error('Expected route error screen');
+    if (!tree) {
+      throw new Error('Expected route error screen');
+    }
     const texts = (tree.root as Queryable).findAll((node) => node.type === Text);
     const [titleText, messageText, actionText] = texts;
 
@@ -58,7 +62,9 @@ describe('RouteErrorScreen', () => {
     expect(flatMessage.fontSize).toBe(theme.typography.body.fontSize);
     expect(flatMessage.lineHeight).toBe(theme.typography.body.lineHeight);
 
-    const flatAction = StyleSheet.flatten<TextStyle>(actionText.props.style as StyleProp<TextStyle>);
+    const flatAction = StyleSheet.flatten<TextStyle>(
+      actionText.props.style as StyleProp<TextStyle>,
+    );
     expect(flatAction.fontSize).toBe(theme.typography.headline.fontSize);
     expect(flatAction.lineHeight).toBe(theme.typography.headline.lineHeight);
     expect(flatAction.fontWeight).toBe('700');

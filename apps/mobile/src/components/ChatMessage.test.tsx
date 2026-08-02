@@ -222,7 +222,9 @@ describe('ChatMessage markdown formatting', () => {
       const node = root
         .findAll((n) => n.type === Text)
         .find((n) => flattenRenderedText(n.props.children).includes(label));
-      if (!node) throw new Error(`Expected "${label}" heading text to render`);
+      if (!node) {
+        throw new Error(`Expected "${label}" heading text to render`);
+      }
       const style = StyleSheet.flatten(node.props.style as never) as { fontSize?: number };
       return style.fontSize;
     };
@@ -238,9 +240,7 @@ describe('ChatMessage markdown formatting', () => {
 
     // Each level must resolve to one of the theme's named typography roles (never an arbitrary
     // literal), and the sizes must strictly descend from h1 to h6.
-    const knownRoleSizes = new Set(
-      Object.values(theme.typography).map((role) => role.fontSize),
-    );
+    const knownRoleSizes = new Set(Object.values(theme.typography).map((role) => role.fontSize));
     for (const size of sizes) {
       expect(size).toBeDefined();
       expect(knownRoleSizes.has(size as number)).toBe(true);
@@ -301,7 +301,9 @@ describe('ChatMessage markdown formatting', () => {
     const keyword = root
       .findAll((node) => node.type === Text)
       .find((node) => flattenRenderedText(node.props.children) === 'const');
-    if (!keyword) throw new Error('Expected TypeScript keyword highlighting');
+    if (!keyword) {
+      throw new Error('Expected TypeScript keyword highlighting');
+    }
     expect(StyleSheet.flatten(keyword.props.style as never)).toMatchObject({
       color: theme.colors.codeSyntaxKeyword,
     });
@@ -368,7 +370,10 @@ describe('ChatMessage markdown formatting', () => {
       content: 'Same content',
       parts: [
         { type: 'text', text: 'Same content' },
-        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+        {
+          type: 'resource',
+          resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' },
+        },
       ],
       createdAt: '2026-04-17T00:00:00.000Z',
     };
@@ -376,13 +381,14 @@ describe('ChatMessage markdown formatting', () => {
       ...previous,
       parts: [
         { type: 'text', text: 'Same content' },
-        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+        {
+          type: 'resource',
+          resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' },
+        },
       ],
     };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(true);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(true);
   });
 
   it('detects a real change nested inside a resource part', () => {
@@ -398,9 +404,7 @@ describe('ChatMessage markdown formatting', () => {
       parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'changed body' } }],
     };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(false);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(false);
   });
 
   it('detects a content-only change even when parts are unchanged', () => {
@@ -412,9 +416,7 @@ describe('ChatMessage markdown formatting', () => {
     };
     const next: ApiChatMessage = { ...previous, content: 'after' };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(false);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(false);
   });
 
   it('detects when a reasoning message settles', () => {
@@ -427,10 +429,7 @@ describe('ChatMessage markdown formatting', () => {
     };
 
     expect(
-      areChatMessagePropsEqual(
-        { message: previous },
-        { message: { ...previous, pending: false } },
-      ),
+      areChatMessagePropsEqual({ message: previous }, { message: { ...previous, pending: false } }),
     ).toBe(false);
   });
 
@@ -507,10 +506,11 @@ describe('ChatMessage markdown formatting', () => {
     const chip = root
       .findAllByProps({ accessibilityLabel: 'Open http://localhost:3000/ in Browser' })
       .find((node) => typeof node.props.onPress === 'function');
-    if (!chip) throw new Error('Expected the local-preview chip to render');
+    if (!chip) {
+      throw new Error('Expected the local-preview chip to render');
+    }
     const hitSlop = chip.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
 
     // The chip's visible chrome (padding + icon/text row) is well under the 44pt/48dp minimum
     // touch target, so it must widen its effective tap area via hitSlop rather than relying on
@@ -554,8 +554,7 @@ describe('ChatMessage markdown formatting', () => {
     const HALF_GAP = GAP / 2;
     for (const chip of chips) {
       const hitSlop = chip.props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeLessThanOrEqual(HALF_GAP);
       expect(hitSlop!.bottom).toBeLessThanOrEqual(HALF_GAP);
@@ -565,8 +564,7 @@ describe('ChatMessage markdown formatting', () => {
     // chip's expanded top edge must not cross the midpoint of the gap between them, i.e. they
     // must not overlap at all.
     const [firstHitSlop, secondHitSlop] = chips.map(
-      (chip) =>
-        chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
+      (chip) => chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
     );
     const firstChipExpandedBottomOffset = firstHitSlop.bottom;
     const secondChipExpandedTopOffset = secondHitSlop.top;
@@ -953,7 +951,9 @@ describe('ChatMessage user bubble', () => {
     const node = root
       .findAll((candidate) => candidate.type === Text)
       .find((candidate) => flattenRenderedText(candidate.props.children).includes('wrapped'));
-    if (!node) throw new Error('Expected the user message text to render');
+    if (!node) {
+      throw new Error('Expected the user message text to render');
+    }
     return node;
   };
 
@@ -964,7 +964,9 @@ describe('ChatMessage user bubble', () => {
   const fireTextLayout = (node: QueryableTestInstance, widths: number[]) => {
     const onTextLayout = node.props.onTextLayout as
       ((event: { nativeEvent: { lines: { width: number }[] } }) => void) | undefined;
-    if (!onTextLayout) throw new Error('Expected the user text to report its layout');
+    if (!onTextLayout) {
+      throw new Error('Expected the user text to report its layout');
+    }
     act(() => {
       onTextLayout({ nativeEvent: { lines: widths.map((width) => ({ width })) } });
     });
@@ -1129,8 +1131,9 @@ describe('ChatMessage role and part matrices', () => {
     },
   ])('renders $name', ({ message, expected }) => {
     const tree = renderMessage(message);
-    for (const text of expected)
+    for (const text of expected) {
       expect(hasRenderedText(tree.root as QueryableTestInstance, text)).toBe(true);
+    }
     act(() => tree.unmount());
   });
 
@@ -1478,7 +1481,9 @@ describe('ChatMessage system timeline matrices', () => {
         typeof node.props.onPress === 'function' &&
         node.props.accessibilityLabel === 'npm run build',
     )[0];
-    if (!control) throw new Error('Missing invocation row');
+    if (!control) {
+      throw new Error('Missing invocation row');
+    }
     act(() => readOnPress(control.props)());
     expect(hasRenderedText(root, 'compile error')).toBe(true);
     expect(hasRenderedText(root, 'src/app.ts:12')).toBe(true);
@@ -1589,7 +1594,9 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const root = tree.root as QueryableTestInstance;
     expect(hasRenderedText(root, '9 actions')).toBe(true);
-    for (const [, label] of actions) expect(hasRenderedText(root, label)).toBe(true);
+    for (const [, label] of actions) {
+      expect(hasRenderedText(root, label)).toBe(true);
+    }
     expect(hasRenderedText(root, 'VSCode')).toBe(true);
     expect(
       root
@@ -1764,7 +1771,9 @@ function renderMessage(
 function onlyInvocation(messages: LegacyTestMessage[]): ToolInvocation {
   const invocations = buildToolInvocations(messages.map(toOfficialMessage));
   const invocation = invocations[0];
-  if (!invocation) throw new Error('Expected a tool invocation');
+  if (!invocation) {
+    throw new Error('Expected a tool invocation');
+  }
   return invocation;
 }
 
@@ -1853,7 +1862,9 @@ function readOnLongPress(props: Record<string, unknown>): () => void {
 function hasTextAncestor(node: QueryableTestInstance): boolean {
   let parent = (node as unknown as { parent: QueryableTestInstance | null }).parent;
   while (parent) {
-    if (parent.type === Text) return true;
+    if (parent.type === Text) {
+      return true;
+    }
     parent = (parent as unknown as { parent: QueryableTestInstance | null }).parent;
   }
   return false;
@@ -1896,7 +1907,9 @@ function findTextPressable(root: QueryableTestInstance, text: string): Queryable
   const node = findTextNodes(root, text).find(
     (candidate) => typeof candidate.props.onPress === 'function',
   );
-  if (!node) throw new Error(`Expected pressable text "${text}"`);
+  if (!node) {
+    throw new Error(`Expected pressable text "${text}"`);
+  }
   return node;
 }
 

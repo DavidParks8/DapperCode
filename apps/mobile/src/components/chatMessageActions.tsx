@@ -35,7 +35,9 @@ export function MessageActions({
 
   useEffect(
     () => () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
     },
     [],
   );
@@ -44,13 +46,17 @@ export function MessageActions({
     void Clipboard.setStringAsync(text).catch(() => {});
     void feedback.success();
     setCopied(true);
-    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+    }
     resetTimerRef.current = setTimeout(() => {
       setCopied(false);
     }, COPIED_RESET_MS);
   }, [text]);
 
-  if (!text.trim()) return null;
+  if (!text.trim()) {
+    return null;
+  }
 
   return (
     <View style={styles.messageActionRow}>

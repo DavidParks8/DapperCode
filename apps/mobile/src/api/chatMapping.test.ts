@@ -393,7 +393,9 @@ describe('chatMapping', () => {
     );
 
     const message = mapped.messages[0];
-    if (message.role !== 'activity') throw new Error('expected activity message');
+    if (message.role !== 'activity') {
+      throw new Error('expected activity message');
+    }
     expect(message.content.subAgent).toMatchObject({ agentStatus: 'completed' });
   });
 
@@ -464,7 +466,9 @@ describe('chatMapping', () => {
     );
 
     const message = mapped.messages[0];
-    if (message.role !== 'activity') throw new Error('expected activity message');
+    if (message.role !== 'activity') {
+      throw new Error('expected activity message');
+    }
     expect(message.content.text).toContain('Sub-agent completed');
     expect(message.content.text).toContain('Status: completed');
     expect(message.content.text).not.toContain('Thread: ');

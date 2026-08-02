@@ -59,6 +59,8 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     transcriptContinuationController,
     transcriptContinuationState,
   } = context;
+  // The controller object is rebuilt every render; only its actions are referentially stable.
+  const { closePathModal: closeAttachmentPathModal } = attachmentController;
   const setSending = useSetAtom(sendingAtom);
   const setCreating = useSetAtom(creatingAtom);
   const setError = useSetAtom(errorAtom);
@@ -79,10 +81,14 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
 
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
-    if (!chat || transcriptContinuationState.loading) return;
+    if (!chat || transcriptContinuationState.loading) {
+      return;
+    }
     setTranscriptContinuationState((previous) => ({ ...previous, loading: true, error: null }));
     const result = await transcriptContinuationController.loadEarlier(chat);
-    if (selectedChatIdRef.current !== chat.id) return;
+    if (selectedChatIdRef.current !== chat.id) {
+      return;
+    }
     if (result.kind === 'stale') {
       setTranscriptContinuationState(result.state);
       void loadChat(chat.id, { preserveRuntimeState: true });
@@ -91,7 +97,16 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     setSelectedChat((previous) => (previous?.id === chat.id ? result.chat : previous));
     api.rememberChat(result.chat);
     setTranscriptContinuationState(result.state);
-  }, [api, loadChat, transcriptContinuationController, transcriptContinuationState.loading]);
+  }, [
+    api,
+    loadChat,
+    selectedChatIdRef,
+    selectedChatRef,
+    setSelectedChat,
+    setTranscriptContinuationState,
+    transcriptContinuationController,
+    transcriptContinuationState.loading,
+  ]);
 
   const openChatThread = useCallback(
     (id: string, optimisticChat?: Chat | null) => {
@@ -135,7 +150,7 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
       setUserInputDrafts({});
       setUserInputError(null);
       setResolvingUserInput(false);
-      attachmentController.closePathModal();
+      closeAttachmentPathModal();
       setAgentThreadMenuVisible(false);
       setActivePlan(null);
       setActiveTurnId(null);
@@ -163,9 +178,34 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     [
       api,
       applyThreadRuntimeSnapshot,
+      autoEnabledPlanTurnIdByThreadRef,
+      chatIdRef,
+      closeAttachmentPathModal,
       loadChat,
       mergeChatWithPendingOptimisticMessages,
+      openingChatStartedAtRef,
       refreshPendingApprovalsForThread,
+      setActivePlan,
+      setActiveTurnId,
+      setActivity,
+      setAgentRootThreadId,
+      setAgentThreadMenuVisible,
+      setCreating,
+      setError,
+      setOpeningChatId,
+      setPendingUserInputRequest,
+      setQueueActionItemId,
+      setQueueActionKind,
+      setRelatedAgentThreads,
+      setResolvingUserInput,
+      setSelectedChat,
+      setSelectedChatId,
+      setSending,
+      setStoppingTurn,
+      setUserInputDrafts,
+      setUserInputError,
+      stopRequestedRef,
+      stopSystemMessageLoggedRef,
     ],
   );
 

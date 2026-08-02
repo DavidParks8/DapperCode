@@ -21,7 +21,9 @@ export function mergeDrawerChatBatch(
   previous: ChatSummary[],
   incoming: ChatSummary[],
 ): ChatSummary[] {
-  if (previous.length === 0) return sortChats(incoming);
+  if (previous.length === 0) {
+    return sortChats(incoming);
+  }
   const byId = new Map(previous.map((chat) => [chat.id, chat]));
   for (const chat of incoming) {
     const existing = byId.get(chat.id);
@@ -44,8 +46,12 @@ export function areDrawerChatListsEquivalent(
   previous: ChatSummary[],
   next: ChatSummary[],
 ): boolean {
-  if (previous === next) return true;
-  if (previous.length !== next.length) return false;
+  if (previous === next) {
+    return true;
+  }
+  if (previous.length !== next.length) {
+    return false;
+  }
   return previous.every((left, index) => {
     const right = next[index];
     return (
@@ -70,11 +76,21 @@ export function relativeTime(iso: string): string {
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
   const weeks = Math.floor(days / 7);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  if (days < 7) return `${days}d`;
-  if (weeks < 5) return `${weeks}w`;
+  if (minutes < 1) {
+    return 'now';
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  if (days < 7) {
+    return `${days}d`;
+  }
+  if (weeks < 5) {
+    return `${weeks}w`;
+  }
   return `${Math.floor(days / 30)}mo`;
 }
 
@@ -96,7 +112,9 @@ export function normalizeWorkspaceChatLimit(value: WorkspaceChatLimit): Workspac
  * trimmed and lower-cased by the caller so this stays a cheap, allocation-free comparison.
  */
 export function matchesDrawerSearch(row: DrawerAttentionRow, query: string): boolean {
-  if (!query) return true;
+  if (!query) {
+    return true;
+  }
   const haystacks: Array<string | null | undefined> = [
     row.chat.title,
     row.workspaceLabel,
@@ -120,7 +138,9 @@ export function filterDrawerAttentionSections(
   query: string,
 ): DrawerAttentionSection[] {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return sections;
+  if (!normalized) {
+    return sections;
+  }
   return sections
     .map((section) => {
       const data = section.data.filter((row) => matchesDrawerSearch(row, normalized));

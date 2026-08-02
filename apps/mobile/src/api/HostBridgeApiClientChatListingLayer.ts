@@ -149,7 +149,9 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
         partial = true;
         break;
       }
-      if (requestedCursor) seenCursors.add(requestedCursor);
+      if (requestedCursor) {
+        seenCursors.add(requestedCursor);
+      }
       pageCount += 1;
       const previousCount = chats.length;
       const page = await this.fetchChatPage({

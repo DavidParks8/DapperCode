@@ -229,17 +229,41 @@ describe('theme', () => {
   it('adds semantic typography roles while keeping every existing key', () => {
     const theme = createAppTheme('dark');
 
-    expect(theme.typography.largeTitle).toMatchObject({ fontSize: 28, lineHeight: 34, fontWeight: '700' });
-    expect(theme.typography.title).toMatchObject({ fontSize: 22, lineHeight: 28, fontWeight: '700' });
-    expect(theme.typography.headline).toMatchObject({ fontSize: 17, lineHeight: 22, fontWeight: '600' });
+    expect(theme.typography.largeTitle).toMatchObject({
+      fontSize: 28,
+      lineHeight: 34,
+      fontWeight: '700',
+    });
+    expect(theme.typography.title).toMatchObject({
+      fontSize: 22,
+      lineHeight: 28,
+      fontWeight: '700',
+    });
+    expect(theme.typography.headline).toMatchObject({
+      fontSize: 17,
+      lineHeight: 22,
+      fontWeight: '600',
+    });
     expect(theme.typography.subheadline).toMatchObject({
       fontSize: 15,
       lineHeight: 20,
       fontWeight: '600',
     });
-    expect(theme.typography.body).toMatchObject({ fontSize: 16, lineHeight: 22, fontWeight: '400' });
-    expect(theme.typography.caption).toMatchObject({ fontSize: 13, lineHeight: 18, fontWeight: '400' });
-    expect(theme.typography.label).toMatchObject({ fontSize: 12, lineHeight: 16, fontWeight: '600' });
+    expect(theme.typography.body).toMatchObject({
+      fontSize: 16,
+      lineHeight: 22,
+      fontWeight: '400',
+    });
+    expect(theme.typography.caption).toMatchObject({
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '400',
+    });
+    expect(theme.typography.label).toMatchObject({
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '600',
+    });
     expect(theme.typography.metadata).toMatchObject({
       fontSize: 11,
       lineHeight: 14,

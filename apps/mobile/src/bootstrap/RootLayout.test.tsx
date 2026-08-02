@@ -48,7 +48,9 @@ function renderRoot(store = createTestStore()): ReactTestRenderer {
   act(() => {
     tree = renderer.create(withAppStore(store, <RootLayout />));
   });
-  if (!tree) throw new Error('Expected root layout');
+  if (!tree) {
+    throw new Error('Expected root layout');
+  }
   return tree;
 }
 
@@ -92,7 +94,9 @@ describe('RootLayout', () => {
     const store = createTestStore();
     store.set(chatSnapshotCacheAtom, null);
     const tree = renderRoot(store);
-    if (!mockRootStackProps) throw new Error('Expected root Stack props');
+    if (!mockRootStackProps) {
+      throw new Error('Expected root Stack props');
+    }
 
     expect(mockRootStackProps.screenOptions).toMatchObject({
       contentStyle: { backgroundColor: store.get(themeAtom).colors.bgMain },

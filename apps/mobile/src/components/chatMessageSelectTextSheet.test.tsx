@@ -31,7 +31,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -43,13 +45,17 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
   const match = root.findAll(
     (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
-  if (!match) throw new Error(`Missing pressable: ${label}`);
+  if (!match) {
+    throw new Error(`Missing pressable: ${label}`);
+  }
   return match;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return callback(...args);
 }
 
@@ -67,8 +73,7 @@ describe('SelectableTextSheet', () => {
     const root = queryRoot(tree);
     const closeButton = findPressable(root, 'Close text selection');
     const hitSlop = closeButton.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
     expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -77,9 +82,7 @@ describe('SelectableTextSheet', () => {
   it('renders the given text in a read-only, non-editable input', () => {
     const tree = render(<SelectableTextSheet text="selectable body text" onClose={() => {}} />);
     const root = queryRoot(tree);
-    const input = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Response text',
-    )[0];
+    const input = root.findAll((node) => node.props.accessibilityLabel === 'Response text')[0];
     expect(input).toBeDefined();
     expect(input.props.value).toBe('selectable body text');
     expect(input.props.editable).toBe(false);

@@ -75,8 +75,12 @@ export function ToolInvocationOutput({
     </View>
   );
 
-  if (invocation.empty && !invocation.truncated) return null;
-  if (lineCount <= SCROLL_LINE_THRESHOLD) return body;
+  if (invocation.empty && !invocation.truncated) {
+    return null;
+  }
+  if (lineCount <= SCROLL_LINE_THRESHOLD) {
+    return body;
+  }
   return (
     <ScrollView
       style={styles.toolBodyScroll}
@@ -124,10 +128,14 @@ function ToolDiffBlock({
 }
 
 function splitLines(value: string): string[] {
-  if (!value) return [];
+  if (!value) {
+    return [];
+  }
   const lines = value.split('\n');
   // A trailing newline is a terminator, not a blank line worth a row of its own.
-  if (lines[lines.length - 1] === '') lines.pop();
+  if (lines[lines.length - 1] === '') {
+    lines.pop();
+  }
   return lines;
 }
 

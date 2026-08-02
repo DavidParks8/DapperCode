@@ -103,10 +103,7 @@ export function DrawerChatList() {
             debounced useAccessibilityAnnouncement channel in DrawerContent.tsx already
             announces "No sessions match", so this stays a silent visual update to avoid a
             duplicate announcement. */}
-        <View
-          accessibilityLiveRegion={isSearching ? 'none' : 'polite'}
-          style={styles.emptyState}
-        >
+        <View accessibilityLiveRegion={isSearching ? 'none' : 'polite'} style={styles.emptyState}>
           <Ionicons
             {...decorativeAccessibilityProps}
             name={isSearching ? 'search-outline' : 'chatbubbles-outline'}

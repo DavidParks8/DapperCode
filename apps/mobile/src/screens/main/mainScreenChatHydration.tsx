@@ -28,6 +28,64 @@ import type {
 export type MainScreenChatHydrationContext = MainScreenThreadSnapshotStoreContext &
   MainScreenThreadSnapshotStoreResult;
 
+const PLAN_SNAPSHOT_FIELDS = ['turnId', 'explanation', 'deltaText', 'updatedAt'] as const;
+
+function normalizePersistedChatId(chatId: string | null | undefined): string {
+  return typeof chatId === 'string' ? chatId.trim() : '';
+}
+
+function arePlanSnapshotsEqual(
+  previous: ActivePlanState | null | undefined,
+  next: ActivePlanState | null,
+): boolean {
+  for (const field of PLAN_SNAPSHOT_FIELDS) {
+    if (previous?.[field] !== next?.[field]) {
+      return false;
+    }
+  }
+  return JSON.stringify(previous?.steps ?? []) === JSON.stringify(next?.steps ?? []);
+}
+
+function replaceSnapshotEntry<T>(
+  snapshots: Record<string, T>,
+  chatId: string,
+  value: T | null,
+): Record<string, T> {
+  const nextSnapshots = { ...snapshots };
+  if (value) {
+    nextSnapshots[chatId] = value;
+    return nextSnapshots;
+  }
+  delete nextSnapshots[chatId];
+  return nextSnapshots;
+}
+
+function matchesChatModelPreference(
+  previous: ChatModelPreference | null | undefined,
+  nextPreference: ChatModelPreference,
+): boolean {
+  return (
+    previous?.modelId === nextPreference.modelId &&
+    previous?.effort === nextPreference.effort &&
+    previous?.serviceTier === nextPreference.serviceTier
+  );
+}
+
+function shouldSkipChatModelPreferenceUpdate(
+  previous: ChatModelPreference | null | undefined,
+  previousAgent: ChatModelPreference | null | undefined,
+  nextPreference: ChatModelPreference,
+  agentPreferenceKey: string | null,
+): boolean {
+  if (!matchesChatModelPreference(previous, nextPreference)) {
+    return false;
+  }
+  if (!agentPreferenceKey) {
+    return true;
+  }
+  return matchesChatModelPreference(previousAgent, nextPreference);
+}
+
 export function useMainScreenChatHydration(context: MainScreenChatHydrationContext) {
   const {
     activeAgentId,
@@ -63,58 +121,53 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       }
       void saveBridgeUiSurfaceSnapshots(bridgeUiSurfaceSnapshotsRef.current);
     };
-  }, [saveBridgeUiSurfaceSnapshots]);
+  }, [
+    bridgeUiSurfacePersistenceTimeoutRef,
+    bridgeUiSurfaceSnapshotsRef,
+    saveBridgeUiSurfaceSnapshots,
+  ]);
 
   const rememberChatPlanSnapshot = useCallback(
     (chatId: string, plan: ActivePlanState | null) => {
-      const normalizedChatId = chatId.trim();
+      const normalizedChatId = normalizePersistedChatId(chatId);
       if (!normalizedChatId) {
         return;
       }
 
       const previous = chatPlanSnapshotsRef.current[normalizedChatId] ?? null;
-      const unchanged =
-        previous?.turnId === plan?.turnId &&
-        previous?.explanation === plan?.explanation &&
-        previous?.deltaText === plan?.deltaText &&
-        previous?.updatedAt === plan?.updatedAt &&
-        JSON.stringify(previous?.steps ?? []) === JSON.stringify(plan?.steps ?? []);
-      if (unchanged) {
+      if (arePlanSnapshotsEqual(previous, plan)) {
         return;
       }
 
-      const nextSnapshots = { ...chatPlanSnapshotsRef.current };
-      if (plan) {
-        nextSnapshots[normalizedChatId] = plan;
-      } else {
-        delete nextSnapshots[normalizedChatId];
-      }
+      const nextSnapshots = replaceSnapshotEntry(
+        chatPlanSnapshotsRef.current,
+        normalizedChatId,
+        plan,
+      );
       chatPlanSnapshotsRef.current = nextSnapshots;
       void saveChatPlanSnapshots(nextSnapshots);
     },
-    [saveChatPlanSnapshots],
+    [chatPlanSnapshotsRef, saveChatPlanSnapshots],
   );
 
   const rememberBridgeUiSurfaceSnapshots = useCallback(
     (chatId: string, updater: (previous: BridgeUiSurface[]) => BridgeUiSurface[]) => {
-      const normalizedChatId = chatId.trim();
+      const normalizedChatId = normalizePersistedChatId(chatId);
       if (!normalizedChatId) {
         return;
       }
 
       const previous = bridgeUiSurfaceSnapshotsRef.current[normalizedChatId] ?? [];
       const nextSurfaces = updater(previous);
-      const nextSnapshots = { ...bridgeUiSurfaceSnapshotsRef.current };
-      if (nextSurfaces.length > 0) {
-        nextSnapshots[normalizedChatId] = nextSurfaces;
-      } else {
-        delete nextSnapshots[normalizedChatId];
-      }
-
+      const nextSnapshots = replaceSnapshotEntry(
+        bridgeUiSurfaceSnapshotsRef.current,
+        normalizedChatId,
+        nextSurfaces.length > 0 ? nextSurfaces : null,
+      );
       bridgeUiSurfaceSnapshotsRef.current = nextSnapshots;
       scheduleBridgeUiSurfaceSnapshotsPersist(nextSnapshots);
     },
-    [scheduleBridgeUiSurfaceSnapshotsPersist],
+    [bridgeUiSurfaceSnapshotsRef, scheduleBridgeUiSurfaceSnapshotsPersist],
   );
 
   const rememberChatModelPreference = useCallback(
@@ -124,7 +177,7 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       effort: ReasoningEffort | null | undefined,
       serviceTier: ServiceTier | null | undefined,
     ) => {
-      const normalizedChatId = typeof chatId === 'string' ? chatId.trim() : '';
+      const normalizedChatId = normalizePersistedChatId(chatId);
       if (!normalizedChatId) {
         return;
       }
@@ -140,19 +193,17 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
         updatedAt,
       };
       const agentPreferenceKey = activeAgentId ? agentModelPreferenceKey(activeAgentId) : null;
-      const previous = chatModelPreferencesRef.current[normalizedChatId];
+      const previous = chatModelPreferencesRef.current[normalizedChatId] ?? null;
       const previousAgent = agentPreferenceKey
-        ? chatModelPreferencesRef.current[agentPreferenceKey]
+        ? (chatModelPreferencesRef.current[agentPreferenceKey] ?? null)
         : null;
       if (
-        previous &&
-        previous.modelId === normalizedModelId &&
-        previous.effort === normalizedEffort &&
-        previous.serviceTier === normalizedServiceTier &&
-        (!agentPreferenceKey ||
-          (previousAgent?.modelId === normalizedModelId &&
-            previousAgent?.effort === normalizedEffort &&
-            previousAgent?.serviceTier === normalizedServiceTier))
+        shouldSkipChatModelPreferenceUpdate(
+          previous,
+          previousAgent,
+          nextPreference,
+          agentPreferenceKey,
+        )
       ) {
         return;
       }
@@ -170,7 +221,15 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
       }
       void saveChatModelPreferences(nextPreferences);
     },
-    [activeAgentId, saveChatModelPreferences],
+    [
+      activeAgentId,
+      chatIdRef,
+      chatModelPreferencesRef,
+      saveChatModelPreferences,
+      setSelectedEffort,
+      setSelectedModelId,
+      setSelectedServiceTier,
+    ],
   );
 
   useEffect(() => {
@@ -192,11 +251,11 @@ export function useMainScreenChatHydration(context: MainScreenChatHydrationConte
     return () => {
       cancelled = true;
     };
-  }, [persistenceController]);
+  }, [chatModelPreferencesRef, persistenceController, setChatModelPreferencesLoaded]);
 
   useEffect(() => {
     setDefaultServiceTier(null);
-  }, [activeAgentId]);
+  }, [activeAgentId, setDefaultServiceTier]);
 
   return {
     toggleWorkspaceFavorite,
