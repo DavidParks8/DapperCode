@@ -1,5 +1,5 @@
 import { createContext, createElement, useContext, type PropsWithChildren } from 'react';
-import { type ColorSchemeName, type TextStyle } from 'react-native';
+import { Platform, type ColorSchemeName, type TextStyle } from 'react-native';
 
 import { SYSTEM_FONT_FAMILIES, type AppFontFamilies } from './fonts';
 
@@ -58,10 +58,23 @@ export interface AppColors {
 }
 
 export type AppTypography = {
+  /** Screen/hero titles. */
   largeTitle: TextStyle;
+  /** Section/nav-bar titles, one step down from largeTitle. */
+  title: TextStyle;
+  /** Card/list-row primary headings. */
   headline: TextStyle;
+  /** Secondary heading beneath a headline. */
+  subheadline: TextStyle;
+  /** Default reading copy. */
   body: TextStyle;
+  /** Supporting copy, helper text. */
   caption: TextStyle;
+  /** Compact semibold labels: form labels, tags, buttons. */
+  label: TextStyle;
+  /** Smallest role: timestamps, footnotes, fine print. Floor of the type scale. */
+  metadata: TextStyle;
+  /** Monospace text for code/terminal-style content. */
   mono: TextStyle;
 };
 
@@ -74,6 +87,8 @@ export interface AppTheme {
   radius: typeof radius;
   shadow: typeof shadow;
   typography: AppTypography;
+  motion: typeof motion;
+  touchTarget: { minimum: number };
   keyboardAppearance: 'light' | 'dark';
   blurTint: 'light' | 'dark';
   statusBarStyle: 'dark-content' | 'light-content';
@@ -93,8 +108,8 @@ const darkClassicColors: AppColors = {
   textPrimary: '#F3F4F8',
   textSecondary: '#D0D5DF',
   textMuted: 'rgba(232, 236, 244, 0.74)',
-  accent: '#B5BDCC',
-  accentPressed: '#9CA5B7',
+  accent: '#C7BFFF',
+  accentPressed: '#AFA0FF',
   accentText: '#000000',
   userBubble: '#262A31',
   userBubbleBorder: 'rgba(212, 219, 232, 0.32)',
@@ -143,8 +158,8 @@ const darkGreyColors: AppColors = {
   textPrimary: '#e8e8e8',
   textSecondary: '#cccccc',
   textMuted: '#9d9d9d',
-  accent: '#d4d4d4',
-  accentPressed: '#b8b8b8',
+  accent: '#C7BFFF',
+  accentPressed: '#AFA0FF',
   accentText: '#1e1e1e',
   userBubble: '#2d2d30',
   userBubbleBorder: 'rgba(255, 255, 255, 0.14)',
@@ -192,8 +207,8 @@ const lightColors: AppColors = {
   textPrimary: '#102030',
   textSecondary: '#203A55',
   textMuted: 'rgba(44, 62, 88, 0.82)',
-  accent: '#384F6A',
-  accentPressed: '#293E56',
+  accent: '#4C3FCB',
+  accentPressed: '#3C2FB0',
   accentText: '#FFFFFF',
   userBubble: '#EFF3F7',
   userBubbleBorder: 'rgba(67, 96, 126, 0.24)',
@@ -238,9 +253,11 @@ export const spacing = {
 };
 
 export const radius = {
+  xs: 4,
   sm: 8,
   md: 12,
   lg: 16,
+  xl: 24,
   full: 999,
 };
 
@@ -250,35 +267,101 @@ export const shadow = {
   },
 } as const;
 
+/**
+ * Motion tokens shared across the app: durations in milliseconds, easing as cubic-bezier
+ * control points matching Reanimated's `Easing.bezier(x1, y1, x2, y2)`.
+ */
+export const motion = {
+  duration: {
+    /** Instant acknowledgements: button press states, toggle flips. */
+    immediate: 120,
+    /** Everyday transitions: sheet content swaps, fades. */
+    routine: 200,
+    /** Layout-affecting moves: card enter/exit, expand/collapse reflows. */
+    layout: 280,
+  },
+  easing: {
+    standard: [0.4, 0, 0.2, 1] as const,
+    decelerate: [0, 0, 0.2, 1] as const,
+    accelerate: [0.4, 0, 1, 1] as const,
+  },
+} as const;
+
+/**
+ * Platform-effective minimum touch target sizes, matching Apple's Human Interface Guidelines
+ * (44pt), Android's Material accessibility guidance (48dp), and a 44px default for web.
+ */
+export const touchTarget = {
+  ios44: 44,
+  android48: 48,
+  web44: 44,
+} as const;
+
+export function resolveMinimumTouchTarget(platformOS: string = Platform.OS): number {
+  if (platformOS === 'android') {
+    return touchTarget.android48;
+  }
+  if (platformOS === 'web') {
+    return touchTarget.web44;
+  }
+  return touchTarget.ios44;
+}
+
 function createTypography(colors: AppColors, fonts: AppFontFamilies): AppTypography {
   return {
     largeTitle: {
-      fontSize: 24,
+      fontSize: 28,
+      lineHeight: 34,
       color: colors.textPrimary,
-      letterSpacing: 0,
+      fontWeight: '700',
+    },
+    title: {
+      fontSize: 22,
+      lineHeight: 28,
+      color: colors.textPrimary,
       fontWeight: '700',
     },
     headline: {
-      fontSize: 15,
+      fontSize: 17,
+      lineHeight: 22,
       color: colors.textPrimary,
       fontWeight: '600',
     },
-    body: {
-      fontSize: 14,
-      color: colors.textPrimary,
+    subheadline: {
+      fontSize: 15,
       lineHeight: 20,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    body: {
+      fontSize: 16,
+      lineHeight: 22,
+      color: colors.textPrimary,
       fontWeight: '400',
     },
     caption: {
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 18,
       color: colors.textMuted,
       fontWeight: '400',
     },
-    mono: {
+    label: {
       fontSize: 12,
+      lineHeight: 16,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    metadata: {
+      fontSize: 11,
+      lineHeight: 14,
+      color: colors.textMuted,
+      fontWeight: '500',
+    },
+    mono: {
+      fontSize: 13,
+      lineHeight: 19,
       fontFamily: fonts.monoRegular,
       color: colors.textPrimary,
-      lineHeight: 18,
     },
   };
 }
@@ -311,6 +394,8 @@ export function createAppTheme(
     radius,
     shadow,
     typography: createTypography(colors, fonts),
+    motion,
+    touchTarget: { minimum: resolveMinimumTouchTarget() },
     keyboardAppearance: isDark ? 'dark' : 'light',
     blurTint: isDark ? 'dark' : 'light',
     statusBarStyle: isDark ? 'light-content' : 'dark-content',

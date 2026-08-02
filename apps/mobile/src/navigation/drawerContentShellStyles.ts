@@ -44,8 +44,8 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       lineHeight: 14,
     },
     headerIconButton: {
-      width: 44,
-      height: 44,
+      width: theme.touchTarget.minimum,
+      height: theme.touchTarget.minimum,
       borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
@@ -79,7 +79,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       backgroundColor: theme.colors.borderHighlight,
     },
     folderFilter: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 7,
@@ -154,7 +154,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
     },
     connectionStatus: {
       minWidth: 0,
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       flex: 1,
       flexDirection: 'row',
       alignItems: 'center',
@@ -196,7 +196,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
     },
     footerBrowserButton: {
       minWidth: 78,
-      height: 44,
+      height: theme.touchTarget.minimum,
       paddingHorizontal: 7,
       borderRadius: theme.radius.md,
       flexDirection: 'row',
@@ -212,8 +212,8 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       fontWeight: '600',
     },
     footerIconButton: {
-      width: 44,
-      height: 44,
+      width: theme.touchTarget.minimum,
+      height: theme.touchTarget.minimum,
       borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',

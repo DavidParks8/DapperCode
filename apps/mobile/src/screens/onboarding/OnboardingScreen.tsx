@@ -5,12 +5,12 @@ import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { decorativeAccessibilityProps, useModalAccessibilityFocus } from '../../accessibility';
+import { motionDuration } from '../../components/motion';
 import { useAppTheme } from '../../theme';
 import { OnboardingConnectSection } from './OnboardingConnectSection';
 import { OnboardingIntroSection } from './OnboardingIntroSection';
 import { OnboardingScannerModal } from './OnboardingScannerModal';
 import { useOnboardingScreenController } from './onboardingScreenController';
-import { onboardingMotion } from './onboardingScreenMotion';
 import { createOnboardingStyles } from './onboardingScreenStyles';
 import type { OnboardingScreenProps } from './onboardingScreenTypes';
 
@@ -76,7 +76,7 @@ export function OnboardingScreen({
           ) : (
             <Animated.View
               key="connect"
-              entering={FadeIn.duration(onboardingMotion.duration.routine).reduceMotion(
+              entering={FadeIn.duration(motionDuration.routine).reduceMotion(
                 ReduceMotion.System,
               )}
               style={styles.connectAnimatedRoot}

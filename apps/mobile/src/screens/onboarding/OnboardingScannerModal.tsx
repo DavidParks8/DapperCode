@@ -4,8 +4,8 @@ import { Modal, Pressable, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '../../accessibility';
+import { motionDuration } from '../../components/motion';
 import type { AppTheme } from '../../theme';
-import { onboardingMotion } from './onboardingScreenMotion';
 import type { createOnboardingStyles } from './onboardingScreenStyles';
 
 interface ScannerModalProps {
@@ -93,7 +93,7 @@ export function OnboardingScannerModal({
           <Text style={styles.scannerHintText}>Scan the pairing QR to fill the URL and token.</Text>
           {scannerError ? (
             <Animated.Text
-              entering={FadeIn.duration(onboardingMotion.duration.immediate).reduceMotion(
+              entering={FadeIn.duration(motionDuration.immediate).reduceMotion(
                 ReduceMotion.System,
               )}
               accessibilityRole="alert"

@@ -2,7 +2,6 @@ import { StyleSheet } from 'react-native';
 
 import type { AppTheme } from '../theme';
 import { ENTRY_ROW_HEIGHT } from './workspacePickerHelpers';
-import { TOUCH_TARGET_MINIMUM } from './workspacePickerTouch';
 
 export const createWorkspacePickerBrowserStyles = (theme: AppTheme) => ({
   rowMainAction: {
@@ -147,8 +146,8 @@ export const createWorkspacePickerBrowserStyles = (theme: AppTheme) => ({
     color: theme.colors.textMuted,
   },
   footerFavoriteButton: {
-    width: TOUCH_TARGET_MINIMUM,
-    height: TOUCH_TARGET_MINIMUM,
+    width: theme.touchTarget.minimum,
+    height: theme.touchTarget.minimum,
     borderRadius: theme.radius.full,
     borderWidth: 1,
     borderColor: theme.colors.borderLight,
@@ -163,7 +162,7 @@ export const createWorkspacePickerBrowserStyles = (theme: AppTheme) => ({
   footerFavoriteButtonPressed: { opacity: 0.84 },
   footerUseButton: {
     width: 94,
-    height: TOUCH_TARGET_MINIMUM,
+    height: theme.touchTarget.minimum,
     borderRadius: theme.radius.lg,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,

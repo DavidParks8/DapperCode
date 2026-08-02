@@ -3,9 +3,9 @@ import { BlurView } from 'expo-blur';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../../accessibility';
+import { computeHitSlop } from '../../components/touchTarget';
 import type { AppTheme } from '../../theme';
 import { BRIDGE_SETUP_INSTRUCTION } from './onboardingScreenConstants';
-import { hitSlopToMeetMinimum } from './onboardingScreenTouch';
 import { CommandSnippet, OnboardingStepDock, StatusBanner } from './OnboardingScreenWidgets';
 import type { ConnectionCheck, OnboardingMode } from './onboardingScreenTypes';
 import type { createOnboardingStyles } from './onboardingScreenStyles';
@@ -102,7 +102,7 @@ export function OnboardingConnectSection({
             {(mode === 'edit' || mode === 'add' || mode === 'reconnect') && onCancel ? (
               <Pressable
                 onPress={onCancel}
-                hitSlop={hitSlopToMeetMinimum(30)}
+                hitSlop={computeHitSlop({ width: 30, height: 30 })}
                 style={({ pressed }) => [styles.cancelBtn, pressed && styles.cancelBtnPressed]}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel connection setup"

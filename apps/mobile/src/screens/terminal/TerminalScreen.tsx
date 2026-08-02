@@ -17,17 +17,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { HostBridgeApiClient } from '../../api/client';
 import type { HostBridgeWsClient } from '../../api/ws';
 import { useAccessibilityAnnouncement } from '../../accessibility';
+import { motionDuration, motionEasing } from '../../components/motion';
+import { computeHitSlop } from '../../components/touchTarget';
 import { feedback } from '../../feedback';
 import { useAppTheme, type AppTheme } from '../../theme';
-
-/** Local motion constants — mirrors the forthcoming theme.motion token set. */
-const MOTION = {
-  duration: { immediate: 120, routine: 200 } as const,
-  easing: { standard: [0.4, 0, 0.2, 1] as const },
-} as const;
-
-/** iOS HIG minimum touch target (44pt); run button is 30pt, needs 7pt per side. */
-const RUN_BTN_HIT_SLOP = (44 - 30) / 2;
 
 interface TerminalScreenProps {
   api: HostBridgeApiClient;
@@ -155,10 +148,10 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
 
         {running ? (
           <Animated.View
-            entering={FadeIn.duration(MOTION.duration.routine).easing(
-              Easing.bezier(...MOTION.easing.standard),
+            entering={FadeIn.duration(motionDuration.routine).easing(
+              Easing.bezier(...motionEasing.standard),
             )}
-            exiting={FadeOut.duration(MOTION.duration.immediate)}
+            exiting={FadeOut.duration(motionDuration.immediate)}
             style={styles.runningIndicator}
             accessibilityRole="progressbar"
             accessibilityLabel="Command running"
@@ -187,7 +180,7 @@ export function TerminalScreen({ api, ws, onOpenDrawer }: TerminalScreenProps) {
           <Pressable
             onPress={running ? stopCommand : runCommand}
             disabled={!running && runDisabled}
-            hitSlop={RUN_BTN_HIT_SLOP}
+            hitSlop={computeHitSlop({ width: 30, height: 30 })}
             accessibilityRole="button"
             accessibilityLabel={running ? 'Stop command' : 'Run command'}
             style={({ pressed }) => [

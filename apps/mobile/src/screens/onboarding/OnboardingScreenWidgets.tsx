@@ -6,11 +6,11 @@ import { Platform, Pressable, Share, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '../../accessibility';
+import { computeHitSlop } from '../../components/touchTarget';
+import { motionDuration } from '../../components/motion';
 import { feedback } from '../../feedback';
 import { useAppTheme } from '../../theme';
 import { BRIDGE_SETUP_URL, SETUP_STAGES } from './onboardingScreenConstants';
-import { onboardingMotion } from './onboardingScreenMotion';
-import { hitSlopToMeetMinimum } from './onboardingScreenTouch';
 import { createOnboardingStyles } from './onboardingScreenStyles';
 
 export function OnboardingStepDock({ currentStage }: { currentStage: number }) {
@@ -106,7 +106,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             accessibilityRole="button"
             accessibilityLabel="Share bridge setup guide"
             onPress={handleShareGuide}
-            hitSlop={hitSlopToMeetMinimum(30)}
+            hitSlop={computeHitSlop({ width: 30, height: 30 })}
             style={({ pressed }) => [
               styles.commandIconButton,
               pressed && styles.commandCopyButtonPressed,
@@ -118,7 +118,7 @@ export function CommandSnippet({ label, command }: { label: string; command: str
             onPress={() => {
               void handleCopy();
             }}
-            hitSlop={hitSlopToMeetMinimum(30)}
+            hitSlop={computeHitSlop({ width: 30, height: 30 })}
             accessibilityRole="button"
             accessibilityLabel={copied ? 'Copied to clipboard' : 'Copy setup command'}
             style={({ pressed }) => [
@@ -169,7 +169,7 @@ export function StatusBanner({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(onboardingMotion.duration.routine).reduceMotion(
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(
         ReduceMotion.System,
       )}
       accessibilityRole={tone === 'error' ? 'alert' : undefined}

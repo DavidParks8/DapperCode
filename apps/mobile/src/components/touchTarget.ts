@@ -1,26 +1,16 @@
-import { Platform } from 'react-native';
+import { resolveMinimumTouchTarget, touchTarget } from '../theme';
+
+/**
+ * Re-exported so existing call sites can keep importing platform touch-target constants from
+ * this shared, chat-owned helper alongside `computeHitSlop`.
+ */
+export { resolveMinimumTouchTarget, touchTarget };
 
 export interface HitSlop {
   top: number;
   bottom: number;
   left: number;
   right: number;
-}
-
-/**
- * Platform-effective minimum touch target size, matching Apple's Human Interface Guidelines
- * (44pt) and Android's Material accessibility guidance (48dp). `theme.ts` does not (yet) expose
- * an equivalent `touchTarget` token, so this shared helper computes it directly per-platform;
- * once a `theme.touchTarget.minimum` token exists, callers can prefer that instead.
- */
-const PLATFORM_MINIMUM_TOUCH_TARGET: Partial<Record<string, number>> = {
-  ios: 44,
-  android: 48,
-  web: 44,
-};
-
-export function resolveMinimumTouchTarget(platformOS: string = Platform.OS): number {
-  return PLATFORM_MINIMUM_TOUCH_TARGET[platformOS] ?? 44;
 }
 
 /**

@@ -6,12 +6,12 @@ import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated
 import type { WorkspaceSummary } from '../api/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 import { useAppTheme } from '../theme';
+import { motionDuration } from './motion';
 import {
   formatWorkspaceMeta,
   showWorkspacePinAction,
   toPathBasename,
 } from './workspacePickerHelpers';
-import { workspacePickerMotion } from './workspacePickerMotion';
 import { createWorkspacePickerStyles } from './workspacePickerStyles';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
@@ -47,10 +47,10 @@ export function WorkspaceTile({
         <View style={[styles.workspaceTileContent, pressed && styles.pressed]}>
           {selected ? (
             <Animated.View
-              entering={FadeIn.duration(workspacePickerMotion.duration.routine).reduceMotion(
+              entering={FadeIn.duration(motionDuration.routine).reduceMotion(
                 ReduceMotion.System,
               )}
-              exiting={FadeOut.duration(workspacePickerMotion.duration.routine).reduceMotion(
+              exiting={FadeOut.duration(motionDuration.routine).reduceMotion(
                 ReduceMotion.System,
               )}
               style={styles.workspaceTileSelectedOverlay}
@@ -82,7 +82,7 @@ export function LoadingRow({ label }: { label: string }) {
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
   return (
     <Animated.View
-      entering={FadeIn.duration(workspacePickerMotion.duration.routine).reduceMotion(
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(
         ReduceMotion.System,
       )}
       style={styles.statusRow}

@@ -1,4 +1,5 @@
 import {
+  Easing,
   ReduceMotion,
   interpolate,
   useAnimatedStyle,
@@ -11,7 +12,7 @@ import {
 import { useEffect } from 'react';
 import type { ViewStyle } from 'react-native';
 
-import { onboardingMotion } from './onboardingScreenMotion';
+import { motionDuration, motionEasing } from '../../components/motion';
 
 export type OnboardingHeroAnimatedStyle = AnimatedStyle<ViewStyle>;
 export type OnboardingTranslateAnimatedStyle = AnimatedStyle<ViewStyle>;
@@ -40,15 +41,15 @@ export function useOnboardingIntroAnimations(
     actionsProgress.value = 0;
     const timingConfig = {
       reduceMotion: ReduceMotion.System,
-      easing: onboardingMotion.easing.decelerate,
+      easing: Easing.bezier(...motionEasing.decelerate),
     };
     heroProgress.value = withTiming(1, {
       ...timingConfig,
-      duration: onboardingMotion.duration.layout,
+      duration: motionDuration.layout,
     });
     actionsProgress.value = withDelay(
-      onboardingMotion.duration.layout,
-      withTiming(1, { ...timingConfig, duration: onboardingMotion.duration.routine }),
+      motionDuration.layout,
+      withTiming(1, { ...timingConfig, duration: motionDuration.routine }),
     );
   }, [actionsProgress, heroProgress, reduceMotion, showIntroStep]);
 

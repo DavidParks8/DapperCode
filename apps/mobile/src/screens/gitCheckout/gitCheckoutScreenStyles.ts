@@ -26,10 +26,8 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       borderColor: theme.colors.borderLight,
     },
     pressed: { opacity: 0.86 },
-    // Uses largeTitle (the largest available heading role) as the screen-title baseline.
-    // When theme.typography.title (20pt) lands, switch to that role.
     title: {
-      ...theme.typography.largeTitle,
+      ...theme.typography.title,
       textAlign: 'center',
     },
     body: {
@@ -42,7 +40,7 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     input: {
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.md,
       borderWidth: 1,
       borderColor: theme.colors.borderLight,
@@ -63,9 +61,8 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       paddingHorizontal: theme.spacing.md,
     },
     pathCopy: { flex: 1, minWidth: 0, gap: 2 },
-    // Uses caption role; update to theme.typography.metadata (11pt) when that role lands.
     pathLabel: {
-      ...theme.typography.caption,
+      ...theme.typography.metadata,
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0,
@@ -111,7 +108,7 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
     },
     button: {
       minWidth: 110,
-      minHeight: 44,
+      minHeight: theme.touchTarget.minimum,
       borderRadius: theme.radius.md,
       alignItems: 'center',
       justifyContent: 'center',

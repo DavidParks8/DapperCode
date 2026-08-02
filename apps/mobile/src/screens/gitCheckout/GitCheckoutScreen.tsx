@@ -33,14 +33,10 @@ import {
   openGitCheckoutDestinationPickerAtom,
   submitGitCheckoutAtom,
 } from '../../state/mainScreen/workspaceActions';
+import { motionDuration, motionEasing } from '../../components/motion';
 import { useAppTheme } from '../../theme';
 import { joinWorkspacePath, normalizeCloneDirectoryName } from '../main/mainScreenHelpers';
 import { createGitCheckoutScreenStyles } from './gitCheckoutScreenStyles';
-
-// Motion constants matching theme.motion tokens (use theme.motion once that property lands).
-const MOTION_ROUTINE_MS = 200;
-const EASING_DECELERATE: [number, number, number, number] = [0, 0, 0.2, 1];
-const EASING_ACCELERATE: [number, number, number, number] = [0.4, 0, 1, 1];
 
 export function GitCheckoutScreen() {
   const theme = useAppTheme();
@@ -88,11 +84,11 @@ export function GitCheckoutScreen() {
   // meeting both iOS (44pt) and Android (48dp) minimum touch targets.
   const backButtonHitSlop = { top: 6, bottom: 6, left: 6, right: 6 };
 
-  const routineEnter = FadeIn.duration(MOTION_ROUTINE_MS)
-    .easing(Easing.bezier(...EASING_DECELERATE))
+  const routineEnter = FadeIn.duration(motionDuration.routine)
+    .easing(Easing.bezier(...motionEasing.decelerate))
     .reduceMotion(ReduceMotion.System);
-  const routineExit = FadeOut.duration(MOTION_ROUTINE_MS)
-    .easing(Easing.bezier(...EASING_ACCELERATE))
+  const routineExit = FadeOut.duration(motionDuration.routine)
+    .easing(Easing.bezier(...motionEasing.accelerate))
     .reduceMotion(ReduceMotion.System);
 
   return (

@@ -355,8 +355,8 @@ describe('GitCheckoutScreen', () => {
         ? Object.assign({}, ...titleNode.props.style)
         : (titleNode?.props.style as Record<string, unknown>) ?? {};
 
-      // largeTitle role is used (24pt). Switch assertion to 20 once theme.typography.title lands.
-      expect(style.fontSize).toBe(24);
+      // Screen-title baseline uses the `title` role (22pt), one step below `largeTitle`.
+      expect(style.fontSize).toBe(22);
 
       act(() => tree.unmount());
     });

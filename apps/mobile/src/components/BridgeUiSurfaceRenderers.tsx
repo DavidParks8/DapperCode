@@ -24,6 +24,8 @@ import {
 import { AppSheet } from './AppSheet';
 import { createBridgeUiSurfaceStyles } from './bridge-ui-surface-styles';
 import { useAppTheme } from '../theme';
+import { motionDuration, motionEasing } from './motion';
+import { computeHitSlop } from './touchTarget';
 import { feedback } from '../feedback';
 import { createWorkflowMarkdownStyles } from '../screens/main/mainScreenStyles';
 import {
@@ -32,15 +34,6 @@ import {
   useAccessibilityAnnouncement,
   useModalAccessibilityFocus,
 } from '../accessibility';
-
-/** Local motion constants — mirrors the forthcoming theme.motion token set. */
-const MOTION = {
-  duration: { immediate: 120, routine: 200, layout: 280 } as const,
-  easing: { standard: [0.4, 0, 0.2, 1] as const },
-} as const;
-
-/** Platform-resolved minimum touch target (px / dp). */
-const MIN_TOUCH_TARGET = 44;
 
 interface BridgeUiSurfaceProps {
   surface: BridgeUiSurface;
@@ -66,8 +59,8 @@ export function BridgeUiWorkflowCard({
   return (
     <Animated.View
       style={[styles.surfaceCard, styles.workflowCard]}
-      layout={LinearTransition.duration(MOTION.duration.layout).easing(
-        Easing.bezier(...MOTION.easing.standard),
+      layout={LinearTransition.duration(motionDuration.layout).easing(
+        Easing.bezier(...motionEasing.standard),
       )}
     >
       <SurfaceHeader
@@ -78,10 +71,10 @@ export function BridgeUiWorkflowCard({
       />
       {collapsed ? null : (
         <Animated.View
-          entering={FadeIn.duration(MOTION.duration.routine).easing(
-            Easing.bezier(...MOTION.easing.standard),
+          entering={FadeIn.duration(motionDuration.routine).easing(
+            Easing.bezier(...motionEasing.standard),
           )}
-          exiting={FadeOut.duration(MOTION.duration.immediate)}
+          exiting={FadeOut.duration(motionDuration.immediate)}
         >
           <ScrollView
             nestedScrollEnabled
@@ -224,7 +217,7 @@ function SurfaceHeader({
       {surface.dismissible === false ? null : (
         <Pressable
           onPress={() => onDismiss(surface)}
-          hitSlop={(MIN_TOUCH_TARGET - 26) / 2}
+          hitSlop={computeHitSlop({ width: 26, height: 26 })}
           style={({ pressed }) => [styles.dismissButton, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel={`Dismiss ${surface.title}`}
@@ -328,8 +321,8 @@ function ProgressBlock({ block }: { block: BridgeUiProgressBlock }) {
 
   useEffect(() => {
     progressWidth.value = withTiming(ratio, {
-      duration: MOTION.duration.routine,
-      easing: Easing.bezier(...MOTION.easing.standard),
+      duration: motionDuration.routine,
+      easing: Easing.bezier(...motionEasing.standard),
       reduceMotion: ReduceMotion.System,
     });
   }, [ratio, progressWidth]);

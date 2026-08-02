@@ -348,7 +348,7 @@ function createStyles(theme: AppTheme) {
       marginBottom: 6,
     },
     row: {
-      minHeight: 48,
+      minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -361,7 +361,7 @@ function createStyles(theme: AppTheme) {
     muted: { ...theme.typography.caption, color: colors.textMuted, fontSize: 13 },
     error: { ...theme.typography.caption, color: colors.error, fontSize: 13 },
     action: { ...theme.typography.body, color: colors.accent, fontSize: 13, fontWeight: '700' },
-    noticeAction: { minHeight: 44, justifyContent: 'center' },
+    noticeAction: { minHeight: theme.touchTarget.minimum, justifyContent: 'center' },
     notice: {
       padding: 12,
       borderWidth: 1,

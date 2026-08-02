@@ -242,9 +242,12 @@ describe('TerminalScreen behavior', () => {
     const result = await renderTerminal();
     const root = result.tree.root as Queryable;
     const runBtn = findRunButton(root);
-    const hitSlop = runBtn.props.hitSlop as number;
+    const hitSlop = runBtn.props.hitSlop as { top: number; bottom: number; left: number; right: number };
     // Button is 30pt, needs 7pt per side to reach 44pt minimum.
-    expect(hitSlop).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.top).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.bottom).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.left).toBeGreaterThanOrEqual(7);
+    expect(hitSlop.right).toBeGreaterThanOrEqual(7);
     act(() => result.tree.unmount());
   });
 
