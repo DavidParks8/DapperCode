@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCameraPermissions } from 'expo-camera';
 
 import { isInsecureRemoteUrl, normalizeBridgeUrlInput } from '../../bridgeUrl';
@@ -88,12 +88,25 @@ export function useOnboardingScreenController(
     setOnboardingStep(mode === 'initial' ? 'intro' : 'connect');
   }, [mode]);
 
+  // Bumped on every credential-changing action (typed edit, pairing payload, or a prop-driven
+  // reset). `runConnectionCheck` captures this at request start and re-checks it before applying
+  // its result, so a probe that resolves after the credentials it was testing have since changed
+  // never overwrites the current state with a stale/mismatched outcome.
+  const inputGenerationRef = useRef(0);
+  const bumpInputGeneration = () => {
+    inputGenerationRef.current += 1;
+  };
+
   useEffect(() => {
     setUrlInputState(initialBridgeUrl ?? '');
+    setConnectionCheck({ kind: 'idle' });
+    bumpInputGeneration();
   }, [initialBridgeUrl]);
 
   useEffect(() => {
     setTokenInputState(initialBridgeToken ?? '');
+    setConnectionCheck({ kind: 'idle' });
+    bumpInputGeneration();
   }, [initialBridgeToken]);
 
   const showIntroStep = mode === 'initial' && onboardingStep === 'intro';
@@ -154,6 +167,7 @@ export function useOnboardingScreenController(
 
   const runConnectionCheck = useCallback(
     async (normalized: string, token: string | null): Promise<boolean> => {
+      const generation = inputGenerationRef.current;
       setCheckingConnection(true);
       setConnectionCheck({ kind: 'idle' });
 
@@ -166,16 +180,26 @@ export function useOnboardingScreenController(
         if (!result.ok) {
           throw new Error('probe failed');
         }
+        if (inputGenerationRef.current !== generation) {
+          // The URL/token have changed since this probe started; discard the stale result
+          // instead of showing a success message for credentials the user has since edited.
+          return false;
+        }
 
         setConnectionCheck({
           kind: 'success',
           message: result.healthCheckError
             ? 'Connected. Authenticated RPC verified; /health endpoint did not return 200.'
             : 'Connected. URL and token both verified.',
+          verifiedUrl: normalized,
+          verifiedToken: token,
         });
         void feedback.success();
         return true;
       } catch {
+        if (inputGenerationRef.current !== generation) {
+          return false;
+        }
         setConnectionCheck({
           kind: 'error',
           message: 'Connection error. Check the URL and token, then try again.',
@@ -183,7 +207,9 @@ export function useOnboardingScreenController(
         void feedback.error();
         return false;
       } finally {
-        setCheckingConnection(false);
+        if (inputGenerationRef.current === generation) {
+          setCheckingConnection(false);
+        }
       }
     },
     [allowQueryTokenAuth],
@@ -197,15 +223,15 @@ export function useOnboardingScreenController(
     }
 
     const normalizedToken = normalizeTokenInput(validated.bridgeToken);
-    // A prior, unchanged "Test Connection" already verified these exact inputs: every input
-    // edit (setUrlInput/setTokenInput/applyPairingPayload/openScanner) resets connectionCheck
-    // back to idle, so a lingering `success` here is guaranteed to still match urlInput/tokenInput.
-    // Re-running the ~7s probe in that case only duplicates network/WS traffic the user already
-    // waited through once.
-    const ok =
-      connectionCheck.kind === 'success'
-        ? true
-        : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
+    // A prior "Test Connection" is only reused when it verified these exact, current url/token
+    // values. Any edit — including one that raced with an in-flight probe — either resets
+    // connectionCheck to idle synchronously or is caught by runConnectionCheck's generation
+    // guard, so a lingering `success` here is guaranteed to match validated.bridgeUrl/token.
+    const alreadyVerified =
+      connectionCheck.kind === 'success' &&
+      connectionCheck.verifiedUrl === validated.bridgeUrl &&
+      connectionCheck.verifiedToken === normalizedToken;
+    const ok = alreadyVerified ? true : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
     if (!ok) {
       return;
     }
@@ -219,7 +245,7 @@ export function useOnboardingScreenController(
       });
       void feedback.error();
     }
-  }, [connectionCheck.kind, normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
+  }, [connectionCheck, normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
 
   const handleConnectionCheck = useCallback(async () => {
     const validated = validateInput();
@@ -282,6 +308,7 @@ export function useOnboardingScreenController(
       setScannerError(null);
       setScannerLocked(false);
       setScannerVisible(false);
+      bumpInputGeneration();
     },
     [],
   );
@@ -341,10 +368,12 @@ export function useOnboardingScreenController(
       setUrlInputState(value);
       setFormError(null);
       setConnectionCheck({ kind: 'idle' });
+      bumpInputGeneration();
     },
     setTokenInput: (value: string) => {
       setTokenInputState(value);
       setConnectionCheck({ kind: 'idle' });
+      bumpInputGeneration();
     },
     setTokenHidden: (updater: (previous: boolean) => boolean) => {
       void feedback.selection();

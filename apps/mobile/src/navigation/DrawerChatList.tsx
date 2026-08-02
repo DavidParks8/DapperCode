@@ -99,7 +99,14 @@ export function DrawerChatList() {
         style={styles.list}
       >
         {notice}
-        <View accessibilityLiveRegion="polite" style={styles.emptyState}>
+        {/* Live region announces the genuinely-empty-drawer state; while searching, the
+            debounced useAccessibilityAnnouncement channel in DrawerContent.tsx already
+            announces "No sessions match", so this stays a silent visual update to avoid a
+            duplicate announcement. */}
+        <View
+          accessibilityLiveRegion={isSearching ? 'none' : 'polite'}
+          style={styles.emptyState}
+        >
           <Ionicons
             {...decorativeAccessibilityProps}
             name={isSearching ? 'search-outline' : 'chatbubbles-outline'}
@@ -144,7 +151,11 @@ export function DrawerChatList() {
         ) : null
       }
       renderSectionHeader={({ section }) => {
-        const collapsed = collapsedLaneKeys.has(section.key);
+        // While searching, matches render regardless of the lane's collapsed state (see
+        // DrawerContent.tsx's visibleAttentionSections), so the header must reflect "expanded"
+        // too — otherwise the chevron/accessibilityState would claim collapsed while rows are
+        // visibly rendered underneath it.
+        const collapsed = !isSearching && collapsedLaneKeys.has(section.key);
         return (
           <Pressable
             accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}

@@ -140,6 +140,27 @@ function SettingsConnectionLauncher() {
   return <Text>Settings launcher</Text>;
 }
 
+function ChatFooterConnectionLauncher() {
+  const { profileId = 'profile-1', chatId = 'missing' } = useLocalSearchParams<{
+    profileId?: string;
+    chatId?: string;
+  }>();
+  mainRenders.push(chatId);
+  useEffect(() => {
+    mainLifecycle.push('mount');
+    return () => {
+      mainLifecycle.push('unmount');
+    };
+  }, []);
+  useEffect(() => {
+    // Mirrors openBridgeConnectionAtom in actions.ts: the drawer's connection footer opens the
+    // Settings-owned connection editor with an anchored push, from whatever screen (a chat, in
+    // this case) the drawer happened to be opened over.
+    router.push(routes.settingsConnection(profileId, 'edit'), { withAnchor: true });
+  }, [profileId]);
+  return <Text>Chat {chatId}</Text>;
+}
+
 const baseOverrides = {
   _layout: RootLayout,
 };
@@ -153,6 +174,23 @@ function countNamedRoutes(state: unknown, routeName: string): number {
     const record = route as { name?: unknown; state?: unknown };
     return count + (record.name === routeName ? 1 : 0) + countNamedRoutes(record.state, routeName);
   }, 0);
+}
+
+function findStackContaining(
+  state: unknown,
+  routeName: string,
+): { routes: Array<{ name?: unknown }> } | null {
+  if (!state || typeof state !== 'object') return null;
+  const routesValue = (state as { routes?: unknown }).routes;
+  if (!Array.isArray(routesValue)) return null;
+  if (routesValue.some((route) => (route as { name?: unknown }).name === routeName)) {
+    return state as { routes: Array<{ name?: unknown }> };
+  }
+  for (const route of routesValue) {
+    const found = findStackContaining((route as { state?: unknown }).state, routeName);
+    if (found) return found;
+  }
+  return null;
 }
 
 describe('Expo Router route topology', () => {
@@ -473,6 +511,48 @@ describe('Expo Router route topology', () => {
     act(() => router.back());
     // Cancelling/back must land on Settings, never on chats/new or any chat.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
+  });
+
+  it('anchors the connection modal beneath Settings from a chat screen, keeping the chat intact', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': ChatFooterConnectionLauncher,
+          'profiles/[profileId]/(drawer)/settings/connection': ConnectionRoute,
+          'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
+        },
+      },
+      {
+        initialUrl: '/profiles/profile-1/chats/chat-1',
+        wrapper: defaultWrapper,
+      },
+    );
+
+    // openBridgeConnectionAtom's anchored push from the drawer footer must land on the modal
+    // even when opened from a chat screen, not just from Settings itself.
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
+    expect(screen.getByText('Connection')).toBeTruthy();
+    expect(mainLifecycle).toEqual(['mount']);
+
+    // The anchor must force Settings' own `index` route to be established beneath the modal in
+    // the very same stack — proving `POP_TO`'s destructive replace-when-absent behavior (see
+    // routeNavigation.ts) never fires for this push.
+    const settingsStack = findStackContaining(result.getRouterState(), 'connection');
+    expect(settingsStack?.routes.map((route) => route.name)).toEqual(
+      expect.arrayContaining(['index', 'connection']),
+    );
+
+    act(() => router.back());
+    // Cancelling must land on Settings, never back on the originating chat or chats/new.
+    expect(result.getPathname()).toBe('/profiles/profile-1/settings');
+    expect(screen.getByText(routeLabels.settings)).toBeTruthy();
+
+    // The chat the drawer was opened from must still be intact and reachable, not remounted.
+    act(() => router.push('/profiles/profile-1/chats/chat-1'));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
+    expect(mainLifecycle).toEqual(['mount']);
   });
 
   it('uses real Drawer history so chat root exits and Settings returns to the live chat', () => {

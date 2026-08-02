@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 jest.mock('expo-router', () => jest.requireActual('../testing/expoRouterMock'));
 import { router } from 'expo-router';
-import { AccessibilityInfo, Alert, AppState, RefreshControl } from 'react-native';
+import { AccessibilityInfo, Alert, AppState, RefreshControl, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -23,6 +23,7 @@ import { createEmptyChatSummaryCache, mergeChatSummaryCache } from '../chatSumma
 import * as ChatSummaryCache from '../chatSummaryCache';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { DrawerContent } from './DrawerContent';
+import { createDrawerContentStyles } from './drawerContentStyles';
 import { routes } from './routes';
 import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from './useDrawerChatCollection';
 
@@ -1997,6 +1998,42 @@ describe('DrawerContent session search', () => {
     act(() => tree.unmount());
   });
 
+  it('forces a previously collapsed lane header to report expanded while a search reveals its matches', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'first', title: 'First recent', cwd: '/repo/first' }),
+        createChat({ id: 'second', title: 'Second recent', cwd: '/repo/second' }),
+      ],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    // Collapse the "Recent" lane before searching.
+    await press(findByLabel(root, 'Recent, 2 sessions'));
+    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: false }),
+    );
+    expect(hasText(root, 'First recent')).toBe(false);
+
+    await typeSearch(root, 'first');
+
+    // Rows for the match render (the search bypasses collapse-filtering), so the header must
+    // now claim expanded too, not still say collapsed while its rows are visibly showing.
+    expect(findByLabel(root, 'Recent, 1 session').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: true }),
+    );
+    expect(hasText(root, 'First recent')).toBe(true);
+
+    await press(findByLabel(root, 'Clear search'));
+
+    // Clearing the search restores the user's manual collapse preference.
+    expect(findByLabel(root, 'Recent, 2 sessions').props.accessibilityState).toEqual(
+      expect.objectContaining({ expanded: false }),
+    );
+    expect(hasText(root, 'First recent')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('shows a distinct no-results state without hiding the offline notice or connection footer', async () => {
     const harness = createHarness({
       chats: [createChat({ id: 'a', title: 'Alpha chat', cwd: '/repo/a' })],
@@ -2064,7 +2101,13 @@ describe('DrawerContent session search', () => {
     act(() => tree.unmount());
   });
 
-  it('announces the result count to screen readers as the query changes', async () => {
+  async function settleSearchAnnouncementDebounce(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+  }
+
+  it('announces the debounced result count to screen readers once typing settles', async () => {
     const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation();
     const harness = createHarness({
       chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
@@ -2073,12 +2116,70 @@ describe('DrawerContent session search', () => {
     const root = tree.root as Queryable;
 
     await typeSearch(root, 'alpha');
+    // The single announcement channel is debounced: nothing fires until typing settles.
+    expect(announce).not.toHaveBeenCalled();
+    await settleSearchAnnouncementDebounce();
     expect(announce).toHaveBeenCalledWith('1 session matches "alpha"');
+    expect(announce).toHaveBeenCalledTimes(1);
 
     await typeSearch(root, 'nonexistent');
+    await settleSearchAnnouncementDebounce();
     expect(announce).toHaveBeenCalledWith('No sessions match "nonexistent"');
+    expect(announce).toHaveBeenCalledTimes(2);
 
     announce.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('coalesces rapid keystrokes into a single announcement instead of one per keystroke', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation();
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    // Simulate fast typing: each keystroke lands well inside the debounce window of the last.
+    await act(async () => {
+      (searchInput(root).props.onChangeText as (value: string) => void)('a');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('al');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('alp');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      (searchInput(root).props.onChangeText as (value: string) => void)('alpha');
+    });
+
+    expect(announce).not.toHaveBeenCalled();
+    await settleSearchAnnouncementDebounce();
+
+    // Only the final, settled query is announced — never the intermediate keystrokes.
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('1 session matches "alpha"');
+
+    announce.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('keeps a single announcement channel by omitting live regions from the visual search summary and empty state', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await typeSearch(root, 'alpha');
+    const summaryText = root.findAll(
+      (node) => textContent(node as Queryable).includes('session matches "alpha"') && node.type === Text,
+    )[0];
+    expect(summaryText?.props.accessibilityLiveRegion).toBeUndefined();
+
+    await typeSearch(root, 'nonexistent');
+    const emptyStateView = root.findAll(
+      (node) => node.props.accessibilityLiveRegion !== undefined && hasText(node as Queryable, 'No sessions match'),
+    )[0];
+    expect(emptyStateView?.props.accessibilityLiveRegion).toBe('none');
+
     act(() => tree.unmount());
   });
 
@@ -2099,6 +2200,12 @@ describe('DrawerContent session search', () => {
     const clearButton = findByLabel(root, 'Clear search');
     expect(clearButton.props.accessibilityRole).toBe('button');
     act(() => tree.unmount());
+  });
+
+  it('sizes the search field container to the platform touch-target minimum, not a spacing token', () => {
+    const flattened = StyleSheet.flatten(createDrawerContentStyles(theme).searchField);
+    expect(flattened.minHeight).toBe(theme.touchTarget.minimum);
+    expect(flattened.minHeight).toBeGreaterThanOrEqual(44);
   });
 
   it('does not hide the offline notice or connection footer while a search matches', async () => {
@@ -2124,7 +2231,11 @@ describe('DrawerContent session search', () => {
     const tree = await renderDrawer(harness);
     const root = tree.root as Queryable;
     await press(findByLabel(root, 'Bridge offline. Reconnect or edit connection'));
-    expect(router.navigate).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'edit'));
+    expect(router.push).toHaveBeenCalledWith(routes.settingsConnection('profile-1', 'edit'), {
+      withAnchor: true,
+    });
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(router.navigate).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 });

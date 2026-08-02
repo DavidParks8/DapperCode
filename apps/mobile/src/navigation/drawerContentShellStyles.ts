@@ -107,7 +107,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       textAlign: 'right',
     },
     searchField: {
-      minHeight: theme.spacing.xl,
+      minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 7,

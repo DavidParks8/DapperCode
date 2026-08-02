@@ -24,10 +24,17 @@ export function dismissAllPresentedRoutes(): void {
  * `presentation: 'modal'` connection screen over Settings, etc). `dismissTo` computes the
  * specific navigator where the current and target routes diverge and only ever touches that
  * navigator, so it cannot reach into an unrelated sibling stack (another Drawer screen's own
- * history). When the destination isn't already reachable within that scope — e.g. switching
- * between Drawer siblings such as Browser and Settings — `dismissTo` is a no-op, so `apply`
- * still performs the real navigation. Both calls are queued synchronously before Expo Router
- * flushes them, so only the final, combined state is ever rendered.
+ * history).
+ *
+ * Caveat: this is only safe when `href` already exists as a route in that navigator's current
+ * history (e.g. switching back to an already-visited chat or Drawer screen). The underlying
+ * `POP_TO` action is NOT a no-op when the destination isn't already present — the vendored
+ * StackRouter instead drops every route from the current index onward and replaces it with the
+ * destination, which can silently delete an unrelated route (a Settings screen's own `index`)
+ * out of its stack. Never call `navigateRoot`/`replaceRoot` to land on a route that may not yet
+ * exist in its navigator (e.g. a modal opened for the first time) — push it directly instead,
+ * with `{ withAnchor: true }` if its ancestor screens also need to be established. See
+ * `openBridgeConnectionAtom` in `actions.ts` for a concrete example of this distinction.
  */
 function dismissToThenApply(href: Href, apply: (href: Href) => void): void {
   router.dismissTo(href);

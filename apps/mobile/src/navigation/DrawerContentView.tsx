@@ -157,10 +157,11 @@ export function DrawerContentView() {
             </View>
 
             {isSearching ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={styles.searchResultSummary}
-              >
+              // Visual summary only — the debounced useAccessibilityAnnouncement call in
+              // DrawerContent.tsx is the single announcement channel for search results, so this
+              // Text intentionally has no accessibilityLiveRegion to avoid a duplicate
+              // announcement.
+              <Text style={styles.searchResultSummary}>
                 {searchResultCount === 0
                   ? `No sessions match "${searchQuery.trim()}"`
                   : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${searchQuery.trim()}"`}

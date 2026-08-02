@@ -99,6 +99,15 @@ export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null):
  * Opens the Settings-owned connection editor directly from the drawer's connection footer, so
  * an offline/disconnected bridge is one tap from a fix without routing through a specific chat
  * (there may not be one selected) or leaking the profile's secrets into a chat-scoped URL.
+ *
+ * This intentionally pushes with `withAnchor: true` instead of using `navigateRoot`. The
+ * connection modal is not yet a route in any navigator's history the first time it's opened —
+ * whether the drawer footer is tapped from Settings itself or from a chat screen — and
+ * `navigateRoot`'s `dismissTo` (`POP_TO`) replaces the current route with the destination
+ * instead of no-op'ing when the destination isn't already present, which would silently drop
+ * Settings' own `index` route out of its stack. Pushing with an anchor instead adds the
+ * connection screen on top while forcing Settings' `index` to load beneath it, so cancelling
+ * always lands back on Settings and the screen the drawer was opened from is left untouched.
  */
 export const openBridgeConnectionAtom = atom(null, (get, set): void => {
   const profileId = activeProfileId(get);
@@ -108,7 +117,7 @@ export const openBridgeConnectionAtom = atom(null, (get, set): void => {
   }
   set(cancelChatTransitionAtom);
   set(closeDrawerAtom);
-  navigateRoot(routes.settingsConnection(profileId, 'edit'));
+  router.push(routes.settingsConnection(profileId, 'edit'), { withAnchor: true });
 });
 
 export const openChatGitAtom = atom(null, (get, set, chat: Chat): void => {

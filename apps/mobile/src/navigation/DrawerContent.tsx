@@ -155,13 +155,31 @@ export const DrawerContent = memo(function DrawerContentComponent({
     [visibleAttentionSections],
   );
 
-  useAccessibilityAnnouncement(
-    isSearching
-      ? searchResultCount === 0
-        ? `No sessions match "${trimmedSearchQuery}"`
-        : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${trimmedSearchQuery}"`
-      : null,
+  const searchAnnouncementMessage = isSearching
+    ? searchResultCount === 0
+      ? `No sessions match "${trimmedSearchQuery}"`
+      : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${trimmedSearchQuery}"`
+    : null;
+
+  // Search is the ONLY announcement channel for result counts/no-results: the visual result
+  // summary and empty-state copy intentionally omit accessibilityLiveRegion so a screen reader
+  // doesn't hear the same update twice. Debounce so rapid typing settles before announcing
+  // instead of firing once per keystroke.
+  const [debouncedSearchAnnouncement, setDebouncedSearchAnnouncement] = useState<string | null>(
+    null,
   );
+  useEffect(() => {
+    if (!isSearching) {
+      setDebouncedSearchAnnouncement(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setDebouncedSearchAnnouncement(searchAnnouncementMessage);
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [isSearching, searchAnnouncementMessage]);
+
+  useAccessibilityAnnouncement(debouncedSearchAnnouncement);
 
   const handleSearchQueryChange = useCallback((value: string) => {
     setSearchQuery(value);

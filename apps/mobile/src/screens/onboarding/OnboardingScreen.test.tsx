@@ -723,6 +723,97 @@ describe('OnboardingScreen behavior', () => {
     act(() => result.tree.unmount());
   });
 
+  it('discards a stale in-flight probe result for credentials edited while it was pending', async () => {
+    let resolveWsRequest: ((value: { status: string }) => void) | undefined;
+    mockWsRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveWsRequest = resolve;
+        }),
+    );
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token-a',
+    });
+    const root = result.tree.root as Queryable;
+
+    // Start a Test Connection probe for the original credentials; it stays pending on the
+    // authenticated RPC health check until resolveWsRequest is invoked below.
+    await act(async () => {
+      readHandler<() => void>(findPressableByText(root, 'Test Connection'), 'onPress')();
+      await Promise.resolve();
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    // Edit both fields to a different, never-probed pair of credentials while the first
+    // probe is still in flight.
+    act(() =>
+      readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')(
+        'http://127.0.0.1:4002',
+      ),
+    );
+    act(() =>
+      readHandler<(value: string) => void>(findByLabel(root, 'Bridge token'), 'onChangeText')(
+        'token-b',
+      ),
+    );
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+
+    // Let the stale probe for the original credentials resolve.
+    await act(async () => {
+      resolveWsRequest?.({ status: 'ok' });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The stale success must never surface for credentials the user has since replaced.
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+
+    // Saving the edited (never-probed) credentials must run its own probe rather than
+    // trusting the discarded, mismatched result.
+    await press(findByLabel(root, 'Continue'));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(mockWsRequest).toHaveBeenCalledTimes(2);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:4002',
+      bridgeToken: 'token-b',
+    });
+    act(() => result.tree.unmount());
+  });
+
+  it('clears a cached probe success when initial credentials reset via props', async () => {
+    const result = await renderOnboarding({
+      mode: 'edit',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token-a',
+    });
+    const root = result.tree.root as Queryable;
+    await press(findPressableByText(root, 'Test Connection'));
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    await result.rerender({
+      mode: 'edit',
+      initialBridgeUrl: 'http://127.0.0.1:9002',
+      initialBridgeToken: 'token-b',
+    });
+
+    // The cached success from the previous profile's credentials must not leak into the
+    // freshly loaded, never-probed pair.
+    expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
+    expect(findByLabel(root, 'Bridge URL').props.value).toBe('http://127.0.0.1:9002');
+
+    await press(findByLabel(root, 'Save URL'));
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.onSave).toHaveBeenCalledWith({
+      bridgeUrl: 'http://127.0.0.1:9002',
+      bridgeToken: 'token-b',
+    });
+    act(() => result.tree.unmount());
+  });
+
   it('fires semantic haptics for selection, connection outcomes, and QR scan results', async () => {
     mockRequestCameraPermission.mockResolvedValueOnce({ granted: true });
     mockCameraGranted = true;
