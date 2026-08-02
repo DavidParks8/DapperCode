@@ -24,6 +24,7 @@ import {
   subAgentTerminalThenIdleThread,
   promptAfterSnapshot,
   streamThenAuthoritativeSnapshot,
+  toolContentAfterRenamingSnapshot,
   multiTurnReplayedHistory,
   turnsWithSubAgentInTheMiddle,
 } from '../fixtures/regressions';
@@ -867,6 +868,80 @@ describe('Tool rendering', () => {
       .join('\n');
     expect(toolText).toContain('[location: src/b.ts]');
     expect(toolText).not.toContain('[location: src/a.ts]');
+  });
+
+  it('renders one row for a tool whose content lands after a renaming snapshot', () => {
+    // Regression: a `messages` snapshot re-states the turn under the agent's own
+    // ids but left the call-to-message bookkeeping pointing at the streamed ids,
+    // so the tool's final content resurrected the pre-snapshot message at the end
+    // of the transcript. The tool rendered twice and React saw two children with
+    // the same key.
+    const state = new TestableThreadState();
+    const { events, toolCallId } = toolContentAfterRenamingSnapshot('t1');
+    state.applySequence(events);
+
+    const carryingCallId = state
+      .getThreadState('t1')
+      ?.messages.filter(
+        (message) =>
+          (message.role === 'tool' && message.toolCallId === toolCallId) ||
+          (message.role === 'assistant' &&
+            (message.toolCalls ?? []).some((call) => call.id === toolCallId)),
+      );
+    expect(carryingCallId?.map((message) => message.id)).toEqual([
+      't1::item-call',
+      't1::item-result',
+    ]);
+
+    const { items } = state.projectTranscript('t1');
+    const renderKeys = items.map((item) => (item.kind === 'message' ? item.renderKey : item.id));
+    expect(new Set(renderKeys).size).toBe(renderKeys.length);
+    expect(
+      items.filter((item) => item.kind === 'toolInvocation' && item.id === toolCallId),
+    ).toHaveLength(1);
+
+    // The completed output still belongs to the one row that survives.
+    const [invocation] = items.flatMap((item) =>
+      item.kind === 'toolInvocation' && item.id === toolCallId ? [item.invocation] : [],
+    );
+    expect(invocation.title).toContain('node -e');
+    expect(invocation.status).toBe('completed');
+    expect(invocation.terminals.map((terminal) => terminal.output)).toEqual(['harness ok 42\n']);
+    expect(state.findDuplicateIds('t1')).toEqual([]);
+  });
+
+  it('keeps one row when narration splits a tool call from its result', () => {
+    // Regression: display items only deduplicated tool calls inside a contiguous
+    // run of tool messages, so an assistant message between the call and its
+    // result produced two rows keyed by the same tool call id.
+    const state = new TestableThreadState();
+    const toolCallId = 'call_01_split';
+    state.apply('t1', 'run-1', {
+      type: EventType.TOOL_CALL_START,
+      toolCallId,
+      toolCallName: 'bash',
+    } as never);
+    state.applySequence(
+      sequence('t1', 'run-1')
+        .textMessage('Running the snippet now.', { messageId: 't1::narration' })
+        .build(),
+    );
+    state.apply('t1', 'run-1', {
+      type: EventType.TOOL_CALL_RESULT,
+      toolCallId,
+      messageId: 't1::result',
+      content: 'harness ok 42\n',
+    } as never);
+
+    const { items } = state.projectTranscript('t1');
+    const renderKeys = items.map((item) => (item.kind === 'message' ? item.renderKey : item.id));
+    expect(new Set(renderKeys).size).toBe(renderKeys.length);
+
+    const invocations = items.flatMap((item) =>
+      item.kind === 'toolInvocation' && item.id === toolCallId ? [item.invocation] : [],
+    );
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0].textLines.join('\n')).toContain('harness ok 42');
   });
 });
 

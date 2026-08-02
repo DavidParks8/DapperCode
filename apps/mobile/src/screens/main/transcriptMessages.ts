@@ -76,6 +76,11 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   const items: TranscriptDisplayItem[] = [];
   let toolBuffer: ChatMessage[] = [];
   let userMessageOrdinal = 0;
+  // One tool call is one row, even when other content splits its messages apart,
+  // so the row it already produced is refolded instead of a second row appearing
+  // under the same identity.
+  const flushedToolMessages: ChatMessage[] = [];
+  const itemIndexByInvocationId = new Map<string, number>();
 
   const flushToolBuffer = () => {
     if (toolBuffer.length === 0) {
@@ -86,6 +91,7 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
     const buffered = [...toolBuffer];
     toolBuffer = [];
     if (invocations.length === 0) {
+      flushedToolMessages.push(...buffered);
       return;
     }
     if (isComputerUseTrace(invocations)) {
@@ -94,11 +100,31 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
         id: `tool-group-${buffered[0]?.id ?? 'start'}-${buffered[buffered.length - 1]?.id ?? 'end'}`,
         invocations,
       });
+      flushedToolMessages.push(...buffered);
       return;
     }
+    const revisitsEarlierInvocation = invocations.some((invocation) =>
+      itemIndexByInvocationId.has(invocation.id),
+    );
+    const refolded = revisitsEarlierInvocation
+      ? new Map(
+          buildToolInvocations([...flushedToolMessages, ...buffered]).map((invocation) => [
+            invocation.id,
+            invocation,
+          ]),
+        )
+      : null;
     for (const invocation of invocations) {
-      items.push({ kind: 'toolInvocation', id: invocation.id, invocation });
+      const merged = refolded?.get(invocation.id) ?? invocation;
+      const existingIndex = itemIndexByInvocationId.get(invocation.id);
+      if (existingIndex === undefined) {
+        itemIndexByInvocationId.set(invocation.id, items.length);
+        items.push({ kind: 'toolInvocation', id: merged.id, invocation: merged });
+        continue;
+      }
+      items[existingIndex] = { kind: 'toolInvocation', id: merged.id, invocation: merged };
     }
+    flushedToolMessages.push(...buffered);
   };
 
   for (const message of messages) {

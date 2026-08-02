@@ -279,6 +279,40 @@ describe('buildTranscriptDisplayItems', () => {
     ]);
   });
 
+  it('folds one tool call split by other content into a single row', () => {
+    // Regression: two rows carried the same tool call id as their React key, so
+    // the tool rendered twice and React reported duplicate children.
+    const callId = 'call_01_v9wRdhhSk6HQ9ws94PUB9680';
+    const messages: ChatMessage[] = [
+      message('u1', 'user', 'Run the snippet'),
+      {
+        id: 'call-message',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-03-19T00:00:00.000Z',
+        toolCalls: [{ id: callId, type: 'function', function: { name: 'bash', arguments: '{}' } }],
+      },
+      message('a1', 'assistant', 'Running it now.'),
+      {
+        id: 'result-message',
+        role: 'tool',
+        toolCallId: callId,
+        content: '• Ran `node -e ...`\n  harness ok 42',
+        createdAt: '2026-03-19T00:00:00.000Z',
+      },
+    ];
+
+    const items = buildTranscriptDisplayItems(messages);
+    const keys = items.map((item) => (item.kind === 'message' ? item.renderKey : item.id));
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toEqual(['user-1-Run the snippet', callId, 'a1']);
+
+    const [invocation] = items.flatMap((item) =>
+      item.kind === 'toolInvocation' ? [item.invocation] : [],
+    );
+    expect(invocation.textLines.join('\n')).toContain('harness ok 42');
+  });
+
   it('keeps a run of computer-use tools grouped into one trace', () => {
     const messages = [
       message('u1', 'user', 'Drive the app'),

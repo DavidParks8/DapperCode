@@ -478,3 +478,95 @@ export function subAgentWithToolPayloads(
       .build(),
   ];
 }
+
+/**
+ * The bridge sequence behind a tool that rendered twice: a bash call streams its
+ * structured output, the agent narrates the result, then a `messages` snapshot
+ * re-states the whole turn under the agent's own message ids, and the tool's
+ * final content lands after it.
+ */
+export function toolContentAfterRenamingSnapshot(
+  threadId = 'thread',
+  toolCallId = 'call_01_v9wRdhhSk6HQ9ws94PUB9680',
+): { events: EventSequenceEntry[]; toolCallId: string } {
+  const runId = `${threadId}::run-1`;
+  const command = `node -e "console.log('harness ok', 6 * 7)"`;
+  const toolContent = (revision: string, output: string): EventSequenceEntry => ({
+    threadId,
+    runId,
+    event: {
+      type: EventType.CUSTOM,
+      name: 'dappercode.dev/tool-content',
+      value: {
+        toolCallId,
+        revision,
+        content: [{ type: 'terminal', terminalId: 'term-1', output }],
+        locations: [],
+      },
+    } as unknown as AGUIEvent,
+  });
+  const toolMeta = (status: string): EventSequenceEntry => ({
+    threadId,
+    runId,
+    event: {
+      type: EventType.CUSTOM,
+      name: 'dappercode.dev/tool-meta',
+      value: { toolCallId, kind: 'execute', status, title: command },
+    } as unknown as AGUIEvent,
+  });
+
+  return {
+    toolCallId,
+    events: [
+      ...sequence(threadId, runId)
+        .runStarted()
+        .toolCall('bash', JSON.stringify({ command }), { toolCallId })
+        .build(),
+      toolMeta('in_progress'),
+      toolContent('r1', 'harness ok '),
+      ...sequence(threadId, runId)
+        .textMessage('Harness is functioning.', { messageId: `${threadId}::summary` })
+        .build(),
+      {
+        threadId,
+        runId,
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [
+            {
+              id: `${threadId}::item-call`,
+              role: 'assistant',
+              content: '',
+              toolCalls: [
+                {
+                  id: toolCallId,
+                  type: 'function',
+                  function: { name: 'bash', arguments: JSON.stringify({ command }) },
+                },
+              ],
+            },
+            {
+              id: `${threadId}::item-result`,
+              role: 'tool',
+              toolCallId,
+              content: '[terminal: term-1]\nharness ok ',
+            },
+            {
+              id: `${threadId}::item-summary`,
+              role: 'assistant',
+              content: 'Harness is functioning.',
+            },
+            {
+              id: `${threadId}::item-tool-meta`,
+              role: 'activity',
+              activityType: 'dappercode.tool',
+              content: { toolCallId, kind: 'execute', status: 'in_progress', title: command },
+            },
+          ],
+        } as unknown as AGUIEvent,
+      },
+      toolContent('r2', 'harness ok 42\n'),
+      toolMeta('completed'),
+    ],
+  };
+}
