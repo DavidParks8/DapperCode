@@ -35,14 +35,18 @@ function createStore(initial: Partial<AppStateData['push']> = {}) {
         const registration = data.push.registrations.find(
           (entry) => entry.profileId === action.profileId,
         );
-        if (registration) registration.token = action.token;
+        if (registration) {
+          registration.token = action.token;
+        }
         break;
       }
       case 'push/unregistered': {
         const registration = data.push.registrations.find(
           (entry) => entry.profileId === action.profileId,
         );
-        if (registration) registration.token = null;
+        if (registration) {
+          registration.token = null;
+        }
         break;
       }
     }

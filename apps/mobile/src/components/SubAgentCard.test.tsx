@@ -25,7 +25,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -35,7 +37,9 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 
 function findByAccessibilityLabel(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll((node) => node.props.accessibilityLabel === label)[0];
-  if (!match) throw new Error(`Missing element with accessibilityLabel: ${label}`);
+  if (!match) {
+    throw new Error(`Missing element with accessibilityLabel: ${label}`);
+  }
   return match;
 }
 
@@ -104,7 +108,9 @@ describe('SubAgentCard', () => {
     const card = queryRoot(tree).findAll(
       (node) => node.props.testID === 'sub-1-subagent-card-0',
     )[0];
-    if (!card) throw new Error('Expected sub-agent card');
+    if (!card) {
+      throw new Error('Expected sub-agent card');
+    }
     const style = StyleSheet.flatten(card.props.style as never) as {
       backgroundColor?: string;
       borderColor?: string;

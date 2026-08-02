@@ -43,7 +43,13 @@ export function useMainScreenPanelCollapseCoordinator(
         [threadId]: true,
       };
     });
-  }, [keyboardVisible, planPanelCollapsed, selectedChat?.id, workflowCardMode]);
+  }, [
+    keyboardVisible,
+    planPanelCollapsed,
+    selectedChat?.id,
+    setPlanPanelCollapsedByThread,
+    workflowCardMode,
+  ]);
 
   const toggleSelectedPlanPanel = useCallback(() => {
     if (!selectedChat?.id || workflowCardMode === null) {
@@ -54,7 +60,7 @@ export function useMainScreenPanelCollapseCoordinator(
       ...prev,
       [selectedChat.id]: !(prev[selectedChat.id] ?? false),
     }));
-  }, [selectedChat?.id, workflowCardMode]);
+  }, [selectedChat?.id, setPlanPanelCollapsedByThread, workflowCardMode]);
 
   return {
     toggleSelectedPlanPanel,

@@ -58,7 +58,9 @@ function render(value: ToolInvocation, bridgeUrl: string | null = null): Queryab
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Expected a rendered row');
+  if (!tree) {
+    throw new Error('Expected a rendered row');
+  }
   return tree as QueryableRenderer;
 }
 
@@ -66,7 +68,9 @@ function expand(tree: QueryableRenderer, title: string) {
   const control = tree.root.findAll(
     (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === title,
   )[0];
-  if (!control) throw new Error('Missing invocation row');
+  if (!control) {
+    throw new Error('Missing invocation row');
+  }
   act(() => {
     (control.props.onPress as () => void)();
   });
@@ -92,8 +96,7 @@ describe('ToolInvocationRow', () => {
     const tree = render(invocation({ id: 'tool-hitslop', textLines: ['out'] }));
     const row = tree.root.findAll((node) => typeof node.props.onPress === 'function')[0];
     const hitSlop = row.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
 
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);

@@ -68,12 +68,16 @@ export function useMainScreenApprovalAndUserInputResolution(
   const applySynchronizedChat = useCallback(
     (latest: Chat, assessment: ChatSyncAssessment) => {
       const targetChatId = latest.id;
-      if (selectedChatIdRef.current !== targetChatId) return;
+      if (selectedChatIdRef.current !== targetChatId) {
+        return;
+      }
       const hasPendingApproval = Boolean(pendingApproval?.requestId);
       const hasPendingUserInput = Boolean(pendingUserInputRequest?.requestId);
       const resolvedLatest = mergeChatWithPendingOptimisticMessages(latest);
       setSelectedChat((prev) => {
-        if (!prev || prev.id !== resolvedLatest.id) return resolvedLatest;
+        if (!prev || prev.id !== resolvedLatest.id) {
+          return resolvedLatest;
+        }
         return resolveEquivalentChat(prev, resolvedLatest);
       });
       const shouldShowRunning = assessment.shouldShowRunning;
@@ -136,7 +140,17 @@ export function useMainScreenApprovalAndUserInputResolution(
       pendingUserInputRequest?.requestId,
       bumpRunWatchdog,
       clearRunWatchdog,
+      hadCommandRef,
       mergeChatWithPendingOptimisticMessages,
+      reasoningBufferRef,
+      reasoningSummaryRef,
+      selectedChatIdRef,
+      setActiveCommands,
+      setActiveTurnId,
+      setActivity,
+      setSelectedChat,
+      setStoppingTurn,
+      setStreamingText,
     ],
   );
 
@@ -166,16 +180,19 @@ export function useMainScreenApprovalAndUserInputResolution(
         throw err;
       }
     },
-    [approvalController, cacheThreadPendingApproval, selectedChatId],
+    [approvalController, cacheThreadPendingApproval, selectedChatId, setError, setPendingApproval],
   );
 
-  const setUserInputDraft = useCallback((questionId: string, value: string) => {
-    setUserInputDrafts((prev) => ({
-      ...prev,
-      [questionId]: value,
-    }));
-    setUserInputError(null);
-  }, []);
+  const setUserInputDraft = useCallback(
+    (questionId: string, value: string) => {
+      setUserInputDrafts((prev) => ({
+        ...prev,
+        [questionId]: value,
+      }));
+      setUserInputError(null);
+    },
+    [setUserInputDrafts, setUserInputError],
+  );
 
   const submitUserInputRequest = useCallback(async () => {
     if (!pendingUserInputRequest || resolvingUserInput) {
@@ -218,6 +235,11 @@ export function useMainScreenApprovalAndUserInputResolution(
     cacheThreadPendingUserInputRequest,
     pendingUserInputRequest,
     resolvingUserInput,
+    setActivity,
+    setPendingUserInputRequest,
+    setResolvingUserInput,
+    setUserInputDrafts,
+    setUserInputError,
     userInputDrafts,
   ]);
 

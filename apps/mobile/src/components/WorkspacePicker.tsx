@@ -9,27 +9,126 @@ import { WorkspacePickerView } from './WorkspacePickerView';
 import { createWorkspacePickerStyles } from './workspacePickerStyles';
 import type { WorkspacePickerProps } from './workspacePickerTypes';
 
-export function WorkspacePicker({
-  selectedPath = null,
-  bridgeRoot = null,
-  recentWorkspaces,
-  favoriteWorkspacePaths = [],
-  currentPath = null,
-  parentPath = null,
-  entries,
-  loadingEntries = false,
-  error = null,
-  refreshError = null,
-  truncationMessage = null,
-  onBrowsePath,
-  onSelectPath,
-  onToggleFavorite,
-  actionLabel = null,
-  actionDescription = null,
-  actionDisabled = false,
-  onActionPress,
-  onClose,
-}: WorkspacePickerProps) {
+function resolveWorkspacePickerFooterInfo(
+  pendingSelectionPath: string | null,
+  currentPath: string | null,
+  bridgeRoot: string | null,
+  favoritePathSet: Set<string>,
+): {
+  footerPath: string | null;
+  footerTitle: string;
+  currentFolderPath: string | null;
+  currentFolderTitle: string;
+  footerSubtitle: string;
+  footerIsFavorite: boolean;
+} {
+  const footerPath = pendingSelectionPath ?? currentPath ?? bridgeRoot ?? null;
+  const currentFolderPath = currentPath ?? bridgeRoot ?? null;
+  return {
+    footerPath,
+    footerTitle: footerPath ? toPathBasename(footerPath) : 'Default workspace',
+    currentFolderPath,
+    currentFolderTitle: currentFolderPath ? toPathBasename(currentFolderPath) : 'Loading',
+    footerSubtitle: footerPath ?? 'Bridge default workspace',
+    footerIsFavorite: footerPath ? favoritePathSet.has(footerPath) : false,
+  };
+}
+
+function createToggleFavoriteHandler(
+  onToggleFavorite: WorkspacePickerProps['onToggleFavorite'],
+): ((path: string | null) => void) | undefined {
+  if (!onToggleFavorite) {
+    return undefined;
+  }
+  return (path: string | null) => {
+    void feedback.selection();
+    onToggleFavorite(path);
+  };
+}
+
+function createActionPressHandler(
+  onActionPress: WorkspacePickerProps['onActionPress'],
+  footerPath: string | null,
+): (() => void) | undefined {
+  if (!onActionPress) {
+    return undefined;
+  }
+  return () => {
+    void feedback.selection();
+    onActionPress(footerPath);
+  };
+}
+
+interface NormalizedWorkspacePickerProps {
+  selectedPath: string | null;
+  bridgeRoot: string | null;
+  recentWorkspaces: WorkspacePickerProps['recentWorkspaces'];
+  favoriteWorkspacePaths: string[];
+  currentPath: string | null;
+  parentPath: string | null;
+  entries: WorkspacePickerProps['entries'];
+  loadingEntries: boolean;
+  error: string | null;
+  refreshError: string | null;
+  truncationMessage: string | null;
+  onBrowsePath: WorkspacePickerProps['onBrowsePath'];
+  onSelectPath: WorkspacePickerProps['onSelectPath'];
+  onToggleFavorite: WorkspacePickerProps['onToggleFavorite'];
+  actionLabel: string | null;
+  actionDescription: string | null;
+  actionDisabled: boolean;
+  onActionPress: WorkspacePickerProps['onActionPress'];
+  onClose: () => void;
+}
+
+function normalizeWorkspacePickerProps(
+  props: WorkspacePickerProps,
+): NormalizedWorkspacePickerProps {
+  return {
+    selectedPath: props.selectedPath ?? null,
+    bridgeRoot: props.bridgeRoot ?? null,
+    recentWorkspaces: props.recentWorkspaces,
+    favoriteWorkspacePaths: props.favoriteWorkspacePaths ?? [],
+    currentPath: props.currentPath ?? null,
+    parentPath: props.parentPath ?? null,
+    entries: props.entries,
+    loadingEntries: props.loadingEntries ?? false,
+    error: props.error ?? null,
+    refreshError: props.refreshError ?? null,
+    truncationMessage: props.truncationMessage ?? null,
+    onBrowsePath: props.onBrowsePath,
+    onSelectPath: props.onSelectPath,
+    onToggleFavorite: props.onToggleFavorite,
+    actionLabel: props.actionLabel ?? null,
+    actionDescription: props.actionDescription ?? null,
+    actionDisabled: props.actionDisabled ?? false,
+    onActionPress: props.onActionPress,
+    onClose: props.onClose,
+  };
+}
+
+export function WorkspacePicker(props: WorkspacePickerProps) {
+  const {
+    selectedPath,
+    bridgeRoot,
+    recentWorkspaces,
+    favoriteWorkspacePaths,
+    currentPath,
+    parentPath,
+    entries,
+    loadingEntries,
+    error,
+    refreshError,
+    truncationMessage,
+    onBrowsePath,
+    onSelectPath,
+    onToggleFavorite,
+    actionLabel,
+    actionDescription,
+    actionDisabled,
+    onActionPress,
+    onClose,
+  } = normalizeWorkspacePickerProps(props);
   const theme = useAppTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingSelectionPath, setPendingSelectionPath] = useState<string | null>(
@@ -39,15 +138,21 @@ export function WorkspacePicker({
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
 
   useEffect(() => {
-    if (pendingSelectionPath !== null) return;
+    if (pendingSelectionPath !== null) {
+      return;
+    }
     const fallbackPath = selectedPath ?? currentPath ?? bridgeRoot;
-    if (fallbackPath) setPendingSelectionPath(fallbackPath);
+    if (fallbackPath) {
+      setPendingSelectionPath(fallbackPath);
+    }
   }, [bridgeRoot, currentPath, pendingSelectionPath, selectedPath]);
 
   useEffect(() => {
     const previousSelectedPath = previousSelectedPathRef.current;
     previousSelectedPathRef.current = selectedPath;
-    if (previousSelectedPath === selectedPath) return;
+    if (previousSelectedPath === selectedPath) {
+      return;
+    }
     setPendingSelectionPath((current) =>
       current !== previousSelectedPath
         ? current
@@ -70,10 +175,19 @@ export function WorkspacePicker({
   const filteredEntries = entries.filter((entry) =>
     matchesSearch([entry.name, entry.path], normalizedSearch),
   );
-  const footerPath = pendingSelectionPath ?? currentPath ?? bridgeRoot ?? null;
-  const footerTitle = footerPath ? toPathBasename(footerPath) : 'Default workspace';
-  const currentFolderPath = currentPath ?? bridgeRoot ?? null;
-  const currentFolderTitle = currentFolderPath ? toPathBasename(currentFolderPath) : 'Loading';
+  const {
+    footerPath,
+    footerTitle,
+    currentFolderPath,
+    currentFolderTitle,
+    footerSubtitle,
+    footerIsFavorite,
+  } = resolveWorkspacePickerFooterInfo(
+    pendingSelectionPath,
+    currentPath,
+    bridgeRoot,
+    favoritePathSet,
+  );
   const screenFocusRef = useModalAccessibilityFocus<Text>(true);
   useAccessibilityAnnouncement(error ?? truncationMessage);
   useAccessibilityAnnouncement(refreshError);
@@ -95,19 +209,8 @@ export function WorkspacePicker({
     onSelectPath(path);
   };
 
-  const handleToggleFavorite = onToggleFavorite
-    ? (path: string | null) => {
-        void feedback.selection();
-        onToggleFavorite(path);
-      }
-    : undefined;
-
-  const handleActionPress = onActionPress
-    ? () => {
-        void feedback.selection();
-        onActionPress(footerPath);
-      }
-    : undefined;
+  const handleToggleFavorite = createToggleFavoriteHandler(onToggleFavorite);
+  const handleActionPress = createActionPressHandler(onActionPress, footerPath);
 
   return (
     <WorkspacePickerView
@@ -140,8 +243,8 @@ export function WorkspacePicker({
       truncationMessage={truncationMessage}
       footerPath={footerPath}
       footerTitle={footerTitle}
-      footerSubtitle={footerPath ?? 'Bridge default workspace'}
-      footerIsFavorite={footerPath ? favoritePathSet.has(footerPath) : false}
+      footerSubtitle={footerSubtitle}
+      footerIsFavorite={footerIsFavorite}
     />
   );
 }

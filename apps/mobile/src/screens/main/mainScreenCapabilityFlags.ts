@@ -10,7 +10,6 @@ import {
   userInputErrorAtom,
 } from '../../state/mainScreen/turn';
 import {
-  defaultServiceTierAtom,
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedServiceTierAtom,
@@ -75,6 +74,8 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     stopRequestedRef,
     stopSystemMessageLoggedRef,
   } = context;
+  // The controller object is rebuilt every render; only its actions are referentially stable.
+  const { clear: clearAttachments } = attachmentController;
   const setError = useSetAtom(errorAtom);
   const setPendingApproval = useSetAtom(pendingApprovalAtom);
   const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
@@ -84,7 +85,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const setActivePlan = useSetAtom(activePlanAtom);
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
-  const defaultServiceTier = useAtomValue(defaultServiceTierAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
@@ -142,7 +142,7 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       setResolvingUserInput(false);
       setActivePlan(null);
       setStreamingText(null);
-      attachmentController.clear();
+      clearAttachments();
       setActiveTurnId(null);
       setStoppingTurn(false);
       setAgentThreadMenuVisible(false);
@@ -162,11 +162,47 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       clearRunWatchdog();
     },
     [
+      agentSettings,
+      agentThreadsRefreshTimerRef,
+      agentThreadsRequestRef,
+      clearAttachments,
       clearExternalStatusFullSync,
       clearRunWatchdog,
-      defaultServiceTier,
-      agentSettings,
+      hadCommandRef,
+      loadChatRequestRef,
+      openingChatStartedAtRef,
+      reasoningSummaryRef,
       selectedNewAgentId,
+      setActiveCommands,
+      setActivePlan,
+      setActiveTurnId,
+      setActivity,
+      setAgentRootThreadId,
+      setAgentThreadMenuVisible,
+      setCollaborationModeMenuVisible,
+      setEffortModalVisible,
+      setError,
+      setLoadingAgentThreads,
+      setModelModalVisible,
+      setOpeningChatId,
+      setPendingAgentId,
+      setPendingApproval,
+      setPendingUserInputRequest,
+      setQueueActionItemId,
+      setQueueActionKind,
+      setRelatedAgentThreads,
+      setResolvingUserInput,
+      setSelectedAcpModeId,
+      setSelectedChat,
+      setSelectedChatId,
+      setSelectedCollaborationMode,
+      setSelectedServiceTier,
+      setStoppingTurn,
+      setStreamingText,
+      setUserInputDrafts,
+      setUserInputError,
+      stopRequestedRef,
+      stopSystemMessageLoggedRef,
     ],
   );
 
@@ -179,20 +215,26 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   );
 
   const openTitleEditor = useCallback(() => {
-    if (!selectedChat) return;
+    if (!selectedChat) {
+      return;
+    }
     setTitleDraft(selectedChat.title);
     setTitleModalVisible(true);
     setError(null);
-  }, [selectedChat]);
+  }, [selectedChat, setError, setTitleDraft, setTitleModalVisible]);
 
   const closeTitleEditor = useCallback(() => {
-    if (!titleSaving) setTitleModalVisible(false);
-  }, [titleSaving]);
+    if (!titleSaving) {
+      setTitleModalVisible(false);
+    }
+  }, [setTitleModalVisible, titleSaving]);
 
   const saveTitle = useCallback(async () => {
     const chat = selectedChatRef.current;
     const title = titleDraft.trim();
-    if (!chat || !title || titleSaving) return;
+    if (!chat || !title || titleSaving) {
+      return;
+    }
     try {
       setTitleSaving(true);
       const updated = await api.renameChat(chat.id, title);
@@ -205,7 +247,16 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     } finally {
       setTitleSaving(false);
     }
-  }, [api, titleDraft, titleSaving]);
+  }, [
+    api,
+    selectedChatRef,
+    setError,
+    setSelectedChat,
+    setTitleModalVisible,
+    setTitleSaving,
+    titleDraft,
+    titleSaving,
+  ]);
 
   const refreshWorkspaceRoots = useCallback(async () => {
     setLoadingWorkspaceRoots(true);
@@ -221,7 +272,13 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     } finally {
       setLoadingWorkspaceRoots(false);
     }
-  }, [api]);
+  }, [
+    api,
+    setLoadingWorkspaceRoots,
+    setWorkspaceBridgeRoot,
+    setWorkspaceBrowseError,
+    setWorkspaceRoots,
+  ]);
 
   return {
     resetComposerState,

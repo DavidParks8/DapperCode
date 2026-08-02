@@ -26,16 +26,16 @@ function renderRow(backgroundColor: string): ReactTestRenderer {
       </AppThemeProvider>,
     );
   });
-  if (!tree) throw new Error('Expected scrollable row');
+  if (!tree) {
+    throw new Error('Expected scrollable row');
+  }
   return tree;
 }
 
 function gradients(root: Queryable): Queryable[] {
   return root.findAll(
     (node) =>
-      Array.isArray(node.props.colors) &&
-      node.props.pointerEvents === 'none' &&
-      node.type === View,
+      Array.isArray(node.props.colors) && node.props.pointerEvents === 'none' && node.type === View,
   );
 }
 
@@ -45,7 +45,9 @@ describe('ScrollableRowText', () => {
     const tree = renderRow(backgroundColor);
     const root = tree.root as Queryable;
     const scrollView = root.findAll((node) => node.type === ScrollView)[0];
-    if (!scrollView) throw new Error('Expected horizontal scroll view');
+    if (!scrollView) {
+      throw new Error('Expected horizontal scroll view');
+    }
 
     act(() => {
       (scrollView.props.onLayout as (event: unknown) => void)({

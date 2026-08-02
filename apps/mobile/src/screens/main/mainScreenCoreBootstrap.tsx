@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   creatingAtom,
   errorAtom,
@@ -39,6 +39,59 @@ import {
 import type { MainScreenBaseContext } from './useMainScreenBaseContext';
 
 export type MainScreenCoreBootstrapContext = MainScreenBaseContext;
+
+function resolveInitialPendingSnapshot(
+  pendingOpenChatId: string | null,
+  pendingOpenChatSnapshot: MainScreenCoreBootstrapContext['pendingOpenChatSnapshot'],
+) {
+  if (!pendingOpenChatId || pendingOpenChatSnapshot?.id !== pendingOpenChatId) {
+    return null;
+  }
+  return pendingOpenChatSnapshot.messages.length > 0 ? pendingOpenChatSnapshot : null;
+}
+
+function seedBootstrapAtoms(params: {
+  agentSettings: MainScreenCoreBootstrapContext['agentSettings'];
+  didSeedRef: MutableRefObject<boolean>;
+  initialPendingSnapshot: ReturnType<typeof resolveInitialPendingSnapshot>;
+  pendingOpenChatId: string | null;
+  preferredAgentId: MainScreenCoreBootstrapContext['preferredAgentId'];
+  store: ReturnType<typeof useStore>;
+}) {
+  const {
+    agentSettings,
+    didSeedRef,
+    initialPendingSnapshot,
+    pendingOpenChatId,
+    preferredAgentId,
+    store,
+  } = params;
+
+  if (didSeedRef.current) {
+    return;
+  }
+
+  didSeedRef.current = true;
+  if (initialPendingSnapshot) {
+    store.set(selectedChatAtom, initialPendingSnapshot);
+    store.set(
+      transcriptContinuationStateAtom,
+      getTranscriptContinuationState(initialPendingSnapshot),
+    );
+  }
+  store.set(selectedChatIdAtom, initialPendingSnapshot?.id ?? pendingOpenChatId ?? null);
+  store.set(openingChatIdAtom, initialPendingSnapshot ? null : (pendingOpenChatId ?? null));
+  store.set(pendingAgentIdAtom, preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null);
+}
+
+function resolveStreamingTextUpdate(
+  previous: string | null,
+  next: string | null | ((previous: string | null) => string | null),
+): string | null {
+  return typeof next === 'function'
+    ? (next as (previous: string | null) => string | null)(previous)
+    : next;
+}
 
 export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapContext) {
   const {
@@ -87,28 +140,21 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     () => new TranscriptContinuationController(api),
     [api],
   );
-  const initialPendingSnapshot =
-    pendingOpenChatId &&
-    pendingOpenChatSnapshot?.id === pendingOpenChatId &&
-    pendingOpenChatSnapshot.messages.length > 0
-      ? pendingOpenChatSnapshot
-      : null;
+  const initialPendingSnapshot = resolveInitialPendingSnapshot(
+    pendingOpenChatId,
+    pendingOpenChatSnapshot,
+  );
   // Seeds the freshly reset screen atoms with the snapshot this mount was opened with. Guarded by a
   // ref rather than useMemo so a discarded memo cache can never re-seed over live state.
   const didSeedRef = useRef(false);
-  if (!didSeedRef.current) {
-    didSeedRef.current = true;
-    if (initialPendingSnapshot) {
-      store.set(selectedChatAtom, initialPendingSnapshot);
-      store.set(
-        transcriptContinuationStateAtom,
-        getTranscriptContinuationState(initialPendingSnapshot),
-      );
-    }
-    store.set(selectedChatIdAtom, initialPendingSnapshot?.id ?? pendingOpenChatId ?? null);
-    store.set(openingChatIdAtom, initialPendingSnapshot ? null : (pendingOpenChatId ?? null));
-    store.set(pendingAgentIdAtom, preferredAgentId ?? Object.keys(agentSettings ?? {})[0] ?? null);
-  }
+  seedBootstrapAtoms({
+    agentSettings,
+    didSeedRef,
+    initialPendingSnapshot,
+    pendingOpenChatId,
+    preferredAgentId,
+    store,
+  });
   const selectedChat = useAtomValue(selectedChatAtom);
   const setSelectedChat = useSetAtom(selectedChatAtom);
   const transcriptContinuationState = useAtomValue(transcriptContinuationStateAtom);
@@ -133,11 +179,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(
     (next: string | null | ((previous: string | null) => string | null)) => {
-      const resolved =
-        typeof next === 'function'
-          ? (next as (previous: string | null) => string | null)(streamingTextRef.current)
-          : next;
-      streamingTextRef.current = resolved;
+      streamingTextRef.current = resolveStreamingTextUpdate(streamingTextRef.current, next);
     },
     [],
   );
@@ -146,9 +188,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const workspaceBrowseRequestRef = useRef(0);
   const pendingAgentId = useAtomValue(pendingAgentIdAtom);
   const setPendingAgentId = useSetAtom(pendingAgentIdAtom);
-  const sendingRef = screenRefView(store, sendingAtom);
-  const creatingRef = screenRefView(store, creatingAtom);
-  const stoppingTurnRef = screenRefView(store, stoppingTurnAtom);
+  // Memoized on the store so consumers can list these live views as hook dependencies without
+  // invalidating every memoized callback on each render.
+  const sendingRef = useMemo(() => screenRefView(store, sendingAtom), [store]);
+  const creatingRef = useMemo(() => screenRefView(store, creatingAtom), [store]);
+  const stoppingTurnRef = useMemo(() => screenRefView(store, stoppingTurnAtom), [store]);
   const heldActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const genericRunningActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundAgentRefreshHandleRef = useRef<IdleTaskHandle | null>(null);

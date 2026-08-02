@@ -18,6 +18,48 @@ import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
 // growing its visible chrome.
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
 
+function ToolInvocationTitle({
+  invocation,
+  expanded,
+  collapsedTitle,
+  theme,
+  styles,
+}: {
+  invocation: ToolInvocation;
+  expanded: boolean;
+  collapsedTitle: string;
+  theme: ReturnType<typeof useAppTheme>;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (invocation.monospaceTitle && !expanded) {
+    return (
+      <ScrollableRowText
+        style={[
+          styles.toolRowTitle,
+          styles.toolRowTitleMono,
+          invocation.isError && styles.toolRowTitleError,
+        ]}
+        backgroundColor={theme.colors.bgMain}
+        numberOfLines={1}
+        testID="tool-command-scroll"
+      >
+        {collapsedTitle}
+      </ScrollableRowText>
+    );
+  }
+  return (
+    <Text
+      style={[
+        styles.toolRowTitle,
+        invocation.monospaceTitle && styles.toolRowTitleMono,
+        invocation.isError && styles.toolRowTitleError,
+      ]}
+      numberOfLines={expanded ? 3 : 1}
+    >
+      {expanded ? invocation.title : collapsedTitle}
+    </Text>
+  );
+}
 
 export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   invocation,
@@ -69,31 +111,13 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
             color={invocation.isError ? theme.colors.statusError : theme.colors.textMuted}
           />
         </View>
-        {invocation.monospaceTitle && !expanded ? (
-          <ScrollableRowText
-            style={[
-              styles.toolRowTitle,
-              styles.toolRowTitleMono,
-              invocation.isError && styles.toolRowTitleError,
-            ]}
-            backgroundColor={theme.colors.bgMain}
-            numberOfLines={1}
-            testID="tool-command-scroll"
-          >
-            {collapsedTitle}
-          </ScrollableRowText>
-        ) : (
-          <Text
-            style={[
-              styles.toolRowTitle,
-              invocation.monospaceTitle && styles.toolRowTitleMono,
-              invocation.isError && styles.toolRowTitleError,
-            ]}
-            numberOfLines={expanded ? 3 : 1}
-          >
-            {expanded ? invocation.title : collapsedTitle}
-          </Text>
-        )}
+        <ToolInvocationTitle
+          invocation={invocation}
+          expanded={expanded}
+          collapsedTitle={collapsedTitle}
+          theme={theme}
+          styles={styles}
+        />
         <View style={styles.toolRowTrailing}>
           <ToolStatusAffordance invocation={invocation} />
           {expandable ? (

@@ -43,15 +43,23 @@ export function useHuggedTextWidth(messageId: string) {
   const onTextLayout = useCallback(
     (event: NativeSyntheticEvent<TextLayoutEventData>) => {
       const lines = event.nativeEvent.lines;
-      if (!lines.length) return;
+      if (!lines.length) {
+        return;
+      }
       const widest = Math.ceil(Math.max(...lines.map((line) => line.width)));
-      if (!Number.isFinite(widest) || widest <= 0) return;
+      if (!Number.isFinite(widest) || widest <= 0) {
+        return;
+      }
       setMeasurement((previous) => {
         const current = previous?.key === cacheKey ? previous.width : measuredWidths.get(cacheKey);
         // Only grow: once the bubble is capped, re-measuring reports the capped
         // lines, and accepting those would shrink the bubble on every pass.
-        if (current !== undefined && current >= widest) return previous;
-        if (measuredWidths.size >= MEASUREMENT_CACHE_LIMIT) measuredWidths.clear();
+        if (current !== undefined && current >= widest) {
+          return previous;
+        }
+        if (measuredWidths.size >= MEASUREMENT_CACHE_LIMIT) {
+          measuredWidths.clear();
+        }
         measuredWidths.set(cacheKey, widest);
         return { key: cacheKey, width: widest };
       });
@@ -83,7 +91,7 @@ export function ChatMessageUserBubble({
       >
         <View testID="user-bubble-content" style={[styles.userBubbleContent, hugStyle]}>
           {blocks.map((block, index) => {
-            if (block.kind === 'image')
+            if (block.kind === 'image') {
               return (
                 <MarkdownImage
                   key={`${messageId}-image-${String(index)}`}
@@ -91,7 +99,8 @@ export function ChatMessageUserBubble({
                   accessibilityLabel={block.accessibilityLabel}
                 />
               );
-            if (block.kind === 'file')
+            }
+            if (block.kind === 'file') {
               return (
                 <View key={`${messageId}-file-${String(index)}`} style={styles.userFileChip}>
                   <Ionicons
@@ -105,6 +114,7 @@ export function ChatMessageUserBubble({
                   </Text>
                 </View>
               );
+            }
             return (
               <SelectableMessageText
                 key={`${messageId}-text-${String(index)}`}

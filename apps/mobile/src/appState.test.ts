@@ -163,13 +163,15 @@ describe('current appState production behavior', () => {
       },
     });
     expect(parsePersistedAppState(raw).push.registrations).toHaveLength(1);
-    for (const version of [1, 2, 3])
+    for (const version of [1, 2, 3]) {
       expect(
         parsePersistedAppState(JSON.stringify({ ...JSON.parse(raw), version })).bridgeProfiles
           .profiles,
       ).toHaveLength(1);
-    for (const rawValue of ['', '{}', '{bad', JSON.stringify({ version: 99 })])
+    }
+    for (const rawValue of ['', '{}', '{bad', JSON.stringify({ version: 99 })]) {
       expect(() => parsePersistedAppState(rawValue)).toThrow(AppStatePersistenceError);
+    }
   });
 
   it('imports legacy credentials and initializes current, legacy, and failed stores', async () => {

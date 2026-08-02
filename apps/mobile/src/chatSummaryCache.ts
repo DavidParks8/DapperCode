@@ -1,10 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
 import type { ChatSummary } from './api/types';
-import {
-  cloneChatSummaries,
-  cloneChatSummary,
-} from './api/clientChatCloneAndRetryInternals';
+import { cloneChatSummaries, cloneChatSummary } from './api/clientChatCloneAndRetryInternals';
 
 export const CHAT_SUMMARY_CACHE_VERSION = 1;
 export const CHAT_SUMMARY_CACHE_MAX_ENTRIES = 200;
@@ -431,7 +428,9 @@ function optionalString<K extends keyof ChatSummary>(
   source: Record<string, unknown>,
   key: K,
 ): Partial<Pick<ChatSummary, K>> {
-  return typeof source[key] === 'string' ? ({ [key]: source[key] } as Partial<Pick<ChatSummary, K>>) : {};
+  return typeof source[key] === 'string'
+    ? ({ [key]: source[key] } as Partial<Pick<ChatSummary, K>>)
+    : {};
 }
 
 function optionalNullableString<K extends keyof ChatSummary>(

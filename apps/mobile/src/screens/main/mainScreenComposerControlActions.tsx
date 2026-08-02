@@ -114,6 +114,12 @@ export function useMainScreenComposerControlActions(
       rememberChatModelPreference,
       saveChatModelPreferences,
       selectedChatId,
+      setEffortModalVisible,
+      setEffortPickerModelId,
+      setError,
+      setModelModalVisible,
+      setSelectedEffort,
+      setSelectedModelId,
     ],
   );
 
@@ -137,7 +143,18 @@ export function useMainScreenComposerControlActions(
       setAgentModalVisible(false);
       setError(null);
     },
-    [agentSettings, selectedChatId],
+    [
+      agentSettings,
+      selectedChatId,
+      setAgentModalVisible,
+      setError,
+      setPendingAgentId,
+      setSelectedAcpModeId,
+      setSelectedCollaborationMode,
+      setSelectedEffort,
+      setSelectedModelId,
+      setSelectedServiceTier,
+    ],
   );
 
   useEffect(() => {
@@ -156,7 +173,7 @@ export function useMainScreenComposerControlActions(
 
   const openCollaborationModeMenu = useCallback(() => {
     setCollaborationModeMenuVisible(true);
-  }, []);
+  }, [setCollaborationModeMenuVisible]);
 
   const toggleFastMode = useCallback(() => {
     if (!supportsFastMode) {
@@ -172,7 +189,14 @@ export function useMainScreenComposerControlActions(
       title: nextTitle,
       detail: selectedChatId ? 'Applies to the next message' : 'Applies to the next new chat',
     });
-  }, [activeServiceTier, selectedChatId, supportsFastMode]);
+  }, [
+    activeServiceTier,
+    selectedChatId,
+    setActivity,
+    setError,
+    setSelectedServiceTier,
+    supportsFastMode,
+  ]);
 
   const attachmentControlsDisabled = attachmentPickerBusy || uploadingAttachment;
 

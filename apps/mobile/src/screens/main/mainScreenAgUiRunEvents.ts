@@ -13,11 +13,24 @@ import {
   activityAtom,
   pendingPlanImplementationPromptsAtom,
 } from '../../state/mainScreen/composer';
-import { parseAgUiEventNotification, updateAgUiLiveAssistantMessages } from '../../api/agUi';
-import type { AgUiEventEnvelope } from '../../api/agUi';
-import type { RpcNotification } from '../../api/types';
+import { EventType } from '@ag-ui/core';
+
+import {
+  type AgUiEventEnvelope,
+  parseAgUiEventNotification,
+  updateAgUiLiveAssistantMessages,
+} from '../../api/agUi';
+import type { ChatMessage, RpcNotification } from '../../api/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from './mainScreenHelpers';
 import type { MainScreenWsEventRouterContext } from './mainScreenWsEventRouter';
+
+function resolveRunErrorMessage(envelope: AgUiEventEnvelope): string | undefined {
+  return envelope.event.type === EventType.RUN_ERROR ? envelope.event.message : undefined;
+}
+
+function resolveRunErrorCode(envelope: AgUiEventEnvelope): string {
+  return envelope.event.type === EventType.RUN_ERROR ? (envelope.event.code ?? '') : '';
+}
 
 export function processAgUiRunEvents(
   context: MainScreenWsEventRouterContext,
@@ -64,23 +77,24 @@ export function processAgUiRunEvents(
   );
 
   const agUiEnvelope = parseAgUiEventNotification(event);
-  if (agUiEnvelope) {
-    const agUiEvent = agUiEnvelope.event;
-    setLiveAssistantByThread((previous) => updateAgUiLiveAssistantMessages(previous, agUiEnvelope));
-    if (agUiEvent.type === 'CUSTOM' && agUiEvent.name === 'dappercode.dev/subagent') {
+  if (!agUiEnvelope) {
+    return;
+  }
+
+  setLiveAssistantByThread((previous) => updateAgUiLiveAssistantMessages(previous, agUiEnvelope));
+
+  const handlers: Partial<Record<AgUiEventEnvelope['event']['type'], () => void>> = {
+    CUSTOM: () => {
+      if (!isSubagentCustomEvent(agUiEnvelope)) {
+        return;
+      }
       scheduleAgentThreadsRefresh(agUiEnvelope.threadId);
-      if (agUiEnvelope.threadId === currentId) {
-        schedulePinnedScrollToBottom(true);
-      }
-      return;
-    }
-    if (agUiEvent.type === 'TEXT_MESSAGE_CONTENT') {
-      if (agUiEnvelope.threadId === currentId) {
-        schedulePinnedScrollToBottom(true);
-      }
-      return;
-    }
-    if (agUiEvent.type === 'RUN_STARTED') {
+      scrollCurrentThreadIntoView(agUiEnvelope);
+    },
+    TEXT_MESSAGE_CONTENT: () => {
+      scrollCurrentThreadIntoView(agUiEnvelope);
+    },
+    RUN_STARTED: () => {
       const sourceTurnId = agUiEnvelope.sourceTurnId ?? agUiEnvelope.runId;
       clearLiveReasoningMessage(agUiEnvelope.threadId);
       delete planItemTurnIdByThreadRef.current[agUiEnvelope.threadId];
@@ -95,95 +109,138 @@ export function processAgUiRunEvents(
         setActiveCommands([]);
         setActivity({ tone: 'running', title: 'Working' });
         bumpRunWatchdog();
-      } else {
-        cacheThreadTurnState(agUiEnvelope.threadId, {
-          activeTurnId: sourceTurnId,
-          runWatchdogUntil: Date.now() + RUN_WATCHDOG_MS,
-        });
-        cacheThreadActivity(agUiEnvelope.threadId, {
-          tone: 'running',
-          title: 'Working',
-        });
+        return;
       }
-      return;
+      cacheThreadTurnState(agUiEnvelope.threadId, {
+        activeTurnId: sourceTurnId,
+        runWatchdogUntil: Date.now() + RUN_WATCHDOG_MS,
+      });
+      cacheThreadActivity(agUiEnvelope.threadId, {
+        tone: 'running',
+        title: 'Working',
+      });
+    },
+    RUN_FINISHED: () => {
+      handleRunTerminalState(agUiEnvelope, false);
+    },
+    RUN_ERROR: () => {
+      handleRunTerminalState(agUiEnvelope, true);
+    },
+  };
+
+  function scrollCurrentThreadIntoView(envelope: AgUiEventEnvelope) {
+    if (envelope.threadId === currentId) {
+      schedulePinnedScrollToBottom(true);
     }
-    if (agUiEvent.type === 'RUN_FINISHED' || agUiEvent.type === 'RUN_ERROR') {
-      const failed = agUiEvent.type === 'RUN_ERROR';
-      const interruptedByUser =
-        failed &&
-        ['interrupted', 'cancelled', 'canceled', 'aborted'].includes(agUiEvent.code ?? '') &&
-        stopRequestedRef.current;
-      const planTurnId = planItemTurnIdByThreadRef.current[agUiEnvelope.threadId] ?? null;
-      delete planItemTurnIdByThreadRef.current[agUiEnvelope.threadId];
-      clearLiveReasoningMessage(agUiEnvelope.threadId);
-      delete threadReasoningBuffersRef.current[agUiEnvelope.threadId];
-      const terminalActivity: ActivityState = failed
-        ? interruptedByUser
-          ? { tone: 'complete', title: 'Turn stopped' }
-          : { tone: 'error', title: 'Turn failed', detail: agUiEvent.message }
-        : { tone: 'complete', title: 'Turn completed' };
-      upsertThreadRuntimeSnapshot(agUiEnvelope.threadId, () => ({
-        activity: terminalActivity,
-        activeCommands: [],
-        streamingText: null,
-        pendingUserInputRequest: null,
-        activeTurnId: null,
-        runWatchdogUntil: 0,
-      }));
-      bumpAgentRuntimeRevision();
-      if (agUiEnvelope.threadId === currentId) {
-        clearRunWatchdog();
-        setActiveCommands([]);
-        setStreamingText(null);
-        setPendingUserInputRequest(null);
-        setUserInputDrafts({});
-        setUserInputError(null);
-        setResolvingUserInput(false);
-        setActiveTurnId(null);
-        setStoppingTurn(false);
-        stopRequestedRef.current = false;
-        hadCommandRef.current = false;
-        reasoningSummaryRef.current = {};
-        reasoningBufferRef.current = '';
-        setError(failed && !interruptedByUser ? agUiEvent.message : null);
-        if (interruptedByUser) {
-          appendStopSystemMessageIfNeeded();
-        }
-        setActivity(terminalActivity);
-        const terminalStatusAt = new Date().toISOString();
-        setSelectedChat((previous) =>
-          previous?.id === agUiEnvelope.threadId
-            ? {
-                ...previous,
-                status: failed && !interruptedByUser ? 'error' : 'complete',
-                updatedAt: terminalStatusAt,
-                statusUpdatedAt: terminalStatusAt,
-                lastError: failed && !interruptedByUser ? agUiEvent.message : undefined,
-                messages: previous.messages.map((message) =>
-                  message.role === 'reasoning' && message.pending === true
-                    ? { ...message, pending: false }
-                    : message,
-                ),
-              }
-            : previous,
-        );
-        if (!failed && planTurnId) {
-          setPendingPlanImplementationPrompts((previous) => ({
-            ...previous,
-            [agUiEnvelope.threadId]: {
-              threadId: agUiEnvelope.threadId,
-              turnId: planTurnId,
-            },
-          }));
-        } else {
-          clearPendingPlanImplementationPrompt(agUiEnvelope.threadId);
-        }
-        loadChat(agUiEnvelope.threadId).catch(() => {});
-      }
-      return;
-    }
-    return;
   }
+
+  function handleRunTerminalState(envelope: AgUiEventEnvelope, failed: boolean) {
+    const interruptedByUser = isInterruptedRunError(envelope, failed, stopRequestedRef.current);
+    const planTurnId = planItemTurnIdByThreadRef.current[envelope.threadId] ?? null;
+    delete planItemTurnIdByThreadRef.current[envelope.threadId];
+    clearLiveReasoningMessage(envelope.threadId);
+    delete threadReasoningBuffersRef.current[envelope.threadId];
+    const terminalActivity = buildTerminalActivityState(envelope, failed, interruptedByUser);
+    upsertThreadRuntimeSnapshot(envelope.threadId, () => ({
+      activity: terminalActivity,
+      activeCommands: [],
+      streamingText: null,
+      pendingUserInputRequest: null,
+      activeTurnId: null,
+      runWatchdogUntil: 0,
+    }));
+    bumpAgentRuntimeRevision();
+    if (envelope.threadId !== currentId) {
+      return;
+    }
+    clearRunWatchdog();
+    setActiveCommands([]);
+    setStreamingText(null);
+    setPendingUserInputRequest(null);
+    setUserInputDrafts({});
+    setUserInputError(null);
+    setResolvingUserInput(false);
+    setActiveTurnId(null);
+    setStoppingTurn(false);
+    stopRequestedRef.current = false;
+    hadCommandRef.current = false;
+    reasoningSummaryRef.current = {};
+    reasoningBufferRef.current = '';
+    setError(failed && !interruptedByUser ? (resolveRunErrorMessage(envelope) ?? null) : null);
+    if (interruptedByUser) {
+      appendStopSystemMessageIfNeeded();
+    }
+    setActivity(terminalActivity);
+    const terminalStatusAt = new Date().toISOString();
+    setSelectedChat((previous) =>
+      previous?.id === envelope.threadId
+        ? {
+            ...previous,
+            status: failed && !interruptedByUser ? 'error' : 'complete',
+            updatedAt: terminalStatusAt,
+            statusUpdatedAt: terminalStatusAt,
+            lastError: failed && !interruptedByUser ? resolveRunErrorMessage(envelope) : undefined,
+            messages: settlePendingReasoningMessages(previous.messages),
+          }
+        : previous,
+    );
+    if (!failed && planTurnId) {
+      setPendingPlanImplementationPrompts((previous) => ({
+        ...previous,
+        [envelope.threadId]: {
+          threadId: envelope.threadId,
+          turnId: planTurnId,
+        },
+      }));
+    } else {
+      clearPendingPlanImplementationPrompt(envelope.threadId);
+    }
+    loadChat(envelope.threadId).catch(() => {});
+  }
+
+  handlers[agUiEnvelope.event.type]?.();
+}
+
+/**
+ * A run that reached a terminal state can no longer extend its reasoning, so every
+ * still-pending reasoning message collapses to its completed presentation.
+ */
+function settlePendingReasoningMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) =>
+    message.role === 'reasoning' && message.pending === true
+      ? { ...message, pending: false }
+      : message,
+  );
+}
+
+function isSubagentCustomEvent(envelope: AgUiEventEnvelope): boolean {
+  return envelope.event.type === 'CUSTOM' && envelope.event.name === 'dappercode.dev/subagent';
+}
+
+function isInterruptedRunError(
+  envelope: AgUiEventEnvelope,
+  failed: boolean,
+  stopRequested: boolean,
+): boolean {
+  return (
+    failed &&
+    ['interrupted', 'cancelled', 'canceled', 'aborted'].includes(resolveRunErrorCode(envelope)) &&
+    stopRequested
+  );
+}
+
+function buildTerminalActivityState(
+  envelope: AgUiEventEnvelope,
+  failed: boolean,
+  interruptedByUser: boolean,
+): ActivityState {
+  if (!failed) {
+    return { tone: 'complete', title: 'Turn completed' };
+  }
+  if (interruptedByUser) {
+    return { tone: 'complete', title: 'Turn stopped' };
+  }
+  return { tone: 'error', title: 'Turn failed', detail: resolveRunErrorMessage(envelope) };
 }
 
 export function processAgUiTextContentEvents(
@@ -191,7 +248,9 @@ export function processAgUiTextContentEvents(
   envelopes: AgUiEventEnvelope[],
   currentId: string | null,
 ): void {
-  if (envelopes.length === 0) return;
+  if (envelopes.length === 0) {
+    return;
+  }
   const setLiveAssistantByThread = screenSetter(context.store, liveAssistantByThreadAtom);
   const coalesced = coalesceAgUiTextContentEvents(envelopes);
   setLiveAssistantByThread((previous) =>
@@ -202,9 +261,7 @@ export function processAgUiTextContentEvents(
   }
 }
 
-export function coalesceAgUiTextContentEvents(
-  envelopes: AgUiEventEnvelope[],
-): AgUiEventEnvelope[] {
+export function coalesceAgUiTextContentEvents(envelopes: AgUiEventEnvelope[]): AgUiEventEnvelope[] {
   const coalesced: AgUiEventEnvelope[] = [];
   for (const envelope of envelopes) {
     const event = envelope.event;

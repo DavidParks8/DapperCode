@@ -15,6 +15,104 @@ import type {
 export type MainScreenThreadSnapshotStoreContext = MainScreenLocalTranscriptActionsContext &
   MainScreenLocalTranscriptActionsResult;
 
+function firstRecord(
+  candidates: Array<Record<string, unknown> | null | undefined>,
+): Record<string, unknown> | null {
+  for (const candidate of candidates) {
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function readFirstNonNegativeIntegerLike(values: unknown[]): number | null {
+  for (const value of values) {
+    const parsedValue = readNonNegativeIntegerLike(value);
+    if (parsedValue !== null) {
+      return parsedValue;
+    }
+  }
+
+  return null;
+}
+
+function resolveTokenUsageRecord(
+  record: Record<string, unknown>,
+  infoRecord: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return firstRecord([
+    toRecord(record.tokenUsage),
+    toRecord(record.token_usage),
+    toRecord(infoRecord?.tokenUsage),
+    toRecord(infoRecord?.token_usage),
+  ]);
+}
+
+function resolveTokenWindowRecord(
+  tokenUsageRecord: Record<string, unknown> | null,
+  infoRecord: Record<string, unknown> | null,
+  key: 'total' | 'last',
+): Record<string, unknown> | null {
+  const snakeCaseKey = key === 'total' ? 'total_token_usage' : 'last_token_usage';
+  const camelCaseKey = key === 'total' ? 'totalTokenUsage' : 'lastTokenUsage';
+
+  return firstRecord([
+    toRecord(tokenUsageRecord?.[key]),
+    toRecord(infoRecord?.[snakeCaseKey]),
+    toRecord(infoRecord?.[camelCaseKey]),
+  ]);
+}
+
+function hasThreadContextUsage(
+  totalTokens: number | null,
+  modelContextWindow: number | null,
+): boolean {
+  return totalTokens !== null || modelContextWindow !== null;
+}
+
+function parseThreadContextUsage(value: unknown): ThreadContextUsage | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const turnRecord = toRecord(record.turn);
+  const infoRecord = toRecord(record.info);
+  const tokenUsageRecord = resolveTokenUsageRecord(record, infoRecord);
+  const totalRecord = resolveTokenWindowRecord(tokenUsageRecord, infoRecord, 'total');
+  const lastRecord = resolveTokenWindowRecord(tokenUsageRecord, infoRecord, 'last');
+  const totalTokens = readFirstNonNegativeIntegerLike([
+    totalRecord?.totalTokens,
+    totalRecord?.total_tokens,
+  ]);
+  const lastTokens =
+    readFirstNonNegativeIntegerLike([lastRecord?.totalTokens, lastRecord?.total_tokens]) ??
+    (totalTokens !== null ? 0 : null);
+  const modelContextWindow = readFirstNonNegativeIntegerLike([
+    record.modelContextWindow,
+    record.model_context_window,
+    turnRecord?.modelContextWindow,
+    turnRecord?.model_context_window,
+    tokenUsageRecord?.modelContextWindow,
+    tokenUsageRecord?.model_context_window,
+    infoRecord?.modelContextWindow,
+    infoRecord?.model_context_window,
+  ]);
+
+  if (!hasThreadContextUsage(totalTokens, modelContextWindow)) {
+    return null;
+  }
+
+  return {
+    totalTokens,
+    lastTokens,
+    modelContextWindow,
+    updatedAtMs: Date.now(),
+  };
+}
+
 export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapshotStoreContext) {
   const {
     api,
@@ -68,25 +166,34 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     return () => {
       cancelled = true;
     };
-  }, [api, selectedChat?.id, selectedChat?.parentThreadId]);
+  }, [
+    api,
+    parentChatCacheRef,
+    selectedChat?.id,
+    selectedChat?.parentThreadId,
+    setSelectedParentChat,
+  ]);
 
-  const scheduleRunWatchdogExpiry = useCallback((deadlineMs: number) => {
-    const existingTimer = runWatchdogTimerRef.current;
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-      runWatchdogTimerRef.current = null;
-    }
+  const scheduleRunWatchdogExpiry = useCallback(
+    (deadlineMs: number) => {
+      const existingTimer = runWatchdogTimerRef.current;
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        runWatchdogTimerRef.current = null;
+      }
 
-    const delayMs = deadlineMs - Date.now();
-    if (delayMs <= 0) {
-      return;
-    }
+      const delayMs = deadlineMs - Date.now();
+      if (delayMs <= 0) {
+        return;
+      }
 
-    runWatchdogTimerRef.current = setTimeout(() => {
-      runWatchdogTimerRef.current = null;
-      setRunWatchdogNow(Date.now());
-    }, delayMs + 16);
-  }, []);
+      runWatchdogTimerRef.current = setTimeout(() => {
+        runWatchdogTimerRef.current = null;
+        setRunWatchdogNow(Date.now());
+      }, delayMs + 16);
+    },
+    [runWatchdogTimerRef, setRunWatchdogNow],
+  );
 
   const bumpRunWatchdog = useCallback(
     (durationMs = RUN_WATCHDOG_MS) => {
@@ -95,7 +202,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
       setRunWatchdogNow(Date.now());
       scheduleRunWatchdogExpiry(deadlineMs);
     },
-    [scheduleRunWatchdogExpiry],
+    [runWatchdogUntilRef, scheduleRunWatchdogExpiry, setRunWatchdogNow],
   );
 
   const clearRunWatchdog = useCallback(() => {
@@ -106,7 +213,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
       runWatchdogTimerRef.current = null;
     }
     setRunWatchdogNow(Date.now());
-  }, []);
+  }, [runWatchdogTimerRef, runWatchdogUntilRef, setRunWatchdogNow]);
 
   useEffect(() => {
     return () => {
@@ -116,59 +223,10 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
         runWatchdogTimerRef.current = null;
       }
     };
-  }, []);
+  }, [runWatchdogTimerRef]);
 
   const readThreadContextUsage = useCallback((value: unknown): ThreadContextUsage | null => {
-    const record = toRecord(value);
-    if (!record) {
-      return null;
-    }
-
-    const turnRecord = toRecord(record.turn);
-    const tokenUsageRecord =
-      toRecord(record.tokenUsage) ??
-      toRecord(record.token_usage) ??
-      toRecord(toRecord(record.info)?.tokenUsage) ??
-      toRecord(toRecord(record.info)?.token_usage);
-    const infoRecord = toRecord(record.info);
-
-    const totalRecord =
-      toRecord(tokenUsageRecord?.total) ??
-      toRecord(infoRecord?.total_token_usage) ??
-      toRecord(infoRecord?.totalTokenUsage);
-    const lastRecord =
-      toRecord(tokenUsageRecord?.last) ??
-      toRecord(infoRecord?.last_token_usage) ??
-      toRecord(infoRecord?.lastTokenUsage);
-
-    const totalTokens =
-      readNonNegativeIntegerLike(totalRecord?.totalTokens) ??
-      readNonNegativeIntegerLike(totalRecord?.total_tokens);
-
-    const lastTokens =
-      readNonNegativeIntegerLike(lastRecord?.totalTokens) ??
-      readNonNegativeIntegerLike(lastRecord?.total_tokens) ??
-      (totalTokens !== null ? 0 : null);
-    const modelContextWindow =
-      readNonNegativeIntegerLike(record.modelContextWindow) ??
-      readNonNegativeIntegerLike(record.model_context_window) ??
-      readNonNegativeIntegerLike(turnRecord?.modelContextWindow) ??
-      readNonNegativeIntegerLike(turnRecord?.model_context_window) ??
-      readNonNegativeIntegerLike(tokenUsageRecord?.modelContextWindow) ??
-      readNonNegativeIntegerLike(tokenUsageRecord?.model_context_window) ??
-      readNonNegativeIntegerLike(infoRecord?.modelContextWindow) ??
-      readNonNegativeIntegerLike(infoRecord?.model_context_window);
-
-    if (totalTokens === null && modelContextWindow === null) {
-      return null;
-    }
-
-    return {
-      totalTokens,
-      lastTokens,
-      modelContextWindow,
-      updatedAtMs: Date.now(),
-    };
+    return parseThreadContextUsage(value);
   }, []);
 
   const saveChatModelPreferences = useCallback(
@@ -201,7 +259,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
         void saveBridgeUiSurfaceSnapshots(nextSnapshots);
       }, 180);
     },
-    [saveBridgeUiSurfaceSnapshots],
+    [bridgeUiSurfacePersistenceTimeoutRef, saveBridgeUiSurfaceSnapshots],
   );
 
   return {

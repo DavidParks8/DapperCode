@@ -18,7 +18,6 @@ import { computeHitSlop } from './touchTarget';
 const OPEN_HINT_VISIBLE_SIZE = { width: 120, height: 18 };
 const OPEN_HINT_HIT_SLOP_OPTIONS = { maxVertical: 4 };
 
-
 /** Reads one labelled line out of a sub-agent card body, ignoring its indentation. */
 function findDetailLine(details: string[], label: string): string | undefined {
   const prefix = `${label.toLowerCase()}:`;

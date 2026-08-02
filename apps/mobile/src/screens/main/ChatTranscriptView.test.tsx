@@ -100,13 +100,17 @@ function render(overrides: Partial<ChatTranscriptViewProps> = {}): QueryableRend
       </AppThemeProvider>,
     );
   });
-  if (!tree) throw new Error('Expected transcript tree');
+  if (!tree) {
+    throw new Error('Expected transcript tree');
+  }
   return tree as QueryableRenderer;
 }
 
 function findText(root: Queryable, value: string): Queryable {
   const match = root.findAll((node) => node.children.includes(value))[0];
-  if (!match) throw new Error(`Missing text: ${value}`);
+  if (!match) {
+    throw new Error(`Missing text: ${value}`);
+  }
   return match;
 }
 
@@ -618,8 +622,7 @@ describe('ChatTranscriptView continuation', () => {
       accessibilityLabel: 'Jump to latest message',
     }) as Queryable;
     const hitSlop = jump.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
     expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -783,6 +786,29 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
+  /**
+   * Reproduces paged-in history vanishing when the thread keeps talking.
+   *
+   * Paging older messages in is a deliberate act by the reader. The reset that returns the
+   * transcript to its newest page belongs to a chat switch, so it must not also run when a new
+   * user message appears — that throws away everything the reader just paged in, mid-read.
+   */
+  it('keeps paged-in history when a new user message arrives in the same chat', () => {
+    const paged = makeChat({ id: 'paged', messages: makeMessages(220) });
+    const tree = render({ chat: paged });
+    expect(getList(tree).props.data).toHaveLength(80);
+
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 200 } } }));
+    expect(getList(tree).props.data).toHaveLength(160);
+
+    update(tree, { chat: makeChat({ id: 'paged', messages: makeMessages(221) }) });
+    expect(getList(tree).props.data).toHaveLength(161);
+
+    update(tree, { chat: makeChat({ id: 'other', messages: makeMessages(221) }) });
+    expect(getList(tree).props.data).toHaveLength(80);
+    act(() => tree.unmount());
+  });
+
   it('memoizes equivalent chats and rerenders for every compared prop family', () => {
     const messages = makeMessages(2);
     const stableChat = makeChat({ messages });
@@ -873,7 +899,9 @@ describe('ChatTranscriptView continuation', () => {
     const list = getList(tree);
     const messageItem = list.props.data.find((item) => item.kind === 'message');
     const toolItem = list.props.data.find((item) => item.kind === 'toolInvocation');
-    if (!messageItem || !toolItem) throw new Error('Expected message and tool items');
+    if (!messageItem || !toolItem) {
+      throw new Error('Expected message and tool items');
+    }
     expect(list.props.keyExtractor(messageItem)).toBe(messageItem.renderKey);
     expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);
 
@@ -898,7 +926,9 @@ describe('ChatTranscriptView continuation', () => {
         </AppThemeProvider>,
       );
     });
-    if (!toolTree) throw new Error('Expected rendered tool item');
+    if (!toolTree) {
+      throw new Error('Expected rendered tool item');
+    }
     expect(options).toHaveLength(2);
     expect(options[0].props.style({ pressed: false })[1]).toBe(false);
     expect(options[0].props.style({ pressed: true })[1]).toBeTruthy();
@@ -960,7 +990,9 @@ describe('ChatTranscriptView continuation', () => {
     ];
     const tree = render({ chat: makeChat({ messages }) });
     const groupItem = getList(tree).props.data.find((item) => item.kind === 'toolGroup');
-    if (!groupItem) throw new Error('Expected a computer-use tool group');
+    if (!groupItem) {
+      throw new Error('Expected a computer-use tool group');
+    }
 
     let groupTree: ReactTestRenderer | undefined;
     act(() => {

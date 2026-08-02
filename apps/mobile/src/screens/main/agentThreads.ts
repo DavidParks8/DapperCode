@@ -82,7 +82,9 @@ export function indexAgentThreadOrdinals(
   const ordinals = new Map<string, number>();
   let ordinal = 0;
   for (const thread of threads) {
-    if (thread.id === rootThreadId) continue;
+    if (thread.id === rootThreadId) {
+      continue;
+    }
     ordinal += 1;
     ordinals.set(thread.id, ordinal);
   }

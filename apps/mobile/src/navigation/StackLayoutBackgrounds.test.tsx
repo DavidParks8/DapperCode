@@ -30,12 +30,16 @@ function renderLayout(layout: ReactElement, mode: 'light' | 'dark'): ReactTestRe
       <AppThemeProvider theme={createAppTheme(mode)}>{layout}</AppThemeProvider>,
     );
   });
-  if (!tree) throw new Error('Expected stack layout');
+  if (!tree) {
+    throw new Error('Expected stack layout');
+  }
   return tree;
 }
 
 function readScreenOptions(): StackScreenOptions {
-  if (!mockStackProps) throw new Error('Expected Stack props');
+  if (!mockStackProps) {
+    throw new Error('Expected Stack props');
+  }
   return mockStackProps.screenOptions as StackScreenOptions;
 }
 

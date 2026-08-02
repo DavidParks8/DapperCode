@@ -35,7 +35,9 @@ function renderRoute(api: HostBridgeApiClient): ReactTestRenderer {
       ),
     );
   });
-  if (!tree) throw new Error('Expected Git route');
+  if (!tree) {
+    throw new Error('Expected Git route');
+  }
   return tree;
 }
 

@@ -1,5 +1,13 @@
-import { Ionicons } from '@expo/vector-icons';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  type MutableRefObject,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   FlatList,
   Keyboard,
@@ -13,18 +21,11 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { GestureDetector } from 'react-native-gesture-handler';
 
 import type { Chat } from '../../api/types';
-import { TABLET_LAYOUT_MIN_WIDTH } from '../../bootstrap/appConstants';
-import { ChatScrollRail } from '../../components/chatScrollRail/ChatScrollRail';
+import { type ChatScrollRailJumpController } from '../../components/chatScrollRail/chatScrollRailJumpController';
 import {
-  createChatScrollRailJumpController,
-  type ChatScrollRailJumpController,
-} from '../../components/chatScrollRail/chatScrollRailJumpController';
-import {
-  CHAT_SCROLL_RAIL_REVEAL_MARGIN,
   collectUserMessageAnchors,
   railWindowCapacity,
   resolveActiveAnchorIndex,
@@ -44,14 +45,19 @@ import { createStyles } from './mainScreenStyles';
 import { buildTranscriptDisplayItems, type TranscriptDisplayItem } from './transcriptMessages';
 import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { AgUiThreadMessageState } from '../../api/agUiMessages';
-import { decorativeAccessibilityProps } from '../../accessibility';
 import type { TranscriptContinuationState } from './controllers/transcriptContinuationController';
 import { areChatTranscriptViewPropsEqual } from './chatTranscriptComparison';
 import { renderChatTranscriptItem } from './chatTranscriptItem';
 import { computeHitSlop } from '../../components/touchTarget';
-import { motionDuration } from '../../components/motion';
-
-const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 34, height: 34 };
+import {
+  ensureRailJumpController,
+  JUMP_TO_LATEST_VISIBLE_SIZE,
+  renderJumpToLatestButton,
+  renderScrollRail,
+  resolveListBatchingConfig,
+  resolveRailRestingActiveIndex,
+  resolveResetRailActiveIndex,
+} from './chatTranscriptViewChrome';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -61,13 +67,13 @@ export interface ChatTranscriptViewProps {
   onOpenLocalPreview?: (targetUrl: string) => void;
   showToolCalls: boolean;
   agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
-  scrollRef: React.RefObject<FlatList<TranscriptDisplayItem> | null>;
+  scrollRef: RefObject<FlatList<TranscriptDisplayItem> | null>;
   inlineChoicesEnabled: boolean;
   onInlineOptionSelect: (value: string) => void;
   onPinnedAutoScroll: (animated?: boolean) => void;
   onJumpToLatest: () => void;
   onScrollInteractionStart: () => void;
-  autoScrollStateRef: React.MutableRefObject<AutoScrollState>;
+  autoScrollStateRef: MutableRefObject<AutoScrollState>;
   bottomInset: number;
   liveMessageState?: AgUiThreadMessageState | null;
   onOpenSubAgentThread?: (threadId: string) => void;
@@ -112,6 +118,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const scrollingTowardOlderMessagesRef = useRef(false);
   const autoLoadOlderCheckpointRef = useRef<number | null>(null);
   const visibleMessageCountRef = useRef(0);
+  const userMessageAnchorCountRef = useRef(0);
   const displayIndexByMessageIdRef = useRef(new Map<string, number>());
   const anchorDisplayIndicesRef = useRef<readonly (number | null)[]>([]);
   const scrollRefRef = useRef(scrollRef);
@@ -166,31 +173,19 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
   );
+  const userMessageAnchorCount = userMessageAnchors.length;
   useEffect(() => {
     visibleMessageCountRef.current = visibleMessages.length;
-  }, [visibleMessages.length]);
+    userMessageAnchorCountRef.current = userMessageAnchorCount;
+  }, [userMessageAnchorCount, visibleMessages.length]);
 
-  if (!railJumpControllerRef.current) {
-    railJumpControllerRef.current = createChatScrollRailJumpController({
-      resolveDisplayIndex: (messageId) => displayIndexByMessageIdRef.current.get(messageId) ?? null,
-      revealTranscriptIndex: (transcriptIndex) => {
-        setVisibleStartIndex((current) =>
-          Math.min(current, Math.max(0, transcriptIndex - CHAT_SCROLL_RAIL_REVEAL_MARGIN)),
-        );
-      },
-      scrollToIndex: (index) => {
-        scrollRefRef.current.current?.scrollToIndex({
-          index,
-          animated: false,
-          viewPosition: 1,
-          viewOffset: -theme.spacing.lg,
-        });
-      },
-      scrollToOffset: (offset) => {
-        scrollRefRef.current.current?.scrollToOffset({ offset, animated: false });
-      },
-    });
-  }
+  ensureRailJumpController({
+    railJumpControllerRef,
+    displayIndexByMessageIdRef,
+    scrollRefRef,
+    setVisibleStartIndex,
+    spacingLg: theme.spacing.lg,
+  });
 
   useEffect(() => {
     railJumpControllerRef.current?.notifyDataChanged();
@@ -205,7 +200,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
 
   useEffect(() => {
     setVisibleStartIndex(getInitialVisibleMessageStartIndex(visibleMessageCountRef.current));
-    setRestingRailActiveIndex(Math.max(-1, userMessageAnchors.length - 1));
+    setRestingRailActiveIndex(resolveResetRailActiveIndex(userMessageAnchorCountRef.current));
     railJumpControllerRef.current?.cancel();
   }, [chat.id, showToolCalls]);
 
@@ -266,7 +261,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   );
 
   const historyBoundary = useMemo(() => {
-    if (!continuationState) return null;
+    if (!continuationState) {
+      return null;
+    }
     if (continuationState.loading) {
       return <Text style={styles.inlineChoiceHint}>Loading earlier history...</Text>;
     }
@@ -332,7 +329,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       return;
     }
     const viewportHeight = viewportHeightRef.current;
-    if (viewportHeight <= 0) return;
+    if (viewportHeight <= 0) {
+      return;
+    }
     if (contentHeightRef.current - viewportHeight > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX) {
       return;
     }
@@ -390,10 +389,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     anchors: userMessageAnchors,
     capacity: railCapacity,
     viewportHeight,
-    restingActiveIndex:
-      restingRailActiveIndex >= 0
-        ? restingRailActiveIndex
-        : Math.max(-1, userMessageAnchors.length - 1),
+    restingActiveIndex: resolveRailRestingActiveIndex(
+      restingRailActiveIndex,
+      userMessageAnchorCount,
+    ),
     onJumpToAnchor: handleRailJump,
     onInteractionStart: handleRailInteractionStart,
     onInteractionEnd: handleRailInteractionEnd,
@@ -422,6 +421,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
+  const listBatchingConfig = useMemo(
+    () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
+    [displayMessages.length, isLargeChat],
+  );
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
     [],
@@ -441,11 +444,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     [
       bridgeToken,
       bridgeUrl,
-      chat.status,
       inlineChoiceSet,
       onInlineOptionSelect,
       onOpenLocalPreview,
       onOpenSubAgentThread,
+      styles,
     ],
   );
 
@@ -512,61 +515,36 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             onPinnedAutoScroll(false);
             maybeAutoLoadOlderMessages(true);
           }}
-          initialNumToRender={Math.min(displayMessages.length, isLargeChat ? 18 : 16)}
-          maxToRenderPerBatch={Math.min(displayMessages.length, isLargeChat ? 12 : 10)}
-          updateCellsBatchingPeriod={isLargeChat ? 32 : undefined}
-          windowSize={isLargeChat ? 13 : 11}
+          initialNumToRender={listBatchingConfig.initialNumToRender}
+          maxToRenderPerBatch={listBatchingConfig.maxToRenderPerBatch}
+          updateCellsBatchingPeriod={listBatchingConfig.updateCellsBatchingPeriod}
+          windowSize={listBatchingConfig.windowSize}
           removeClippedSubviews={false}
           accessibilityLabel={`${chat.title || 'Chat'} transcript`}
         />
-        {scrollRailEnabled ? (
-          <ChatScrollRail
-            anchors={userMessageAnchors}
-            activeIndex={rail.state.activeIndex}
-            windowStart={rail.state.windowStart}
-            capacity={railCapacity}
-            viewportHeight={viewportHeight}
-            alwaysVisible={windowWidth >= TABLET_LAYOUT_MIN_WIDTH}
-            engaged={rail.engaged}
-            fingerY={rail.fingerY}
-          />
-        ) : null}
-        {showJumpToLatest ? (
-          <Animated.View
-            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
-            style={[
-              styles.jumpToLatestButton,
-              { bottom: bottomInset + theme.spacing.xs },
-            ]}
-          >
-            <Pressable
-              onPress={() => {
-                railJumpControllerRef.current?.cancel();
-                autoScrollStateRef.current.shouldStickToBottom = true;
-                autoScrollStateRef.current.isUserInteracting = false;
-                autoScrollStateRef.current.isMomentumScrolling = false;
-                showJumpToLatestRef.current = false;
-                setShowJumpToLatest(false);
-                onJumpToLatest();
-              }}
-              hitSlop={jumpToLatestHitSlop}
-              style={({ pressed }) => [
-                styles.jumpToLatestButtonInner,
-                pressed && styles.jumpToLatestButtonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Jump to latest message"
-            >
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="arrow-down"
-                size={14}
-                color={theme.colors.textPrimary}
-              />
-            </Pressable>
-          </Animated.View>
-        ) : null}
+        {renderScrollRail({
+          activeIndex: rail.state.activeIndex,
+          anchors: userMessageAnchors,
+          capacity: railCapacity,
+          engaged: rail.engaged,
+          fingerY: rail.fingerY,
+          scrollRailEnabled,
+          viewportHeight,
+          windowStart: rail.state.windowStart,
+          windowWidth,
+        })}
+        {renderJumpToLatestButton({
+          autoScrollStateRef,
+          bottomInset,
+          hitSlop: jumpToLatestHitSlop,
+          onJumpToLatest,
+          railJumpControllerRef,
+          setShowJumpToLatest,
+          showJumpToLatest,
+          showJumpToLatestRef,
+          styles,
+          theme,
+        })}
       </View>
     </GestureDetector>
   );

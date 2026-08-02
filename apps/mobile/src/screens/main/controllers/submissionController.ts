@@ -91,7 +91,9 @@ export class SubmissionController {
     this.failed.set(key, submission);
     while (this.failed.size > FAILED_SUBMISSION_LIMIT) {
       const oldest = this.failed.keys().next().value as string | undefined;
-      if (!oldest) break;
+      if (!oldest) {
+        break;
+      }
       this.failed.delete(oldest);
     }
     this.idempotencyStore?.record(

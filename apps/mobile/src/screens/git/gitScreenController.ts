@@ -5,9 +5,11 @@ import type { HostBridgeApiClient } from '../../api/client';
 import type {
   ApprovalMode,
   Chat,
+  GitBranchesResponse,
   GitBranchSummary,
   GitDiffResponse,
   GitHistoryCommit,
+  GitHistoryResponse,
   GitStatusResponse,
 } from '../../api/types';
 import { feedback } from '../../feedback';
@@ -23,6 +25,54 @@ interface UseGitScreenControllerArgs {
 }
 
 export const GIT_SCREEN_REFRESH_INTERVAL_MS = 15_000;
+
+function setGitRefreshLoadingState(
+  initialLoad: boolean,
+  setLoading: (value: boolean) => void,
+  setRefreshing: (value: boolean) => void,
+): void {
+  if (initialLoad) {
+    setLoading(true);
+  } else {
+    setRefreshing(true);
+  }
+}
+
+function shouldApplyGitRefreshResult(
+  mountedRef: { current: boolean },
+  refreshRequestIdRef: { current: number },
+  requestedCwdRef: { current: string | undefined },
+  requestId: number,
+  requestCwd: string | undefined,
+): boolean {
+  return (
+    mountedRef.current &&
+    requestId === refreshRequestIdRef.current &&
+    requestCwd === requestedCwdRef.current
+  );
+}
+
+interface GitRefreshSetters {
+  setStatus: (value: GitStatusResponse) => void;
+  setDiff: (value: GitDiffResponse) => void;
+  setHistory: (value: GitHistoryCommit[]) => void;
+  setBranches: (value: GitBranchSummary[]) => void;
+  setBranchDraft: (value: string) => void;
+}
+
+function applyGitRefreshSuccess(
+  setters: GitRefreshSetters,
+  nextStatus: GitStatusResponse,
+  nextDiff: GitDiffResponse,
+  nextHistory: GitHistoryResponse,
+  nextBranches: GitBranchesResponse | null,
+): void {
+  setters.setStatus(nextStatus);
+  setters.setDiff(nextDiff);
+  setters.setHistory(nextHistory.commits);
+  setters.setBranches(nextBranches?.branches ?? []);
+  setters.setBranchDraft(nextBranches?.current ?? nextStatus.branch ?? '');
+}
 
 export function useGitScreenController({
   api,
@@ -84,11 +134,7 @@ export function useGitScreenController({
     const requestCwd = requestedCwd;
     const initialLoad = !hasLoadedRef.current;
     refreshInFlightRef.current = true;
-    if (initialLoad) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
+    setGitRefreshLoadingState(initialLoad, setLoading, setRefreshing);
 
     try {
       const [nextStatus, nextDiff, nextHistory, nextBranches] = await Promise.all([
@@ -98,24 +144,34 @@ export function useGitScreenController({
         api.gitBranches(requestCwd).catch(() => null),
       ]);
       if (
-        !mountedRef.current ||
-        requestId !== refreshRequestIdRef.current ||
-        requestCwd !== requestedCwdRef.current
+        !shouldApplyGitRefreshResult(
+          mountedRef,
+          refreshRequestIdRef,
+          requestedCwdRef,
+          requestId,
+          requestCwd,
+        )
       ) {
         return;
       }
-      setStatus(nextStatus);
-      setDiff(nextDiff);
-      setHistory(nextHistory.commits);
-      setBranches(nextBranches?.branches ?? []);
-      setBranchDraft(nextBranches?.current ?? nextStatus.branch ?? '');
+      applyGitRefreshSuccess(
+        { setStatus, setDiff, setHistory, setBranches, setBranchDraft },
+        nextStatus,
+        nextDiff,
+        nextHistory,
+        nextBranches,
+      );
       hasLoadedRef.current = true;
       setError(null);
     } catch (err) {
       if (
-        mountedRef.current &&
-        requestId === refreshRequestIdRef.current &&
-        requestCwd === requestedCwdRef.current
+        shouldApplyGitRefreshResult(
+          mountedRef,
+          refreshRequestIdRef,
+          requestedCwdRef,
+          requestId,
+          requestCwd,
+        )
       ) {
         // Mark the initial load attempt as settled even on failure so a subsequent poll or
         // manual retry is treated as a lightweight background refresh instead of re-triggering

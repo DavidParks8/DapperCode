@@ -95,7 +95,13 @@ export function useMainScreenReasoningAndInterrupt(
 
       schedulePinnedScrollToBottom(true);
     },
-    [schedulePinnedScrollToBottom],
+    [
+      chatIdRef,
+      liveReasoningBuffersRef,
+      liveReasoningMessageIdsRef,
+      schedulePinnedScrollToBottom,
+      setSelectedChat,
+    ],
   );
 
   const clearLiveReasoningMessage = useCallback(
@@ -123,7 +129,7 @@ export function useMainScreenReasoningAndInterrupt(
       delete liveReasoningBuffersRef.current[threadId];
       delete liveReasoningMessageIdsRef.current[threadId];
     },
-    [setSelectedChat],
+    [liveReasoningBuffersRef, liveReasoningMessageIdsRef, setSelectedChat],
   );
 
   const appendStopSystemMessageIfNeeded = useCallback(() => {
@@ -132,7 +138,7 @@ export function useMainScreenReasoningAndInterrupt(
     }
     stopSystemMessageLoggedRef.current = true;
     appendLocalSystemMessage('Turn stopped by user.');
-  }, [appendLocalSystemMessage]);
+  }, [appendLocalSystemMessage, stopSystemMessageLoggedRef]);
 
   const handleTurnFailure = useCallback(
     (error: unknown) => {
@@ -163,7 +169,15 @@ export function useMainScreenReasoningAndInterrupt(
       stopRequestedRef.current = interruptedByUser;
       clearRunWatchdog();
     },
-    [appendStopSystemMessageIfNeeded, clearRunWatchdog],
+    [
+      appendStopSystemMessageIfNeeded,
+      clearRunWatchdog,
+      setActiveTurnId,
+      setActivity,
+      setError,
+      setStoppingTurn,
+      stopRequestedRef,
+    ],
   );
 
   const interruptActiveTurn = useCallback(
@@ -187,7 +201,7 @@ export function useMainScreenReasoningAndInterrupt(
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController],
+    [setActivity, setError, setStoppingTurn, stopRequestedRef, turnExecutionController],
   );
 
   const interruptLatestTurn = useCallback(
@@ -222,7 +236,14 @@ export function useMainScreenReasoningAndInterrupt(
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController],
+    [
+      setActiveTurnId,
+      setActivity,
+      setError,
+      setStoppingTurn,
+      stopRequestedRef,
+      turnExecutionController,
+    ],
   );
 
   return {

@@ -2,11 +2,11 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { createElement } from 'react';
 import type { HostBridgeWsClient } from '../api/ws';
 import type { RpcNotification } from '../api/types';
-import { DRAWER_REFRESH_CONNECTED_MS, DRAWER_REFRESH_DISCONNECTED_MS } from './drawerChatLoadingConfig';
 import {
-  useDrawerChatLiveSync,
-  type DrawerChatLiveSyncControls,
-} from './useDrawerChatLiveSync';
+  DRAWER_REFRESH_CONNECTED_MS,
+  DRAWER_REFRESH_DISCONNECTED_MS,
+} from './drawerChatLoadingConfig';
+import { useDrawerChatLiveSync, type DrawerChatLiveSyncControls } from './useDrawerChatLiveSync';
 import type { DrawerRunIndicatorMap } from './drawerRuntimeIndicators';
 
 interface Harness {
@@ -60,8 +60,7 @@ function renderLiveSync(
       scheduleLoadChats: props.scheduleLoadChats,
       setRunIndicators: jest.fn() as unknown as (
         update:
-          | DrawerRunIndicatorMap
-          | ((previous: DrawerRunIndicatorMap) => DrawerRunIndicatorMap),
+          DrawerRunIndicatorMap | ((previous: DrawerRunIndicatorMap) => DrawerRunIndicatorMap),
       ) => void,
       setWsConnected: jest.fn(),
       ws: props.ws,

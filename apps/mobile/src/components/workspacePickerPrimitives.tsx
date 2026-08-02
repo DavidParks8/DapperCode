@@ -47,12 +47,8 @@ export function WorkspaceTile({
         <View style={[styles.workspaceTileContent, pressed && styles.pressed]}>
           {selected ? (
             <Animated.View
-              entering={FadeIn.duration(motionDuration.routine).reduceMotion(
-                ReduceMotion.System,
-              )}
-              exiting={FadeOut.duration(motionDuration.routine).reduceMotion(
-                ReduceMotion.System,
-              )}
+              entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+              exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
               style={styles.workspaceTileSelectedOverlay}
               pointerEvents="none"
             />
@@ -82,9 +78,7 @@ export function LoadingRow({ label }: { label: string }) {
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(
-        ReduceMotion.System,
-      )}
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       style={styles.statusRow}
       accessibilityRole="progressbar"
       accessibilityLabel={label}

@@ -308,7 +308,11 @@ describe('chatSnapshotCache', () => {
   it('keeps inline image/audio data at or under the threshold untouched', () => {
     const withSmallImage = chat('with-small-image');
     withSmallImage.messages[0].parts = [
-      { type: 'image', data: 'i'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES), mimeType: 'image/png' },
+      {
+        type: 'image',
+        data: 'i'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES),
+        mimeType: 'image/png',
+      },
     ];
 
     const cache = updateChatSnapshotCache(
@@ -340,7 +344,10 @@ describe('chatSnapshotCache', () => {
     );
 
     expect(cache.entries[0]?.chat.messages[0]?.parts).toEqual([
-      { type: 'resource', resource: { uri: 'file:///big.bin', mimeType: 'application/octet-stream' } },
+      {
+        type: 'resource',
+        resource: { uri: 'file:///big.bin', mimeType: 'application/octet-stream' },
+      },
     ]);
   });
 
@@ -381,7 +388,11 @@ describe('chatSnapshotCache', () => {
   it('re-sanitizes oversized payloads left over from an older on-disk cache when re-priming', () => {
     const legacyChat = chat('legacy');
     legacyChat.messages[0].parts = [
-      { type: 'image', data: 'z'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1), mimeType: 'image/png' },
+      {
+        type: 'image',
+        data: 'z'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1),
+        mimeType: 'image/png',
+      },
     ];
     const legacyRaw = JSON.stringify({
       version: 1,
@@ -397,7 +408,11 @@ describe('chatSnapshotCache', () => {
       ],
     });
 
-    const parsed = parseChatSnapshotCache(legacyRaw, 'profile-a', Date.parse('2026-07-18T00:00:00.000Z'));
+    const parsed = parseChatSnapshotCache(
+      legacyRaw,
+      'profile-a',
+      Date.parse('2026-07-18T00:00:00.000Z'),
+    );
 
     expect(parsed.entries).toHaveLength(1);
     expect(parsed.entries[0]?.chat.messages[0]?.parts).toEqual([

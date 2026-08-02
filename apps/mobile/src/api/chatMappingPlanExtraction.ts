@@ -20,30 +20,7 @@ export function extractChatPlans(raw: RawThread): {
   const latestTurnStatus = readString(latestTurn?.status);
   const activeTurnId = extractActiveTurnId(turns);
   if (threadId && raw.acpSnapshot) {
-    const steps = raw.acpSnapshot.plan.map((entry) => ({
-      step: entry.content,
-      status:
-        entry.status === 'completed'
-          ? ('completed' as const)
-          : entry.status === 'inProgress' || entry.status === 'in_progress'
-            ? ('inProgress' as const)
-            : ('pending' as const),
-    }));
-    const plan =
-      steps.length > 0
-        ? {
-            threadId,
-            turnId: raw.acpSnapshot.active.sourceTurnId ?? `${threadId}::snapshot`,
-            explanation: null,
-            steps,
-          }
-        : null;
-    return {
-      latestPlan: plan,
-      latestTurnPlan: plan,
-      latestTurnStatus: raw.acpSnapshot.active.runId ? 'running' : 'completed',
-      activeTurnId: raw.acpSnapshot.active.sourceTurnId ?? null,
-    };
+    return extractSnapshotPlans(raw, threadId);
   }
   if (!threadId || turns.length === 0) {
     return {
@@ -53,6 +30,49 @@ export function extractChatPlans(raw: RawThread): {
       activeTurnId,
     };
   }
+  return extractTurnPlans(turns, threadId, latestTurn, latestTurnStatus, activeTurnId);
+}
+
+function extractSnapshotPlans(
+  raw: RawThread,
+  threadId: string,
+): ReturnType<typeof extractChatPlans> {
+  const snapshot = raw.acpSnapshot!;
+  const steps = snapshot.plan.map((entry) => ({
+    step: entry.content,
+    status: snapshotPlanStepStatus(entry.status),
+  }));
+  const plan =
+    steps.length > 0
+      ? {
+          threadId,
+          turnId: snapshot.active.sourceTurnId ?? `${threadId}::snapshot`,
+          explanation: null,
+          steps,
+        }
+      : null;
+  return {
+    latestPlan: plan,
+    latestTurnPlan: plan,
+    latestTurnStatus: snapshot.active.runId ? 'running' : 'completed',
+    activeTurnId: snapshot.active.sourceTurnId ?? null,
+  };
+}
+
+function snapshotPlanStepStatus(status: string): 'completed' | 'inProgress' | 'pending' {
+  if (status === 'completed') {
+    return 'completed';
+  }
+  return status === 'inProgress' || status === 'in_progress' ? 'inProgress' : 'pending';
+}
+
+function extractTurnPlans(
+  turns: RawTurn[],
+  threadId: string,
+  latestTurn: RawTurn | null,
+  latestTurnStatus: string | null,
+  activeTurnId: string | null,
+): ReturnType<typeof extractChatPlans> {
   let latestPlan: ChatPlanSnapshot | null = null;
   let latestTurnPlan: ChatPlanSnapshot | null = null;
   for (const turn of turns) {

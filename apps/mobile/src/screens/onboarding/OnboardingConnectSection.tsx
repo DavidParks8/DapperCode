@@ -34,6 +34,109 @@ interface ConnectSectionProps {
   onTestConnection: () => void;
 }
 
+interface ConnectHeaderRowProps {
+  styles: ReturnType<typeof createOnboardingStyles>;
+  theme: AppTheme;
+  mode: OnboardingMode;
+  onCancel?: () => void;
+  showOnboardingDock: boolean;
+  onBack: () => void;
+}
+
+function OnboardingConnectHeaderRow({
+  styles,
+  theme,
+  mode,
+  onCancel,
+  showOnboardingDock,
+  onBack,
+}: ConnectHeaderRowProps) {
+  const canCancel = (mode === 'edit' || mode === 'add' || mode === 'reconnect') && onCancel;
+  return (
+    <View style={styles.connectHeaderRow}>
+      <View style={styles.heroTopRowLeft}>
+        {showOnboardingDock ? (
+          <Pressable
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            accessibilityHint="Returns to the introduction"
+            style={({ pressed }) => [styles.connectTopButton, pressed && styles.cancelBtnPressed]}
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="chevron-back"
+              size={15}
+              color={theme.colors.textPrimary}
+            />
+            <Text style={styles.connectTopButtonText}>Back</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.heroIconWrap}>
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="hardware-chip-outline"
+              size={20}
+              color={theme.colors.textPrimary}
+            />
+          </View>
+        )}
+      </View>
+      <View style={styles.heroTopRowRight}>
+        {canCancel ? (
+          <Pressable
+            onPress={onCancel}
+            hitSlop={computeHitSlop({ width: 30, height: 30 })}
+            style={({ pressed }) => [styles.cancelBtn, pressed && styles.cancelBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel connection setup"
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="close"
+              size={16}
+              color={theme.colors.textPrimary}
+            />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+interface ConnectStatusBannersProps {
+  insecureRemoteWarning: string | null;
+  formError: string | null;
+  connectionCheck: ConnectionCheck;
+}
+
+function OnboardingConnectStatusBanners({
+  insecureRemoteWarning,
+  formError,
+  connectionCheck,
+}: ConnectStatusBannersProps) {
+  return (
+    <>
+      {insecureRemoteWarning ? (
+        <StatusBanner tone="warning" icon="warning-outline" message={insecureRemoteWarning} />
+      ) : null}
+      {formError ? (
+        <StatusBanner tone="error" icon="close-circle-outline" message={formError} />
+      ) : null}
+      {connectionCheck.kind === 'success' ? (
+        <StatusBanner
+          tone="success"
+          icon="checkmark-circle-outline"
+          message={connectionCheck.message}
+        />
+      ) : null}
+      {connectionCheck.kind === 'error' ? (
+        <StatusBanner tone="error" icon="alert-circle-outline" message={connectionCheck.message} />
+      ) : null}
+    </>
+  );
+}
+
 export function OnboardingConnectSection({
   styles,
   theme,
@@ -66,57 +169,14 @@ export function OnboardingConnectSection({
         showsVerticalScrollIndicator={false}
       >
         {showOnboardingDock ? <OnboardingStepDock currentStage={currentSetupStage} /> : null}
-        <View style={styles.connectHeaderRow}>
-          <View style={styles.heroTopRowLeft}>
-            {showOnboardingDock ? (
-              <Pressable
-                onPress={onBack}
-                accessibilityRole="button"
-                accessibilityLabel="Back"
-                accessibilityHint="Returns to the introduction"
-                style={({ pressed }) => [
-                  styles.connectTopButton,
-                  pressed && styles.cancelBtnPressed,
-                ]}
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="chevron-back"
-                  size={15}
-                  color={theme.colors.textPrimary}
-                />
-                <Text style={styles.connectTopButtonText}>Back</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.heroIconWrap}>
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="hardware-chip-outline"
-                  size={20}
-                  color={theme.colors.textPrimary}
-                />
-              </View>
-            )}
-          </View>
-          <View style={styles.heroTopRowRight}>
-            {(mode === 'edit' || mode === 'add' || mode === 'reconnect') && onCancel ? (
-              <Pressable
-                onPress={onCancel}
-                hitSlop={computeHitSlop({ width: 30, height: 30 })}
-                style={({ pressed }) => [styles.cancelBtn, pressed && styles.cancelBtnPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel connection setup"
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="close"
-                  size={16}
-                  color={theme.colors.textPrimary}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
+        <OnboardingConnectHeaderRow
+          styles={styles}
+          theme={theme}
+          mode={mode}
+          onCancel={onCancel}
+          showOnboardingDock={showOnboardingDock}
+          onBack={onBack}
+        />
 
         <BlurView intensity={55} tint={theme.blurTint} style={styles.formCard}>
           <View style={styles.commandPanel}>
@@ -228,27 +288,11 @@ export function OnboardingConnectSection({
             </View>
           </View>
 
-          {insecureRemoteWarning ? (
-            <StatusBanner tone="warning" icon="warning-outline" message={insecureRemoteWarning} />
-          ) : null}
-
-          {formError ? (
-            <StatusBanner tone="error" icon="close-circle-outline" message={formError} />
-          ) : null}
-          {connectionCheck.kind === 'success' ? (
-            <StatusBanner
-              tone="success"
-              icon="checkmark-circle-outline"
-              message={connectionCheck.message}
-            />
-          ) : null}
-          {connectionCheck.kind === 'error' ? (
-            <StatusBanner
-              tone="error"
-              icon="alert-circle-outline"
-              message={connectionCheck.message}
-            />
-          ) : null}
+          <OnboardingConnectStatusBanners
+            insecureRemoteWarning={insecureRemoteWarning}
+            formError={formError}
+            connectionCheck={connectionCheck}
+          />
 
           <View style={styles.formSectionHeader}>
             <Text style={styles.formSectionEyebrow}>3. Save</Text>

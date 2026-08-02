@@ -37,7 +37,9 @@ export function ComputerUseTimeline({
         detailPreview: TimelineDetailPreview;
       } => entry !== null,
     );
-  if (parsedEntries.length === 0) return null;
+  if (parsedEntries.length === 0) {
+    return null;
+  }
 
   return (
     <View

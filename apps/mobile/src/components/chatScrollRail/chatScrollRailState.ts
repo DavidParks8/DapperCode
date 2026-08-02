@@ -49,58 +49,59 @@ export const initialChatScrollRailState: ChatScrollRailState = {
   windowStart: 0,
 };
 
-export function transitionChatScrollRail(
+function transitionOnSync(
   state: ChatScrollRailState,
-  event: ChatScrollRailEvent,
+  event: Extract<ChatScrollRailEvent, { type: 'sync' }>,
 ): ChatScrollRailTransition {
-  if (event.type === 'reset') {
+  if (event.anchorCount <= 0) {
     return { state: initialChatScrollRailState, effect: null };
   }
-  if (event.type === 'release') {
-    return { state: { ...state, engaged: false }, effect: null };
+  const activeIndex = Math.min(
+    event.anchorCount - 1,
+    Math.max(0, event.preferredActiveIndex >= 0 ? event.preferredActiveIndex : state.activeIndex),
+  );
+  const windowStart = state.engaged
+    ? clampRailWindowStart(
+        state.windowStart + activeIndex - state.activeIndex,
+        event.anchorCount,
+        event.capacity,
+      )
+    : centerRailWindowStart(activeIndex, event.anchorCount, event.capacity);
+  if (activeIndex === state.activeIndex && windowStart === state.windowStart) {
+    return { state, effect: null };
   }
-  if (event.type === 'sync') {
-    if (event.anchorCount <= 0) {
-      return { state: initialChatScrollRailState, effect: null };
-    }
-    const activeIndex = Math.min(
-      event.anchorCount - 1,
-      Math.max(0, event.preferredActiveIndex >= 0 ? event.preferredActiveIndex : state.activeIndex),
-    );
-    const windowStart = state.engaged
-      ? clampRailWindowStart(
-          state.windowStart + activeIndex - state.activeIndex,
-          event.anchorCount,
-          event.capacity,
-        )
-      : centerRailWindowStart(activeIndex, event.anchorCount, event.capacity);
-    if (activeIndex === state.activeIndex && windowStart === state.windowStart) {
-      return { state, effect: null };
-    }
-    return { state: { ...state, activeIndex, windowStart }, effect: null };
-  }
-  if (event.type === 'edgeTick') {
-    if (!state.engaged || event.anchorCount <= 0) {
-      return { state, effect: null };
-    }
-    const windowStart = clampRailWindowStart(
-      state.windowStart + event.direction,
-      event.anchorCount,
-      event.capacity,
-    );
-    const activeIndex = Math.min(
-      event.anchorCount - 1,
-      Math.max(0, state.activeIndex + event.direction),
-    );
-    if (windowStart === state.windowStart && activeIndex === state.activeIndex) {
-      return { state, effect: null };
-    }
-    return {
-      state: { ...state, windowStart, activeIndex },
-      effect: { haptic: 'selection', jumpIndex: activeIndex },
-    };
-  }
+  return { state: { ...state, activeIndex, windowStart }, effect: null };
+}
 
+function transitionOnEdgeTick(
+  state: ChatScrollRailState,
+  event: Extract<ChatScrollRailEvent, { type: 'edgeTick' }>,
+): ChatScrollRailTransition {
+  if (!state.engaged || event.anchorCount <= 0) {
+    return { state, effect: null };
+  }
+  const windowStart = clampRailWindowStart(
+    state.windowStart + event.direction,
+    event.anchorCount,
+    event.capacity,
+  );
+  const activeIndex = Math.min(
+    event.anchorCount - 1,
+    Math.max(0, state.activeIndex + event.direction),
+  );
+  if (windowStart === state.windowStart && activeIndex === state.activeIndex) {
+    return { state, effect: null };
+  }
+  return {
+    state: { ...state, windowStart, activeIndex },
+    effect: { haptic: 'selection', jumpIndex: activeIndex },
+  };
+}
+
+function transitionOnPointerEvent(
+  state: ChatScrollRailState,
+  event: Extract<ChatScrollRailEvent, { type: 'engage' | 'move' }>,
+): ChatScrollRailTransition {
   const activeIndex = barIndexForFingerY(
     event.fingerY,
     event.railTop,
@@ -128,4 +129,23 @@ export function transitionChatScrollRail(
       jumpIndex: activeIndex,
     },
   };
+}
+
+export function transitionChatScrollRail(
+  state: ChatScrollRailState,
+  event: ChatScrollRailEvent,
+): ChatScrollRailTransition {
+  if (event.type === 'reset') {
+    return { state: initialChatScrollRailState, effect: null };
+  }
+  if (event.type === 'release') {
+    return { state: { ...state, engaged: false }, effect: null };
+  }
+  if (event.type === 'sync') {
+    return transitionOnSync(state, event);
+  }
+  if (event.type === 'edgeTick') {
+    return transitionOnEdgeTick(state, event);
+  }
+  return transitionOnPointerEvent(state, event);
 }

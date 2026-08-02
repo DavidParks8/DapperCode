@@ -127,7 +127,9 @@ describe('replay recovery controller', () => {
     api.getChat.mockImplementation(() => new Promise<Chat>(() => {}));
     const controller = new AbortController();
     const recovery = fetchReplayRecoverySnapshot(api, [], controller.signal);
-    while (api.getChat.mock.calls.length < REPLAY_RECOVERY_CONCURRENCY) await Promise.resolve();
+    while (api.getChat.mock.calls.length < REPLAY_RECOVERY_CONCURRENCY) {
+      await Promise.resolve();
+    }
     controller.abort(new Error('stale watermark'));
     await expect(recovery).rejects.toThrow('stale watermark');
     expect(api.getChat).toHaveBeenCalledTimes(REPLAY_RECOVERY_CONCURRENCY);

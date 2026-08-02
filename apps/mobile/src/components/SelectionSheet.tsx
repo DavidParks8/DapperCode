@@ -144,6 +144,153 @@ export function SelectionSheet({
   );
 }
 
+function resolveSelectionSheetIconColor(
+  option: SelectionSheetOption,
+  tone: OptionTone,
+  colors: ReturnType<typeof useAppTheme>['colors'],
+): string {
+  if (option.iconColor) {
+    return option.iconColor;
+  }
+  if (tone === 'danger') {
+    return colors.error;
+  }
+  if (option.selected || tone === 'accent') {
+    return colors.textPrimary;
+  }
+  return colors.textMuted;
+}
+
+function resolveSelectionSheetRowColors(
+  option: SelectionSheetOption,
+  theme: ReturnType<typeof useAppTheme>,
+  styles: ReturnType<typeof createSelectionSheetStyles>,
+): {
+  tone: OptionTone;
+  iconColor: string;
+  titleColor: string;
+  descriptionColor: string;
+  metaColor: string;
+  badgeBackgroundColor: string;
+  badgeTextColor: string;
+} {
+  const { colors } = theme;
+  const tone = option.tone ?? 'default';
+  return {
+    tone,
+    iconColor: resolveSelectionSheetIconColor(option, tone, colors),
+    titleColor: option.titleColor ?? colors.textPrimary,
+    descriptionColor: option.descriptionColor ?? colors.textMuted,
+    metaColor: option.metaColor ?? colors.textMuted,
+    badgeBackgroundColor: option.badgeBackgroundColor ?? styles.badge.backgroundColor,
+    badgeTextColor: option.badgeTextColor ?? styles.badgeText.color,
+  };
+}
+
+function SelectionSheetRowIcon({
+  option,
+  tone,
+  iconColor,
+  styles,
+}: {
+  option: SelectionSheetOption;
+  tone: OptionTone;
+  iconColor: string;
+  styles: ReturnType<typeof createSelectionSheetStyles>;
+}) {
+  if (!option.icon) {
+    return null;
+  }
+  return (
+    <View
+      style={[
+        styles.iconWrap,
+        option.selected && styles.iconWrapSelected,
+        tone === 'danger' && styles.iconWrapDanger,
+      ]}
+    >
+      <Ionicons {...decorativeAccessibilityProps} name={option.icon} size={15} color={iconColor} />
+    </View>
+  );
+}
+
+function SelectionSheetRowCopy({
+  option,
+  titleColor,
+  descriptionColor,
+  badgeBackgroundColor,
+  badgeTextColor,
+  styles,
+}: {
+  option: SelectionSheetOption;
+  titleColor: string;
+  descriptionColor: string;
+  badgeBackgroundColor: string;
+  badgeTextColor: string;
+  styles: ReturnType<typeof createSelectionSheetStyles>;
+}) {
+  return (
+    <View style={styles.copy}>
+      <View style={styles.titleRow}>
+        <Text
+          style={[
+            styles.optionTitle,
+            option.selected && styles.optionTitleSelected,
+            { color: titleColor },
+            option.titleStyle,
+          ]}
+          numberOfLines={2}
+        >
+          {option.title}
+        </Text>
+        {option.badge ? (
+          <View style={[styles.badge, { backgroundColor: badgeBackgroundColor }]}>
+            <Text style={[styles.badgeText, { color: badgeTextColor }]}>{option.badge}</Text>
+          </View>
+        ) : null}
+      </View>
+      {option.description ? (
+        <Text
+          style={[styles.optionDescription, { color: descriptionColor }, option.descriptionStyle]}
+          numberOfLines={option.descriptionNumberOfLines ?? 2}
+        >
+          {option.description}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function SelectionSheetRowAccessory({
+  option,
+  metaColor,
+  colors,
+  styles,
+}: {
+  option: SelectionSheetOption;
+  metaColor: string;
+  colors: ReturnType<typeof useAppTheme>['colors'];
+  styles: ReturnType<typeof createSelectionSheetStyles>;
+}) {
+  return (
+    <View style={styles.accessory}>
+      {option.meta ? (
+        <Text style={[styles.meta, { color: metaColor }]} numberOfLines={1}>
+          {option.meta}
+        </Text>
+      ) : null}
+      {option.selected ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="checkmark-circle"
+          size={18}
+          color={colors.textPrimary}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 function SelectionSheetRow({
   option,
   styles,
@@ -154,19 +301,15 @@ function SelectionSheetRow({
   theme: ReturnType<typeof useAppTheme>;
 }) {
   const { colors } = theme;
-  const tone = option.tone ?? 'default';
-  const iconColor =
-    option.iconColor ??
-    (tone === 'danger'
-      ? colors.error
-      : option.selected || tone === 'accent'
-        ? colors.textPrimary
-        : colors.textMuted);
-  const titleColor = option.titleColor ?? colors.textPrimary;
-  const descriptionColor = option.descriptionColor ?? colors.textMuted;
-  const metaColor = option.metaColor ?? colors.textMuted;
-  const badgeBackgroundColor = option.badgeBackgroundColor ?? styles.badge.backgroundColor;
-  const badgeTextColor = option.badgeTextColor ?? styles.badgeText.color;
+  const {
+    tone,
+    iconColor,
+    titleColor,
+    descriptionColor,
+    metaColor,
+    badgeBackgroundColor,
+    badgeTextColor,
+  } = resolveSelectionSheetRowColors(option, theme, styles);
 
   return (
     <Pressable
@@ -187,72 +330,23 @@ function SelectionSheetRow({
       ]}
     >
       <View style={styles.optionMain}>
-        {option.icon ? (
-          <View
-            style={[
-              styles.iconWrap,
-              option.selected && styles.iconWrapSelected,
-              tone === 'danger' && styles.iconWrapDanger,
-            ]}
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name={option.icon}
-              size={15}
-              color={iconColor}
-            />
-          </View>
-        ) : null}
-
-        <View style={styles.copy}>
-          <View style={styles.titleRow}>
-            <Text
-              style={[
-                styles.optionTitle,
-                option.selected && styles.optionTitleSelected,
-                { color: titleColor },
-                option.titleStyle,
-              ]}
-              numberOfLines={2}
-            >
-              {option.title}
-            </Text>
-            {option.badge ? (
-              <View style={[styles.badge, { backgroundColor: badgeBackgroundColor }]}>
-                <Text style={[styles.badgeText, { color: badgeTextColor }]}>{option.badge}</Text>
-              </View>
-            ) : null}
-          </View>
-          {option.description ? (
-            <Text
-              style={[
-                styles.optionDescription,
-                { color: descriptionColor },
-                option.descriptionStyle,
-              ]}
-              numberOfLines={option.descriptionNumberOfLines ?? 2}
-            >
-              {option.description}
-            </Text>
-          ) : null}
-        </View>
+        <SelectionSheetRowIcon option={option} tone={tone} iconColor={iconColor} styles={styles} />
+        <SelectionSheetRowCopy
+          option={option}
+          titleColor={titleColor}
+          descriptionColor={descriptionColor}
+          badgeBackgroundColor={badgeBackgroundColor}
+          badgeTextColor={badgeTextColor}
+          styles={styles}
+        />
       </View>
 
-      <View style={styles.accessory}>
-        {option.meta ? (
-          <Text style={[styles.meta, { color: metaColor }]} numberOfLines={1}>
-            {option.meta}
-          </Text>
-        ) : null}
-        {option.selected ? (
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="checkmark-circle"
-            size={18}
-            color={colors.textPrimary}
-          />
-        ) : null}
-      </View>
+      <SelectionSheetRowAccessory
+        option={option}
+        metaColor={metaColor}
+        colors={colors}
+        styles={styles}
+      />
     </Pressable>
   );
 }

@@ -34,7 +34,9 @@ export class AgentThreadsController {
 
   async loadDetail(threadId: string): Promise<{ chat: Chat; parent: Chat | null }> {
     const chat = await this.api.getChat(threadId, { forceRefresh: true });
-    if (!chat.parentThreadId) return { chat, parent: null };
+    if (!chat.parentThreadId) {
+      return { chat, parent: null };
+    }
     const parent =
       this.api.peekChat(chat.parentThreadId) ??
       (await this.api.getChat(chat.parentThreadId).catch(() => null));

@@ -1,8 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, type FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import type { FlatList } from 'react-native';
+import { Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Chat, RpcNotification } from '../../api/types';
@@ -18,24 +18,33 @@ import {
   relatedAgentThreadsAtom,
 } from '../../state/mainScreen/workspace';
 import { openBrowserAtom, openSubAgentAtom } from '../../navigation/actions';
-import { routes } from '../../navigation/routes';
 import type { AutoScrollState } from './mainScreenHelpers';
-import { extractNotificationThreadId } from './mainScreenHelpers';
 import { formatAgentThreadOptionTitle } from './mainScreenHelperPlansAndCommands';
 import { indexAgentThreadOrdinals } from './agentThreads';
 import { AgentThreadsController } from './controllers/agentThreadsController';
 import { buildAgentThreadDisplayState } from './agentThreadDisplay';
-import { areChatStatusMapsEquivalent, resolveEquivalentChat } from './mainScreenChatState';
-import { projectTranscript } from './controllers/transcriptProjectionController';
 import type { TranscriptDisplayItem } from './transcriptMessages';
-import { ChatTranscriptView } from './ChatTranscriptView';
-import { SubAgentTranscriptShimmer } from './SubAgentTranscriptShimmer';
-import { useAppTheme, type AppTheme } from '../../theme';
+import { useAppTheme } from '../../theme';
+import { useAccessibilityFocus, useAccessibilityAnnouncement } from '../../accessibility';
 import {
-  decorativeAccessibilityProps,
-  useAccessibilityFocus,
-  useAccessibilityAnnouncement,
-} from '../../accessibility';
+  resolveHydratedDetailState,
+  resolveHydrationErrorState,
+  resolveRefreshModeForEvent,
+  resolveRememberedDetailState,
+  resolveSubAgentSummary,
+  mergeSummaryIntoChat,
+  resolveAgentThreadStatusById,
+  countProjectedMessages,
+  resolveTranscriptState,
+  navigateBackFromSubAgent,
+  type SubAgentDetailState,
+} from './subAgentDetailViewState';
+import {
+  createStyles,
+  SubAgentHeader,
+  SubAgentStatusBar,
+  SubAgentTranscriptContent,
+} from './SubAgentDetailViewSections';
 
 interface SubAgentDetailViewProps {
   threadId: string;
@@ -51,7 +60,9 @@ function useShimmerPresentation(active: boolean): boolean {
 
   useEffect(() => {
     if (active) {
-      if (visible) return;
+      if (visible) {
+        return;
+      }
       const timer = setTimeout(() => {
         visibleSinceRef.current = Date.now();
         setVisible(true);
@@ -65,10 +76,13 @@ function useShimmerPresentation(active: boolean): boolean {
     }
 
     const elapsed = Date.now() - (visibleSinceRef.current ?? Date.now());
-    const timer = setTimeout(() => {
-      visibleSinceRef.current = null;
-      setVisible(false);
-    }, Math.max(SHIMMER_REVEAL_HOLD_MS, SHIMMER_MIN_VISIBLE_MS - elapsed));
+    const timer = setTimeout(
+      () => {
+        visibleSinceRef.current = null;
+        setVisible(false);
+      },
+      Math.max(SHIMMER_REVEAL_HOLD_MS, SHIMMER_MIN_VISIBLE_MS - elapsed),
+    );
     return () => clearTimeout(timer);
   }, [active, visible]);
 
@@ -101,11 +115,11 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   const detailChatRef = useRef<Chat | null>(null);
   const hydrationFailedRef = useRef(false);
   const foregroundHydrationRef = useRef(false);
-  const [detail, setDetail] = useState(() => ({
+  const [detail, setDetail] = useState<SubAgentDetailState>(() => ({
     chat: api.peekChat(threadId) ?? api.peekChatShell(threadId),
-    parentChat: null as Chat | null,
+    parentChat: null,
     loading: true,
-    error: null as string | null,
+    error: null,
   }));
   const scrollRef = useRef<FlatList<TranscriptDisplayItem>>(null);
   const autoScrollStateRef = useRef<AutoScrollState>({
@@ -125,34 +139,17 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
       try {
         const { chat, parent } = await controller.loadDetail(threadId);
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId) {
+          return;
+        }
         hydrationFailedRef.current = false;
-        setDetail((current) => {
-          const resolvedChat =
-            current.chat?.id === chat.id ? resolveEquivalentChat(current.chat, chat) : chat;
-          if (
-            resolvedChat === current.chat &&
-            parent === current.parentChat &&
-            !current.loading &&
-            current.error === null
-          ) {
-            return current;
-          }
-          return {
-            chat: resolvedChat,
-            parentChat: parent,
-            loading: false,
-            error: null,
-          };
-        });
+        setDetail((current) => resolveHydratedDetailState(current, chat, parent));
       } catch (error) {
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId) {
+          return;
+        }
         hydrationFailedRef.current = true;
-        setDetail((current) => ({
-          ...current,
-          loading: false,
-          error: !showLoading && current.chat ? current.error : (error as Error).message,
-        }));
+        setDetail((current) => resolveHydrationErrorState(current, showLoading, error));
       } finally {
         if (showLoading && requestRef.current === requestId) {
           foregroundHydrationRef.current = false;
@@ -174,17 +171,15 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   useEffect(
     () =>
       ws.onEvent((event: RpcNotification) => {
-        if (event.method === 'bridge/events/snapshotRequired') {
-          if (foregroundHydrationRef.current) return;
-          void hydrate(false);
-          return;
-        }
-        if (
-          event.method === 'thread/subagent/adopted' &&
-          extractNotificationThreadId(event.params) === threadId &&
-          (!detailChatRef.current || hydrationFailedRef.current)
-        ) {
-          void hydrate(true);
+        const showLoading = resolveRefreshModeForEvent({
+          event,
+          threadId,
+          detailChat: detailChatRef.current,
+          hydrationFailed: hydrationFailedRef.current,
+          foregroundHydration: foregroundHydrationRef.current,
+        });
+        if (showLoading !== null) {
+          void hydrate(showLoading);
         }
       }),
     [hydrate, threadId, ws],
@@ -192,48 +187,27 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
   useEffect(() => {
     const remembered = api.peekChat(threadId);
-    if (!remembered) return;
-    setDetail((current) => {
-      const chat =
-        current.chat?.id === remembered.id
-          ? resolveEquivalentChat(current.chat, remembered)
-          : remembered;
-      return chat === current.chat ? current : { ...current, chat };
-    });
+    if (!remembered) {
+      return;
+    }
+    setDetail((current) => resolveRememberedDetailState(current, remembered));
   }, [agentRuntimeRevision, api, threadId]);
 
   const summary = useMemo(
     () =>
-      relatedAgentThreads.find((candidate) => candidate.id === threadId) ??
-      api.peekChatSummary(threadId) ??
-      detail.chat,
+      resolveSubAgentSummary({
+        relatedAgentThreads,
+        api,
+        threadId,
+        detailChat: detail.chat,
+        revision: agentRuntimeRevision,
+      }),
     [agentRuntimeRevision, api, detail.chat, relatedAgentThreads, threadId],
   );
-  const chat = useMemo(() => {
-    if (!detail.chat || !summary || summary === detail.chat) return detail.chat;
-    if (
-      detail.chat.status === summary.status &&
-      detail.chat.statusUpdatedAt === summary.statusUpdatedAt &&
-      detail.chat.lastError === summary.lastError
-    ) {
-      return detail.chat;
-    }
-    return {
-      ...detail.chat,
-      status: summary.status,
-      statusUpdatedAt: summary.statusUpdatedAt,
-      lastError: summary.lastError,
-    };
-  }, [detail.chat, summary]);
+  const chat = useMemo(() => mergeSummaryIntoChat(detail.chat, summary), [detail.chat, summary]);
   const statusMapRef = useRef<ReadonlyMap<string, Chat['status']>>(new Map());
   const agentThreadStatusById = useMemo(() => {
-    const statuses = new Map(
-      relatedAgentThreads.map((candidate) => [candidate.id, candidate.status] as const),
-    );
-    if (chat) statuses.set(chat.id, chat.status);
-    if (areChatStatusMapsEquivalent(statusMapRef.current, statuses)) {
-      return statusMapRef.current;
-    }
+    const statuses = resolveAgentThreadStatusById(statusMapRef.current, relatedAgentThreads, chat);
     statusMapRef.current = statuses;
     return statuses;
   }, [chat, relatedAgentThreads]);
@@ -252,46 +226,43 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   // A sub-agent that has just been spawned has no transcript yet. Rendering an
   // empty scroll view makes a live agent look dead, so it gets an explicit
   // starting state until its first message arrives.
-  const projectedMessageCount = useMemo(() => {
-    if (!chat) return 0;
-    return projectTranscript({
-      chat,
-      parentChat: detail.parentChat,
-      showToolCalls,
-      threadStatuses: agentThreadStatusById,
-      liveMessageState,
-    }).messages.length;
-  }, [agentThreadStatusById, chat, detail.parentChat, liveMessageState, showToolCalls]);
+  const projectedMessageCount = useMemo(
+    () =>
+      countProjectedMessages({
+        chat,
+        parentChat: detail.parentChat,
+        showToolCalls,
+        threadStatuses: agentThreadStatusById,
+        liveMessageState,
+      }),
+    [agentThreadStatusById, chat, detail.parentChat, liveMessageState, showToolCalls],
+  );
 
   // A non-empty summary preview is evidence that an empty shell still has history to hydrate.
   // Without that evidence, a running summary is a genuinely new agent and should go directly to
   // "Starting" rather than briefly promising transcript rows that do not exist.
-  const hasSummaryHistory = Boolean(summary?.lastMessagePreview.trim());
-  const isKnownEmpty =
-    Boolean(summary) && projectedMessageCount === 0 && !hasSummaryHistory;
-  const isSettledEmpty =
-    Boolean(chat) && !detail.loading && projectedMessageCount === 0;
-  const hasNoVisibleTranscript = isKnownEmpty || isSettledEmpty;
-  const isStarting = hasNoVisibleTranscript && summary?.status === 'running';
-  const isEmpty = hasNoVisibleTranscript && !isStarting;
-  const isHydratingTranscript =
-    detail.loading && projectedMessageCount === 0 && !isKnownEmpty;
+  const { activityDetail, isStarting, isEmpty, isHydratingTranscript } = useMemo(
+    () =>
+      resolveTranscriptState({
+        summary,
+        chat,
+        loading: detail.loading,
+        projectedMessageCount,
+        display,
+        runtime,
+      }),
+    [chat, detail.loading, display, projectedMessageCount, runtime, summary],
+  );
   const showHydrationShimmer = useShimmerPresentation(isHydratingTranscript);
-
-  const activityDetail =
-    display?.detail ?? runtime?.latestCommand?.detail ?? summary?.agentRole?.trim() ?? null;
   const headingFocusRef = useAccessibilityFocus<Text>(true);
   useAccessibilityAnnouncement(
     detail.error ?? (isHydratingTranscript ? 'Loading agent transcript' : null),
   );
 
-  const navigateBack = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back();
-    } else if (profileId && chatId) {
-      router.dismissTo(routes.chat(profileId, chatId));
-    }
-  }, [chatId, profileId, router]);
+  const navigateBack = useCallback(
+    () => navigateBackFromSubAgent(router, profileId, chatId),
+    [chatId, profileId, router],
+  );
 
   const openSubAgentThread = useCallback(
     (nextThreadId: string) => openSubAgent(nextThreadId),
@@ -300,64 +271,20 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={navigateBack}
-          hitSlop={8}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Back from sub-agent transcript"
-        >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="chevron-back"
-            size={22}
-            color={theme.colors.textPrimary}
-          />
-        </Pressable>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Sub-agent</Text>
-          <Text
-            ref={headingFocusRef}
-            accessibilityRole="header"
-            style={styles.title}
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
-        </View>
-        <View style={styles.iconButton} />
-      </View>
-
-      <View style={styles.statusBar} accessibilityLiveRegion="polite">
-        <View style={styles.statusCopy}>
-          <View style={styles.statusTitleRow}>
-            {display?.isActive ? (
-              <ActivityIndicator size="small" color={display.statusColor} />
-            ) : (
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name={display?.icon ?? 'ellipse-outline'}
-                size={15}
-                color={display?.statusColor ?? theme.colors.textMuted}
-              />
-            )}
-            <Text
-              style={[
-                styles.statusLabel,
-                { color: display?.statusColor ?? theme.colors.textMuted },
-              ]}
-            >
-              {display?.label ?? (detail.loading ? 'Loading' : 'Idle')}
-            </Text>
-          </View>
-          {activityDetail ? (
-            <Text style={styles.activityDetail} numberOfLines={2}>
-              {activityDetail}
-            </Text>
-          ) : null}
-        </View>
-      </View>
+      <SubAgentHeader
+        title={title}
+        navigateBack={navigateBack}
+        headingFocusRef={headingFocusRef}
+        styles={styles}
+        theme={theme}
+      />
+      <SubAgentStatusBar
+        display={display}
+        loading={detail.loading}
+        activityDetail={activityDetail}
+        styles={styles}
+        theme={theme}
+      />
 
       {detail.error ? (
         <Text
@@ -368,184 +295,27 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
           {detail.error}
         </Text>
       ) : null}
-
-      <View style={styles.transcript}>
-        <View
-          style={styles.transcriptContent}
-          accessibilityElementsHidden={showHydrationShimmer}
-          importantForAccessibility={showHydrationShimmer ? 'no-hide-descendants' : 'auto'}
-        >
-          {isStarting ? (
-            <View
-              style={styles.loadingShell}
-              accessibilityRole="progressbar"
-              accessibilityLabel="Sub-agent starting"
-            >
-              <ActivityIndicator color={theme.colors.warning} />
-              <Text style={styles.loadingText}>Starting…</Text>
-              <Text
-                style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
-                accessibilityElementsHidden={detail.loading}
-                importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
-              >
-                This agent has not reported anything yet. Its work will stream in here.
-              </Text>
-            </View>
-          ) : isEmpty ? (
-            <View style={styles.loadingShell} accessibilityLabel="Sub-agent reported no transcript">
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="document-text-outline"
-                size={20}
-                color={theme.colors.textMuted}
-              />
-              <Text style={styles.loadingText}>No transcript</Text>
-              <Text
-                style={[styles.startingHint, detail.loading && styles.startingHintLoading]}
-                accessibilityElementsHidden={detail.loading}
-                importantForAccessibility={detail.loading ? 'no-hide-descendants' : 'auto'}
-              >
-                This agent reported back through its parent instead of streaming its own session.
-              </Text>
-            </View>
-          ) : chat && projectedMessageCount > 0 ? (
-            <ChatTranscriptView
-              scrollRailEnabled={false}
-              chat={chat}
-              parentChat={detail.parentChat}
-              bridgeUrl={bridgeUrl}
-              bridgeToken={bridgeToken}
-              onOpenLocalPreview={openBrowser}
-              showToolCalls={showToolCalls}
-              onOpenSubAgentThread={openSubAgentThread}
-              agentThreadStatusById={agentThreadStatusById}
-              scrollRef={scrollRef}
-              inlineChoicesEnabled={false}
-              onInlineOptionSelect={() => {}}
-              onPinnedAutoScroll={() => {
-                if (autoScrollStateRef.current.shouldStickToBottom) {
-                  scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
-                }
-              }}
-              onJumpToLatest={() => {
-                scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
-              }}
-              onScrollInteractionStart={() => {}}
-              autoScrollStateRef={autoScrollStateRef}
-              bottomInset={0}
-              liveMessageState={liveMessageState}
-            />
-          ) : !isHydratingTranscript ? (
-            <View
-              style={styles.loadingShell}
-              accessibilityRole="progressbar"
-              accessibilityLabel="Loading agent transcript"
-            >
-              <ActivityIndicator color={theme.colors.textMuted} />
-              <Text style={styles.loadingText}>Loading agent transcript…</Text>
-            </View>
-          ) : null}
-        </View>
-        {showHydrationShimmer ? <SubAgentTranscriptShimmer /> : null}
-      </View>
+      <SubAgentTranscriptContent
+        chat={chat}
+        parentChat={detail.parentChat}
+        bridgeUrl={bridgeUrl}
+        bridgeToken={bridgeToken}
+        openBrowser={openBrowser}
+        showToolCalls={showToolCalls}
+        onOpenSubAgentThread={openSubAgentThread}
+        agentThreadStatusById={agentThreadStatusById}
+        scrollRef={scrollRef}
+        autoScrollStateRef={autoScrollStateRef}
+        liveMessageState={liveMessageState}
+        projectedMessageCount={projectedMessageCount}
+        isStarting={isStarting}
+        isEmpty={isEmpty}
+        isHydratingTranscript={isHydratingTranscript}
+        showHydrationShimmer={showHydrationShimmer}
+        detailLoading={detail.loading}
+        styles={styles}
+        theme={theme}
+      />
     </SafeAreaView>
   );
 }
-
-const createStyles = (theme: AppTheme) =>
-  StyleSheet.create({
-    page: {
-      flex: 1,
-      backgroundColor: theme.colors.bgMain,
-    },
-    header: {
-      minHeight: 56,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.sm,
-      paddingHorizontal: theme.spacing.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.borderLight,
-    },
-    iconButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerCopy: {
-      flex: 1,
-      minWidth: 0,
-    },
-    eyebrow: {
-      ...theme.typography.metadata,
-      color: theme.colors.textMuted,
-      fontWeight: '700',
-      textTransform: 'uppercase',
-    },
-    title: {
-      ...theme.typography.headline,
-      color: theme.colors.textPrimary,
-    },
-    statusBar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.md,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.sm,
-      backgroundColor: theme.colors.bgElevated,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.borderLight,
-    },
-    statusCopy: {
-      flex: 1,
-      minWidth: 0,
-      gap: 3,
-    },
-    statusTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.xs,
-    },
-    statusLabel: {
-      ...theme.typography.caption,
-      fontWeight: '700',
-    },
-    activityDetail: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
-    },
-    errorText: {
-      ...theme.typography.caption,
-      color: theme.colors.error,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: theme.spacing.sm,
-    },
-    transcript: {
-      flex: 1,
-    },
-    transcriptContent: {
-      flex: 1,
-    },
-    loadingShell: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: theme.spacing.sm,
-    },
-    loadingText: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-    },
-    startingHint: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      textAlign: 'center',
-      maxWidth: 260,
-      paddingHorizontal: theme.spacing.lg,
-    },
-    startingHintLoading: {
-      opacity: 0,
-    },
-  });

@@ -76,9 +76,7 @@ export function OnboardingScreen({
           ) : (
             <Animated.View
               key="connect"
-              entering={FadeIn.duration(motionDuration.routine).reduceMotion(
-                ReduceMotion.System,
-              )}
+              entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
               style={styles.connectAnimatedRoot}
             >
               <OnboardingConnectSection

@@ -97,6 +97,81 @@ function sharedRequest(
   return request;
 }
 
+function isBrowserTargetsCacheFresh(
+  current: BrowserTargetsCacheEntry | undefined,
+  force: boolean | undefined,
+  ttlMs: number,
+  now: number,
+): boolean {
+  return (
+    !force &&
+    current?.value !== null &&
+    current?.value !== undefined &&
+    current.fetchedAt !== null &&
+    now - current.fetchedAt < ttlMs
+  );
+}
+
+function markBrowserTargetsRefreshing(
+  cache: BrowserTargetsCache,
+  profileId: string,
+  identityKey: string,
+  current: BrowserTargetsCacheEntry | undefined,
+): BrowserTargetsCache {
+  return {
+    ...cache,
+    [profileId]: {
+      identityKey,
+      value: current?.value ?? null,
+      fetchedAt: current?.fetchedAt ?? null,
+      refreshing: true,
+      error: null,
+    },
+  };
+}
+
+function applyBrowserTargetsSuccess(
+  cache: BrowserTargetsCache,
+  profileId: string,
+  identityKey: string,
+  value: BrowserPreviewTargetSuggestion[],
+): BrowserTargetsCache {
+  const latest = cache[profileId];
+  if (latest?.identityKey !== identityKey) {
+    return cache;
+  }
+  return {
+    ...cache,
+    [profileId]: {
+      identityKey,
+      value,
+      fetchedAt: Date.now(),
+      refreshing: false,
+      error: null,
+    },
+  };
+}
+
+function applyBrowserTargetsError(
+  cache: BrowserTargetsCache,
+  profileId: string,
+  identityKey: string,
+  error: unknown,
+): BrowserTargetsCache {
+  const latest = cache[profileId];
+  if (latest?.identityKey !== identityKey) {
+    return cache;
+  }
+  return {
+    ...cache,
+    [profileId]: {
+      ...latest,
+      refreshing: false,
+      error: errorMessage(error),
+    },
+  };
+}
+
 export const revalidateBrowserTargetsAtom = atom(
   null,
   async (
@@ -114,62 +189,25 @@ export const revalidateBrowserTargetsAtom = atom(
     const cached = get(browserTargetsCacheAtom)[profileId];
     const current = cached?.identityKey === identityKey ? cached : undefined;
     const ttlMs = Math.max(0, options.ttlMs ?? BROWSER_TARGETS_TTL_MS);
-    if (
-      !options.force &&
-      current?.value !== null &&
-      current?.value !== undefined &&
-      current.fetchedAt !== null &&
-      now - current.fetchedAt < ttlMs
-    ) {
-      return current.value;
+    if (isBrowserTargetsCacheFresh(current, options.force, ttlMs, now)) {
+      return current?.value ?? null;
     }
 
-    set(browserTargetsCacheAtom, (cache) => ({
-      ...cache,
-      [profileId]: {
-        identityKey,
-        value: current?.value ?? null,
-        fetchedAt: current?.fetchedAt ?? null,
-        refreshing: true,
-        error: null,
-      },
-    }));
+    set(browserTargetsCacheAtom, (cache) =>
+      markBrowserTargetsRefreshing(cache, profileId, identityKey, current),
+    );
 
     try {
       const response = await sharedRequest(client, profileId);
       const value = response.suggestions;
-      set(browserTargetsCacheAtom, (cache) => {
-        const latest = cache[profileId];
-        if (latest?.identityKey !== identityKey) {
-          return cache;
-        }
-        return {
-          ...cache,
-          [profileId]: {
-            identityKey,
-            value,
-            fetchedAt: Date.now(),
-            refreshing: false,
-            error: null,
-          },
-        };
-      });
+      set(browserTargetsCacheAtom, (cache) =>
+        applyBrowserTargetsSuccess(cache, profileId, identityKey, value),
+      );
       return value;
     } catch (error) {
-      set(browserTargetsCacheAtom, (cache) => {
-        const latest = cache[profileId];
-        if (latest?.identityKey !== identityKey) {
-          return cache;
-        }
-        return {
-          ...cache,
-          [profileId]: {
-            ...latest,
-            refreshing: false,
-            error: errorMessage(error),
-          },
-        };
-      });
+      set(browserTargetsCacheAtom, (cache) =>
+        applyBrowserTargetsError(cache, profileId, identityKey, error),
+      );
       return current?.value ?? null;
     }
   },

@@ -2,8 +2,16 @@ import { useMainScreenStyles } from './useMainScreenStyles';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../../state/mainScreen/turn';
 import { useAtomValue } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { type ComponentProps, useMemo } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  type StyleProp,
+  type TextStyle,
+  type ViewStyle,
+} from 'react-native';
 import { BridgeUiWorkflowCard } from '../../components/BridgeUiSurface';
 import { ChatHeader } from '../../components/ChatHeader';
 import { decorativeAccessibilityProps } from '../../accessibility';
@@ -16,6 +24,8 @@ import type {
 } from './mainScreenPanelCollapseCoordinator';
 
 type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollapseCoordinatorResult;
+type MainScreenTheme = ReturnType<typeof useMainScreenStyles>['theme'];
+type MainScreenStyles = ReturnType<typeof useMainScreenStyles>['styles'];
 
 // Chips are dense, dynamically-sized labels in a scrollable row (28pt tall); the estimated
 // width keeps them visually compact while still resolving to the 44pt/48dp effective touch
@@ -24,15 +34,93 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 28 };
 const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3 };
 
-export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
+function handleSessionMetaChipPress(action: () => void | Promise<void>): void {
+  void feedback.selection();
+  void action();
+}
+
+function computeWorkflowCardScrollMaxHeight(
+  windowHeight: number,
+  workflowCardMode: Context['workflowCardMode'],
+) {
+  if (workflowCardMode === 'approval') {
+    return Math.max(176, Math.min(Math.floor(windowHeight * 0.34), 280));
+  }
+
+  return Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360));
+}
+
+function SessionMetaChip(props: {
+  styles: MainScreenStyles;
+  theme: MainScreenTheme;
+  baseStyle: StyleProp<ViewStyle>;
+  enabledStyle?: StyleProp<ViewStyle>;
+  disabledStyle?: StyleProp<ViewStyle>;
+  label: string;
+  displayText: string;
+  iconName: ComponentProps<typeof Ionicons>['name'];
+  iconColor?: string;
+  textStyle?: StyleProp<TextStyle>;
+  accessibilityRole: 'button' | 'switch';
+  accessibilityState?: { checked?: boolean; disabled?: boolean };
+  hitSlop: { top: number; bottom: number; left: number; right: number };
+  onPress: () => void | Promise<void>;
+  disabled?: boolean;
+}) {
   const {
-    onOpenDrawer,
-    headerTitle,
-    activeAgent,
-    selectedChat,
-    openTitleEditor,
-    handleOpenGit,
-    isOpeningChat,
+    styles,
+    theme,
+    baseStyle,
+    enabledStyle,
+    disabledStyle,
+    label,
+    displayText,
+    iconName,
+    iconColor,
+    textStyle,
+    accessibilityRole,
+    accessibilityState,
+    hitSlop,
+    onPress,
+    disabled,
+  } = props;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        baseStyle,
+        enabledStyle,
+        pressed && styles.modelChipPressed,
+        disabled && disabledStyle,
+      ]}
+      onPress={() => handleSessionMetaChipPress(onPress)}
+      hitSlop={hitSlop}
+      disabled={disabled}
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={label}
+      accessibilityState={accessibilityState}
+    >
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name={iconName}
+        size={12}
+        color={iconColor ?? theme.colors.textMuted}
+      />
+      <Text style={[styles.modelChipText, textStyle]} numberOfLines={1}>
+        {displayText}
+      </Text>
+    </Pressable>
+  );
+}
+
+function SessionMetaRow(props: {
+  context: Context;
+  styles: MainScreenStyles;
+  theme: MainScreenTheme;
+  hitSlop: { top: number; bottom: number; left: number; right: number };
+}) {
+  const { context, styles, theme, hitSlop } = props;
+  const {
     modelOptions,
     openModelModal,
     activeModelLabel,
@@ -48,7 +136,100 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     fastModeEnabled,
     fastModeControlDisabled,
     toggleFastMode,
-    showTopCardsRow,
+  } = context;
+
+  return (
+    <View style={styles.sessionMetaRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.sessionMetaRowContent}
+      >
+        {modelOptions.length > 0 ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.modelChip}
+            label={`Model, ${activeModelLabel}`}
+            displayText={activeModelLabel}
+            iconName="sparkles-outline"
+            accessibilityRole="button"
+            hitSlop={hitSlop}
+            onPress={openModelModal}
+          />
+        ) : null}
+        {activeModelEffortOptions.length > 0 ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.modelChip}
+            label={`Thinking level, ${activeEffortLabel}`}
+            displayText={activeEffortLabel}
+            iconName="pulse-outline"
+            accessibilityRole="button"
+            hitSlop={hitSlop}
+            onPress={openEffortModal}
+          />
+        ) : null}
+        <SessionMetaChip
+          styles={styles}
+          theme={theme}
+          baseStyle={styles.modeChip}
+          label={`Agent mode, ${collaborationModeLabel}`}
+          displayText={collaborationModeLabel}
+          iconName="map-outline"
+          accessibilityRole="button"
+          hitSlop={hitSlop}
+          onPress={openCollaborationModeMenu}
+        />
+        {showAgentThreadChip ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.modeChip}
+            label={agentThreadChipLabel}
+            displayText={agentThreadChipLabel}
+            iconName="people-outline"
+            accessibilityRole="button"
+            hitSlop={hitSlop}
+            onPress={() => {
+              void openAgentThreadSelector();
+            }}
+          />
+        ) : null}
+        {supportsFastMode ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.fastChip}
+            enabledStyle={fastModeEnabled && styles.fastChipEnabled}
+            disabledStyle={styles.sessionMetaChipDisabled}
+            label="Fast mode"
+            displayText="Fast"
+            iconName={fastModeEnabled ? 'flash' : 'flash-outline'}
+            iconColor={fastModeEnabled ? theme.colors.textPrimary : theme.colors.textMuted}
+            textStyle={fastModeEnabled && styles.fastChipTextEnabled}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: fastModeEnabled, disabled: fastModeControlDisabled }}
+            hitSlop={hitSlop}
+            disabled={fastModeControlDisabled}
+            onPress={toggleFastMode}
+          />
+        ) : null}
+      </ScrollView>
+    </View>
+  );
+}
+
+function TopCardsRow(props: {
+  context: Context;
+  styles: MainScreenStyles;
+  sending: boolean;
+  creating: boolean;
+  stoppingTurn: boolean;
+}) {
+  const { context, styles, sending, creating, stoppingTurn } = props;
+  const {
     workflowBridgeUiSurfaces,
     windowHeight,
     handleBridgeUiAction,
@@ -60,6 +241,53 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     implementPlan,
     stayInPlanMode,
   } = context;
+  const workflowCardScrollMaxHeight = computeWorkflowCardScrollMaxHeight(
+    windowHeight,
+    workflowCardMode,
+  );
+
+  return (
+    <View style={styles.topCardsRow}>
+      {workflowBridgeUiSurfaces.map((surface) => (
+        <BridgeUiWorkflowCard
+          key={surface.id}
+          surface={surface}
+          scrollMaxHeight={Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360))}
+          onAction={(nextSurface, action) => {
+            void handleBridgeUiAction(nextSurface, action);
+          }}
+          onDismiss={(nextSurface) => {
+            void dismissBridgeUiSurface(nextSurface);
+          }}
+        />
+      ))}
+      {workflowCardMode ? (
+        <WorkflowCard
+          mode={workflowCardMode}
+          plan={selectedThreadPlan}
+          collapsed={planPanelCollapsed}
+          scrollMaxHeight={workflowCardScrollMaxHeight}
+          actionDisabled={sending || creating || stoppingTurn}
+          onToggleCollapse={toggleSelectedPlanPanel}
+          onImplement={() => void implementPlan()}
+          onStayInPlanMode={stayInPlanMode}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
+  const {
+    onOpenDrawer,
+    headerTitle,
+    activeAgent,
+    selectedChat,
+    openTitleEditor,
+    handleOpenGit,
+    isOpeningChat,
+    showTopCardsRow,
+  } = context;
   const { theme, styles } = useMainScreenStyles();
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
@@ -68,6 +296,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     () => computeHitSlop(SESSION_META_CHIP_VISIBLE_SIZE, SESSION_META_CHIP_HIT_SLOP_OPTIONS),
     [],
   );
+  const showSessionMetaRow = Boolean(selectedChat) && !isOpeningChat;
 
   return (
     <>
@@ -79,168 +308,22 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
         rightIconName={selectedChat ? 'git-branch-outline' : undefined}
         onRightActionPress={selectedChat ? handleOpenGit : undefined}
       />
-      {selectedChat && !isOpeningChat ? (
-        <View style={styles.sessionMetaRow}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.sessionMetaRowContent}
-          >
-            {modelOptions.length > 0 ? (
-              <Pressable
-                style={({ pressed }) => [styles.modelChip, pressed && styles.modelChipPressed]}
-                onPress={() => {
-                  void feedback.selection();
-                  openModelModal();
-                }}
-                hitSlop={sessionMetaChipHitSlop}
-                accessibilityRole="button"
-                accessibilityLabel={`Model, ${activeModelLabel}`}
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="sparkles-outline"
-                  size={12}
-                  color={theme.colors.textMuted}
-                />
-                <Text style={styles.modelChipText} numberOfLines={1}>
-                  {activeModelLabel}
-                </Text>
-              </Pressable>
-            ) : null}
-            {activeModelEffortOptions.length > 0 ? (
-              <Pressable
-                style={({ pressed }) => [styles.modelChip, pressed && styles.modelChipPressed]}
-                onPress={() => {
-                  void feedback.selection();
-                  openEffortModal();
-                }}
-                hitSlop={sessionMetaChipHitSlop}
-                accessibilityRole="button"
-                accessibilityLabel={`Thinking level, ${activeEffortLabel}`}
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="pulse-outline"
-                  size={12}
-                  color={theme.colors.textMuted}
-                />
-                <Text style={styles.modelChipText} numberOfLines={1}>
-                  {activeEffortLabel}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              style={({ pressed }) => [styles.modeChip, pressed && styles.modelChipPressed]}
-              onPress={() => {
-                void feedback.selection();
-                openCollaborationModeMenu();
-              }}
-              hitSlop={sessionMetaChipHitSlop}
-              accessibilityRole="button"
-              accessibilityLabel={`Agent mode, ${collaborationModeLabel}`}
-            >
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="map-outline"
-                size={12}
-                color={theme.colors.textMuted}
-              />
-              <Text style={styles.modelChipText} numberOfLines={1}>
-                {collaborationModeLabel}
-              </Text>
-            </Pressable>
-            {showAgentThreadChip ? (
-              <Pressable
-                style={({ pressed }) => [styles.modeChip, pressed && styles.modelChipPressed]}
-                onPress={() => {
-                  void feedback.selection();
-                  void openAgentThreadSelector();
-                }}
-                hitSlop={sessionMetaChipHitSlop}
-                accessibilityRole="button"
-                accessibilityLabel={agentThreadChipLabel}
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="people-outline"
-                  size={12}
-                  color={theme.colors.textMuted}
-                />
-                <Text style={styles.modelChipText} numberOfLines={1}>
-                  {agentThreadChipLabel}
-                </Text>
-              </Pressable>
-            ) : null}
-            {supportsFastMode ? (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.fastChip,
-                  fastModeEnabled && styles.fastChipEnabled,
-                  pressed && styles.modelChipPressed,
-                  fastModeControlDisabled && styles.sessionMetaChipDisabled,
-                ]}
-                onPress={() => {
-                  void feedback.selection();
-                  void toggleFastMode();
-                }}
-                hitSlop={sessionMetaChipHitSlop}
-                disabled={fastModeControlDisabled}
-                accessibilityRole="switch"
-                accessibilityLabel="Fast mode"
-                accessibilityState={{ checked: fastModeEnabled, disabled: fastModeControlDisabled }}
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name={fastModeEnabled ? 'flash' : 'flash-outline'}
-                  size={12}
-                  color={fastModeEnabled ? theme.colors.textPrimary : theme.colors.textMuted}
-                />
-                <Text
-                  style={[styles.modelChipText, fastModeEnabled && styles.fastChipTextEnabled]}
-                  numberOfLines={1}
-                >
-                  Fast
-                </Text>
-              </Pressable>
-            ) : null}
-          </ScrollView>
-        </View>
+      {showSessionMetaRow ? (
+        <SessionMetaRow
+          context={context}
+          styles={styles}
+          theme={theme}
+          hitSlop={sessionMetaChipHitSlop}
+        />
       ) : null}
       {showTopCardsRow ? (
-        <View style={styles.topCardsRow}>
-          {workflowBridgeUiSurfaces.map((surface) => (
-            <BridgeUiWorkflowCard
-              key={surface.id}
-              surface={surface}
-              scrollMaxHeight={Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360))}
-              onAction={(nextSurface, action) => {
-                void handleBridgeUiAction(nextSurface, action);
-              }}
-              onDismiss={(nextSurface) => {
-                void dismissBridgeUiSurface(nextSurface);
-              }}
-            />
-          ))}
-          {workflowCardMode ? (
-            <WorkflowCard
-              mode={workflowCardMode}
-              plan={selectedThreadPlan}
-              collapsed={planPanelCollapsed}
-              scrollMaxHeight={Math.max(
-                176,
-                Math.min(
-                  Math.floor(windowHeight * (workflowCardMode === 'approval' ? 0.34 : 0.4)),
-                  workflowCardMode === 'approval' ? 280 : 360,
-                ),
-              )}
-              actionDisabled={sending || creating || stoppingTurn}
-              onToggleCollapse={toggleSelectedPlanPanel}
-              onImplement={() => void implementPlan()}
-              onStayInPlanMode={stayInPlanMode}
-            />
-          ) : null}
-        </View>
+        <TopCardsRow
+          context={context}
+          styles={styles}
+          sending={sending}
+          creating={creating}
+          stoppingTurn={stoppingTurn}
+        />
       ) : null}
     </>
   );

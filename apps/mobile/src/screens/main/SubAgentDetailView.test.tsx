@@ -70,7 +70,9 @@ async function render(options: RenderOptions = {}): Promise<{
     onEvent: jest.fn((listener: (event: RpcNotification) => void) => {
       eventListener = listener;
       return () => {
-        if (eventListener === listener) eventListener = null;
+        if (eventListener === listener) {
+          eventListener = null;
+        }
       };
     }),
   } as unknown as HostBridgeWsClient;
@@ -97,7 +99,9 @@ async function render(options: RenderOptions = {}): Promise<{
     await Promise.resolve();
     await Promise.resolve();
   });
-  if (!tree) throw new Error('render failed');
+  if (!tree) {
+    throw new Error('render failed');
+  }
   return {
     tree,
     store,
@@ -150,7 +154,9 @@ describe('SubAgentDetailView starting state', () => {
     const eyebrow = (tree.root as Queryable).findAll(
       (node) => node.type === Text && textContent(node) === 'Sub-agent',
     )[0];
-    if (!eyebrow) throw new Error('Missing "Sub-agent" eyebrow text');
+    if (!eyebrow) {
+      throw new Error('Missing "Sub-agent" eyebrow text');
+    }
     const style = (StyleSheet.flatten(eyebrow.props.style) ?? {}) as Record<
       string,
       number | string | undefined
@@ -268,7 +274,9 @@ describe('SubAgentDetailView starting state', () => {
       expect(countByLabel(tree, 'Loading agent transcript')).toBe(0);
       expect(countByTestId(tree, 'agent-transcript-shimmer')).toBe(0);
     } finally {
-      if (tree) act(() => tree?.unmount());
+      if (tree) {
+        act(() => tree?.unmount());
+      }
       jest.useRealTimers();
     }
   });

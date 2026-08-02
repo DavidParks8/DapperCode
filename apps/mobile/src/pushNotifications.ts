@@ -236,7 +236,9 @@ export function parsePushNavigationTarget(data: unknown): PushNavigationTarget |
   const notificationId = readRequiredString(record.notificationId);
   const profileId = readRequiredString(record.profileId);
   const registrationId = readRequiredString(record.registrationId);
-  if (!notificationId || !profileId || !registrationId) return null;
+  if (!notificationId || !profileId || !registrationId) {
+    return null;
+  }
   const threadIdValue = record.threadId;
   const threadId =
     typeof threadIdValue === 'string' && threadIdValue.trim().length > 0

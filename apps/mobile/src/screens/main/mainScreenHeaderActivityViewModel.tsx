@@ -11,7 +11,7 @@ import {
 } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
-import type { Chat } from '../../api/types';
+import type { Chat, ChatSummary } from '../../api/types';
 import {
   GENERIC_RUNNING_ACTIVITY_DELAY_MS,
   GENERIC_RUNNING_ACTIVITY_TITLES,
@@ -19,7 +19,11 @@ import {
   joinWorkspacePath,
 } from './mainScreenHelpers';
 import { areChatStatusMapsEquivalent } from './mainScreenChatState';
-import { resolveDisplayedActivity, resolveVisibleActivity } from './mainScreenActivityIndicator';
+import {
+  resolveDisplayedActivity,
+  resolveVisibleActivity,
+  type ActivityIndicatorInputs,
+} from './mainScreenActivityIndicator';
 import type {
   MainScreenUiActionHandlersContext,
   MainScreenUiActionHandlersResult,
@@ -31,6 +35,137 @@ import {
 
 export type MainScreenHeaderActivityViewModelContext = MainScreenUiActionHandlersContext &
   MainScreenUiActionHandlersResult;
+
+interface GenericRunningActivityState {
+  isGenericRunningActivity: boolean;
+  shouldShowGenericRunningActivityImmediately: boolean;
+}
+
+interface AgentThreadChipState {
+  spawnedAgentCount: number;
+  selectedChatIsSubAgent: boolean;
+  showAgentThreadChip: boolean;
+  agentThreadChipLabel: string;
+}
+
+function buildActivityIndicatorInputs(
+  activity: ActivityIndicatorInputs['activity'],
+  heldActivity: ActivityIndicatorInputs['heldActivity'],
+  isConnected: boolean,
+  isLoading: boolean,
+  isOpeningChat: boolean,
+  isTurnLikelyRunning: boolean,
+  pendingApproval: ActivityIndicatorInputs['pendingApproval'],
+  pendingUserInputRequest: ActivityIndicatorInputs['pendingUserInputRequest'],
+  selectedChatStatus: ActivityIndicatorInputs['selectedChatStatus'],
+  showBridgeRecoveryBanner: boolean,
+  turnFailureDetail: string | null,
+): ActivityIndicatorInputs {
+  return {
+    activity,
+    heldActivity,
+    isConnected,
+    isLoading,
+    isOpeningChat,
+    isTurnLikelyRunning,
+    pendingApproval,
+    pendingUserInputRequest,
+    selectedChatStatus,
+    showBridgeRecoveryBanner,
+    turnFailureDetail,
+  };
+}
+
+function resolveGenericRunningActivityState(
+  displayedActivity: ReturnType<typeof resolveDisplayedActivity>,
+  isTurnLoading: boolean,
+  activeTurnId: string | null,
+): GenericRunningActivityState {
+  const isGenericRunningActivity =
+    displayedActivity.tone === 'running' &&
+    !displayedActivity.detail &&
+    GENERIC_RUNNING_ACTIVITY_TITLES.has(displayedActivity.title.trim().toLowerCase());
+
+  return {
+    isGenericRunningActivity,
+    shouldShowGenericRunningActivityImmediately:
+      isGenericRunningActivity && (isTurnLoading || Boolean(activeTurnId)),
+  };
+}
+
+function resolveShowActivity(
+  displayedActivity: ReturnType<typeof resolveDisplayedActivity>,
+  activityDetail: string | undefined,
+  isLoading: boolean,
+  isOpeningChat: boolean,
+  isGenericRunningActivity: boolean,
+  showDelayedGenericRunningActivity: boolean,
+): boolean {
+  if (isLoading && !isGenericRunningActivity) {
+    return true;
+  }
+  if (isOpeningChat) {
+    return true;
+  }
+  if (activityDetail) {
+    return true;
+  }
+  if (displayedActivity.tone === 'idle') {
+    return false;
+  }
+  return !isGenericRunningActivity || showDelayedGenericRunningActivity;
+}
+
+function resolveGitCheckoutTargetPath(
+  gitCheckoutParentPath: string | null,
+  gitCheckoutDirectoryName: string | null,
+): string | null {
+  const normalizedDirectoryName = normalizeCloneDirectoryName(gitCheckoutDirectoryName);
+  if (!gitCheckoutParentPath || !normalizedDirectoryName) {
+    return null;
+  }
+  return joinWorkspacePath(gitCheckoutParentPath, normalizedDirectoryName);
+}
+
+function resolveAgentThreadChipLabel(
+  selectedChatIsSubAgent: boolean,
+  spawnedAgentCount: number,
+): string {
+  if (selectedChatIsSubAgent) {
+    return spawnedAgentCount > 1 ? `Sub-agent · ${String(spawnedAgentCount)} threads` : 'Sub-agent';
+  }
+  return spawnedAgentCount === 1 ? '1 agent' : `${String(spawnedAgentCount)} agents`;
+}
+
+function resolveAgentThreadChipState(
+  selectedChat: Chat | null,
+  relatedAgentThreads: readonly ChatSummary[],
+  selectorAgentCount: number,
+  isOpeningChat: boolean,
+): AgentThreadChipState {
+  const relatedThreadsMatchSelectedChat = Boolean(
+    selectedChat && relatedAgentThreads.some((chat) => chat.id === selectedChat.id),
+  );
+  const spawnedAgentCount = relatedThreadsMatchSelectedChat ? selectorAgentCount : 0;
+  const selectedChatIsSubAgent = Boolean(selectedChat?.parentThreadId);
+  const showAgentThreadChip =
+    !isOpeningChat && Boolean(selectedChat) && (spawnedAgentCount > 0 || selectedChatIsSubAgent);
+
+  return {
+    spawnedAgentCount,
+    selectedChatIsSubAgent,
+    showAgentThreadChip,
+    agentThreadChipLabel: resolveAgentThreadChipLabel(selectedChatIsSubAgent, spawnedAgentCount),
+  };
+}
+
+function resolveAgentThreadStatusMap(
+  previousMap: ReadonlyMap<string, Chat['status']>,
+  relatedAgentThreads: readonly ChatSummary[],
+): ReadonlyMap<string, Chat['status']> {
+  const nextMap = new Map(relatedAgentThreads.map((chat) => [chat.id, chat.status] as const));
+  return areChatStatusMapsEquivalent(previousMap, nextMap) ? previousMap : nextMap;
+}
 
 export function useMainScreenHeaderActivityViewModel(
   context: MainScreenHeaderActivityViewModelContext,
@@ -61,27 +196,23 @@ export function useMainScreenHeaderActivityViewModel(
   const gitCheckoutDirectoryName = useAtomValue(gitCheckoutDirectoryNameAtom);
   const gitCheckoutParentPath = useAtomValue(gitCheckoutParentPathAtom);
 
-  const indicatorInputs = {
+  const indicatorInputs = buildActivityIndicatorInputs(
     activity,
     heldActivity,
-    isConnected: ws.isConnected,
+    ws.isConnected,
     isLoading,
     isOpeningChat,
     isTurnLikelyRunning,
     pendingApproval,
     pendingUserInputRequest,
-    selectedChatStatus: selectedChat?.status ?? null,
+    selectedChat?.status ?? null,
     showBridgeRecoveryBanner,
     turnFailureDetail,
-  };
+  );
   const visibleActivity = resolveVisibleActivity(indicatorInputs);
   const displayedActivity = resolveDisplayedActivity(indicatorInputs);
-  const isGenericRunningActivity =
-    displayedActivity.tone === 'running' &&
-    !displayedActivity.detail &&
-    GENERIC_RUNNING_ACTIVITY_TITLES.has(displayedActivity.title.trim().toLowerCase());
-  const shouldShowGenericRunningActivityImmediately =
-    isGenericRunningActivity && (isTurnLoading || Boolean(activeTurnId));
+  const { isGenericRunningActivity, shouldShowGenericRunningActivityImmediately } =
+    resolveGenericRunningActivityState(displayedActivity, isTurnLoading, activeTurnId);
 
   useEffect(() => {
     if (!isGenericRunningActivity) {
@@ -117,52 +248,45 @@ export function useMainScreenHeaderActivityViewModel(
     };
   }, [
     clearGenericRunningActivityDelay,
+    genericRunningActivityTimeoutRef,
     isGenericRunningActivity,
     shouldShowGenericRunningActivityImmediately,
     showDelayedGenericRunningActivity,
     isTurnLoading,
     activeTurnId,
+    setShowDelayedGenericRunningActivity,
   ]);
 
   const activityDetail = displayedActivity.detail;
-  const showActivity =
-    (isLoading && !isGenericRunningActivity) ||
-    isOpeningChat ||
-    (displayedActivity.tone !== 'idle' &&
-      (!isGenericRunningActivity || showDelayedGenericRunningActivity)) ||
-    Boolean(activityDetail);
+  const showActivity = resolveShowActivity(
+    displayedActivity,
+    activityDetail,
+    isLoading,
+    isOpeningChat,
+    isGenericRunningActivity,
+    showDelayedGenericRunningActivity,
+  );
   const headerTitle = isOpeningChat ? 'Opening chat' : selectedChat?.title?.trim() || 'New chat';
   const defaultStartWorkspaceLabel = preferredStartCwd ?? 'Select project';
   const gitCheckoutDestinationLabel =
     gitCheckoutParentPath ?? workspaceBridgeRoot ?? 'Bridge default workspace';
-  const gitCheckoutTargetPath =
-    gitCheckoutParentPath && normalizeCloneDirectoryName(gitCheckoutDirectoryName)
-      ? joinWorkspacePath(
-          gitCheckoutParentPath,
-          normalizeCloneDirectoryName(gitCheckoutDirectoryName) ?? '',
-        )
-      : null;
-  const relatedThreadsMatchSelectedChat = Boolean(
-    selectedChat && relatedAgentThreads.some((chat) => chat.id === selectedChat.id),
+  const gitCheckoutTargetPath = resolveGitCheckoutTargetPath(
+    gitCheckoutParentPath,
+    gitCheckoutDirectoryName,
   );
-  const spawnedAgentCount = relatedThreadsMatchSelectedChat ? selectorAgentCount : 0;
-  const selectedChatIsSubAgent = Boolean(selectedChat?.parentThreadId);
-  const showAgentThreadChip =
-    !isOpeningChat && Boolean(selectedChat) && (spawnedAgentCount > 0 || selectedChatIsSubAgent);
-  const agentThreadChipLabel = selectedChatIsSubAgent
-    ? spawnedAgentCount > 1
-      ? `Sub-agent · ${String(spawnedAgentCount)} threads`
-      : 'Sub-agent'
-    : spawnedAgentCount === 1
-      ? '1 agent'
-      : `${String(spawnedAgentCount)} agents`;
+  const { spawnedAgentCount, selectedChatIsSubAgent, showAgentThreadChip, agentThreadChipLabel } =
+    resolveAgentThreadChipState(
+      selectedChat,
+      relatedAgentThreads,
+      selectorAgentCount,
+      isOpeningChat,
+    );
   const agentThreadStatusByIdRef = useRef<ReadonlyMap<string, Chat['status']>>(new Map());
   const agentThreadStatusById = useMemo(() => {
-    const nextMap = new Map(relatedAgentThreads.map((chat) => [chat.id, chat.status] as const));
-    const previousMap = agentThreadStatusByIdRef.current;
-    if (areChatStatusMapsEquivalent(previousMap, nextMap)) {
-      return previousMap;
-    }
+    const nextMap = resolveAgentThreadStatusMap(
+      agentThreadStatusByIdRef.current,
+      relatedAgentThreads,
+    );
     agentThreadStatusByIdRef.current = nextMap;
     return nextMap;
   }, [relatedAgentThreads]);

@@ -3,7 +3,7 @@ import { bridgeCapabilitiesAtom, modelOptionsByAgentAtom } from '../../state/mai
 import { agentRootThreadIdAtom } from '../../state/mainScreen/workspace';
 import { androidKeyboardInsetAtom, keyboardVisibleAtom } from '../../state/mainScreen/composer';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   chatModelPreferencesLoadedAtom,
   chatPlanSnapshotsLoadedAtom,
@@ -14,7 +14,7 @@ import { screenRefView } from '../../state/mainScreen/registry';
 import { threadRuntimeSnapshotsAtom } from '../../state/mainScreen/runtime';
 import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '../../agents';
-import type { BridgeUiSurface, Chat } from '../../api/types';
+import type { BridgeCapabilities, BridgeUiSurface, Chat, ModelOption } from '../../api/types';
 import {
   type ActivePlanState,
   type PendingOptimisticUserMessage,
@@ -36,6 +36,128 @@ import { EMPTY_MODEL_OPTIONS } from './mainScreenConstants';
 
 export type MainScreenChatSessionStateContext = MainScreenLifecycleRecoveryContext &
   MainScreenLifecycleRecoveryResult;
+
+function resolveReadyAgents(bridgeCapabilities: BridgeCapabilities | null) {
+  return bridgeCapabilities?.agents.filter((agent) => agent.lifecycle === 'ready') ?? [];
+}
+
+function resolveSelectedNewAgentId(options: {
+  bridgeCapabilities: BridgeCapabilities | null;
+  pendingAgentId: string | null;
+  preferredAgentId: string | null;
+}) {
+  const { bridgeCapabilities, pendingAgentId, preferredAgentId } = options;
+  const preferredSelection = pendingAgentId ?? preferredAgentId;
+  return bridgeCapabilities
+    ? selectAgentId(preferredSelection, bridgeCapabilities)
+    : (preferredSelection ?? null);
+}
+
+function resolveActiveAgentState(options: {
+  bridgeCapabilities: BridgeCapabilities | null;
+  selectedChat: Chat | null;
+  selectedChatId: string | null;
+  selectedNewAgentId: string | null;
+}) {
+  const { bridgeCapabilities, selectedChat, selectedChatId, selectedNewAgentId } = options;
+  const activeAgentId = selectedChat?.agentId ?? selectedNewAgentId;
+  const activeAgent = findAgentDescriptor(bridgeCapabilities?.agents ?? [], activeAgentId);
+  const activeAgentLabel = getAgentLabel(bridgeCapabilities?.agents ?? [], activeAgentId);
+  const activeAgentSupports = activeAgentId
+    ? (bridgeCapabilities?.supportsByAgent[activeAgentId] ?? null)
+    : null;
+  const supportsFastMode = activeAgentSupports?.fastMode === true;
+  const supportsReview = activeAgentSupports?.reviewStart === true;
+  const supportsGoal = activeAgentSupports?.goalSlash === true;
+  const supportsPlanMode = activeAgentSupports?.planMode === true;
+  const slashCommandAvailability = {
+    hasOpenChat: Boolean(selectedChatId),
+    supportsGoal,
+    supportsPlanMode,
+    supportsReview,
+  };
+
+  return {
+    activeAgentId,
+    activeAgent,
+    activeAgentLabel,
+    activeAgentSupports,
+    supportsFastMode,
+    supportsReview,
+    supportsGoal,
+    supportsPlanMode,
+    slashCommandAvailability,
+    activeSlashCommands: SLASH_COMMANDS.filter((command) =>
+      isSlashCommandAvailable(command, slashCommandAvailability),
+    ),
+  };
+}
+
+function resolveAcpOption(
+  activeAcpConfig: Chat['acpConfig'] | undefined,
+  category: 'mode' | 'model' | 'thought_level',
+) {
+  return activeAcpConfig?.find((option) => option.category === category) ?? null;
+}
+
+function resolveModelState(options: {
+  selectedChat: Chat | null;
+  activeAgentId: string | null;
+  modelOptionsByAgent: Record<string, ModelOption[]>;
+}) {
+  const { selectedChat, activeAgentId, modelOptionsByAgent } = options;
+  const activeAcpConfig = selectedChat?.acpConfig ?? [];
+  const snapshotModelOptions = modelOptionsFromAcpConfig(activeAcpConfig);
+  const catalogModelOptions = activeAgentId
+    ? (modelOptionsByAgent[activeAgentId] ?? EMPTY_MODEL_OPTIONS)
+    : EMPTY_MODEL_OPTIONS;
+
+  return {
+    activeAcpConfig,
+    modelConfig: resolveAcpOption(activeAcpConfig, 'model'),
+    effortConfig: resolveAcpOption(activeAcpConfig, 'thought_level'),
+    modeConfig: resolveAcpOption(activeAcpConfig, 'mode'),
+    snapshotModelOptions,
+    catalogModelOptions,
+    modelOptions:
+      snapshotModelOptions.length > 0
+        ? mergeModelOptions(catalogModelOptions, snapshotModelOptions)
+        : catalogModelOptions,
+  };
+}
+
+function resolveAgentDefaults(
+  agentSettings: MainScreenChatSessionStateContext['agentSettings'],
+  selectedNewAgentId: string | null,
+) {
+  const pendingAgentDefaults = selectedNewAgentId
+    ? (agentSettings?.[selectedNewAgentId] ?? null)
+    : null;
+
+  return {
+    pendingAgentDefaults,
+    preferredCollaborationMode:
+      pendingAgentDefaults?.collaborationMode === 'plan'
+        ? pendingAgentDefaults.collaborationMode
+        : 'default',
+  };
+}
+
+function resolvePreferredModelDefaults(
+  chatModelPreferences: Record<string, ChatModelPreference>,
+  selectedNewAgentId: string | null,
+) {
+  const preferredAgentModelPreference = lastUsedModelPreference(
+    chatModelPreferences,
+    selectedNewAgentId,
+  );
+
+  return {
+    preferredDefaultModelId: preferredAgentModelPreference?.modelId ?? null,
+    preferredDefaultEffort: preferredAgentModelPreference?.effort ?? null,
+    preferredServiceTier: undefined,
+  };
+}
 
 export function useMainScreenChatSessionState(context: MainScreenChatSessionStateContext) {
   const {
@@ -70,7 +192,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
         replayRecoveryRetryTimerRef.current = null;
       }
     };
-  }, []);
+  }, [replayRecoveryAbortControllerRef, replayRecoveryGenerationRef, replayRecoveryRetryTimerRef]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -99,21 +221,23 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
       showSub.remove();
       hideSub.remove();
     };
-  }, []);
+  }, [setAndroidKeyboardInset, setKeyboardVisible]);
 
-  // Live views so callbacks always read the newest value without re-subscribing.
-  const chatIdRef = screenRefView(store, selectedChatIdAtom);
+  // Live views so callbacks always read the newest value without re-subscribing. They are
+  // memoized on the store so every consumer that lists one as a hook dependency keeps a stable
+  // identity across renders.
+  const chatIdRef = useMemo(() => screenRefView(store, selectedChatIdAtom), [store]);
   const selectedChatRef = useRef<Chat | null>(selectedChat);
   selectedChatRef.current = selectedChat;
   const selectedChatIdRef = useRef<string | null>(selectedChatId);
   selectedChatIdRef.current = selectedChatId;
   const parentChatCacheRef = useRef<Record<string, Chat>>({});
-  const agentRootThreadIdRef = screenRefView(store, agentRootThreadIdAtom);
+  const agentRootThreadIdRef = useMemo(() => screenRefView(store, agentRootThreadIdAtom), [store]);
   const planPanelLastTurnByThreadRef = useRef<Record<string, string>>({});
   const planItemTurnIdByThreadRef = useRef<Record<string, string>>({});
   const autoEnabledPlanTurnIdByThreadRef = useRef<Record<string, string>>({});
   const dismissedPlanImplementationTurnIdByThreadRef = useRef<Record<string, string>>({});
-  const activeTurnIdRef = screenRefView(store, activeTurnIdAtom);
+  const activeTurnIdRef = useMemo(() => screenRefView(store, activeTurnIdAtom), [store]);
   const stopRequestedRef = useRef(false);
   const stopSystemMessageLoggedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
@@ -135,7 +259,10 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const externalStatusFullSyncInFlightRef = useRef(false);
   const externalStatusFullSyncQueuedThreadRef = useRef<string | null>(null);
   const externalStatusFullSyncNextAllowedAtRef = useRef(0);
-  const threadRuntimeSnapshotsRef = screenRefView(store, threadRuntimeSnapshotsAtom);
+  const threadRuntimeSnapshotsRef = useMemo(
+    () => screenRefView(store, threadRuntimeSnapshotsAtom),
+    [store],
+  );
   const threadReasoningBuffersRef = useRef<Record<string, string>>({});
   const pendingOptimisticUserMessagesRef = useRef<Record<string, PendingOptimisticUserMessage[]>>(
     {},
@@ -151,57 +278,48 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const setChatPlanSnapshotsLoaded = useSetAtom(chatPlanSnapshotsLoadedAtom);
   const bridgeUiSurfacePersistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preferredStartCwd = normalizeWorkspacePath(defaultStartCwd);
-  const readyAgents =
-    bridgeCapabilities?.agents.filter((agent) => agent.lifecycle === 'ready') ?? [];
-  const selectedNewAgentId = bridgeCapabilities
-    ? selectAgentId(pendingAgentId ?? preferredAgentId, bridgeCapabilities)
-    : (pendingAgentId ?? preferredAgentId ?? null);
-  const activeAgentId = selectedChat?.agentId ?? selectedNewAgentId;
-  const activeAgent = findAgentDescriptor(bridgeCapabilities?.agents ?? [], activeAgentId);
-  const activeAgentLabel = getAgentLabel(bridgeCapabilities?.agents ?? [], activeAgentId);
-  const activeAgentSupports = activeAgentId
-    ? (bridgeCapabilities?.supportsByAgent[activeAgentId] ?? null)
-    : null;
-  const supportsFastMode = activeAgentSupports?.fastMode === true;
-  const supportsReview = activeAgentSupports?.reviewStart === true;
-  const supportsGoal = activeAgentSupports?.goalSlash === true;
-  const supportsPlanMode = activeAgentSupports?.planMode === true;
-  const slashCommandAvailability = {
-    hasOpenChat: Boolean(selectedChatId),
+  const readyAgents = resolveReadyAgents(bridgeCapabilities);
+  const selectedNewAgentId = resolveSelectedNewAgentId({
+    bridgeCapabilities,
+    pendingAgentId,
+    preferredAgentId,
+  });
+  const {
+    activeAgentId,
+    activeAgent,
+    activeAgentLabel,
+    activeAgentSupports,
+    supportsFastMode,
+    supportsReview,
     supportsGoal,
     supportsPlanMode,
-    supportsReview,
-  };
-  const activeSlashCommands = SLASH_COMMANDS.filter((command) =>
-    isSlashCommandAvailable(command, slashCommandAvailability),
-  );
-  const activeAcpConfig = selectedChat?.acpConfig ?? [];
-  const modelConfig = activeAcpConfig.find((option) => option.category === 'model') ?? null;
-  const effortConfig =
-    activeAcpConfig.find((option) => option.category === 'thought_level') ?? null;
-  const modeConfig = activeAcpConfig.find((option) => option.category === 'mode') ?? null;
-  const snapshotModelOptions = modelOptionsFromAcpConfig(activeAcpConfig);
-  const catalogModelOptions = activeAgentId
-    ? (modelOptionsByAgent[activeAgentId] ?? EMPTY_MODEL_OPTIONS)
-    : EMPTY_MODEL_OPTIONS;
-  const modelOptions =
-    snapshotModelOptions.length > 0
-      ? mergeModelOptions(catalogModelOptions, snapshotModelOptions)
-      : catalogModelOptions;
-  const pendingAgentDefaults = selectedNewAgentId
-    ? (agentSettings?.[selectedNewAgentId] ?? null)
-    : null;
-  const preferredAgentModelPreference = lastUsedModelPreference(
-    chatModelPreferencesRef.current,
+    slashCommandAvailability,
+    activeSlashCommands,
+  } = resolveActiveAgentState({
+    bridgeCapabilities,
+    selectedChat,
+    selectedChatId,
+    selectedNewAgentId,
+  });
+  const {
+    activeAcpConfig,
+    modelConfig,
+    effortConfig,
+    modeConfig,
+    snapshotModelOptions,
+    catalogModelOptions,
+    modelOptions,
+  } = resolveModelState({
+    selectedChat,
+    activeAgentId,
+    modelOptionsByAgent,
+  });
+  const { pendingAgentDefaults, preferredCollaborationMode } = resolveAgentDefaults(
+    agentSettings,
     selectedNewAgentId,
   );
-  const preferredDefaultModelId = preferredAgentModelPreference?.modelId ?? null;
-  const preferredDefaultEffort = preferredAgentModelPreference?.effort ?? null;
-  const preferredServiceTier = undefined;
-  const preferredCollaborationMode =
-    pendingAgentDefaults?.collaborationMode === 'plan'
-      ? pendingAgentDefaults.collaborationMode
-      : 'default';
+  const { preferredDefaultModelId, preferredDefaultEffort, preferredServiceTier } =
+    resolvePreferredModelDefaults(chatModelPreferencesRef.current, selectedNewAgentId);
   const activeApprovalPolicy = toApprovalPolicyForMode(approvalMode);
   const attachmentWorkspace = selectedChat?.cwd ?? preferredStartCwd ?? null;
   const attachmentController = useAttachmentController({

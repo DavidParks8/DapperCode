@@ -1,15 +1,12 @@
 import { pendingApprovalAtom, pendingUserInputRequestAtom } from '../../state/mainScreen/turn';
 import { processTurnLifecycleEvents } from './mainScreenTurnLifecycleEvents';
-import {
-  processAgUiRunEvents,
-  processAgUiTextContentEvents,
-} from './mainScreenAgUiRunEvents';
+import { processAgUiRunEvents, processAgUiTextContentEvents } from './mainScreenAgUiRunEvents';
 import { processThreadStateEvents } from './mainScreenThreadStateEvents';
 import { processPlanAndReasoningEvents } from './mainScreenPlanAndReasoningEvents';
 import { processBridgeInteractionEvents } from './mainScreenBridgeInteractionEvents';
 import { processBridgeConnectionEvents } from './mainScreenBridgeConnectionEvents';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { activityAtom } from '../../state/mainScreen/composer';
 import type { RpcNotification } from '../../api/types';
 import { parseAgUiEventNotification, type AgUiEventEnvelope } from '../../api/agUi';
@@ -20,6 +17,36 @@ import type {
 
 export type MainScreenWsEventRouterContext = MainScreenReplayRecoveryEngineContext &
   MainScreenReplayRecoveryEngineResult;
+
+type MainScreenWsEventRoute =
+  | 'agUi'
+  | 'threadState'
+  | 'planAndReasoning'
+  | 'turnLifecycle'
+  | 'bridgeConnection'
+  | 'bridgeInteraction';
+
+const THREAD_STATE_EVENT_METHODS = new Set([
+  'bridge/events/snapshotRequired',
+  'thread/name/updated',
+  'thread/deleted',
+  'thread/tokenUsage/updated',
+  'item/started',
+]);
+
+const PLAN_AND_REASONING_EVENT_METHODS = new Set([
+  'item/plan/delta',
+  'item/commandExecution/outputDelta',
+  'item/mcpToolCall/progress',
+  'item/commandExecution/terminalInteraction',
+]);
+
+const TURN_LIFECYCLE_EVENT_METHODS = new Set([
+  'turn/plan/updated',
+  'turn/diff/updated',
+  'item/completed',
+  'thread/status/changed',
+]);
 
 export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterContext) {
   const {
@@ -35,7 +62,6 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     cacheThreadPendingUserInputRequest,
     cacheThreadPlan,
     cacheThreadTurnState,
-    chatIdRef,
     clearDeferredDisconnectActivity,
     clearLiveReasoningMessage,
     clearPendingPlanImplementationPrompt,
@@ -59,6 +85,10 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const setActivity = useSetAtom(activityAtom);
+  const eventContextRef = useRef(context);
+  const setActivityRef = useRef(setActivity);
+  eventContextRef.current = context;
+  setActivityRef.current = setActivity;
 
   useEffect(() => {
     const pendingApprovalId = pendingApproval?.requestId;
@@ -67,9 +97,12 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     let animationFrame: number | null = null;
     const flushTextEvents = () => {
       animationFrame = null;
-      if (pendingTextEvents.length === 0) return;
+      if (pendingTextEvents.length === 0) {
+        return;
+      }
       const events = pendingTextEvents.splice(0);
-      processAgUiTextContentEvents(context, events, chatIdRef.current);
+      const eventContext = eventContextRef.current;
+      processAgUiTextContentEvents(eventContext, events, eventContext.chatIdRef.current);
     };
     const flushTextEventsNow = () => {
       if (animationFrame !== null) {
@@ -80,7 +113,8 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
     };
 
     const unsubscribe = ws.onEvent((event: RpcNotification) => {
-      const currentId = chatIdRef.current;
+      const eventContext = eventContextRef.current;
+      const currentId = eventContext.chatIdRef.current;
       const agUiEnvelope = parseAgUiEventNotification(event);
       if (agUiEnvelope?.event.type === 'TEXT_MESSAGE_CONTENT') {
         pendingTextEvents.push(agUiEnvelope);
@@ -88,57 +122,41 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
         return;
       }
       flushTextEventsNow();
-      if (agUiEnvelope) {
-        processAgUiRunEvents(context, event, currentId);
+      const route = agUiEnvelope ? 'agUi' : getMainScreenWsEventMethodRoute(event.method);
+      if (!route) {
         return;
       }
-      if (
-        event.method === 'bridge/events/snapshotRequired' ||
-        event.method === 'thread/name/updated' ||
-        event.method === 'thread/deleted' ||
-        event.method === 'thread/tokenUsage/updated' ||
-        event.method === 'item/started'
-      ) {
-        processThreadStateEvents(context, event, currentId);
-        return;
-      }
-      if (
-        event.method === 'item/plan/delta' ||
-        event.method.startsWith('item/reasoning/') ||
-        event.method === 'item/commandExecution/outputDelta' ||
-        event.method === 'item/mcpToolCall/progress' ||
-        event.method === 'item/commandExecution/terminalInteraction'
-      ) {
-        processPlanAndReasoningEvents(context, event, currentId, setActivity);
-        return;
-      }
-      if (
-        event.method === 'turn/plan/updated' ||
-        event.method === 'turn/diff/updated' ||
-        event.method === 'item/completed' ||
-        event.method === 'thread/status/changed'
-      ) {
-        processTurnLifecycleEvents(
-          context,
-          event,
-          currentId,
-          pendingApprovalId,
-          pendingUserInputRequestId,
-        );
-        return;
-      }
-      if (event.method.startsWith('bridge/')) {
-        if (event.method === 'bridge/connection/state') {
-          processBridgeConnectionEvents(context, event, currentId);
+
+      switch (route) {
+        case 'agUi':
+          processAgUiRunEvents(eventContext, event, currentId);
           return;
-        }
-        processBridgeInteractionEvents(
-          context,
-          event,
-          currentId,
-          pendingApprovalId,
-          pendingUserInputRequestId,
-        );
+        case 'threadState':
+          processThreadStateEvents(eventContext, event, currentId);
+          return;
+        case 'planAndReasoning':
+          processPlanAndReasoningEvents(eventContext, event, currentId, setActivityRef.current);
+          return;
+        case 'turnLifecycle':
+          processTurnLifecycleEvents(
+            eventContext,
+            event,
+            currentId,
+            pendingApprovalId,
+            pendingUserInputRequestId,
+          );
+          return;
+        case 'bridgeConnection':
+          processBridgeConnectionEvents(eventContext, event, currentId);
+          return;
+        case 'bridgeInteraction':
+          processBridgeInteractionEvents(
+            eventContext,
+            event,
+            currentId,
+            pendingApprovalId,
+            pendingUserInputRequestId,
+          );
       }
     });
     return () => {
@@ -185,3 +203,20 @@ export function useMainScreenWsEventRouter(context: MainScreenWsEventRouterConte
 }
 
 export type MainScreenWsEventRouterResult = ReturnType<typeof useMainScreenWsEventRouter>;
+
+function getMainScreenWsEventMethodRoute(method: string): MainScreenWsEventRoute | null {
+  if (THREAD_STATE_EVENT_METHODS.has(method)) {
+    return 'threadState';
+  }
+  if (PLAN_AND_REASONING_EVENT_METHODS.has(method) || method.startsWith('item/reasoning/')) {
+    return 'planAndReasoning';
+  }
+  if (TURN_LIFECYCLE_EVENT_METHODS.has(method)) {
+    return 'turnLifecycle';
+  }
+  if (method === 'bridge/connection/state') {
+    return 'bridgeConnection';
+  }
+
+  return method.startsWith('bridge/') ? 'bridgeInteraction' : null;
+}

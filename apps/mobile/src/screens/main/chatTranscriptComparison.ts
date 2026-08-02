@@ -1,6 +1,45 @@
 import type { Chat } from '../../api/types';
 import type { ChatTranscriptViewProps } from './ChatTranscriptView';
 
+function areTranscriptConnectionPropsEqual(
+  previous: ChatTranscriptViewProps,
+  next: ChatTranscriptViewProps,
+): boolean {
+  return previous.bridgeUrl === next.bridgeUrl && previous.bridgeToken === next.bridgeToken;
+}
+
+function areTranscriptInteractionPropsEqual(
+  previous: ChatTranscriptViewProps,
+  next: ChatTranscriptViewProps,
+): boolean {
+  return (
+    previous.onOpenLocalPreview === next.onOpenLocalPreview &&
+    previous.onOpenSubAgentThread === next.onOpenSubAgentThread &&
+    previous.onInlineOptionSelect === next.onInlineOptionSelect &&
+    previous.onPinnedAutoScroll === next.onPinnedAutoScroll &&
+    previous.onJumpToLatest === next.onJumpToLatest &&
+    previous.onScrollInteractionStart === next.onScrollInteractionStart &&
+    previous.scrollRef === next.scrollRef &&
+    previous.autoScrollStateRef === next.autoScrollStateRef
+  );
+}
+
+function areTranscriptDisplayPropsEqual(
+  previous: ChatTranscriptViewProps,
+  next: ChatTranscriptViewProps,
+): boolean {
+  return (
+    previous.showToolCalls === next.showToolCalls &&
+    previous.agentThreadStatusById === next.agentThreadStatusById &&
+    previous.inlineChoicesEnabled === next.inlineChoicesEnabled &&
+    previous.bottomInset === next.bottomInset &&
+    previous.liveMessageState === next.liveMessageState &&
+    previous.continuationState === next.continuationState &&
+    previous.onLoadEarlier === next.onLoadEarlier &&
+    previous.scrollRailEnabled === next.scrollRailEnabled
+  );
+}
+
 export function areChatTranscriptViewPropsEqual(
   previous: ChatTranscriptViewProps,
   next: ChatTranscriptViewProps,
@@ -8,24 +47,9 @@ export function areChatTranscriptViewPropsEqual(
   return (
     areChatsEquivalentForTranscript(previous.chat, next.chat) &&
     areChatsEquivalentForTranscript(previous.parentChat, next.parentChat) &&
-    previous.bridgeUrl === next.bridgeUrl &&
-    previous.bridgeToken === next.bridgeToken &&
-    previous.onOpenLocalPreview === next.onOpenLocalPreview &&
-    previous.showToolCalls === next.showToolCalls &&
-    previous.agentThreadStatusById === next.agentThreadStatusById &&
-    previous.scrollRef === next.scrollRef &&
-    previous.inlineChoicesEnabled === next.inlineChoicesEnabled &&
-    previous.onInlineOptionSelect === next.onInlineOptionSelect &&
-    previous.onPinnedAutoScroll === next.onPinnedAutoScroll &&
-    previous.onJumpToLatest === next.onJumpToLatest &&
-    previous.onScrollInteractionStart === next.onScrollInteractionStart &&
-    previous.autoScrollStateRef === next.autoScrollStateRef &&
-    previous.bottomInset === next.bottomInset &&
-    previous.liveMessageState === next.liveMessageState &&
-    previous.onOpenSubAgentThread === next.onOpenSubAgentThread &&
-    previous.continuationState === next.continuationState &&
-    previous.onLoadEarlier === next.onLoadEarlier &&
-    previous.scrollRailEnabled === next.scrollRailEnabled
+    areTranscriptConnectionPropsEqual(previous, next) &&
+    areTranscriptInteractionPropsEqual(previous, next) &&
+    areTranscriptDisplayPropsEqual(previous, next)
   );
 }
 

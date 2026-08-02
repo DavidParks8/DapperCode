@@ -39,7 +39,9 @@ export class EventSequenceBuilder {
   /** Override the thread/run IDs for subsequent events. */
   setThread(threadId: string, runId?: string): this {
     this._threadId = threadId;
-    if (runId) this._runId = runId;
+    if (runId) {
+      this._runId = runId;
+    }
     return this;
   }
 

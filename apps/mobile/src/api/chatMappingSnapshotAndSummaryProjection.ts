@@ -25,15 +25,8 @@ import {
   unixSecondsToIso,
 } from './chatMappingRawTypesAndReaders';
 
-export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
-  const snapshot = toRecord(value);
-  const session = toRecord(snapshot?.session);
-  const active = toRecord(snapshot?.active);
-  const version = readCoercedFiniteNumber(snapshot?.version);
-  if (!snapshot || (version !== 1 && version !== 2) || !session || !active) {
-    return undefined;
-  }
-  const messages = (Array.isArray(snapshot.messages) ? snapshot.messages : [])
+function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapshot['messages'] {
+  return (Array.isArray(snapshot.messages) ? snapshot.messages : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -43,7 +36,10 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       truncated: entry.truncated === true,
     }))
     .filter((entry) => entry.id && entry.role);
-  const tools = (Array.isArray(snapshot.tools) ? snapshot.tools : [])
+}
+
+function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['tools'] {
+  return (Array.isArray(snapshot.tools) ? snapshot.tools : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -59,7 +55,12 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       subagent: entry.subagent === true,
     }))
     .filter((entry) => entry.id);
-  const timeline = (Array.isArray(snapshot.timeline) ? snapshot.timeline : [])
+}
+
+function parseSnapshotTimeline(
+  snapshot: Record<string, unknown>,
+): NonNullable<RawAcpSnapshot['timeline']> {
+  return (Array.isArray(snapshot.timeline) ? snapshot.timeline : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -73,7 +74,10 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
         (entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool') &&
         Boolean(entry.canonicalId),
     );
-  const plan = (Array.isArray(snapshot.plan) ? snapshot.plan : [])
+}
+
+function parseSnapshotPlan(snapshot: Record<string, unknown>): RawAcpSnapshot['plan'] {
+  return (Array.isArray(snapshot.plan) ? snapshot.plan : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -82,7 +86,10 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       status: readString(entry.status) ?? '',
     }))
     .filter((entry) => entry.content);
-  const config = (Array.isArray(snapshot.config) ? snapshot.config : [])
+}
+
+function parseSnapshotConfig(snapshot: Record<string, unknown>): RawAcpSnapshot['config'] {
+  return (Array.isArray(snapshot.config) ? snapshot.config : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -102,7 +109,10 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
         .filter((option) => option.value && option.name),
     }))
     .filter((entry) => entry.id);
-  const commands = (Array.isArray(snapshot.commands) ? snapshot.commands : [])
+}
+
+function parseSnapshotCommands(snapshot: Record<string, unknown>): RawAcpSnapshot['commands'] {
+  return (Array.isArray(snapshot.commands) ? snapshot.commands : [])
     .map(toRecord)
     .filter((entry): entry is Record<string, unknown> => entry !== null)
     .map((entry) => ({
@@ -110,68 +120,96 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
       description: readString(entry.description) ?? '',
     }))
     .filter((entry) => entry.name);
-  const usage = toRecord(snapshot.usage) ?? {};
-  const readCollection = (value: unknown): RawSnapshotCollectionMetadata | undefined => {
-    const collection = toRecord(value);
-    const revision = readCoercedFiniteNumber(collection?.revision);
-    if (!collection || revision === null) return undefined;
-    return {
-      truncated: collection.truncated === true,
-      omittedCount: readCoercedFiniteNumber(collection.omittedCount) ?? 0,
-      oldestAvailableSequence: readCoercedFiniteNumber(collection.oldestAvailableSequence),
-      newestSequence: readCoercedFiniteNumber(collection.newestSequence),
-      beforeCursor: readString(collection.beforeCursor),
-      revision,
-    };
+}
+
+function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
+  const usage = toRecord(usageValue) ?? {};
+  return {
+    used: readCoercedFiniteNumber(usage.used),
+    size: readCoercedFiniteNumber(usage.size),
+    cost: readString(usage.cost),
   };
-  const continuationRecord = toRecord(snapshot.continuation);
+}
+
+function readSnapshotCollectionMetadata(value: unknown): RawSnapshotCollectionMetadata | undefined {
+  const collection = toRecord(value);
+  const revision = readCoercedFiniteNumber(collection?.revision);
+  if (!collection || revision === null) {
+    return undefined;
+  }
+  return {
+    truncated: collection.truncated === true,
+    omittedCount: readCoercedFiniteNumber(collection.omittedCount) ?? 0,
+    oldestAvailableSequence: readCoercedFiniteNumber(collection.oldestAvailableSequence),
+    newestSequence: readCoercedFiniteNumber(collection.newestSequence),
+    beforeCursor: readString(collection.beforeCursor),
+    revision,
+  };
+}
+
+function parseSnapshotContinuation(value: unknown): RawAcpSnapshot['continuation'] {
+  const continuationRecord = toRecord(value);
   const continuationRevision = readCoercedFiniteNumber(continuationRecord?.revision);
+  if (!continuationRecord || continuationRevision === null) {
+    return undefined;
+  }
+  return {
+    revision: continuationRevision,
+    unavailableCount: readCoercedFiniteNumber(continuationRecord.unavailableCount) ?? 0,
+    earliestAvailableSequence: readCoercedFiniteNumber(
+      continuationRecord.earliestAvailableSequence,
+    ),
+    latestAvailableSequence: readCoercedFiniteNumber(continuationRecord.latestAvailableSequence),
+    maxPageSize: readCoercedFiniteNumber(continuationRecord.maxPageSize) ?? 0,
+    maxHistoryEntries: readCoercedFiniteNumber(continuationRecord.maxHistoryEntries) ?? 0,
+    maxHistoryBytes: readCoercedFiniteNumber(continuationRecord.maxHistoryBytes) ?? 0,
+  };
+}
+
+function parseSnapshotSessionInfo(session: Record<string, unknown>): RawAcpSnapshot['session'] {
+  return {
+    agentId: readString(session.agentId) ?? '',
+    threadId: readString(session.threadId) ?? '',
+    title: readString(session.title),
+    updatedAt: readString(session.updatedAt),
+    historyReconstruction: session.historyReconstruction === true,
+  };
+}
+
+function parseSnapshotActiveInfo(active: Record<string, unknown>): RawAcpSnapshot['active'] {
+  return {
+    runId: readString(active.runId),
+    sourceTurnId: readString(active.sourceTurnId),
+    generation: readCoercedFiniteNumber(active.generation),
+    toolIds: readTrimmedStringArray(active.toolIds),
+  };
+}
+
+export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
+  const snapshot = toRecord(value);
+  const session = toRecord(snapshot?.session);
+  const active = toRecord(snapshot?.active);
+  const version = readCoercedFiniteNumber(snapshot?.version);
+  if (!snapshot || (version !== 1 && version !== 2) || !session || !active) {
+    return undefined;
+  }
+  const timeline = parseSnapshotTimeline(snapshot);
   return {
     version,
     timeline: timeline.length > 0 ? timeline : undefined,
-    messages,
-    tools,
-    messageCollection: readCollection(snapshot.messageCollection),
-    reasoningCollection: readCollection(snapshot.reasoningCollection),
-    toolCollection: readCollection(snapshot.toolCollection),
-    continuation:
-      continuationRecord && continuationRevision !== null
-        ? {
-            revision: continuationRevision,
-            unavailableCount: readCoercedFiniteNumber(continuationRecord.unavailableCount) ?? 0,
-            earliestAvailableSequence: readCoercedFiniteNumber(
-              continuationRecord.earliestAvailableSequence,
-            ),
-            latestAvailableSequence: readCoercedFiniteNumber(
-              continuationRecord.latestAvailableSequence,
-            ),
-            maxPageSize: readCoercedFiniteNumber(continuationRecord.maxPageSize) ?? 0,
-            maxHistoryEntries: readCoercedFiniteNumber(continuationRecord.maxHistoryEntries) ?? 0,
-            maxHistoryBytes: readCoercedFiniteNumber(continuationRecord.maxHistoryBytes) ?? 0,
-          }
-        : undefined,
-    plan,
-    usage: {
-      used: readCoercedFiniteNumber(usage.used),
-      size: readCoercedFiniteNumber(usage.size),
-      cost: readString(usage.cost),
-    },
+    messages: parseSnapshotMessages(snapshot),
+    tools: parseSnapshotTools(snapshot),
+    messageCollection: readSnapshotCollectionMetadata(snapshot.messageCollection),
+    reasoningCollection: readSnapshotCollectionMetadata(snapshot.reasoningCollection),
+    toolCollection: readSnapshotCollectionMetadata(snapshot.toolCollection),
+    continuation: parseSnapshotContinuation(snapshot.continuation),
+    plan: parseSnapshotPlan(snapshot),
+    usage: parseSnapshotUsage(snapshot.usage),
     mode: readString(snapshot.mode),
-    config,
-    commands,
-    session: {
-      agentId: readString(session.agentId) ?? '',
-      threadId: readString(session.threadId) ?? '',
-      title: readString(session.title),
-      updatedAt: readString(session.updatedAt),
-      historyReconstruction: session.historyReconstruction === true,
-    },
-    active: {
-      runId: readString(active.runId),
-      sourceTurnId: readString(active.sourceTurnId),
-      generation: readCoercedFiniteNumber(active.generation),
-      toolIds: readTrimmedStringArray(active.toolIds),
-    },
+    config: parseSnapshotConfig(snapshot),
+    commands: parseSnapshotCommands(snapshot),
+    session: parseSnapshotSessionInfo(session),
+    active: parseSnapshotActiveInfo(active),
   };
 }
 
@@ -201,29 +239,44 @@ export function toRawTurn(value: unknown): RawTurn | null {
   };
 }
 
-export function mapChatSummary(raw: RawThread): ChatSummary | null {
-  if (!raw.id) {
-    return null;
-  }
-  const fallbackTimestampSeconds = stableThreadTimestampSeconds(raw.id);
+function resolveChatSummaryTimestamps(raw: RawThread): {
+  createdAt: string;
+  updatedAt: string;
+  hasBridgeTimestamps: boolean;
+} {
+  const fallbackTimestampSeconds = stableThreadTimestampSeconds(raw.id ?? '');
   const hasBridgeTimestamps = raw.createdAt != null || raw.updatedAt != null;
   const createdAtSeconds = raw.createdAt ?? raw.updatedAt ?? fallbackTimestampSeconds;
   const updatedAtSeconds = raw.updatedAt ?? raw.createdAt ?? createdAtSeconds;
-  const createdAt = unixSecondsToIso(createdAtSeconds);
-  const updatedAt = unixSecondsToIso(updatedAtSeconds);
-  const turns = Array.isArray(raw.turns) ? raw.turns : [];
-  const sourceMetadata = readThreadSourceMetadata(raw.source);
-  const lastError = extractLastError(turns);
-  const previewTitle = toPreview(raw.preview || '');
+  return {
+    createdAt: unixSecondsToIso(createdAtSeconds),
+    updatedAt: unixSecondsToIso(updatedAtSeconds),
+    hasBridgeTimestamps,
+  };
+}
+
+function resolveChatSummaryTitle(raw: RawThread, turns: RawTurn[], previewTitle: string): string {
   const firstUserTitle = firstUserMessagePreview(turns) ?? firstSnapshotUserMessagePreview(raw);
   const rawTitle = raw.name?.trim() || null;
   const displayTitle = rawTitle || previewTitle || firstUserTitle;
   const fallbackTitle = raw.acpSnapshot?.session.threadId
     ? `Session ${shortSessionId(raw.acpSnapshot.session.threadId)}`
-    : `Chat ${raw.id.slice(0, 8)}`;
+    : `Chat ${(raw.id ?? '').slice(0, 8)}`;
+  return toPreview(displayTitle || fallbackTitle);
+}
+
+export function mapChatSummary(raw: RawThread): ChatSummary | null {
+  if (!raw.id) {
+    return null;
+  }
+  const { createdAt, updatedAt, hasBridgeTimestamps } = resolveChatSummaryTimestamps(raw);
+  const turns = Array.isArray(raw.turns) ? raw.turns : [];
+  const sourceMetadata = readThreadSourceMetadata(raw.source);
+  const lastError = extractLastError(turns);
+  const previewTitle = toPreview(raw.preview || '');
   return {
     id: raw.id,
-    title: toPreview(displayTitle || fallbackTitle),
+    title: resolveChatSummaryTitle(raw, turns, previewTitle),
     status: hasActiveAcpRun(raw.acpSnapshot) ? 'running' : mapRawStatus(raw.status, turns),
     createdAt,
     updatedAt,

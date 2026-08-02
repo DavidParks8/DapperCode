@@ -180,9 +180,7 @@ export function StatusBanner({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(
-        ReduceMotion.System,
-      )}
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       accessibilityRole={tone === 'error' ? 'alert' : undefined}
       accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'polite'}
       style={[

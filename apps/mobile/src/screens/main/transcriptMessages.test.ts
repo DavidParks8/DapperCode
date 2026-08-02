@@ -255,9 +255,12 @@ function summarizeItems(
   items: TranscriptDisplayItem[],
 ): Array<{ kind: string; id: string; title?: string }> {
   return items.map((item) => {
-    if (item.kind === 'message') return { kind: item.kind, id: item.renderKey };
-    if (item.kind === 'toolInvocation')
+    if (item.kind === 'message') {
+      return { kind: item.kind, id: item.renderKey };
+    }
+    if (item.kind === 'toolInvocation') {
       return { kind: item.kind, id: item.id, title: item.invocation.title };
+    }
     return { kind: item.kind, id: item.id };
   });
 }
@@ -331,7 +334,9 @@ describe('buildTranscriptDisplayItems', () => {
       { kind: 'message', id: 'a1' },
     ]);
     const group = items[1];
-    if (group.kind !== 'toolGroup') throw new Error('expected a tool group');
+    if (group.kind !== 'toolGroup') {
+      throw new Error('expected a tool group');
+    }
     expect(group.invocations.map((invocation) => invocation.title)).toEqual([
       'Called tool `computeruse / screenshot`',
       'Called tool `computeruse / click`',

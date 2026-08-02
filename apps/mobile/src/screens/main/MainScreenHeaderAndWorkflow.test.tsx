@@ -102,7 +102,9 @@ function render(context: Context): ReactTestRenderer {
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -117,13 +119,17 @@ function findPressableByLabelPrefix(root: QueryableInstance, prefix: string): Qu
       typeof node.props.accessibilityLabel === 'string' &&
       (node.props.accessibilityLabel as string).startsWith(prefix),
   )[0];
-  if (!match) throw new Error(`Missing pressable starting with: ${prefix}`);
+  if (!match) {
+    throw new Error(`Missing pressable starting with: ${prefix}`);
+  }
   return match;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return callback(...args);
 }
 
@@ -141,11 +147,16 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     const tree = render(context);
     const root = queryRoot(tree);
 
-    for (const prefix of ['Model,', 'Thinking level,', 'Agent mode,', 'Agent threads,', 'Fast mode']) {
+    for (const prefix of [
+      'Model,',
+      'Thinking level,',
+      'Agent mode,',
+      'Agent threads,',
+      'Fast mode',
+    ]) {
       const chip = findPressableByLabelPrefix(root, prefix);
       const hitSlop = chip.props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);
       expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -195,7 +206,11 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     const root = queryRoot(tree);
 
     expect(
-      root.findAll((node) => typeof node.props.accessibilityLabel === 'string' && (node.props.accessibilityLabel as string).startsWith('Model,')),
+      root.findAll(
+        (node) =>
+          typeof node.props.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel as string).startsWith('Model,'),
+      ),
     ).toHaveLength(0);
     act(() => tree.unmount());
   });

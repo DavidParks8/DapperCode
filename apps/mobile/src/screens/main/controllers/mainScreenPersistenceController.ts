@@ -70,12 +70,16 @@ interface WebStorageLike {
 const webStorage: MainScreenStorage = {
   read: async (key) => {
     const value = getWebStorage()?.getItem(key);
-    if (value === null || value === undefined) throw new Error('missing');
+    if (value === null || value === undefined) {
+      throw new Error('missing');
+    }
     return value;
   },
   write: async (key, value) => {
     const storage = getWebStorage();
-    if (!storage) throw new Error('Browser storage is unavailable.');
+    if (!storage) {
+      throw new Error('Browser storage is unavailable.');
+    }
     storage.setItem(key, value);
   },
   exists: async (key) => getWebStorage()?.getItem(key) != null,
@@ -105,6 +109,109 @@ const MIGRATION_KEYS: Record<PersistedCollection, string> = {
   workspaceFavorites: 'workspace-favorites',
 };
 
+function resolveStorage(
+  storage: MainScreenStorage | undefined,
+  platform: string,
+): MainScreenStorage {
+  return storage ?? (platform === 'web' ? webStorage : fileStorage);
+}
+
+function buildPersistencePaths(
+  profileId: string,
+  platform: string,
+  overrides: Partial<MainScreenPersistencePaths>,
+): MainScreenPersistencePaths {
+  return {
+    modelPreferences:
+      overrides.modelPreferences ??
+      createProfilePathResolver(profileId, platform, 'model-preferences.v1', () =>
+        getChatModelPreferencesPath(profileId),
+      ),
+    planSnapshots:
+      overrides.planSnapshots ??
+      createProfilePathResolver(profileId, platform, 'plan-snapshots.v1', () =>
+        getChatPlanSnapshotsPath(profileId),
+      ),
+    bridgeUiSurfaces:
+      overrides.bridgeUiSurfaces ??
+      createProfilePathResolver(profileId, platform, 'bridge-ui-surfaces.v1', () =>
+        getChatBridgeUiSurfacesPath(profileId),
+      ),
+    workspaceFavorites:
+      overrides.workspaceFavorites ??
+      createProfilePathResolver(profileId, platform, 'workspace-favorites.v1', () =>
+        getWorkspaceFavoritesPath(profileId),
+      ),
+    legacyModelPreferences:
+      overrides.legacyModelPreferences ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.modelPreferences,
+        getLegacyChatModelPreferencesPath,
+      ),
+    legacyPlanSnapshots:
+      overrides.legacyPlanSnapshots ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.planSnapshots,
+        getLegacyChatPlanSnapshotsPath,
+      ),
+    legacyBridgeUiSurfaces:
+      overrides.legacyBridgeUiSurfaces ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.bridgeUiSurfaces,
+        getLegacyChatBridgeUiSurfacesPath,
+      ),
+    legacyWorkspaceFavorites:
+      overrides.legacyWorkspaceFavorites ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.workspaceFavorites,
+        getLegacyWorkspaceFavoritesPath,
+      ),
+    modelPreferencesMigrationMarker:
+      overrides.modelPreferencesMigrationMarker ??
+      createMarkerPathResolver(platform, 'modelPreferences'),
+    planSnapshotsMigrationMarker:
+      overrides.planSnapshotsMigrationMarker ?? createMarkerPathResolver(platform, 'planSnapshots'),
+    bridgeUiSurfacesMigrationMarker:
+      overrides.bridgeUiSurfacesMigrationMarker ??
+      createMarkerPathResolver(platform, 'bridgeUiSurfaces'),
+    workspaceFavoritesMigrationMarker:
+      overrides.workspaceFavoritesMigrationMarker ??
+      createMarkerPathResolver(platform, 'workspaceFavorites'),
+  };
+}
+
+function createProfilePathResolver(
+  profileId: string,
+  platform: string,
+  webName: string,
+  nativePath: () => string | null,
+): () => string | null {
+  return () =>
+    platform === 'web' ? getWebProfilePersistenceKey(webName, profileId) : nativePath();
+}
+
+function createLegacyPathResolver(
+  platform: string,
+  webKey: string,
+  nativePath: () => string | null,
+): () => string | null {
+  return () => (platform === 'web' ? webKey : nativePath());
+}
+
+function createMarkerPathResolver(
+  platform: string,
+  collection: PersistedCollection,
+): () => string | null {
+  return () =>
+    platform === 'web'
+      ? getWebPersistenceMigrationMarkerKey(MIGRATION_KEYS[collection])
+      : getPersistenceMigrationMarkerPath(MIGRATION_KEYS[collection]);
+}
+
 export class MainScreenPersistenceController {
   private readonly storage: MainScreenStorage;
   private readonly paths: MainScreenPersistencePaths;
@@ -124,53 +231,10 @@ export class MainScreenPersistenceController {
       onPersistenceError,
     } = options;
     this.profileId = profileId.trim();
-    this.storage = storage ?? (platform === 'web' ? webStorage : fileStorage);
+    this.storage = resolveStorage(storage, platform);
     this.migrateLegacy = migrateLegacy;
     this.onPersistenceError = onPersistenceError;
-
-    const profilePath = (webName: string, nativePath: () => string | null) => () =>
-      platform === 'web' ? getWebProfilePersistenceKey(webName, this.profileId) : nativePath();
-    const legacyPath = (webKey: string, nativePath: () => string | null) => () =>
-      platform === 'web' ? webKey : nativePath();
-    const markerPath = (collection: PersistedCollection) => () =>
-      platform === 'web'
-        ? getWebPersistenceMigrationMarkerKey(MIGRATION_KEYS[collection])
-        : getPersistenceMigrationMarkerPath(MIGRATION_KEYS[collection]);
-
-    this.paths = {
-      modelPreferences:
-        paths.modelPreferences ??
-        profilePath('model-preferences.v1', () => getChatModelPreferencesPath(this.profileId)),
-      planSnapshots:
-        paths.planSnapshots ??
-        profilePath('plan-snapshots.v1', () => getChatPlanSnapshotsPath(this.profileId)),
-      bridgeUiSurfaces:
-        paths.bridgeUiSurfaces ??
-        profilePath('bridge-ui-surfaces.v1', () => getChatBridgeUiSurfacesPath(this.profileId)),
-      workspaceFavorites:
-        paths.workspaceFavorites ??
-        profilePath('workspace-favorites.v1', () => getWorkspaceFavoritesPath(this.profileId)),
-      legacyModelPreferences:
-        paths.legacyModelPreferences ??
-        legacyPath(WEB_LEGACY_PATHS.modelPreferences, getLegacyChatModelPreferencesPath),
-      legacyPlanSnapshots:
-        paths.legacyPlanSnapshots ??
-        legacyPath(WEB_LEGACY_PATHS.planSnapshots, getLegacyChatPlanSnapshotsPath),
-      legacyBridgeUiSurfaces:
-        paths.legacyBridgeUiSurfaces ??
-        legacyPath(WEB_LEGACY_PATHS.bridgeUiSurfaces, getLegacyChatBridgeUiSurfacesPath),
-      legacyWorkspaceFavorites:
-        paths.legacyWorkspaceFavorites ??
-        legacyPath(WEB_LEGACY_PATHS.workspaceFavorites, getLegacyWorkspaceFavoritesPath),
-      modelPreferencesMigrationMarker:
-        paths.modelPreferencesMigrationMarker ?? markerPath('modelPreferences'),
-      planSnapshotsMigrationMarker:
-        paths.planSnapshotsMigrationMarker ?? markerPath('planSnapshots'),
-      bridgeUiSurfacesMigrationMarker:
-        paths.bridgeUiSurfacesMigrationMarker ?? markerPath('bridgeUiSurfaces'),
-      workspaceFavoritesMigrationMarker:
-        paths.workspaceFavoritesMigrationMarker ?? markerPath('workspaceFavorites'),
-    };
+    this.paths = buildPersistencePaths(this.profileId, platform, paths);
   }
 
   loadModelPreferences(): Promise<Record<string, ChatModelPreference>> {
@@ -226,7 +290,9 @@ export class MainScreenPersistenceController {
   }
 
   private async migrate(collection: PersistedCollection): Promise<void> {
-    if (!this.migrateLegacy || this.migrated.has(collection)) return;
+    if (!this.migrateLegacy || this.migrated.has(collection)) {
+      return;
+    }
 
     const suffix = collection[0].toUpperCase() + collection.slice(1);
     await migrateLegacyPersistenceEntry({
@@ -254,7 +320,9 @@ export class MainScreenPersistenceController {
     }
 
     const path = this.paths[collection]();
-    if (!path) return fallback;
+    if (!path) {
+      return fallback;
+    }
     try {
       return parse(await this.storage.read(path));
     } catch {
@@ -274,10 +342,14 @@ export class MainScreenPersistenceController {
     this.writeChains.set(collection, write);
     void write.then(
       () => {
-        if (this.writeChains.get(collection) === write) this.writeChains.delete(collection);
+        if (this.writeChains.get(collection) === write) {
+          this.writeChains.delete(collection);
+        }
       },
       () => {
-        if (this.writeChains.get(collection) === write) this.writeChains.delete(collection);
+        if (this.writeChains.get(collection) === write) {
+          this.writeChains.delete(collection);
+        }
       },
     );
     return write;
@@ -291,7 +363,9 @@ export class MainScreenPersistenceController {
     try {
       await this.migrate(collection);
       const path = this.paths[collection]();
-      if (!path) throw new Error('Persistence path is unavailable.');
+      if (!path) {
+        throw new Error('Persistence path is unavailable.');
+      }
       await this.storage.write(path, JSON.stringify(value));
     } catch (cause) {
       if (!reliable) {
@@ -310,7 +384,9 @@ export class MainScreenPersistenceController {
 }
 
 function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  if (typeof globalThis !== 'object' || globalThis === null) {
+    return null;
+  }
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'

@@ -2,7 +2,7 @@ import { activityAtom } from './composer';
 import { gitCheckoutRepoUrlAtom } from './gitCheckout';
 import { titleDraftAtom } from './modals';
 import { selectedModelIdAtom } from './models';
-import { listScreenAtomEntries, resetMainScreenStateAtom } from './registry';
+import { listScreenAtomEntries, resetMainScreenStateAtom, screenRefView } from './registry';
 import { runWatchdogNowAtom, selectedChatIdAtom } from './session';
 import { sendingAtom } from './turn';
 import { workspaceBrowsePathAtom } from './workspace';
@@ -95,6 +95,33 @@ describe('MainScreen atom registry', () => {
     expect(store.get(runWatchdogNowAtom)).toBeGreaterThanOrEqual(beforeReset);
   });
 
+  it('memoizes every screenRefView live view on the store', () => {
+    // screenRefView returns a new object on every call. Consumers list these views in hook
+    // dependency arrays, so an unmemoized call site invalidates every memoized callback that
+    // reads it on each render, which cascades into an unbounded render loop on MainScreen.
+    const offenders: string[] = [];
+    for (const file of readLiveViewConsumerFiles()) {
+      const normalized = file.source.replace(/\s+/g, ' ');
+      const pattern = /(.{0,40})screenRefView\(/g;
+      let match = pattern.exec(normalized);
+      while (match) {
+        if (!/useMemo\( ?\(\) => $/.test(match[1])) {
+          offenders.push(`${file.name}: ${match[0].trim()}`);
+        }
+        match = pattern.exec(normalized);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('keeps a memoized live view reading the newest atom value', () => {
+    const store = createTestStore();
+    const view = screenRefView(store, selectedChatIdAtom);
+    expect(view.current).toBeNull();
+    store.set(selectedChatIdAtom, 'thread-9');
+    expect(view.current).toBe('thread-9');
+  });
+
   it('isolates screen state between stores', () => {
     const a = createTestStore();
     const b = createTestStore();
@@ -102,6 +129,14 @@ describe('MainScreen atom registry', () => {
     expect(b.get(selectedChatIdAtom)).toBeNull();
   });
 });
+
+function readLiveViewConsumerFiles(): { name: string; source: string }[] {
+  const directory = join(__dirname, '..', '..', 'screens', 'main');
+  return readdirSync(directory)
+    .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
+    .map((name) => ({ name, source: readFileSync(join(directory, name), 'utf8') }))
+    .filter((file) => file.source.includes('screenRefView('));
+}
 
 function readScreenStateFiles(): { name: string; source: string }[] {
   return readdirSync(__dirname)

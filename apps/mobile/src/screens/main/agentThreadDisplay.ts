@@ -46,6 +46,20 @@ export interface AgentThreadDisplayState {
   isActive: boolean;
 }
 
+interface AgentRuntimeStatusContext {
+  chat: ChatSummary;
+  activityTitle: string | null;
+  activityDetail: string | null;
+  activityTone: ActivityTone | undefined;
+  hasActiveTurn: boolean;
+  watchdogActive: boolean;
+  hasActiveCommands: boolean;
+  needsApproval: boolean;
+  needsInput: boolean;
+}
+
+type AgentRuntimeStatus = Omit<AgentThreadDisplayState, 'accentColor'>;
+
 export function buildAgentThreadDisplayState(
   chat: ChatSummary,
   snapshot: AgentThreadRuntimeSnapshotLike | null | undefined,
@@ -73,93 +87,132 @@ function resolveAgentRuntimeStatus(
   chat: ChatSummary,
   snapshot: AgentThreadRuntimeSnapshotLike | null | undefined,
   nowMs: number,
-): Omit<AgentThreadDisplayState, 'accentColor'> {
+): AgentRuntimeStatus {
+  return pickAgentRuntimeStatus(buildAgentRuntimeStatusContext(chat, snapshot, nowMs));
+}
+
+function buildAgentRuntimeStatusContext(
+  chat: ChatSummary,
+  snapshot: AgentThreadRuntimeSnapshotLike | null | undefined,
+  nowMs: number,
+): AgentRuntimeStatusContext {
   const activity = snapshot?.activity;
-  const activityTitle = normalizeValue(activity?.title);
-  const activityDetail = normalizeValue(activity?.detail);
-  const hasActiveTurn = Boolean(snapshot?.activeTurnId);
-  const watchdogActive =
-    typeof snapshot?.runWatchdogUntil === 'number' && snapshot.runWatchdogUntil > nowMs;
-  const hasActiveCommands = (snapshot?.activeCommands?.length ?? 0) > 0;
-  const needsApproval = snapshot?.pendingApproval != null;
-  const needsInput = snapshot?.pendingUserInputRequest != null;
+  return {
+    chat,
+    activityTitle: normalizeValue(activity?.title),
+    activityDetail: normalizeValue(activity?.detail),
+    activityTone: activity?.tone,
+    hasActiveTurn: Boolean(snapshot?.activeTurnId),
+    watchdogActive:
+      typeof snapshot?.runWatchdogUntil === 'number' && snapshot.runWatchdogUntil > nowMs,
+    hasActiveCommands: (snapshot?.activeCommands?.length ?? 0) > 0,
+    needsApproval: snapshot?.pendingApproval != null,
+    needsInput: snapshot?.pendingUserInputRequest != null,
+  };
+}
 
-  if (chat.status === 'error' || activity?.tone === 'error') {
-    return {
-      icon: 'alert-circle-outline',
-      label: 'Error',
-      detail:
-        activityDetail ??
-        normalizeErrorActivityTitle(activityTitle) ??
-        normalizeValue(chat.lastError) ??
-        null,
-      tone: 'error',
-      statusColor: colors.statusError,
-      statusSurfaceColor: 'rgba(239, 68, 68, 0.16)',
-      statusBorderColor: 'rgba(239, 68, 68, 0.42)',
-      isActive: false,
-    };
+function pickAgentRuntimeStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus {
+  return (
+    resolveErrorStatus(context) ??
+    resolveApprovalStatus(context) ??
+    resolveInputStatus(context) ??
+    resolveRunningStatus(context) ??
+    resolveCompleteStatus(context) ??
+    resolveIdleStatus()
+  );
+}
+
+function resolveErrorStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus | null {
+  if (context.chat.status !== 'error' && context.activityTone !== 'error') {
+    return null;
   }
 
-  if (needsApproval) {
-    return {
-      icon: 'hand-left-outline',
-      label: 'Needs approval',
-      detail: activityDetail ?? normalizeRunningDetail(activityTitle),
-      tone: 'running',
-      statusColor: WAITING_STATUS_COLOR,
-      statusSurfaceColor: 'rgba(245, 165, 36, 0.16)',
-      statusBorderColor: 'rgba(245, 165, 36, 0.4)',
-      isActive: true,
-    };
+  return {
+    icon: 'alert-circle-outline',
+    label: 'Error',
+    detail:
+      context.activityDetail ??
+      normalizeErrorActivityTitle(context.activityTitle) ??
+      normalizeValue(context.chat.lastError) ??
+      null,
+    tone: 'error',
+    statusColor: colors.statusError,
+    statusSurfaceColor: 'rgba(239, 68, 68, 0.16)',
+    statusBorderColor: 'rgba(239, 68, 68, 0.42)',
+    isActive: false,
+  };
+}
+
+function resolveApprovalStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus | null {
+  if (!context.needsApproval) {
+    return null;
   }
 
-  if (needsInput) {
-    return {
-      icon: 'help-circle-outline',
-      label: 'Needs input',
-      detail: activityDetail ?? normalizeRunningDetail(activityTitle),
-      tone: 'running',
-      statusColor: WAITING_STATUS_COLOR,
-      statusSurfaceColor: 'rgba(245, 165, 36, 0.16)',
-      statusBorderColor: 'rgba(245, 165, 36, 0.4)',
-      isActive: true,
-    };
+  return {
+    icon: 'hand-left-outline',
+    label: 'Needs approval',
+    detail: context.activityDetail ?? normalizeRunningDetail(context.activityTitle),
+    tone: 'running',
+    statusColor: WAITING_STATUS_COLOR,
+    statusSurfaceColor: 'rgba(245, 165, 36, 0.16)',
+    statusBorderColor: 'rgba(245, 165, 36, 0.4)',
+    isActive: true,
+  };
+}
+
+function resolveInputStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus | null {
+  if (!context.needsInput) {
+    return null;
   }
 
-  if (
-    activity?.tone === 'running' ||
-    chat.status === 'running' ||
-    hasActiveTurn ||
-    watchdogActive ||
-    hasActiveCommands
-  ) {
-    const label = normalizeRunningLabel(activityTitle);
-    return {
-      icon: runningIconForLabel(label),
-      label,
-      detail: activityDetail,
-      tone: 'running',
-      statusColor: RUNNING_STATUS_COLOR,
-      statusSurfaceColor: 'rgba(126, 231, 135, 0.14)',
-      statusBorderColor: 'rgba(126, 231, 135, 0.34)',
-      isActive: true,
-    };
+  return {
+    icon: 'help-circle-outline',
+    label: 'Needs input',
+    detail: context.activityDetail ?? normalizeRunningDetail(context.activityTitle),
+    tone: 'running',
+    statusColor: WAITING_STATUS_COLOR,
+    statusSurfaceColor: 'rgba(245, 165, 36, 0.16)',
+    statusBorderColor: 'rgba(245, 165, 36, 0.4)',
+    isActive: true,
+  };
+}
+
+function resolveRunningStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus | null {
+  if (!isRunningContext(context)) {
+    return null;
   }
 
-  if (chat.status === 'complete' || activity?.tone === 'complete') {
-    return {
-      icon: 'checkmark-circle-outline',
-      label: 'Complete',
-      detail: activityDetail ?? normalizeCompleteActivityTitle(activityTitle) ?? null,
-      tone: 'complete',
-      statusColor: COMPLETE_STATUS_COLOR,
-      statusSurfaceColor: 'rgba(147, 197, 253, 0.15)',
-      statusBorderColor: 'rgba(147, 197, 253, 0.34)',
-      isActive: false,
-    };
+  const label = normalizeRunningLabel(context.activityTitle);
+  return {
+    icon: runningIconForLabel(label),
+    label,
+    detail: context.activityDetail,
+    tone: 'running',
+    statusColor: RUNNING_STATUS_COLOR,
+    statusSurfaceColor: 'rgba(126, 231, 135, 0.14)',
+    statusBorderColor: 'rgba(126, 231, 135, 0.34)',
+    isActive: true,
+  };
+}
+
+function resolveCompleteStatus(context: AgentRuntimeStatusContext): AgentRuntimeStatus | null {
+  if (context.chat.status !== 'complete' && context.activityTone !== 'complete') {
+    return null;
   }
 
+  return {
+    icon: 'checkmark-circle-outline',
+    label: 'Complete',
+    detail: context.activityDetail ?? normalizeCompleteActivityTitle(context.activityTitle) ?? null,
+    tone: 'complete',
+    statusColor: COMPLETE_STATUS_COLOR,
+    statusSurfaceColor: 'rgba(147, 197, 253, 0.15)',
+    statusBorderColor: 'rgba(147, 197, 253, 0.34)',
+    isActive: false,
+  };
+}
+
+function resolveIdleStatus(): AgentRuntimeStatus {
   return {
     icon: 'ellipse-outline',
     label: 'Idle',
@@ -170,6 +223,16 @@ function resolveAgentRuntimeStatus(
     statusBorderColor: 'rgba(180, 188, 203, 0.24)',
     isActive: false,
   };
+}
+
+function isRunningContext(context: AgentRuntimeStatusContext): boolean {
+  return (
+    context.activityTone === 'running' ||
+    context.chat.status === 'running' ||
+    context.hasActiveTurn ||
+    context.watchdogActive ||
+    context.hasActiveCommands
+  );
 }
 
 function normalizeRunningLabel(activityTitle: string | null): string {
@@ -251,4 +314,17 @@ function runningIconForLabel(label: string): IoniconName {
 function normalizeValue(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+/**
+ * Reads the mutable per-thread runtime snapshot store from inside a memo. Snapshots mutate in
+ * place, so `revision` is the invalidation token that makes the memoized read recompute when
+ * runtime state changes without the ref identity changing.
+ */
+export function readAgentThreadRuntimeSnapshots<T>(
+  snapshotsRef: { readonly current: T },
+  revision: number,
+): T {
+  void revision;
+  return snapshotsRef.current;
 }

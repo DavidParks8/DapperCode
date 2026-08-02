@@ -59,7 +59,9 @@ type PropHandler = (...args: never[]) => unknown;
 
 function readHandler<Handler extends PropHandler>(node: Queryable, property: string): Handler {
   const handler = node.props[property];
-  if (typeof handler !== 'function') throw new Error(`Missing handler: ${property}`);
+  if (typeof handler !== 'function') {
+    throw new Error(`Missing handler: ${property}`);
+  }
   return handler as Handler;
 }
 
@@ -72,15 +74,21 @@ function hasText(root: Queryable, text: string): boolean {
 
 function findByLabel(root: Queryable, label: string): Queryable {
   const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-  if (!node) throw new Error(`Missing label: ${label}`);
+  if (!node) {
+    throw new Error(`Missing label: ${label}`);
+  }
   return node;
 }
 
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') current = current.parent;
-  if (!current) throw new Error(`Missing pressable: ${text}`);
+  while (current && typeof current.props.onPress !== 'function') {
+    current = current.parent;
+  }
+  if (!current) {
+    throw new Error(`Missing pressable: ${text}`);
+  }
   return current;
 }
 
@@ -136,7 +144,9 @@ async function renderOnboarding(
     tree = renderer.create(createElement(options));
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected onboarding tree');
+  if (!tree) {
+    throw new Error('Expected onboarding tree');
+  }
   const renderedTree = tree;
   return {
     tree: renderedTree,
@@ -294,7 +304,9 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     expect(hasText(root, 'Scan Pairing QR')).toBe(true);
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    if (!camera) throw new Error('Missing camera');
+    if (!camera) {
+      throw new Error('Missing camera');
+    }
     await act(async () => {
       readHandler<(event: { data: string }) => void>(
         camera,
@@ -699,7 +711,7 @@ describe('OnboardingScreen behavior', () => {
       bridgeToken: 'token',
     });
     // No redundant success haptic for a save that skipped a fresh probe.
-    expect((feedback.success as jest.Mock)).not.toHaveBeenCalled();
+    expect(feedback.success as jest.Mock).not.toHaveBeenCalled();
     act(() => result.tree.unmount());
   });
 
@@ -752,14 +764,16 @@ describe('OnboardingScreen behavior', () => {
     // Edit both fields to a different, never-probed pair of credentials while the first
     // probe is still in flight.
     act(() =>
-      readHandler<(value: string) => void>(findByLabel(root, 'Bridge URL'), 'onChangeText')(
-        'http://127.0.0.1:4002',
-      ),
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge URL'),
+        'onChangeText',
+      )('http://127.0.0.1:4002'),
     );
     act(() =>
-      readHandler<(value: string) => void>(findByLabel(root, 'Bridge token'), 'onChangeText')(
-        'token-b',
-      ),
+      readHandler<(value: string) => void>(
+        findByLabel(root, 'Bridge token'),
+        'onChangeText',
+      )('token-b'),
     );
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(false);
 
@@ -839,7 +853,7 @@ describe('OnboardingScreen behavior', () => {
     const root = result.tree.root as Queryable;
 
     await press(findPressableByText(root, 'Private connection'));
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     (feedback.selection as jest.Mock).mockClear();
 
     const url = findByLabel(root, 'Bridge URL');
@@ -848,18 +862,16 @@ describe('OnboardingScreen behavior', () => {
     act(() => readHandler<(value: string) => void>(token, 'onChangeText')('token'));
 
     await press(findPressableByText(root, 'Test Connection'));
-    expect((feedback.success as jest.Mock)).toHaveBeenCalledTimes(1);
+    expect(feedback.success as jest.Mock).toHaveBeenCalledTimes(1);
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({ status: 503 });
     mockWsRequest.mockRejectedValueOnce(new Error('offline'));
-    act(() =>
-      readHandler<(value: string) => void>(token, 'onChangeText')('token-changed'),
-    );
+    act(() => readHandler<(value: string) => void>(token, 'onChangeText')('token-changed'));
     await press(findPressableByText(root, 'Test Connection'));
-    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.error as jest.Mock).toHaveBeenCalled();
 
     await press(findPressableByText(root, 'Scan QR'));
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     act(() => result.tree.unmount());
   });
 
@@ -985,7 +997,9 @@ describe('OnboardingScreen behavior', () => {
         }
         const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
         const matches = contents.match(/fontSize:\s*[0-9]/g);
-        if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+        if (matches) {
+          offenders.push(`${entry}: ${matches.join(', ')}`);
+        }
       }
       expect(offenders).toEqual([]);
     });
@@ -1007,9 +1021,7 @@ describe('OnboardingScreen behavior', () => {
       const result = await renderOnboarding({ mode: 'initial' });
       const root = result.tree.root as Queryable;
       await press(findPressableByText(root, 'Private connection'));
-      const pillIndexNode = root.findAll(
-        (node) => node.children.map(String).join('') === '1',
-      )[0];
+      const pillIndexNode = root.findAll((node) => node.children.map(String).join('') === '1')[0];
       const style = Array.isArray(pillIndexNode?.props.style)
         ? Object.assign({}, ...pillIndexNode.props.style)
         : ((pillIndexNode?.props.style as Record<string, unknown>) ?? {});

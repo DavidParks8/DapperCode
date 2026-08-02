@@ -144,7 +144,9 @@ export class TestableThreadState {
     const seen = new Set<string>();
     const dupes: string[] = [];
     for (const id of ids) {
-      if (seen.has(id)) dupes.push(id);
+      if (seen.has(id)) {
+        dupes.push(id);
+      }
       seen.add(id);
     }
     return dupes;

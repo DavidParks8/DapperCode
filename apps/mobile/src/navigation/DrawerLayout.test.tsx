@@ -26,12 +26,16 @@ function renderLayout(width: number): ReactTestRenderer {
   act(() => {
     tree = renderer.create(<ResponsiveDrawerLayout width={width} />);
   });
-  if (!tree) throw new Error('Expected drawer layout');
+  if (!tree) {
+    throw new Error('Expected drawer layout');
+  }
   return tree;
 }
 
 function readScreenOptions(): DrawerScreenOptions {
-  if (!mockDrawerProps) throw new Error('Expected Drawer props');
+  if (!mockDrawerProps) {
+    throw new Error('Expected Drawer props');
+  }
   return mockDrawerProps.screenOptions as DrawerScreenOptions;
 }
 

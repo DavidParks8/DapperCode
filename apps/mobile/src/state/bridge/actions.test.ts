@@ -29,7 +29,9 @@ describe('bridge profile purge coordinates with pending summary writes', () => {
     jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
     jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async (path: string) => {
       const raw = files.get(path);
-      if (raw === undefined) throw new Error('missing');
+      if (raw === undefined) {
+        throw new Error('missing');
+      }
       return raw;
     });
     jest

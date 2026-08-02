@@ -57,7 +57,14 @@ export function useMainScreenWorkspaceCheckoutActions(
 
       scheduleDisconnectActivity();
     });
-  }, [clearDeferredDisconnectActivity, scheduleDisconnectActivity, ws]);
+  }, [
+    appStateRef,
+    clearDeferredDisconnectActivity,
+    scheduleDisconnectActivity,
+    setBridgeRecoveryBannerVisible,
+    setError,
+    ws,
+  ]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
@@ -101,10 +108,15 @@ export function useMainScreenWorkspaceCheckoutActions(
       subscription.remove();
     };
   }, [
+    appStateRef,
+    chatIdRef,
     clearDeferredDisconnectActivity,
     clearForegroundAgentRefresh,
+    foregroundAgentRefreshHandleRef,
+    lastAppForegroundedAtRef,
     scheduleAgentThreadsRefresh,
     scheduleDisconnectActivity,
+    setBridgeRecoveryBannerVisible,
     ws,
   ]);
 

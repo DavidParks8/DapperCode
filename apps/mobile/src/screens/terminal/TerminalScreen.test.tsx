@@ -49,21 +49,28 @@ function findRunButton(root: Queryable): Queryable {
       (node.props.accessibilityLabel === 'Run command' ||
         node.props.accessibilityLabel === 'Running command'),
   )[0];
-  if (!button) throw new Error('Missing run button');
+  if (!button) {
+    throw new Error('Missing run button');
+  }
   return button;
 }
 
 function findPressableAncestor(node: Queryable): Queryable {
   let current: Queryable | null = node;
-  while (current && typeof current.props.onPress !== 'function')
+  while (current && typeof current.props.onPress !== 'function') {
     current = current.parent as Queryable | null;
-  if (!current) throw new Error('Missing pressable ancestor');
+  }
+  if (!current) {
+    throw new Error('Missing pressable ancestor');
+  }
   return current;
 }
 
 function getCallback<T extends (...args: never[]) => unknown>(node: Queryable, prop: string): T {
   const callback = node.props[prop];
-  if (typeof callback !== 'function') throw new Error(`Expected ${prop} callback`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Expected ${prop} callback`);
+  }
   return callback as T;
 }
 
@@ -109,7 +116,9 @@ async function renderTerminal(apiOverrides: Record<string, jest.Mock> = {}, appe
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Expected TerminalScreen tree');
+  if (!tree) {
+    throw new Error('Expected TerminalScreen tree');
+  }
   return { tree, api, ws, unsubscribe, getListener: () => listener, onOpenDrawer };
 }
 
@@ -242,7 +251,12 @@ describe('TerminalScreen behavior', () => {
     const result = await renderTerminal();
     const root = result.tree.root as Queryable;
     const runBtn = findRunButton(root);
-    const hitSlop = runBtn.props.hitSlop as { top: number; bottom: number; left: number; right: number };
+    const hitSlop = runBtn.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
     // Button is 30pt, needs 7pt per side to reach 44pt minimum.
     expect(hitSlop.top).toBeGreaterThanOrEqual(7);
     expect(hitSlop.bottom).toBeGreaterThanOrEqual(7);
@@ -326,8 +340,18 @@ describe('TerminalScreen behavior', () => {
     await triggerRun(root);
     expect(announceSpy).toHaveBeenCalledWith('Running command');
 
-    resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: 'hi', stderr: '', timedOut: false, durationMs: 1 });
-    await act(async () => { await Promise.resolve(); });
+    resolveExec({
+      command: 'echo hi',
+      cwd: '/',
+      code: 0,
+      stdout: 'hi',
+      stderr: '',
+      timedOut: false,
+      durationMs: 1,
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => result.tree.unmount());
   });
 });

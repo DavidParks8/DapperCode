@@ -2749,8 +2749,9 @@ describe('HostBridgeApiClient', () => {
             streamId: (params as { streamId: string }).streamId,
           });
         }
-        if (method === 'bridge/thread/list/stream/cancel')
+        if (method === 'bridge/thread/list/stream/cancel') {
           return Promise.reject(new Error('closed'));
+        }
         return Promise.resolve({});
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -3193,11 +3194,12 @@ describe('HostBridgeApiClient', () => {
         return jest.fn();
       });
       ws.request.mockImplementation((method, params) => {
-        if (method === 'bridge/thread/list/stream/start')
+        if (method === 'bridge/thread/list/stream/start') {
           return Promise.resolve({
             started: true,
             streamId: (params as { streamId: string }).streamId,
           });
+        }
         return Promise.resolve({ data: [] });
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -3276,13 +3278,16 @@ describe('HostBridgeApiClient', () => {
       const ws = createWsMock();
       ws.onEvent.mockImplementation(() => jest.fn());
       ws.request.mockImplementation((method, params) => {
-        if (method === 'bridge/thread/list/stream/start')
+        if (method === 'bridge/thread/list/stream/start') {
           return Promise.resolve({
             started: true,
             streamId: (params as { streamId: string }).streamId,
           });
-        if (method === 'thread/list') return Promise.resolve({ data: 'bad' });
-        if (method === 'thread/read')
+        }
+        if (method === 'thread/list') {
+          return Promise.resolve({ data: 'bad' });
+        }
+        if (method === 'thread/read') {
           return Promise.resolve({
             thread: {
               id: 'thread',
@@ -3294,13 +3299,17 @@ describe('HostBridgeApiClient', () => {
               ],
             },
           });
-        if (method === 'thread/resume') return Promise.resolve({ model: 'model', effort: 'low' });
-        if (method === 'bridge/thread/queue/send')
+        }
+        if (method === 'thread/resume') {
+          return Promise.resolve({ model: 'model', effort: 'low' });
+        }
+        if (method === 'bridge/thread/queue/send') {
           return Promise.resolve({
             disposition: 'sent',
             turnId: 'turn',
             queue: { threadId: 'thread', items: [] },
           });
+        }
         return Promise.resolve({});
       });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -3507,8 +3516,12 @@ describe('HostBridgeApiClient', () => {
 
       const sendWs = createWsMock();
       sendWs.request.mockImplementation((method) => {
-        if (method === 'thread/resume') return Promise.resolve({ model: null, effort: null });
-        if (method === 'turn/start') return Promise.resolve({ turn: { id: 'turn' } });
+        if (method === 'thread/resume') {
+          return Promise.resolve({ model: null, effort: null });
+        }
+        if (method === 'turn/start') {
+          return Promise.resolve({ turn: { id: 'turn' } });
+        }
         return Promise.resolve({
           thread: {
             id: 'thread',

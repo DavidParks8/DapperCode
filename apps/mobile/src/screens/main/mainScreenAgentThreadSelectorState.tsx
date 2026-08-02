@@ -15,7 +15,10 @@ import {
   indexAgentThreadOrdinals,
   resolveAgentActivitySummary,
 } from './agentThreads';
-import { buildAgentThreadDisplayState } from './agentThreadDisplay';
+import {
+  buildAgentThreadDisplayState,
+  readAgentThreadRuntimeSnapshots,
+} from './agentThreadDisplay';
 import { formatAgentThreadOptionTitle, iconForAgentThread } from './mainScreenHelpers';
 import type {
   MainScreenChatNavigationContext,
@@ -91,7 +94,16 @@ export function useMainScreenAgentThreadSelectorState(
       }
       return true;
     },
-    [agentRootThreadId, chatIdRef, closeAgentDetail, openAgentDetail, refreshAgentThreads],
+    [
+      agentRootThreadId,
+      chatIdRef,
+      closeAgentDetail,
+      openAgentDetail,
+      refreshAgentThreads,
+      selectedChatRef,
+      setAgentThreadMenuVisible,
+      setError,
+    ],
   );
   openAgentThreadSelectorRef.current = openAgentThreadSelector;
 
@@ -100,10 +112,14 @@ export function useMainScreenAgentThreadSelectorState(
     [agentRootThreadId, relatedAgentThreads],
   );
   const agentThreadRows = useMemo(() => {
+    const runtimeSnapshots = readAgentThreadRuntimeSnapshots(
+      threadRuntimeSnapshotsRef,
+      agentRuntimeRevision,
+    );
     return relatedAgentThreads.map((chat) => {
       const isRootThread = Boolean(agentRootThreadId) && chat.id === agentRootThreadId;
       const ordinal = agentThreadOrdinals.get(chat.id) ?? null;
-      const snapshot = threadRuntimeSnapshotsRef.current[chat.id] ?? null;
+      const snapshot = runtimeSnapshots[chat.id] ?? null;
       const runtime = buildAgentThreadDisplayState(chat, snapshot, runWatchdogNow);
       const latestCommand = snapshot?.latestCommand ?? snapshot?.activeCommands?.at(-1) ?? null;
 
@@ -131,6 +147,7 @@ export function useMainScreenAgentThreadSelectorState(
     relatedAgentThreads,
     runWatchdogNow,
     agentDetailThreadId,
+    threadRuntimeSnapshotsRef,
   ]);
 
   const selectorAgentCount = useMemo(
@@ -168,7 +185,13 @@ export function useMainScreenAgentThreadSelectorState(
         },
       } satisfies SelectionSheetOption;
     });
-  }, [agentRootThreadId, agentThreadRows, closeAgentDetail, openAgentDetail]);
+  }, [
+    agentRootThreadId,
+    agentThreadRows,
+    closeAgentDetail,
+    openAgentDetail,
+    setAgentThreadMenuVisible,
+  ]);
 
   const setMainScreenCommands = useSetAtom(mainScreenCommandsAtom);
   useEffect(() => {

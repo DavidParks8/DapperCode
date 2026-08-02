@@ -74,7 +74,9 @@ function render(context: MainScreenPickerOptionBuildersContext) {
   act(() => {
     renderer.create(withAppStore(store, <Harness context={context} resultRef={resultRef} />));
   });
-  if (!resultRef.current) throw new Error('Hook did not render');
+  if (!resultRef.current) {
+    throw new Error('Hook did not render');
+  }
   return resultRef.current;
 }
 
@@ -100,7 +102,9 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
   it('fires a selection haptic and delegates when the server-default model option is pressed', async () => {
     const context = createContext();
     const result = render(context);
-    const defaultOption = result.modelPickerOptions.find((option) => option.key === 'server-default');
+    const defaultOption = result.modelPickerOptions.find(
+      (option) => option.key === 'server-default',
+    );
     expect(defaultOption).toBeDefined();
 
     await act(async () => {

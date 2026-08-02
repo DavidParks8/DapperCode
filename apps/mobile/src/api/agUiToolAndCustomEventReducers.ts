@@ -40,7 +40,9 @@ export function rememberToolMeta(
   current: AgUiThreadMessageState,
   meta: ChatToolMeta,
 ): AgUiThreadMessageState {
-  if (current.subagentToolCallIds[meta.toolCallId]) return current;
+  if (current.subagentToolCallIds[meta.toolCallId]) {
+    return current;
+  }
   const merged = mergeToolMeta(current.toolMetaByCallId[meta.toolCallId], meta);
   return {
     ...current,
@@ -56,7 +58,9 @@ export function reduceToolMeta(
   timestamp?: number,
 ): AgUiThreadMessageState {
   const meta = parseToolMeta(value);
-  if (!meta) return current;
+  if (!meta) {
+    return current;
+  }
   // A tool can be announced by its metadata before any output exists, which is
   // what puts a running row on screen the moment the agent starts working.
   const started = current.toolCallMessageIdByCallId[meta.toolCallId]
@@ -77,7 +81,9 @@ export function appendToolArgs(
     ? current
     : startToolCall(current, runId, toolCallId, 'tool', undefined, timestamp);
   const message = findMessage(started, messageId);
-  if (!message || message.role !== 'assistant') return started;
+  if (!message || message.role !== 'assistant') {
+    return started;
+  }
   const existing = message.toolCalls?.find((call) => call.id === toolCallId);
   return upsertMessage(
     started,
@@ -124,20 +130,24 @@ export function upsertToolResult(
   };
 }
 
-export function applyMessagesSnapshot(
-  current: AgUiThreadMessageState,
-  runId: string,
-  messages: Message[],
-  timestamp?: number,
-): AgUiThreadMessageState {
+function collectCurrentSubagentsById(current: AgUiThreadMessageState): Map<string, ChatMessage> {
   const currentSubagents = new Map<string, ChatMessage>();
   for (const message of current.messages) {
     if (message.role !== 'activity' || message.activityType !== SUBAGENT_ACTIVITY_TYPE) {
       continue;
     }
     const toolCallId = nonEmptyString(record(message.content.subAgent)?.toolCallId);
-    if (toolCallId) currentSubagents.set(toolCallId, message);
+    if (toolCallId) {
+      currentSubagents.set(toolCallId, message);
+    }
   }
+  return currentSubagents;
+}
+
+function collectSnapshotSubagentIds(
+  current: AgUiThreadMessageState,
+  messages: Message[],
+): { snapshotSubagentIds: Record<string, true>; snapshotActivityIds: Set<string> } {
   const snapshotActivityIds = new Set<string>();
   const snapshotSubagentIds = messages.reduce<Record<string, true>>(
     (ids, message) => {
@@ -154,44 +164,87 @@ export function applyMessagesSnapshot(
     },
     { ...current.subagentToolCallIds },
   );
-  const previous = new Map(current.messages.map((message) => [message.id, message]));
-  const restoredSubagents = new Set<string>();
-  const nextMessages: ChatMessage[] = [];
+  return { snapshotSubagentIds, snapshotActivityIds };
+}
+
+function restoreSuppressedSubagentCards(
+  suppressedIds: string[],
+  ctx: {
+    currentSubagents: Map<string, ChatMessage>;
+    snapshotActivityIds: Set<string>;
+    restoredSubagents: Set<string>;
+    terminalMessageIds: string[];
+    messages: Message[];
+  },
+): ChatMessage[] {
+  const restored: ChatMessage[] = [];
+  for (const toolCallId of suppressedIds) {
+    const currentSubagent = ctx.currentSubagents.get(toolCallId);
+    const alreadyRestored =
+      !currentSubagent ||
+      ctx.snapshotActivityIds.has(toolCallId) ||
+      ctx.restoredSubagents.has(toolCallId);
+    if (alreadyRestored) {
+      continue;
+    }
+    // A malformed bridge snapshot can forget that a live task tool was already
+    // classified as a sub-agent. Keep the known card at the tool's timeline
+    // position instead of letting the snapshot replace it with a generic tool.
+    restored.push(
+      ctx.terminalMessageIds.includes(currentSubagent.id)
+        ? terminalizeSubagentCard(
+            currentSubagent,
+            snapshotToolFailed(ctx.messages, toolCallId) ? 'failed' : 'completed',
+          )
+        : currentSubagent,
+    );
+    ctx.restoredSubagents.add(toolCallId);
+  }
+  return restored;
+}
+
+function applySnapshotToolMeta(
+  message: Message,
+  toolMetaByCallId: Record<string, ChatToolMeta>,
+  snapshotSubagentIds: Record<string, true>,
+): void {
+  const meta = parseToolMeta(message.content);
+  if (meta && !snapshotSubagentIds[meta.toolCallId]) {
+    toolMetaByCallId[meta.toolCallId] = mergeToolMeta(toolMetaByCallId[meta.toolCallId], meta);
+  }
+}
+
+function buildSnapshotMessages(
+  messages: Message[],
+  current: AgUiThreadMessageState,
+  previous: Map<string, ChatMessage>,
+  currentSubagents: Map<string, ChatMessage>,
+  snapshotSubagentIds: Record<string, true>,
+  snapshotActivityIds: Set<string>,
+  timestamp: number | undefined,
+): { nextMessages: ChatMessage[]; toolMetaByCallId: Record<string, ChatToolMeta> } {
   // The snapshot describes each tool's kind and status in a companion activity
   // message. It is bookkeeping for the tool row, never a transcript entry of its
   // own, so it is folded into the metadata map and dropped here.
   const toolMetaByCallId = { ...current.toolMetaByCallId };
+  const restoredSubagents = new Set<string>();
+  const nextMessages: ChatMessage[] = [];
   for (const message of messages) {
     if (message.role === 'activity' && message.activityType === TOOL_META_ACTIVITY_TYPE) {
-      const meta = parseToolMeta(message.content);
-      if (meta && !snapshotSubagentIds[meta.toolCallId]) {
-        toolMetaByCallId[meta.toolCallId] = mergeToolMeta(toolMetaByCallId[meta.toolCallId], meta);
-      }
+      applySnapshotToolMeta(message, toolMetaByCallId, snapshotSubagentIds);
       continue;
     }
     const suppressedIds = suppressedToolCallIds(message, snapshotSubagentIds);
     if (suppressedIds.length > 0) {
-      // A malformed bridge snapshot can forget that a live task tool was already
-      // classified as a sub-agent. Keep the known card at the tool's timeline
-      // position instead of letting the snapshot replace it with a generic tool.
-      for (const toolCallId of suppressedIds) {
-        const currentSubagent = currentSubagents.get(toolCallId);
-        if (
-          currentSubagent &&
-          !snapshotActivityIds.has(toolCallId) &&
-          !restoredSubagents.has(toolCallId)
-        ) {
-          nextMessages.push(
-            current.terminalMessageIds.includes(currentSubagent.id)
-              ? terminalizeSubagentCard(
-                  currentSubagent,
-                  snapshotToolFailed(messages, toolCallId) ? 'failed' : 'completed',
-                )
-              : currentSubagent,
-          );
-          restoredSubagents.add(toolCallId);
-        }
-      }
+      nextMessages.push(
+        ...restoreSuppressedSubagentCards(suppressedIds, {
+          currentSubagents,
+          snapshotActivityIds,
+          restoredSubagents,
+          terminalMessageIds: current.terminalMessageIds,
+          messages,
+        }),
+      );
       continue;
     }
     const existing = previous.get(message.id);
@@ -203,6 +256,30 @@ export function applyMessagesSnapshot(
         : undefined,
     } as ChatMessage);
   }
+  return { nextMessages, toolMetaByCallId };
+}
+
+export function applyMessagesSnapshot(
+  current: AgUiThreadMessageState,
+  runId: string,
+  messages: Message[],
+  timestamp?: number,
+): AgUiThreadMessageState {
+  const currentSubagents = collectCurrentSubagentsById(current);
+  const { snapshotSubagentIds, snapshotActivityIds } = collectSnapshotSubagentIds(
+    current,
+    messages,
+  );
+  const previous = new Map(current.messages.map((message) => [message.id, message]));
+  const { nextMessages, toolMetaByCallId } = buildSnapshotMessages(
+    messages,
+    current,
+    previous,
+    currentSubagents,
+    snapshotSubagentIds,
+    snapshotActivityIds,
+    timestamp,
+  );
   const kept = Object.values(toolMetaByCallId).reduce(
     (messages, meta) => attachToolMeta(messages, meta),
     nextMessages.slice(-MAX_MESSAGES_PER_THREAD),
@@ -245,7 +322,9 @@ function rebaseToolBookkeeping(
 ): Record<string, string> {
   const next: Record<string, string> = {};
   for (const [toolCallId, messageId] of Object.entries(previous)) {
-    if (survivingMessageIds.has(messageId)) next[toolCallId] = messageId;
+    if (survivingMessageIds.has(messageId)) {
+      next[toolCallId] = messageId;
+    }
   }
   for (const [toolCallId, messageId] of fromSnapshot) {
     next[toolCallId] = messageId;
@@ -256,7 +335,9 @@ function rebaseToolBookkeeping(
 function snapshotToolCallMessageIds(messages: ChatMessage[]): Map<string, string> {
   const ids = new Map<string, string>();
   for (const message of messages) {
-    if (message.role !== 'assistant') continue;
+    if (message.role !== 'assistant') {
+      continue;
+    }
     for (const call of message.toolCalls ?? []) {
       ids.set(call.id, message.id);
     }
@@ -267,7 +348,9 @@ function snapshotToolCallMessageIds(messages: ChatMessage[]): Map<string, string
 function snapshotToolResultMessageIds(messages: ChatMessage[]): Map<string, string> {
   const ids = new Map<string, string>();
   for (const message of messages) {
-    if (message.role === 'tool') ids.set(message.toolCallId, message.id);
+    if (message.role === 'tool') {
+      ids.set(message.toolCallId, message.id);
+    }
   }
   return ids;
 }
@@ -358,7 +441,9 @@ export function reduceCustomEvent(
   envelope: AgUiEventEnvelope,
 ): AgUiThreadMessageState {
   const event = envelope.event;
-  if (event.type !== EventType.CUSTOM) return current;
+  if (event.type !== EventType.CUSTOM) {
+    return current;
+  }
   const value = record(event.value);
   if (event.name.endsWith('-chunk')) {
     return reduceCustomChunk(current, envelope, value);
@@ -386,15 +471,14 @@ export function reduceCustomChunk(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  if (envelope.event.type !== EventType.CUSTOM) return current;
-  const customName = envelope.event.name;
-  const canonicalId = nonEmptyString(value?.canonicalId);
-  const revision = nonEmptyString(value?.revision);
-  const index = typeof value?.index === 'number' ? value.index : -1;
-  const count = typeof value?.count === 'number' ? value.count : 0;
-  const data = typeof value?.data === 'string' ? value.data : null;
-  if (!canonicalId || !revision || index < 0 || index >= count || !data) return current;
-  const key = `${customName}\0${revision}`;
+  if (envelope.event.type !== EventType.CUSTOM) {
+    return current;
+  }
+  const chunk = readCustomChunk(envelope.event.name, value);
+  if (!chunk) {
+    return current;
+  }
+  const { key, count, index, data } = chunk;
   const existing = current.chunkAssemblies[key];
   const chunks =
     existing?.count === count ? { ...existing.chunks, [index]: data } : { [index]: data };
@@ -402,14 +486,40 @@ export function reduceCustomChunk(
     ...current,
     chunkAssemblies: { ...current.chunkAssemblies, [key]: { count, chunks } },
   };
-  if (Object.keys(chunks).length !== count) return pending;
+  if (Object.keys(chunks).length !== count) {
+    return pending;
+  }
+  return reduceCompletedCustomChunks(pending, envelope, envelope.event.name, key, count, chunks);
+}
+
+function readCustomChunk(
+  customName: string,
+  value: Record<string, unknown> | null,
+): { key: string; count: number; index: number; data: string } | null {
+  const canonicalId = nonEmptyString(value?.canonicalId);
+  const revision = nonEmptyString(value?.revision);
+  const index = typeof value?.index === 'number' ? value.index : -1;
+  const count = typeof value?.count === 'number' ? value.count : 0;
+  const data = typeof value?.data === 'string' ? value.data : null;
+  if (!canonicalId || !revision || index < 0 || index >= count || !data) {
+    return null;
+  }
+  return { key: `${customName}\0${revision}`, count, index, data };
+}
+
+function reduceCompletedCustomChunks(
+  pending: AgUiThreadMessageState,
+  envelope: AgUiEventEnvelope,
+  customName: string,
+  key: string,
+  count: number,
+  chunks: Record<number, string>,
+): AgUiThreadMessageState {
   try {
     const event = {
       type: EventType.CUSTOM,
       name: customName.slice(0, -'-chunk'.length),
-      value: JSON.parse(
-        Array.from({ length: count }, (_, chunkIndex) => chunks[chunkIndex]).join(''),
-      ),
+      value: JSON.parse(Array.from({ length: count }, (_, index) => chunks[index]).join('')),
     } as AGUIEvent;
     const completed = reduceCustomEvent(pending, { ...envelope, event });
     const chunkAssemblies = { ...completed.chunkAssemblies };
@@ -427,7 +537,9 @@ export function storeCustomMetadata(
 ): AgUiThreadMessageState {
   const order = current.customMetadataOrder.filter((entry) => entry !== name);
   order.push(name);
-  while (order.length > MAX_CUSTOM_METADATA_ENTRIES) order.shift();
+  while (order.length > MAX_CUSTOM_METADATA_ENTRIES) {
+    order.shift();
+  }
   const customMetadata = Object.fromEntries(
     order.map((entry) => [entry, entry === name ? value : current.customMetadata[entry]]),
   );

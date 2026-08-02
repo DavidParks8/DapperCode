@@ -24,7 +24,9 @@ function memoryStorage(
     values,
     read: jest.fn(async (path: string) => {
       const value = values.get(path);
-      if (value === undefined) throw new Error('missing');
+      if (value === undefined) {
+        throw new Error('missing');
+      }
       return value;
     }),
     write: jest.fn(async (path: string, value: string) => {

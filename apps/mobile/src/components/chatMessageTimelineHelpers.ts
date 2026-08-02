@@ -4,11 +4,15 @@ import { isComputerUseTraceEntry } from './computerUseTrace';
 import type { TimelineEntry, ToolGroupEntry } from './chatMessageTypes';
 
 export function parseTimelineEntries(content: string): TimelineEntry[] | null {
-  if (!content.includes('•')) return null;
+  if (!content.includes('•')) {
+    return null;
+  }
   const entries: TimelineEntry[] = [];
   let current: TimelineEntry | null = null;
   const commitCurrent = () => {
-    if (current?.title) entries.push(current);
+    if (current?.title) {
+      entries.push(current);
+    }
     current = null;
   };
   for (const line of content.split('\n')) {
@@ -19,18 +23,24 @@ export function parseTimelineEntries(content: string): TimelineEntry[] | null {
       continue;
     }
     if (!current) {
-      if (line.trim()) return null;
+      if (line.trim()) {
+        return null;
+      }
       continue;
     }
     const detail = normalizeTimelineDetail(line);
-    if (detail) current.details.push(detail);
+    if (detail) {
+      current.details.push(detail);
+    }
   }
   commitCurrent();
   return entries.length > 0 ? entries : null;
 }
 
 function normalizeTimelineDetail(line: string): string | null {
-  if (!line.trim()) return null;
+  if (!line.trim()) {
+    return null;
+  }
   const withoutMarker = line.replace(/^\s*[└├│]\s*/, '').trimEnd();
   return withoutMarker.trim() ? withoutMarker : null;
 }
@@ -72,21 +82,30 @@ export function toTimelineVisual(title: string): {
   const normalized = stripLeadingTimelineBullet(title).toLowerCase();
   const isError =
     normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
-  if (isError) return { icon: 'alert-circle-outline', useMonospaceTitle: false, isError: true };
-  if (normalized.startsWith('ran '))
+  if (isError) {
+    return { icon: 'alert-circle-outline', useMonospaceTitle: false, isError: true };
+  }
+  if (normalized.startsWith('ran ')) {
     return { icon: 'play-outline', useMonospaceTitle: true, isError: false };
-  if (normalized.startsWith('explored'))
+  }
+  if (normalized.startsWith('explored')) {
     return { icon: 'search', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('called tool'))
+  }
+  if (normalized.startsWith('called tool')) {
     return { icon: 'construct-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('searched web'))
+  }
+  if (normalized.startsWith('searched web')) {
     return { icon: 'globe-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('reading'))
+  }
+  if (normalized.startsWith('reading')) {
     return { icon: 'eye-outline', useMonospaceTitle: true, isError: false };
-  if (normalized.startsWith('listing'))
+  }
+  if (normalized.startsWith('listing')) {
     return { icon: 'folder-open-outline', useMonospaceTitle: false, isError: false };
-  if (normalized.startsWith('applied file'))
+  }
+  if (normalized.startsWith('applied file')) {
     return { icon: 'create-outline', useMonospaceTitle: false, isError: false };
+  }
   return { icon: 'document-text-outline', useMonospaceTitle: false, isError: false };
 }
 
@@ -97,10 +116,18 @@ export function toSubAgentVisual(title: string): {
   const normalized = title.toLowerCase();
   const isError =
     normalized.includes('failed') || normalized.includes('error') || normalized.includes('aborted');
-  if (isError) return { icon: 'alert-circle-outline', isError: true };
-  if (normalized.includes('waiting')) return { icon: 'pause-circle-outline', isError: false };
-  if (normalized.includes('closed')) return { icon: 'checkmark-circle-outline', isError: false };
-  if (normalized.includes('spawn')) return { icon: 'sparkles-outline', isError: false };
+  if (isError) {
+    return { icon: 'alert-circle-outline', isError: true };
+  }
+  if (normalized.includes('waiting')) {
+    return { icon: 'pause-circle-outline', isError: false };
+  }
+  if (normalized.includes('closed')) {
+    return { icon: 'checkmark-circle-outline', isError: false };
+  }
+  if (normalized.includes('spawn')) {
+    return { icon: 'sparkles-outline', isError: false };
+  }
   return { icon: 'git-branch-outline', isError: false };
 }
 

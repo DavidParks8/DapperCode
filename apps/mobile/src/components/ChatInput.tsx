@@ -20,6 +20,13 @@ import { useAppTheme } from '../theme';
 import { feedback } from '../feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '../accessibility';
 
+const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
+const ACTION_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
+const INPUT_TEXT_LINE_HEIGHT = 20;
+const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
+const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
+const INPUT_TEXT_MAX_HEIGHT = 96;
+
 interface ChatInputProps {
   value: string;
   onChangeText: (text: string) => void;
@@ -40,34 +47,297 @@ interface ChatInputProps {
   reserveFooterSpace?: boolean;
 }
 
-export function ChatInput({
-  value,
-  onChangeText,
-  onFocus,
-  onSubmit,
-  onStop,
-  onAttachPress,
-  attachDisabled = false,
-  attachments = [],
+interface ChatInputAttachmentListProps {
+  attachments: Array<{ id: string; label: string }>;
+  onRemoveAttachment?: (id: string) => void;
+  hitSlop: ReturnType<typeof computeHitSlop>;
+  styles: ReturnType<typeof createChatInputStyles>;
+  textMutedColor: string;
+}
+
+function ChatInputAttachmentList({
+  attachments,
   onRemoveAttachment,
+  hitSlop,
+  styles,
+  textMutedColor,
+}: ChatInputAttachmentListProps) {
+  if (attachments.length === 0) {
+    return null;
+  }
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.attachmentListContent}
+      style={styles.attachmentList}
+    >
+      {attachments.map((attachment, index) => (
+        <Pressable
+          key={`${attachment.id}-${String(index)}`}
+          onPress={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined}
+          hitSlop={hitSlop}
+          style={({ pressed }) => [styles.attachmentChip, pressed && styles.attachmentChipPressed]}
+          accessibilityRole={onRemoveAttachment ? 'button' : undefined}
+          accessibilityLabel={`${attachment.label}${onRemoveAttachment ? ', remove attachment' : ''}`}
+          accessibilityHint={
+            onRemoveAttachment ? 'Removes this attachment from the message' : undefined
+          }
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="attach-outline"
+            size={12}
+            color={textMutedColor}
+          />
+          <Text style={styles.attachmentChipText} numberOfLines={1}>
+            {attachment.label}
+          </Text>
+          {onRemoveAttachment ? (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="close-outline"
+              size={12}
+              color={textMutedColor}
+            />
+          ) : null}
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
+interface ChatInputStopButtonProps {
+  onStop: () => void;
+  isStopping: boolean;
+  hitSlop: ReturnType<typeof computeHitSlop>;
+  pressRetentionOffset: number;
+  styles: ReturnType<typeof createChatInputStyles>;
+  textMutedColor: string;
+  textPrimaryColor: string;
+}
+
+function ChatInputStopButton({
+  onStop,
+  isStopping,
+  hitSlop,
+  pressRetentionOffset,
+  styles,
+  textMutedColor,
+  textPrimaryColor,
+}: ChatInputStopButtonProps) {
+  return (
+    <Pressable
+      onPress={onStop}
+      style={styles.sendBtn}
+      disabled={isStopping}
+      hitSlop={hitSlop}
+      pressRetentionOffset={pressRetentionOffset}
+      accessibilityRole="button"
+      accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
+      accessibilityHint="Stops the current turn"
+      accessibilityState={controlAccessibilityState({
+        disabled: isStopping,
+        busy: isStopping,
+      })}
+    >
+      <View style={styles.stopButtonContent}>
+        {isStopping ? (
+          <ActivityIndicator size="small" color={textMutedColor} />
+        ) : (
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="square"
+            size={10}
+            color={textPrimaryColor}
+          />
+        )}
+      </View>
+    </Pressable>
+  );
+}
+
+interface ChatInputSendButtonProps {
+  onSubmit: () => void;
+  canSend: boolean;
+  isLoading: boolean;
+  submitUsesPrimaryChrome: boolean;
+  hitSlop: ReturnType<typeof computeHitSlop>;
+  pressRetentionOffset: number;
+  styles: ReturnType<typeof createChatInputStyles>;
+  textMutedColor: string;
+  textPrimaryColor: string;
+  accentTextColor: string;
+}
+
+function ChatInputSendButton({
+  onSubmit,
+  canSend,
   isLoading,
-  showStopButton = false,
-  isStopping = false,
-  placeholder = 'Message agent...',
-  safeAreaBottomInset = 0,
-  keyboardVisible = false,
-  footer = null,
-  reserveFooterSpace = false,
-}: ChatInputProps) {
+  submitUsesPrimaryChrome,
+  hitSlop,
+  pressRetentionOffset,
+  styles,
+  textMutedColor,
+  textPrimaryColor,
+  accentTextColor,
+}: ChatInputSendButtonProps) {
+  const busy = isLoading && !canSend;
+  return (
+    <Pressable
+      onPress={canSend ? onSubmit : undefined}
+      style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
+      disabled={!canSend}
+      hitSlop={hitSlop}
+      pressRetentionOffset={pressRetentionOffset}
+      accessibilityRole="button"
+      accessibilityLabel={busy ? 'Agent is responding' : 'Send message'}
+      accessibilityHint="Sends the current message"
+      accessibilityState={controlAccessibilityState({ disabled: !canSend, busy })}
+    >
+      {busy ? (
+        <ActivityIndicator
+          size="small"
+          color={submitUsesPrimaryChrome ? accentTextColor : textMutedColor}
+        />
+      ) : (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="arrow-up"
+          size={14}
+          color={submitUsesPrimaryChrome ? accentTextColor : textPrimaryColor}
+        />
+      )}
+    </Pressable>
+  );
+}
+
+interface ChatInputActionButtonsProps {
+  canStop: boolean;
+  showSendButton: boolean;
+  onStop: () => void;
+  onSubmit: () => void;
+  isStopping: boolean;
+  isLoading: boolean;
+  canSend: boolean;
+  submitUsesPrimaryChrome: boolean;
+  hitSlop: ReturnType<typeof computeHitSlop>;
+  pressRetentionOffset: number;
+  styles: ReturnType<typeof createChatInputStyles>;
+  colors: ReturnType<typeof useAppTheme>['colors'];
+}
+
+function ChatInputActionButtons({
+  canStop,
+  showSendButton,
+  onStop,
+  onSubmit,
+  isStopping,
+  isLoading,
+  canSend,
+  submitUsesPrimaryChrome,
+  hitSlop,
+  pressRetentionOffset,
+  styles,
+  colors,
+}: ChatInputActionButtonsProps) {
+  return (
+    <View style={styles.actionButtons}>
+      {canStop ? (
+        <ChatInputStopButton
+          onStop={onStop}
+          isStopping={isStopping}
+          hitSlop={hitSlop}
+          pressRetentionOffset={pressRetentionOffset}
+          styles={styles}
+          textMutedColor={colors.textMuted}
+          textPrimaryColor={colors.textPrimary}
+        />
+      ) : null}
+      {showSendButton ? (
+        <ChatInputSendButton
+          onSubmit={onSubmit}
+          canSend={canSend}
+          isLoading={isLoading}
+          submitUsesPrimaryChrome={submitUsesPrimaryChrome}
+          hitSlop={hitSlop}
+          pressRetentionOffset={pressRetentionOffset}
+          styles={styles}
+          textMutedColor={colors.textMuted}
+          textPrimaryColor={colors.textPrimary}
+          accentTextColor={colors.accentText}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+interface NormalizedChatInputProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  onFocus?: () => void;
+  onSubmit: () => void;
+  onStop?: () => void;
+  onAttachPress: () => void;
+  attachDisabled: boolean;
+  attachments: Array<{ id: string; label: string }>;
+  onRemoveAttachment?: (id: string) => void;
+  isLoading: boolean;
+  showStopButton: boolean;
+  isStopping: boolean;
+  placeholder: string;
+  safeAreaBottomInset: number;
+  keyboardVisible: boolean;
+  footer: ReactNode;
+  reserveFooterSpace: boolean;
+}
+
+function normalizeChatInputProps(props: ChatInputProps): NormalizedChatInputProps {
+  return {
+    value: props.value,
+    onChangeText: props.onChangeText,
+    onFocus: props.onFocus,
+    onSubmit: props.onSubmit,
+    onStop: props.onStop,
+    onAttachPress: props.onAttachPress,
+    attachDisabled: props.attachDisabled ?? false,
+    attachments: props.attachments ?? [],
+    onRemoveAttachment: props.onRemoveAttachment,
+    isLoading: props.isLoading,
+    showStopButton: props.showStopButton ?? false,
+    isStopping: props.isStopping ?? false,
+    placeholder: props.placeholder ?? 'Message agent...',
+    safeAreaBottomInset: props.safeAreaBottomInset ?? 0,
+    keyboardVisible: props.keyboardVisible ?? false,
+    footer: props.footer ?? null,
+    reserveFooterSpace: props.reserveFooterSpace ?? false,
+  };
+}
+
+export function ChatInput(props: ChatInputProps) {
+  const {
+    value,
+    onChangeText,
+    onFocus,
+    onSubmit,
+    onStop,
+    onAttachPress,
+    attachDisabled,
+    attachments,
+    onRemoveAttachment,
+    isLoading,
+    showStopButton,
+    isStopping,
+    placeholder,
+    safeAreaBottomInset,
+    keyboardVisible,
+    footer,
+    reserveFooterSpace,
+  } = normalizeChatInputProps(props);
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createChatInputStyles(theme), [theme]);
-  const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
-  const ACTION_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
-  const actionButtonHitSlop = useMemo(
-    () => computeHitSlop(ACTION_BUTTON_VISIBLE_SIZE),
-    [],
-  );
+  const actionButtonHitSlop = useMemo(() => computeHitSlop(ACTION_BUTTON_VISIBLE_SIZE), []);
   // Attachment chips vary in width with their label; the removal affordance shares the chip's
   // full Pressable area, so only vertical slop is needed and horizontal is capped to avoid
   // overlapping a neighboring chip in the tightly packed scroll row.
@@ -75,10 +345,6 @@ export function ChatInput({
     () => computeHitSlop({ width: 44, height: 28 }, { maxHorizontal: theme.spacing.xs / 2 }),
     [theme],
   );
-  const INPUT_TEXT_LINE_HEIGHT = 20;
-  const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
-  const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
-  const INPUT_TEXT_MAX_HEIGHT = 96;
   const [inputHeight, setInputHeight] = useState(INPUT_TEXT_MIN_HEIGHT);
   const [inputWidth, setInputWidth] = useState(0);
   const updateInputHeight = (height: number) => {
@@ -136,49 +402,13 @@ export function ChatInput({
         ]}
       >
         <View style={styles.composerBar}>
-          {attachments.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.attachmentListContent}
-              style={styles.attachmentList}
-            >
-              {attachments.map((attachment, index) => (
-                <Pressable
-                  key={`${attachment.id}-${String(index)}`}
-                  onPress={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined}
-                  hitSlop={attachmentChipHitSlop}
-                  style={({ pressed }) => [
-                    styles.attachmentChip,
-                    pressed && styles.attachmentChipPressed,
-                  ]}
-                  accessibilityRole={onRemoveAttachment ? 'button' : undefined}
-                  accessibilityLabel={`${attachment.label}${onRemoveAttachment ? ', remove attachment' : ''}`}
-                  accessibilityHint={
-                    onRemoveAttachment ? 'Removes this attachment from the message' : undefined
-                  }
-                >
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name="attach-outline"
-                    size={12}
-                    color={colors.textMuted}
-                  />
-                  <Text style={styles.attachmentChipText} numberOfLines={1}>
-                    {attachment.label}
-                  </Text>
-                  {onRemoveAttachment ? (
-                    <Ionicons
-                      {...decorativeAccessibilityProps}
-                      name="close-outline"
-                      size={12}
-                      color={colors.textMuted}
-                    />
-                  ) : null}
-                </Pressable>
-              ))}
-            </ScrollView>
-          ) : null}
+          <ChatInputAttachmentList
+            attachments={attachments}
+            onRemoveAttachment={onRemoveAttachment}
+            hitSlop={attachmentChipHitSlop}
+            styles={styles}
+            textMutedColor={colors.textMuted}
+          />
 
           <View style={styles.row}>
             <Pressable
@@ -257,69 +487,20 @@ export function ChatInput({
                 }}
               />
               {shouldShowActionButton ? (
-                <View style={styles.actionButtons}>
-                  {canStop ? (
-                    <Pressable
-                      onPress={handleStop}
-                      style={styles.sendBtn}
-                      disabled={isStopping}
-                      hitSlop={actionButtonHitSlop}
-                      pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-                      accessibilityRole="button"
-                      accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
-                      accessibilityHint="Stops the current turn"
-                      accessibilityState={controlAccessibilityState({
-                        disabled: isStopping,
-                        busy: isStopping,
-                      })}
-                    >
-                      <View style={styles.stopButtonContent}>
-                        {isStopping ? (
-                          <ActivityIndicator size="small" color={colors.textMuted} />
-                        ) : (
-                          <Ionicons
-                            {...decorativeAccessibilityProps}
-                            name="square"
-                            size={10}
-                            color={colors.textPrimary}
-                          />
-                        )}
-                      </View>
-                    </Pressable>
-                  ) : null}
-                  {showSendButton ? (
-                    <Pressable
-                      onPress={canSend ? handleSubmit : undefined}
-                      style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
-                      disabled={!canSend}
-                      hitSlop={actionButtonHitSlop}
-                      pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        isLoading && !canSend ? 'Agent is responding' : 'Send message'
-                      }
-                      accessibilityHint="Sends the current message"
-                      accessibilityState={controlAccessibilityState({
-                        disabled: !canSend,
-                        busy: isLoading && !canSend,
-                      })}
-                    >
-                      {isLoading && !canSend ? (
-                        <ActivityIndicator
-                          size="small"
-                          color={submitUsesPrimaryChrome ? colors.accentText : colors.textMuted}
-                        />
-                      ) : (
-                        <Ionicons
-                          {...decorativeAccessibilityProps}
-                          name="arrow-up"
-                          size={14}
-                          color={submitUsesPrimaryChrome ? colors.accentText : colors.textPrimary}
-                        />
-                      )}
-                    </Pressable>
-                  ) : null}
-                </View>
+                <ChatInputActionButtons
+                  canStop={canStop}
+                  showSendButton={showSendButton}
+                  onStop={handleStop}
+                  onSubmit={handleSubmit}
+                  isStopping={isStopping}
+                  isLoading={isLoading}
+                  canSend={canSend}
+                  submitUsesPrimaryChrome={submitUsesPrimaryChrome}
+                  hitSlop={actionButtonHitSlop}
+                  pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+                  styles={styles}
+                  colors={colors}
+                />
               ) : null}
             </View>
           </View>

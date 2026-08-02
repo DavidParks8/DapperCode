@@ -74,7 +74,12 @@ export function useMainScreenThreadRuntimeMutations(
       }
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision, rememberBridgeUiSurfaceSnapshots, upsertThreadRuntimeSnapshot],
+    [
+      bumpAgentRuntimeRevision,
+      rememberBridgeUiSurfaceSnapshots,
+      threadRuntimeSnapshotsRef,
+      upsertThreadRuntimeSnapshot,
+    ],
   );
 
   const replaceThreadBridgeUiSurfaces = useCallback(
@@ -135,7 +140,7 @@ export function useMainScreenThreadRuntimeMutations(
         };
       });
     },
-    [upsertThreadRuntimeSnapshot],
+    [threadRuntimeSnapshotsRef, upsertThreadRuntimeSnapshot],
   );
 
   const cacheThreadPlan = useCallback(
@@ -154,24 +159,27 @@ export function useMainScreenThreadRuntimeMutations(
       }));
       rememberChatPlanSnapshot(threadId, threadRuntimeSnapshotsRef.current[threadId]?.plan ?? null);
     },
-    [rememberChatPlanSnapshot, upsertThreadRuntimeSnapshot],
+    [rememberChatPlanSnapshot, threadRuntimeSnapshotsRef, upsertThreadRuntimeSnapshot],
   );
 
-  const clearPendingPlanImplementationPrompt = useCallback((threadId: string) => {
-    if (!threadId) {
-      return;
-    }
-
-    setPendingPlanImplementationPrompts((prev) => {
-      if (!(threadId in prev)) {
-        return prev;
+  const clearPendingPlanImplementationPrompt = useCallback(
+    (threadId: string) => {
+      if (!threadId) {
+        return;
       }
 
-      const next = { ...prev };
-      delete next[threadId];
-      return next;
-    });
-  }, []);
+      setPendingPlanImplementationPrompts((prev) => {
+        if (!(threadId in prev)) {
+          return prev;
+        }
+
+        const next = { ...prev };
+        delete next[threadId];
+        return next;
+      });
+    },
+    [setPendingPlanImplementationPrompts],
+  );
 
   return {
     cacheThreadBridgeUiSurface,
