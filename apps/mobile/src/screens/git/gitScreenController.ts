@@ -117,6 +117,10 @@ export function useGitScreenController({
         requestId === refreshRequestIdRef.current &&
         requestCwd === requestedCwdRef.current
       ) {
+        // Mark the initial load attempt as settled even on failure so a subsequent poll or
+        // manual retry is treated as a lightweight background refresh instead of re-triggering
+        // the full-screen "loading" spinner indefinitely.
+        hasLoadedRef.current = true;
         setError((err as Error).message);
       }
     } finally {

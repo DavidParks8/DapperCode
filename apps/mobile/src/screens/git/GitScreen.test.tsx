@@ -277,6 +277,53 @@ describe('GitScreen behavior', () => {
   it('surfaces refresh failures', async () => {
     const tree = await renderGit(createApi(new Error('git unavailable')));
     expect(hasText(tree.root as Queryable, 'git unavailable')).toBe(true);
+    // A failed initial load must never show a false "clean" state above the real error.
+    expect(hasText(tree.root as Queryable, 'Working tree clean')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('does not show a false clean state or a repeated full-screen spinner after a rejected initial gitStatus load', async () => {
+    const api = createApi();
+    const nextStatus = deferred<GitStatusResponse>();
+    (api.gitStatus as jest.Mock)
+      .mockRejectedValueOnce(new Error('git unavailable'))
+      .mockImplementationOnce(() => nextStatus.promise);
+
+    const tree = await renderGit(api);
+    const root = tree.root as Queryable;
+
+    // Initial load failed: the real error is surfaced, with no false "clean" claim.
+    expect(hasText(root, 'git unavailable')).toBe(true);
+    expect(hasText(root, 'Working tree clean')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
+
+    // Trigger the periodic poll. Since the initial attempt already settled (even though it
+    // failed), this must be a lightweight background refresh, not a repeated full-screen load
+    // that would remount/fade the sections again.
+    act(() => {
+      jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
+
+    await act(async () => {
+      nextStatus.resolve(cleanStatus);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hasText(root, 'Clean')).toBe(true);
+    expect(hasText(root, 'git unavailable')).toBe(false);
+    expect(
+      root.findAll((node) => node.props.accessibilityLabel === 'Loading Git status'),
+    ).toHaveLength(0);
     act(() => tree.unmount());
   });
 

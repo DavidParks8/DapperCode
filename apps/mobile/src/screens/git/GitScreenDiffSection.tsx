@@ -10,7 +10,13 @@ import type { GitSectionCommonProps } from './gitScreenSectionTypes';
 export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCommonProps) {
   const { derived, diffFileForView } = controller;
 
-  if (!derived.hasChanges) {
+  // Only claim a clean working tree once a status fetch has actually succeeded (no active
+  // error) and returned no changes. Falling through to `null` for an initial/failed load
+  // avoids showing a false "Working tree clean" state stacked above the real error banner.
+  const hasLoadedStatus = controller.status !== null;
+  const showCleanState = !controller.error && hasLoadedStatus && !derived.hasChanges;
+
+  if (showCleanState) {
     return (
       <View
         style={styles.cleanStateContainer}
@@ -22,6 +28,12 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
         <Text style={styles.cleanStateSubtext}>No staged or unstaged changes.</Text>
       </View>
     );
+  }
+
+  if (!derived.hasChanges) {
+    // No changes to render because the status either hasn't loaded successfully yet or the
+    // most recent refresh failed; GitScreen's loading spinner / error banner communicates that.
+    return null;
   }
 
   return (
