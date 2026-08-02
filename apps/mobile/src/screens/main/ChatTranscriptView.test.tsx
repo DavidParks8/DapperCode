@@ -5,7 +5,9 @@ import type { Chat } from '../../api/types';
 import { createAgUiThreadMessageState } from '../../api/agUiMessages';
 import { AppThemeProvider, createAppTheme } from '../../theme';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
+import { FadeIn, FadeOut, ReduceMotion } from '../../testing/reanimatedMock';
 
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 jest.mock('../../components/ChatMessage', () => ({
   ChatMessage: ({ message }: { message: { content: string } }) => message.content,
@@ -304,6 +306,38 @@ describe('ChatTranscriptView continuation', () => {
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
       0,
     );
+    act(() => tree.unmount());
+  });
+
+  it('gives the jump-to-latest button an effective touch target at or above the 44pt/48dp floor', () => {
+    const tree = render({});
+    const list = getList(tree);
+    scroll(list, 100);
+
+    const jump = tree.root.findByProps({
+      accessibilityLabel: 'Jump to latest message',
+    }) as Queryable;
+    const hitSlop = jump.props.hitSlop as
+      | { top: number; bottom: number; left: number; right: number }
+      | undefined;
+    expect(hitSlop).toBeDefined();
+    expect(hitSlop!.top).toBeGreaterThan(0);
+    expect(hitSlop!.bottom).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('wires the jump-to-latest enter/exit transitions to honor system Reduce Motion', () => {
+    const enterSpy = jest.spyOn(FadeIn, 'reduceMotion');
+    const exitSpy = jest.spyOn(FadeOut, 'reduceMotion');
+    const tree = render({});
+    const list = getList(tree);
+    scroll(list, 100);
+
+    expect(enterSpy).toHaveBeenCalledWith(ReduceMotion.System);
+    expect(exitSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    enterSpy.mockRestore();
+    exitSpy.mockRestore();
     act(() => tree.unmount());
   });
 

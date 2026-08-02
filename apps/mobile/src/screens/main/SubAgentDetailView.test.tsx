@@ -1,6 +1,7 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 jest.mock('expo-router', () => jest.requireActual('../../testing/expoRouterMock'));
+jest.mock('react-native-reanimated', () => jest.requireActual('../../testing/reanimatedMock'));
 import { router } from 'expo-router';
 
 import type { HostBridgeApiClient } from '../../api/client';

@@ -11,6 +11,7 @@ import {
   type NativeSyntheticEvent,
   View,
 } from 'react-native';
+import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 
 import type { Chat } from '../../api/types';
 import { useAppTheme } from '../../theme';
@@ -31,6 +32,10 @@ import { decorativeAccessibilityProps } from '../../accessibility';
 import type { TranscriptContinuationState } from './controllers/transcriptContinuationController';
 import { areChatTranscriptViewPropsEqual } from './chatTranscriptComparison';
 import { renderChatTranscriptItem } from './chatTranscriptItem';
+import { computeHitSlop } from '../../components/touchTarget';
+import { motionDuration } from '../../components/motion';
+
+const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 34, height: 34 };
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -279,6 +284,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         : [styles.messageListContent, { paddingBottom: bottomInset }],
     [bottomInset, styles.messageListContent],
   );
+  const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
@@ -364,30 +370,36 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         accessibilityLabel={`${chat.title || 'Chat'} transcript`}
       />
       {showJumpToLatest ? (
-        <Pressable
-          onPress={() => {
-            autoScrollStateRef.current.shouldStickToBottom = true;
-            autoScrollStateRef.current.isUserInteracting = false;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-            showJumpToLatestRef.current = false;
-            setShowJumpToLatest(false);
-            onJumpToLatest();
-          }}
-          style={({ pressed }) => [
-            styles.jumpToLatestButton,
-            { bottom: bottomInset + theme.spacing.xs },
-            pressed && styles.jumpToLatestButtonPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Jump to latest message"
+        <Animated.View
+          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+          style={[styles.jumpToLatestButton, { bottom: bottomInset + theme.spacing.xs }]}
         >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="arrow-down"
-            size={14}
-            color={theme.colors.textPrimary}
-          />
-        </Pressable>
+          <Pressable
+            onPress={() => {
+              autoScrollStateRef.current.shouldStickToBottom = true;
+              autoScrollStateRef.current.isUserInteracting = false;
+              autoScrollStateRef.current.isMomentumScrolling = false;
+              showJumpToLatestRef.current = false;
+              setShowJumpToLatest(false);
+              onJumpToLatest();
+            }}
+            hitSlop={jumpToLatestHitSlop}
+            style={({ pressed }) => [
+              styles.jumpToLatestButtonInner,
+              pressed && styles.jumpToLatestButtonPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Jump to latest message"
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="arrow-down"
+              size={14}
+              color={theme.colors.textPrimary}
+            />
+          </Pressable>
+        </Animated.View>
       ) : null}
     </View>
   );
