@@ -6,11 +6,10 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 import { ActivityBar, type ActivityTone } from './ActivityBar';
 import { AppThemeProvider, createAppTheme } from '../theme';
 
-jest.mock('react-native-reanimated', () => ({
-  __esModule: true,
-  default: { View: 'View' },
-  FadeIn: { duration: () => undefined },
-}));
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+
+import { FadeIn, ReduceMotion } from '../testing/reanimatedMock';
+
 
 type Props = Record<string, unknown>;
 
@@ -93,6 +92,16 @@ describe('ActivityBar', () => {
   it('falls back to the title when there is no detail', () => {
     const tree = render('complete', 'Turn completed', '   ');
     expect(textContent(tree.root as Queryable)).toContain('Turn completed');
+    act(() => tree.unmount());
+  });
+
+  it('wires the enter transition to honor the system Reduce Motion setting', () => {
+    const reduceMotionSpy = jest.spyOn(FadeIn, 'reduceMotion');
+    const tree = render('running', 'Working');
+
+    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    reduceMotionSpy.mockRestore();
     act(() => tree.unmount());
   });
 });

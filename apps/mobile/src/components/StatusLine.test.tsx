@@ -6,11 +6,10 @@ import type { RunEvent } from '../api/types';
 import { AppThemeProvider, createAppTheme } from '../theme';
 import { StatusLine } from './StatusLine';
 
-jest.mock('react-native-reanimated', () => ({
-  __esModule: true,
-  default: { View: 'View' },
-  FadeInUp: { duration: () => undefined },
-}));
+jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanimatedMock'));
+
+import { FadeInUp, ReduceMotion } from '../testing/reanimatedMock';
+
 
 type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children'> & {
   props: Record<string, unknown>;
@@ -70,6 +69,18 @@ describe('StatusLine', () => {
     expect(content).toContain('Run completed — All checks passed');
     expect(content).toContain('Run failed — Exit 1');
     expect(content).toContain('run.paused');
+    act(() => tree.unmount());
+  });
+
+  it('wires the enter transition to honor the system Reduce Motion setting', () => {
+    const reduceMotionSpy = jest.spyOn(FadeInUp, 'reduceMotion');
+    const tree = render(
+      <StatusLine event={{ eventType: 'run.started', detail: undefined } as RunEvent} />,
+    );
+
+    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+
+    reduceMotionSpy.mockRestore();
     act(() => tree.unmount());
   });
 });

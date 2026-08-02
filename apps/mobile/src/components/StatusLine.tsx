@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { StyleSheet, Text } from 'react-native';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeInUp, ReduceMotion } from 'react-native-reanimated';
 
 import type { RunEvent } from '../api/types';
+import { motionDuration } from './motion';
 import { useAppTheme, type AppTheme } from '../theme';
 
 interface StatusLineProps {
@@ -32,7 +33,10 @@ export function StatusLine({ event }: StatusLineProps) {
   const detail = event.detail;
 
   return (
-    <Animated.View entering={FadeInUp.duration(200)} style={styles.container}>
+    <Animated.View
+      entering={FadeInUp.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      style={styles.container}
+    >
       <Ionicons name={icon.name} size={14} color={icon.color} />
       <Text style={[styles.text, { color: icon.color }]}>
         {label}
@@ -53,6 +57,5 @@ const createStyles = (theme: AppTheme) =>
     text: {
       ...theme.typography.caption,
       fontStyle: 'italic',
-      color: theme.colors.textMuted,
     },
   });
