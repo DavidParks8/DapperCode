@@ -195,7 +195,9 @@ function normalizePushRegistrations(
   value: unknown,
   profiles: BridgeProfileStore,
 ): PushProfileRegistration[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
   const knownProfiles = new Set(profiles.profiles.map((profile) => profile.id));
   const seenProfiles = new Set<string>();
   const seenRegistrations = new Set<string>();
@@ -211,7 +213,9 @@ function toPushRegistration(
   seenProfiles: Set<string>,
   seenRegistrations: Set<string>,
 ): PushProfileRegistration | null {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
   const registration = value as Record<string, unknown>;
   const profileId = normalizeNullableString(registration.profileId);
   const registrationId = normalizeNullableString(registration.registrationId);
@@ -257,7 +261,9 @@ export function updatePushRegistration(
 
 export function normalizeRequiredString(value: unknown, name: string): string {
   const normalized = normalizeNullableString(value);
-  if (!normalized) throw new Error(`${name} must not be empty.`);
+  if (!normalized) {
+    throw new Error(`${name} must not be empty.`);
+  }
   return normalized;
 }
 

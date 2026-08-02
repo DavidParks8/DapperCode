@@ -59,7 +59,9 @@ type PropHandler = (...args: never[]) => unknown;
 
 function readHandler<Handler extends PropHandler>(node: Queryable, property: string): Handler {
   const handler = node.props[property];
-  if (typeof handler !== 'function') throw new Error(`Missing handler: ${property}`);
+  if (typeof handler !== 'function') {
+    throw new Error(`Missing handler: ${property}`);
+  }
   return handler as Handler;
 }
 
@@ -72,15 +74,21 @@ function hasText(root: Queryable, text: string): boolean {
 
 function findByLabel(root: Queryable, label: string): Queryable {
   const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-  if (!node) throw new Error(`Missing label: ${label}`);
+  if (!node) {
+    throw new Error(`Missing label: ${label}`);
+  }
   return node;
 }
 
 function findPressableByText(root: Queryable, text: string): Queryable {
   const textNode = root.findAll((node) => node.children.map(String).join('') === text)[0];
   let current: Queryable | null = textNode ?? null;
-  while (current && typeof current.props.onPress !== 'function') current = current.parent;
-  if (!current) throw new Error(`Missing pressable: ${text}`);
+  while (current && typeof current.props.onPress !== 'function') {
+    current = current.parent;
+  }
+  if (!current) {
+    throw new Error(`Missing pressable: ${text}`);
+  }
   return current;
 }
 
@@ -136,7 +144,9 @@ async function renderOnboarding(
     tree = renderer.create(createElement(options));
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected onboarding tree');
+  if (!tree) {
+    throw new Error('Expected onboarding tree');
+  }
   const renderedTree = tree;
   return {
     tree: renderedTree,
@@ -294,7 +304,9 @@ describe('OnboardingScreen behavior', () => {
     await press(findPressableByText(root, 'Scan QR'));
     expect(hasText(root, 'Scan Pairing QR')).toBe(true);
     const camera = root.findAll((node) => node.type === 'mock-camera-view')[0];
-    if (!camera) throw new Error('Missing camera');
+    if (!camera) {
+      throw new Error('Missing camera');
+    }
     await act(async () => {
       readHandler<(event: { data: string }) => void>(
         camera,
@@ -985,7 +997,9 @@ describe('OnboardingScreen behavior', () => {
         }
         const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
         const matches = contents.match(/fontSize:\s*[0-9]/g);
-        if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+        if (matches) {
+          offenders.push(`${entry}: ${matches.join(', ')}`);
+        }
       }
       expect(offenders).toEqual([]);
     });

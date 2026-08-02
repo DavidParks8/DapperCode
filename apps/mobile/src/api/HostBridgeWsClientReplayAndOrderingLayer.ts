@@ -84,8 +84,12 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
     latestEventId: number | null,
     pageEventIds: number[],
   ): number | null {
-    if (targetEventId !== null) return targetEventId;
-    if (latestEventId !== null) return latestEventId;
+    if (targetEventId !== null) {
+      return targetEventId;
+    }
+    if (latestEventId !== null) {
+      return latestEventId;
+    }
     return pageEventIds.length > 0 ? Math.max(...pageEventIds) : null;
   }
   protected async replayMissedEvents(generation: number): Promise<void> {

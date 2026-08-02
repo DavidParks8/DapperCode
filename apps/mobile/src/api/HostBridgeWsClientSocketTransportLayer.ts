@@ -152,18 +152,26 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     options?: { source?: 'live' | 'replay' },
   ): void {
     const notification = this.readNotification(record);
-    if (!notification) return;
+    if (!notification) {
+      return;
+    }
     const { method, protocolVersion, identityResult, eventId, event } = notification;
-    if (!this.deliverNotification(event, eventId, protocolVersion, options)) return;
+    if (!this.deliverNotification(event, eventId, protocolVersion, options)) {
+      return;
+    }
     this.scheduleConnectionReplay(method, identityResult);
   }
   private readNotification(record: Record<string, unknown>) {
     const method = readString(record.method);
-    if (!method) return null;
+    if (!method) {
+      return null;
+    }
     const protocolVersion = readIntegerLike(record.protocolVersion);
     const streamId = readString(record.streamId);
     const identityResult = this.applyStreamIdentity(protocolVersion, streamId);
-    if (identityResult === 'unsupported') return null;
+    if (identityResult === 'unsupported') {
+      return null;
+    }
     const eventId = readEventId(record);
     const event = this.createNotification(
       method,
@@ -204,7 +212,9 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
   }
   private deliverUnnumberedEvent(event: RpcNotification): void {
     const completion = toAgUiTurnCompletionSnapshot(event);
-    if (completion?.turnId) this.rememberTurnCompletion(completion);
+    if (completion?.turnId) {
+      this.rememberTurnCompletion(completion);
+    }
     this.emitEvent(event);
   }
   private deliverNumberedNotification(
@@ -216,7 +226,9 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     if (protocolVersion === null && eventId === 1 && this.lastSeenEventId > 1) {
       this.resetDeliveryEpoch('streamChanged', null, null);
     }
-    if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) return false;
+    if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) {
+      return false;
+    }
     if (this.lastSeenEventId === 0 && !this.awaitingFreshRecoveryBaseline) {
       this.emitNumberedEvent(event);
       return true;
@@ -242,7 +254,9 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     }
     if (!this.replayInFlight) {
       this.drainPendingEvents();
-      if (this.hasPendingGap()) this.scheduleReplay();
+      if (this.hasPendingGap()) {
+        this.scheduleReplay();
+      }
     }
   }
   private scheduleConnectionReplay(

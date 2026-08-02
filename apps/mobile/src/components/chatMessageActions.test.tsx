@@ -42,7 +42,9 @@ function render(node: React.ReactNode): ReactTestRenderer {
   act(() => {
     tree = renderer.create(wrap(node));
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -54,13 +56,17 @@ function findPressable(root: QueryableInstance, label: string): QueryableInstanc
   const match = root.findAll(
     (node) => typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label,
   )[0];
-  if (!match) throw new Error(`Missing pressable: ${label}`);
+  if (!match) {
+    throw new Error(`Missing pressable: ${label}`);
+  }
   return match;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return callback(...args);
 }
 

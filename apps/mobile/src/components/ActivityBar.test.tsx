@@ -35,7 +35,9 @@ function render(tone: ActivityTone, title: string, detail?: string | null): Reac
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 

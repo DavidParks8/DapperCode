@@ -12,7 +12,9 @@ const PAIRING_TYPES = new Set([
 
 export function parsePairingPayload(rawValue: string): PairingPayload | null {
   const raw = rawValue.trim();
-  if (!raw) return null;
+  if (!raw) {
+    return null;
+  }
   return parseJsonPairingPayload(raw) ?? parseUriPairingPayload(raw);
 }
 
@@ -38,7 +40,9 @@ function parseJsonPairingPayload(raw: string): PairingPayload | null {
 function parseUriPairingPayload(raw: string): PairingPayload | null {
   try {
     const parsed = new URL(raw);
-    if (parsed.protocol !== 'dappercode:') return null;
+    if (parsed.protocol !== 'dappercode:') {
+      return null;
+    }
     const bridgeUrl =
       normalizeBridgeUrlInput(
         firstString(parsed.searchParams.get('bridgeUrl'), parsed.searchParams.get('url')),

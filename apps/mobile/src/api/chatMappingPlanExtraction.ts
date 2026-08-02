@@ -60,7 +60,9 @@ function extractSnapshotPlans(
 }
 
 function snapshotPlanStepStatus(status: string): 'completed' | 'inProgress' | 'pending' {
-  if (status === 'completed') return 'completed';
+  if (status === 'completed') {
+    return 'completed';
+  }
   return status === 'inProgress' || status === 'in_progress' ? 'inProgress' : 'pending';
 }
 

@@ -66,7 +66,9 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
 
   const draftFor = (id: string): ToolInvocationDraft => {
     const existing = drafts.get(id);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
     const created: ToolInvocationDraft = {
       id,
       meta: null,
@@ -83,7 +85,9 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
     const callId = meta?.toolCallId ?? toolCallIdOf(message);
     if (callId) {
       const draft = draftFor(callId);
-      if (meta) draft.meta = meta;
+      if (meta) {
+        draft.meta = meta;
+      }
       const parsed = readToolMessage(message, Boolean(meta ?? draft.meta));
       draft.legacyTitle ??= parsed.title;
       appendLines(draft.textLines, parsed.lines);
@@ -116,7 +120,9 @@ function resolveInvocationTitleInfo(
   const legacyTitle = draft.legacyTitle?.trim() ?? '';
   const fallbackTitle = draft.textLines[0]?.trim() ?? '';
   const title = metaTitle || legacyTitle || fallbackTitle;
-  if (!title) return null;
+  if (!title) {
+    return null;
+  }
   // A title lifted out of the output must not also be printed inside it.
   const rawLines = metaTitle || legacyTitle ? draft.textLines : draft.textLines.slice(1);
   return { title, rawLines };
@@ -159,9 +165,13 @@ function computeInvocationEmpty(
 }
 
 function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocation | null {
-  if (!draft) return null;
+  if (!draft) {
+    return null;
+  }
   const titleInfo = resolveInvocationTitleInfo(draft);
-  if (!titleInfo) return null;
+  if (!titleInfo) {
+    return null;
+  }
   const { title, rawLines } = titleInfo;
   const meta = draft.meta;
   const metaFields = resolveInvocationMetaFields(meta, title);
@@ -190,8 +200,12 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
 }
 
 function toolCallIdOf(message: ChatMessage): string | null {
-  if (message.role === 'tool') return message.toolCallId || null;
-  if (message.role === 'assistant') return message.toolCalls?.[0]?.id ?? null;
+  if (message.role === 'tool') {
+    return message.toolCallId || null;
+  }
+  if (message.role === 'assistant') {
+    return message.toolCalls?.[0]?.id ?? null;
+  }
   return null;
 }
 
@@ -206,8 +220,12 @@ function readToolMessage(
 ): { title: string | null; lines: string[] } {
   const isToolCall = message.role === 'assistant';
   const text = isToolCall ? getToolCallDisplayLines(message).join('\n') : getMessageText(message);
-  if (!text.trim()) return { title: null, lines: [] };
-  if (hasMeta) return { title: null, lines: isToolCall ? [] : text.split('\n') };
+  if (!text.trim()) {
+    return { title: null, lines: [] };
+  }
+  if (hasMeta) {
+    return { title: null, lines: isToolCall ? [] : text.split('\n') };
+  }
   const entries = parseTimelineEntries(text);
   if (entries?.length) {
     return {
@@ -228,9 +246,13 @@ interface LegacyInvocation {
 }
 
 function legacyInvocations(message: ChatMessage): LegacyInvocation[] {
-  if (message.role !== 'system' && message.role !== 'tool') return [];
+  if (message.role !== 'system' && message.role !== 'tool') {
+    return [];
+  }
   const entries = parseTimelineEntries(getMessageText(message));
-  if (!entries?.length) return [];
+  if (!entries?.length) {
+    return [];
+  }
   return entries.map((entry, index) => ({
     id: `${message.id}-${String(index)}`,
     title: entry.title,
@@ -240,7 +262,9 @@ function legacyInvocations(message: ChatMessage): LegacyInvocation[] {
 
 function appendLines(target: string[], lines: string[]): void {
   for (const line of lines) {
-    if (target[target.length - 1] === line && !line.trim()) continue;
+    if (target[target.length - 1] === line && !line.trim()) {
+      continue;
+    }
     target.push(line);
   }
 }
@@ -271,7 +295,11 @@ function visitDiffContent(entry: Record<string, unknown>, parsed: ParsedStructur
   parsed.diffs.push({ path, oldText, newText });
   parsed.suppressedLines.add(`[diff: ${path}]`);
   for (const text of [oldText, newText]) {
-    if (text) for (const line of text.split('\n')) parsed.suppressedLines.add(line.trim());
+    if (text) {
+      for (const line of text.split('\n')) {
+        parsed.suppressedLines.add(line.trim());
+      }
+    }
   }
 }
 
@@ -283,7 +311,9 @@ function visitTerminalContent(
   const output = collectText([entry.output, entry.content]);
   parsed.terminals.push({ terminalId, output });
   parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
-  for (const line of output.split('\n')) parsed.suppressedLines.add(line.trim());
+  for (const line of output.split('\n')) {
+    parsed.suppressedLines.add(line.trim());
+  }
 }
 
 function visitImageContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
@@ -305,7 +335,9 @@ function visitNestedStructuredContent(
   depth: number,
 ): void {
   for (const nested of Object.values(entry)) {
-    if (nested && typeof nested === 'object') visitStructuredContent(nested, parsed, depth + 1);
+    if (nested && typeof nested === 'object') {
+      visitStructuredContent(nested, parsed, depth + 1);
+    }
   }
 }
 
@@ -327,13 +359,19 @@ function visitStructuredContent(
   parsed: ParsedStructuredContent,
   depth: number,
 ): void {
-  if (depth > 4 || value == null) return;
+  if (depth > 4 || value == null) {
+    return;
+  }
   if (Array.isArray(value)) {
-    for (const entry of value) visitStructuredContent(entry, parsed, depth + 1);
+    for (const entry of value) {
+      visitStructuredContent(entry, parsed, depth + 1);
+    }
     return;
   }
   const entry = asRecord(value);
-  if (!entry) return;
+  if (!entry) {
+    return;
+  }
   const type = normalizedType(entry.type);
   const visitor = lookupDispatchEntry(STRUCTURED_CONTENT_VISITORS, type);
   if (visitor) {
@@ -344,11 +382,15 @@ function visitStructuredContent(
 }
 
 function parseLocations(value: unknown): ToolInvocationLocation[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
   return value.flatMap((entry) => {
     const location = asRecord(entry);
     const path = asString(location?.path);
-    if (!path) return [];
+    if (!path) {
+      return [];
+    }
     const line = location?.line;
     return [{ path, ...(typeof line === 'number' ? { line } : {}) }];
   });
@@ -357,25 +399,39 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
 function collectText(values: unknown[]): string {
   const lines: string[] = [];
   const visit = (value: unknown, depth: number) => {
-    if (depth > 4 || value == null) return;
+    if (depth > 4 || value == null) {
+      return;
+    }
     if (typeof value === 'string') {
-      if (value) lines.push(value);
+      if (value) {
+        lines.push(value);
+      }
       return;
     }
     if (Array.isArray(value)) {
-      for (const entry of value) visit(entry, depth + 1);
+      for (const entry of value) {
+        visit(entry, depth + 1);
+      }
       return;
     }
     const entry = asRecord(value);
-    if (!entry) return;
-    if (normalizedType(entry.type) === 'text') {
-      const text = asString(entry.text);
-      if (text) lines.push(text);
+    if (!entry) {
       return;
     }
-    for (const nested of Object.values(entry)) visit(nested, depth + 1);
+    if (normalizedType(entry.type) === 'text') {
+      const text = asString(entry.text);
+      if (text) {
+        lines.push(text);
+      }
+      return;
+    }
+    for (const nested of Object.values(entry)) {
+      visit(nested, depth + 1);
+    }
   };
-  for (const value of values) visit(value, 0);
+  for (const value of values) {
+    visit(value, 0);
+  }
   return lines.join('\n');
 }
 

@@ -152,7 +152,9 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
 
   const dismissUserInputRequest = useCallback(
     async (action: 'decline' | 'cancel') => {
-      if (!pendingUserInputRequest || resolvingUserInput) return;
+      if (!pendingUserInputRequest || resolvingUserInput) {
+        return;
+      }
       setResolvingUserInput(true);
       try {
         await approvalController.dismissUserInput(pendingUserInputRequest, action);

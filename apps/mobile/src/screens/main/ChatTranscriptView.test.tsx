@@ -100,13 +100,17 @@ function render(overrides: Partial<ChatTranscriptViewProps> = {}): QueryableRend
       </AppThemeProvider>,
     );
   });
-  if (!tree) throw new Error('Expected transcript tree');
+  if (!tree) {
+    throw new Error('Expected transcript tree');
+  }
   return tree as QueryableRenderer;
 }
 
 function findText(root: Queryable, value: string): Queryable {
   const match = root.findAll((node) => node.children.includes(value))[0];
-  if (!match) throw new Error(`Missing text: ${value}`);
+  if (!match) {
+    throw new Error(`Missing text: ${value}`);
+  }
   return match;
 }
 
@@ -895,7 +899,9 @@ describe('ChatTranscriptView continuation', () => {
     const list = getList(tree);
     const messageItem = list.props.data.find((item) => item.kind === 'message');
     const toolItem = list.props.data.find((item) => item.kind === 'toolInvocation');
-    if (!messageItem || !toolItem) throw new Error('Expected message and tool items');
+    if (!messageItem || !toolItem) {
+      throw new Error('Expected message and tool items');
+    }
     expect(list.props.keyExtractor(messageItem)).toBe(messageItem.renderKey);
     expect(list.props.keyExtractor(toolItem)).toBe(toolItem.id);
 
@@ -920,7 +926,9 @@ describe('ChatTranscriptView continuation', () => {
         </AppThemeProvider>,
       );
     });
-    if (!toolTree) throw new Error('Expected rendered tool item');
+    if (!toolTree) {
+      throw new Error('Expected rendered tool item');
+    }
     expect(options).toHaveLength(2);
     expect(options[0].props.style({ pressed: false })[1]).toBe(false);
     expect(options[0].props.style({ pressed: true })[1]).toBeTruthy();
@@ -982,7 +990,9 @@ describe('ChatTranscriptView continuation', () => {
     ];
     const tree = render({ chat: makeChat({ messages }) });
     const groupItem = getList(tree).props.data.find((item) => item.kind === 'toolGroup');
-    if (!groupItem) throw new Error('Expected a computer-use tool group');
+    if (!groupItem) {
+      throw new Error('Expected a computer-use tool group');
+    }
 
     let groupTree: ReactTestRenderer | undefined;
     act(() => {

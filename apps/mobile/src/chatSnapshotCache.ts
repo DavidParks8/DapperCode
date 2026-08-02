@@ -217,8 +217,12 @@ function enqueueCacheOperation(path: string, operation: () => Promise<void>): Pr
 
 function boundChatSnapshotCache(cache: ChatSnapshotCache): ChatSnapshotCache {
   const ordered = [...cache.entries].sort((left, right) => {
-    if (left.chat.id === cache.selectedChatId) return -1;
-    if (right.chat.id === cache.selectedChatId) return 1;
+    if (left.chat.id === cache.selectedChatId) {
+      return -1;
+    }
+    if (right.chat.id === cache.selectedChatId) {
+      return 1;
+    }
     return right.lastAccessedAt.localeCompare(left.lastAccessedAt);
   });
   const entries: ChatSnapshotCacheEntry[] = [];
@@ -283,9 +287,13 @@ function normalizeCacheEntry(value: unknown): ChatSnapshotCacheEntry | null {
 }
 
 function migrateLegacyChat(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value;
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
   const chat = value as Record<string, unknown>;
-  if (!Array.isArray(chat.messages)) return value;
+  if (!Array.isArray(chat.messages)) {
+    return value;
+  }
   return {
     ...chat,
     messages: chat.messages.map((message) =>
@@ -361,11 +369,19 @@ function migrateLegacyMessage(value: Record<string, unknown>): unknown {
 }
 
 function isChatMessagePart(value: unknown): value is ChatMessagePart {
-  if (!value || typeof value !== 'object') return false;
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
   const part = value as Record<string, unknown>;
-  if (part.type === 'text') return typeof part.text === 'string';
-  if (part.type === 'image' || part.type === 'audio') return true;
-  if (part.type === 'resourceLink') return typeof part.uri === 'string';
+  if (part.type === 'text') {
+    return typeof part.text === 'string';
+  }
+  if (part.type === 'image' || part.type === 'audio') {
+    return true;
+  }
+  if (part.type === 'resourceLink') {
+    return typeof part.uri === 'string';
+  }
   return (
     part.type === 'resource' &&
     typeof part.resource === 'object' &&

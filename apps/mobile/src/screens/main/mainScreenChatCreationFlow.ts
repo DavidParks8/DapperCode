@@ -97,7 +97,9 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   const createChat = useCallback(async () => {
     const draftSnapshot = draftController.snapshot();
     const content = draftSnapshot.value.trim();
-    if (!content) return;
+    if (!content) {
+      return;
+    }
 
     if (await handleSlashCommand(content)) {
       setDraft('');

@@ -215,20 +215,26 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   );
 
   const openTitleEditor = useCallback(() => {
-    if (!selectedChat) return;
+    if (!selectedChat) {
+      return;
+    }
     setTitleDraft(selectedChat.title);
     setTitleModalVisible(true);
     setError(null);
   }, [selectedChat, setError, setTitleDraft, setTitleModalVisible]);
 
   const closeTitleEditor = useCallback(() => {
-    if (!titleSaving) setTitleModalVisible(false);
+    if (!titleSaving) {
+      setTitleModalVisible(false);
+    }
   }, [setTitleModalVisible, titleSaving]);
 
   const saveTitle = useCallback(async () => {
     const chat = selectedChatRef.current;
     const title = titleDraft.trim();
-    if (!chat || !title || titleSaving) return;
+    if (!chat || !title || titleSaving) {
+      return;
+    }
     try {
       setTitleSaving(true);
       const updated = await api.renameChat(chat.id, title);

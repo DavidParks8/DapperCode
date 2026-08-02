@@ -79,7 +79,9 @@ export function mapRawStatus(status: unknown, turns: RawTurn[] | undefined): Cha
   const lastTurnStatus = normalizeLifecycleStatus(readString(lastTurn?.status));
   const isIdleLikeStatus = statusType === 'idle' || statusType === 'notloaded';
   const turnStatus = mapLastTurnStatus(lastTurnStatus, hasTurns, isIdleLikeStatus);
-  if (turnStatus) return turnStatus;
+  if (turnStatus) {
+    return turnStatus;
+  }
   return mapThreadLifecycleStatus(statusType, hasTurns, isIdleLikeStatus);
 }
 
@@ -89,9 +91,12 @@ function mapLastTurnStatus(
   isIdleLikeStatus: boolean,
 ): ChatStatus | null {
   const knownStatus = status ?? '';
-  if (RUNNING_STATUSES.has(knownStatus))
+  if (RUNNING_STATUSES.has(knownStatus)) {
     return isIdleLikeStatus ? (hasTurns ? 'complete' : 'idle') : 'running';
-  if (ERROR_STATUSES.has(knownStatus)) return 'error';
+  }
+  if (ERROR_STATUSES.has(knownStatus)) {
+    return 'error';
+  }
   return COMPLETED_STATUSES.has(knownStatus) ? 'complete' : null;
 }
 
@@ -146,7 +151,9 @@ function readTurnErrorMessage(turn: RawTurn): string | null {
     turn.stderr,
   ]) {
     const message = readErrorMessage(value);
-    if (message) return message;
+    if (message) {
+      return message;
+    }
   }
   return null;
 }
@@ -178,7 +185,9 @@ export function toRawThread(value: unknown): RawThread {
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     const text = readString(value);
-    if (text) return text;
+    if (text) {
+      return text;
+    }
   }
   return undefined;
 }

@@ -62,7 +62,9 @@ function isLikelyPrivateHost(hostname: string): boolean {
   if (!host) {
     return false;
   }
-  if (isLocalHost(host)) return true;
+  if (isLocalHost(host)) {
+    return true;
+  }
   return host.includes(':') ? isPrivateIpv6(host) : isPrivateIpv4(host);
 }
 
@@ -80,7 +82,9 @@ function isPrivateIpv6(host: string): boolean {
 
 function isPrivateIpv4(host: string): boolean {
   const octets = host.split('.');
-  if (octets.length !== 4 || !octets.every(isValidIpv4Octet)) return false;
+  if (octets.length !== 4 || !octets.every(isValidIpv4Octet)) {
+    return false;
+  }
   return isPrivateIpv4Prefix(octets.map(Number));
 }
 

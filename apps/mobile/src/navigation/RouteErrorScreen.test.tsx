@@ -25,7 +25,9 @@ describe('RouteErrorScreen', () => {
         </AppThemeProvider>,
       );
     });
-    if (!tree) throw new Error('Expected route error screen');
+    if (!tree) {
+      throw new Error('Expected route error screen');
+    }
     const button = (tree.root as Queryable).findAll(
       (node) => node.props.accessibilityRole === 'button',
     )[0];
@@ -44,7 +46,9 @@ describe('RouteErrorScreen', () => {
         </AppThemeProvider>,
       );
     });
-    if (!tree) throw new Error('Expected route error screen');
+    if (!tree) {
+      throw new Error('Expected route error screen');
+    }
     const texts = (tree.root as Queryable).findAll((node) => node.type === Text);
     const [titleText, messageText, actionText] = texts;
 

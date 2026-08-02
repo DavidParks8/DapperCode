@@ -164,7 +164,9 @@ export function useMainScreenSelectedRuntimeSelectors(
 
     const load = async () => {
       const snapshots = await persistenceController.loadPlanSnapshots();
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
       // A live plan event (including an explicit clear when a turn settles or
       // starts anew) may already have reached a thread's runtime snapshot
       // while this persisted load was in flight; that live state is newer and
@@ -179,7 +181,9 @@ export function useMainScreenSelectedRuntimeSelectors(
       for (const [threadId, plan] of Object.entries(mergedSnapshots)) {
         upsertThreadRuntimeSnapshot(threadId, () => ({ plan }));
       }
-      if (chatIdRef.current) applyThreadRuntimeSnapshot(chatIdRef.current);
+      if (chatIdRef.current) {
+        applyThreadRuntimeSnapshot(chatIdRef.current);
+      }
       setChatPlanSnapshotsLoaded(true);
     };
 
@@ -202,7 +206,9 @@ export function useMainScreenSelectedRuntimeSelectors(
 
     const load = async () => {
       const persisted = await persistenceController.loadBridgeUiSurfaces();
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
       const nextSnapshots = { ...persisted };
       for (const [threadId, surfaces] of Object.entries(bridgeUiSurfaceSnapshotsRef.current)) {
         nextSnapshots[threadId] = surfaces.reduce(

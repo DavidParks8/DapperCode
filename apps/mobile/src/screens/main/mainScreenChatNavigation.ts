@@ -81,10 +81,14 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
 
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
-    if (!chat || transcriptContinuationState.loading) return;
+    if (!chat || transcriptContinuationState.loading) {
+      return;
+    }
     setTranscriptContinuationState((previous) => ({ ...previous, loading: true, error: null }));
     const result = await transcriptContinuationController.loadEarlier(chat);
-    if (selectedChatIdRef.current !== chat.id) return;
+    if (selectedChatIdRef.current !== chat.id) {
+      return;
+    }
     if (result.kind === 'stale') {
       setTranscriptContinuationState(result.state);
       void loadChat(chat.id, { preserveRuntimeState: true });

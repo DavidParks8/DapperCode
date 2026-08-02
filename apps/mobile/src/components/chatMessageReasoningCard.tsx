@@ -145,7 +145,9 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
   const showDetails = expanded && canToggle;
 
   const onPreviewTextLayout = (event: NativeSyntheticEvent<TextLayoutEventData>) => {
-    if (preview === null) return;
+    if (preview === null) {
+      return;
+    }
     const clippedNow = event.nativeEvent.lines.length > REASONING_PREVIEW_LINES;
     setMeasurement((previous) =>
       previous?.text === preview && previous.clipped === clippedNow

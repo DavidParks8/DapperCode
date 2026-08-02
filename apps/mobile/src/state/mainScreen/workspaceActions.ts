@@ -20,6 +20,11 @@ import { activeBridgeProfileAtom, apiClientAtom } from '../bridge/atoms';
 import { routes } from '../../navigation/routes';
 import { getWorkspaceRouteIds, returnToChat } from './workspaceRouteNavigation';
 import {
+  shouldUseFreshResource,
+  type WorkspaceResourceRevalidationOptions,
+} from './workspaceResourceRevalidation';
+export { WORKSPACE_RESOURCES_TTL_MS } from './workspaceResourceRevalidation';
+import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
   gitCheckoutDirectoryNameEditedAtom,
@@ -67,25 +72,6 @@ const favoritesRequestsByPersistence = new WeakMap<
   Promise<void>
 >();
 
-export const WORKSPACE_RESOURCES_TTL_MS = 30_000;
-
-export interface WorkspaceResourceRevalidationOptions {
-  force?: boolean;
-  now?: number;
-  ttlMs?: number;
-}
-
-function shouldUseFreshResource(
-  fetchedAt: number | null,
-  {
-    force = false,
-    now = Date.now(),
-    ttlMs = WORKSPACE_RESOURCES_TTL_MS,
-  }: WorkspaceResourceRevalidationOptions,
-): boolean {
-  return !force && fetchedAt !== null && now - fetchedAt < ttlMs;
-}
-
 function getFavoritesPersistence(profileId: string): MainScreenPersistenceController {
   let persistence = favoritesPersistenceByProfile.get(profileId);
   if (!persistence) {
@@ -99,13 +85,19 @@ export const loadWorkspaceFavoritesAtom = atom(
   null,
   async (get, set, options: WorkspaceResourceRevalidationOptions = {}): Promise<void> => {
     const profileId = get(activeBridgeProfileAtom)?.id;
-    if (!profileId) return;
+    if (!profileId) {
+      return;
+    }
     const current = get(workspaceFavoritesResourceAtom);
-    if (shouldUseFreshResource(current.fetchedAt, options)) return;
+    if (shouldUseFreshResource(current.fetchedAt, options)) {
+      return;
+    }
 
     const persistence = getFavoritesPersistence(profileId);
     const existing = favoritesRequestsByPersistence.get(persistence);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
 
     const requestId = current.requestId + 1;
     set(workspaceFavoritesByProfileAtom, (resources) => ({
@@ -116,7 +108,9 @@ export const loadWorkspaceFavoritesAtom = atom(
       .loadWorkspaceFavorites()
       .then((paths) => {
         const latest = get(workspaceFavoritesByProfileAtom)[profileId];
-        if (!latest || latest.requestId !== requestId) return;
+        if (!latest || latest.requestId !== requestId) {
+          return;
+        }
         set(workspaceFavoritesByProfileAtom, (resources) => ({
           ...resources,
           [profileId]: {
@@ -130,7 +124,9 @@ export const loadWorkspaceFavoritesAtom = atom(
       })
       .catch((error: Error) => {
         const latest = get(workspaceFavoritesByProfileAtom)[profileId];
-        if (!latest || latest.requestId !== requestId) return;
+        if (!latest || latest.requestId !== requestId) {
+          return;
+        }
         set(workspaceFavoritesByProfileAtom, (resources) => ({
           ...resources,
           [profileId]: { ...latest, error: error.message, refreshing: false },
@@ -155,7 +151,9 @@ export const toggleWorkspaceFavoriteAtom = atom(
     }
 
     const profileId = get(activeBridgeProfileAtom)?.id;
-    if (!profileId) return;
+    if (!profileId) {
+      return;
+    }
     const current = get(workspaceFavoritesResourceAtom);
     const next = current.data.includes(normalizedPath)
       ? current.data.filter((entry) => entry !== normalizedPath)
@@ -194,7 +192,9 @@ export const refreshWorkspaceRootsAtom = atom(
     options: WorkspaceResourceRevalidationOptions = {},
   ): Promise<WorkspaceRootsResult | null> => {
     const identity = get(activeWorkspaceIdentityAtom);
-    if (!identity) return null;
+    if (!identity) {
+      return null;
+    }
     const { profileId, identityKey, client: api } = identity;
 
     // `workspaceRootsResourceAtom` already returns the empty resource when the cached entry's
@@ -209,7 +209,9 @@ export const refreshWorkspaceRootsAtom = atom(
     // Keyed by identity (not just profile ID) so an in-flight request from a bridge/token that
     // was edited out from under it is never mistaken for the same-identity single-flight request.
     const existing = requestsForApi.get(identityKey);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
 
     const requestId = current.requestId + 1;
     set(workspaceRootsByProfileAtom, (resources) => ({
@@ -284,7 +286,9 @@ function sharedBrowseRequest(
     browseRequestsByApi.set(api, requests);
   }
   const existing = requests.get(key);
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
   const request = fetcher().finally(() => {
     if (requests?.get(key) === request) {
       requests.delete(key);

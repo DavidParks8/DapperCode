@@ -37,7 +37,9 @@ function resolveWorkspacePickerFooterInfo(
 function createToggleFavoriteHandler(
   onToggleFavorite: WorkspacePickerProps['onToggleFavorite'],
 ): ((path: string | null) => void) | undefined {
-  if (!onToggleFavorite) return undefined;
+  if (!onToggleFavorite) {
+    return undefined;
+  }
   return (path: string | null) => {
     void feedback.selection();
     onToggleFavorite(path);
@@ -48,7 +50,9 @@ function createActionPressHandler(
   onActionPress: WorkspacePickerProps['onActionPress'],
   footerPath: string | null,
 ): (() => void) | undefined {
-  if (!onActionPress) return undefined;
+  if (!onActionPress) {
+    return undefined;
+  }
   return () => {
     void feedback.selection();
     onActionPress(footerPath);
@@ -134,15 +138,21 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
 
   useEffect(() => {
-    if (pendingSelectionPath !== null) return;
+    if (pendingSelectionPath !== null) {
+      return;
+    }
     const fallbackPath = selectedPath ?? currentPath ?? bridgeRoot;
-    if (fallbackPath) setPendingSelectionPath(fallbackPath);
+    if (fallbackPath) {
+      setPendingSelectionPath(fallbackPath);
+    }
   }, [bridgeRoot, currentPath, pendingSelectionPath, selectedPath]);
 
   useEffect(() => {
     const previousSelectedPath = previousSelectedPathRef.current;
     previousSelectedPathRef.current = selectedPath;
-    if (previousSelectedPath === selectedPath) return;
+    if (previousSelectedPath === selectedPath) {
+      return;
+    }
     setPendingSelectionPath((current) =>
       current !== previousSelectedPath
         ? current

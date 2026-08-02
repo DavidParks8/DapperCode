@@ -44,7 +44,9 @@ export function assessChatSync(
 }
 
 export function getChatSyncInterval(appActive: boolean, turnActive: boolean): number {
-  if (!appActive) return BACKGROUND_CHAT_SYNC_INTERVAL_MS;
+  if (!appActive) {
+    return BACKGROUND_CHAT_SYNC_INTERVAL_MS;
+  }
   return turnActive ? ACTIVE_CHAT_SYNC_INTERVAL_MS : IDLE_CHAT_SYNC_INTERVAL_MS;
 }
 
@@ -99,15 +101,21 @@ export function useChatSynchronization({
   };
 
   useEffect(() => {
-    if (!threadId) return;
+    if (!threadId) {
+      return;
+    }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const sync = async () => {
-      if (paused) return;
+      if (paused) {
+        return;
+      }
       try {
         const latest = await controller.poll(threadId);
-        if (stopped) return;
+        if (stopped) {
+          return;
+        }
         const callbacks = callbacksRef.current;
         callbacks.onSnapshot(
           latest,
@@ -119,7 +127,9 @@ export function useChatSynchronization({
     };
 
     const schedule = () => {
-      if (stopped) return;
+      if (stopped) {
+        return;
+      }
       const callbacks = callbacksRef.current;
       timer = setTimeout(
         () => {
@@ -133,7 +143,9 @@ export function useChatSynchronization({
     schedule();
     return () => {
       stopped = true;
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+      }
     };
   }, [controller, paused, threadId]);
 }

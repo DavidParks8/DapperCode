@@ -69,7 +69,9 @@ export function projectTranscript({
  * output, so a message that only carries tool activity is not empty.
  */
 function carriesToolActivity(message: ChatMessage): boolean {
-  if (message.toolMeta) return true;
+  if (message.toolMeta) {
+    return true;
+  }
   return message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0;
 }
 
@@ -369,9 +371,13 @@ function replacePersistedLiveMessage(
 
 function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((message, index) => {
-    if (!isTransientUserMessage(message)) return true;
+    if (!isTransientUserMessage(message)) {
+      return true;
+    }
     const content = normalizeChatMessageMatchContent(getMessageText(message));
-    if (!content) return true;
+    if (!content) {
+      return true;
+    }
     return ![messages[index - 1], messages[index + 1]].some(
       (neighbor) =>
         neighbor?.role === 'user' &&

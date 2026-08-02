@@ -63,19 +63,29 @@ export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata 
 }
 
 function readSubAgentSourceMetadata(subAgent: unknown): ThreadSourceMetadata {
-  if (typeof subAgent === 'string') return { kind: subAgentKind(subAgent) };
+  if (typeof subAgent === 'string') {
+    return { kind: subAgentKind(subAgent) };
+  }
   const subAgentRecord = toRecord(subAgent);
-  if (!subAgentRecord) return { kind: 'subAgent' };
+  if (!subAgentRecord) {
+    return { kind: 'subAgent' };
+  }
   const threadSpawn = toRecord(subAgentRecord.thread_spawn);
-  if (threadSpawn) return withSourceFields('subAgentThreadSpawn', threadSpawn);
+  if (threadSpawn) {
+    return withSourceFields('subAgentThreadSpawn', threadSpawn);
+  }
   return readString(subAgentRecord.other)
     ? { kind: 'subAgentOther' }
     : withSourceFields('subAgent', subAgentRecord);
 }
 
 function subAgentKind(subAgent: string): string {
-  if (subAgent === 'review') return 'subAgentReview';
-  if (subAgent === 'compact') return 'subAgentCompact';
+  if (subAgent === 'review') {
+    return 'subAgentReview';
+  }
+  if (subAgent === 'compact') {
+    return 'subAgentCompact';
+  }
   return subAgent === 'memory_consolidation' ? 'subAgentOther' : 'subAgent';
 }
 

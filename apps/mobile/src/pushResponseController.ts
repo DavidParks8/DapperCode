@@ -38,15 +38,21 @@ export class PushResponseController {
     if (profile) {
       const pending = [...this.pending.values()];
       this.pending.clear();
-      for (const event of pending) this.handle(event);
+      for (const event of pending) {
+        this.handle(event);
+      }
     }
   }
 
   handle(event: PushResponseEvent): boolean {
-    if (this.handled.has(event.actionId)) return false;
+    if (this.handled.has(event.actionId)) {
+      return false;
+    }
     const profile = this.profile;
     if (!profile) {
-      if (this.pending.size < this.maxHandled) this.pending.set(event.actionId, event);
+      if (this.pending.size < this.maxHandled) {
+        this.pending.set(event.actionId, event);
+      }
       return false;
     }
     if (
@@ -71,7 +77,9 @@ export class PushResponseController {
     this.handledOrder.push(actionId);
     while (this.handledOrder.length > this.maxHandled) {
       const oldest = this.handledOrder.shift();
-      if (oldest) this.handled.delete(oldest);
+      if (oldest) {
+        this.handled.delete(oldest);
+      }
     }
   }
 

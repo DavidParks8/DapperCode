@@ -132,10 +132,14 @@ async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
       args.targetChatId,
       args.optimisticState.optimisticQueuedMessage?.id,
     );
-    if (args.selectedChatIdRef.current === args.targetChatId) args.handleTurnFailure(err);
+    if (args.selectedChatIdRef.current === args.targetChatId) {
+      args.handleTurnFailure(err);
+    }
     return false;
   } finally {
-    if (args.selectedChatIdRef.current === args.targetChatId) args.setSending(false);
+    if (args.selectedChatIdRef.current === args.targetChatId) {
+      args.setSending(false);
+    }
   }
 }
 

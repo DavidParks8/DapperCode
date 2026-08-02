@@ -48,14 +48,18 @@ export function collectReplayRecoveryThreadIds(
   for (const source of sources) {
     for (const candidate of source) {
       const threadId = candidate?.trim();
-      if (threadId) ids.add(threadId);
+      if (threadId) {
+        ids.add(threadId);
+      }
     }
   }
   return [...ids];
 }
 
 function throwIfReplayRecoveryAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw replayRecoveryCancellationError(signal);
+  if (signal?.aborted) {
+    throw replayRecoveryCancellationError(signal);
+  }
 }
 
 function replayRecoveryCancellationError(signal: AbortSignal): Error {
@@ -66,7 +70,9 @@ async function awaitWithReplayRecoveryCancellation<T>(
   value: Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  if (!signal) return value;
+  if (!signal) {
+    return value;
+  }
   throwIfReplayRecoveryAborted(signal);
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(replayRecoveryCancellationError(signal));

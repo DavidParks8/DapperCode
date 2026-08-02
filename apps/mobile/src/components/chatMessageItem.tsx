@@ -102,26 +102,40 @@ function ChatMessageComponent({
  * path where `ChatMessage` re-renders on each streamed token.
  */
 function arePartsEqual(previous?: ChatMessagePart[], next?: ChatMessagePart[]): boolean {
-  if (previous === next) return true;
-  if (!previous || !next || previous.length !== next.length) return false;
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
   for (let index = 0; index < previous.length; index += 1) {
-    if (!isPartEqual(previous[index], next[index])) return false;
+    if (!isPartEqual(previous[index], next[index])) {
+      return false;
+    }
   }
   return true;
 }
 
 function isPartEqual(previous: ChatMessagePart, next: ChatMessagePart): boolean {
-  if (previous === next) return true;
-  if (previous.type !== next.type) return false;
+  if (previous === next) {
+    return true;
+  }
+  if (previous.type !== next.type) {
+    return false;
+  }
   const previousRecord = previous as unknown as Record<string, unknown>;
   const nextRecord = next as unknown as Record<string, unknown>;
   const previousKeys = Object.keys(previousRecord);
   const nextKeys = Object.keys(nextRecord);
-  if (previousKeys.length !== nextKeys.length) return false;
+  if (previousKeys.length !== nextKeys.length) {
+    return false;
+  }
   for (const key of previousKeys) {
     const previousValue = previousRecord[key];
     const nextValue = nextRecord[key];
-    if (previousValue === nextValue) continue;
+    if (previousValue === nextValue) {
+      continue;
+    }
     // `{ type: 'resource' }` parts nest an inner plain object; compare it shallowly too rather
     // than treating any object-valued field as an automatic mismatch.
     if (
@@ -151,7 +165,9 @@ function isShallowRecordEqual(
 ): boolean {
   const previousKeys = Object.keys(previous);
   const nextKeys = Object.keys(next);
-  if (previousKeys.length !== nextKeys.length) return false;
+  if (previousKeys.length !== nextKeys.length) {
+    return false;
+  }
   return previousKeys.every((key) => previous[key] === next[key]);
 }
 
@@ -162,7 +178,9 @@ export function areChatMessagePropsEqual(
 ): boolean {
   const previous = previousProps.message;
   const next = nextProps.message;
-  if (previous === next) return true;
+  if (previous === next) {
+    return true;
+  }
   return (
     previous.id === next.id &&
     previous.role === next.role &&

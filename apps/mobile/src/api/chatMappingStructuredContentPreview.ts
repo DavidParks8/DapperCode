@@ -58,7 +58,9 @@ export function stringifyStructuredContentEntry(entry: unknown): string[] {
     const text = readStructuredText(entryRecord);
     return text ? [text] : [];
   }
-  if (isStructuredImageType(entryType)) return stringifyStructuredImage(entryRecord);
+  if (isStructuredImageType(entryType)) {
+    return stringifyStructuredImage(entryRecord);
+  }
   if (entryType === 'mention') {
     const mentionPath = readStructuredMentionPath(entryRecord);
     return mentionPath ? [`[file: ${mentionPath}]`] : [];
@@ -76,7 +78,9 @@ function isStructuredImageType(type: string): boolean {
 
 function stringifyStructuredImage(entry: Record<string, unknown>): string[] {
   const localImagePath = readStructuredLocalImagePath(entry);
-  if (localImagePath) return [`[local image: ${localImagePath}]`];
+  if (localImagePath) {
+    return [`[local image: ${localImagePath}]`];
+  }
   const imageUrl = readStructuredImageUrl(entry);
   return imageUrl ? [`[image: ${imageUrl}]`] : [];
 }
@@ -127,7 +131,9 @@ function readStructuredImageUrlValue(
 function firstTrimmedString(values: unknown[]): string | null {
   for (const value of values) {
     const text = readString(value)?.trim();
-    if (text) return text;
+    if (text) {
+      return text;
+    }
   }
   return null;
 }

@@ -70,12 +70,16 @@ interface WebStorageLike {
 const webStorage: MainScreenStorage = {
   read: async (key) => {
     const value = getWebStorage()?.getItem(key);
-    if (value === null || value === undefined) throw new Error('missing');
+    if (value === null || value === undefined) {
+      throw new Error('missing');
+    }
     return value;
   },
   write: async (key, value) => {
     const storage = getWebStorage();
-    if (!storage) throw new Error('Browser storage is unavailable.');
+    if (!storage) {
+      throw new Error('Browser storage is unavailable.');
+    }
     storage.setItem(key, value);
   },
   exists: async (key) => getWebStorage()?.getItem(key) != null,
@@ -286,7 +290,9 @@ export class MainScreenPersistenceController {
   }
 
   private async migrate(collection: PersistedCollection): Promise<void> {
-    if (!this.migrateLegacy || this.migrated.has(collection)) return;
+    if (!this.migrateLegacy || this.migrated.has(collection)) {
+      return;
+    }
 
     const suffix = collection[0].toUpperCase() + collection.slice(1);
     await migrateLegacyPersistenceEntry({
@@ -314,7 +320,9 @@ export class MainScreenPersistenceController {
     }
 
     const path = this.paths[collection]();
-    if (!path) return fallback;
+    if (!path) {
+      return fallback;
+    }
     try {
       return parse(await this.storage.read(path));
     } catch {
@@ -334,10 +342,14 @@ export class MainScreenPersistenceController {
     this.writeChains.set(collection, write);
     void write.then(
       () => {
-        if (this.writeChains.get(collection) === write) this.writeChains.delete(collection);
+        if (this.writeChains.get(collection) === write) {
+          this.writeChains.delete(collection);
+        }
       },
       () => {
-        if (this.writeChains.get(collection) === write) this.writeChains.delete(collection);
+        if (this.writeChains.get(collection) === write) {
+          this.writeChains.delete(collection);
+        }
       },
     );
     return write;
@@ -351,7 +363,9 @@ export class MainScreenPersistenceController {
     try {
       await this.migrate(collection);
       const path = this.paths[collection]();
-      if (!path) throw new Error('Persistence path is unavailable.');
+      if (!path) {
+        throw new Error('Persistence path is unavailable.');
+      }
       await this.storage.write(path, JSON.stringify(value));
     } catch (cause) {
       if (!reliable) {
@@ -370,7 +384,9 @@ export class MainScreenPersistenceController {
 }
 
 function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  if (typeof globalThis !== 'object' || globalThis === null) {
+    return null;
+  }
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'

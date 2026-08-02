@@ -98,10 +98,18 @@ export function base64UrlUtf8(value: string): string {
 
 export function isChatMessagePart(value: unknown): value is ChatMessagePart {
   const part = toRecord(value);
-  if (!part || typeof part.type !== 'string') return false;
-  if (part.type === 'text') return typeof part.text === 'string';
-  if (part.type === 'image' || part.type === 'audio') return true;
-  if (part.type === 'resourceLink') return typeof part.uri === 'string';
+  if (!part || typeof part.type !== 'string') {
+    return false;
+  }
+  if (part.type === 'text') {
+    return typeof part.text === 'string';
+  }
+  if (part.type === 'image' || part.type === 'audio') {
+    return true;
+  }
+  if (part.type === 'resourceLink') {
+    return typeof part.uri === 'string';
+  }
   return part.type === 'resource' && toRecord(part.resource) !== null;
 }
 
@@ -194,11 +202,17 @@ function readPlanSteps(lines: string[]): TurnPlanStep[] {
 
 function readPlanExplanation(lines: string[]): string | null {
   let startIndex = lines.length > 1 && /plan$/i.test(lines[0]) ? 1 : 0;
-  if (lines[startIndex] && /^summary$/i.test(lines[startIndex])) startIndex += 1;
+  if (lines[startIndex] && /^summary$/i.test(lines[startIndex])) {
+    startIndex += 1;
+  }
   const explanationLines: string[] = [];
   for (const line of lines.slice(startIndex)) {
-    if (/^\d+[.)]\s+/.test(line)) break;
-    if (!/^(summary|implementation plan|proposed plan)$/i.test(line)) explanationLines.push(line);
+    if (/^\d+[.)]\s+/.test(line)) {
+      break;
+    }
+    if (!/^(summary|implementation plan|proposed plan)$/i.test(line)) {
+      explanationLines.push(line);
+    }
   }
   const explanation = explanationLines.join(' ').trim();
   return explanation || null;

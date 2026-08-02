@@ -74,7 +74,9 @@ function render(context: MainScreenPickerOptionBuildersContext) {
   act(() => {
     renderer.create(withAppStore(store, <Harness context={context} resultRef={resultRef} />));
   });
-  if (!resultRef.current) throw new Error('Hook did not render');
+  if (!resultRef.current) {
+    throw new Error('Hook did not render');
+  }
   return resultRef.current;
 }
 

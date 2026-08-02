@@ -134,7 +134,9 @@ function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
 function readSnapshotCollectionMetadata(value: unknown): RawSnapshotCollectionMetadata | undefined {
   const collection = toRecord(value);
   const revision = readCoercedFiniteNumber(collection?.revision);
-  if (!collection || revision === null) return undefined;
+  if (!collection || revision === null) {
+    return undefined;
+  }
   return {
     truncated: collection.truncated === true,
     omittedCount: readCoercedFiniteNumber(collection.omittedCount) ?? 0,

@@ -191,7 +191,9 @@ export type RunSendMessageTurnArgs = {
 
 export function prepareSendMessageRequest(args: PrepareSendMessageRequestArgs) {
   const content = args.rawContent.trim();
-  if (!args.selectedChatId || !content) return null;
+  if (!args.selectedChatId || !content) {
+    return null;
+  }
   return {
     content,
     targetChatId: args.selectedChatId,
@@ -238,12 +240,15 @@ export function createGoalSurfaceState(args: GoalSurfaceStateArgs) {
       ]
     : null;
   const syncSurfaces = (surfaces: BridgeUiSurface[]) => {
-    if (args.selectedChatIdRef.current === args.targetChatId)
+    if (args.selectedChatIdRef.current === args.targetChatId) {
       args.setActiveBridgeUiSurfaces(surfaces);
+    }
   };
   return {
     applyGoalSurface() {
-      if (!optimisticGoalSurface) return;
+      if (!optimisticGoalSurface) {
+        return;
+      }
       const nextSurfaces = [
         ...(previousBridgeUiSurfaces ?? []).filter(
           (entry) => entry.kind !== 'goal' && !entry.id.startsWith('goal-'),
@@ -254,7 +259,9 @@ export function createGoalSurfaceState(args: GoalSurfaceStateArgs) {
       syncSurfaces(nextSurfaces);
     },
     restoreGoalSurfaces() {
-      if (!previousBridgeUiSurfaces) return;
+      if (!previousBridgeUiSurfaces) {
+        return;
+      }
       args.replaceThreadBridgeUiSurfaces(args.targetChatId, previousBridgeUiSurfaces);
       syncSurfaces(previousBridgeUiSurfaces);
     },
@@ -306,7 +313,9 @@ export function createSentMessageState(args: SentMessageStateArgs) {
         : null;
   return {
     applySentMessage() {
-      if (!optimisticSentMessage) return;
+      if (!optimisticSentMessage) {
+        return;
+      }
       args.queueOptimisticUserMessage(args.targetChatId, optimisticSentMessage);
       args.setSelectedChat((prev) => {
         const baseChat =
@@ -315,7 +324,9 @@ export function createSentMessageState(args: SentMessageStateArgs) {
             : prev?.id === args.targetChatId
               ? prev
               : prev;
-        if (!baseChat) return prev;
+        if (!baseChat) {
+          return prev;
+        }
         const nowIso = new Date().toISOString();
         const updated: Chat = {
           ...baseChat,
@@ -334,14 +345,20 @@ export function createSentMessageState(args: SentMessageStateArgs) {
       args.scrollToBottomReliable(true);
     },
     clearSentMessage() {
-      if (!optimisticSentMessage) return;
+      if (!optimisticSentMessage) {
+        return;
+      }
       args.discardOptimisticUserMessage(args.targetChatId, optimisticSentMessage.id);
       args.setSelectedChat((prev) => {
-        if (!prev || prev.id !== args.targetChatId) return prev;
+        if (!prev || prev.id !== args.targetChatId) {
+          return prev;
+        }
         const nextMessages = prev.messages.filter(
           (message) => message.id !== optimisticSentMessage.id,
         );
-        if (nextMessages.length === prev.messages.length) return prev;
+        if (nextMessages.length === prev.messages.length) {
+          return prev;
+        }
         const fallbackPreview =
           normalizeChatMessageMatchContent(
             nextMessages.length > 0 ? getMessageText(nextMessages[nextMessages.length - 1]) : '',
@@ -420,7 +437,9 @@ export function applyStartedTurnResult(args: StartedTurnResultArgs) {
     args.stopRequestedRef.current = false;
   }
   if (!args.shouldPreservePlan) {
-    if (isStillSelected) args.setActivePlan(null);
+    if (isStillSelected) {
+      args.setActivePlan(null);
+    }
     args.cacheThreadPlan(args.targetChatId, null);
   }
   if (isStillSelected) {
@@ -437,8 +456,12 @@ export function applyStartedTurnResult(args: StartedTurnResultArgs) {
   const autoEnabledPlan =
     !args.suppressPlanModeAutoEnable &&
     shouldAutoEnablePlanModeFromChat(resolvedUpdated, args.supportsPlanMode);
-  if (autoEnabledPlan && isStillSelected) args.setSelectedCollaborationMode('plan');
-  if (!isStillSelected) return;
+  if (autoEnabledPlan && isStillSelected) {
+    args.setSelectedCollaborationMode('plan');
+  }
+  if (!isStillSelected) {
+    return;
+  }
   args.setSelectedChat(resolvedUpdated);
   applyResolvedChatActivity({
     chat: resolvedUpdated,
@@ -463,10 +486,13 @@ export const finalizeSuccessfulSubmission = (
   >,
   isStillSelectedForResult: boolean,
 ) => {
-  if (args.shouldClearComposer)
+  if (args.shouldClearComposer) {
     args.attachmentController.finishSubmission(isStillSelectedForResult);
+  }
   args.submissionController.succeed(args.submission);
-  if (isStillSelectedForResult) args.setError(null);
+  if (isStillSelectedForResult) {
+    args.setError(null);
+  }
 };
 export const restoreFailedSubmission = (
   args: Pick<
@@ -479,11 +505,15 @@ export const restoreFailedSubmission = (
     | 'setDraft'
   >,
 ) => {
-  if (!args.shouldClearComposer) return;
+  if (!args.shouldClearComposer) {
+    return;
+  }
   const shouldRestoreDraft = args.submissionController.fail(
     args.submission,
     args.draftController.snapshot(),
   );
   args.attachmentController.finishSubmission(false, shouldRestoreDraft);
-  if (shouldRestoreDraft) args.setDraft(args.submission.draft);
+  if (shouldRestoreDraft) {
+    args.setDraft(args.submission.draft);
+  }
 };

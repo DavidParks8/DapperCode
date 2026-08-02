@@ -85,9 +85,13 @@ export function useAttachmentUploadController({
           throw new Error('Unable to read attachment from this device');
         }
         const sizeBytes = knownSize ?? info.size;
-        if (sizeBytes <= 0) throw new Error('Attachment is empty');
+        if (sizeBytes <= 0) {
+          throw new Error('Attachment is empty');
+        }
         const sizeError = attachmentSizeError(sizeBytes);
-        if (sizeError) throw new Error(sizeError);
+        if (sizeError) {
+          throw new Error(sizeError);
+        }
         preparedId = `${kind}:${normalizedUri}`;
         const prepared: PreparedAttachment = {
           id: preparedId,
@@ -109,8 +113,11 @@ export function useAttachmentUploadController({
           threadId: chat?.id,
           kind,
         });
-        if (uploaded.kind === 'image') addImage(uploaded.path);
-        else addMention(uploaded.path);
+        if (uploaded.kind === 'image') {
+          addImage(uploaded.path);
+        } else {
+          addMention(uploaded.path);
+        }
         setPreparedAttachments((current) => current.filter((entry) => entry.id !== preparedId));
         setError(null);
       } catch (error) {
@@ -139,7 +146,9 @@ export function useAttachmentUploadController({
 
   const runPicker = useCallback(
     async (picker: () => Promise<void>) => {
-      if (pickerInProgressRef.current) return;
+      if (pickerInProgressRef.current) {
+        return;
+      }
       pickerInProgressRef.current = true;
       setPickerBusy(true);
       try {
@@ -254,9 +263,13 @@ export function useAttachmentUploadController({
 
 async function prepareImage(uri: string, width: number, height: number, knownSize?: number) {
   const sourceInfo = await FileSystem.getInfoAsync(uri);
-  if (!sourceInfo.exists || sourceInfo.isDirectory) throw new Error('Unable to read image');
+  if (!sourceInfo.exists || sourceInfo.isDirectory) {
+    throw new Error('Unable to read image');
+  }
   const sourceSizeError = attachmentSizeError(knownSize ?? sourceInfo.size);
-  if (sourceSizeError) throw new Error(sourceSizeError);
+  if (sourceSizeError) {
+    throw new Error(sourceSizeError);
+  }
   const longestSide = Math.max(width, height);
   const context = ImageManipulator.ImageManipulator.manipulate(uri);
   if (longestSide > IMAGE_MAX_DIMENSION) {
@@ -270,10 +283,13 @@ async function prepareImage(uri: string, width: number, height: number, knownSiz
     format: ImageManipulator.SaveFormat.JPEG,
   });
   const info = await FileSystem.getInfoAsync(result.uri);
-  if (!info.exists || info.isDirectory) throw new Error('Unable to prepare image');
+  if (!info.exists || info.isDirectory) {
+    throw new Error('Unable to prepare image');
+  }
   const sizeError = attachmentSizeError(info.size);
-  if (sizeError)
+  if (sizeError) {
     throw new Error(`Compressed image still exceeds the ${ATTACHMENT_MAX_LABEL} limit`);
+  }
   return result;
 }
 

@@ -199,7 +199,9 @@ function findPressableByText(root: Queryable, text: string): Queryable {
     while (current && typeof current.props.onPress !== 'function') {
       current = current.parent as Queryable | null;
     }
-    if (current) return current;
+    if (current) {
+      return current;
+    }
   }
   throw new Error(`Missing pressable: ${text}`);
 }
@@ -241,7 +243,9 @@ async function renderGit(
     await Promise.resolve();
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected GitScreen tree');
+  if (!tree) {
+    throw new Error('Expected GitScreen tree');
+  }
   return tree;
 }
 
@@ -270,7 +274,9 @@ describe('GitScreen behavior', () => {
   ])('renders repository state matrices', async ({ status, expected }) => {
     const tree = await renderGit(createApi(status));
     exercisePressableStyles(tree.root as Queryable);
-    for (const text of expected) expect(hasText(tree.root as Queryable, text)).toBe(true);
+    for (const text of expected) {
+      expect(hasText(tree.root as Queryable, text)).toBe(true);
+    }
     act(() => tree.unmount());
   });
 
@@ -348,7 +354,9 @@ describe('GitScreen behavior', () => {
     const workspace = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Git workspace path');
-    if (!workspace) throw new Error('Missing workspace input');
+    if (!workspace) {
+      throw new Error('Missing workspace input');
+    }
     act(() => {
       workspace.props.onChangeText('/next');
     });
@@ -391,19 +399,25 @@ describe('GitScreen behavior', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    if (!tree) throw new Error('Expected GitScreen tree');
+    if (!tree) {
+      throw new Error('Expected GitScreen tree');
+    }
     const root = tree.root as Queryable;
     const icon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = icon?.parent as Queryable | null;
     while (commentButton && typeof commentButton.props.onPress !== 'function') {
       commentButton = commentButton.parent as Queryable | null;
     }
-    if (!commentButton) throw new Error('Missing review comment action');
+    if (!commentButton) {
+      throw new Error('Missing review comment action');
+    }
     act(() => (commentButton.props.onPress as () => void)());
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Review comment');
-    if (!input) throw new Error('Missing review input');
+    if (!input) {
+      throw new Error('Missing review input');
+    }
     act(() => input.props.onChangeText('Please preserve this behavior.'));
     await press(root, 'Save comment');
     expect(hasText(root, 'Inline review')).toBe(true);
@@ -756,9 +770,12 @@ describe('GitScreen behavior', () => {
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function')
+    while (commentButton && typeof commentButton.props.onPress !== 'function') {
       commentButton = commentButton.parent as Queryable | null;
-    if (!commentButton) throw new Error('Missing review comment action');
+    }
+    if (!commentButton) {
+      throw new Error('Missing review comment action');
+    }
     await invoke(commentButton);
     exercisePressableStyles(root);
     await invoke(findByLabel(root, 'Close inline comment'));
@@ -791,9 +808,12 @@ describe('GitScreen behavior', () => {
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function')
+    while (commentButton && typeof commentButton.props.onPress !== 'function') {
       commentButton = commentButton.parent as Queryable | null;
-    if (!commentButton) throw new Error('Missing review comment action');
+    }
+    if (!commentButton) {
+      throw new Error('Missing review comment action');
+    }
     await invoke(commentButton);
     act(() => findByLabel(root, 'Review comment').props.onChangeText('Do not regress this.'));
     await press(root, 'Save comment');
@@ -858,7 +878,9 @@ describe('GitScreen behavior', () => {
       });
       const tree = await renderGit(api, { ...chat, title: '', cwd: undefined });
       exercisePressableStyles(tree.root as Queryable);
-      for (const text of expected) expect(hasText(tree.root as Queryable, text)).toBe(true);
+      for (const text of expected) {
+        expect(hasText(tree.root as Queryable, text)).toBe(true);
+      }
       expect(hasText(tree.root as Queryable, 'Untitled chat')).toBe(true);
       expect(hasText(tree.root as Queryable, 'Using bridge root workspace.')).toBe(true);
       act(() => tree.unmount());
@@ -958,7 +980,9 @@ describe('GitScreen behavior', () => {
     while (commentButton && typeof commentButton.props.onPress !== 'function') {
       commentButton = commentButton.parent as Queryable | null;
     }
-    if (!commentButton) throw new Error('Missing diff comment button');
+    if (!commentButton) {
+      throw new Error('Missing diff comment button');
+    }
     const { hitSlop } = commentButton.props;
     expect(hitSlop).toBeTruthy();
     if (typeof hitSlop === 'number') {
@@ -1046,14 +1070,19 @@ describe('GitScreen behavior', () => {
 
     const commentIcon = root.findAll((node) => node.children.includes('add-circle-outline'))[0];
     let commentButton = commentIcon?.parent as Queryable | null;
-    while (commentButton && typeof commentButton.props.onPress !== 'function')
+    while (commentButton && typeof commentButton.props.onPress !== 'function') {
       commentButton = commentButton.parent as Queryable | null;
-    if (!commentButton) throw new Error('Missing review comment action');
+    }
+    if (!commentButton) {
+      throw new Error('Missing review comment action');
+    }
     act(() => (commentButton.props.onPress as () => void)());
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Review comment');
-    if (!input) throw new Error('Missing review input');
+    if (!input) {
+      throw new Error('Missing review input');
+    }
     act(() => input.props.onChangeText('Test note'));
     jest.clearAllMocks();
     await press(root, 'Save comment');
@@ -1083,7 +1112,9 @@ describe('GitScreen behavior', () => {
 
 function findByLabel(root: Queryable, label: string): Queryable {
   const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-  if (!node) throw new Error(`Missing label: ${label}`);
+  if (!node) {
+    throw new Error(`Missing label: ${label}`);
+  }
   return node;
 }
 

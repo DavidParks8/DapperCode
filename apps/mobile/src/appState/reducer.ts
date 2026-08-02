@@ -29,9 +29,12 @@ type ProfileAction = Extract<AppStateAction, { type: `profiles/${string}` }>;
 type PushAction = Extract<AppStateAction, { type: `push/${string}` }>;
 
 export function appStateReducer(state: AppStateData, action: AppStateAction): AppStateData {
-  if (action.type.startsWith('profiles/'))
+  if (action.type.startsWith('profiles/')) {
     return reduceProfileAction(state, action as ProfileAction);
-  if (action.type.startsWith('push/')) return reducePushAction(state, action as PushAction);
+  }
+  if (action.type.startsWith('push/')) {
+    return reducePushAction(state, action as PushAction);
+  }
   switch (action.type) {
     case 'settings/update':
       return {
@@ -40,7 +43,9 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
       };
     case 'settings/remember-thread': {
       const agentId = normalizeNullableString(action.agentId);
-      if (!agentId) return state;
+      if (!agentId) {
+        return state;
+      }
       return {
         ...state,
         settings: {

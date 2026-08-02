@@ -257,14 +257,18 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             trackedThreadIds(),
             abortController.signal,
           );
-          if (generation !== replayRecoveryGenerationRef.current) return;
+          if (generation !== replayRecoveryGenerationRef.current) {
+            return;
+          }
           installReplayRecoverySnapshot(snapshot, installGuard);
           replayRecoveryEpochResetPendingRef.current = false;
           if (acknowledge && resumeAfterEventId !== null) {
             ws.acknowledgeSnapshotRecovery(resumeAfterEventId);
           }
         } catch (recoveryError) {
-          if (generation !== replayRecoveryGenerationRef.current) return;
+          if (generation !== replayRecoveryGenerationRef.current) {
+            return;
+          }
           if (recoveryError instanceof ReplayRecoveryProtocolError) {
             replayRecoveryGenerationRef.current += 1;
             replayRecoveryAbortControllerRef.current = null;

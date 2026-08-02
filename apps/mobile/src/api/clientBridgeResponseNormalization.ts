@@ -108,8 +108,12 @@ function trimmedValue(value: unknown): string {
 }
 
 function readPreviewPort(value: unknown): number {
-  if (typeof value === 'number') return Math.max(1, Math.trunc(value));
-  if (typeof value === 'string') return Math.max(1, Number.parseInt(value, 10) || 0);
+  if (typeof value === 'number') {
+    return Math.max(1, Math.trunc(value));
+  }
+  if (typeof value === 'string') {
+    return Math.max(1, Number.parseInt(value, 10) || 0);
+  }
   return 0;
 }
 

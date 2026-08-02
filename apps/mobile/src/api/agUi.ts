@@ -24,15 +24,21 @@ export interface AgUiEventEnvelope {
 export function parseAgUiEventNotification(
   notification: RpcNotification,
 ): AgUiEventEnvelope | null {
-  if (notification.method !== 'bridge/agui.event') return null;
+  if (notification.method !== 'bridge/agui.event') {
+    return null;
+  }
   const params = record(notification.params);
   const threadId = nonEmptyString(params?.threadId);
   const runId = nonEmptyString(params?.runId);
   const sourceTurnId = nonEmptyString(params?.sourceTurnId) ?? undefined;
   const parsedEvent = EventSchemas.safeParse(params?.event);
-  if (!threadId || !runId || !parsedEvent.success) return null;
+  if (!threadId || !runId || !parsedEvent.success) {
+    return null;
+  }
   const event = parsedEvent.data;
-  if (!SUPPORTED_AG_UI_EVENT_TYPES.has(event.type)) return null;
+  if (!SUPPORTED_AG_UI_EVENT_TYPES.has(event.type)) {
+    return null;
+  }
   if (
     (event.type === EventType.RUN_STARTED || event.type === EventType.RUN_FINISHED) &&
     (event.threadId !== threadId || event.runId !== runId)

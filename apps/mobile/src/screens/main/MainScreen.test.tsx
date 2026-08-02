@@ -296,7 +296,9 @@ function MainRouteShell() {
     };
     return new Proxy(methods, {
       get(target, property) {
-        if (typeof property !== 'string' || property === 'then') return undefined;
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
@@ -319,7 +321,9 @@ function MainRouteShell() {
   }
 
   async function emitWs(event: unknown): Promise<void> {
-    if (!wsEventHandler) throw new Error('Missing WS event handler');
+    if (!wsEventHandler) {
+      throw new Error('Missing WS event handler');
+    }
     await act(async () => {
       wsEventHandler?.(event);
       await Promise.resolve();
@@ -329,7 +333,9 @@ function MainRouteShell() {
 
   async function pressLabel(root: Queryable, label: string): Promise<void> {
     const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-    if (!node) throw new Error(`Missing label: ${label}`);
+    if (!node) {
+      throw new Error(`Missing label: ${label}`);
+    }
     await act(async () => {
       (node.props.onPress as () => void)();
       await Promise.resolve();
@@ -349,7 +355,9 @@ function MainRouteShell() {
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Message');
-    if (!input) throw new Error('Missing composer');
+    if (!input) {
+      throw new Error('Missing composer');
+    }
     return input;
   }
 
@@ -448,7 +456,9 @@ function MainRouteShell() {
       await Promise.resolve();
       await Promise.resolve();
     });
-    if (!tree) throw new Error('Expected MainScreen tree');
+    if (!tree) {
+      throw new Error('Expected MainScreen tree');
+    }
     return { tree, store, ref };
   }
 
@@ -676,12 +686,15 @@ function MainRouteShell() {
       const retries = root
         .findAllByType(TextInput)
         .find((node) => node.props.accessibilityLabel === 'Retries');
-      if (!retries) throw new Error('Missing retries input');
+      if (!retries) {
+        throw new Error('Missing retries input');
+      }
       act(() => retries.props.onChangeText('3'));
       const submitText = root.findAll((node) => node.children.includes('Submit answers'))[0];
       let submit = submitText as Queryable | null;
-      while (submit && typeof submit.props.onPress !== 'function')
+      while (submit && typeof submit.props.onPress !== 'function') {
         submit = submit.parent as Queryable | null;
+      }
       await act(async () => {
         (submit?.props.onPress as () => void)();
         await Promise.resolve();
@@ -742,7 +755,9 @@ function MainRouteShell() {
       const message = root
         .findAllByType(TextInput)
         .find((node) => node.props.accessibilityLabel === 'Message');
-      if (!message) throw new Error('Missing composer');
+      if (!message) {
+        throw new Error('Missing composer');
+      }
       act(() => message.props.onChangeText('Follow up'));
       await pressLabel(root, 'Send message');
       expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
@@ -1643,7 +1658,9 @@ function MainRouteShell() {
     };
     return new Proxy(methods, {
       get(target, property) {
-        if (typeof property !== 'string' || property === 'then') return undefined;
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
@@ -1697,7 +1714,9 @@ function MainRouteShell() {
       );
       await flush();
     });
-    if (!tree) throw new Error('Expected MainScreen renderer');
+    if (!tree) {
+      throw new Error('Expected MainScreen renderer');
+    }
     return { tree, api, store };
   }
 
@@ -1759,7 +1778,9 @@ function MainRouteShell() {
       );
       await flush();
     });
-    if (!tree) throw new Error('Expected app shell renderer');
+    if (!tree) {
+      throw new Error('Expected app shell renderer');
+    }
     return { tree, api, store };
   }
 
@@ -1775,7 +1796,9 @@ function MainRouteShell() {
 
   function byLabel(root: Queryable, label: string): Queryable {
     const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-    if (!node) throw new Error(`Missing accessibility label: ${label}`);
+    if (!node) {
+      throw new Error(`Missing accessibility label: ${label}`);
+    }
     return node;
   }
 
@@ -1783,7 +1806,9 @@ function MainRouteShell() {
     const node = root.findAll((candidate) =>
       String(candidate.props.accessibilityLabel ?? '').startsWith(prefix),
     )[0];
-    if (!node) throw new Error(`Missing accessibility label prefix: ${prefix}`);
+    if (!node) {
+      throw new Error(`Missing accessibility label prefix: ${prefix}`);
+    }
     return node;
   }
 
@@ -1791,7 +1816,9 @@ function MainRouteShell() {
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === label);
-    if (!input) throw new Error(`Missing input: ${label}`);
+    if (!input) {
+      throw new Error(`Missing input: ${label}`);
+    }
     return input;
   }
 
@@ -1801,12 +1828,16 @@ function MainRouteShell() {
 
   function pressForText(root: Queryable, text: string): Queryable {
     const textNode = root.findAll((node) => node.children.includes(text))[0];
-    if (!textNode) throw new Error(`Missing text: ${text}`);
+    if (!textNode) {
+      throw new Error(`Missing text: ${text}`);
+    }
     let pressable: Queryable | null = textNode;
     while (pressable && typeof pressable.props.onPress !== 'function') {
       pressable = pressable.parent;
     }
-    if (!pressable) throw new Error(`Missing pressable for text: ${text}`);
+    if (!pressable) {
+      throw new Error(`Missing pressable for text: ${text}`);
+    }
     return pressable;
   }
 
@@ -2944,7 +2975,9 @@ function MainRouteShell() {
     };
     return new Proxy(methods, {
       get(target, property) {
-        if (typeof property !== 'string' || property === 'then') return undefined;
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
@@ -3004,7 +3037,9 @@ function MainRouteShell() {
       await Promise.resolve();
       await Promise.resolve();
     });
-    if (!tree) throw new Error('MainScreen did not render');
+    if (!tree) {
+      throw new Error('MainScreen did not render');
+    }
     return { tree, api, ws };
   }
 
@@ -3104,7 +3139,9 @@ function MainRouteShell() {
           role: 'tool',
         }),
       ];
-      for (const event of events) await emit(event);
+      for (const event of events) {
+        await emit(event);
+      }
 
       expect(transcript(tree)).toEqual(
         expect.arrayContaining([
@@ -3174,7 +3211,9 @@ function MainRouteShell() {
         );
       };
       const messageProps = (node: Queryable) => {
-        if (!isChatMessageProps(node.props)) throw new Error('Invalid rendered ChatMessage props');
+        if (!isChatMessageProps(node.props)) {
+          throw new Error('Invalid rendered ChatMessage props');
+        }
         return node.props;
       };
       const renderedMessages = () => root.findAllByType(ChatMessage) as Queryable[];
@@ -3182,7 +3221,9 @@ function MainRouteShell() {
         const node = renderedMessages().find(
           (candidate) => messageProps(candidate).message.id === messageId,
         );
-        if (!node) throw new Error(`Missing rendered message: ${messageId}`);
+        if (!node) {
+          throw new Error(`Missing rendered message: ${messageId}`);
+        }
         return { node, props: messageProps(node) };
       };
       const subagentActivity = (status: 'running' | 'completed', latest: string) =>
@@ -3408,7 +3449,9 @@ function MainRouteShell() {
         ...event,
         params: { ...event.params, threadId: otherThreadId },
       }));
-      for (const event of [...currentEvents, ...offThreadEvents]) await emit(event);
+      for (const event of [...currentEvents, ...offThreadEvents]) {
+        await emit(event);
+      }
 
       expect(
         transcript(tree).some(({ message }) => message.content.includes('Detailed reasoning')),
@@ -3446,7 +3489,9 @@ function MainRouteShell() {
           params: { thread_id: threadId, thread_name: 'Snake case name' },
         },
       ];
-      for (const event of identityEvents) await emit(event);
+      for (const event of identityEvents) {
+        await emit(event);
+      }
       expect(hasText(tree.root as Queryable, 'Snake case name')).toBe(true);
 
       const validEvents = [
@@ -3499,7 +3544,9 @@ function MainRouteShell() {
           },
         },
       ];
-      for (const event of validEvents) await emit(event);
+      for (const event of validEvents) {
+        await emit(event);
+      }
       expect(mockApprovalProps?.approval).toEqual(
         expect.objectContaining({ requestId: 'approval-current' }),
       );
@@ -3555,8 +3602,9 @@ function MainRouteShell() {
             ],
           },
         },
-      ])
+      ]) {
         await emit(event);
+      }
       const malformed = [
         { method: 'thread/name/updated', params: null },
         { method: 'thread/status/changed', params: {} },
@@ -3589,8 +3637,9 @@ function MainRouteShell() {
         { method: 'bridge/approval.resolved', params: { id: 'approval-other' } },
         { method: 'bridge/approval.resolved', params: { id: 'approval-current' } },
         ...malformed,
-      ])
+      ]) {
         await emit(event);
+      }
       await unmount(tree);
     });
 
@@ -3608,7 +3657,9 @@ function MainRouteShell() {
         params: surface('surface-1', 'Updated workflow', 'workflowCard'),
       });
       const updated = mockBridgeUiProps.find((props) => props.surface.title === 'Updated workflow');
-      if (!updated) throw new Error('Updated bridge UI surface was not rendered');
+      if (!updated) {
+        throw new Error('Updated bridge UI surface was not rendered');
+      }
       await act(async () => updated.onAction(updated.surface, updated.surface.actions[0]));
       expect(api.resolveBridgeUiSurface).toHaveBeenCalledWith('surface-1', {
         threadId,
@@ -3621,7 +3672,9 @@ function MainRouteShell() {
         params: surface('surface-2', 'Dismissible banner'),
       });
       const dismissible = mockBridgeUiProps.find((props) => props.surface.id === 'surface-2');
-      if (!dismissible) throw new Error('Dismissible bridge UI surface was not rendered');
+      if (!dismissible) {
+        throw new Error('Dismissible bridge UI surface was not rendered');
+      }
       await act(async () => dismissible.onDismiss(dismissible.surface));
       expect(api.dismissBridgeUiSurface).toHaveBeenCalledWith('surface-2', threadId);
 
@@ -3643,7 +3696,9 @@ function MainRouteShell() {
 
       await emit({ method: 'bridge/events/snapshotRequired', params: { resumeAfterEventId: 41 } });
       await act(async () => {
-        for (let index = 0; index < 20; index += 1) await Promise.resolve();
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
       });
       expect(api.listApprovals).toHaveBeenCalled();
       expect(api.listPendingUserInputs).toHaveBeenCalled();
@@ -3802,7 +3857,9 @@ function MainRouteShell() {
     };
     return new Proxy(methods, {
       get(target, property) {
-        if (typeof property !== 'string' || property === 'then') return undefined;
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
@@ -3822,7 +3879,9 @@ function MainRouteShell() {
     const result = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Message');
-    if (!result) throw new Error('Message input not rendered');
+    if (!result) {
+      throw new Error('Message input not rendered');
+    }
     return result;
   }
 
@@ -3842,10 +3901,16 @@ function MainRouteShell() {
     const result = root.findAll(
       (node) => node.props.accessibilityLabel === label || node.children.includes(label),
     )[0];
-    if (!result) throw new Error(`Control not rendered: ${label}`);
+    if (!result) {
+      throw new Error(`Control not rendered: ${label}`);
+    }
     let target: Queryable | null = result;
-    while (target && typeof target.props.onPress !== 'function') target = target.parent;
-    if (!target) throw new Error(`Control is not pressable: ${label}`);
+    while (target && typeof target.props.onPress !== 'function') {
+      target = target.parent;
+    }
+    if (!target) {
+      throw new Error(`Control is not pressable: ${label}`);
+    }
     await act(async () => {
       (target?.props.onPress as () => void)();
       await Promise.resolve();
@@ -3924,7 +3989,9 @@ function MainRouteShell() {
       await Promise.resolve();
       await Promise.resolve();
     });
-    if (!tree) throw new Error('MainScreen did not render');
+    if (!tree) {
+      throw new Error('MainScreen did not render');
+    }
     return {
       api,
       ws: ws as unknown as Harness['ws'],
@@ -3932,7 +3999,9 @@ function MainRouteShell() {
       ref,
       store,
       async emit(event: unknown) {
-        if (!eventHandler) throw new Error('WS event handler not registered');
+        if (!eventHandler) {
+          throw new Error('WS event handler not registered');
+        }
         await act(async () => {
           eventHandler?.(event);
           await Promise.resolve();
@@ -4183,7 +4252,9 @@ function MainRouteShell() {
         0,
       );
       const onChangeText = input(root).props.onChangeText;
-      if (typeof onChangeText !== 'function') throw new Error('Message input cannot be edited');
+      if (typeof onChangeText !== 'function') {
+        throw new Error('Message input cannot be edited');
+      }
       act(() => onChangeText('Follow up after reasoning'));
       expect(input(root).props.value).toBe('Follow up after reasoning');
 
@@ -4701,7 +4772,9 @@ function MainRouteShell() {
       const harness = await renderMain({ api, chat: running });
       const root = harness.tree.root as Queryable;
       const chatInput = root.findAll((node) => typeof node.props.onStop === 'function')[0];
-      if (!chatInput) throw new Error('Running ChatInput not rendered');
+      if (!chatInput) {
+        throw new Error('Running ChatInput not rendered');
+      }
       await act(async () => {
         (chatInput.props.onStop as () => void)();
         await Promise.resolve();
@@ -4730,8 +4803,12 @@ function MainRouteShell() {
           items: [{ id: 'queued-send', content: 'Queued response', createdAt: now }],
         };
         api.sendOrQueueChatMessage.mockImplementation(() => {
-          if (failure) return Promise.reject(failure);
-          if (disposition === 'queued') return Promise.resolve({ disposition, queue: queued });
+          if (failure) {
+            return Promise.reject(failure);
+          }
+          if (disposition === 'queued') {
+            return Promise.resolve({ disposition, queue: queued });
+          }
           return Promise.resolve({
             disposition,
             queue: emptyQueue,
@@ -4981,7 +5058,9 @@ function MainRouteShell() {
     };
     return new Proxy(methods, {
       get(target, property) {
-        if (typeof property !== 'string' || property === 'then') return undefined;
+        if (typeof property !== 'string' || property === 'then') {
+          return undefined;
+        }
         target[property] ??= jest.fn().mockResolvedValue(null);
         return target[property];
       },
@@ -5046,7 +5125,9 @@ function MainRouteShell() {
       );
       await flush();
     });
-    if (!tree) throw new Error('MainScreen did not render');
+    if (!tree) {
+      throw new Error('MainScreen did not render');
+    }
     return {
       api,
       tree,
@@ -5055,7 +5136,9 @@ function MainRouteShell() {
       store,
       ws,
       async emit(event) {
-        if (!eventHandler) throw new Error('WebSocket event handler missing');
+        if (!eventHandler) {
+          throw new Error('WebSocket event handler missing');
+        }
         await act(async () => {
           eventHandler?.(event);
           await flush();
@@ -5084,7 +5167,9 @@ function MainRouteShell() {
     const result = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Message');
-    if (!result) throw new Error('Message input missing');
+    if (!result) {
+      throw new Error('Message input missing');
+    }
     return result as TextInputNode;
   }
 
@@ -5100,7 +5185,9 @@ function MainRouteShell() {
 
   function labeled(root: Queryable, label: string): Queryable {
     const result = root.findAll((node) => node.props.accessibilityLabel === label)[0];
-    if (!result) throw new Error(`Missing label: ${label}`);
+    if (!result) {
+      throw new Error(`Missing label: ${label}`);
+    }
     return result;
   }
 
@@ -5108,14 +5195,20 @@ function MainRouteShell() {
     const result = root.findAll((node) =>
       String(node.props.accessibilityLabel ?? '').startsWith(prefix),
     )[0];
-    if (!result) throw new Error(`Missing label prefix: ${prefix}`);
+    if (!result) {
+      throw new Error(`Missing label prefix: ${prefix}`);
+    }
     return result;
   }
 
   async function press(node: Queryable): Promise<void> {
     let target: Queryable | null = node;
-    while (target && typeof target.props.onPress !== 'function') target = target.parent;
-    if (!target) throw new Error('Press target missing');
+    while (target && typeof target.props.onPress !== 'function') {
+      target = target.parent;
+    }
+    if (!target) {
+      throw new Error('Press target missing');
+    }
     await act(async () => {
       (target?.props.onPress as () => void)();
       await flush();
@@ -5186,7 +5279,9 @@ function MainRouteShell() {
           typeof node.props.onPress === 'function' &&
           node.children.some((child) => child === '/plan <prompt>'),
       )[0];
-      if (suggestion) await press(suggestion);
+      if (suggestion) {
+        await press(suggestion);
+      }
 
       await submit(harness.root, '/new');
       harness.unmount();
@@ -5496,7 +5591,9 @@ function MainRouteShell() {
         },
         { method: 'item/completed', params: { threadId, item: { type: 'toolCall', name: '' } } },
       ];
-      for (const event of currentEvents) await harness.emit(event);
+      for (const event of currentEvents) {
+        await harness.emit(event);
+      }
 
       const offThreadEvents = [
         {
@@ -5554,7 +5651,9 @@ function MainRouteShell() {
           params: { threadId: otherThreadId, item: { type: 'mcpToolCall', server: '', tool: '' } },
         },
       ];
-      for (const event of offThreadEvents) await harness.emit(event);
+      for (const event of offThreadEvents) {
+        await harness.emit(event);
+      }
 
       await harness.emit(
         agUi(
@@ -5567,7 +5666,9 @@ function MainRouteShell() {
         params: { resumeAfterEventId: 77 },
       });
       await act(async () => {
-        for (let index = 0; index < 20; index += 1) await Promise.resolve();
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
       });
       expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(77);
       harness.unmount();
@@ -5578,7 +5679,9 @@ function MainRouteShell() {
         params: { resumeAfterEventId: 88 },
       });
       await act(async () => {
-        for (let index = 0; index < 20; index += 1) await Promise.resolve();
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
       });
       expect(noThread.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(88);
       noThread.unmount();
@@ -5634,7 +5737,9 @@ function MainRouteShell() {
       await harness.emit(agUi({ type: 'RUN_FINISHED', threadId, runId: 'run-final' }));
       exercisePressedStyles(harness.root);
       const stay = harness.root.findAll((node) => node.children.includes('Keep planning'))[0];
-      if (stay) await press(stay);
+      if (stay) {
+        await press(stay);
+      }
 
       await harness.emit({
         method: 'item/started',
@@ -5787,7 +5892,9 @@ function MainRouteShell() {
       const guide = harness.root.findAll((node) =>
         node.children.includes('How to start bridge'),
       )[0];
-      if (guide) await press(guide);
+      if (guide) {
+        await press(guide);
+      }
       await harness.status(true);
       harness.unmount();
     });
@@ -5812,7 +5919,9 @@ function MainRouteShell() {
         { text: 'Equality answer', subAgent: meta },
         now,
       );
-      if (message.role !== 'activity') throw new Error('Expected activity message');
+      if (message.role !== 'activity') {
+        throw new Error('Expected activity message');
+      }
       const snapshots: Chat[] = [
         { ...baseChat, latestPlan: plan, latestTurnPlan: plan, messages: [message] },
         {
@@ -5972,7 +6081,9 @@ function MainRouteShell() {
       ];
       const api = createApi();
       api.getChat.mockReset();
-      for (const snapshot of snapshots) api.getChat.mockResolvedValueOnce(snapshot);
+      for (const snapshot of snapshots) {
+        api.getChat.mockResolvedValueOnce(snapshot);
+      }
       const harness = await renderMain({ api, chat: snapshots[0] });
 
       for (let index = 1; index < snapshots.length; index += 1) {
@@ -6071,7 +6182,9 @@ function MainRouteShell() {
         const resolvingSubmit = harness.root.findAll((node) =>
           node.children.includes('Submitting…'),
         )[0];
-        if (resolvingSubmit) await press(resolvingSubmit);
+        if (resolvingSubmit) {
+          await press(resolvingSubmit);
+        }
         await act(async () => {
           pendingResolution.resolve({ ok: true });
           await flush();
@@ -6107,7 +6220,9 @@ function MainRouteShell() {
       const yes = implement.root.findAll((node) =>
         node.children.includes('Yes, implement this plan'),
       )[0];
-      if (yes) await press(yes);
+      if (yes) {
+        await press(yes);
+      }
       implement.unmount();
 
       const stay = await renderMain({ chat: planned });
@@ -6120,7 +6235,9 @@ function MainRouteShell() {
       );
       exercisePressedStyles(stay.root);
       const no = stay.root.findAll((node) => node.children.includes('No, stay in Plan mode'))[0];
-      if (no) await press(no);
+      if (no) {
+        await press(no);
+      }
       stay.unmount();
 
       const compose = await renderMain();
@@ -6133,7 +6250,9 @@ function MainRouteShell() {
       const suggestion = compose.root.findAll((node) =>
         String(node.props.accessibilityLabel ?? '').startsWith('Use suggestion:'),
       )[0];
-      if (suggestion) await press(suggestion);
+      if (suggestion) {
+        await press(suggestion);
+      }
       compose.unmount();
     });
 

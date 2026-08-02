@@ -68,12 +68,16 @@ export function useMainScreenApprovalAndUserInputResolution(
   const applySynchronizedChat = useCallback(
     (latest: Chat, assessment: ChatSyncAssessment) => {
       const targetChatId = latest.id;
-      if (selectedChatIdRef.current !== targetChatId) return;
+      if (selectedChatIdRef.current !== targetChatId) {
+        return;
+      }
       const hasPendingApproval = Boolean(pendingApproval?.requestId);
       const hasPendingUserInput = Boolean(pendingUserInputRequest?.requestId);
       const resolvedLatest = mergeChatWithPendingOptimisticMessages(latest);
       setSelectedChat((prev) => {
-        if (!prev || prev.id !== resolvedLatest.id) return resolvedLatest;
+        if (!prev || prev.id !== resolvedLatest.id) {
+          return resolvedLatest;
+        }
         return resolveEquivalentChat(prev, resolvedLatest);
       });
       const shouldShowRunning = assessment.shouldShowRunning;

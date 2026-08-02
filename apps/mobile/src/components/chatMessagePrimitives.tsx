@@ -43,8 +43,12 @@ export function renderUserTextWithMentions(
     const token = match[2] ?? '';
     const startIndex = match.index + prefix.length;
     const prefixStartIndex = match.index;
-    if (prefixStartIndex > lastIndex) parts.push(value.slice(lastIndex, prefixStartIndex));
-    if (prefix) parts.push(prefix);
+    if (prefixStartIndex > lastIndex) {
+      parts.push(value.slice(lastIndex, prefixStartIndex));
+    }
+    if (prefix) {
+      parts.push(prefix);
+    }
     parts.push(
       <Text key={`mention-${String(key)}`} style={mentionStyle}>
         {token}
@@ -53,7 +57,9 @@ export function renderUserTextWithMentions(
     key += 1;
     lastIndex = startIndex + token.length;
   }
-  if (lastIndex < value.length) parts.push(value.slice(lastIndex));
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
   return parts.length > 0 ? parts : [value];
 }
 
@@ -110,8 +116,9 @@ export function MarkdownImage({
               !Number.isFinite(height) ||
               width <= 0 ||
               height <= 0
-            )
+            ) {
               return;
+            }
             const nextAspectRatio = width / height;
             setAspectRatio((previous) =>
               previous === nextAspectRatio ? previous : nextAspectRatio,

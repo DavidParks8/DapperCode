@@ -89,7 +89,9 @@ export function SubAgentTranscriptShimmer() {
   const userContentOffset = userBubbleOffset + theme.spacing.lg;
 
   useEffect(() => {
-    if (containerWidth <= 0) return;
+    if (containerWidth <= 0) {
+      return;
+    }
 
     progress.value = 0;
     const shimmerDurationMs =

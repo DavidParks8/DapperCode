@@ -114,7 +114,9 @@ export function useAppBridgeLifecycle(): void {
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryDelay = 1000;
     const attempt = () => {
-      if (cancelled || inFlight || !ws.isConnected) return;
+      if (cancelled || inFlight || !ws.isConnected) {
+        return;
+      }
       inFlight = true;
       void syncPushRegistration(api, store, activeBridgeProfileId)
         .then(() => {
@@ -141,7 +143,9 @@ export function useAppBridgeLifecycle(): void {
     return () => {
       cancelled = true;
       unsubscribe();
-      if (retryTimer) clearTimeout(retryTimer);
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
     };
   }, [activeBridgeProfileId, api, isOnboarding, store, ws]);
 

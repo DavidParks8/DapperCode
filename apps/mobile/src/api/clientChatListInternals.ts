@@ -198,7 +198,9 @@ function parseSnapshotPageEntry(value: unknown): SnapshotPageEntry[] {
   const sequence = readFiniteNumber(entry?.sequence);
   const kind = readString(entry?.kind);
   const canonicalId = readString(entry?.canonicalId)?.trim();
-  if (sequence === null || !canonicalId || !isSnapshotPageEntryKind(kind)) return [];
+  if (sequence === null || !canonicalId || !isSnapshotPageEntryKind(kind)) {
+    return [];
+  }
   return [
     {
       sequence,
@@ -216,7 +218,9 @@ function isSnapshotPageEntryKind(kind: string | null): kind is 'message' | 'reas
 
 function parseSnapshotPageMessage(value: unknown, canonicalId: string) {
   const message = toRecord(value);
-  if (!message) return undefined;
+  if (!message) {
+    return undefined;
+  }
   return {
     id: readString(message.id) ?? canonicalId,
     role: readString(message.role) ?? '',
@@ -227,7 +231,9 @@ function parseSnapshotPageMessage(value: unknown, canonicalId: string) {
 
 function parseSnapshotPageTool(value: unknown, canonicalId: string) {
   const tool = toRecord(value);
-  if (!tool) return undefined;
+  if (!tool) {
+    return undefined;
+  }
   return {
     id: readString(tool.id) ?? canonicalId,
     generation: readFiniteNumber(tool.generation),

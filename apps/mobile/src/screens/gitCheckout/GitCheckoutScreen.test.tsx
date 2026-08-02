@@ -105,7 +105,9 @@ async function renderScreen(store: AppStore): Promise<ReactTestRenderer> {
     );
     await Promise.resolve();
   });
-  if (!tree) throw new Error('Expected GitCheckoutScreen tree');
+  if (!tree) {
+    throw new Error('Expected GitCheckoutScreen tree');
+  }
   return tree;
 }
 

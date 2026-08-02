@@ -51,7 +51,9 @@ function LocalPreviewLinks({
     () => computeHitSlop(LOCAL_PREVIEW_LINK_VISIBLE_SIZE, LOCAL_PREVIEW_LINK_HIT_SLOP_OPTIONS),
     [],
   );
-  if (!onOpen || urls.length === 0) return null;
+  if (!onOpen || urls.length === 0) {
+    return null;
+  }
   return (
     <View style={styles.localPreviewLinkList}>
       {urls.map((url) => (
@@ -111,16 +113,24 @@ export function classifyChatMessageKind(
   message: ChatMessageRecord,
   hasTimelineEntries: boolean,
 ): ChatMessageKind {
-  if (message.role === 'user') return 'user';
-  if (['assistant', 'developer', 'system'].includes(message.role)) return 'assistantLike';
+  if (message.role === 'user') {
+    return 'user';
+  }
+  if (['assistant', 'developer', 'system'].includes(message.role)) {
+    return 'assistantLike';
+  }
   if (message.role === 'activity' && message.activityType === COMPACTION_ACTIVITY_TYPE) {
     return 'compaction';
   }
-  if (message.role === 'reasoning') return 'reasoning';
+  if (message.role === 'reasoning') {
+    return 'reasoning';
+  }
   if (message.role === 'activity' && message.activityType === SUBAGENT_ACTIVITY_TYPE) {
     return 'subAgent';
   }
-  if (hasTimelineEntries) return 'timeline';
+  if (hasTimelineEntries) {
+    return 'timeline';
+  }
   return 'plainFallback';
 }
 
@@ -140,7 +150,7 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
         accessible={false}
       >
         {messageBlocks.map((block, index) => {
-          if (block.kind === 'image')
+          if (block.kind === 'image') {
             return (
               <MarkdownImage
                 key={`${message.id}-assistant-image-${String(index)}`}
@@ -148,7 +158,8 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
                 accessibilityLabel={block.accessibilityLabel}
               />
             );
-          if (block.kind === 'file')
+          }
+          if (block.kind === 'file') {
             return (
               <View
                 key={`${message.id}-assistant-file-${String(index)}`}
@@ -165,6 +176,7 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
                 </Text>
               </View>
             );
+          }
           return (
             <Markdown
               key={`${message.id}-assistant-text-${String(index)}`}
@@ -262,8 +274,12 @@ function resolveTimelineToggleLabel(
   if (preview.images.length && isViewedImageEntry(title, preview.textDetails)) {
     return expanded ? 'Tap to hide path' : 'Tap to show path';
   }
-  if (expanded) return 'Tap to hide details';
-  if (preview.textDetails.length <= 1) return 'Tap to show details';
+  if (expanded) {
+    return 'Tap to hide details';
+  }
+  if (preview.textDetails.length <= 1) {
+    return 'Tap to show details';
+  }
   return `Tap to show ${String(preview.textDetails.length)} lines`;
 }
 

@@ -213,7 +213,9 @@ describe('chatSummaryCache', () => {
     let stored: string | null = null;
     jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
     jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async () => {
-      if (stored === null) throw new Error('missing');
+      if (stored === null) {
+        throw new Error('missing');
+      }
       return stored;
     });
     const write = jest
@@ -257,7 +259,9 @@ describe('chatSummaryCache', () => {
       let stored: string | null = null;
       jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
       jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async () => {
-        if (stored === null) throw new Error('missing');
+        if (stored === null) {
+          throw new Error('missing');
+        }
         return stored;
       });
       const write = jest

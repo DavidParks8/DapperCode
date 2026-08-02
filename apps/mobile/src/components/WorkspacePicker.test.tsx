@@ -151,7 +151,9 @@ describe('WorkspacePicker', () => {
     const search = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Search folders');
-    if (!search) throw new Error('Missing search');
+    if (!search) {
+      throw new Error('Missing search');
+    }
     act(() => search.props.onChangeText('missing'));
     expect(flattenTreeText(root)).toContain('No folders match this search.');
     act(() => search.props.onChangeText(''));
@@ -582,7 +584,9 @@ describe('WorkspacePicker', () => {
           }
           const contents = fs.readFileSync(path.join(dir, entry), 'utf8');
           const matches = contents.match(/fontSize:\s*[0-9]/g);
-          if (matches) offenders.push(`${entry}: ${matches.join(', ')}`);
+          if (matches) {
+            offenders.push(`${entry}: ${matches.join(', ')}`);
+          }
         }
       };
       scan(__dirname, (entry) => /^WorkspacePicker|^workspacePicker/.test(entry));

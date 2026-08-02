@@ -39,7 +39,9 @@ export function ensureRailJumpController(params: {
   setVisibleStartIndex: Dispatch<SetStateAction<number>>;
   spacingLg: number;
 }) {
-  if (params.railJumpControllerRef.current) return;
+  if (params.railJumpControllerRef.current) {
+    return;
+  }
   params.railJumpControllerRef.current = createChatScrollRailJumpController({
     resolveDisplayIndex: (messageId) =>
       params.displayIndexByMessageIdRef.current.get(messageId) ?? null,
@@ -69,7 +71,9 @@ export function renderScrollRail(params: {
   windowStart: number;
   windowWidth: number;
 }): ReactNode {
-  if (!params.scrollRailEnabled) return null;
+  if (!params.scrollRailEnabled) {
+    return null;
+  }
   return (
     <ChatScrollRail
       anchors={params.anchors}
@@ -95,7 +99,9 @@ export function renderJumpToLatestButton(params: {
   styles: ReturnType<typeof createStyles>;
   theme: ReturnType<typeof useAppTheme>;
 }): ReactNode {
-  if (!params.showJumpToLatest) return null;
+  if (!params.showJumpToLatest) {
+    return null;
+  }
   return (
     <Animated.View
       entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}

@@ -33,9 +33,15 @@ function readUserInputFieldType(
 function readUserInputDefaultValue(
   value: unknown,
 ): PendingUserInputRequest['questions'][number]['defaultValue'] {
-  if (typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return value;
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+    return value;
+  }
   return null;
 }
 

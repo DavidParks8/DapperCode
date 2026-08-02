@@ -59,4 +59,10 @@ module.exports = [
     },
   },
   prettierRecommended,
+  {
+    files: ['**/*.ts', '**/*.tsx'],
+    rules: {
+      curly: ['error', 'all'],
+    },
+  },
 ];

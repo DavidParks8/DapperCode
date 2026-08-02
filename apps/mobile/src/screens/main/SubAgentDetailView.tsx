@@ -60,7 +60,9 @@ function useShimmerPresentation(active: boolean): boolean {
 
   useEffect(() => {
     if (active) {
-      if (visible) return;
+      if (visible) {
+        return;
+      }
       const timer = setTimeout(() => {
         visibleSinceRef.current = Date.now();
         setVisible(true);
@@ -137,11 +139,15 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
       try {
         const { chat, parent } = await controller.loadDetail(threadId);
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId) {
+          return;
+        }
         hydrationFailedRef.current = false;
         setDetail((current) => resolveHydratedDetailState(current, chat, parent));
       } catch (error) {
-        if (requestRef.current !== requestId) return;
+        if (requestRef.current !== requestId) {
+          return;
+        }
         hydrationFailedRef.current = true;
         setDetail((current) => resolveHydrationErrorState(current, showLoading, error));
       } finally {
@@ -181,7 +187,9 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
   useEffect(() => {
     const remembered = api.peekChat(threadId);
-    if (!remembered) return;
+    if (!remembered) {
+      return;
+    }
     setDetail((current) => resolveRememberedDetailState(current, remembered));
   }, [agentRuntimeRevision, api, threadId]);
 

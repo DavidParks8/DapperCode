@@ -28,7 +28,9 @@ function memoryStorage(initial: Record<string, string> = {}): DraftStorage & {
     values,
     read: jest.fn(async (path: string) => {
       const value = values.get(path);
-      if (value === undefined) throw new Error('missing');
+      if (value === undefined) {
+        throw new Error('missing');
+      }
       return value;
     }),
     write: jest.fn(async (path: string, value: string) => {

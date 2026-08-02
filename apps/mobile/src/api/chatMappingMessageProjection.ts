@@ -106,7 +106,9 @@ function mapSnapshotToolEntry(
   context: SnapshotMappingContext,
 ): ChatMessage[] {
   const tool = context.toolsById.get(entry.canonicalId);
-  if (!tool) return [];
+  if (!tool) {
+    return [];
+  }
   const taskSubagent = parseSnapshotTaskSubagent(tool.content, context.acpSnapshot.session.agentId);
   const createdAt = new Date(context.baseTs + index * 1000).toISOString();
   if (taskSubagent || isSnapshotSubagentTool(tool)) {
@@ -121,7 +123,9 @@ function mapSnapshotMessageEntry(
   context: SnapshotMappingContext,
 ): ChatMessage[] {
   const message = context.messagesById.get(entry.canonicalId);
-  if (!message) return [];
+  if (!message) {
+    return [];
+  }
   const parts = message.parts.filter(isChatMessagePart);
   const content = parts
     .map((part) => renderAgUiCustomContent(part))
@@ -191,7 +195,9 @@ function buildSnapshotTruncationNotices(acpSnapshot: RawAcpSnapshot): string[] {
 
 function mapMessagesFromAcpSnapshot(raw: RawThread, fallbackCreatedAt: string): ChatMessage[] {
   const acpSnapshot = raw.acpSnapshot;
-  if (!acpSnapshot) return [];
+  if (!acpSnapshot) {
+    return [];
+  }
   const baseTs = new Date(fallbackCreatedAt).getTime();
   const context: SnapshotMappingContext = {
     raw,

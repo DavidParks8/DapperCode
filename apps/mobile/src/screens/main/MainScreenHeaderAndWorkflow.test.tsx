@@ -102,7 +102,9 @@ function render(context: Context): ReactTestRenderer {
       </SafeAreaProvider>,
     );
   });
-  if (!tree) throw new Error('Component did not render');
+  if (!tree) {
+    throw new Error('Component did not render');
+  }
   return tree;
 }
 
@@ -117,13 +119,17 @@ function findPressableByLabelPrefix(root: QueryableInstance, prefix: string): Qu
       typeof node.props.accessibilityLabel === 'string' &&
       (node.props.accessibilityLabel as string).startsWith(prefix),
   )[0];
-  if (!match) throw new Error(`Missing pressable starting with: ${prefix}`);
+  if (!match) {
+    throw new Error(`Missing pressable starting with: ${prefix}`);
+  }
   return match;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
   const callback = node.props[name];
-  if (typeof callback !== 'function') throw new Error(`Missing callback: ${name}`);
+  if (typeof callback !== 'function') {
+    throw new Error(`Missing callback: ${name}`);
+  }
   return callback(...args);
 }
 

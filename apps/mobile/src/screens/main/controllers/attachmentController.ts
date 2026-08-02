@@ -29,7 +29,9 @@ type AttachmentApi = Pick<HostBridgeApiClient, 'execTerminal' | 'uploadAttachmen
 
 export function addUniqueAttachmentPath(paths: string[], rawPath: string): string[] | null {
   const normalized = normalizeAttachmentPath(rawPath);
-  if (!normalized) return null;
+  if (!normalized) {
+    return null;
+  }
   return paths.some((path) => path.toLowerCase() === normalized.toLowerCase())
     ? paths
     : [...paths, normalized];
@@ -149,7 +151,9 @@ export function useAttachmentController({
           cwd,
           timeoutMs: 15_000,
         });
-        if (response.code !== 0) return [];
+        if (response.code !== 0) {
+          return [];
+        }
         return response.stdout
           .split('\n')
           .map((line) => line.trim())
@@ -174,7 +178,9 @@ export function useAttachmentController({
       }
       const cached = cacheRef.current[cwd];
       if (cached) {
-        if (workspaceRef.current === cwd) setFileCandidates(cached);
+        if (workspaceRef.current === cwd) {
+          setFileCandidates(cached);
+        }
         return cached;
       }
       let pending = inFlightRef.current[cwd];
@@ -186,7 +192,9 @@ export function useAttachmentController({
         });
         inFlightRef.current[cwd] = pending;
       }
-      if (workspaceRef.current === cwd) setLoadingFileCandidates(true);
+      if (workspaceRef.current === cwd) {
+        setLoadingFileCandidates(true);
+      }
       const lines = await pending;
       if (workspaceRef.current === cwd) {
         setFileCandidates(lines);
@@ -198,7 +206,9 @@ export function useAttachmentController({
   );
 
   const openPathModal = useCallback(() => {
-    if (pickerInProgressRef.current) return;
+    if (pickerInProgressRef.current) {
+      return;
+    }
     setAttachmentPathDraft('');
     setAttachmentModalVisible(true);
     setError(null);
@@ -215,11 +225,15 @@ export function useAttachmentController({
     const cached = cacheRef.current[cwd];
     setFileCandidates(cached ?? []);
     setLoadingFileCandidates(false);
-    if (!cached) void loadCandidates(cwd);
+    if (!cached) {
+      void loadCandidates(cwd);
+    }
   }, [loadCandidates, workspace]);
 
   useEffect(() => {
-    if (submissionPendingRef.current) return;
+    if (submissionPendingRef.current) {
+      return;
+    }
     if (skipNextDraftReconcileRef.current) {
       skipNextDraftReconcileRef.current = false;
       return;
@@ -231,24 +245,35 @@ export function useAttachmentController({
   }, [draft]);
 
   useEffect(() => {
-    if (attachmentMenuVisible || pendingAction === null) return;
+    if (attachmentMenuVisible || pendingAction === null) {
+      return;
+    }
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
     const idle = scheduleIdleTask(() => {
       timeout = setTimeout(() => {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         const action = pendingAction;
         setPendingAction(null);
-        if (action === 'workspace-path') openPathModal();
-        else if (action === 'phone-file') void pickFile();
-        else if (action === 'phone-image') void pickImage();
-        else if (action === 'phone-camera') void captureImage();
+        if (action === 'workspace-path') {
+          openPathModal();
+        } else if (action === 'phone-file') {
+          void pickFile();
+        } else if (action === 'phone-image') {
+          void pickImage();
+        } else if (action === 'phone-camera') {
+          void captureImage();
+        }
       }, 180);
     });
     return () => {
       cancelled = true;
       idle.cancel();
-      if (timeout) clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
     };
   }, [attachmentMenuVisible, captureImage, openPathModal, pendingAction, pickFile, pickImage]);
 

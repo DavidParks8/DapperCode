@@ -117,13 +117,17 @@ describe('TranscriptContinuationController', () => {
 
     const first = await controller.loadEarlier(chat());
     expect(first.kind).toBe('merged');
-    if (first.kind !== 'merged') return;
+    if (first.kind !== 'merged') {
+      return;
+    }
     expect(first.chat.acpSnapshot?.timeline?.map((entry) => entry.sequence)).toEqual([2, 3]);
     expect(first.state.exhausted).toBe(false);
 
     const second = await controller.loadEarlier(first.chat);
     expect(second.kind).toBe('merged');
-    if (second.kind !== 'merged') return;
+    if (second.kind !== 'merged') {
+      return;
+    }
     expect(second.chat.acpSnapshot?.timeline?.map((entry) => entry.sequence)).toEqual([1, 2, 3]);
     expect(second.chat.acpSnapshot?.messages.map((message) => message.id)).toEqual([
       'newest',

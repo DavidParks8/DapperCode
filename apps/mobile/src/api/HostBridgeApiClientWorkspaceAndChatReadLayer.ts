@@ -216,7 +216,9 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     });
     const thread = toRecord(started.thread);
     const chatId = readString(thread?.id);
-    if (!chatId || !thread) throw new Error('bridge/thread/create did not return a chat');
+    if (!chatId || !thread) {
+      throw new Error('bridge/thread/create did not return a chat');
+    }
     return this.mapChatWithCachedTitle(thread);
   }
   async getChat(id: string, options: ChatReadOptions = {}): Promise<Chat> {

@@ -54,7 +54,9 @@ export function getSurfaceCollapsedSummary(surface: BridgeUiSurface): string {
 
   for (const block of surface.blocks) {
     const summary = getBlockCollapsedSummary(block);
-    if (summary) return summary;
+    if (summary) {
+      return summary;
+    }
   }
 
   return normalizeCollapsedSummary(surface.subtitle ?? '');

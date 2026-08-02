@@ -73,7 +73,9 @@ export class ProfilePersistenceError extends Error {
 
 export function encodePersistenceProfileId(profileId: string | null | undefined): string | null {
   const normalized = profileId?.trim();
-  if (!normalized) return null;
+  if (!normalized) {
+    return null;
+  }
 
   let safe = '';
   for (let index = 0; index < normalized.length; index += 1) {
@@ -188,7 +190,9 @@ async function storageEntryExists(
   storage: ProfilePersistenceStorage,
   path: string,
 ): Promise<boolean> {
-  if (storage.exists) return storage.exists(path);
+  if (storage.exists) {
+    return storage.exists(path);
+  }
   try {
     await storage.read(path);
     return true;
@@ -220,7 +224,9 @@ export async function migrateLegacyPersistenceEntry(options: {
 }): Promise<void> {
   const { storage, profileId, targetPath, legacyPath, markerPath, transform } = options;
   const normalizedProfileId = profileId.trim();
-  if (!normalizedProfileId || !targetPath || !legacyPath || !markerPath) return;
+  if (!normalizedProfileId || !targetPath || !legacyPath || !markerPath) {
+    return;
+  }
 
   const previous = migrationLocks.get(markerPath) ?? Promise.resolve();
   const migration = previous
@@ -236,9 +242,15 @@ export async function migrateLegacyPersistenceEntry(options: {
         // A missing marker means this profile can claim the one-time migration.
       }
 
-      if (markerWasRead && !marker) return;
-      if (marker && marker.profileId !== normalizedProfileId) return;
-      if (marker?.complete) return;
+      if (markerWasRead && !marker) {
+        return;
+      }
+      if (marker && marker.profileId !== normalizedProfileId) {
+        return;
+      }
+      if (marker?.complete) {
+        return;
+      }
       if (!marker) {
         const claim: PersistenceMigrationMarker = {
           version: 1,
@@ -274,7 +286,9 @@ export async function migrateLegacyPersistenceEntry(options: {
   try {
     await migration;
   } finally {
-    if (migrationLocks.get(markerPath) === migration) migrationLocks.delete(markerPath);
+    if (migrationLocks.get(markerPath) === migration) {
+      migrationLocks.delete(markerPath);
+    }
   }
 }
 

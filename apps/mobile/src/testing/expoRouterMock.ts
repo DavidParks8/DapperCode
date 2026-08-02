@@ -27,7 +27,9 @@ function resolveHref(href: MockHref): MockRoute {
 }
 
 function publish(): void {
-  for (const listener of listeners) listener();
+  for (const listener of listeners) {
+    listener();
+  }
 }
 
 const router = {

@@ -51,19 +51,25 @@ interface WebStorageLike {
 const webStorage: SubmissionIdempotencyStorage = {
   read: async (key) => {
     const value = getWebStorage()?.getItem(key);
-    if (value == null) throw new Error('missing');
+    if (value == null) {
+      throw new Error('missing');
+    }
     return value;
   },
   write: async (key, value) => {
     const storage = getWebStorage();
-    if (!storage) throw new Error('Browser storage is unavailable.');
+    if (!storage) {
+      throw new Error('Browser storage is unavailable.');
+    }
     storage.setItem(key, value);
   },
   exists: async (key) => getWebStorage()?.getItem(key) != null,
 };
 
 function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) return null;
+  if (typeof globalThis !== 'object' || globalThis === null) {
+    return null;
+  }
   const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
     .localStorage;
   return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
@@ -210,7 +216,9 @@ export class SubmissionIdempotencyCache implements SubmissionIdempotencyStore {
   }
 
   async load(): Promise<void> {
-    if (!this.path) return;
+    if (!this.path) {
+      return;
+    }
     try {
       const raw = await this.storage.read(this.path);
       this.entries = parseSubmissionIdempotencyEntries(raw, this.now());
@@ -222,7 +230,9 @@ export class SubmissionIdempotencyCache implements SubmissionIdempotencyStore {
   lookup(scopeKey: string, requestHash: string): string | null {
     const key = buildKey(scopeKey, requestHash);
     const record = this.entries[key];
-    if (!record) return null;
+    if (!record) {
+      return null;
+    }
     if (this.now() - record.updatedAt > this.ttlMs) {
       delete this.entries[key];
       return null;
@@ -243,7 +253,9 @@ export class SubmissionIdempotencyCache implements SubmissionIdempotencyStore {
 
   clear(scopeKey: string, requestHash: string): void {
     const key = buildKey(scopeKey, requestHash);
-    if (!(key in this.entries)) return;
+    if (!(key in this.entries)) {
+      return;
+    }
     const next = { ...this.entries };
     delete next[key];
     this.entries = next;
@@ -256,7 +268,9 @@ export class SubmissionIdempotencyCache implements SubmissionIdempotencyStore {
   }
 
   private persist(): void {
-    if (!this.path) return;
+    if (!this.path) {
+      return;
+    }
     const path = this.path;
     const snapshot = this.entries;
     this.writeChain = this.writeChain

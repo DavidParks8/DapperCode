@@ -261,7 +261,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   );
 
   const historyBoundary = useMemo(() => {
-    if (!continuationState) return null;
+    if (!continuationState) {
+      return null;
+    }
     if (continuationState.loading) {
       return <Text style={styles.inlineChoiceHint}>Loading earlier history...</Text>;
     }
@@ -327,7 +329,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       return;
     }
     const viewportHeight = viewportHeightRef.current;
-    if (viewportHeight <= 0) return;
+    if (viewportHeight <= 0) {
+      return;
+    }
     if (contentHeightRef.current - viewportHeight > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX) {
       return;
     }

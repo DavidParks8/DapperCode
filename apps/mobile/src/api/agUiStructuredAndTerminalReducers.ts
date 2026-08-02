@@ -68,11 +68,17 @@ export function reduceToolText(
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId);
-  if (toolCallId && current.subagentToolCallIds[toolCallId]) return current;
+  if (toolCallId && current.subagentToolCallIds[toolCallId]) {
+    return current;
+  }
   const revision = nonEmptyString(value?.revision);
   const content = typeof value?.content === 'string' ? value.content : null;
-  if (!toolCallId || !revision || content === null) return current;
-  if (current.toolTextRevisionByCallId[toolCallId] === revision) return current;
+  if (!toolCallId || !revision || content === null) {
+    return current;
+  }
+  if (current.toolTextRevisionByCallId[toolCallId] === revision) {
+    return current;
+  }
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const structured = current.structuredTextByCallId[toolCallId] ?? '';
   const joined = appendToolText(content, structured);
@@ -103,9 +109,13 @@ export function reduceToolContent(
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
-  if (current.subagentToolCallIds[toolCallId]) return current;
+  if (current.subagentToolCallIds[toolCallId]) {
+    return current;
+  }
   const revision = nonEmptyString(value?.revision) ?? JSON.stringify(value);
-  if (current.structuredRevisionByCallId[toolCallId] === revision) return current;
+  if (current.structuredRevisionByCallId[toolCallId] === revision) {
+    return current;
+  }
   const structured = renderToolStructuredContent(value);
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const existing = findMessage(current, messageId);
@@ -165,7 +175,9 @@ export function reduceSubagentActivity(
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
   const receiverThreadIds = readReceiverThreadIds(value?.receiverThreadIds);
-  if (receiverThreadIds.length === 0) return current;
+  if (receiverThreadIds.length === 0) {
+    return current;
+  }
   const meta = createSubagentMeta(toolCallId, receiverThreadIds, value, envelope.threadId);
   const resultPreview = nonEmptyString(value?.resultPreview);
   const text = formatSubagentActivity(meta, receiverThreadIds[0], resultPreview);
@@ -239,7 +251,9 @@ export function markTerminal(
   current: AgUiThreadMessageState,
   messageId: string,
 ): AgUiThreadMessageState {
-  if (current.terminalMessageIds.includes(messageId)) return current;
+  if (current.terminalMessageIds.includes(messageId)) {
+    return current;
+  }
   return {
     ...current,
     terminalMessageIds: [...current.terminalMessageIds, messageId],
@@ -253,7 +267,9 @@ export function markRunTerminal(
   const ids = Object.entries(current.runByMessageId)
     .filter(([, messageRunId]) => messageRunId === runId)
     .map(([messageId]) => messageId);
-  if (ids.length === 0) return current;
+  if (ids.length === 0) {
+    return current;
+  }
   return {
     ...current,
     terminalMessageIds: Array.from(new Set([...current.terminalMessageIds, ...ids])),
@@ -279,7 +295,9 @@ export function updateEncryptedValue(
   }
   const messageId = current.toolCallMessageIdByCallId[entityId];
   const message = messageId ? findMessage(current, messageId) : undefined;
-  if (!message || message.role !== 'assistant') return current;
+  if (!message || message.role !== 'assistant') {
+    return current;
+  }
   return upsertMessage(
     current,
     {

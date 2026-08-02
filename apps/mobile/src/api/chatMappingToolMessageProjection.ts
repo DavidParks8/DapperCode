@@ -84,7 +84,9 @@ function toFunctionCallOutputToolLikeMessage(item: Record<string, unknown>): str
 function buildCollabToolCallTitle(tool: string, status: string): string {
   const failed = status === 'failed' || status === 'error';
   if (tool === 'spawnagent') {
-    if (failed) return '• Sub-agent spawn failed';
+    if (failed) {
+      return '• Sub-agent spawn failed';
+    }
     if (status === 'completed' || status === 'complete' || status === 'succeeded') {
       return '• Spawned sub-agent';
     }
@@ -242,7 +244,9 @@ function buildMcpFunctionToolMessage(
   inputPreview: string | null,
 ): string | null {
   const mcpToolName = parseMcpFunctionToolName(normalizedToolName);
-  if (!mcpToolName) return null;
+  if (!mcpToolName) {
+    return null;
+  }
   const title =
     status === 'failed' || status === 'error'
       ? `• Tool failed \`${mcpToolName.server} / ${mcpToolName.tool}\``

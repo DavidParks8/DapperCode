@@ -45,7 +45,9 @@ const theme = createAppTheme('dark');
 
 function byLabel(root: Queryable, label: string) {
   const node = root.findAll((candidate) => candidate.props.accessibilityLabel === label)[0];
-  if (!node) throw new Error(`Missing ${label}`);
+  if (!node) {
+    throw new Error(`Missing ${label}`);
+  }
   return node;
 }
 function wrap(child: React.ReactElement): React.ReactElement {
@@ -188,7 +190,9 @@ describe('ChatInput behavior', () => {
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props.accessibilityLabel === 'Message');
-    if (!input) throw new Error('Missing message input');
+    if (!input) {
+      throw new Error('Missing message input');
+    }
     act(() => input.props.onLayout({ nativeEvent: { layout: { width: 240 } } }));
     const measure = root.findAll((node) => typeof node.props.onTextLayout === 'function')[0];
     act(() => measure.props.onTextLayout({ nativeEvent: { lines: [{}, {}, {}, {}, {}, {}] } }));

@@ -37,7 +37,9 @@ function findBlockquoteStyle(styles: object): ViewStyle {
   const found = renderMarkdownViewStyles(styles, '> example').find(
     (style) => typeof style.borderLeftWidth === 'number' && style.borderLeftWidth > 0,
   );
-  if (!found) throw new Error('blockquote view was not rendered');
+  if (!found) {
+    throw new Error('blockquote view was not rendered');
+  }
   return found;
 }
 
@@ -45,7 +47,9 @@ function findHorizontalRuleStyle(styles: object): ViewStyle {
   const found = renderMarkdownViewStyles(styles, 'before\n\n---\n\nafter').find(
     (style) => style.height === StyleSheet.hairlineWidth || style.height === 1,
   );
-  if (!found) throw new Error('horizontal rule view was not rendered');
+  if (!found) {
+    throw new Error('horizontal rule view was not rendered');
+  }
   return found;
 }
 
@@ -59,7 +63,9 @@ function findTableStyles(styles: object): { table: ViewStyle; row: ViewStyle } {
   const row = rendered.find(
     (style) => typeof style.borderBottomWidth === 'number' && style.borderBottomWidth > 0,
   );
-  if (!table || !row) throw new Error('table views were not rendered');
+  if (!table || !row) {
+    throw new Error('table views were not rendered');
+  }
   return { table, row };
 }
 

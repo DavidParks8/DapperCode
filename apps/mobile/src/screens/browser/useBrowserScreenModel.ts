@@ -36,7 +36,9 @@ function resolveCapabilitiesError(
   localError: string | null,
   bridgeError: string | null,
 ): string | null {
-  if (localError) return localError;
+  if (localError) {
+    return localError;
+  }
   if (bridgeError === 'Could not read bridge capabilities.') {
     return 'Could not load bridge capabilities.';
   }

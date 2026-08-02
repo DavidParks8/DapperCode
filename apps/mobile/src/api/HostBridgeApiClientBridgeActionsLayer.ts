@@ -60,9 +60,15 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
       throw new Error('Bridge URL is required for attachment uploads');
     }
     const parameters: Record<string, string> = { kind: body.kind };
-    if (body.fileName?.trim()) parameters.fileName = body.fileName.trim();
-    if (body.mimeType?.trim()) parameters.mimeType = body.mimeType.trim();
-    if (body.threadId?.trim()) parameters.threadId = body.threadId.trim();
+    if (body.fileName?.trim()) {
+      parameters.fileName = body.fileName.trim();
+    }
+    if (body.mimeType?.trim()) {
+      parameters.mimeType = body.mimeType.trim();
+    }
+    if (body.threadId?.trim()) {
+      parameters.threadId = body.threadId.trim();
+    }
     const file = new File(body.uri);
     const formData = new FormData();
     for (const [key, value] of Object.entries(parameters)) {

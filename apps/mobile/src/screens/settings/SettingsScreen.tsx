@@ -41,9 +41,15 @@ import { replaceRoot } from '../../navigation/routeNavigation';
 import { useAppTheme, type AppTheme } from '../../theme';
 
 function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
-  if (current === 5) return 10;
-  if (current === 10) return 25;
-  if (current === 25) return null;
+  if (current === 5) {
+    return 10;
+  }
+  if (current === 10) {
+    return 25;
+  }
+  if (current === 25) {
+    return null;
+  }
   return 5;
 }
 
@@ -228,12 +234,17 @@ export function SettingsScreen() {
   const [pushBusy, setPushBusy] = useState(false);
 
   const updatePush = async (enabled: boolean) => {
-    if (!api || !activeBridgeProfileId || pushBusy) return;
+    if (!api || !activeBridgeProfileId || pushBusy) {
+      return;
+    }
     setPushBusy(true);
     setError(null);
     try {
-      if (enabled) await enablePush(api, store, activeBridgeProfileId);
-      else await disablePush(api, store, activeBridgeProfileId);
+      if (enabled) {
+        await enablePush(api, store, activeBridgeProfileId);
+      } else {
+        await disablePush(api, store, activeBridgeProfileId);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not update notifications.');
     } finally {
@@ -242,7 +253,9 @@ export function SettingsScreen() {
   };
 
   const updatePushEvent = async (key: 'turnCompleted' | 'approvalRequested', value: boolean) => {
-    if (!api || !activeBridgeProfileId) return;
+    if (!api || !activeBridgeProfileId) {
+      return;
+    }
     await updatePushEvents(api, store, activeBridgeProfileId, {
       ...pushSettings.events,
       [key]: value,
@@ -357,7 +370,9 @@ function Row({ label, value, onPress }: { label: string; value?: string; onPress
       accessibilityRole={onPress ? 'button' : undefined}
       disabled={!onPress}
       onPress={() => {
-        if (!onPress) return;
+        if (!onPress) {
+          return;
+        }
         void feedback.selection();
         onPress();
       }}

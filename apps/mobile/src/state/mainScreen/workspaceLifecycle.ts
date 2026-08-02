@@ -19,7 +19,9 @@ export function bindWorkspaceResourcesRevalidation(
 ): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const schedule = () => {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
     timer = setTimeout(() => {
       timer = null;
       revalidate();
@@ -28,14 +30,20 @@ export function bindWorkspaceResourcesRevalidation(
 
   schedule();
   const unsubscribeStatus = ws.onStatus((connected) => {
-    if (connected) schedule();
+    if (connected) {
+      schedule();
+    }
   });
   const appStateSubscription = appState.addEventListener('change', (state) => {
-    if (state === 'active') schedule();
+    if (state === 'active') {
+      schedule();
+    }
   });
 
   return () => {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
     unsubscribeStatus();
     appStateSubscription.remove();
   };

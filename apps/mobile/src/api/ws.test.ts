@@ -1187,8 +1187,11 @@ describe('HostBridgeWsClient', () => {
       socket.simulateOpen();
       const request = client.request(`pending/${event}`);
       await Promise.resolve();
-      if (event === 'close') socket.simulateClose();
-      else socket.simulateError();
+      if (event === 'close') {
+        socket.simulateClose();
+      } else {
+        socket.simulateError();
+      }
       await expect(request).rejects.toThrow(
         `Bridge websocket ${event === 'close' ? 'closed' : 'error'}`,
       );

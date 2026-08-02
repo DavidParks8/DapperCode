@@ -18,7 +18,9 @@ export function lastUsedModelPreference(
   agentId: AgentId | null | undefined,
 ): ChatModelPreference | null {
   const normalizedAgentId = agentId?.trim() ?? '';
-  if (!normalizedAgentId) return null;
+  if (!normalizedAgentId) {
+    return null;
+  }
   return preferences[agentModelPreferenceKey(normalizedAgentId)] ?? null;
 }
 

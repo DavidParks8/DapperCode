@@ -149,9 +149,15 @@ function resolveSelectionSheetIconColor(
   tone: OptionTone,
   colors: ReturnType<typeof useAppTheme>['colors'],
 ): string {
-  if (option.iconColor) return option.iconColor;
-  if (tone === 'danger') return colors.error;
-  if (option.selected || tone === 'accent') return colors.textPrimary;
+  if (option.iconColor) {
+    return option.iconColor;
+  }
+  if (tone === 'danger') {
+    return colors.error;
+  }
+  if (option.selected || tone === 'accent') {
+    return colors.textPrimary;
+  }
   return colors.textMuted;
 }
 
@@ -192,7 +198,9 @@ function SelectionSheetRowIcon({
   iconColor: string;
   styles: ReturnType<typeof createSelectionSheetStyles>;
 }) {
-  if (!option.icon) return null;
+  if (!option.icon) {
+    return null;
+  }
   return (
     <View
       style={[

@@ -76,9 +76,15 @@ function resolveDrawerAttentionLane(
   running: boolean,
   chat: ChatSummary,
 ): DrawerAttentionLane {
-  if (pending) return 'attention';
-  if (running) return 'working';
-  if (chat.status === 'error') return 'attention';
+  if (pending) {
+    return 'attention';
+  }
+  if (running) {
+    return 'working';
+  }
+  if (chat.status === 'error') {
+    return 'attention';
+  }
   return 'recent';
 }
 
@@ -90,7 +96,9 @@ function resolveDrawerAttentionReason(
   if (pending) {
     return pending.approvalCount > 0 ? 'approval' : 'input';
   }
-  if (!running && chat.status === 'error') return 'error';
+  if (!running && chat.status === 'error') {
+    return 'error';
+  }
   return null;
 }
 

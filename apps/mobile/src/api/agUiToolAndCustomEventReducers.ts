@@ -39,7 +39,9 @@ export function rememberToolMeta(
   current: AgUiThreadMessageState,
   meta: ChatToolMeta,
 ): AgUiThreadMessageState {
-  if (current.subagentToolCallIds[meta.toolCallId]) return current;
+  if (current.subagentToolCallIds[meta.toolCallId]) {
+    return current;
+  }
   const merged = mergeToolMeta(current.toolMetaByCallId[meta.toolCallId], meta);
   return {
     ...current,
@@ -55,7 +57,9 @@ export function reduceToolMeta(
   timestamp?: number,
 ): AgUiThreadMessageState {
   const meta = parseToolMeta(value);
-  if (!meta) return current;
+  if (!meta) {
+    return current;
+  }
   // A tool can be announced by its metadata before any output exists, which is
   // what puts a running row on screen the moment the agent starts working.
   const started = current.toolCallMessageIdByCallId[meta.toolCallId]
@@ -76,7 +80,9 @@ export function appendToolArgs(
     ? current
     : startToolCall(current, runId, toolCallId, 'tool', undefined, timestamp);
   const message = findMessage(started, messageId);
-  if (!message || message.role !== 'assistant') return started;
+  if (!message || message.role !== 'assistant') {
+    return started;
+  }
   const existing = message.toolCalls?.find((call) => call.id === toolCallId);
   return upsertMessage(
     started,
@@ -130,7 +136,9 @@ function collectCurrentSubagentsById(current: AgUiThreadMessageState): Map<strin
       continue;
     }
     const toolCallId = nonEmptyString(record(message.content.subAgent)?.toolCallId);
-    if (toolCallId) currentSubagents.set(toolCallId, message);
+    if (toolCallId) {
+      currentSubagents.set(toolCallId, message);
+    }
   }
   return currentSubagents;
 }
@@ -175,7 +183,9 @@ function restoreSuppressedSubagentCards(
       !currentSubagent ||
       ctx.snapshotActivityIds.has(toolCallId) ||
       ctx.restoredSubagents.has(toolCallId);
-    if (alreadyRestored) continue;
+    if (alreadyRestored) {
+      continue;
+    }
     // A malformed bridge snapshot can forget that a live task tool was already
     // classified as a sub-agent. Keep the known card at the tool's timeline
     // position instead of letting the snapshot replace it with a generic tool.
@@ -310,7 +320,9 @@ function rebaseToolBookkeeping(
 ): Record<string, string> {
   const next: Record<string, string> = {};
   for (const [toolCallId, messageId] of Object.entries(previous)) {
-    if (survivingMessageIds.has(messageId)) next[toolCallId] = messageId;
+    if (survivingMessageIds.has(messageId)) {
+      next[toolCallId] = messageId;
+    }
   }
   for (const [toolCallId, messageId] of fromSnapshot) {
     next[toolCallId] = messageId;
@@ -321,7 +333,9 @@ function rebaseToolBookkeeping(
 function snapshotToolCallMessageIds(messages: ChatMessage[]): Map<string, string> {
   const ids = new Map<string, string>();
   for (const message of messages) {
-    if (message.role !== 'assistant') continue;
+    if (message.role !== 'assistant') {
+      continue;
+    }
     for (const call of message.toolCalls ?? []) {
       ids.set(call.id, message.id);
     }
@@ -332,7 +346,9 @@ function snapshotToolCallMessageIds(messages: ChatMessage[]): Map<string, string
 function snapshotToolResultMessageIds(messages: ChatMessage[]): Map<string, string> {
   const ids = new Map<string, string>();
   for (const message of messages) {
-    if (message.role === 'tool') ids.set(message.toolCallId, message.id);
+    if (message.role === 'tool') {
+      ids.set(message.toolCallId, message.id);
+    }
   }
   return ids;
 }
@@ -423,7 +439,9 @@ export function reduceCustomEvent(
   envelope: AgUiEventEnvelope,
 ): AgUiThreadMessageState {
   const event = envelope.event;
-  if (event.type !== EventType.CUSTOM) return current;
+  if (event.type !== EventType.CUSTOM) {
+    return current;
+  }
   const value = record(event.value);
   if (event.name.endsWith('-chunk')) {
     return reduceCustomChunk(current, envelope, value);
@@ -451,9 +469,13 @@ export function reduceCustomChunk(
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
-  if (envelope.event.type !== EventType.CUSTOM) return current;
+  if (envelope.event.type !== EventType.CUSTOM) {
+    return current;
+  }
   const chunk = readCustomChunk(envelope.event.name, value);
-  if (!chunk) return current;
+  if (!chunk) {
+    return current;
+  }
   const { key, count, index, data } = chunk;
   const existing = current.chunkAssemblies[key];
   const chunks =
@@ -462,7 +484,9 @@ export function reduceCustomChunk(
     ...current,
     chunkAssemblies: { ...current.chunkAssemblies, [key]: { count, chunks } },
   };
-  if (Object.keys(chunks).length !== count) return pending;
+  if (Object.keys(chunks).length !== count) {
+    return pending;
+  }
   return reduceCompletedCustomChunks(pending, envelope, envelope.event.name, key, count, chunks);
 }
 
@@ -475,7 +499,9 @@ function readCustomChunk(
   const index = typeof value?.index === 'number' ? value.index : -1;
   const count = typeof value?.count === 'number' ? value.count : 0;
   const data = typeof value?.data === 'string' ? value.data : null;
-  if (!canonicalId || !revision || index < 0 || index >= count || !data) return null;
+  if (!canonicalId || !revision || index < 0 || index >= count || !data) {
+    return null;
+  }
   return { key: `${customName}\0${revision}`, count, index, data };
 }
 
@@ -509,7 +535,9 @@ export function storeCustomMetadata(
 ): AgUiThreadMessageState {
   const order = current.customMetadataOrder.filter((entry) => entry !== name);
   order.push(name);
-  while (order.length > MAX_CUSTOM_METADATA_ENTRIES) order.shift();
+  while (order.length > MAX_CUSTOM_METADATA_ENTRIES) {
+    order.shift();
+  }
   const customMetadata = Object.fromEntries(
     order.map((entry) => [entry, entry === name ? value : current.customMetadata[entry]]),
   );
