@@ -4,8 +4,104 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-nati
 
 import type { GitReviewTarget } from './gitDiffReview';
 import { createGitReviewTarget } from './gitDiffReview';
+import type { GitScreenController } from './gitScreenController';
+import type { GitChangedFileWithStats } from './gitScreenTypes';
 import { formatDiffLineNumber, formatStatusCode } from './gitScreenUtils';
 import type { GitSectionCommonProps } from './gitScreenSectionTypes';
+
+function isFileStageActionDisabled(controller: GitScreenController, stagePath: string): boolean {
+  return (
+    controller.loading ||
+    controller.committing ||
+    controller.pushing ||
+    controller.stagingAll ||
+    controller.unstagingAll ||
+    controller.stagingPath === stagePath ||
+    controller.unstagingPath === stagePath
+  );
+}
+
+function GitDiffFileRow({
+  entry,
+  controller,
+  styles,
+}: {
+  entry: GitChangedFileWithStats;
+  controller: GitScreenController;
+  styles: GitSectionCommonProps['styles'];
+}) {
+  const actionDisabled = isFileStageActionDisabled(controller, entry.stagePath);
+  return (
+    <View style={styles.fileRow}>
+      <Text style={styles.fileCode}>{formatStatusCode(entry.code)}</Text>
+      {entry.diffFileId ? (
+        <Pressable
+          style={styles.filePathPressable}
+          onPress={() => {
+            if (entry.diffFileId) {
+              controller.selectDiffFile(entry.diffFileId);
+            }
+          }}
+          disabled={controller.showDiffFileSwitching}
+        >
+          <Text
+            style={[
+              styles.filePath,
+              styles.filePathInteractive,
+              controller.showDiffFileSwitching && styles.filePathDisabled,
+            ]}
+          >
+            {entry.path}
+          </Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.filePath}>{entry.path}</Text>
+      )}
+      {entry.stats ? (
+        <View style={styles.fileStats}>
+          <Text style={styles.fileAdded}>+{entry.stats.additions}</Text>
+          <Text style={styles.fileRemoved}>-{entry.stats.deletions}</Text>
+        </View>
+      ) : null}
+      <View style={styles.fileActions}>
+        {entry.unstaged ? (
+          <Pressable
+            onPress={() => void controller.stageFile(entry.stagePath)}
+            disabled={actionDisabled}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.fileActionBtn,
+              styles.fileActionBtnStage,
+              pressed && styles.fileActionBtnPressed,
+              actionDisabled && styles.fileActionBtnDisabled,
+            ]}
+          >
+            <Text style={styles.fileActionText}>
+              {controller.stagingPath === entry.stagePath ? 'Staging...' : 'Stage'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {entry.staged ? (
+          <Pressable
+            onPress={() => void controller.unstageFile(entry.stagePath)}
+            disabled={actionDisabled}
+            hitSlop={8}
+            style={({ pressed }) => [
+              styles.fileActionBtn,
+              styles.fileActionBtnUnstage,
+              pressed && styles.fileActionBtnPressed,
+              actionDisabled && styles.fileActionBtnDisabled,
+            ]}
+          >
+            <Text style={styles.fileActionText}>
+              {controller.unstagingPath === entry.stagePath ? 'Unstaging...' : 'Unstage'}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
 
 export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCommonProps) {
   const { derived, diffFileForView } = controller;
@@ -58,104 +154,12 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
           onMomentumScrollEnd={controller.enableBodyScroll}
         >
           {derived.changedFilesWithStats.map((entry) => (
-            <View key={`${entry.code}:${entry.path}`} style={styles.fileRow}>
-              <Text style={styles.fileCode}>{formatStatusCode(entry.code)}</Text>
-              {entry.diffFileId ? (
-                <Pressable
-                  style={styles.filePathPressable}
-                  onPress={() => {
-                    if (entry.diffFileId) {
-                      controller.selectDiffFile(entry.diffFileId);
-                    }
-                  }}
-                  disabled={controller.showDiffFileSwitching}
-                >
-                  <Text
-                    style={[
-                      styles.filePath,
-                      styles.filePathInteractive,
-                      controller.showDiffFileSwitching && styles.filePathDisabled,
-                    ]}
-                  >
-                    {entry.path}
-                  </Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.filePath}>{entry.path}</Text>
-              )}
-              {entry.stats ? (
-                <View style={styles.fileStats}>
-                  <Text style={styles.fileAdded}>+{entry.stats.additions}</Text>
-                  <Text style={styles.fileRemoved}>-{entry.stats.deletions}</Text>
-                </View>
-              ) : null}
-              <View style={styles.fileActions}>
-                {entry.unstaged ? (
-                  <Pressable
-                    onPress={() => void controller.stageFile(entry.stagePath)}
-                    disabled={
-                      controller.loading ||
-                      controller.committing ||
-                      controller.pushing ||
-                      controller.stagingAll ||
-                      controller.unstagingAll ||
-                      controller.stagingPath === entry.stagePath ||
-                      controller.unstagingPath === entry.stagePath
-                    }
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                      styles.fileActionBtn,
-                      styles.fileActionBtnStage,
-                      pressed && styles.fileActionBtnPressed,
-                      (controller.loading ||
-                        controller.committing ||
-                        controller.pushing ||
-                        controller.stagingAll ||
-                        controller.unstagingAll ||
-                        controller.stagingPath === entry.stagePath ||
-                        controller.unstagingPath === entry.stagePath) &&
-                        styles.fileActionBtnDisabled,
-                    ]}
-                  >
-                    <Text style={styles.fileActionText}>
-                      {controller.stagingPath === entry.stagePath ? 'Staging...' : 'Stage'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {entry.staged ? (
-                  <Pressable
-                    onPress={() => void controller.unstageFile(entry.stagePath)}
-                    disabled={
-                      controller.loading ||
-                      controller.committing ||
-                      controller.pushing ||
-                      controller.stagingAll ||
-                      controller.unstagingAll ||
-                      controller.unstagingPath === entry.stagePath ||
-                      controller.stagingPath === entry.stagePath
-                    }
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                      styles.fileActionBtn,
-                      styles.fileActionBtnUnstage,
-                      pressed && styles.fileActionBtnPressed,
-                      (controller.loading ||
-                        controller.committing ||
-                        controller.pushing ||
-                        controller.stagingAll ||
-                        controller.unstagingAll ||
-                        controller.unstagingPath === entry.stagePath ||
-                        controller.stagingPath === entry.stagePath) &&
-                        styles.fileActionBtnDisabled,
-                    ]}
-                  >
-                    <Text style={styles.fileActionText}>
-                      {controller.unstagingPath === entry.stagePath ? 'Unstaging...' : 'Unstage'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            </View>
+            <GitDiffFileRow
+              key={`${entry.code}:${entry.path}`}
+              entry={entry}
+              controller={controller}
+              styles={styles}
+            />
           ))}
         </ScrollView>
       </View>
@@ -254,12 +258,12 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
                     No textual hunks available for this file.
                   </Text>
                 ) : (
-                  <Animated.View
-                    key={diffFileForView.id}
-                    entering={FadeIn.duration(200)}
-                  >
+                  <Animated.View key={diffFileForView.id} entering={FadeIn.duration(200)}>
                     <ScrollView
-                      style={[styles.diffVerticalScroll, { maxHeight: derived.diffViewerMaxHeight }]}
+                      style={[
+                        styles.diffVerticalScroll,
+                        { maxHeight: derived.diffViewerMaxHeight },
+                      ]}
                       contentContainerStyle={styles.diffVerticalContent}
                       showsVerticalScrollIndicator
                       nestedScrollEnabled

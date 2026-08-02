@@ -80,10 +80,7 @@ export function useDrawerChatCollection(
       if (!profileId) {
         return;
       }
-      if (
-        pendingPersistenceRef.current &&
-        pendingPersistenceRef.current.profileId !== profileId
-      ) {
+      if (pendingPersistenceRef.current && pendingPersistenceRef.current.profileId !== profileId) {
         flushPendingPersistence();
       }
       const pending = pendingPersistenceRef.current;
@@ -98,10 +95,7 @@ export function useDrawerChatCollection(
         pending?.profileId === profileId && pending.generation === generation;
       pendingPersistenceRef.current = {
         profileId,
-        summaries: mergeDrawerChatBatch(
-          canCarryForwardPending ? pending.summaries : [],
-          summaries,
-        ),
+        summaries: mergeDrawerChatBatch(canCarryForwardPending ? pending.summaries : [], summaries),
         generation,
       };
       if (persistenceTimerRef.current) {
@@ -116,12 +110,7 @@ export function useDrawerChatCollection(
   );
 
   const applyChats = useCallback(
-    (
-      rawChats: ChatSummary[],
-      cacheLimit?: number,
-      persist = true,
-      authoritative = false,
-    ) => {
+    (rawChats: ChatSummary[], cacheLimit?: number, persist = true, authoritative = false) => {
       if (profileIdRef.current !== profileId) {
         return;
       }

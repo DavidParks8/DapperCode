@@ -242,7 +242,12 @@ describe('TerminalScreen behavior', () => {
     const result = await renderTerminal();
     const root = result.tree.root as Queryable;
     const runBtn = findRunButton(root);
-    const hitSlop = runBtn.props.hitSlop as { top: number; bottom: number; left: number; right: number };
+    const hitSlop = runBtn.props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
     // Button is 30pt, needs 7pt per side to reach 44pt minimum.
     expect(hitSlop.top).toBeGreaterThanOrEqual(7);
     expect(hitSlop.bottom).toBeGreaterThanOrEqual(7);
@@ -326,8 +331,18 @@ describe('TerminalScreen behavior', () => {
     await triggerRun(root);
     expect(announceSpy).toHaveBeenCalledWith('Running command');
 
-    resolveExec({ command: 'echo hi', cwd: '/', code: 0, stdout: 'hi', stderr: '', timedOut: false, durationMs: 1 });
-    await act(async () => { await Promise.resolve(); });
+    resolveExec({
+      command: 'echo hi',
+      cwd: '/',
+      code: 0,
+      stdout: 'hi',
+      stderr: '',
+      timedOut: false,
+      durationMs: 1,
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
     act(() => result.tree.unmount());
   });
 });

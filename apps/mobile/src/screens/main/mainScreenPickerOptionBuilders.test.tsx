@@ -100,7 +100,9 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
   it('fires a selection haptic and delegates when the server-default model option is pressed', async () => {
     const context = createContext();
     const result = render(context);
-    const defaultOption = result.modelPickerOptions.find((option) => option.key === 'server-default');
+    const defaultOption = result.modelPickerOptions.find(
+      (option) => option.key === 'server-default',
+    );
     expect(defaultOption).toBeDefined();
 
     await act(async () => {

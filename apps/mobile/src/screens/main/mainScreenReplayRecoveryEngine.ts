@@ -195,9 +195,29 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     [
       api,
       applyThreadRuntimeSnapshot,
+      bridgeUiSurfaceSnapshotsRef,
       bumpAgentRuntimeRevision,
+      chatIdRef,
+      chatPlanSnapshotsRef,
       mergeChatWithPendingOptimisticMessages,
       readThreadContextUsage,
+      setActiveBridgeUiSurfaces,
+      setActiveCommands,
+      setActivePlan,
+      setActiveTurnId,
+      setActivity,
+      setBridgeCapabilities,
+      setError,
+      setLiveAssistantByThread,
+      setPendingApproval,
+      setPendingUserInputRequest,
+      setSelectedChat,
+      setStoppingTurn,
+      setStreamingText,
+      setTranscriptContinuationState,
+      setUserInputDrafts,
+      store,
+      threadRuntimeSnapshotsRef,
     ],
   );
 
@@ -266,7 +286,24 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       };
       void attempt();
     },
-    [agentDetailThreadId, api, installReplayRecoverySnapshot, relatedAgentThreads, store, ws],
+    [
+      agentDetailThreadId,
+      agentRootThreadIdRef,
+      api,
+      chatIdRef,
+      installReplayRecoverySnapshot,
+      pendingOptimisticQueuedMessagesRef,
+      pendingOptimisticUserMessagesRef,
+      relatedAgentThreads,
+      replayRecoveryAbortControllerRef,
+      replayRecoveryEpochResetPendingRef,
+      replayRecoveryGenerationRef,
+      replayRecoveryRetryTimerRef,
+      setError,
+      store,
+      threadRuntimeSnapshotsRef,
+      ws,
+    ],
   );
 
   return {

@@ -32,10 +32,103 @@ import {
   type ViewportPreset,
 } from './browserScreenShared';
 
+function resolveCapabilitiesError(
+  localError: string | null,
+  bridgeError: string | null,
+): string | null {
+  if (localError) return localError;
+  if (bridgeError === 'Could not read bridge capabilities.') {
+    return 'Could not load bridge capabilities.';
+  }
+  return bridgeError;
+}
+
+function resolveNativeUserAgent(
+  platformOS: typeof Platform.OS,
+  nativeShellMode: ReturnType<typeof getNativeBrowserPreviewShellMode>,
+  desktopModeEnabled: boolean,
+): string | undefined {
+  if (platformOS === 'web' || nativeShellMode || !desktopModeEnabled) {
+    return undefined;
+  }
+  return DESKTOP_PREVIEW_USER_AGENT;
+}
+
+function resolveNativeContentMode(
+  platformOS: typeof Platform.OS,
+  nativeShellMode: ReturnType<typeof getNativeBrowserPreviewShellMode>,
+  desktopModeEnabled: boolean,
+): 'mobile' | 'desktop' | undefined {
+  if (platformOS === 'ios' || nativeShellMode) {
+    return undefined;
+  }
+  return desktopModeEnabled ? 'desktop' : 'mobile';
+}
+
+function resolveBottomBarInset(insetsBottom: number, spacingMd: number, spacingXs: number): number {
+  return insetsBottom > 0 ? Math.max(insetsBottom - spacingMd, spacingXs) : spacingXs;
+}
+
+function resolveOverviewContentHeight(
+  desktopOverviewEnabled: boolean,
+  nativeOverviewShellEnabled: boolean,
+  previewUrl: string | null,
+  overviewMetrics: { previewUrl: string; height: number } | null,
+): number | null {
+  if (
+    desktopOverviewEnabled &&
+    !nativeOverviewShellEnabled &&
+    previewUrl &&
+    overviewMetrics?.previewUrl === previewUrl
+  ) {
+    return overviewMetrics.height;
+  }
+  return null;
+}
+
+function resolveDesktopCanvasHeight(
+  desktopOverviewEnabled: boolean,
+  overviewContentHeight: number | null,
+  desktopViewportHeight: number,
+): number {
+  if (desktopOverviewEnabled && overviewContentHeight) {
+    return Math.max(desktopViewportHeight, overviewContentHeight);
+  }
+  return desktopViewportHeight;
+}
+
+function resolveOverviewReady(
+  nativeOverviewShellEnabled: boolean,
+  desktopOverviewEnabled: boolean,
+  overviewContentHeight: number | null,
+): boolean {
+  return nativeOverviewShellEnabled || !desktopOverviewEnabled || overviewContentHeight !== null;
+}
+
+function resolveDesktopMinimumZoomScale(
+  platformOS: typeof Platform.OS,
+  nativePreviewLayout: { width: number; height: number },
+  desktopViewportWidth: number,
+  desktopCanvasHeight: number,
+): number {
+  if (platformOS === 'ios' && nativePreviewLayout.width > 0) {
+    return Math.min(
+      1,
+      nativePreviewLayout.width / desktopViewportWidth,
+      nativePreviewLayout.height / desktopCanvasHeight,
+    );
+  }
+  return 1;
+}
+
 export function useBrowserScreenModel(theme: AppTheme) {
   const api = useBridgeApi();
   const bridgeCapabilities = useBridgeCapabilitiesResource();
   const browserTargets = useBrowserTargetsResource();
+  // The resource hooks rebuild their result object every render; only the actions inside it are
+  // referentially stable, so callbacks must depend on those rather than the container.
+  const { revalidate: revalidateBridgeCapabilities } = bridgeCapabilities;
+  const { refresh: refreshBrowserTargets } = browserTargets;
   const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
   const [recentTargetUrls, onRecentTargetUrlsChange] = useAtom(recentBrowserTargetUrlsAtom);
   const [pendingTargetUrl, setPendingTargetUrl] = useAtom(pendingBrowserTargetUrlAtom);
@@ -66,11 +159,10 @@ export function useBrowserScreenModel(theme: AppTheme) {
   const suggestionsLoading = browserTargets.refreshing && browserTargets.value === null;
   const suggestions = browserTargets.value ?? [];
   const [localCapabilitiesError, setCapabilitiesError] = useState<string | null>(null);
-  const capabilitiesError =
-    localCapabilitiesError ??
-    (bridgeCapabilities.error === 'Could not read bridge capabilities.'
-      ? 'Could not load bridge capabilities.'
-      : bridgeCapabilities.error);
+  const capabilitiesError = resolveCapabilitiesError(
+    localCapabilitiesError,
+    bridgeCapabilities.error,
+  );
   const supportsBrowserPreview = bridgeCapabilities.value?.supports.browserPreview !== false;
   const [webReloadKey, setWebReloadKey] = useState(0);
   const [nativeReloadKey, setNativeReloadKey] = useState(0);
@@ -131,23 +223,16 @@ export function useBrowserScreenModel(theme: AppTheme) {
     [desktopModeEnabled, desktopViewportSize.width, theme.colors.bgMain],
   );
 
-  const bottomBarInset =
-    insets.bottom > 0
-      ? Math.max(insets.bottom - theme.spacing.md, theme.spacing.xs)
-      : theme.spacing.xs;
+  const bottomBarInset = resolveBottomBarInset(insets.bottom, theme.spacing.md, theme.spacing.xs);
   const bottomBarReservedSpace = bottomBarInset + 58;
   const webViewBottomInset = bottomBarVisible ? bottomBarReservedSpace : 0;
 
-  const nativeUserAgent =
-    Platform.OS === 'web' || nativeShellMode || !desktopModeEnabled
-      ? undefined
-      : DESKTOP_PREVIEW_USER_AGENT;
-  const nativeContentMode: 'mobile' | 'desktop' | undefined =
-    Platform.OS === 'ios' || nativeShellMode
-      ? undefined
-      : desktopModeEnabled
-        ? 'desktop'
-        : 'mobile';
+  const nativeUserAgent = resolveNativeUserAgent(Platform.OS, nativeShellMode, desktopModeEnabled);
+  const nativeContentMode = resolveNativeContentMode(
+    Platform.OS,
+    nativeShellMode,
+    desktopModeEnabled,
+  );
 
   const browserViewport = useMemo<BrowserPreviewViewportSpec>(
     () =>
@@ -166,27 +251,28 @@ export function useBrowserScreenModel(theme: AppTheme) {
     (preset) =>
       preset.width === desktopViewportSize.width && preset.height === desktopViewportSize.height,
   );
-  const overviewContentHeight =
-    desktopOverviewEnabled &&
-    !nativeOverviewShellEnabled &&
-    previewUrl &&
-    overviewMetrics?.previewUrl === previewUrl
-      ? overviewMetrics.height
-      : null;
-  const desktopCanvasHeight =
-    desktopOverviewEnabled && overviewContentHeight
-      ? Math.max(desktopViewportSize.height, overviewContentHeight)
-      : desktopViewportSize.height;
-  const overviewReady =
-    nativeOverviewShellEnabled || !desktopOverviewEnabled || overviewContentHeight !== null;
-  const desktopMinimumZoomScale =
-    Platform.OS === 'ios' && nativePreviewLayout.width > 0
-      ? Math.min(
-          1,
-          nativePreviewLayout.width / desktopViewportSize.width,
-          nativePreviewLayout.height / desktopCanvasHeight,
-        )
-      : 1;
+  const overviewContentHeight = resolveOverviewContentHeight(
+    desktopOverviewEnabled,
+    nativeOverviewShellEnabled,
+    previewUrl,
+    overviewMetrics,
+  );
+  const desktopCanvasHeight = resolveDesktopCanvasHeight(
+    desktopOverviewEnabled,
+    overviewContentHeight,
+    desktopViewportSize.height,
+  );
+  const overviewReady = resolveOverviewReady(
+    nativeOverviewShellEnabled,
+    desktopOverviewEnabled,
+    overviewContentHeight,
+  );
+  const desktopMinimumZoomScale = resolveDesktopMinimumZoomScale(
+    Platform.OS,
+    nativePreviewLayout,
+    desktopViewportSize.width,
+    desktopCanvasHeight,
+  );
 
   const startPreviewSession = useCallback(
     async (rawTarget: string, viewport: BrowserPreviewViewportSpec) => {
@@ -215,12 +301,12 @@ export function useBrowserScreenModel(theme: AppTheme) {
 
   const loadBrowserCapabilities = useCallback(async () => {
     setCapabilitiesError(null);
-    await bridgeCapabilities.revalidate();
-  }, [bridgeCapabilities.revalidate]);
+    await revalidateBridgeCapabilities();
+  }, [revalidateBridgeCapabilities]);
 
   const loadSuggestions = useCallback(async () => {
-    await browserTargets.refresh();
-  }, [browserTargets.refresh]);
+    await refreshBrowserTargets();
+  }, [refreshBrowserTargets]);
 
   const openPreview = useCallback(
     async (rawTarget: string) => {

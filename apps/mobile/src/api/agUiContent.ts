@@ -37,49 +37,72 @@ function renderStructuredContent(value: unknown, depth: number): string[] {
   const type = nonEmptyString(entry.type)
     ?.replace(/[^a-z0-9]/gi, '')
     .toLowerCase();
-  if (type === 'text') return nonEmptyString(entry.text) ? [String(entry.text)] : [];
-  if (type === 'image') {
-    const url =
-      nonEmptyString(entry.url) ??
-      nonEmptyString(entry.imageUrl) ??
-      nonEmptyString(entry.image_url);
-    const data = nonEmptyString(entry.data);
-    const mimeType = nonEmptyString(entry.mimeType) ?? nonEmptyString(entry.mime_type);
-    const source = url ?? (data && mimeType ? `data:${mimeType};base64,${data}` : null);
-    return source ? [`[image: ${source}]`] : ['[image]'];
-  }
-  if (type === 'audio') {
-    const mimeType = nonEmptyString(entry.mimeType) ?? nonEmptyString(entry.mime_type);
-    return [`[audio${mimeType ? `: ${mimeType}` : ''}]`];
-  }
-  if (type === 'resourcelink') {
-    const uri = nonEmptyString(entry.uri);
-    const name = nonEmptyString(entry.name);
-    return uri ? [`[file: ${uri}]${name && name !== uri ? ` ${name}` : ''}`] : [];
-  }
-  if (type === 'resource') {
-    const resource = record(entry.resource);
-    const uri = nonEmptyString(resource?.uri);
-    const text = nonEmptyString(resource?.text);
-    return [uri ? `[resource: ${uri}]` : '[resource]', ...(text ? [text] : [])];
-  }
+  const rendered = renderTypedContent(type, entry);
+  if (rendered) return rendered;
   if (type === 'content') return renderStructuredContent(entry.content, depth + 1);
-  if (type === 'diff') {
-    const path = nonEmptyString(entry.path) ?? 'file';
-    return [
-      `[diff: ${path}]`,
-      ...[entry.oldText, entry.newText].flatMap((part) => renderStructuredContent(part, depth + 1)),
-    ];
-  }
-  if (type === 'terminal') {
-    const terminalId = nonEmptyString(entry.terminalId) ?? nonEmptyString(entry.terminal_id);
-    return [
-      `[terminal${terminalId ? `: ${terminalId}` : ''}]`,
-      ...['output', 'content'].flatMap((key) =>
-        key in entry ? renderStructuredContent(entry[key], depth + 1) : [],
-      ),
-    ];
-  }
+  if (type === 'diff') return renderDiff(entry, depth);
+  if (type === 'terminal') return renderTerminal(entry, depth);
+  return renderNestedContent(entry, depth);
+}
+
+function renderTypedContent(
+  type: string | undefined,
+  entry: Record<string, unknown>,
+): string[] | null {
+  if (type === 'text') return nonEmptyString(entry.text) ? [String(entry.text)] : [];
+  if (type === 'image') return renderImage(entry);
+  if (type === 'audio') return renderAudio(entry);
+  if (type === 'resourcelink') return renderResourceLink(entry);
+  if (type === 'resource') return renderResource(entry);
+  return null;
+}
+
+function renderImage(entry: Record<string, unknown>): string[] {
+  const url =
+    nonEmptyString(entry.url) ?? nonEmptyString(entry.imageUrl) ?? nonEmptyString(entry.image_url);
+  const data = nonEmptyString(entry.data);
+  const mimeType = nonEmptyString(entry.mimeType) ?? nonEmptyString(entry.mime_type);
+  const source = url ?? (data && mimeType ? `data:${mimeType};base64,${data}` : null);
+  return source ? [`[image: ${source}]`] : ['[image]'];
+}
+
+function renderAudio(entry: Record<string, unknown>): string[] {
+  const mimeType = nonEmptyString(entry.mimeType) ?? nonEmptyString(entry.mime_type);
+  return [`[audio${mimeType ? `: ${mimeType}` : ''}]`];
+}
+
+function renderResourceLink(entry: Record<string, unknown>): string[] {
+  const uri = nonEmptyString(entry.uri);
+  const name = nonEmptyString(entry.name);
+  return uri ? [`[file: ${uri}]${name && name !== uri ? ` ${name}` : ''}`] : [];
+}
+
+function renderResource(entry: Record<string, unknown>): string[] {
+  const resource = record(entry.resource);
+  const uri = nonEmptyString(resource?.uri);
+  const text = nonEmptyString(resource?.text);
+  return [uri ? `[resource: ${uri}]` : '[resource]', ...(text ? [text] : [])];
+}
+
+function renderDiff(entry: Record<string, unknown>, depth: number): string[] {
+  const path = nonEmptyString(entry.path) ?? 'file';
+  return [
+    `[diff: ${path}]`,
+    ...[entry.oldText, entry.newText].flatMap((part) => renderStructuredContent(part, depth + 1)),
+  ];
+}
+
+function renderTerminal(entry: Record<string, unknown>, depth: number): string[] {
+  const terminalId = nonEmptyString(entry.terminalId) ?? nonEmptyString(entry.terminal_id);
+  return [
+    `[terminal${terminalId ? `: ${terminalId}` : ''}]`,
+    ...['output', 'content'].flatMap((key) =>
+      key in entry ? renderStructuredContent(entry[key], depth + 1) : [],
+    ),
+  ];
+}
+
+function renderNestedContent(entry: Record<string, unknown>, depth: number): string[] {
   const nested = [
     'content',
     'structuredContent',

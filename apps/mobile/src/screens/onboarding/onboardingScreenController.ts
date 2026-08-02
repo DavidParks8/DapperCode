@@ -243,7 +243,9 @@ export function useOnboardingScreenController(
       connectionCheck.kind === 'success' &&
       connectionCheck.verifiedUrl === validated.bridgeUrl &&
       connectionCheck.verifiedToken === normalizedToken;
-    const ok = alreadyVerified ? true : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
+    const ok = alreadyVerified
+      ? true
+      : await runConnectionCheck(validated.bridgeUrl, normalizedToken);
     if (!ok) {
       return;
     }

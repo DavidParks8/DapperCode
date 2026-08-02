@@ -7,7 +7,16 @@ import type {
 } from '../../api/types';
 import { parseSlashCommand } from './mainScreenHelperPlansAndCommands';
 import { parseInlineOptionsFromQuestionText } from './mainScreenHelperInlineChoices';
-import { readBoolean, readFiniteNumber, readString, toRecord } from '../../runtimeValidation';
+import {
+  lookupDispatchEntry,
+  readBoolean,
+  readFiniteNumber,
+  readString,
+  toRecord,
+} from '../../runtimeValidation';
+
+const BRIDGE_UI_PRESENTATIONS = ['workflowCard', 'modal', 'banner'] as const;
+const BRIDGE_UI_TONES = ['info', 'success', 'warning', 'error', 'neutral'] as const;
 
 function readUserInputFieldType(
   value: unknown,
@@ -148,16 +157,8 @@ export function toBridgeUiSurface(value: unknown): BridgeUiSurface | null {
     return null;
   }
 
-  const id = readString(record.id);
-  const threadId = readString(record.threadId);
-  const presentation = readString(record.presentation);
-  const title = readString(record.title);
-  if (
-    !id ||
-    !threadId ||
-    !title ||
-    (presentation !== 'workflowCard' && presentation !== 'modal' && presentation !== 'banner')
-  ) {
+  const baseSurface = readBridgeUiSurfaceBase(record);
+  if (!baseSurface) {
     return null;
   }
 
@@ -167,23 +168,12 @@ export function toBridgeUiSurface(value: unknown): BridgeUiSurface | null {
   const actions = rawActions
     .map(toBridgeUiAction)
     .filter((action): action is BridgeUiAction => action !== null);
-  const tone = readString(record.tone);
 
   return {
-    id,
-    threadId,
+    ...baseSurface,
     turnId: readString(record.turnId) ?? null,
     kind: readString(record.kind) ?? null,
-    presentation,
-    tone:
-      tone === 'info' ||
-      tone === 'success' ||
-      tone === 'warning' ||
-      tone === 'error' ||
-      tone === 'neutral'
-        ? tone
-        : undefined,
-    title,
+    tone: readBridgeUiTone(readString(record.tone)),
     subtitle: readString(record.subtitle) ?? null,
     bodyMarkdown,
     blocks,
@@ -275,89 +265,11 @@ function toBridgeUiBlock(value: unknown): BridgeUiBlock | null {
   }
 
   const type = readString(record.type);
-  if (type === 'text') {
-    const text = readString(record.text);
-    return text ? { type, text } : null;
+  if (!type) {
+    return null;
   }
 
-  if (type === 'markdown') {
-    const markdown = readString(record.markdown);
-    return markdown ? { type, markdown } : null;
-  }
-
-  if (type === 'checklist') {
-    const items: BridgeUiChecklistItem[] = Array.isArray(record.items)
-      ? record.items
-          .map((item) => {
-            const itemRecord = toRecord(item);
-            if (!itemRecord) {
-              return null;
-            }
-            const label = readString(itemRecord.label);
-            const status = readString(itemRecord.status);
-            if (!label) {
-              return null;
-            }
-            const normalizedStatus =
-              status === 'pending' || status === 'inProgress' || status === 'completed'
-                ? status
-                : undefined;
-            return {
-              label,
-              status: normalizedStatus,
-              detail: readString(itemRecord.detail) ?? undefined,
-            } satisfies BridgeUiChecklistItem;
-          })
-          .filter((item): item is NonNullable<typeof item> => item !== null)
-      : [];
-    return items.length > 0 ? { type, items } : null;
-  }
-
-  if (type === 'keyValue') {
-    const items = Array.isArray(record.items)
-      ? record.items
-          .map((item) => {
-            const itemRecord = toRecord(item);
-            if (!itemRecord) {
-              return null;
-            }
-            const label = readString(itemRecord.label);
-            const itemValue = readString(itemRecord.value);
-            return label && itemValue ? { label, value: itemValue } : null;
-          })
-          .filter((item): item is NonNullable<typeof item> => item !== null)
-      : [];
-    return items.length > 0 ? { type, items } : null;
-  }
-
-  if (type === 'code') {
-    const text = readString(record.text);
-    return text
-      ? {
-          type,
-          text,
-          language: readString(record.language) ?? null,
-        }
-      : null;
-  }
-
-  if (type === 'progress') {
-    const label = readString(record.label);
-    const progressValue = readFiniteNumber(record.value);
-    const max = readFiniteNumber(record.max);
-    if (!label || progressValue === null || max === null || max <= 0) {
-      return null;
-    }
-    return {
-      type,
-      label,
-      value: progressValue,
-      max,
-      detail: readString(record.detail) ?? null,
-    };
-  }
-
-  return null;
+  return lookupDispatchEntry(BRIDGE_UI_BLOCK_READERS, type)?.(record) ?? null;
 }
 
 export function upsertBridgeUiSurfaceList(
@@ -379,4 +291,142 @@ export function removeBridgeUiSurfaceFromList(
   surfaceId: string,
 ): BridgeUiSurface[] {
   return surfaces.filter((surface) => surface.id !== surfaceId);
+}
+
+function readBridgeUiSurfaceBase(
+  record: Record<string, unknown>,
+): Pick<BridgeUiSurface, 'id' | 'threadId' | 'presentation' | 'title'> | null {
+  const id = readString(record.id);
+  const threadId = readString(record.threadId);
+  const presentation = readBridgeUiPresentation(record.presentation);
+  const title = readString(record.title);
+
+  return id && threadId && presentation && title ? { id, threadId, presentation, title } : null;
+}
+
+function readBridgeUiPresentation(value: unknown): BridgeUiSurface['presentation'] | null {
+  const presentation = readString(value);
+  return presentation &&
+    BRIDGE_UI_PRESENTATIONS.includes(presentation as BridgeUiSurface['presentation'])
+    ? (presentation as BridgeUiSurface['presentation'])
+    : null;
+}
+
+function readBridgeUiTone(value: unknown): BridgeUiSurface['tone'] | undefined {
+  return BRIDGE_UI_TONES.includes(value as (typeof BRIDGE_UI_TONES)[number])
+    ? (value as (typeof BRIDGE_UI_TONES)[number])
+    : undefined;
+}
+
+const BRIDGE_UI_BLOCK_READERS: Record<
+  string,
+  (record: Record<string, unknown>) => BridgeUiBlock | null
+> = {
+  text: toTextBridgeUiBlock,
+  markdown: toMarkdownBridgeUiBlock,
+  checklist: toChecklistBridgeUiBlock,
+  keyValue: toKeyValueBridgeUiBlock,
+  code: toCodeBridgeUiBlock,
+  progress: toProgressBridgeUiBlock,
+};
+
+function toTextBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const text = readString(record.text);
+  return text ? { type: 'text', text } : null;
+}
+
+function toMarkdownBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const markdown = readString(record.markdown);
+  return markdown ? { type: 'markdown', markdown } : null;
+}
+
+function toChecklistBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const items = parseBridgeUiChecklistItems(record.items);
+  return items.length > 0 ? { type: 'checklist', items } : null;
+}
+
+function toKeyValueBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const items = parseBridgeUiKeyValueItems(record.items);
+  return items.length > 0 ? { type: 'keyValue', items } : null;
+}
+
+function toCodeBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const text = readString(record.text);
+  return text
+    ? {
+        type: 'code',
+        text,
+        language: readString(record.language) ?? null,
+      }
+    : null;
+}
+
+function toProgressBridgeUiBlock(record: Record<string, unknown>): BridgeUiBlock | null {
+  const label = readString(record.label);
+  const progressValue = readFiniteNumber(record.value);
+  const max = readFiniteNumber(record.max);
+  if (!label || progressValue === null || max === null || max <= 0) {
+    return null;
+  }
+
+  return {
+    type: 'progress',
+    label,
+    value: progressValue,
+    max,
+    detail: readString(record.detail) ?? null,
+  };
+}
+
+function parseBridgeUiChecklistItems(value: unknown): BridgeUiChecklistItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(toBridgeUiChecklistItem)
+    .filter((item): item is BridgeUiChecklistItem => item !== null);
+}
+
+function toBridgeUiChecklistItem(value: unknown): BridgeUiChecklistItem | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const label = readString(record.label);
+  if (!label) {
+    return null;
+  }
+
+  return {
+    label,
+    status: readBridgeUiChecklistStatus(record.status),
+    detail: readString(record.detail) ?? undefined,
+  };
+}
+
+function readBridgeUiChecklistStatus(value: unknown): BridgeUiChecklistItem['status'] | undefined {
+  return value === 'pending' || value === 'inProgress' || value === 'completed' ? value : undefined;
+}
+
+function parseBridgeUiKeyValueItems(value: unknown): Array<{ label: string; value: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(toBridgeUiKeyValueItem)
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function toBridgeUiKeyValueItem(value: unknown): { label: string; value: string } | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const label = readString(record.label);
+  const itemValue = readString(record.value);
+  return label && itemValue ? { label, value: itemValue } : null;
 }

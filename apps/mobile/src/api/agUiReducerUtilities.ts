@@ -49,31 +49,53 @@ export function applyJsonPatch(value: unknown, operations: unknown[]): unknown {
   let next: unknown = cloneJson(value ?? {});
   for (const operation of operations) {
     const patch = record(operation);
-    const op = nonEmptyString(patch?.op);
-    const path = typeof patch?.path === 'string' ? patch.path : null;
-    if (!op || path === null) continue;
-    const segments = path.split('/').slice(1).map(unescapePointer);
-    if (segments.length === 0) {
-      if (op === 'replace' || op === 'add') next = cloneJson(patch?.value);
-      if (op === 'remove') next = null;
-      continue;
-    }
-    const parent = getPatchParent(next, segments.slice(0, -1));
-    if (!parent) continue;
-    const key = segments.at(-1)!;
-    if (Array.isArray(parent)) {
-      const index = key === '-' ? parent.length : Number.parseInt(key, 10);
-      if (!Number.isFinite(index)) continue;
-      if (op === 'remove') parent.splice(index, 1);
-      else if (op === 'add') parent.splice(index, 0, cloneJson(patch?.value));
-      else if (op === 'replace') parent[index] = cloneJson(patch?.value);
-    } else if (typeof parent === 'object') {
-      if (op === 'remove') delete (parent as Record<string, unknown>)[key];
-      else if (op === 'add' || op === 'replace')
-        (parent as Record<string, unknown>)[key] = cloneJson(patch?.value);
-    }
+    next = applyPatchOperation(next, patch);
   }
   return next;
+}
+
+function applyPatchOperation(root: unknown, patch: Record<string, unknown> | null): unknown {
+  const op = nonEmptyString(patch?.op);
+  const path = typeof patch?.path === 'string' ? patch.path : null;
+  if (!op || path === null) return root;
+  const segments = path.split('/').slice(1).map(unescapePointer);
+  if (segments.length === 0) return applyRootPatch(root, op, patch?.value);
+  applyNestedPatch(root, segments, op, patch?.value);
+  return root;
+}
+
+function applyRootPatch(root: unknown, op: string, value: unknown): unknown {
+  if (op === 'replace' || op === 'add') return cloneJson(value);
+  return op === 'remove' ? null : root;
+}
+
+function applyNestedPatch(root: unknown, segments: string[], op: string, value: unknown): void {
+  const parent = getPatchParent(root, segments.slice(0, -1));
+  if (!parent) return;
+  const key = segments.at(-1)!;
+  if (Array.isArray(parent)) {
+    applyArrayPatch(parent, key, op, value);
+  } else if (typeof parent === 'object') {
+    applyObjectPatch(parent as Record<string, unknown>, key, op, value);
+  }
+}
+
+function applyArrayPatch(parent: unknown[], key: string, op: string, value: unknown): void {
+  const index = key === '-' ? parent.length : Number.parseInt(key, 10);
+  if (!Number.isFinite(index)) return;
+  if (op === 'remove') parent.splice(index, 1);
+  else if (op === 'add') parent.splice(index, 0, cloneJson(value));
+  else if (op === 'replace') parent[index] = cloneJson(value);
+}
+
+function applyObjectPatch(
+  parent: Record<string, unknown>,
+  key: string,
+  op: string,
+  value: unknown,
+): void {
+  if (op === 'remove') delete parent[key];
+  else if (op === 'add' || op === 'replace') parent[key] = cloneJson(value);
 }
 
 export function getPatchParent(root: unknown, segments: string[]): unknown {

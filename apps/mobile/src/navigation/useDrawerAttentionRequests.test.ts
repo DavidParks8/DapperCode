@@ -113,9 +113,7 @@ describe('useDrawerAttentionRequests event burst debouncing', () => {
   it('coalesces a burst of approval/user-input events into a single trailing refresh', async () => {
     const harness = createHarness();
     harness.listApprovals.mockResolvedValueOnce([]).mockResolvedValueOnce([approval('a')]);
-    harness.listPendingUserInputs
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([userInput('b')]);
+    harness.listPendingUserInputs.mockResolvedValueOnce([]).mockResolvedValueOnce([userInput('b')]);
     const { tree, latest } = renderAttentionRequests(harness);
 
     // The initial mount refresh fires immediately.

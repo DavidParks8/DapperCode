@@ -106,21 +106,14 @@ export function reduceToolContent(
   if (current.subagentToolCallIds[toolCallId]) return current;
   const revision = nonEmptyString(value?.revision) ?? JSON.stringify(value);
   if (current.structuredRevisionByCallId[toolCallId] === revision) return current;
-  const structured =
-    Array.isArray(value?.content) &&
-    value.content.length === 0 &&
-    Array.isArray(value?.locations) &&
-    value.locations.length === 0
-      ? ''
-      : renderAgUiCustomContent(value);
+  const structured = renderToolStructuredContent(value);
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const existing = findMessage(current, messageId);
   const existingText = existing?.role === 'tool' ? existing.content : '';
-  const previousStructured = current.structuredTextByCallId[toolCallId] ?? '';
-  const base =
-    previousStructured && existingText.endsWith(previousStructured)
-      ? existingText.slice(0, -previousStructured.length).trimEnd()
-      : existingText;
+  const base = withoutPreviousStructuredText(
+    existingText,
+    current.structuredTextByCallId[toolCallId] ?? '',
+  );
   const joined = appendToolText(base, structured);
   const next = upsertToolResult(
     current,
@@ -153,40 +146,30 @@ export function reduceToolContent(
   };
 }
 
+function renderToolStructuredContent(value: Record<string, unknown> | null): string {
+  const emptyContent = Array.isArray(value?.content) && value.content.length === 0;
+  const emptyLocations = Array.isArray(value?.locations) && value.locations.length === 0;
+  return emptyContent && emptyLocations ? '' : renderAgUiCustomContent(value);
+}
+
+function withoutPreviousStructuredText(text: string, previousStructured: string): string {
+  return previousStructured && text.endsWith(previousStructured)
+    ? text.slice(0, -previousStructured.length).trimEnd()
+    : text;
+}
+
 export function reduceSubagentActivity(
   current: AgUiThreadMessageState,
   envelope: AgUiEventEnvelope,
   value: Record<string, unknown> | null,
 ): AgUiThreadMessageState {
   const toolCallId = nonEmptyString(value?.toolCallId) ?? 'unknown';
-  const receiverThreadIds = Array.isArray(value?.receiverThreadIds)
-    ? value.receiverThreadIds.map(nonEmptyString).filter((id): id is string => Boolean(id))
-    : [];
+  const receiverThreadIds = readReceiverThreadIds(value?.receiverThreadIds);
   if (receiverThreadIds.length === 0) return current;
-  const meta: ChatMessageSubAgentMeta = {
-    toolCallId,
-    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
-    senderThreadId: nonEmptyString(value?.senderThreadId) ?? envelope.threadId,
-    receiverThreadIds: Array.from(new Set(receiverThreadIds)),
-    agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
-  };
+  const meta = createSubagentMeta(toolCallId, receiverThreadIds, value, envelope.threadId);
   const resultPreview = nonEmptyString(value?.resultPreview);
-  const text = [
-    meta.agentStatus === 'completed' ? '• Spawned sub-agent' : '• Spawning sub-agent',
-    `  Thread: ${receiverThreadIds[0]}`,
-    meta.agentStatus ? `  Status: ${meta.agentStatus}` : null,
-    resultPreview ? `  Result: ${resultPreview}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-  const messages = current.messages.filter(
-    (message) =>
-      !(
-        message.id === `tool-call:${toolCallId}` ||
-        message.id === `tool-result:${toolCallId}` ||
-        message.id === `subagent:${toolCallId}`
-      ),
-  );
+  const text = formatSubagentActivity(meta, receiverThreadIds[0], resultPreview);
+  const messages = withoutSubagentMessages(current.messages, toolCallId);
   return upsertMessage(
     {
       ...current,
@@ -205,6 +188,51 @@ export function reduceSubagentActivity(
     envelope.runId,
     envelope.event.timestamp,
   );
+}
+
+function readReceiverThreadIds(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(nonEmptyString).filter((id): id is string => Boolean(id))
+    : [];
+}
+
+function createSubagentMeta(
+  toolCallId: string,
+  receiverThreadIds: string[],
+  value: Record<string, unknown> | null,
+  threadId: string,
+): ChatMessageSubAgentMeta {
+  return {
+    toolCallId,
+    tool: nonEmptyString(value?.tool) ?? 'spawnAgent',
+    senderThreadId: nonEmptyString(value?.senderThreadId) ?? threadId,
+    receiverThreadIds: Array.from(new Set(receiverThreadIds)),
+    agentStatus: nonEmptyString(value?.agentStatus) ?? undefined,
+  };
+}
+
+function formatSubagentActivity(
+  meta: ChatMessageSubAgentMeta,
+  receiverThreadId: string,
+  resultPreview: string | null,
+): string {
+  return [
+    meta.agentStatus === 'completed' ? '• Spawned sub-agent' : '• Spawning sub-agent',
+    `  Thread: ${receiverThreadId}`,
+    meta.agentStatus ? `  Status: ${meta.agentStatus}` : null,
+    resultPreview ? `  Result: ${resultPreview}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function withoutSubagentMessages(messages: ChatMessage[], toolCallId: string): ChatMessage[] {
+  const removedIds = new Set([
+    `tool-call:${toolCallId}`,
+    `tool-result:${toolCallId}`,
+    `subagent:${toolCallId}`,
+  ]);
+  return messages.filter((message) => !removedIds.has(message.id));
 }
 
 export function markTerminal(

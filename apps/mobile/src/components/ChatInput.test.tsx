@@ -1,4 +1,10 @@
-import { ActivityIndicator, Platform, StyleSheet, TextInput, type TextInputProps } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  StyleSheet,
+  TextInput,
+  type TextInputProps,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 

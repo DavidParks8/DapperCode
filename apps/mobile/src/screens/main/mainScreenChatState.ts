@@ -12,6 +12,46 @@ const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
   'local-assistant-',
   'local-system-',
 ] as const;
+const CHAT_SUMMARY_IDENTITY_FIELDS = [
+  'id',
+  'title',
+  'status',
+  'createdAt',
+  'updatedAt',
+  'statusUpdatedAt',
+  'lastMessagePreview',
+  'cwd',
+  'lastError',
+] as const satisfies readonly (keyof ChatSummary)[];
+const CHAT_SUMMARY_AGENT_FIELDS = [
+  'agentId',
+  'modelProvider',
+  'agentNickname',
+  'agentRole',
+  'sourceKind',
+  'parentThreadId',
+  'subAgentDepth',
+] as const satisfies readonly (keyof ChatSummary)[];
+const CHAT_SUMMARY_RUN_FIELDS = [
+  'lastRunStartedAt',
+  'lastRunFinishedAt',
+  'lastRunDurationMs',
+  'lastRunExitCode',
+  'lastRunTimedOut',
+] as const satisfies readonly (keyof ChatSummary)[];
+
+function areChatSummaryFieldsEquivalent(
+  previous: ChatSummary,
+  next: ChatSummary,
+  fields: readonly (keyof ChatSummary)[],
+): boolean {
+  for (const field of fields) {
+    if (previous[field] !== next[field]) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export function areChatStatusMapsEquivalent(
   previous: ReadonlyMap<string, Chat['status']>,
@@ -167,27 +207,9 @@ function areChatSummariesEquivalent(
   }
 
   return (
-    previous.id === next.id &&
-    previous.title === next.title &&
-    previous.status === next.status &&
-    previous.createdAt === next.createdAt &&
-    previous.updatedAt === next.updatedAt &&
-    previous.statusUpdatedAt === next.statusUpdatedAt &&
-    previous.lastMessagePreview === next.lastMessagePreview &&
-    previous.cwd === next.cwd &&
-    previous.agentId === next.agentId &&
-    previous.modelProvider === next.modelProvider &&
-    previous.agentNickname === next.agentNickname &&
-    previous.agentRole === next.agentRole &&
-    previous.sourceKind === next.sourceKind &&
-    previous.parentThreadId === next.parentThreadId &&
-    previous.subAgentDepth === next.subAgentDepth &&
-    previous.lastRunStartedAt === next.lastRunStartedAt &&
-    previous.lastRunFinishedAt === next.lastRunFinishedAt &&
-    previous.lastRunDurationMs === next.lastRunDurationMs &&
-    previous.lastRunExitCode === next.lastRunExitCode &&
-    previous.lastRunTimedOut === next.lastRunTimedOut &&
-    previous.lastError === next.lastError
+    areChatSummaryFieldsEquivalent(previous, next, CHAT_SUMMARY_IDENTITY_FIELDS) &&
+    areChatSummaryFieldsEquivalent(previous, next, CHAT_SUMMARY_AGENT_FIELDS) &&
+    areChatSummaryFieldsEquivalent(previous, next, CHAT_SUMMARY_RUN_FIELDS)
   );
 }
 

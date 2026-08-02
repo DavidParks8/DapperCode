@@ -33,9 +33,7 @@ function renderRow(backgroundColor: string): ReactTestRenderer {
 function gradients(root: Queryable): Queryable[] {
   return root.findAll(
     (node) =>
-      Array.isArray(node.props.colors) &&
-      node.props.pointerEvents === 'none' &&
-      node.type === View,
+      Array.isArray(node.props.colors) && node.props.pointerEvents === 'none' && node.type === View,
   );
 }
 

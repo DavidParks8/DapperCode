@@ -92,8 +92,7 @@ describe('ToolInvocationRow', () => {
     const tree = render(invocation({ id: 'tool-hitslop', textLines: ['out'] }));
     const row = tree.root.findAll((node) => typeof node.props.onPress === 'function')[0];
     const hitSlop = row.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
 
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);

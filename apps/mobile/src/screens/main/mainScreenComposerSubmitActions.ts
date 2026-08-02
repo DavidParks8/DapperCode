@@ -21,7 +21,6 @@ export function useMainScreenComposerSubmitActions(
     bumpRunWatchdog,
     cacheThreadQueueState,
     creatingRef,
-    draft,
     draftController,
     handleSlashCommand,
     hasFailedAttachmentUploads,
@@ -79,10 +78,11 @@ export function useMainScreenComposerSubmitActions(
     });
     await sendMessageContent(content, { allowSlashCommands: false, submission });
   }, [
-    draft,
     draftController,
     handleSlashCommand,
     sendMessageContent,
+    setDraft,
+    setError,
     submissionController,
     pendingMentionPaths,
     pendingLocalImagePaths,
@@ -128,6 +128,10 @@ export function useMainScreenComposerSubmitActions(
     pendingUserInputRequest?.requestId,
     scrollToBottomReliable,
     selectedChatId,
+    setError,
+    setQueueActionItemId,
+    setQueueActionKind,
+    threadRuntimeSnapshotsRef,
   ]);
 
   const handleCancelQueuedMessage = useCallback(
@@ -151,32 +155,42 @@ export function useMainScreenComposerSubmitActions(
         setQueueActionKind((previous) => (previous === 'cancel' ? null : previous));
       }
     },
-    [selectedChatId, turnExecutionController, cacheThreadQueueState],
+    [
+      cacheThreadQueueState,
+      selectedChatId,
+      setError,
+      setQueueActionItemId,
+      setQueueActionKind,
+      turnExecutionController,
+    ],
   );
 
   useEffect(() => {
     setQueueActionItemId(null);
     setQueueActionKind(null);
-  }, [selectedChat?.id]);
+  }, [selectedChat?.id, setQueueActionItemId, setQueueActionKind]);
 
-  const handleInlineOptionSelect = useCallback((value: string) => {
-    const option = value.trim();
-    if (!option) {
-      return;
-    }
+  const handleInlineOptionSelect = useCallback(
+    (value: string) => {
+      const option = value.trim();
+      if (!option) {
+        return;
+      }
 
-    const cannotAutoSend =
-      !selectedChatIdRef.current ||
-      sendingRef.current ||
-      creatingRef.current ||
-      stoppingTurnRef.current;
-    if (cannotAutoSend) {
-      setDraft(option);
-      return;
-    }
+      const cannotAutoSend =
+        !selectedChatIdRef.current ||
+        sendingRef.current ||
+        creatingRef.current ||
+        stoppingTurnRef.current;
+      if (cannotAutoSend) {
+        setDraft(option);
+        return;
+      }
 
-    void sendMessageContentRef.current(option, { allowSlashCommands: false });
-  }, []);
+      void sendMessageContentRef.current(option, { allowSlashCommands: false });
+    },
+    [creatingRef, selectedChatIdRef, sendingRef, setDraft, stoppingTurnRef],
+  );
 
   return {
     sendMessageContentRef,

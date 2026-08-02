@@ -80,17 +80,11 @@ export function readBrowserPreviewSession(value: unknown): BrowserPreviewSession
   if (!record) {
     return null;
   }
-  const sessionId = readString(record.sessionId)?.trim() ?? '';
-  const targetUrl = readString(record.targetUrl)?.trim() ?? '';
-  const bootstrapPath = readString(record.bootstrapPath)?.trim() ?? '';
-  const previewBaseUrl = readString(record.previewBaseUrl)?.trim() || null;
-  const previewPortRaw = record.previewPort;
-  const previewPort =
-    typeof previewPortRaw === 'number'
-      ? Math.max(1, Math.trunc(previewPortRaw))
-      : typeof previewPortRaw === 'string'
-        ? Math.max(1, Number.parseInt(previewPortRaw, 10) || 0)
-        : 0;
+  const sessionId = trimmedValue(record.sessionId);
+  const targetUrl = trimmedValue(record.targetUrl);
+  const bootstrapPath = trimmedValue(record.bootstrapPath);
+  const previewBaseUrl = trimmedValue(record.previewBaseUrl);
+  const previewPort = readPreviewPort(record.previewPort);
   const createdAt = readTimestampIso(record.createdAt);
   const lastAccessedAt = readTimestampIso(record.lastAccessedAt);
   const expiresAt = readTimestampIso(record.expiresAt);
@@ -107,6 +101,16 @@ export function readBrowserPreviewSession(value: unknown): BrowserPreviewSession
     lastAccessedAt: lastAccessedAt ?? createdAt,
     expiresAt,
   };
+}
+
+function trimmedValue(value: unknown): string {
+  return readString(value)?.trim() ?? '';
+}
+
+function readPreviewPort(value: unknown): number {
+  if (typeof value === 'number') return Math.max(1, Math.trunc(value));
+  if (typeof value === 'string') return Math.max(1, Number.parseInt(value, 10) || 0);
+  return 0;
 }
 
 export function readBrowserPreviewDiscoveryResponse(

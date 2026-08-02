@@ -2196,13 +2196,16 @@ describe('DrawerContent session search', () => {
 
     await typeSearch(root, 'alpha');
     const summaryText = root.findAll(
-      (node) => textContent(node as Queryable).includes('session matches "alpha"') && node.type === Text,
+      (node) =>
+        textContent(node as Queryable).includes('session matches "alpha"') && node.type === Text,
     )[0];
     expect(summaryText?.props.accessibilityLiveRegion).toBeUndefined();
 
     await typeSearch(root, 'nonexistent');
     const emptyStateView = root.findAll(
-      (node) => node.props.accessibilityLiveRegion !== undefined && hasText(node as Queryable, 'No sessions match'),
+      (node) =>
+        node.props.accessibilityLiveRegion !== undefined &&
+        hasText(node as Queryable, 'No sessions match'),
     )[0];
     expect(emptyStateView?.props.accessibilityLiveRegion).toBe('none');
 
@@ -2218,9 +2221,9 @@ describe('DrawerContent session search', () => {
     const input = searchInput(root);
     expect(input.props.accessibilityLabel).toBe('Search sessions');
     expect(input.props.accessibilityHint).toContain('Filters sessions');
-    expect(
-      root.findAll((node) => node.props.accessibilityLabel === 'Clear search'),
-    ).toHaveLength(0);
+    expect(root.findAll((node) => node.props.accessibilityLabel === 'Clear search')).toHaveLength(
+      0,
+    );
 
     await typeSearch(root, 'alpha');
     const clearButton = findByLabel(root, 'Clear search');
@@ -2243,7 +2246,9 @@ describe('DrawerContent session search', () => {
     try {
       const androidTheme = createAppTheme('dark');
       expect(androidTheme.touchTarget.minimum).toBe(48);
-      const flattenedAndroid = StyleSheet.flatten(createDrawerContentStyles(androidTheme).laneHeader);
+      const flattenedAndroid = StyleSheet.flatten(
+        createDrawerContentStyles(androidTheme).laneHeader,
+      );
       expect(flattenedAndroid.minHeight).toBe(48);
     } finally {
       Platform.OS = originalOS;

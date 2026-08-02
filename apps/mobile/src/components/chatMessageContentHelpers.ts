@@ -55,16 +55,7 @@ export function messagePartToBlocks(
   bridgeToken: string | null,
 ): MessageBlock[] {
   if (part.type === 'text') return part.text ? [{ kind: 'text', value: part.text }] : [];
-  if (part.type === 'image') {
-    const sourceValue =
-      part.url ??
-      part.uri ??
-      (part.data && part.mimeType ? `data:${part.mimeType};base64,${part.data}` : null);
-    const source = sourceValue ? toMarkdownImageSource(sourceValue, bridgeUrl, bridgeToken) : null;
-    return source
-      ? [{ kind: 'image', source, accessibilityLabel: 'Attached image' }]
-      : [{ kind: 'file', value: '[image]' }];
-  }
+  if (part.type === 'image') return imagePartToBlocks(part, bridgeUrl, bridgeToken);
   if (part.type === 'audio') {
     return [{ kind: 'file', value: `[audio${part.mimeType ? `: ${part.mimeType}` : ''}]` }];
   }
@@ -75,6 +66,22 @@ export function messagePartToBlocks(
     blocks.push({ kind: 'text', value: part.resource.text });
   }
   return blocks;
+}
+
+function imagePartToBlocks(
+  part: Extract<ChatMessagePart, { type: 'image' }>,
+  bridgeUrl: string | null,
+  bridgeToken: string | null,
+): MessageBlock[] {
+  const sourceValue = [
+    part.url,
+    part.uri,
+    part.data && part.mimeType ? `data:${part.mimeType};base64,${part.data}` : null,
+  ].find((value): value is string => Boolean(value));
+  const source = sourceValue ? toMarkdownImageSource(sourceValue, bridgeUrl, bridgeToken) : null;
+  return source
+    ? [{ kind: 'image', source, accessibilityLabel: 'Attached image' }]
+    : [{ kind: 'file', value: '[image]' }];
 }
 
 export function toTimelineDetailPreview(

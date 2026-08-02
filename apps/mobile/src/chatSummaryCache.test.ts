@@ -104,11 +104,7 @@ describe('chatSummaryCache', () => {
         },
       ],
     });
-    const parsed = parseChatSummaryCache(
-      raw,
-      'profile-a',
-      Date.parse('2026-07-18T00:00:00.000Z'),
-    );
+    const parsed = parseChatSummaryCache(raw, 'profile-a', Date.parse('2026-07-18T00:00:00.000Z'));
     expect(parsed.entries.map((entry) => entry.summary.id)).toEqual(['one']);
     expect(parsed.entries[0]?.summary).not.toHaveProperty('authToken');
     expect(parseChatSummaryCache(raw, 'profile-b').entries).toEqual([]);
@@ -177,11 +173,7 @@ describe('chatSummaryCache', () => {
       ],
       '2026-07-18T00:00:00.000Z',
     );
-    expect(refreshed.entries.map((entry) => entry.summary.id)).toEqual([
-      'updated',
-      'stale',
-      'new',
-    ]);
+    expect(refreshed.entries.map((entry) => entry.summary.id)).toEqual(['updated', 'stale', 'new']);
     expect(refreshed.entries.find((entry) => entry.summary.id === 'updated')?.summary.title).toBe(
       'New title',
     );
@@ -224,9 +216,11 @@ describe('chatSummaryCache', () => {
       if (stored === null) throw new Error('missing');
       return stored;
     });
-    const write = jest.spyOn(FileSystem, 'writeAsStringAsync').mockImplementation(async (_path, raw) => {
-      stored = raw;
-    });
+    const write = jest
+      .spyOn(FileSystem, 'writeAsStringAsync')
+      .mockImplementation(async (_path, raw) => {
+        stored = raw;
+      });
 
     await Promise.all([
       persistChatSummaries('profile-a', [summary('one')]),
@@ -305,12 +299,7 @@ describe('chatSummaryCache', () => {
         // A drawer debounce timer that captured `staleGeneration` before the
         // purge, but whose setTimeout only fires well after the purge fully
         // resolved, must not recreate the purged cache.
-        await persistChatSummaries(
-          'profile-purge',
-          [summary('ghost')],
-          undefined,
-          staleGeneration,
-        );
+        await persistChatSummaries('profile-purge', [summary('ghost')], undefined, staleGeneration);
         expect(write).toHaveBeenCalledTimes(writesBeforeStaleFlush);
         await expect(loadChatSummaryCache('profile-purge')).resolves.toMatchObject({
           entries: [],
@@ -344,12 +333,7 @@ describe('chatSummaryCache', () => {
           undefined,
           staleGeneration,
         );
-        await deletePersistedChatSummary(
-          'profile-purge-2',
-          'one',
-          undefined,
-          staleGeneration,
-        );
+        await deletePersistedChatSummary('profile-purge-2', 'one', undefined, staleGeneration);
         await expect(loadChatSummaryCache('profile-purge-2')).resolves.toMatchObject({
           entries: [],
         });

@@ -93,16 +93,25 @@ export function useMainScreenReasoningAndInterrupt(
 
       schedulePinnedScrollToBottom(true);
     },
-    [schedulePinnedScrollToBottom],
+    [
+      chatIdRef,
+      liveReasoningBuffersRef,
+      liveReasoningMessageIdsRef,
+      schedulePinnedScrollToBottom,
+      setSelectedChat,
+    ],
   );
 
-  const clearLiveReasoningMessage = useCallback((threadId: string | null | undefined) => {
-    if (!threadId) {
-      return;
-    }
-    delete liveReasoningBuffersRef.current[threadId];
-    delete liveReasoningMessageIdsRef.current[threadId];
-  }, []);
+  const clearLiveReasoningMessage = useCallback(
+    (threadId: string | null | undefined) => {
+      if (!threadId) {
+        return;
+      }
+      delete liveReasoningBuffersRef.current[threadId];
+      delete liveReasoningMessageIdsRef.current[threadId];
+    },
+    [liveReasoningBuffersRef, liveReasoningMessageIdsRef],
+  );
 
   const appendStopSystemMessageIfNeeded = useCallback(() => {
     if (stopSystemMessageLoggedRef.current) {
@@ -110,7 +119,7 @@ export function useMainScreenReasoningAndInterrupt(
     }
     stopSystemMessageLoggedRef.current = true;
     appendLocalSystemMessage('Turn stopped by user.');
-  }, [appendLocalSystemMessage]);
+  }, [appendLocalSystemMessage, stopSystemMessageLoggedRef]);
 
   const handleTurnFailure = useCallback(
     (error: unknown) => {
@@ -141,7 +150,15 @@ export function useMainScreenReasoningAndInterrupt(
       stopRequestedRef.current = interruptedByUser;
       clearRunWatchdog();
     },
-    [appendStopSystemMessageIfNeeded, clearRunWatchdog],
+    [
+      appendStopSystemMessageIfNeeded,
+      clearRunWatchdog,
+      setActiveTurnId,
+      setActivity,
+      setError,
+      setStoppingTurn,
+      stopRequestedRef,
+    ],
   );
 
   const interruptActiveTurn = useCallback(
@@ -165,7 +182,7 @@ export function useMainScreenReasoningAndInterrupt(
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController],
+    [setActivity, setError, setStoppingTurn, stopRequestedRef, turnExecutionController],
   );
 
   const interruptLatestTurn = useCallback(
@@ -200,7 +217,14 @@ export function useMainScreenReasoningAndInterrupt(
         stopRequestedRef.current = false;
       }
     },
-    [turnExecutionController],
+    [
+      setActiveTurnId,
+      setActivity,
+      setError,
+      setStoppingTurn,
+      stopRequestedRef,
+      turnExecutionController,
+    ],
   );
 
   return {

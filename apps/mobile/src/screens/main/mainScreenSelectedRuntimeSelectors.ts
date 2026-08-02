@@ -138,7 +138,25 @@ export function useMainScreenSelectedRuntimeSelectors(
         scheduleRunWatchdogExpiry(snapshot.runWatchdogUntil);
       }
     },
-    [scheduleRunWatchdogExpiry, supportsPlanModeForThread],
+    [
+      runWatchdogUntilRef,
+      scheduleRunWatchdogExpiry,
+      setActiveBridgeUiSurfaces,
+      setActiveCommands,
+      setActivePlan,
+      setActiveTurnId,
+      setActivity,
+      setPendingApproval,
+      setPendingUserInputRequest,
+      setResolvingUserInput,
+      setRunWatchdogNow,
+      setSelectedCollaborationMode,
+      setStreamingText,
+      setUserInputDrafts,
+      setUserInputError,
+      supportsPlanModeForThread,
+      threadRuntimeSnapshotsRef,
+    ],
   );
 
   useEffect(() => {
@@ -169,7 +187,15 @@ export function useMainScreenSelectedRuntimeSelectors(
     return () => {
       cancelled = true;
     };
-  }, [applyThreadRuntimeSnapshot, persistenceController, upsertThreadRuntimeSnapshot]);
+  }, [
+    applyThreadRuntimeSnapshot,
+    chatIdRef,
+    chatPlanSnapshotsRef,
+    persistenceController,
+    setChatPlanSnapshotsLoaded,
+    threadRuntimeSnapshotsRef,
+    upsertThreadRuntimeSnapshot,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,7 +229,13 @@ export function useMainScreenSelectedRuntimeSelectors(
     return () => {
       cancelled = true;
     };
-  }, [applyThreadRuntimeSnapshot, persistenceController, upsertThreadRuntimeSnapshot]);
+  }, [
+    applyThreadRuntimeSnapshot,
+    bridgeUiSurfaceSnapshotsRef,
+    chatIdRef,
+    persistenceController,
+    upsertThreadRuntimeSnapshot,
+  ]);
 
   const refreshPendingApprovalsForThread = useCallback(
     async (threadId: string) => {
@@ -224,12 +256,15 @@ export function useMainScreenSelectedRuntimeSelectors(
         // Best effort hydration for externally-started turns.
       }
     },
-    [approvalController, cacheThreadPendingApproval],
+    [approvalController, cacheThreadPendingApproval, chatIdRef, setActivity, setPendingApproval],
   );
 
-  const pushActiveCommand = useCallback((threadId: string, eventType: string, detail: string) => {
-    setActiveCommands((prev) => appendRunEventHistory(prev, threadId, eventType, detail));
-  }, []);
+  const pushActiveCommand = useCallback(
+    (threadId: string, eventType: string, detail: string) => {
+      setActiveCommands((prev) => appendRunEventHistory(prev, threadId, eventType, detail));
+    },
+    [setActiveCommands],
+  );
 
   useEffect(() => {
     onChatContextChange?.(selectedChat);

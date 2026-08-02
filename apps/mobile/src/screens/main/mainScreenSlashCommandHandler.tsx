@@ -1,6 +1,4 @@
-import { selectedCollaborationModeAtom } from '../../state/mainScreen/models';
-import { useAtomValue } from 'jotai';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type {
   MainScreenTurnStopControlContext,
   MainScreenTurnStopControlResult,
@@ -11,83 +9,16 @@ export type MainScreenSlashCommandHandlerContext = MainScreenTurnStopControlCont
   MainScreenTurnStopControlResult;
 
 export function useMainScreenSlashCommandHandler(context: MainScreenSlashCommandHandlerContext) {
-  const {
-    activeAgentId,
-    activeAgentLabel,
-    activeApprovalPolicy,
-    activeEffort,
-    activeEffortLabel,
-    activeModelId,
-    activeModelLabel,
-    activeServiceTier,
-    activeSlashCommands,
-    api,
-    appendLocalAssistantMessage,
-    bumpRunWatchdog,
-    clearRunWatchdog,
-    discardOptimisticUserMessage,
-    ensureLocalCommandChat,
-    fastModeEnabled,
-    handleTurnFailure,
-    mergeChatWithPendingOptimisticMessages,
-    modelOptions,
-    onLastUsedThreadSettingsChange,
-    onOpenGit,
-    openModelModal,
-    preferredStartCwd,
-    queueOptimisticUserMessage,
-    registerTurnStarted,
-    rememberChatModelPreference,
-    scrollToBottomReliable,
-    selectedChat,
-    selectedChatId,
-    startNewChat,
-    supportsFastMode,
-    supportsGoal,
-    supportsPlanMode,
-    supportsReview,
-  } = context;
-  const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
+  // `executeSlashCommand` consumes the whole composition context and reads live screen state from
+  // the jotai store at call time. The context object is rebuilt on every render, so it is held in
+  // a ref: the handler stays referentially stable for the callbacks and effects that depend on it
+  // while still running against the latest context.
+  const contextRef = useRef(context);
+  contextRef.current = context;
 
   const handleSlashCommand = useCallback(
-    (input: string): Promise<boolean> => executeSlashCommand(context, input),
-    [
-      activeAgentId,
-      activeSlashCommands,
-      activeEffort,
-      activeModelId,
-      activeEffortLabel,
-      activeModelLabel,
-      activeApprovalPolicy,
-      activeServiceTier,
-      api,
-      appendLocalAssistantMessage,
-      ensureLocalCommandChat,
-      bumpRunWatchdog,
-      clearRunWatchdog,
-      discardOptimisticUserMessage,
-      fastModeEnabled,
-      supportsFastMode,
-      supportsGoal,
-      supportsPlanMode,
-      supportsReview,
-      activeAgentLabel,
-      mergeChatWithPendingOptimisticMessages,
-      modelOptions,
-      onLastUsedThreadSettingsChange,
-      onOpenGit,
-      openModelModal,
-      preferredStartCwd,
-      queueOptimisticUserMessage,
-      registerTurnStarted,
-      selectedChat,
-      selectedChatId,
-      selectedCollaborationMode,
-      handleTurnFailure,
-      rememberChatModelPreference,
-      scrollToBottomReliable,
-      startNewChat,
-    ],
+    (input: string): Promise<boolean> => executeSlashCommand(contextRef.current, input),
+    [],
   );
 
   return {

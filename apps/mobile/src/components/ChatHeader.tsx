@@ -21,7 +21,6 @@ const MENU_BUTTON_VISIBLE_SIZE = { width: 24, height: 24 };
 const RIGHT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
 const EDIT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
 
-
 interface ChatHeaderProps {
   onOpenDrawer?: () => void;
   title: string;

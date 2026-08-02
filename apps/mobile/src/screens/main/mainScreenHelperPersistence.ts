@@ -341,6 +341,44 @@ export function parseChatDrafts(raw: string): Record<string, string> {
   }
 }
 
+function parseBridgeQueuedMessage(value: unknown): BridgeQueuedMessage | null {
+  const entry = toRecord(value);
+  const id = readString(entry?.id)?.trim();
+  const createdAt = readString(entry?.createdAt)?.trim();
+  const content = readString(entry?.content)?.replace(/\r\n/g, '\n');
+  return id && createdAt && content ? { id, createdAt, content } : null;
+}
+
+function parseBridgeQueuedMessages(value: unknown): BridgeQueuedMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(parseBridgeQueuedMessage)
+    .filter((item): item is BridgeQueuedMessage => item !== null);
+}
+
+function parseBridgeThreadQueueError(value: unknown): BridgeThreadQueueError | null {
+  const record = toRecord(value);
+  const message = readString(record?.message)?.trim();
+  const operation = readString(record?.operation)?.trim();
+  const at = readString(record?.at)?.trim();
+
+  return message && operation && at
+    ? {
+        message,
+        operation,
+        at,
+        itemId: readString(record?.itemId)?.trim() ?? null,
+      }
+    : null;
+}
+
+function parsePendingSteerCount(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? Math.max(0, value) : fallback;
+}
+
 export function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueState | null {
   const record = toRecord(value);
   const threadId = readString(record?.threadId)?.trim();
@@ -348,62 +386,17 @@ export function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueSt
     return null;
   }
 
-  const items = Array.isArray(record.items)
-    ? record.items
-        .map((item) => {
-          const entry = toRecord(item);
-          const id = readString(entry?.id)?.trim();
-          const createdAt = readString(entry?.createdAt)?.trim();
-          const content = readString(entry?.content)?.replace(/\r\n/g, '\n');
-          if (!id || !createdAt || !content) {
-            return null;
-          }
-
-          return {
-            id,
-            createdAt,
-            content,
-          } satisfies BridgeQueuedMessage;
-        })
-        .filter((item): item is BridgeQueuedMessage => item !== null)
-    : [];
-  const pendingSteers = Array.isArray(record.pendingSteers)
-    ? record.pendingSteers
-        .map((item) => {
-          const entry = toRecord(item);
-          const id = readString(entry?.id)?.trim();
-          const createdAt = readString(entry?.createdAt)?.trim();
-          const content = readString(entry?.content)?.replace(/\r\n/g, '\n');
-          return id && createdAt && content ? { id, createdAt, content } : null;
-        })
-        .filter((item): item is BridgeQueuedMessage => item !== null)
-    : [];
-
-  const lastErrorRecord = toRecord(record.lastError);
-  const lastErrorMessage = readString(lastErrorRecord?.message)?.trim();
-  const lastErrorOperation = readString(lastErrorRecord?.operation)?.trim();
-  const lastErrorAt = readString(lastErrorRecord?.at)?.trim();
-  const lastError =
-    lastErrorMessage && lastErrorOperation && lastErrorAt
-      ? ({
-          message: lastErrorMessage,
-          operation: lastErrorOperation,
-          at: lastErrorAt,
-          itemId: readString(lastErrorRecord?.itemId)?.trim() ?? null,
-        } satisfies BridgeThreadQueueError)
-      : null;
+  const items = parseBridgeQueuedMessages(record.items);
+  const pendingSteers = parseBridgeQueuedMessages(record.pendingSteers);
 
   return {
     threadId,
     items,
     pendingSteers,
-    pendingSteerCount:
-      typeof record.pendingSteerCount === 'number' && Number.isSafeInteger(record.pendingSteerCount)
-        ? Math.max(0, record.pendingSteerCount)
-        : pendingSteers.length,
+    pendingSteerCount: parsePendingSteerCount(record.pendingSteerCount, pendingSteers.length),
     waitingForToolCalls: record.waitingForToolCalls === true,
     steeringInFlight: record.steeringInFlight === true,
-    lastError,
+    lastError: parseBridgeThreadQueueError(record.lastError),
   };
 }
 
@@ -495,6 +488,52 @@ export function parseChatModelPreferences(raw: string): Record<string, ChatModel
   }
 }
 
+function parseTurnPlanStep(value: unknown): TurnPlanStep | null {
+  const record = toRecord(value);
+  const step = readString(record?.step);
+  const status = readString(record?.status);
+  return step && (status === 'pending' || status === 'inProgress' || status === 'completed')
+    ? { step, status }
+    : null;
+}
+
+function parseTurnPlanSteps(value: unknown): TurnPlanStep[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map(parseTurnPlanStep).filter((item): item is TurnPlanStep => item !== null);
+}
+
+function parseChatPlanSnapshotEntry(
+  chatId: string,
+  value: unknown,
+): { chatId: string; snapshot: ActivePlanState } | null {
+  const entry = toRecord(value);
+  if (!entry) {
+    return null;
+  }
+
+  const normalizedChatId = chatId.trim();
+  const threadId = readString(entry.threadId) ?? normalizedChatId;
+  const turnId = readString(entry.turnId);
+  if (!normalizedChatId || !threadId || !turnId) {
+    return null;
+  }
+
+  return {
+    chatId: normalizedChatId,
+    snapshot: {
+      threadId,
+      turnId,
+      explanation: readString(entry.explanation),
+      steps: parseTurnPlanSteps(entry.steps),
+      deltaText: readString(entry.deltaText) ?? '',
+      updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
+    },
+  };
+}
+
 export function parseChatPlanSnapshots(raw: string): Record<string, ActivePlanState> {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return {};
@@ -514,50 +553,11 @@ export function parseChatPlanSnapshots(raw: string): Record<string, ActivePlanSt
 
     const result: Record<string, ActivePlanState> = {};
     for (const [chatId, value] of Object.entries(entries)) {
-      const entry = toRecord(value);
-      if (!entry) {
+      const parsedEntry = parseChatPlanSnapshotEntry(chatId, value);
+      if (!parsedEntry) {
         continue;
       }
-
-      const normalizedChatId = chatId.trim();
-      const threadId = readString(entry.threadId) ?? normalizedChatId;
-      const turnId = readString(entry.turnId);
-      if (!normalizedChatId || !threadId || !turnId) {
-        continue;
-      }
-
-      const rawSteps = Array.isArray(entry.steps) ? entry.steps : [];
-      const steps: TurnPlanStep[] = rawSteps
-        .map((item) => {
-          const itemRecord = toRecord(item);
-          if (!itemRecord) {
-            return null;
-          }
-
-          const step = readString(itemRecord.step);
-          const status = readString(itemRecord.status);
-          if (
-            !step ||
-            (status !== 'pending' && status !== 'inProgress' && status !== 'completed')
-          ) {
-            return null;
-          }
-
-          return {
-            step,
-            status,
-          } satisfies TurnPlanStep;
-        })
-        .filter((item): item is TurnPlanStep => item !== null);
-
-      result[normalizedChatId] = {
-        threadId,
-        turnId,
-        explanation: readString(entry.explanation),
-        steps,
-        deltaText: readString(entry.deltaText) ?? '',
-        updatedAt: readString(entry.updatedAt) ?? new Date(0).toISOString(),
-      };
+      result[parsedEntry.chatId] = parsedEntry.snapshot;
     }
 
     return result;

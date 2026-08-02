@@ -238,9 +238,7 @@ describe('ChatMessage markdown formatting', () => {
 
     // Each level must resolve to one of the theme's named typography roles (never an arbitrary
     // literal), and the sizes must strictly descend from h1 to h6.
-    const knownRoleSizes = new Set(
-      Object.values(theme.typography).map((role) => role.fontSize),
-    );
+    const knownRoleSizes = new Set(Object.values(theme.typography).map((role) => role.fontSize));
     for (const size of sizes) {
       expect(size).toBeDefined();
       expect(knownRoleSizes.has(size as number)).toBe(true);
@@ -329,7 +327,10 @@ describe('ChatMessage markdown formatting', () => {
       content: 'Same content',
       parts: [
         { type: 'text', text: 'Same content' },
-        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+        {
+          type: 'resource',
+          resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' },
+        },
       ],
       createdAt: '2026-04-17T00:00:00.000Z',
     };
@@ -337,13 +338,14 @@ describe('ChatMessage markdown formatting', () => {
       ...previous,
       parts: [
         { type: 'text', text: 'Same content' },
-        { type: 'resource', resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' } },
+        {
+          type: 'resource',
+          resource: { uri: 'file:///a.txt', text: 'body', mimeType: 'text/plain' },
+        },
       ],
     };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(true);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(true);
   });
 
   it('detects a real change nested inside a resource part', () => {
@@ -359,9 +361,7 @@ describe('ChatMessage markdown formatting', () => {
       parts: [{ type: 'resource', resource: { uri: 'file:///a.txt', text: 'changed body' } }],
     };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(false);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(false);
   });
 
   it('detects a content-only change even when parts are unchanged', () => {
@@ -373,9 +373,7 @@ describe('ChatMessage markdown formatting', () => {
     };
     const next: ApiChatMessage = { ...previous, content: 'after' };
 
-    expect(
-      areChatMessagePropsEqual({ message: previous }, { message: next }),
-    ).toBe(false);
+    expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(false);
   });
 
   it('renders markdown tables in a horizontal scroll area', () => {
@@ -453,8 +451,7 @@ describe('ChatMessage markdown formatting', () => {
       .find((node) => typeof node.props.onPress === 'function');
     if (!chip) throw new Error('Expected the local-preview chip to render');
     const hitSlop = chip.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
 
     // The chip's visible chrome (padding + icon/text row) is well under the 44pt/48dp minimum
     // touch target, so it must widen its effective tap area via hitSlop rather than relying on
@@ -498,8 +495,7 @@ describe('ChatMessage markdown formatting', () => {
     const HALF_GAP = GAP / 2;
     for (const chip of chips) {
       const hitSlop = chip.props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeLessThanOrEqual(HALF_GAP);
       expect(hitSlop!.bottom).toBeLessThanOrEqual(HALF_GAP);
@@ -509,8 +505,7 @@ describe('ChatMessage markdown formatting', () => {
     // chip's expanded top edge must not cross the midpoint of the gap between them, i.e. they
     // must not overlap at all.
     const [firstHitSlop, secondHitSlop] = chips.map(
-      (chip) =>
-        chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
+      (chip) => chip.props.hitSlop as { top: number; bottom: number; left: number; right: number },
     );
     const firstChipExpandedBottomOffset = firstHitSlop.bottom;
     const secondChipExpandedTopOffset = secondHitSlop.top;

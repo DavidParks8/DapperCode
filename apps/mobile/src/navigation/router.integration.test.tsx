@@ -689,7 +689,9 @@ describe('Expo Router route topology', () => {
           ...baseOverrides,
           'profiles/[profileId]/(drawer)/chats/[chatId]/index': ChatFooterConnectionLauncher,
           'profiles/[profileId]/(drawer)/settings/index': () => <Text>{routeLabels.settings}</Text>,
-          'profiles/[profileId]/(drawer)/settings/privacy': () => <Text>{routeLabels.privacy}</Text>,
+          'profiles/[profileId]/(drawer)/settings/privacy': () => (
+            <Text>{routeLabels.privacy}</Text>
+          ),
           // `settings/connection` is intentionally NOT overridden — the real route file (with
           // its `onSaved` wiring) must be exercised for this regression to be meaningful.
         },

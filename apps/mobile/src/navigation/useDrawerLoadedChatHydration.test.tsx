@@ -51,7 +51,12 @@ describe('useDrawerLoadedChatHydration', () => {
 
     await act(async () => {
       renderer.create(
-        <Harness api={api} applyChats={applyChats} setDiagnostics={setDiagnostics} hydrateRef={hydrateRef} />,
+        <Harness
+          api={api}
+          applyChats={applyChats}
+          setDiagnostics={setDiagnostics}
+          hydrateRef={hydrateRef}
+        />,
       );
     });
 

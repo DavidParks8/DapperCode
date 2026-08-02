@@ -943,7 +943,8 @@ describe('GitScreen behavior', () => {
     expect(hasText(root, 'Working tree clean')).toBe(true);
     expect(hasText(root, 'No staged or unstaged changes.')).toBe(true);
     const emptyStateNode = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Working tree is clean. No changes to stage or commit.',
+      (node) =>
+        node.props.accessibilityLabel === 'Working tree is clean. No changes to stage or commit.',
     );
     expect(emptyStateNode.length).toBeGreaterThan(0);
     act(() => tree.unmount());
@@ -978,7 +979,9 @@ describe('GitScreen behavior', () => {
     const testTheme = createAppTheme('dark');
     const styles = createGitScreenStyles(testTheme) as Record<string, Record<string, unknown>>;
     const { minWidth } = styles.inlineReviewComment ?? {};
-    expect(minWidth === undefined || minWidth === 0 || (typeof minWidth === 'number' && minWidth < 320)).toBe(true);
+    expect(
+      minWidth === undefined || minWidth === 0 || (typeof minWidth === 'number' && minWidth < 320),
+    ).toBe(true);
   });
 
   it('fires selection haptic on stage, unstage, stageAll, unstageAll, branchSwitch', async () => {
@@ -987,26 +990,26 @@ describe('GitScreen behavior', () => {
     const root = tree.root as Queryable;
 
     await press(root, 'Stage');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Unstage');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Stage all');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Unstage all');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Change branch');
     const mainBranch = root.findAll((node) => node.props.accessibilityLabel === 'main, Local')[0];
     act(() => (mainBranch.props.onPress as () => void)());
     await press(root, 'Switch');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
 
     act(() => tree.unmount());
   });
@@ -1017,21 +1020,21 @@ describe('GitScreen behavior', () => {
     const root = tree.root as Queryable;
 
     await press(root, 'Commit');
-    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.success as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Push (2)');
-    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.success as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     (api.gitCommit as jest.Mock).mockResolvedValueOnce({ committed: false, stderr: '' });
     await press(root, 'Commit');
-    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.error as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     (api.gitPush as jest.Mock).mockResolvedValueOnce({ pushed: false, stderr: '' });
     await press(root, 'Push (2)');
-    expect((feedback.error as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.error as jest.Mock).toHaveBeenCalled();
 
     act(() => tree.unmount());
   });
@@ -1054,11 +1057,11 @@ describe('GitScreen behavior', () => {
     act(() => input.props.onChangeText('Test note'));
     jest.clearAllMocks();
     await press(root, 'Save comment');
-    expect((feedback.selection as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     jest.clearAllMocks();
 
     await press(root, 'Send review to agent');
-    expect((feedback.success as jest.Mock)).toHaveBeenCalled();
+    expect(feedback.success as jest.Mock).toHaveBeenCalled();
 
     act(() => tree.unmount());
   });

@@ -37,6 +37,149 @@ interface UseGitScreenDerivedArgs {
   windowHeight: number;
 }
 
+interface GitActionStateInputs {
+  status: GitStatusResponse | null;
+  history: GitHistoryCommit[];
+  changedFiles: ReturnType<typeof parseChangedFiles>;
+  changedFilesWithStats: GitScreenDerivedState['changedFilesWithStats'];
+  hasChanges: boolean;
+  hasStagedFiles: boolean;
+  aheadCount: number;
+  behindCount: number;
+  hasUpstream: boolean;
+  upstreamBranch: string | null;
+  stagedCount: number;
+  unstagedCount: number;
+  commitMessage: string;
+  committing: boolean;
+  pushing: boolean;
+  loading: boolean;
+  switchingBranch: boolean;
+  branchDraft: string;
+}
+
+type GitActionState = Pick<
+  GitScreenDerivedState,
+  | 'latestCommit'
+  | 'canPush'
+  | 'canPublishBranch'
+  | 'showPushAction'
+  | 'commitButtonDisabled'
+  | 'pushButtonDisabled'
+  | 'upstreamDisplay'
+  | 'syncDisplay'
+  | 'reviewTitle'
+  | 'reviewDetail'
+  | 'reviewHighlights'
+  | 'pushButtonLabel'
+  | 'branchSwitchDisabled'
+>;
+
+function computeGitReviewTitle(
+  status: GitStatusResponse | null,
+  hasStagedFiles: boolean,
+  hasChanges: boolean,
+): string {
+  if (status?.clean) {
+    return 'Working tree clean';
+  }
+  if (hasStagedFiles) {
+    return 'Ready to commit';
+  }
+  return hasChanges ? 'Review and stage' : 'No changes';
+}
+
+function computeGitReviewDetail(
+  status: GitStatusResponse | null,
+  hasStagedFiles: boolean,
+  changedFilesCount: number,
+  stagedCount: number,
+  unstagedCount: number,
+): string {
+  if (status?.clean) {
+    return 'There are no local changes in this workspace.';
+  }
+  if (hasStagedFiles) {
+    return `${String(stagedCount)} staged, ${String(unstagedCount)} unstaged.`;
+  }
+  return `${String(changedFilesCount)} changed file${changedFilesCount === 1 ? '' : 's'}. Stage the ones you want to commit.`;
+}
+
+function computeGitPushButtonLabel(
+  pushing: boolean,
+  canPublishBranch: boolean,
+  aheadCount: number,
+): string {
+  if (pushing) {
+    return canPublishBranch ? 'Publishing...' : 'Pushing...';
+  }
+  return canPublishBranch ? 'Publish branch' : `Push (${aheadCount})`;
+}
+
+function computeBranchSwitchDisabled(
+  switchingBranch: boolean,
+  loading: boolean,
+  branchDraft: string,
+  statusBranch: string | undefined,
+): boolean {
+  return (
+    switchingBranch || loading || !branchDraft.trim() || branchDraft.trim() === (statusBranch ?? '')
+  );
+}
+
+function computeGitActionState(inputs: GitActionStateInputs): GitActionState {
+  const {
+    status,
+    history,
+    changedFiles,
+    changedFilesWithStats,
+    hasChanges,
+    hasStagedFiles,
+    aheadCount,
+    behindCount,
+    hasUpstream,
+    upstreamBranch,
+    stagedCount,
+    unstagedCount,
+    commitMessage,
+    committing,
+    pushing,
+    loading,
+    switchingBranch,
+    branchDraft,
+  } = inputs;
+
+  const canPush = aheadCount > 0;
+  const canPublishBranch = !hasUpstream && isPublishableBranch(status?.branch);
+
+  return {
+    latestCommit: history[0] ?? null,
+    canPush,
+    canPublishBranch,
+    showPushAction: canPush || canPublishBranch,
+    commitButtonDisabled: committing || !commitMessage.trim() || !hasStagedFiles,
+    pushButtonDisabled: pushing || committing || loading,
+    upstreamDisplay: upstreamBranch ?? (canPublishBranch ? 'Not published' : null),
+    syncDisplay: formatSyncDisplay(aheadCount, behindCount),
+    reviewTitle: computeGitReviewTitle(status, hasStagedFiles, hasChanges),
+    reviewDetail: computeGitReviewDetail(
+      status,
+      hasStagedFiles,
+      changedFiles.length,
+      stagedCount,
+      unstagedCount,
+    ),
+    reviewHighlights: changedFilesWithStats.slice(0, 3),
+    pushButtonLabel: computeGitPushButtonLabel(pushing, canPublishBranch, aheadCount),
+    branchSwitchDisabled: computeBranchSwitchDisabled(
+      switchingBranch,
+      loading,
+      branchDraft,
+      status?.branch,
+    ),
+  };
+}
+
 export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDerivedState {
   const {
     status,
@@ -119,39 +262,40 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
     () => changedFiles.filter((entry) => entry.untracked).length,
     [changedFiles],
   );
-  const latestCommit = history[0] ?? null;
-  const canPush = aheadCount > 0;
-  const canPublishBranch = !hasUpstream && isPublishableBranch(status?.branch);
-  const showPushAction = canPush || canPublishBranch;
-  const commitButtonDisabled = committing || !commitMessage.trim() || !hasStagedFiles;
-  const pushButtonDisabled = pushing || committing || loading;
-  const upstreamDisplay = upstreamBranch ?? (canPublishBranch ? 'Not published' : null);
-  const syncDisplay = formatSyncDisplay(aheadCount, behindCount);
-  const reviewTitle = status?.clean
-    ? 'Working tree clean'
-    : hasStagedFiles
-      ? 'Ready to commit'
-      : hasChanges
-        ? 'Review and stage'
-        : 'No changes';
-  const reviewDetail = status?.clean
-    ? 'There are no local changes in this workspace.'
-    : hasStagedFiles
-      ? `${String(stagedCount)} staged, ${String(unstagedCount)} unstaged.`
-      : `${String(changedFiles.length)} changed file${changedFiles.length === 1 ? '' : 's'}. Stage the ones you want to commit.`;
-  const reviewHighlights = changedFilesWithStats.slice(0, 3);
-  const pushButtonLabel = pushing
-    ? canPublishBranch
-      ? 'Publishing...'
-      : 'Pushing...'
-    : canPublishBranch
-      ? 'Publish branch'
-      : `Push (${aheadCount})`;
-  const branchSwitchDisabled =
-    switchingBranch ||
-    loading ||
-    !branchDraft.trim() ||
-    branchDraft.trim() === (status?.branch ?? '');
+  const {
+    latestCommit,
+    canPush,
+    canPublishBranch,
+    showPushAction,
+    commitButtonDisabled,
+    pushButtonDisabled,
+    upstreamDisplay,
+    syncDisplay,
+    reviewTitle,
+    reviewDetail,
+    reviewHighlights,
+    pushButtonLabel,
+    branchSwitchDisabled,
+  } = computeGitActionState({
+    status,
+    history,
+    changedFiles,
+    changedFilesWithStats,
+    hasChanges,
+    hasStagedFiles,
+    aheadCount,
+    behindCount,
+    hasUpstream,
+    upstreamBranch,
+    stagedCount,
+    unstagedCount,
+    commitMessage,
+    committing,
+    pushing,
+    loading,
+    switchingBranch,
+    branchDraft,
+  });
   const filesListMaxHeight = useMemo(
     () => Math.max(200, Math.min(360, Math.floor(windowHeight * 0.4))),
     [windowHeight],

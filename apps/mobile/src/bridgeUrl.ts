@@ -58,35 +58,42 @@ export function toBridgeHealthUrl(baseUrl: string): string {
 
 function isLikelyPrivateHost(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase();
-  const host =
-    normalized.startsWith('[') && normalized.endsWith(']') ? normalized.slice(1, -1) : normalized;
+  const host = stripIpv6Brackets(normalized);
   if (!host) {
     return false;
   }
+  if (isLocalHost(host)) return true;
+  return host.includes(':') ? isPrivateIpv6(host) : isPrivateIpv4(host);
+}
 
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local')) {
+function stripIpv6Brackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+}
+
+function isLocalHost(host: string): boolean {
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.local');
+}
+
+function isPrivateIpv6(host: string): boolean {
+  return host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:');
+}
+
+function isPrivateIpv4(host: string): boolean {
+  const octets = host.split('.');
+  if (octets.length !== 4 || !octets.every(isValidIpv4Octet)) return false;
+  return isPrivateIpv4Prefix(octets.map(Number));
+}
+
+function isValidIpv4Octet(octet: string): boolean {
+  return /^\d{1,3}$/.test(octet) && Number(octet) <= 255;
+}
+
+function isPrivateIpv4Prefix([first, second]: number[]): boolean {
+  if (first === 10 || (first === 192 && second === 168) || (first === 169 && second === 254)) {
     return true;
   }
-
-  if (host.includes(':')) {
-    return host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:');
-  }
-
-  const octets = host.split('.');
-  if (octets.length !== 4) {
-    return false;
-  }
-
-  if (!octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)) {
-    return false;
-  }
-  const [first, second] = octets.map(Number);
-
   return (
-    first === 10 ||
     (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    (first === 169 && second === 254) ||
     (first === 100 && second >= 64 && second <= 127)
   );
 }

@@ -25,7 +25,13 @@ import {
 } from './model';
 import { parseAppSettings } from '../appSettings';
 
+type ProfileAction = Extract<AppStateAction, { type: `profiles/${string}` }>;
+type PushAction = Extract<AppStateAction, { type: `push/${string}` }>;
+
 export function appStateReducer(state: AppStateData, action: AppStateAction): AppStateData {
+  if (action.type.startsWith('profiles/'))
+    return reduceProfileAction(state, action as ProfileAction);
+  if (action.type.startsWith('push/')) return reducePushAction(state, action as PushAction);
   switch (action.type) {
     case 'settings/update':
       return {
@@ -49,6 +55,13 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         },
       };
     }
+    default:
+      return state;
+  }
+}
+
+function reduceProfileAction(state: AppStateData, action: ProfileAction): AppStateData {
+  switch (action.type) {
     case 'profiles/save': {
       const existing = action.draft.id
         ? state.bridgeProfiles.profiles.find((profile) => profile.id === action.draft.id)
@@ -102,6 +115,11 @@ export function appStateReducer(state: AppStateData, action: AppStateAction): Ap
         bridgeProfiles: createEmptyBridgeProfileStore(),
         push: { ...state.push, registrations: [] },
       };
+  }
+}
+
+function reducePushAction(state: AppStateData, action: PushAction): AppStateData {
+  switch (action.type) {
     case 'push/update':
       return {
         ...state,

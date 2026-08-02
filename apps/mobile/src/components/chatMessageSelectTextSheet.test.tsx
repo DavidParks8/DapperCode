@@ -67,8 +67,7 @@ describe('SelectableTextSheet', () => {
     const root = queryRoot(tree);
     const closeButton = findPressable(root, 'Close text selection');
     const hitSlop = closeButton.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
     expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -77,9 +76,7 @@ describe('SelectableTextSheet', () => {
   it('renders the given text in a read-only, non-editable input', () => {
     const tree = render(<SelectableTextSheet text="selectable body text" onClose={() => {}} />);
     const root = queryRoot(tree);
-    const input = root.findAll(
-      (node) => node.props.accessibilityLabel === 'Response text',
-    )[0];
+    const input = root.findAll((node) => node.props.accessibilityLabel === 'Response text')[0];
     expect(input).toBeDefined();
     expect(input.props.value).toBe('selectable body text');
     expect(input.props.editable).toBe(false);

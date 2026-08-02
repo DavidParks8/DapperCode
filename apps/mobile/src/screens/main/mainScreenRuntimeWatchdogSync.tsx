@@ -44,7 +44,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     clearTimeout(timer);
     externalStatusFullSyncTimerRef.current = null;
     externalStatusFullSyncQueuedThreadRef.current = null;
-  }, []);
+  }, [externalStatusFullSyncQueuedThreadRef, externalStatusFullSyncTimerRef]);
 
   const drainExternalStatusFullSyncQueue = useCallback(() => {
     if (externalStatusFullSyncInFlightRef.current) {
@@ -102,7 +102,18 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
         externalStatusFullSyncInFlightRef.current = false;
         drainExternalStatusFullSyncQueue();
       });
-  }, [api, bumpRunWatchdog, mergeChatWithPendingOptimisticMessages]);
+  }, [
+    api,
+    bumpRunWatchdog,
+    chatIdRef,
+    externalStatusFullSyncInFlightRef,
+    externalStatusFullSyncNextAllowedAtRef,
+    externalStatusFullSyncQueuedThreadRef,
+    externalStatusFullSyncTimerRef,
+    mergeChatWithPendingOptimisticMessages,
+    setActivity,
+    setSelectedChat,
+  ]);
 
   const scheduleExternalStatusFullSync = useCallback(
     (threadId: string) => {
@@ -112,7 +123,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       externalStatusFullSyncQueuedThreadRef.current = threadId;
       drainExternalStatusFullSyncQueue();
     },
-    [drainExternalStatusFullSyncQueue],
+    [chatIdRef, drainExternalStatusFullSyncQueue, externalStatusFullSyncQueuedThreadRef],
   );
 
   useEffect(

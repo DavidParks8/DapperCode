@@ -41,7 +41,15 @@ jest.mock('react-native-reanimated', () => {
   return {
     __esModule: true,
     default: Animated,
-    Easing: { bezier: () => 'bezier', linear: 'linear', in: (v: unknown) => v, out: (v: unknown) => v, inOut: (v: unknown) => v, ease: 'ease', cubic: 'cubic' },
+    Easing: {
+      bezier: () => 'bezier',
+      linear: 'linear',
+      in: (v: unknown) => v,
+      out: (v: unknown) => v,
+      inOut: (v: unknown) => v,
+      ease: 'ease',
+      cubic: 'cubic',
+    },
     FadeIn: makeChain(),
     FadeOut: makeChain(),
     FadeInDown: makeChain(),
@@ -950,5 +958,4 @@ describe('BrowserScreen behavior', () => {
 
     act(() => result.tree.unmount());
   });
-
 });

@@ -70,46 +70,52 @@ export function useMainScreenLocalTranscriptActions(
         },
       ];
     },
-    [],
+    [pendingOptimisticUserMessagesRef, selectedChatRef],
   );
 
-  const discardOptimisticUserMessage = useCallback((threadId: string, messageId: string) => {
-    if (!threadId || !messageId) {
-      return;
-    }
+  const discardOptimisticUserMessage = useCallback(
+    (threadId: string, messageId: string) => {
+      if (!threadId || !messageId) {
+        return;
+      }
 
-    const existingPendingMessages = pendingOptimisticUserMessagesRef.current[threadId] ?? [];
-    if (existingPendingMessages.length === 0) {
-      return;
-    }
+      const existingPendingMessages = pendingOptimisticUserMessagesRef.current[threadId] ?? [];
+      if (existingPendingMessages.length === 0) {
+        return;
+      }
 
-    const nextPendingMessages = existingPendingMessages.filter(
-      (entry) => entry.message.id !== messageId,
-    );
-    if (nextPendingMessages.length > 0) {
-      pendingOptimisticUserMessagesRef.current[threadId] = nextPendingMessages;
-    } else {
-      delete pendingOptimisticUserMessagesRef.current[threadId];
-    }
-  }, []);
+      const nextPendingMessages = existingPendingMessages.filter(
+        (entry) => entry.message.id !== messageId,
+      );
+      if (nextPendingMessages.length > 0) {
+        pendingOptimisticUserMessagesRef.current[threadId] = nextPendingMessages;
+      } else {
+        delete pendingOptimisticUserMessagesRef.current[threadId];
+      }
+    },
+    [pendingOptimisticUserMessagesRef],
+  );
 
-  const mergeChatWithPendingOptimisticMessages = useCallback((chat: Chat): Chat => {
-    const pendingMessages = pendingOptimisticUserMessagesRef.current[chat.id] ?? [];
-    if (pendingMessages.length === 0) {
-      return chat;
-    }
+  const mergeChatWithPendingOptimisticMessages = useCallback(
+    (chat: Chat): Chat => {
+      const pendingMessages = pendingOptimisticUserMessagesRef.current[chat.id] ?? [];
+      if (pendingMessages.length === 0) {
+        return chat;
+      }
 
-    const { chat: mergedChat, remainingPendingMessages } =
-      reconcileChatWithPendingOptimisticMessages(chat, pendingMessages);
+      const { chat: mergedChat, remainingPendingMessages } =
+        reconcileChatWithPendingOptimisticMessages(chat, pendingMessages);
 
-    if (remainingPendingMessages.length > 0) {
-      pendingOptimisticUserMessagesRef.current[chat.id] = remainingPendingMessages;
-    } else {
-      delete pendingOptimisticUserMessagesRef.current[chat.id];
-    }
+      if (remainingPendingMessages.length > 0) {
+        pendingOptimisticUserMessagesRef.current[chat.id] = remainingPendingMessages;
+      } else {
+        delete pendingOptimisticUserMessagesRef.current[chat.id];
+      }
 
-    return mergedChat;
-  }, []);
+      return mergedChat;
+    },
+    [pendingOptimisticUserMessagesRef],
+  );
 
   const queueOptimisticQueuedMessage = useCallback(
     (threadId: string, content: string): PendingOptimisticQueuedMessage | null => {
@@ -132,7 +138,7 @@ export function useMainScreenLocalTranscriptActions(
       bumpAgentRuntimeRevision();
       return optimisticMessage;
     },
-    [bumpAgentRuntimeRevision],
+    [bumpAgentRuntimeRevision, pendingOptimisticQueuedMessagesRef],
   );
 
   const discardOptimisticQueuedMessage = useCallback(
@@ -156,7 +162,7 @@ export function useMainScreenLocalTranscriptActions(
       }
       bumpAgentRuntimeRevision();
     },
-    [bumpAgentRuntimeRevision],
+    [bumpAgentRuntimeRevision, pendingOptimisticQueuedMessagesRef],
   );
 
   useEffect(() => {
@@ -165,7 +171,7 @@ export function useMainScreenLocalTranscriptActions(
     }
 
     parentChatCacheRef.current[selectedChat.id] = selectedChat;
-  }, [selectedChat]);
+  }, [parentChatCacheRef, selectedChat]);
 
   return {
     slashQuery,

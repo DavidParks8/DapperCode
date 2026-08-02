@@ -76,7 +76,7 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       });
       scrollToBottomIfPinned(true);
     },
-    [scrollToBottomIfPinned],
+    [scrollToBottomIfPinned, selectedChatIdRef, selectedChatRef, setSelectedChat],
   );
 
   const ensureLocalCommandChat = useCallback(
@@ -136,7 +136,14 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       activeServiceTier,
       api,
       preferredStartCwd,
+      selectedAcpModeId,
       selectedChatId,
+      selectedChatIdRef,
+      selectedChatRef,
+      selectedCollaborationMode,
+      setError,
+      setSelectedChat,
+      setSelectedChatId,
     ],
   );
 
@@ -169,7 +176,7 @@ export function useMainScreenLocalCommandChat(context: MainScreenLocalCommandCha
       });
       scrollToBottomIfPinned(true);
     },
-    [scrollToBottomIfPinned, selectedChatId],
+    [scrollToBottomIfPinned, selectedChatId, setSelectedChat],
   );
 
   return {

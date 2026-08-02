@@ -103,8 +103,7 @@ describe('MessageActions', () => {
 
     for (const button of [copyButton, selectButton]) {
       const hitSlop = button.props.hitSlop as
-        | { top: number; bottom: number; left: number; right: number }
-        | undefined;
+        { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
       expect(hitSlop!.top).toBeGreaterThan(0);
       expect(hitSlop!.bottom).toBeGreaterThan(0);

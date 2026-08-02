@@ -544,20 +544,18 @@ describe('WorkspacePicker', () => {
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    const selectedTile = root
-      .findAll(
-        (node) =>
-          typeof node.props.onPress === 'function' &&
-          flattenTreeText(node).includes('alpha-project') &&
-          node.props.accessibilityState !== undefined,
-      )[0];
-    const unselectedTile = root
-      .findAll(
-        (node) =>
-          typeof node.props.onPress === 'function' &&
-          flattenTreeText(node).includes('beta-project') &&
-          node.props.accessibilityState !== undefined,
-      )[0];
+    const selectedTile = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        flattenTreeText(node).includes('alpha-project') &&
+        node.props.accessibilityState !== undefined,
+    )[0];
+    const unselectedTile = root.findAll(
+      (node) =>
+        typeof node.props.onPress === 'function' &&
+        flattenTreeText(node).includes('beta-project') &&
+        node.props.accessibilityState !== undefined,
+    )[0];
     expect(selectedTile.props.accessibilityState).toEqual(
       expect.objectContaining({ selected: true }),
     );

@@ -16,27 +16,19 @@ import {
   activityAtom,
   showDelayedGenericRunningActivityAtom,
 } from '../../state/mainScreen/composer';
-import type {
-  BridgeUiSurface,
-  Chat,
-  ChatMessage as ChatTranscriptMessage,
-  CollaborationMode,
-  LocalImageInput,
-  MentionInput,
-} from '../../api/types';
-import { getMessageText } from '../../api/messages';
-import {
-  toMentionInput,
-  toOptimisticUserContent,
-  normalizeChatMessageMatchContent,
-  shouldAutoEnablePlanModeFromChat,
-  isChatLikelyRunning,
-  parseGoalSlashObjective,
-  buildOptimisticGoalBridgeUiSurface,
-} from './mainScreenHelpers';
+import type { CollaborationMode, LocalImageInput, MentionInput } from '../../api/types';
 import type { MainScreenSendMessageHandlerContext } from './mainScreenSendMessageHandler';
 import type { ComposerSubmission } from './controllers/submissionController';
-import { resolveEquivalentChat } from './mainScreenChatState';
+import {
+  applyQueuedMessageResult,
+  applyStartedTurnResult,
+  createOptimisticSendState,
+  finalizeSuccessfulSubmission,
+  beginSendMessageSubmission,
+  prepareSendMessageRequest,
+  restoreFailedSubmission,
+  type RunSendMessageTurnArgs,
+} from './mainScreenSendMessageState';
 
 export interface SendMessageOptions {
   allowSlashCommands?: boolean;
@@ -47,6 +39,104 @@ export interface SendMessageOptions {
   preservePlan?: boolean;
   suppressPlanModeAutoEnable?: boolean;
   submission?: ComposerSubmission;
+}
+
+async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
+  try {
+    args.setSending(true);
+    args.setActivity({ tone: 'running', title: 'Sending message' });
+    args.bumpRunWatchdog();
+    if (args.shouldClearComposer) {
+      args.attachmentController.beginSubmission();
+      args.setDraft('');
+      args.submissionController.markCleared(
+        args.submission,
+        args.draftController.snapshot().revision,
+      );
+    }
+    args.optimisticState.applyGoalSurface();
+    args.optimisticState.applySentMessage();
+    const result = await args.turnExecutionController.sendOrQueue(
+      args.targetChatId,
+      {
+        content: args.content,
+        mentions: args.turnMentions,
+        localImages: args.turnLocalImages,
+        cwd: args.selectedChat?.cwd,
+        model: args.activeModelId ?? undefined,
+        effort: args.activeEffort ?? undefined,
+        serviceTier: args.activeServiceTier ?? undefined,
+        approvalPolicy: args.activeApprovalPolicy,
+        collaborationMode: args.resolvedCollaborationMode,
+      },
+      args.optimisticState.likelyQueuesLocally,
+      args.submission.id,
+    );
+    args.discardOptimisticQueuedMessage(
+      args.targetChatId,
+      args.optimisticState.optimisticQueuedMessage?.id,
+    );
+    args.cacheThreadQueueState(args.targetChatId, result.queue);
+    args.rememberChatModelPreference(
+      args.targetChatId,
+      args.activeModelId,
+      args.selectedEffort ?? args.activeEffort,
+      args.activeServiceTier,
+    );
+    const isStillSelectedForResult = args.selectedChatIdRef.current === args.targetChatId;
+    finalizeSuccessfulSubmission(args, isStillSelectedForResult);
+    if (result.disposition === 'queued') {
+      applyQueuedMessageResult({
+        optimisticState: args.optimisticState,
+        selectedChatIdRef: args.selectedChatIdRef,
+        targetChatId: args.targetChatId,
+        selectedChatRef: args.selectedChatRef,
+        setActivity: args.setActivity,
+        clearRunWatchdog: args.clearRunWatchdog,
+      });
+      return true;
+    }
+    applyStartedTurnResult({
+      result,
+      targetChatId: args.targetChatId,
+      selectedChatIdRef: args.selectedChatIdRef,
+      registerTurnStarted: args.registerTurnStarted,
+      setStoppingTurn: args.setStoppingTurn,
+      stopRequestedRef: args.stopRequestedRef,
+      shouldPreservePlan: args.shouldPreservePlan,
+      setActivePlan: args.setActivePlan,
+      cacheThreadPlan: args.cacheThreadPlan,
+      setPendingUserInputRequest: args.setPendingUserInputRequest,
+      setUserInputDrafts: args.setUserInputDrafts,
+      setUserInputError: args.setUserInputError,
+      setResolvingUserInput: args.setResolvingUserInput,
+      selectedChatRef: args.selectedChatRef,
+      mergeChatWithPendingOptimisticMessages: args.mergeChatWithPendingOptimisticMessages,
+      suppressPlanModeAutoEnable: args.suppressPlanModeAutoEnable,
+      supportsPlanMode: args.supportsPlanMode,
+      setSelectedCollaborationMode: args.setSelectedCollaborationMode,
+      setSelectedChat: args.setSelectedChat,
+      resolvedCollaborationMode: args.resolvedCollaborationMode,
+      optimisticState: args.optimisticState,
+      setActivity: args.setActivity,
+      clearRunWatchdog: args.clearRunWatchdog,
+      setShowDelayedGenericRunningActivity: args.setShowDelayedGenericRunningActivity,
+      bumpRunWatchdog: args.bumpRunWatchdog,
+    });
+    return true;
+  } catch (err) {
+    restoreFailedSubmission(args);
+    args.optimisticState.restoreGoalSurfaces();
+    args.optimisticState.clearSentMessage();
+    args.discardOptimisticQueuedMessage(
+      args.targetChatId,
+      args.optimisticState.optimisticQueuedMessage?.id,
+    );
+    if (args.selectedChatIdRef.current === args.targetChatId) args.handleTurnFailure(err);
+    return false;
+  } finally {
+    if (args.selectedChatIdRef.current === args.targetChatId) args.setSending(false);
+  }
 }
 
 export async function executeSendMessage(
@@ -114,301 +204,102 @@ export async function executeSendMessage(
     showDelayedGenericRunningActivityAtom,
   );
 
-  const content = rawContent.trim();
-  if (!selectedChatId || !content) {
+  const request = prepareSendMessageRequest({
+    rawContent,
+    options,
+    selectedChatId,
+  });
+  if (!request) {
     return false;
   }
-  const targetChatId = selectedChatId;
-
-  const shouldClearComposer = options?.clearComposer ?? true;
-  const shouldPreservePlan = options?.preservePlan ?? false;
+  const { content, targetChatId, shouldClearComposer, shouldPreservePlan } = request;
   if (options?.allowSlashCommands && (await handleSlashCommand(content))) {
     if (shouldClearComposer) {
       setDraft('');
     }
     return true;
   }
-  const resolvedCollaborationMode = options?.collaborationMode ?? selectedCollaborationMode;
-  const turnMentions =
-    options?.mentions ?? pendingMentionPaths.map((path) => toMentionInput(path, selectedChat?.cwd));
-  const turnLocalImages = options?.localImages ?? pendingLocalImagePaths.map((path) => ({ path }));
-  const submission =
-    options?.submission ??
-    submissionController.begin(
-      { ...draftController.snapshot(), value: rawContent },
-      {
-        mentions: turnMentions.map((mention) => mention.path),
-        localImages: turnLocalImages.map((image) => image.path),
-      },
-    );
+  const { resolvedCollaborationMode, turnMentions, turnLocalImages, submission } =
+    beginSendMessageSubmission({
+      rawContent,
+      options,
+      selectedCollaborationMode,
+      selectedChat,
+      pendingMentionPaths,
+      pendingLocalImagePaths,
+      submissionController,
+      draftController,
+    });
   const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[targetChatId] ?? null;
-  const goalObjective = supportsGoal ? parseGoalSlashObjective(content) : null;
-  const optimisticGoalSurface = goalObjective
-    ? buildOptimisticGoalBridgeUiSurface(targetChatId, goalObjective, new Date().toISOString())
-    : null;
-  const previousBridgeUiSurfaces = optimisticGoalSurface
-    ? [
-        ...(selectedThreadSnapshot?.bridgeUiSurfaces ??
-          activeBridgeUiSurfaces.filter((surface) => surface.threadId === targetChatId)),
-      ]
-    : null;
-  const replaceGoalSurfaces = (surface: BridgeUiSurface) => {
-    const nextSurfaces = [
-      ...(previousBridgeUiSurfaces ?? []).filter(
-        (entry) => entry.kind !== 'goal' && !entry.id.startsWith('goal-'),
-      ),
-      surface,
-    ];
-    replaceThreadBridgeUiSurfaces(targetChatId, nextSurfaces);
-    if (selectedChatIdRef.current === targetChatId) {
-      setActiveBridgeUiSurfaces(nextSurfaces);
-    }
-  };
-  const restoreGoalSurfaces = () => {
-    if (!previousBridgeUiSurfaces) {
-      return;
-    }
-    replaceThreadBridgeUiSurfaces(targetChatId, previousBridgeUiSurfaces);
-    if (selectedChatIdRef.current === targetChatId) {
-      setActiveBridgeUiSurfaces(previousBridgeUiSurfaces);
-    }
-  };
-  const knownQueuedMessages = selectedThreadSnapshot?.queuedMessages ?? [];
-  const likelyQueuesLocally =
-    knownQueuedMessages.length > 0 ||
-    Boolean(activeTurnIdRef.current) ||
-    Boolean(selectedThreadSnapshot?.activeTurnId) ||
-    Boolean(selectedChatRef.current && isChatLikelyRunning(selectedChatRef.current)) ||
-    Boolean(selectedThreadSnapshot?.pendingApproval?.requestId) ||
-    Boolean(selectedThreadSnapshot?.pendingUserInputRequest?.requestId) ||
-    Boolean(pendingApproval?.requestId) ||
-    Boolean(pendingUserInputRequest?.requestId);
-  const shouldShowOptimisticQueuedMessage = knownQueuedMessages.length === 0 && likelyQueuesLocally;
-  const optimisticSentContent = !shouldShowOptimisticQueuedMessage
-    ? toOptimisticUserContent(content, turnMentions, turnLocalImages)
-    : null;
-  const optimisticSentMessage = optimisticSentContent
-    ? ({
-        id: `msg-${Date.now()}`,
-        role: 'user',
-        content: optimisticSentContent,
-        createdAt: new Date().toISOString(),
-      } satisfies ChatTranscriptMessage)
-    : null;
-  const previousSelectedChatPreview =
-    selectedChatRef.current?.id === targetChatId
-      ? selectedChatRef.current.lastMessagePreview
-      : selectedChat?.id === targetChatId
-        ? selectedChat.lastMessagePreview
-        : null;
-  const optimisticQueuedMessage = shouldShowOptimisticQueuedMessage
-    ? queueOptimisticQueuedMessage(targetChatId, content)
-    : null;
-  const clearOptimisticSentMessage = () => {
-    if (!optimisticSentMessage) {
-      return;
-    }
-    discardOptimisticUserMessage(targetChatId, optimisticSentMessage.id);
-    setSelectedChat((prev) => {
-      if (!prev || prev.id !== targetChatId) {
-        return prev;
-      }
-
-      const nextMessages = prev.messages.filter(
-        (message) => message.id !== optimisticSentMessage.id,
-      );
-      if (nextMessages.length === prev.messages.length) {
-        return prev;
-      }
-
-      const fallbackPreview =
-        normalizeChatMessageMatchContent(
-          nextMessages.length > 0 ? getMessageText(nextMessages[nextMessages.length - 1]) : '',
-        ).slice(0, 120) || '';
-      return {
-        ...prev,
-        lastMessagePreview:
-          previousSelectedChatPreview ??
-          (fallbackPreview.length > 0 ? fallbackPreview : prev.lastMessagePreview),
-        messages: nextMessages,
-      };
-    });
-  };
-
-  try {
-    setSending(true);
-    setActivity({
-      tone: 'running',
-      title: 'Sending message',
-    });
-    bumpRunWatchdog();
-    if (shouldClearComposer) {
-      attachmentController.beginSubmission();
-      setDraft('');
-      submissionController.markCleared(submission, draftController.snapshot().revision);
-    }
-    if (optimisticGoalSurface) {
-      replaceGoalSurfaces(optimisticGoalSurface);
-    }
-    if (optimisticSentMessage) {
-      queueOptimisticUserMessage(targetChatId, optimisticSentMessage);
-      setSelectedChat((prev) => {
-        const baseChat =
-          selectedChat?.id === targetChatId
-            ? selectedChat
-            : prev?.id === targetChatId
-              ? prev
-              : prev;
-        if (!baseChat) {
-          return prev;
-        }
-        const nowIso = new Date().toISOString();
-        const updated: Chat = {
-          ...baseChat,
-          status: 'running',
-          updatedAt: nowIso,
-          statusUpdatedAt: nowIso,
-          lastError: undefined,
-          lastMessagePreview:
-            normalizeChatMessageMatchContent(optimisticSentMessage.content).slice(0, 120) ||
-            baseChat.lastMessagePreview,
-          messages: [...baseChat.messages, optimisticSentMessage],
-        };
-        selectedChatRef.current = updated;
-        return updated;
-      });
-      scrollToBottomReliable(true);
-    }
-
-    const result = await turnExecutionController.sendOrQueue(
-      targetChatId,
-      {
-        content,
-        mentions: turnMentions,
-        localImages: turnLocalImages,
-        cwd: selectedChat?.cwd,
-        model: activeModelId ?? undefined,
-        effort: activeEffort ?? undefined,
-        serviceTier: activeServiceTier ?? undefined,
-        approvalPolicy: activeApprovalPolicy,
-        collaborationMode: resolvedCollaborationMode,
-      },
-      likelyQueuesLocally,
-      submission.id,
-    );
-
-    discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
-    cacheThreadQueueState(targetChatId, result.queue);
-    rememberChatModelPreference(
-      targetChatId,
-      activeModelId,
-      selectedEffort ?? activeEffort,
-      activeServiceTier,
-    );
-
-    const isStillSelectedForResult = selectedChatIdRef.current === targetChatId;
-    if (shouldClearComposer) {
-      attachmentController.finishSubmission(isStillSelectedForResult);
-    }
-    submissionController.succeed(submission);
-
-    if (isStillSelectedForResult) {
-      setError(null);
-    }
-
-    if (result.disposition === 'queued') {
-      clearOptimisticSentMessage();
-      if (
-        selectedChatIdRef.current === targetChatId &&
-        (!selectedChatRef.current || !isChatLikelyRunning(selectedChatRef.current))
-      ) {
-        setActivity({
-          tone: 'idle',
-          title: 'Message queued',
-        });
-        clearRunWatchdog();
-      }
-      return true;
-    }
-
-    registerTurnStarted(targetChatId, result.turnId);
-    const isStillSelected = selectedChatIdRef.current === targetChatId;
-    if (isStillSelected) {
-      setStoppingTurn(false);
-      stopRequestedRef.current = false;
-    }
-    if (!shouldPreservePlan) {
-      if (isStillSelected) {
-        setActivePlan(null);
-      }
-      cacheThreadPlan(targetChatId, null);
-    }
-    if (isStillSelected) {
-      setPendingUserInputRequest(null);
-      setUserInputDrafts({});
-      setUserInputError(null);
-      setResolvingUserInput(false);
-    }
-    const currentChat = selectedChatRef.current?.id === targetChatId ? selectedChatRef.current : null;
-    const resolvedUpdated = mergeChatWithPendingOptimisticMessages(
-      currentChat ? resolveEquivalentChat(currentChat, result.chat) : result.chat,
-    );
-    const autoEnabledPlan =
-      !options?.suppressPlanModeAutoEnable &&
-      shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
-    if (autoEnabledPlan && isStillSelected) {
-      setSelectedCollaborationMode('plan');
-    }
-    if (isStillSelected) {
-      setSelectedChat(resolvedUpdated);
-      if (resolvedUpdated.status === 'complete') {
-        setActivity({
-          tone: 'complete',
-          title: 'Turn completed',
-          detail:
-            autoEnabledPlan && resolvedCollaborationMode !== 'plan'
-              ? 'Plan mode enabled for the next turn'
-              : undefined,
-        });
-        clearRunWatchdog();
-      } else if (resolvedUpdated.status === 'error') {
-        restoreGoalSurfaces();
-        setActivity({
-          tone: 'error',
-          title: 'Turn failed',
-          detail: resolvedUpdated.lastError ?? undefined,
-        });
-        clearRunWatchdog();
-      } else {
-        // 'running' or 'idle' (server may not have started yet) — keep working
-        setShowDelayedGenericRunningActivity(true);
-        setActivity({
-          tone: 'running',
-          title: 'Working',
-        });
-        bumpRunWatchdog();
-      }
-    }
-  } catch (err) {
-    if (shouldClearComposer) {
-      const shouldRestoreDraft = submissionController.fail(submission, draftController.snapshot());
-      attachmentController.finishSubmission(false, shouldRestoreDraft);
-      if (shouldRestoreDraft) {
-        setDraft(submission.draft);
-      }
-    }
-    restoreGoalSurfaces();
-    clearOptimisticSentMessage();
-    discardOptimisticQueuedMessage(targetChatId, optimisticQueuedMessage?.id);
-    if (selectedChatIdRef.current === targetChatId) {
-      handleTurnFailure(err);
-    }
-    return false;
-  } finally {
-    if (selectedChatIdRef.current === targetChatId) {
-      setSending(false);
-    }
-  }
-
-  return true;
+  const optimisticState = createOptimisticSendState({
+    targetChatId,
+    content,
+    turnMentions,
+    turnLocalImages,
+    supportsGoal,
+    selectedThreadSnapshot,
+    activeBridgeUiSurfaces,
+    replaceThreadBridgeUiSurfaces,
+    selectedChatIdRef,
+    setActiveBridgeUiSurfaces,
+    activeTurnId: activeTurnIdRef.current,
+    selectedChat: selectedChatRef.current,
+    pendingApproval,
+    pendingUserInputRequest,
+    queueOptimisticQueuedMessage,
+    queueOptimisticUserMessage,
+    discardOptimisticUserMessage,
+    setSelectedChat,
+    selectedChatState: selectedChat,
+    selectedChatRef,
+    scrollToBottomReliable,
+  });
+  return runSendMessageTurn({
+    targetChatId,
+    content,
+    turnMentions,
+    turnLocalImages,
+    selectedChat,
+    activeModelId,
+    activeEffort,
+    activeServiceTier,
+    activeApprovalPolicy,
+    resolvedCollaborationMode,
+    selectedEffort,
+    shouldClearComposer,
+    shouldPreservePlan,
+    submission,
+    submissionController,
+    draftController,
+    setDraft,
+    attachmentController,
+    setSending,
+    setActivity,
+    bumpRunWatchdog,
+    optimisticState,
+    turnExecutionController,
+    discardOptimisticQueuedMessage,
+    cacheThreadQueueState,
+    rememberChatModelPreference,
+    clearRunWatchdog,
+    selectedChatIdRef,
+    setError,
+    selectedChatRef,
+    registerTurnStarted,
+    setStoppingTurn,
+    stopRequestedRef,
+    setActivePlan,
+    cacheThreadPlan,
+    setPendingUserInputRequest,
+    setUserInputDrafts,
+    setUserInputError,
+    setResolvingUserInput,
+    mergeChatWithPendingOptimisticMessages,
+    supportsPlanMode,
+    setSelectedCollaborationMode,
+    setSelectedChat,
+    setShowDelayedGenericRunningActivity,
+    suppressPlanModeAutoEnable: options?.suppressPlanModeAutoEnable ?? false,
+    handleTurnFailure,
+  });
 }

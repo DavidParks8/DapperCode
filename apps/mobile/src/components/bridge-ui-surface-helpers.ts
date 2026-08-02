@@ -53,42 +53,29 @@ export function getSurfaceCollapsedSummary(surface: BridgeUiSurface): string {
   }
 
   for (const block of surface.blocks) {
-    if (block.type === 'text') {
-      const text = normalizeCollapsedSummary(block.text);
-      if (text) {
-        return text;
-      }
-    }
-    if (block.type === 'markdown') {
-      const text = normalizeCollapsedSummary(block.markdown);
-      if (text) {
-        return text;
-      }
-    }
-    if (block.type === 'checklist') {
-      const item = block.items.find((entry) => normalizeCollapsedSummary(entry.label));
-      if (item) {
-        return normalizeCollapsedSummary(item.label);
-      }
-    }
-    if (block.type === 'progress') {
-      return normalizeCollapsedSummary(block.label);
-    }
-    if (block.type === 'keyValue') {
-      const item = block.items[0];
-      if (item) {
-        return normalizeCollapsedSummary(`${item.label}: ${item.value}`);
-      }
-    }
-    if (block.type === 'code') {
-      const text = normalizeCollapsedSummary(block.text);
-      if (text) {
-        return text;
-      }
-    }
+    const summary = getBlockCollapsedSummary(block);
+    if (summary) return summary;
   }
 
   return normalizeCollapsedSummary(surface.subtitle ?? '');
+}
+
+function getBlockCollapsedSummary(surface: BridgeUiSurface['blocks'][number]): string {
+  switch (surface.type) {
+    case 'text':
+    case 'code':
+      return normalizeCollapsedSummary(surface.text);
+    case 'markdown':
+      return normalizeCollapsedSummary(surface.markdown);
+    case 'checklist':
+      return normalizeCollapsedSummary(surface.items.find((item) => item.label)?.label ?? '');
+    case 'progress':
+      return normalizeCollapsedSummary(surface.label);
+    case 'keyValue': {
+      const item = surface.items[0];
+      return item ? normalizeCollapsedSummary(`${item.label}: ${item.value}`) : '';
+    }
+  }
 }
 
 function normalizeCollapsedSummary(value: string): string {

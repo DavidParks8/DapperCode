@@ -58,7 +58,9 @@ describe('RouteErrorScreen', () => {
     expect(flatMessage.fontSize).toBe(theme.typography.body.fontSize);
     expect(flatMessage.lineHeight).toBe(theme.typography.body.lineHeight);
 
-    const flatAction = StyleSheet.flatten<TextStyle>(actionText.props.style as StyleProp<TextStyle>);
+    const flatAction = StyleSheet.flatten<TextStyle>(
+      actionText.props.style as StyleProp<TextStyle>,
+    );
     expect(flatAction.fontSize).toBe(theme.typography.headline.fontSize);
     expect(flatAction.lineHeight).toBe(theme.typography.headline.lineHeight);
     expect(flatAction.fontWeight).toBe('700');

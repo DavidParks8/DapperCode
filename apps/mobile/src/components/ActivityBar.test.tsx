@@ -10,7 +10,6 @@ jest.mock('react-native-reanimated', () => jest.requireActual('../testing/reanim
 
 import { FadeIn, ReduceMotion } from '../testing/reanimatedMock';
 
-
 type Props = Record<string, unknown>;
 
 type Queryable = ReactTestInstance & {

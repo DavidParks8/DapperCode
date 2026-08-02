@@ -126,31 +126,8 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     return readBrowserPreviewDiscoveryResponse(response);
   }
   async createChat(body: CreateChatRequest): Promise<Chat> {
-    const requestedAgentId = normalizeAgentId(body.agentId);
-    const requestedCwd = normalizeCwd(body.cwd);
-    const requestedModel = normalizeModel(body.model);
-    const requestedEffort = normalizeEffort(body.effort);
-    const requestedMode =
-      normalizeAcpMode(body.agentMode) ?? (body.collaborationMode === 'plan' ? 'plan' : 'build');
-    const requestedServiceTier = normalizeServiceTier(body.serviceTier);
-    const requestedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
-    const started = await this.ws.request<AppServerStartResponse>('thread/start', {
-      agentId: requestedAgentId ?? undefined,
-      model: requestedModel ?? null,
-      effort: requestedEffort ?? null,
-      mode: requestedMode,
-      modelProvider: null,
-      cwd: requestedCwd ?? null,
-      approvalPolicy: requestedApprovalPolicy,
-      sandbox: MOBILE_DEFAULT_SANDBOX,
-      config: toThreadConfig(requestedServiceTier),
-      baseInstructions: null,
-      developerInstructions: MOBILE_DEVELOPER_INSTRUCTIONS,
-      personality: null,
-      ephemeral: null,
-      experimentalRawEvents: true,
-      persistExtendedHistory: true,
-    });
+    const settings = this.readCreateChatSettings(body);
+    const started = await this.startChatThread(settings);
     const chatId = started.thread?.id;
     if (!chatId) {
       throw new Error('thread/start did not return a chat id');
@@ -160,16 +137,53 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
       return this.sendChatMessage(chatId, {
         content: initialPrompt,
         role: 'user',
-        cwd: requestedCwd ?? undefined,
-        model: requestedModel ?? undefined,
-        effort: requestedEffort ?? undefined,
-        approvalPolicy: requestedApprovalPolicy,
+        cwd: settings.cwd ?? undefined,
+        model: settings.model ?? undefined,
+        effort: settings.effort ?? undefined,
+        approvalPolicy: settings.approvalPolicy,
       });
     }
-    if (started.thread) {
-      return this.mapChatWithCachedTitle(started.thread);
-    }
-    return this.getChat(chatId);
+    return started.thread ? this.mapChatWithCachedTitle(started.thread) : this.getChat(chatId);
+  }
+  private readCreateChatSettings(body: CreateChatRequest) {
+    const requestedAgentId = normalizeAgentId(body.agentId);
+    const requestedCwd = normalizeCwd(body.cwd);
+    const requestedModel = normalizeModel(body.model);
+    const requestedEffort = normalizeEffort(body.effort);
+    const requestedMode =
+      normalizeAcpMode(body.agentMode) ?? (body.collaborationMode === 'plan' ? 'plan' : 'build');
+    const requestedServiceTier = normalizeServiceTier(body.serviceTier);
+    const requestedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
+    return {
+      agentId: requestedAgentId,
+      cwd: requestedCwd,
+      model: requestedModel,
+      effort: requestedEffort,
+      mode: requestedMode,
+      serviceTier: requestedServiceTier,
+      approvalPolicy: requestedApprovalPolicy,
+    };
+  }
+  private startChatThread(
+    settings: ReturnType<HostBridgeApiClientWorkspaceAndChatReadLayer['readCreateChatSettings']>,
+  ) {
+    return this.ws.request<AppServerStartResponse>('thread/start', {
+      agentId: settings.agentId ?? undefined,
+      model: settings.model ?? null,
+      effort: settings.effort ?? null,
+      mode: settings.mode,
+      modelProvider: null,
+      cwd: settings.cwd ?? null,
+      approvalPolicy: settings.approvalPolicy,
+      sandbox: MOBILE_DEFAULT_SANDBOX,
+      config: toThreadConfig(settings.serviceTier),
+      baseInstructions: null,
+      developerInstructions: MOBILE_DEVELOPER_INSTRUCTIONS,
+      personality: null,
+      ephemeral: null,
+      experimentalRawEvents: true,
+      persistExtendedHistory: true,
+    });
   }
   async createChatIdempotent(body: CreateChatRequest, submissionId: string): Promise<Chat> {
     const requestedAgentId = normalizeAgentId(body.agentId);

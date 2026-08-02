@@ -68,7 +68,17 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
         void interruptActiveTurn(threadId, turnId);
       }
     },
-    [interruptActiveTurn],
+    [
+      chatIdRef,
+      interruptActiveTurn,
+      setActiveTurnId,
+      setActivity,
+      setCreating,
+      setSelectedChat,
+      setSending,
+      setShowDelayedGenericRunningActivity,
+      stopRequestedRef,
+    ],
   );
 
   const handleStopTurn = useCallback(() => {
@@ -103,7 +113,18 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       tone: 'idle',
       title: 'No active turn found',
     });
-  }, [interruptActiveTurn, interruptLatestTurn, stoppingTurn]);
+  }, [
+    activeTurnIdRef,
+    chatIdRef,
+    interruptActiveTurn,
+    interruptLatestTurn,
+    setActivity,
+    setError,
+    setStoppingTurn,
+    stopRequestedRef,
+    stopSystemMessageLoggedRef,
+    stoppingTurn,
+  ]);
 
   return {
     registerTurnStarted,

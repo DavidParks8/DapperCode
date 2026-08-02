@@ -2,6 +2,7 @@ import type { Ionicons } from '@expo/vector-icons';
 
 import { getMessageText, getToolCallDisplayLines } from '../api/messages';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '../api/types';
+import { lookupDispatchEntry } from '../runtimeValidation';
 import { parseTimelineEntries, toTimelineVisual } from './chatMessageTimelineHelpers';
 
 export interface ToolInvocationLocation {
@@ -107,18 +108,63 @@ interface ToolInvocationDraft {
   legacyTitle: string | null;
 }
 
-function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocation | null {
-  if (!draft) return null;
+function resolveInvocationTitleInfo(
+  draft: ToolInvocationDraft,
+): { title: string; rawLines: string[] } | null {
   const meta = draft.meta;
+  const metaTitle = meta?.title.trim() ?? '';
   const legacyTitle = draft.legacyTitle?.trim() ?? '';
   const fallbackTitle = draft.textLines[0]?.trim() ?? '';
-  const title = meta?.title.trim() || legacyTitle || fallbackTitle;
+  const title = metaTitle || legacyTitle || fallbackTitle;
   if (!title) return null;
   // A title lifted out of the output must not also be printed inside it.
-  const rawLines = meta?.title.trim() || legacyTitle ? draft.textLines : draft.textLines.slice(1);
+  const rawLines = metaTitle || legacyTitle ? draft.textLines : draft.textLines.slice(1);
+  return { title, rawLines };
+}
+
+function resolveInvocationMetaFields(
+  meta: ChatToolMeta | null,
+  title: string,
+): {
+  kind: ChatToolKind;
+  status: ChatToolStatus;
+  monospaceTitle: boolean;
+  isError: boolean;
+  truncated: boolean;
+} {
   const legacyVisual = meta ? null : toTimelineVisual(title);
   const kind = meta?.kind ?? 'other';
   const status = meta?.status ?? 'completed';
+  return {
+    kind,
+    status,
+    monospaceTitle: meta ? kind === 'execute' : legacyVisual?.useMonospaceTitle === true,
+    isError: status === 'failed' || legacyVisual?.isError === true,
+    truncated: meta?.truncated === true,
+  };
+}
+
+function computeInvocationEmpty(
+  textLines: string[],
+  parsed: ParsedStructuredContent,
+  locations: ToolInvocationLocation[],
+): boolean {
+  return (
+    textLines.length === 0 &&
+    parsed.diffs.length === 0 &&
+    parsed.terminals.length === 0 &&
+    parsed.images.length === 0 &&
+    locations.length === 0
+  );
+}
+
+function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocation | null {
+  if (!draft) return null;
+  const titleInfo = resolveInvocationTitleInfo(draft);
+  if (!titleInfo) return null;
+  const { title, rawLines } = titleInfo;
+  const meta = draft.meta;
+  const metaFields = resolveInvocationMetaFields(meta, title);
   const parsed = parseStructuredContent(meta?.content);
   const locations = parseLocations(meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
@@ -128,23 +174,18 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   );
   return {
     id: draft.id,
-    kind,
-    status,
+    kind: metaFields.kind,
+    status: metaFields.status,
     title: stripBullet(title),
-    monospaceTitle: meta ? kind === 'execute' : legacyVisual?.useMonospaceTitle === true,
-    isError: status === 'failed' || legacyVisual?.isError === true,
+    monospaceTitle: metaFields.monospaceTitle,
+    isError: metaFields.isError,
     locations,
     diffs: parsed.diffs,
     terminals: parsed.terminals,
     textLines,
     images: parsed.images,
-    truncated: meta?.truncated === true,
-    empty:
-      textLines.length === 0 &&
-      parsed.diffs.length === 0 &&
-      parsed.terminals.length === 0 &&
-      parsed.images.length === 0 &&
-      locations.length === 0,
+    truncated: metaFields.truncated,
+    empty: computeInvocationEmpty(textLines, parsed, locations),
   };
 }
 
@@ -223,6 +264,64 @@ function parseStructuredContent(content: unknown): ParsedStructuredContent {
   return parsed;
 }
 
+function visitDiffContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
+  const path = asString(entry.path) ?? 'file';
+  const newText = asString(entry.newText) ?? asString(entry.new_text) ?? '';
+  const oldText = asString(entry.oldText) ?? asString(entry.old_text) ?? null;
+  parsed.diffs.push({ path, oldText, newText });
+  parsed.suppressedLines.add(`[diff: ${path}]`);
+  for (const text of [oldText, newText]) {
+    if (text) for (const line of text.split('\n')) parsed.suppressedLines.add(line.trim());
+  }
+}
+
+function visitTerminalContent(
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+): void {
+  const terminalId = asString(entry.terminalId) ?? asString(entry.terminal_id) ?? null;
+  const output = collectText([entry.output, entry.content]);
+  parsed.terminals.push({ terminalId, output });
+  parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
+  for (const line of output.split('\n')) parsed.suppressedLines.add(line.trim());
+}
+
+function visitImageContent(entry: Record<string, unknown>, parsed: ParsedStructuredContent): void {
+  const source =
+    asString(entry.url) ??
+    asString(entry.imageUrl) ??
+    asString(entry.image_url) ??
+    toDataUrl(entry);
+  if (source) {
+    parsed.images.push(source);
+    parsed.suppressedLines.add(`[image: ${source}]`);
+  }
+  parsed.suppressedLines.add('[image]');
+}
+
+function visitNestedStructuredContent(
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+  depth: number,
+): void {
+  for (const nested of Object.values(entry)) {
+    if (nested && typeof nested === 'object') visitStructuredContent(nested, parsed, depth + 1);
+  }
+}
+
+type StructuredContentVisitor = (
+  entry: Record<string, unknown>,
+  parsed: ParsedStructuredContent,
+  depth: number,
+) => void;
+
+const STRUCTURED_CONTENT_VISITORS: Partial<Record<string, StructuredContentVisitor>> = {
+  diff: (entry, parsed) => visitDiffContent(entry, parsed),
+  terminal: (entry, parsed) => visitTerminalContent(entry, parsed),
+  image: (entry, parsed) => visitImageContent(entry, parsed),
+  content: (entry, parsed, depth) => visitStructuredContent(entry.content, parsed, depth + 1),
+};
+
 function visitStructuredContent(
   value: unknown,
   parsed: ParsedStructuredContent,
@@ -236,45 +335,12 @@ function visitStructuredContent(
   const entry = asRecord(value);
   if (!entry) return;
   const type = normalizedType(entry.type);
-  if (type === 'diff') {
-    const path = asString(entry.path) ?? 'file';
-    const newText = asString(entry.newText) ?? asString(entry.new_text) ?? '';
-    const oldText = asString(entry.oldText) ?? asString(entry.old_text) ?? null;
-    parsed.diffs.push({ path, oldText, newText });
-    parsed.suppressedLines.add(`[diff: ${path}]`);
-    for (const text of [oldText, newText]) {
-      if (text) for (const line of text.split('\n')) parsed.suppressedLines.add(line.trim());
-    }
+  const visitor = lookupDispatchEntry(STRUCTURED_CONTENT_VISITORS, type);
+  if (visitor) {
+    visitor(entry, parsed, depth);
     return;
   }
-  if (type === 'terminal') {
-    const terminalId = asString(entry.terminalId) ?? asString(entry.terminal_id) ?? null;
-    const output = collectText([entry.output, entry.content]);
-    parsed.terminals.push({ terminalId, output });
-    parsed.suppressedLines.add(`[terminal${terminalId ? `: ${terminalId}` : ''}]`);
-    for (const line of output.split('\n')) parsed.suppressedLines.add(line.trim());
-    return;
-  }
-  if (type === 'image') {
-    const source =
-      asString(entry.url) ??
-      asString(entry.imageUrl) ??
-      asString(entry.image_url) ??
-      toDataUrl(entry);
-    if (source) {
-      parsed.images.push(source);
-      parsed.suppressedLines.add(`[image: ${source}]`);
-    }
-    parsed.suppressedLines.add('[image]');
-    return;
-  }
-  if (type === 'content') {
-    visitStructuredContent(entry.content, parsed, depth + 1);
-    return;
-  }
-  for (const nested of Object.values(entry)) {
-    if (nested && typeof nested === 'object') visitStructuredContent(nested, parsed, depth + 1);
-  }
+  visitNestedStructuredContent(entry, parsed, depth);
 }
 
 function parseLocations(value: unknown): ToolInvocationLocation[] {

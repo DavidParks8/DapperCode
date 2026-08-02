@@ -71,6 +71,29 @@ const LANE_TITLES: Record<DrawerAttentionLane, string> = {
   recent: 'Recent',
 };
 
+function resolveDrawerAttentionLane(
+  pending: PendingInteractionSummary | undefined,
+  running: boolean,
+  chat: ChatSummary,
+): DrawerAttentionLane {
+  if (pending) return 'attention';
+  if (running) return 'working';
+  if (chat.status === 'error') return 'attention';
+  return 'recent';
+}
+
+function resolveDrawerAttentionReason(
+  pending: PendingInteractionSummary | undefined,
+  running: boolean,
+  chat: ChatSummary,
+): DrawerAttentionReason {
+  if (pending) {
+    return pending.approvalCount > 0 ? 'approval' : 'input';
+  }
+  if (!running && chat.status === 'error') return 'error';
+  return null;
+}
+
 export function buildDrawerAttentionModel({
   chats,
   agents,
@@ -133,13 +156,7 @@ export function buildDrawerAttentionModel({
     }
     const pending = pendingByThread.get(chat.id);
     const running = isDrawerChatRunning(chat, runIndicatorsByThread);
-    const lane: DrawerAttentionLane = pending
-      ? 'attention'
-      : running
-        ? 'working'
-        : chat.status === 'error'
-          ? 'attention'
-          : 'recent';
+    const lane = resolveDrawerAttentionLane(pending, running, chat);
     // Sub-agents belong to their parent session and are reported inside its
     // transcript, so they only earn a row of their own when they need the user.
     if (lane !== 'attention' && isSubAgentSource(chat.sourceKind)) {
@@ -148,13 +165,7 @@ export function buildDrawerAttentionModel({
     rowsByLane[lane].push({
       chat,
       lane,
-      attentionReason: pending
-        ? pending.approvalCount > 0
-          ? 'approval'
-          : 'input'
-        : !running && chat.status === 'error'
-          ? 'error'
-          : null,
+      attentionReason: resolveDrawerAttentionReason(pending, running, chat),
       stateLabel: getStateLabel(chat, pending, running),
       agentLabel: getAgentLabel(agents, chat.agentId),
       workspaceKey: workspace.key,

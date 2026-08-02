@@ -1,5 +1,5 @@
 import type { ChatSummary, RpcNotification } from '../api/types';
-import { parseAgUiEventNotification } from '../api/agUi';
+import { parseAgUiEventNotification, type AgUiEventEnvelope } from '../api/agUi';
 import type { ChatWorkspaceSection } from './chatThreadTree';
 
 export interface DrawerRunIndicator {
@@ -129,6 +129,39 @@ export function pruneStaleDrawerRunIndicators(
   return changed ? next : previous;
 }
 
+function updateDrawerRunIndicatorsForAgUiEvent(
+  previous: DrawerRunIndicatorMap,
+  agUi: AgUiEventEnvelope,
+  now: number,
+): DrawerRunIndicatorMap {
+  if (agUi.event.type === 'RUN_STARTED') {
+    return setRunningIndicator(previous, agUi.threadId, 'lifecycle', now);
+  }
+  if (agUi.event.type === 'TEXT_MESSAGE_CONTENT') {
+    return setRunningIndicator(previous, agUi.threadId, 'heartbeat', now);
+  }
+  if (agUi.event.type === 'RUN_FINISHED' || agUi.event.type === 'RUN_ERROR') {
+    return clearRunningIndicator(previous, agUi.threadId);
+  }
+  return previous;
+}
+
+function updateDrawerRunIndicatorsForStatusChange(
+  previous: DrawerRunIndicatorMap,
+  threadId: string,
+  params: Record<string, unknown> | null,
+  now: number,
+): DrawerRunIndicatorMap {
+  const statusHint = extractDrawerStatusHint(params);
+  if (statusHint && DRAWER_RUNNING_STATUS_HINTS.has(statusHint)) {
+    return setRunningIndicator(previous, threadId, 'lifecycle', now);
+  }
+  if (statusHint && DRAWER_NON_RUNNING_STATUS_HINTS.has(statusHint)) {
+    return clearRunningIndicator(previous, threadId);
+  }
+  return previous;
+}
+
 export function updateDrawerRunIndicatorsForEvent(
   previous: DrawerRunIndicatorMap,
   event: RpcNotification,
@@ -136,16 +169,7 @@ export function updateDrawerRunIndicatorsForEvent(
 ): DrawerRunIndicatorMap {
   const agUi = parseAgUiEventNotification(event);
   if (agUi) {
-    if (agUi.event.type === 'RUN_STARTED') {
-      return setRunningIndicator(previous, agUi.threadId, 'lifecycle', now);
-    }
-    if (agUi.event.type === 'TEXT_MESSAGE_CONTENT') {
-      return setRunningIndicator(previous, agUi.threadId, 'heartbeat', now);
-    }
-    if (agUi.event.type === 'RUN_FINISHED' || agUi.event.type === 'RUN_ERROR') {
-      return clearRunningIndicator(previous, agUi.threadId);
-    }
-    return previous;
+    return updateDrawerRunIndicatorsForAgUiEvent(previous, agUi, now);
   }
   const params = toRecord(event.params);
   const threadId = extractDrawerNotificationThreadId(params);
@@ -154,14 +178,7 @@ export function updateDrawerRunIndicatorsForEvent(
   }
 
   if (event.method === 'thread/status/changed') {
-    const statusHint = extractDrawerStatusHint(params);
-    if (statusHint && DRAWER_RUNNING_STATUS_HINTS.has(statusHint)) {
-      return setRunningIndicator(previous, threadId, 'lifecycle', now);
-    }
-    if (statusHint && DRAWER_NON_RUNNING_STATUS_HINTS.has(statusHint)) {
-      return clearRunningIndicator(previous, threadId);
-    }
-    return previous;
+    return updateDrawerRunIndicatorsForStatusChange(previous, threadId, params, now);
   }
 
   if (DRAWER_LIFECYCLE_METHODS.has(event.method)) {
@@ -179,6 +196,115 @@ export function updateDrawerRunIndicatorsForEvent(
   return previous;
 }
 
+function resolveDrawerThreadRecord(
+  params: Record<string, unknown> | null,
+  msg: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return (
+    toRecord(params?.thread) ??
+    toRecord(params?.threadState) ??
+    toRecord(params?.thread_state) ??
+    toRecord(msg?.thread)
+  );
+}
+
+function resolveDrawerSubagentSpawnRecord(
+  source: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return toRecord(toRecord(source?.subagent ?? source?.subAgent)?.thread_spawn);
+}
+
+interface DrawerThreadIdContext {
+  msg: Record<string, unknown> | null;
+  threadRecord: Record<string, unknown> | null;
+  threadSourceRecord: Record<string, unknown> | null;
+  turnRecord: Record<string, unknown> | null;
+  sourceRecord: Record<string, unknown> | null;
+  subagentThreadSpawnRecord: Record<string, unknown> | null;
+  threadSubagentThreadSpawnRecord: Record<string, unknown> | null;
+}
+
+function buildDrawerThreadIdContext(
+  params: Record<string, unknown> | null,
+  msgArg?: Record<string, unknown> | null,
+): DrawerThreadIdContext {
+  const msg = msgArg ?? toRecord(params?.msg);
+  const threadRecord = resolveDrawerThreadRecord(params, msg);
+  const threadSourceRecord = toRecord(threadRecord?.source);
+  const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
+  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
+  return {
+    msg,
+    threadRecord,
+    threadSourceRecord,
+    turnRecord,
+    sourceRecord,
+    subagentThreadSpawnRecord: resolveDrawerSubagentSpawnRecord(sourceRecord),
+    threadSubagentThreadSpawnRecord: resolveDrawerSubagentSpawnRecord(threadSourceRecord),
+  };
+}
+
+function extractThreadIdFromMsg(msg: Record<string, unknown> | null): string | null {
+  return (
+    readNonEmptyString(msg?.thread_id) ??
+    readNonEmptyString(msg?.threadId) ??
+    readNonEmptyString(msg?.conversation_id) ??
+    readNonEmptyString(msg?.conversationId) ??
+    null
+  );
+}
+
+function extractThreadIdFromParams(params: Record<string, unknown> | null): string | null {
+  return (
+    readNonEmptyString(params?.thread_id) ??
+    readNonEmptyString(params?.threadId) ??
+    readNonEmptyString(params?.conversation_id) ??
+    readNonEmptyString(params?.conversationId) ??
+    null
+  );
+}
+
+function extractThreadIdFromThreadRecord(
+  threadRecord: Record<string, unknown> | null,
+): string | null {
+  return (
+    readNonEmptyString(threadRecord?.id) ??
+    readNonEmptyString(threadRecord?.thread_id) ??
+    readNonEmptyString(threadRecord?.threadId) ??
+    readNonEmptyString(threadRecord?.conversation_id) ??
+    readNonEmptyString(threadRecord?.conversationId) ??
+    null
+  );
+}
+
+function extractThreadIdFromTurnRecord(turnRecord: Record<string, unknown> | null): string | null {
+  return (
+    readNonEmptyString(turnRecord?.thread_id) ?? readNonEmptyString(turnRecord?.threadId) ?? null
+  );
+}
+
+function extractThreadIdFromSourceRecord(
+  sourceRecord: Record<string, unknown> | null,
+): string | null {
+  return (
+    readNonEmptyString(sourceRecord?.thread_id) ??
+    readNonEmptyString(sourceRecord?.threadId) ??
+    readNonEmptyString(sourceRecord?.conversation_id) ??
+    readNonEmptyString(sourceRecord?.conversationId) ??
+    readNonEmptyString(sourceRecord?.parent_thread_id) ??
+    readNonEmptyString(sourceRecord?.parentThreadId) ??
+    null
+  );
+}
+
+function extractParentThreadId(record: Record<string, unknown> | null): string | null {
+  return (
+    readNonEmptyString(record?.parent_thread_id) ??
+    readNonEmptyString(record?.parentThreadId) ??
+    null
+  );
+}
+
 export function extractDrawerNotificationThreadId(
   params: Record<string, unknown> | null,
   msgArg?: Record<string, unknown> | null,
@@ -187,51 +313,41 @@ export function extractDrawerNotificationThreadId(
     return null;
   }
 
-  const msg = msgArg ?? toRecord(params?.msg);
-  const threadRecord =
-    toRecord(params?.thread) ??
-    toRecord(params?.threadState) ??
-    toRecord(params?.thread_state) ??
-    toRecord(msg?.thread);
-  const threadSourceRecord = toRecord(threadRecord?.source);
-  const turnRecord = toRecord(params?.turn) ?? toRecord(msg?.turn);
-  const sourceRecord = toRecord(params?.source) ?? toRecord(msg?.source);
-  const subagentThreadSpawnRecord = toRecord(
-    toRecord(sourceRecord?.subagent ?? sourceRecord?.subAgent)?.thread_spawn,
-  );
-  const threadSubagentThreadSpawnRecord = toRecord(
-    toRecord(threadSourceRecord?.subagent ?? threadSourceRecord?.subAgent)?.thread_spawn,
-  );
+  const ctx = buildDrawerThreadIdContext(params, msgArg);
 
   return (
-    readNonEmptyString(msg?.thread_id) ??
-    readNonEmptyString(msg?.threadId) ??
-    readNonEmptyString(msg?.conversation_id) ??
-    readNonEmptyString(msg?.conversationId) ??
-    readNonEmptyString(params?.thread_id) ??
-    readNonEmptyString(params?.threadId) ??
-    readNonEmptyString(params?.conversation_id) ??
-    readNonEmptyString(params?.conversationId) ??
-    readNonEmptyString(threadRecord?.id) ??
-    readNonEmptyString(threadRecord?.thread_id) ??
-    readNonEmptyString(threadRecord?.threadId) ??
-    readNonEmptyString(threadRecord?.conversation_id) ??
-    readNonEmptyString(threadRecord?.conversationId) ??
-    readNonEmptyString(turnRecord?.thread_id) ??
-    readNonEmptyString(turnRecord?.threadId) ??
-    readNonEmptyString(sourceRecord?.thread_id) ??
-    readNonEmptyString(sourceRecord?.threadId) ??
-    readNonEmptyString(sourceRecord?.conversation_id) ??
-    readNonEmptyString(sourceRecord?.conversationId) ??
-    readNonEmptyString(sourceRecord?.parent_thread_id) ??
-    readNonEmptyString(sourceRecord?.parentThreadId) ??
-    readNonEmptyString(subagentThreadSpawnRecord?.parent_thread_id) ??
-    readNonEmptyString(subagentThreadSpawnRecord?.parentThreadId) ??
-    readNonEmptyString(threadSourceRecord?.parent_thread_id) ??
-    readNonEmptyString(threadSourceRecord?.parentThreadId) ??
-    readNonEmptyString(threadSubagentThreadSpawnRecord?.parent_thread_id) ??
-    readNonEmptyString(threadSubagentThreadSpawnRecord?.parentThreadId) ??
+    extractThreadIdFromMsg(ctx.msg) ??
+    extractThreadIdFromParams(params) ??
+    extractThreadIdFromThreadRecord(ctx.threadRecord) ??
+    extractThreadIdFromTurnRecord(ctx.turnRecord) ??
+    extractThreadIdFromSourceRecord(ctx.sourceRecord) ??
+    extractParentThreadId(ctx.subagentThreadSpawnRecord) ??
+    extractParentThreadId(ctx.threadSourceRecord) ??
+    extractParentThreadId(ctx.threadSubagentThreadSpawnRecord) ??
     null
+  );
+}
+
+function resolveDrawerStatusRecord(
+  params: Record<string, unknown>,
+  msg: Record<string, unknown> | null,
+  threadRecord: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  return toRecord(params.status) ?? toRecord(msg?.status) ?? toRecord(threadRecord?.status);
+}
+
+function resolveDrawerStatusToken(
+  params: Record<string, unknown>,
+  msg: Record<string, unknown> | null,
+  statusRecord: Record<string, unknown> | null,
+  threadRecord: Record<string, unknown> | null,
+): string | null {
+  return (
+    readString(params.status) ??
+    readString(msg?.status) ??
+    readString(statusRecord?.type) ??
+    readString(statusRecord?.status) ??
+    readString(threadRecord?.status)
   );
 }
 
@@ -241,21 +357,10 @@ export function extractDrawerStatusHint(params: Record<string, unknown> | null):
   }
 
   const msg = toRecord(params.msg);
-  const threadRecord =
-    toRecord(params.thread) ??
-    toRecord(params.threadState) ??
-    toRecord(params.thread_state) ??
-    toRecord(msg?.thread);
-  const statusRecord =
-    toRecord(params.status) ?? toRecord(msg?.status) ?? toRecord(threadRecord?.status);
+  const threadRecord = resolveDrawerThreadRecord(params, msg);
+  const statusRecord = resolveDrawerStatusRecord(params, msg, threadRecord);
 
-  return normalizeToken(
-    readString(params.status) ??
-      readString(msg?.status) ??
-      readString(statusRecord?.type) ??
-      readString(statusRecord?.status) ??
-      readString(threadRecord?.status),
-  );
+  return normalizeToken(resolveDrawerStatusToken(params, msg, statusRecord, threadRecord));
 }
 
 function isDrawerRunIndicatorActive(

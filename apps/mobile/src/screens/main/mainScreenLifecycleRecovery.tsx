@@ -27,9 +27,12 @@ export type MainScreenLifecycleRecoveryContext = MainScreenCoreBootstrapContext 
 
 export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecoveryContext) {
   const {
+    appStateRef,
+    deferredDisconnectActivityTimeoutRef,
     foregroundAgentRefreshHandleRef,
     genericRunningActivityTimeoutRef,
     heldActivityTimeoutRef,
+    lastAppForegroundedAtRef,
     lastPinnedScrollAtRef,
     scheduledPinnedScrollTimeoutRef,
     scrollRef,
@@ -60,10 +63,9 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   );
   const bumpAgentRuntimeRevision = useCallback(() => {
     setAgentRuntimeRevision((previous) => previous + 1);
-  }, []);
+  }, [setAgentRuntimeRevision]);
 
   const clearDeferredDisconnectActivity = useCallback(() => {
-    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
     if (!deferredDisconnectActivityTimeoutRef) {
       return;
     }
@@ -71,7 +73,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       clearTimeout(deferredDisconnectActivityTimeoutRef.current);
       deferredDisconnectActivityTimeoutRef.current = null;
     }
-  }, []);
+  }, [deferredDisconnectActivityTimeoutRef]);
 
   const clearHeldActivity = useCallback(() => {
     if (heldActivityTimeoutRef.current) {
@@ -79,7 +81,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       heldActivityTimeoutRef.current = null;
     }
     setHeldActivity(null);
-  }, []);
+  }, [heldActivityTimeoutRef, setHeldActivity]);
 
   const clearGenericRunningActivityDelay = useCallback(() => {
     if (genericRunningActivityTimeoutRef.current) {
@@ -87,18 +89,15 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       genericRunningActivityTimeoutRef.current = null;
     }
     setShowDelayedGenericRunningActivity(false);
-  }, []);
+  }, [genericRunningActivityTimeoutRef, setShowDelayedGenericRunningActivity]);
 
   const clearForegroundAgentRefresh = useCallback(() => {
     foregroundAgentRefreshHandleRef.current?.cancel?.();
     foregroundAgentRefreshHandleRef.current = null;
-  }, []);
+  }, [foregroundAgentRefreshHandleRef]);
 
   const scheduleDisconnectActivity = useCallback(() => {
     clearDeferredDisconnectActivity();
-    const appStateRef = context.appStateRef;
-    const deferredDisconnectActivityTimeoutRef = context.deferredDisconnectActivityTimeoutRef;
-    const lastAppForegroundedAtRef = context.lastAppForegroundedAtRef;
     if (!appStateRef || !deferredDisconnectActivityTimeoutRef || !lastAppForegroundedAtRef) {
       return;
     }
@@ -129,7 +128,15 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
     }
 
     deferredDisconnectActivityTimeoutRef.current = setTimeout(showDisconnected, remainingGraceMs);
-  }, [clearDeferredDisconnectActivity, ws]);
+  }, [
+    appStateRef,
+    clearDeferredDisconnectActivity,
+    deferredDisconnectActivityTimeoutRef,
+    lastAppForegroundedAtRef,
+    setActivity,
+    setBridgeRecoveryBannerVisible,
+    ws,
+  ]);
 
   const clearPendingScrollRetries = useCallback(() => {
     for (const timeoutId of scrollRetryTimeoutsRef.current) {
@@ -140,7 +147,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       clearTimeout(scheduledPinnedScrollTimeoutRef.current);
       scheduledPinnedScrollTimeoutRef.current = null;
     }
-  }, []);
+  }, [scheduledPinnedScrollTimeoutRef, scrollRetryTimeoutsRef]);
 
   const scrollToBottomReliable = useCallback(
     (animated = true) => {
@@ -157,7 +164,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
         }, delay),
       );
     },
-    [clearPendingScrollRetries],
+    [clearPendingScrollRetries, scrollRef, scrollRetryTimeoutsRef],
   );
 
   const scrollToBottomIfPinned = useCallback(
@@ -208,7 +215,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
         scrollToBottomReliable(animated);
       }, STREAMING_SCROLL_THROTTLE_MS - elapsed);
     },
-    [scrollToBottomReliable],
+    [lastPinnedScrollAtRef, scheduledPinnedScrollTimeoutRef, scrollToBottomReliable],
   );
 
   useEffect(() => {

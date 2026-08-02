@@ -1,5 +1,6 @@
 const tsPlugin = require('@typescript-eslint/eslint-plugin');
 const globals = require('globals');
+const prettierRecommended = require('eslint-plugin-prettier/recommended');
 const reactHooks = require('eslint-plugin-react-hooks');
 
 module.exports = [
@@ -36,6 +37,9 @@ module.exports = [
           skipComments: true,
         },
       ],
+      complexity: ['error', 15],
+      'max-depth': ['error', 4],
+      'react-hooks/exhaustive-deps': 'error',
       'react-hooks/rules-of-hooks': 'error',
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
@@ -54,4 +58,5 @@ module.exports = [
       '@typescript-eslint/no-misused-promises': 'off',
     },
   },
+  prettierRecommended,
 ];

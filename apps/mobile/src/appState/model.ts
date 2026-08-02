@@ -174,34 +174,7 @@ export function normalizePushSettings(
     record.events && typeof record.events === 'object'
       ? (record.events as Record<string, unknown>)
       : {};
-  const knownProfiles = new Set(profiles.profiles.map((profile) => profile.id));
-  const seenProfiles = new Set<string>();
-  const seenRegistrations = new Set<string>();
-  const registrations: PushProfileRegistration[] = [];
-  if (Array.isArray(record.registrations)) {
-    for (const value of record.registrations) {
-      if (!value || typeof value !== 'object') continue;
-      const registration = value as Record<string, unknown>;
-      const profileId = normalizeNullableString(registration.profileId);
-      const registrationId = normalizeNullableString(registration.registrationId);
-      if (
-        !profileId ||
-        !registrationId ||
-        !knownProfiles.has(profileId) ||
-        seenProfiles.has(profileId) ||
-        seenRegistrations.has(registrationId)
-      ) {
-        continue;
-      }
-      seenProfiles.add(profileId);
-      seenRegistrations.add(registrationId);
-      registrations.push({
-        profileId,
-        registrationId,
-        token: normalizeNullableString(registration.token),
-      });
-    }
-  }
+  const registrations = normalizePushRegistrations(record.registrations, profiles);
   return {
     optedOut: record.optedOut === true,
     events: {
@@ -216,6 +189,44 @@ export function normalizePushSettings(
     },
     registrations,
   };
+}
+
+function normalizePushRegistrations(
+  value: unknown,
+  profiles: BridgeProfileStore,
+): PushProfileRegistration[] {
+  if (!Array.isArray(value)) return [];
+  const knownProfiles = new Set(profiles.profiles.map((profile) => profile.id));
+  const seenProfiles = new Set<string>();
+  const seenRegistrations = new Set<string>();
+  return value.flatMap((entry) => {
+    const registration = toPushRegistration(entry, knownProfiles, seenProfiles, seenRegistrations);
+    return registration ? [registration] : [];
+  });
+}
+
+function toPushRegistration(
+  value: unknown,
+  knownProfiles: ReadonlySet<string>,
+  seenProfiles: Set<string>,
+  seenRegistrations: Set<string>,
+): PushProfileRegistration | null {
+  if (!value || typeof value !== 'object') return null;
+  const registration = value as Record<string, unknown>;
+  const profileId = normalizeNullableString(registration.profileId);
+  const registrationId = normalizeNullableString(registration.registrationId);
+  if (
+    !profileId ||
+    !registrationId ||
+    !knownProfiles.has(profileId) ||
+    seenProfiles.has(profileId) ||
+    seenRegistrations.has(registrationId)
+  ) {
+    return null;
+  }
+  seenProfiles.add(profileId);
+  seenRegistrations.add(registrationId);
+  return { profileId, registrationId, token: normalizeNullableString(registration.token) };
 }
 
 export function updatePushRegistration(

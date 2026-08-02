@@ -80,9 +80,7 @@ export function GitScreen({ chat }: GitScreenProps) {
             style={styles.loader}
           />
         ) : (
-          <Animated.View
-            entering={FadeIn.duration(200)}
-          >
+          <Animated.View entering={FadeIn.duration(200)}>
             <GitScreenBranchSummarySection controller={controller} styles={styles} theme={theme} />
             <GitScreenCommitHistorySection controller={controller} styles={styles} theme={theme} />
             <GitScreenDiffSection controller={controller} styles={styles} theme={theme} />

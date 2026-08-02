@@ -9,14 +9,9 @@ export function parseSnapshotTaskSubagent(
   // Tool content is appended across updates, so the newest `<task …>` header wins.
   // Later matches can be incidental (quoted markup in tool output), so fall back to
   // earlier candidates instead of giving up on the first unparsable one.
-  const headers = [...content.matchAll(/<task\s+([^>]+)>/g)].reverse();
-  const header = headers.find(
-    (candidate) =>
-      /\bid="([^"]{1,1024})"/.test(candidate[1] ?? '') &&
-      /\bstate="([^"]{1,64})"/.test(candidate[1] ?? ''),
-  );
-  const sessionId = header?.[1]?.match(/\bid="([^"]{1,1024})"/)?.[1]?.trim();
-  const state = header?.[1]?.match(/\bstate="([^"]{1,64})"/)?.[1]?.trim();
+  const header = findTaskHeader(content);
+  const sessionId = readTaskHeaderAttribute(header, 'id');
+  const state = readTaskHeaderAttribute(header, 'state');
   const normalizedAgentId = agentId?.trim();
   if (!sessionId || !state || !normalizedAgentId) {
     return null;
@@ -27,6 +22,26 @@ export function parseSnapshotTaskSubagent(
     state,
     result: result?.slice(0, 2048) ?? null,
   };
+}
+
+function findTaskHeader(content: string): string | null {
+  const headers = [...content.matchAll(/<task\s+([^>]+)>/g)].reverse();
+  return (
+    headers
+      .map((candidate) => candidate[1] ?? '')
+      .find(
+        (candidate) =>
+          readTaskHeaderAttribute(candidate, 'id') && readTaskHeaderAttribute(candidate, 'state'),
+      ) ?? null
+  );
+}
+
+function readTaskHeaderAttribute(header: string | null, attribute: 'id' | 'state'): string | null {
+  return (
+    header
+      ?.match(new RegExp(`\\b${attribute}="([^"]{1,${attribute === 'id' ? 1024 : 64}})"`))?.[1]
+      ?.trim() ?? null
+  );
 }
 
 const FAILED_SUBAGENT_STATES = new Set(['failed', 'error', 'aborted', 'cancelled', 'canceled']);
@@ -147,48 +162,46 @@ export function parsePlanTextSnapshot(
   if (!trimmed) {
     return null;
   }
-  const lines = trimmed
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  const lines = readPlanLines(trimmed);
   if (lines.length === 0) {
     return null;
   }
   const hasSummaryHeader = lines.some((line) => /^summary$/i.test(line));
-  const steps: TurnPlanStep[] = [];
-  for (const line of lines) {
-    const match = line.match(/^\d+[.)]\s+(.+)$/);
-    if (!match?.[1]) {
-      continue;
-    }
-    steps.push({ step: match[1].trim(), status: 'pending' });
-  }
+  const steps = readPlanSteps(lines);
   if (!hasSummaryHeader && steps.length === 0) {
     return null;
   }
-  let startIndex = 0;
-  if (lines.length > 1 && /plan$/i.test(lines[0])) {
-    startIndex = 1;
-  }
-  if (lines[startIndex] && /^summary$/i.test(lines[startIndex])) {
-    startIndex += 1;
-  }
-  const explanationLines: string[] = [];
-  for (let index = startIndex; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (/^\d+[.)]\s+/.test(line)) {
-      break;
-    }
-    if (/^(summary|implementation plan|proposed plan)$/i.test(line)) {
-      continue;
-    }
-    explanationLines.push(line);
-  }
-  const explanation = explanationLines.length > 0 ? explanationLines.join(' ').trim() : null;
+  const explanation = readPlanExplanation(lines);
   if (steps.length === 0 && !explanation) {
     return null;
   }
   return { threadId, turnId, explanation, steps };
+}
+
+function readPlanLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function readPlanSteps(lines: string[]): TurnPlanStep[] {
+  return lines.flatMap((line) => {
+    const step = line.match(/^\d+[.)]\s+(.+)$/)?.[1]?.trim();
+    return step ? [{ step, status: 'pending' as const }] : [];
+  });
+}
+
+function readPlanExplanation(lines: string[]): string | null {
+  let startIndex = lines.length > 1 && /plan$/i.test(lines[0]) ? 1 : 0;
+  if (lines[startIndex] && /^summary$/i.test(lines[startIndex])) startIndex += 1;
+  const explanationLines: string[] = [];
+  for (const line of lines.slice(startIndex)) {
+    if (/^\d+[.)]\s+/.test(line)) break;
+    if (!/^(summary|implementation plan|proposed plan)$/i.test(line)) explanationLines.push(line);
+  }
+  const explanation = explanationLines.join(' ').trim();
+  return explanation || null;
 }
 
 export function normalizePlanStepStatus(

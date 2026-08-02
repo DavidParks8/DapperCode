@@ -618,8 +618,7 @@ describe('ChatTranscriptView continuation', () => {
       accessibilityLabel: 'Jump to latest message',
     }) as Queryable;
     const hitSlop = jump.props.hitSlop as
-      | { top: number; bottom: number; left: number; right: number }
-      | undefined;
+      { top: number; bottom: number; left: number; right: number } | undefined;
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
     expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -780,6 +779,29 @@ describe('ChatTranscriptView continuation', () => {
       isUserInteracting: false,
       isMomentumScrolling: false,
     });
+    act(() => tree.unmount());
+  });
+
+  /**
+   * Reproduces paged-in history vanishing when the thread keeps talking.
+   *
+   * Paging older messages in is a deliberate act by the reader. The reset that returns the
+   * transcript to its newest page belongs to a chat switch, so it must not also run when a new
+   * user message appears — that throws away everything the reader just paged in, mid-read.
+   */
+  it('keeps paged-in history when a new user message arrives in the same chat', () => {
+    const paged = makeChat({ id: 'paged', messages: makeMessages(220) });
+    const tree = render({ chat: paged });
+    expect(getList(tree).props.data).toHaveLength(80);
+
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 200 } } }));
+    expect(getList(tree).props.data).toHaveLength(160);
+
+    update(tree, { chat: makeChat({ id: 'paged', messages: makeMessages(221) }) });
+    expect(getList(tree).props.data).toHaveLength(161);
+
+    update(tree, { chat: makeChat({ id: 'other', messages: makeMessages(221) }) });
+    expect(getList(tree).props.data).toHaveLength(80);
     act(() => tree.unmount());
   });
 

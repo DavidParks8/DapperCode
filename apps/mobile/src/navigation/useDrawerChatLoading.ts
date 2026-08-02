@@ -170,9 +170,7 @@ export function useDrawerChatLoading(
         await loadDeepChatsOnce(true);
       };
 
-      let streamStarted = false;
-      let streamFinished = false;
-      if (!activeRef.current) {
+      const primeHiddenDrawerChats = async () => {
         try {
           const primedChats = await api.listChats({
             includeSubAgents: true,
@@ -188,32 +186,28 @@ export function useDrawerChatLoading(
         } finally {
           setLoading(false);
         }
-        return;
-      }
-      hasLoadedWhileActiveRef.current = true;
+      };
 
-      try {
-        const hasCachedDeepChats = applyCachedDeepChats();
-        if (hasCachedDeepChats) {
-          try {
-            const latestChats = await api.listChats({
-              includeSubAgents: true,
-              limit: showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
-              cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
-              forceRefresh,
-            });
-            if (activeRef.current) {
-              applyChats(
-                latestChats,
-                showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
-              );
-            }
-          } catch {
-            // The cached full list is already visible; newest-chat refresh is best effort.
+      const refreshNewestChatsOnTopOfCache = async () => {
+        try {
+          const latestChats = await api.listChats({
+            includeSubAgents: true,
+            limit: showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
+            cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
+            forceRefresh,
+          });
+          if (activeRef.current) {
+            applyChats(
+              latestChats,
+              showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
+            );
           }
-          return;
+        } catch {
+          // The cached full list is already visible; newest-chat refresh is best effort.
         }
+      };
 
+      const seedListFromPeekedCache = () => {
         const cachedFullChats = api.peekChats({
           includeSubAgents: true,
           limit: DRAWER_FULL_CHAT_LIST_LIMIT,
@@ -229,6 +223,53 @@ export function useDrawerChatLoading(
         } else if (cachedFastChats) {
           applyChats(cachedFastChats, DRAWER_FAST_CHAT_LIST_LIMIT, false);
         }
+      };
+
+      const fallbackReloadChats = async () => {
+        try {
+          const fastListedChats = await api.listChats({
+            includeSubAgents: true,
+            limit: DRAWER_FAST_CHAT_LIST_LIMIT,
+            cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
+            forceRefresh,
+          });
+          if (activeRef.current) {
+            applyChats(fastListedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
+          }
+
+          const fullListedChats = await api.listChats({
+            includeSubAgents: true,
+            limit: DRAWER_FULL_CHAT_LIST_LIMIT,
+            cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
+            forceRefresh,
+          });
+          if (activeRef.current) {
+            applyChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
+            void hydrateLoadedChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
+            scheduleDeepLoadChatsOnce();
+          }
+        } catch {
+          // silently fail
+        }
+      };
+
+      if (!activeRef.current) {
+        await primeHiddenDrawerChats();
+        return;
+      }
+      hasLoadedWhileActiveRef.current = true;
+
+      let streamStarted = false;
+      let streamFinished = false;
+
+      try {
+        const hasCachedDeepChats = applyCachedDeepChats();
+        if (hasCachedDeepChats) {
+          await refreshNewestChatsOnTopOfCache();
+          return;
+        }
+
+        seedListFromPeekedCache();
 
         cancelChatListStream();
         const stream = await api.startChatListStream(
@@ -275,31 +316,7 @@ export function useDrawerChatLoading(
           chatListStreamRef.current = stream;
         }
       } catch {
-        try {
-          const fastListedChats = await api.listChats({
-            includeSubAgents: true,
-            limit: DRAWER_FAST_CHAT_LIST_LIMIT,
-            cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
-            forceRefresh,
-          });
-          if (activeRef.current) {
-            applyChats(fastListedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
-          }
-
-          const fullListedChats = await api.listChats({
-            includeSubAgents: true,
-            limit: DRAWER_FULL_CHAT_LIST_LIMIT,
-            cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
-            forceRefresh,
-          });
-          if (activeRef.current) {
-            applyChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
-            void hydrateLoadedChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
-            scheduleDeepLoadChatsOnce();
-          }
-        } catch {
-          // silently fail
-        }
+        await fallbackReloadChats();
       } finally {
         if (!streamStarted || streamFinished) {
           if (showRefresh) {
@@ -347,7 +364,7 @@ export function useDrawerChatLoading(
       loadChatsInFlightRef.current = promise;
       return promise;
     },
-    [active, loadChatsNow],
+    [active, hasHydratedOnceRef, loadChatsNow],
   );
   const retryDeepChatListRef = useRef<() => Promise<void>>(async () => {});
 
@@ -364,7 +381,7 @@ export function useDrawerChatLoading(
 
   useEffect(() => {
     chatsRef.current = chats;
-  }, [chats]);
+  }, [chats, chatsRef]);
 
   useDrawerPrioritySessionHydration({
     active,
@@ -413,7 +430,7 @@ export function useDrawerChatLoading(
     }
 
     void loadChats(false, shouldRefreshVisibleDrawer);
-  }, [active, loadChats, ws]);
+  }, [active, hasHydratedOnceRef, lastLoadedAtRef, loadChats, ws]);
 
   const { resetPollTimer } = useDrawerChatLiveSync({
     active,

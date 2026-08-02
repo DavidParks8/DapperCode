@@ -115,6 +115,22 @@ export function serializeSubmissionIdempotencyEntries(
   return JSON.stringify({ version: CHAT_SUBMISSION_IDEMPOTENCY_VERSION, entries });
 }
 
+function toSubmissionIdempotencyEntries(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function parseSubmissionIdempotencyEntry(
+  key: string,
+  value: unknown,
+): SubmissionIdempotencyRecord | null {
+  const record = toSubmissionIdempotencyEntries(value);
+  const submissionId = typeof record?.submissionId === 'string' ? record.submissionId.trim() : '';
+  const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : NaN;
+  return key.trim() && submissionId && Number.isFinite(updatedAt)
+    ? { submissionId, updatedAt }
+    : null;
+}
+
 export function parseSubmissionIdempotencyEntries(
   raw: string,
   now: number,
@@ -128,24 +144,18 @@ export function parseSubmissionIdempotencyEntries(
       version?: unknown;
       entries?: unknown;
     };
-    if (
-      parsed?.version !== CHAT_SUBMISSION_IDEMPOTENCY_VERSION ||
-      typeof parsed.entries !== 'object' ||
-      parsed.entries === null
-    ) {
+    const entries = toSubmissionIdempotencyEntries(parsed?.entries);
+    if (parsed?.version !== CHAT_SUBMISSION_IDEMPOTENCY_VERSION || !entries) {
       return {};
     }
 
     const result: Record<string, SubmissionIdempotencyRecord> = {};
-    for (const [key, value] of Object.entries(parsed.entries as Record<string, unknown>)) {
-      const record = value as Partial<SubmissionIdempotencyRecord> | null;
-      const submissionId =
-        typeof record?.submissionId === 'string' ? record.submissionId.trim() : '';
-      const updatedAt = typeof record?.updatedAt === 'number' ? record.updatedAt : NaN;
-      if (!key.trim() || !submissionId || !Number.isFinite(updatedAt)) {
+    for (const [key, value] of Object.entries(entries)) {
+      const record = parseSubmissionIdempotencyEntry(key, value);
+      if (!record) {
         continue;
       }
-      result[key] = { submissionId, updatedAt };
+      result[key] = record;
     }
     return pruneSubmissionIdempotencyEntries(result, now);
   } catch {

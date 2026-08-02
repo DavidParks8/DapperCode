@@ -105,6 +105,109 @@ const MIGRATION_KEYS: Record<PersistedCollection, string> = {
   workspaceFavorites: 'workspace-favorites',
 };
 
+function resolveStorage(
+  storage: MainScreenStorage | undefined,
+  platform: string,
+): MainScreenStorage {
+  return storage ?? (platform === 'web' ? webStorage : fileStorage);
+}
+
+function buildPersistencePaths(
+  profileId: string,
+  platform: string,
+  overrides: Partial<MainScreenPersistencePaths>,
+): MainScreenPersistencePaths {
+  return {
+    modelPreferences:
+      overrides.modelPreferences ??
+      createProfilePathResolver(profileId, platform, 'model-preferences.v1', () =>
+        getChatModelPreferencesPath(profileId),
+      ),
+    planSnapshots:
+      overrides.planSnapshots ??
+      createProfilePathResolver(profileId, platform, 'plan-snapshots.v1', () =>
+        getChatPlanSnapshotsPath(profileId),
+      ),
+    bridgeUiSurfaces:
+      overrides.bridgeUiSurfaces ??
+      createProfilePathResolver(profileId, platform, 'bridge-ui-surfaces.v1', () =>
+        getChatBridgeUiSurfacesPath(profileId),
+      ),
+    workspaceFavorites:
+      overrides.workspaceFavorites ??
+      createProfilePathResolver(profileId, platform, 'workspace-favorites.v1', () =>
+        getWorkspaceFavoritesPath(profileId),
+      ),
+    legacyModelPreferences:
+      overrides.legacyModelPreferences ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.modelPreferences,
+        getLegacyChatModelPreferencesPath,
+      ),
+    legacyPlanSnapshots:
+      overrides.legacyPlanSnapshots ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.planSnapshots,
+        getLegacyChatPlanSnapshotsPath,
+      ),
+    legacyBridgeUiSurfaces:
+      overrides.legacyBridgeUiSurfaces ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.bridgeUiSurfaces,
+        getLegacyChatBridgeUiSurfacesPath,
+      ),
+    legacyWorkspaceFavorites:
+      overrides.legacyWorkspaceFavorites ??
+      createLegacyPathResolver(
+        platform,
+        WEB_LEGACY_PATHS.workspaceFavorites,
+        getLegacyWorkspaceFavoritesPath,
+      ),
+    modelPreferencesMigrationMarker:
+      overrides.modelPreferencesMigrationMarker ??
+      createMarkerPathResolver(platform, 'modelPreferences'),
+    planSnapshotsMigrationMarker:
+      overrides.planSnapshotsMigrationMarker ?? createMarkerPathResolver(platform, 'planSnapshots'),
+    bridgeUiSurfacesMigrationMarker:
+      overrides.bridgeUiSurfacesMigrationMarker ??
+      createMarkerPathResolver(platform, 'bridgeUiSurfaces'),
+    workspaceFavoritesMigrationMarker:
+      overrides.workspaceFavoritesMigrationMarker ??
+      createMarkerPathResolver(platform, 'workspaceFavorites'),
+  };
+}
+
+function createProfilePathResolver(
+  profileId: string,
+  platform: string,
+  webName: string,
+  nativePath: () => string | null,
+): () => string | null {
+  return () =>
+    platform === 'web' ? getWebProfilePersistenceKey(webName, profileId) : nativePath();
+}
+
+function createLegacyPathResolver(
+  platform: string,
+  webKey: string,
+  nativePath: () => string | null,
+): () => string | null {
+  return () => (platform === 'web' ? webKey : nativePath());
+}
+
+function createMarkerPathResolver(
+  platform: string,
+  collection: PersistedCollection,
+): () => string | null {
+  return () =>
+    platform === 'web'
+      ? getWebPersistenceMigrationMarkerKey(MIGRATION_KEYS[collection])
+      : getPersistenceMigrationMarkerPath(MIGRATION_KEYS[collection]);
+}
+
 export class MainScreenPersistenceController {
   private readonly storage: MainScreenStorage;
   private readonly paths: MainScreenPersistencePaths;
@@ -124,53 +227,10 @@ export class MainScreenPersistenceController {
       onPersistenceError,
     } = options;
     this.profileId = profileId.trim();
-    this.storage = storage ?? (platform === 'web' ? webStorage : fileStorage);
+    this.storage = resolveStorage(storage, platform);
     this.migrateLegacy = migrateLegacy;
     this.onPersistenceError = onPersistenceError;
-
-    const profilePath = (webName: string, nativePath: () => string | null) => () =>
-      platform === 'web' ? getWebProfilePersistenceKey(webName, this.profileId) : nativePath();
-    const legacyPath = (webKey: string, nativePath: () => string | null) => () =>
-      platform === 'web' ? webKey : nativePath();
-    const markerPath = (collection: PersistedCollection) => () =>
-      platform === 'web'
-        ? getWebPersistenceMigrationMarkerKey(MIGRATION_KEYS[collection])
-        : getPersistenceMigrationMarkerPath(MIGRATION_KEYS[collection]);
-
-    this.paths = {
-      modelPreferences:
-        paths.modelPreferences ??
-        profilePath('model-preferences.v1', () => getChatModelPreferencesPath(this.profileId)),
-      planSnapshots:
-        paths.planSnapshots ??
-        profilePath('plan-snapshots.v1', () => getChatPlanSnapshotsPath(this.profileId)),
-      bridgeUiSurfaces:
-        paths.bridgeUiSurfaces ??
-        profilePath('bridge-ui-surfaces.v1', () => getChatBridgeUiSurfacesPath(this.profileId)),
-      workspaceFavorites:
-        paths.workspaceFavorites ??
-        profilePath('workspace-favorites.v1', () => getWorkspaceFavoritesPath(this.profileId)),
-      legacyModelPreferences:
-        paths.legacyModelPreferences ??
-        legacyPath(WEB_LEGACY_PATHS.modelPreferences, getLegacyChatModelPreferencesPath),
-      legacyPlanSnapshots:
-        paths.legacyPlanSnapshots ??
-        legacyPath(WEB_LEGACY_PATHS.planSnapshots, getLegacyChatPlanSnapshotsPath),
-      legacyBridgeUiSurfaces:
-        paths.legacyBridgeUiSurfaces ??
-        legacyPath(WEB_LEGACY_PATHS.bridgeUiSurfaces, getLegacyChatBridgeUiSurfacesPath),
-      legacyWorkspaceFavorites:
-        paths.legacyWorkspaceFavorites ??
-        legacyPath(WEB_LEGACY_PATHS.workspaceFavorites, getLegacyWorkspaceFavoritesPath),
-      modelPreferencesMigrationMarker:
-        paths.modelPreferencesMigrationMarker ?? markerPath('modelPreferences'),
-      planSnapshotsMigrationMarker:
-        paths.planSnapshotsMigrationMarker ?? markerPath('planSnapshots'),
-      bridgeUiSurfacesMigrationMarker:
-        paths.bridgeUiSurfacesMigrationMarker ?? markerPath('bridgeUiSurfaces'),
-      workspaceFavoritesMigrationMarker:
-        paths.workspaceFavoritesMigrationMarker ?? markerPath('workspaceFavorites'),
-    };
+    this.paths = buildPersistencePaths(this.profileId, platform, paths);
   }
 
   loadModelPreferences(): Promise<Record<string, ChatModelPreference>> {

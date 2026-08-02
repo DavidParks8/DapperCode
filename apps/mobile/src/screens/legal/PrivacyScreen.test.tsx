@@ -76,7 +76,8 @@ function effectiveSize(
   axis: 'vertical' | 'horizontal',
 ): number {
   if (typeof hitSlop === 'number') return visible + hitSlop * 2;
-  const [a, b] = axis === 'vertical' ? [hitSlop?.top, hitSlop?.bottom] : [hitSlop?.left, hitSlop?.right];
+  const [a, b] =
+    axis === 'vertical' ? [hitSlop?.top, hitSlop?.bottom] : [hitSlop?.left, hitSlop?.right];
   return visible + (a ?? 0) + (b ?? 0);
 }
 
@@ -201,9 +202,7 @@ describe('PrivacyScreen behavior', () => {
     const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
     const backBtn = findPressableAncestor(backIcon);
     const hitSlop = backBtn.props.hitSlop as
-      | { top?: number; bottom?: number; left?: number; right?: number }
-      | number
-      | undefined;
+      { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
     const iconSize = 22;
     expect(effectiveSize(iconSize, hitSlop, 'vertical')).toBeGreaterThanOrEqual(
       theme.touchTarget.minimum,
@@ -248,9 +247,7 @@ describe('PrivacyScreen behavior', () => {
       const backIcon = root.findAll((node) => node.children.includes('chevron-back'))[0];
       const backBtn = findPressableAncestor(backIcon);
       const hitSlop = backBtn.props.hitSlop as
-        | { top?: number; bottom?: number; left?: number; right?: number }
-        | number
-        | undefined;
+        { top?: number; bottom?: number; left?: number; right?: number } | number | undefined;
       expect(effectiveSize(22, hitSlop, 'vertical')).toBeGreaterThanOrEqual(48);
       expect(effectiveSize(22, hitSlop, 'horizontal')).toBeGreaterThanOrEqual(48);
       const openBtn = findPressableByText(root, button);

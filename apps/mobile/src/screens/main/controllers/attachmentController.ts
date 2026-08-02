@@ -203,7 +203,7 @@ export function useAttachmentController({
     setAttachmentModalVisible(true);
     setError(null);
     void loadCandidates();
-  }, [loadCandidates, setError]);
+  }, [loadCandidates, pickerInProgressRef, setError]);
 
   useEffect(() => {
     const cwd = normalizeWorkspacePath(workspace);
@@ -252,6 +252,12 @@ export function useAttachmentController({
     };
   }, [attachmentMenuVisible, captureImage, openPathModal, pendingAction, pickFile, pickImage]);
 
+  // Consumers keep this in dependency arrays of long-lived callbacks, so it must be stable.
+  const closePathModal = useCallback(() => {
+    setAttachmentModalVisible(false);
+    setAttachmentPathDraft('');
+  }, []);
+
   const clear = useCallback(() => {
     setAttachmentModalVisible(false);
     setAttachmentMenuVisible(false);
@@ -261,7 +267,7 @@ export function useAttachmentController({
     setFileCandidates([]);
     setLoadingFileCandidates(false);
     setPreparedAttachments([]);
-  }, []);
+  }, [setPreparedAttachments]);
 
   const composerAttachments = useMemo(
     () => [
@@ -308,10 +314,7 @@ export function useAttachmentController({
       setAttachmentMenuVisible(false);
       setPendingAction(action);
     },
-    closePathModal: () => {
-      setAttachmentModalVisible(false);
-      setAttachmentPathDraft('');
-    },
+    closePathModal,
     submitPath: () => {
       if (addMention(attachmentPathDraft)) {
         setAttachmentPathDraft('');

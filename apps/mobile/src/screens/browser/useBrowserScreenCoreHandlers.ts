@@ -19,6 +19,7 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
     openPreview,
     sessionLifecycle,
     previewRequestIdRef,
+    setInputValue,
     bottomBarTranslateY,
     bottomBarVisible,
     bottomBarReservedSpace,
@@ -37,10 +38,10 @@ export function useBrowserScreenCoreHandlers(model: BrowserScreenModel) {
       return;
     }
 
-    model.setInputValue(pendingTargetUrl);
+    setInputValue(pendingTargetUrl);
     void openPreview(pendingTargetUrl);
     onPendingTargetHandled?.();
-  }, [onPendingTargetHandled, openPreview, pendingTargetUrl, model.setInputValue]);
+  }, [onPendingTargetHandled, openPreview, pendingTargetUrl, setInputValue]);
 
   useEffect(() => {
     RNAnimated.timing(bottomBarTranslateY, {

@@ -24,6 +24,113 @@ interface PreviewMeasurement {
   clipped: boolean;
 }
 
+function resolveReasoningClipped(
+  measurement: PreviewMeasurement | null,
+  preview: string | null,
+): boolean {
+  if (measurement !== null && measurement.text === preview) {
+    return measurement.clipped;
+  }
+  return measurement?.clipped ?? false;
+}
+
+function ReasoningCardHeader({
+  title,
+  canToggle,
+  showDetails,
+  theme,
+  styles,
+}: {
+  title: string;
+  canToggle: boolean;
+  showDetails: boolean;
+  theme: ReturnType<typeof useAppTheme>;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  return (
+    <View style={styles.reasoningHeader}>
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name="sparkles-outline"
+        size={13}
+        color={theme.colors.textMuted}
+      />
+      <Text style={styles.reasoningTitle}>{title}</Text>
+      {canToggle ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name={showDetails ? 'chevron-up' : 'chevron-down'}
+          size={14}
+          color={theme.colors.textMuted}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function ReasoningCardPreview({
+  preview,
+  showDetails,
+  onPreviewTextLayout,
+  styles,
+}: {
+  preview: string | null;
+  showDetails: boolean;
+  onPreviewTextLayout: (event: NativeSyntheticEvent<TextLayoutEventData>) => void;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (showDetails || !preview) {
+    return null;
+  }
+  return (
+    <View>
+      <SelectableMessageText
+        style={styles.reasoningPreview}
+        numberOfLines={REASONING_PREVIEW_LINES}
+      >
+        {preview}
+      </SelectableMessageText>
+      <Text
+        {...decorativeAccessibilityProps}
+        style={[styles.reasoningPreview, styles.reasoningPreviewMeasure]}
+        onTextLayout={onPreviewTextLayout}
+      >
+        {preview}
+      </Text>
+    </View>
+  );
+}
+
+function ReasoningCardDetails({
+  entry,
+  showDetails,
+  styles,
+}: {
+  entry: TimelineEntry;
+  showDetails: boolean;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (!showDetails) {
+    return null;
+  }
+  return (
+    <Animated.View
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      style={styles.reasoningDetailWrap}
+    >
+      {entry.details.map((line, lineIndex) => (
+        <SelectableMessageText
+          key={`reasoning-line-${String(lineIndex)}`}
+          style={styles.reasoningDetailLine}
+        >
+          {line}
+        </SelectableMessageText>
+      ))}
+    </Animated.View>
+  );
+}
+
 export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -33,10 +140,7 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
   const preview = entry.details.length > 0 ? summarizeReasoningPreview(entry.details) : null;
   // While a changed preview is re-measured, keep the previous result so the
   // toggle affordance does not flicker mid-stream.
-  const clipped =
-    measurement !== null && measurement.text === preview
-      ? measurement.clipped
-      : (measurement?.clipped ?? false);
+  const clipped = resolveReasoningClipped(measurement, preview);
   const canToggle = preview !== null && clipped;
   const showDetails = expanded && canToggle;
 
@@ -72,56 +176,20 @@ export function ReasoningEntryCard({ entry }: { entry: TimelineEntry }) {
           expanded: canToggle ? showDetails : undefined,
         })}
       >
-        <View style={styles.reasoningHeader}>
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="sparkles-outline"
-            size={13}
-            color={theme.colors.textMuted}
-          />
-          <Text style={styles.reasoningTitle}>{entry.title}</Text>
-          {canToggle ? (
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name={showDetails ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={theme.colors.textMuted}
-            />
-          ) : null}
-        </View>
-        {!showDetails && preview ? (
-          <View>
-            <SelectableMessageText
-              style={styles.reasoningPreview}
-              numberOfLines={REASONING_PREVIEW_LINES}
-            >
-              {preview}
-            </SelectableMessageText>
-            <Text
-              {...decorativeAccessibilityProps}
-              style={[styles.reasoningPreview, styles.reasoningPreviewMeasure]}
-              onTextLayout={onPreviewTextLayout}
-            >
-              {preview}
-            </Text>
-          </View>
-        ) : null}
-        {showDetails ? (
-          <Animated.View
-            entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-            style={styles.reasoningDetailWrap}
-          >
-            {entry.details.map((line, lineIndex) => (
-              <SelectableMessageText
-                key={`reasoning-line-${String(lineIndex)}`}
-                style={styles.reasoningDetailLine}
-              >
-                {line}
-              </SelectableMessageText>
-            ))}
-          </Animated.View>
-        ) : null}
+        <ReasoningCardHeader
+          title={entry.title}
+          canToggle={canToggle}
+          showDetails={showDetails}
+          theme={theme}
+          styles={styles}
+        />
+        <ReasoningCardPreview
+          preview={preview}
+          showDetails={showDetails}
+          onPreviewTextLayout={onPreviewTextLayout}
+          styles={styles}
+        />
+        <ReasoningCardDetails entry={entry} showDetails={showDetails} styles={styles} />
         {canToggle ? (
           <Text style={styles.reasoningToggleText}>
             {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}

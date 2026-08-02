@@ -6,13 +6,7 @@ import { AccessibilityInfo, Platform } from 'react-native';
  * these instead of calling `expo-haptics` directly so the mapping to concrete haptic patterns
  * stays centralized and easy to retune.
  */
-export type FeedbackAction =
-  | 'selection'
-  | 'send'
-  | 'success'
-  | 'warning'
-  | 'error'
-  | 'destructive';
+export type FeedbackAction = 'selection' | 'send' | 'success' | 'warning' | 'error' | 'destructive';
 
 const HAPTICS_SUPPORTED_PLATFORMS: ReadonlySet<typeof Platform.OS> = new Set(['ios', 'android']);
 

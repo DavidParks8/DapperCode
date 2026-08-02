@@ -100,9 +100,7 @@ describe('LoadingGlyph', () => {
     expect(loopCallsAfterMount).toBe(3);
     const stopsCalled = loopSpy.mock.results
       .slice(loopCallsBeforeMount)
-      .every(
-        (result) => (result.value as { stop: jest.Mock }).stop.mock.calls.length > 0,
-      );
+      .every((result) => (result.value as { stop: jest.Mock }).stop.mock.calls.length > 0);
     expect(stopsCalled).toBe(true);
 
     // The static phase/scale/opacity values are applied instead of animating.

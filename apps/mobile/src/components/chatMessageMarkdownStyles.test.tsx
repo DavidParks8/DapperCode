@@ -1,9 +1,5 @@
 import { StyleSheet, View, type ViewStyle } from 'react-native';
-import renderer, {
-  act,
-  type ReactTestInstance,
-  type ReactTestRenderer,
-} from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import Markdown from 'react-native-markdown-display';
 
 import { createWorkflowMarkdownStyles } from '../screens/main/mainScreenWorkflowMarkdownStyles';
@@ -77,9 +73,7 @@ describe.each([
 
     expect(blockquote.backgroundColor).not.toBe(LIBRARY_DEFAULT_BLOCKQUOTE_BACKGROUND);
     expect(blockquote.backgroundColor).toBe('transparent');
-    expect(blockquote.borderLeftColor ?? blockquote.borderColor).toBe(
-      theme.colors.borderHighlight,
-    );
+    expect(blockquote.borderLeftColor ?? blockquote.borderColor).toBe(theme.colors.borderHighlight);
   });
 
   it('does not inherit the library default indentation', () => {
