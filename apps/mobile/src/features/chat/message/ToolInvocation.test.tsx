@@ -126,6 +126,34 @@ function hasTextAncestor(node: Queryable): boolean {
   return false;
 }
 
+function hexColorDistance(left: string, right: string): number {
+  const channels = (hex: string) =>
+    [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+  const leftChannels = channels(left);
+  const rightChannels = channels(right);
+  return Math.hypot(
+    (leftChannels[0] ?? 0) - (rightChannels[0] ?? 0),
+    (leftChannels[1] ?? 0) - (rightChannels[1] ?? 0),
+    (leftChannels[2] ?? 0) - (rightChannels[2] ?? 0),
+  );
+}
+
+function hexContrastRatio(left: string, right: string): number {
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255);
+    const linear = channels.map((channel) =>
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * (linear[0] ?? 0) + 0.7152 * (linear[1] ?? 0) + 0.0722 * (linear[2] ?? 0);
+  };
+  const leftLuminance = luminance(left);
+  const rightLuminance = luminance(right);
+  return (
+    (Math.max(leftLuminance, rightLuminance) + 0.05) /
+    (Math.min(leftLuminance, rightLuminance) + 0.05)
+  );
+}
+
 describe('ToolInvocationRow', () => {
   afterEach(() => setMockReducedMotionEnabled(false));
 
@@ -533,6 +561,34 @@ describe('ToolInvocationOutput', () => {
     expect(blocks[1]?.findAllByType(Text).some((node) => node.props['children'] === 'const')).toBe(
       false,
     );
+
+    for (const palette of [
+      createAppTheme('dark', 'classic'),
+      createAppTheme('dark', 'grey'),
+      createAppTheme('light'),
+    ]) {
+      const syntaxColors = [
+        palette.colors.codeSyntaxComment,
+        palette.colors.codeSyntaxKeyword,
+        palette.colors.codeSyntaxString,
+        palette.colors.codeSyntaxNumber,
+        palette.colors.codeSyntaxFunction,
+        palette.colors.codeSyntaxProperty,
+        palette.colors.codeSyntaxOperator,
+      ];
+      for (const syntaxColor of syntaxColors) {
+        expect(hexColorDistance(syntaxColor, palette.colors.diffAddedText)).toBeGreaterThan(48);
+        expect(hexColorDistance(syntaxColor, palette.colors.diffRemovedText)).toBeGreaterThan(48);
+        const panelSurface = compositeOverlayColor(
+          palette.colors.bgMain,
+          palette.colors.bgCanvasAccent,
+        );
+        const addedSurface = compositeOverlayColor(panelSurface, palette.colors.diffAddedBg);
+        const removedSurface = compositeOverlayColor(panelSurface, palette.colors.diffRemovedBg);
+        expect(hexContrastRatio(syntaxColor, addedSurface)).toBeGreaterThanOrEqual(4.5);
+        expect(hexContrastRatio(syntaxColor, removedSurface)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
 
     act(() => tree.unmount());
   });
