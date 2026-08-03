@@ -110,7 +110,7 @@ jest.mock('../approvals/ApprovalBanner', () => ({
   },
 }));
 
-jest.mock('./LoadingGlyph', () => ({ LoadingGlyph: () => null }));
+jest.mock('./HelixGlyph', () => ({ HelixGlyph: () => null }));
 
 let mockBridgeUiProps: {
   surface: BridgeUiSurface;

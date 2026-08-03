@@ -58,6 +58,24 @@ function flattenedStyles(tree: ReactTestRenderer): Props[] {
     .filter((style): style is Props => Boolean(style));
 }
 
+function iconNames(tree: ReactTestRenderer): string[] {
+  return allNodes(tree)
+    .map((node) => node.props['name'])
+    .filter((name): name is string => typeof name === 'string');
+}
+
+function helixNodes(tree: ReactTestRenderer): Queryable[] {
+  return allNodes(tree).filter((node) => node.props['testID'] === 'helix-glyph');
+}
+
+/** Width of the leading glyph slot: the only fixed-width box in the row. */
+function glyphSlotWidth(tree: ReactTestRenderer): number {
+  const widths = flattenedStyles(tree)
+    .map((style) => style['width'])
+    .filter((width): width is number => typeof width === 'number');
+  return Math.max(...widths);
+}
+
 describe('ActivityBar', () => {
   it('renders the status as a bare caption with no card chrome', () => {
     // The status used to sit inside a blurred, bordered card above the composer, which
@@ -104,5 +122,37 @@ describe('ActivityBar', () => {
 
     reduceMotionSpy.mockRestore();
     act(() => tree.unmount());
+  });
+
+  it('spins the helix while running and shows a settled icon otherwise', () => {
+    // A live turn used to get the same three static-looking bars as every other loading
+    // surface; the running row is now the only one with the animated helix.
+    const running = render('running', 'Working');
+    expect(helixNodes(running)).not.toHaveLength(0);
+    expect(iconNames(running)).toHaveLength(0);
+    act(() => running.unmount());
+
+    const settled: [ActivityTone, string][] = [
+      ['complete', 'checkmark-circle-outline'],
+      ['error', 'close-circle-outline'],
+      ['idle', 'ellipse-outline'],
+    ];
+    for (const [tone, icon] of settled) {
+      const tree = render(tone, 'Status');
+      expect(helixNodes(tree)).toHaveLength(0);
+      expect(iconNames(tree)).toContain(icon);
+      act(() => tree.unmount());
+    }
+  });
+
+  it('gives the running row a wider glyph slot than the icon rows', () => {
+    // The helix is wider than a 12pt icon, so a shared 14pt slot would clip it.
+    const running = render('running', 'Working');
+    const idle = render('idle', 'Waiting for input');
+
+    expect(glyphSlotWidth(running)).toBeGreaterThan(glyphSlotWidth(idle));
+
+    act(() => running.unmount());
+    act(() => idle.unmount());
   });
 });
