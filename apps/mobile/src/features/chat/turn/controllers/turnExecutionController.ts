@@ -16,6 +16,9 @@ type TurnApi = Pick<
   | 'interruptLatestTurn'
   | 'steerQueuedThreadMessage'
   | 'cancelQueuedThreadMessage'
+  | 'startQueuedThreadMessageEdit'
+  | 'commitQueuedThreadMessageEdit'
+  | 'cancelQueuedThreadMessageEdit'
 >;
 
 export interface CreateAndStartTurnRequest {
@@ -80,5 +83,21 @@ export class TurnExecutionController {
 
   cancelQueued(threadId: string, messageId: string): Promise<BridgeThreadQueueActionResponse> {
     return this.api.cancelQueuedThreadMessage(threadId, messageId);
+  }
+
+  startQueuedEdit(threadId: string, messageId: string): Promise<BridgeThreadQueueActionResponse> {
+    return this.api.startQueuedThreadMessageEdit(threadId, messageId);
+  }
+
+  commitQueuedEdit(
+    threadId: string,
+    messageId: string,
+    content: string,
+  ): Promise<BridgeThreadQueueActionResponse> {
+    return this.api.commitQueuedThreadMessageEdit(threadId, messageId, content);
+  }
+
+  cancelQueuedEdit(threadId: string, messageId: string): Promise<BridgeThreadQueueActionResponse> {
+    return this.api.cancelQueuedThreadMessageEdit(threadId, messageId);
   }
 }

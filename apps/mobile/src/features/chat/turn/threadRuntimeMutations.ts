@@ -98,6 +98,7 @@ export function useMainScreenThreadRuntimeMutations(
       upsertThreadRuntimeSnapshot(threadId, () => ({
         queuedMessages: queueState ? [...queueState.pendingSteers, ...queueState.items] : [],
         pendingSteerMessageIds: queueState?.pendingSteers.map((item) => item.id) ?? [],
+        editingQueuedMessageId: queueState?.editingItemId ?? null,
         waitingForToolCalls: queueState?.waitingForToolCalls ?? false,
         steeringInFlight: queueState?.steeringInFlight ?? false,
         queuedMessageError: queueState?.lastError ?? null,

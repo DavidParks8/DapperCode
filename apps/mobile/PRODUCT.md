@@ -12,7 +12,7 @@ Android projects and platform-specific interaction requirements._
 ## Users
 
 Software developers and maintainers who need to monitor and control ACP-compatible coding agents
-from a phone while their repositories and agent processes remain on a trusted desktop or private
+from a device while their repositories and agent processes remain on a trusted desktop or private
 network.
 
 ## Product Purpose
@@ -36,7 +36,7 @@ _Inferred from repository evidence:_
 - A developer first configures a desktop workspace, registers an already-installed ACP executable,
   starts its authenticated Rust bridge, and pairs the mobile client by QR code or credentials.
 - The mobile client connects over a trusted LAN, VPN, or Tailscale network; `localhost` on a physical
-  phone is not the desktop bridge.
+  device is not the desktop bridge.
 - Core work moves between bridge profiles, workspaces, sessions, transcripts, agent prompts,
   approvals, Git operations, local browser previews, and connection recovery.
 - Push notifications return developers to relevant work when a turn finishes or an approval needs

@@ -33,7 +33,18 @@ export const createMainScreenWorkflowStyles = (theme: AppTheme) =>
       ...theme.typography.caption,
       color: theme.colors.textPrimary,
       lineHeight: 18,
+      flex: 1,
     },
+    queuedMessageBodyButton: {
+      minHeight: 44,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      marginHorizontal: -theme.spacing.xs,
+      paddingHorizontal: theme.spacing.xs,
+      borderRadius: 8,
+    },
+    queuedMessageBodyButtonPressed: { backgroundColor: theme.colors.bgInput },
     queuedMessageHint: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,

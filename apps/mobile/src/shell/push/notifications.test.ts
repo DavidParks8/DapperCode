@@ -189,15 +189,22 @@ describe('pushNotifications', () => {
   });
 
   it('falls back to EAS config and platform device names', async () => {
+    // The fallback name reaches the bridge's device list, so it must not claim a handset the
+    // client may not be: DapperCode also runs on tablets and in the browser.
     mockConstants.expoConfig = { extra: { eas: { projectId: ' ' } } };
     mockConstants.easConfig = { projectId: ' eas-project ' };
     mockDevice.deviceName = null;
     await expect(requestPushRegistration()).resolves.toEqual(
-      expect.objectContaining({ deviceName: 'iPhone' }),
+      expect.objectContaining({ deviceName: 'Apple device' }),
     );
     expect(mockNotifications.getExpoPushTokenAsync).toHaveBeenCalledWith({
       projectId: 'eas-project',
     });
+
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'web' });
+    await expect(requestPushRegistration()).resolves.toEqual(
+      expect.objectContaining({ platform: 'web', deviceName: 'Web browser' }),
+    );
 
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     mockConstants.easConfig = { projectId: null };

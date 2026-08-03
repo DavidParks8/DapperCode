@@ -206,6 +206,19 @@ export abstract class HostBridgeApiClientCore {
     threadId: string,
     itemId: string,
   ): Promise<BridgeThreadQueueActionResponse>;
+  abstract startQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+  ): Promise<BridgeThreadQueueActionResponse>;
+  abstract commitQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+    content: string,
+  ): Promise<BridgeThreadQueueActionResponse>;
+  abstract cancelQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+  ): Promise<BridgeThreadQueueActionResponse>;
   abstract uploadAttachment(body: UploadAttachmentRequest): Promise<UploadAttachmentResponse>;
   abstract listApprovals(): Promise<PendingApproval[]>;
   abstract listPendingUserInputs(): Promise<PendingUserInputRequest[]>;

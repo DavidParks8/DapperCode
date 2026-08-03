@@ -18,7 +18,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { motionDuration } from '@shared/ui/motion';
 import { toPathBasename } from '../helpers/helpers';
-import { QueuedMessageDock } from '../workflow/Workflow';
+import { QueuedMessageDockView } from './QueuedMessageDockView';
 import type {
   MainScreenWorkflowQueueStateContext,
   MainScreenWorkflowQueueStateResult,
@@ -30,6 +30,13 @@ export type MainScreenComposerRendererContext = MainScreenWorkflowQueueStateCont
 type ComposerPendingApproval = ComponentProps<typeof ApprovalBanner>['approval'];
 type BridgeRecoveryBannerButtonHitSlop = NonNullable<ComponentProps<typeof Pressable>['hitSlop']>;
 
+function resolveComposerMentionQuery(
+  editingQueuedMessage: boolean,
+  mentionQuery: MainScreenComposerRendererContext['mentionQuery'],
+) {
+  return editingQueuedMessage ? null : mentionQuery;
+}
+
 export function useMainScreenComposerRenderer(context: MainScreenComposerRendererContext) {
   const {
     activeAgentLabel,
@@ -37,6 +44,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     attachmentControlsDisabled,
     bannerBridgeUiSurfaces,
     canCancelQueuedMessage,
+    canEditQueuedMessage,
     canSteerQueuedMessage,
     composerAttachments,
     composerOverlayInset,
@@ -44,9 +52,12 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     dismissBridgeUiSurface,
     displayedActivity,
     draft,
+    editingQueuedMessage,
     handleBridgeUiAction,
     handleCancelQueuedMessage,
+    handleCancelQueuedMessageEdit,
     handleComposerFocus,
+    handleEditQueuedMessage,
     handleResolveApproval,
     handleSteerQueuedMessage,
     handleStopTurn,
@@ -126,12 +137,16 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showingOptimisticQueuedMessage={showingOptimisticQueuedMessage}
         canSteerQueuedMessage={canSteerQueuedMessage}
         canCancelQueuedMessage={canCancelQueuedMessage}
+        canEditQueuedMessage={canEditQueuedMessage}
         queueActionItemId={queueActionItemId}
         queueActionKind={queueActionKind}
         oldestQueuedMessageIsPendingSteer={oldestQueuedMessageIsPendingSteer}
+        editingQueuedMessage={editingQueuedMessage}
         selectedThreadRuntimeSnapshot={selectedThreadRuntimeSnapshot}
         queuedMessageSteerDisabledReason={queuedMessageSteerDisabledReason}
         handleCancelQueuedMessage={handleCancelQueuedMessage}
+        handleCancelQueuedMessageEdit={handleCancelQueuedMessageEdit}
+        handleEditQueuedMessage={handleEditQueuedMessage}
         handleSteerQueuedMessage={handleSteerQueuedMessage}
       />
       <SlashSuggestionsView
@@ -143,7 +158,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
       />
       <MentionSuggestionsView
         showSlashSuggestions={showSlashSuggestions}
-        mentionQuery={mentionQuery}
+        mentionQuery={resolveComposerMentionQuery(editingQueuedMessage, mentionQuery)}
         loadingAttachmentFileCandidates={loadingAttachmentFileCandidates}
         mentionPathSuggestions={mentionPathSuggestions}
         slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
@@ -166,11 +181,24 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showStopButton={isTurnLoading || isTurnLikelyRunning || stoppingTurn}
         isStopping={stoppingTurn}
         onAttachPress={openAttachmentMenu}
-        attachDisabled={attachmentControlsDisabled}
+        attachDisabled={attachmentControlsDisabled || editingQueuedMessage}
         attachments={composerAttachments}
         onRemoveAttachment={removeComposerAttachment}
         isLoading={isLoading}
-        placeholder={selectedChat ? 'Reply...' : `Message ${activeAgentLabel}...`}
+        submitLabel={editingQueuedMessage ? 'Save queued message' : undefined}
+        submitHint={editingQueuedMessage ? 'Saves changes to the queued message' : undefined}
+        submitDisabled={
+          queueActionKind === 'editStart' ||
+          queueActionKind === 'editCommit' ||
+          queueActionKind === 'editCancel'
+        }
+        placeholder={
+          editingQueuedMessage
+            ? 'Edit queued message...'
+            : selectedChat
+              ? 'Reply...'
+              : `Message ${activeAgentLabel}...`
+        }
         safeAreaBottomInset={composerSafeAreaBottomInset}
         keyboardVisible={keyboardVisible}
         reserveFooterSpace={false}
@@ -304,61 +332,6 @@ function PendingApprovalView({
   return pendingApproval ? (
     <ApprovalBanner approval={pendingApproval} onResolve={onResolve} />
   ) : null;
-}
-
-function QueuedMessageDockView({
-  showQueuedMessageDock,
-  oldestQueuedMessage,
-  remainingQueuedMessagesCount,
-  showingOptimisticQueuedMessage,
-  canSteerQueuedMessage,
-  canCancelQueuedMessage,
-  queueActionItemId,
-  queueActionKind,
-  oldestQueuedMessageIsPendingSteer,
-  selectedThreadRuntimeSnapshot,
-  queuedMessageSteerDisabledReason,
-  handleCancelQueuedMessage,
-  handleSteerQueuedMessage,
-}: {
-  showQueuedMessageDock: boolean;
-  oldestQueuedMessage: MainScreenComposerRendererContext['oldestQueuedMessage'];
-  remainingQueuedMessagesCount: MainScreenComposerRendererContext['remainingQueuedMessagesCount'];
-  showingOptimisticQueuedMessage: MainScreenComposerRendererContext['showingOptimisticQueuedMessage'];
-  canSteerQueuedMessage: MainScreenComposerRendererContext['canSteerQueuedMessage'];
-  canCancelQueuedMessage: MainScreenComposerRendererContext['canCancelQueuedMessage'];
-  queueActionItemId: string | null;
-  queueActionKind: string | null;
-  oldestQueuedMessageIsPendingSteer: MainScreenComposerRendererContext['oldestQueuedMessageIsPendingSteer'];
-  selectedThreadRuntimeSnapshot: MainScreenComposerRendererContext['selectedThreadRuntimeSnapshot'];
-  queuedMessageSteerDisabledReason: MainScreenComposerRendererContext['queuedMessageSteerDisabledReason'];
-  handleCancelQueuedMessage: MainScreenComposerRendererContext['handleCancelQueuedMessage'];
-  handleSteerQueuedMessage: MainScreenComposerRendererContext['handleSteerQueuedMessage'];
-}) {
-  if (!showQueuedMessageDock || !oldestQueuedMessage) {
-    return null;
-  }
-
-  return (
-    <QueuedMessageDock
-      queuedMessage={oldestQueuedMessage}
-      remainingQueuedMessagesCount={remainingQueuedMessagesCount}
-      pendingSubmission={showingOptimisticQueuedMessage}
-      steerEnabled={canSteerQueuedMessage}
-      cancelEnabled={canCancelQueuedMessage}
-      steeringActive={queueActionKind === 'steer' && queueActionItemId === oldestQueuedMessage.id}
-      steerPending={oldestQueuedMessageIsPendingSteer}
-      waitingForToolCalls={selectedThreadRuntimeSnapshot?.waitingForToolCalls === true}
-      steeringInFlight={selectedThreadRuntimeSnapshot?.steeringInFlight === true}
-      steerDisabledReason={queuedMessageSteerDisabledReason}
-      onCancelQueuedMessage={(messageId) => {
-        void handleCancelQueuedMessage(messageId);
-      }}
-      onSteerQueuedMessage={() => {
-        void handleSteerQueuedMessage();
-      }}
-    />
-  );
 }
 
 function SlashSuggestionsView({
