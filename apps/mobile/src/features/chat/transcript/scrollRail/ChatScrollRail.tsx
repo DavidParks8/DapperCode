@@ -37,6 +37,7 @@ export interface ChatScrollRailProps {
   windowStart: number;
   capacity: number;
   viewportHeight: number;
+  topInset: number;
   alwaysVisible: boolean;
   engaged: SharedValue<number>;
   fingerY: SharedValue<number>;
@@ -125,6 +126,7 @@ export const ChatScrollRail = memo(function ChatScrollRail({
   windowStart,
   capacity,
   viewportHeight,
+  topInset,
   alwaysVisible,
   engaged,
   fingerY,
@@ -166,7 +168,7 @@ export const ChatScrollRail = memo(function ChatScrollRail({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       testID="chat-scroll-rail"
-      style={[styles.root, rootStyle]}
+      style={[styles.root, rootStyle, { top: topInset }]}
     >
       <View style={[styles.clip, { top, height: clipHeight }]}>
         {renderedAnchors.map((anchor, renderedIndex) => {

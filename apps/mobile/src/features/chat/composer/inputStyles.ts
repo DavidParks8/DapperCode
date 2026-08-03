@@ -16,8 +16,6 @@ export const createChatInputStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
       borderCurve: 'continuous',
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderHighlight,
-      backgroundColor: theme.colors.bgInput,
       paddingHorizontal: 6,
       paddingVertical: 5,
       gap: theme.spacing.xs,

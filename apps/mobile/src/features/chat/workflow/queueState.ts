@@ -337,7 +337,7 @@ function resolveComposerInsets(options: {
   const composerSafeAreaBottomInset = options.safeAreaInsets.bottom;
   const composerOverlayInset =
     Platform.OS === 'android' && options.keyboardVisible ? options.androidKeyboardInset : 0;
-  const androidComposerReservedInset = options.shouldShowComposer
+  const composerReservedInset = options.shouldShowComposer
     ? Math.max(
         options.theme.spacing.lg,
         options.composerHeight + composerOverlayInset + options.theme.spacing.sm,
@@ -345,10 +345,9 @@ function resolveComposerInsets(options: {
     : chatBottomInset;
 
   return {
-    chatBottomInset,
     composerSafeAreaBottomInset,
     composerOverlayInset,
-    androidComposerReservedInset,
+    composerReservedInset,
   };
 }
 
@@ -485,19 +484,15 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     !isOpeningChat &&
     !showBridgeRecoveryBanner &&
     !isSettledIdleActivity(displayedActivity);
-  const {
-    chatBottomInset,
-    composerSafeAreaBottomInset,
-    composerOverlayInset,
-    androidComposerReservedInset,
-  } = resolveComposerInsets({
-    shouldShowComposer,
-    theme,
-    safeAreaInsets,
-    keyboardVisible,
-    androidKeyboardInset,
-    composerHeight,
-  });
+  const { composerSafeAreaBottomInset, composerOverlayInset, composerReservedInset } =
+    resolveComposerInsets({
+      shouldShowComposer,
+      theme,
+      safeAreaInsets,
+      keyboardVisible,
+      androidKeyboardInset,
+      composerHeight,
+    });
   const visibleError = resolveVisibleError(ws.isConnected, error);
 
   useAccessibilityAnnouncement(visibleError ?? userInputError ?? gitCheckoutError);
@@ -535,11 +530,10 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     workflowCardMode,
     showTopCardsRow,
     showFloatingActivity,
-    chatBottomInset,
     composerSafeAreaBottomInset,
     composerOverlayInset,
     visibleError,
-    androidComposerReservedInset,
+    composerReservedInset,
   };
 }
 

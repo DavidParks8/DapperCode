@@ -15,15 +15,22 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
     keyboardAvoiding: {
       flex: 1,
     },
+    topChromeOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      left: 0,
+      zIndex: 5,
+    },
     composerContainer: {
-      backgroundColor: theme.colors.bgMain,
+      backgroundColor: theme.colors.transparent,
     },
     composerContainerOverlay: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
-      zIndex: 4,
+      zIndex: 6,
     },
     composerContainerResting: {
       marginBottom: 0,
@@ -34,7 +41,6 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       paddingBottom: theme.spacing.xs / 2,
     },
     activityDock: {
-      backgroundColor: theme.colors.bgMain,
       paddingTop: theme.spacing.xs,
       paddingBottom: theme.spacing.xs / 2,
       zIndex: 3,

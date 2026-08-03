@@ -138,3 +138,25 @@ by remounting. Both mechanisms are in place, and both are covered by tests.
   caches, so they cannot become derived atoms. Converting the chain further would be churn rather
   than simplification.
 - **Animation values and gesture objects**, which must stay component-local.
+
+## Liquid glass
+
+`shared/ui/glass/GlassSurface.tsx` is the only app-level primitive for native iOS Liquid Glass. It
+always renders Expo's `GlassView`; Expo itself degrades that view to an ordinary native view on
+unsupported platforms. The app's `isGlassAvailable()` gate additionally requires iOS, the Liquid
+Glass design, and the runtime Glass Effect API, because some iOS 26 beta releases exposed an
+incomplete API.
+
+When the gate is false, `GlassSurface` sets `glassEffectStyle="none"` and applies the theme role's
+solid fallback surface. Both are required: a plain `GlassView` is otherwise transparent, while an
+opaque fallback background placed under an active effect would flatten it. The primitive owns
+background and border treatment; callers provide layout only and should never add `backgroundColor`.
+
+Pass the app's resolved `theme.mode` to the native surface rather than letting it follow the OS:
+the user may choose an app appearance different from the system appearance. Do not set or animate
+`opacity` on a glass surface or any ancestor. UIKit can stop rendering the material at zero opacity;
+animate the glass effect style instead when a transition is necessary.
+
+The chat's `topChromeHeightAtom` carries the measured height of its floating header group to the
+transcript, compose state, and opening state. It is a resettable `screenAtom` because it crosses
+those components; keep one-component-only measurements local.

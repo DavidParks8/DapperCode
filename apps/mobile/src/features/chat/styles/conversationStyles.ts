@@ -252,7 +252,13 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     errorText: {
       ...theme.typography.caption,
       color: theme.colors.error,
+      alignSelf: 'stretch',
+      backgroundColor: theme.colors.errorBg,
+      borderColor: theme.colors.errorBorder,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      marginHorizontal: theme.spacing.lg,
       paddingHorizontal: theme.spacing.lg,
-      paddingBottom: theme.spacing.xs,
+      paddingVertical: theme.spacing.sm,
     },
   }) as const;

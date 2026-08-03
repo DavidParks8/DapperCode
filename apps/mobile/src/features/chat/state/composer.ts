@@ -7,6 +7,8 @@ export const androidKeyboardInsetAtom = screenAtom(0);
 
 export const composerHeightAtom = screenAtom(0);
 
+export const topChromeHeightAtom = screenAtom(0);
+
 export const queueActionItemIdAtom = screenAtom<string | null>(null);
 
 export const queueActionKindAtom = screenAtom<'steer' | 'cancel' | null>(null);

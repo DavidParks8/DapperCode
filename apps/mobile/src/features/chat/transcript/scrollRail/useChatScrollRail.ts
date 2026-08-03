@@ -26,6 +26,7 @@ export interface UseChatScrollRailOptions {
   anchors: readonly UserMessageAnchor[];
   capacity: number;
   viewportHeight: number;
+  topInset?: number;
   restingActiveIndex: number;
   onJumpToAnchor: (anchor: UserMessageAnchor) => void;
   onInteractionStart: () => void;
@@ -47,6 +48,7 @@ export function useChatScrollRail({
   anchors,
   capacity,
   viewportHeight,
+  topInset = 0,
   restingActiveIndex,
   onJumpToAnchor,
   onInteractionStart,
@@ -210,6 +212,8 @@ export function useChatScrollRail({
     onInteractionEnd();
   }, [applyTransition, clearEdgeTimer, engaged, onInteractionEnd, reduceMotion]);
 
+  const toRailY = useCallback((y: number) => Math.max(0, y - topInset), [topInset]);
+
   tickEdgeRef.current = tickEdge;
 
   useEffect(() => {
@@ -264,15 +268,15 @@ export function useChatScrollRail({
         .runOnJS(true)
         .withTestId('chat-scroll-rail-pan')
         .onStart((event) => {
-          begin(event.y);
+          begin(toRailY(event.y));
         })
         .onUpdate((event) => {
-          move(event.y);
+          move(toRailY(event.y));
         })
         .onFinalize(() => {
           finish();
         }),
-    [begin, enabled, finish, move],
+    [begin, enabled, finish, move, toRailY],
   );
 
   return {
