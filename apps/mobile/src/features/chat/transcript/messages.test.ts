@@ -7,11 +7,39 @@ import {
 } from '@bridge/messages';
 import {
   buildTranscriptDisplayItems,
+  eligibleForkMessageIds,
   getVisibleTranscriptMessages,
   MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP,
   syncVisibleSubAgentStatuses,
   type TranscriptDisplayItem,
 } from './messages';
+
+describe('eligibleForkMessageIds', () => {
+  const settledConversation = [
+    message('user-1', 'user', 'First request'),
+    message('assistant-1', 'assistant', 'First response'),
+    message('user-2', 'user', 'Second request'),
+    message('assistant-2', 'assistant', 'Second response'),
+    message('user-3', 'user', 'Third request'),
+    message('assistant-3', 'assistant', 'Third response'),
+  ];
+
+  it('offers settled authoritative non-first requests', () => {
+    expect([...eligibleForkMessageIds(settledConversation, 'complete')]).toEqual([
+      'user-2',
+      'user-3',
+    ]);
+  });
+
+  it('suppresses every boundary while the conversation is running', () => {
+    const messages = [
+      ...settledConversation.slice(0, 4),
+      message('msg-optimistic', 'user', 'Optimistic request'),
+      { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
+    ];
+    expect([...eligibleForkMessageIds(messages, 'running')]).toEqual([]);
+  });
+});
 
 function message(
   id: string,

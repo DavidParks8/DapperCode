@@ -17,12 +17,14 @@ import { normalizeAgentId } from '@bridge/client/clientTurnInputInternals';
 import {
   type AppServerLoadedThreadListResponse,
   type AppServerStartResponse,
+  createSubmissionId,
   type ListChatsOptions,
   MOBILE_DEFAULT_SANDBOX,
   MOBILE_DEVELOPER_INSTRUCTIONS,
 } from '@bridge/client/clientContractsAndSnapshotInternals';
 import type {
   BridgeThreadCreateResponse,
+  BridgeThreadForkResponse,
   BrowserPreviewDiscoveryResponse,
   BrowserPreviewSession,
   Chat,
@@ -212,6 +214,31 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
       throw new Error('bridge/thread/create did not return a chat');
     }
     return this.mapChatWithCachedTitle(thread);
+  }
+  async forkChat(threadId: string, messageId: string, submissionId?: string): Promise<Chat> {
+    const normalizedThreadId = threadId.trim();
+    const normalizedMessageId = messageId.trim();
+    if (!normalizedThreadId || !normalizedMessageId) {
+      throw new Error('thread and message are required');
+    }
+    const response = await this.ws.request<BridgeThreadForkResponse>('bridge/thread/fork', {
+      submissionId: submissionId?.trim() || createSubmissionId(),
+      threadId: normalizedThreadId,
+      messageId: normalizedMessageId,
+    });
+    const thread = toRecord(response.thread);
+    if (!thread || !readString(thread['id'])) {
+      throw new Error('bridge/thread/fork did not return a chat');
+    }
+    const chat = this.mapChatWithCachedTitle(thread);
+    for (const [key, cachedList] of this.chatListCache.entries()) {
+      this.chatListCache.set(key, {
+        value: mergeChatSummariesById(cachedList.value, [chat]),
+        loadedAt: cachedList.loadedAt,
+      });
+    }
+    this.mergeIntoAllChatListCaches([chat]);
+    return chat;
   }
   async getChat(id: string, options: ChatReadOptions = {}): Promise<Chat> {
     const threadId = id.trim();

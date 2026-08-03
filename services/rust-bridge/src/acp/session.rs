@@ -69,6 +69,7 @@ enum GenerationState {
     Terminal,
     Active(u64),
     Cancelling(u64),
+    Handoff { generation: u64, settled: bool },
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -120,6 +121,7 @@ impl AcpSession {
         match state.generation_state {
             GenerationState::Active(_) => return Err(ReconstructionError::Busy),
             GenerationState::Cancelling(_) => return Err(ReconstructionError::Cancelled),
+            GenerationState::Handoff { .. } => return Err(ReconstructionError::Busy),
             GenerationState::Terminal => {}
         }
         debug_assert!(state.reconstruction_backup.is_none());
@@ -195,7 +197,9 @@ impl AcpSession {
         let mut state = self.inner.lock().await;
         if matches!(
             state.generation_state,
-            GenerationState::Active(_) | GenerationState::Cancelling(_)
+            GenerationState::Active(_)
+                | GenerationState::Cancelling(_)
+                | GenerationState::Handoff { .. }
         ) {
             return Err("ACP session already has an active prompt");
         }
@@ -215,6 +219,73 @@ impl AcpSession {
             eprintln!("ACP session canonical event mailbox closed during prompt admission");
         }
         Ok((generation, event))
+    }
+
+    pub async fn reserve_handoff(
+        &self,
+        expected_run_id: &str,
+        expected_source_turn_id: &str,
+        expected_generation: u64,
+    ) -> Result<(), &'static str> {
+        let _operation = self.operation_lock.lock().await;
+        let mut state = self.inner.lock().await;
+        let matches_operation = state.snapshot.active_run_id.as_deref() == Some(expected_run_id)
+            && state.snapshot.active_source_turn_id.as_deref() == Some(expected_source_turn_id)
+            && state.snapshot.active_generation == Some(expected_generation);
+        if !matches_operation
+            || state.generation_state != GenerationState::Active(expected_generation)
+        {
+            return Err("steer target is no longer the active prompt");
+        }
+        state.generation_state = GenerationState::Handoff {
+            generation: expected_generation,
+            settled: false,
+        };
+        Ok(())
+    }
+
+    pub async fn admit_handoff(
+        &self,
+        run_id: String,
+        source_turn_id: String,
+    ) -> Result<(u64, CanonicalEvent), &'static str> {
+        let _operation = self.operation_lock.lock().await;
+        let mut state = self.inner.lock().await;
+        if !matches!(state.generation_state, GenerationState::Handoff { .. }) {
+            return Err("steer handoff is no longer reserved");
+        }
+        state.next_generation += 1;
+        let generation = state.next_generation;
+        let event = CanonicalEvent::RunStarted {
+            agent_id: state.snapshot.agent_id.clone(),
+            thread_id: state.snapshot.thread_id.clone(),
+            run_id,
+            source_turn_id,
+            generation,
+        };
+        state.snapshot.apply(&event);
+        state.generation_state = GenerationState::Active(generation);
+        drop(state);
+        if self.events.send(event.clone()).await.is_err() {
+            eprintln!("ACP session canonical event mailbox closed during steer handoff");
+        }
+        Ok((generation, event))
+    }
+
+    pub async fn release_handoff(&self) {
+        let _operation = self.operation_lock.lock().await;
+        let mut state = self.inner.lock().await;
+        if let GenerationState::Handoff {
+            generation,
+            settled,
+        } = state.generation_state
+        {
+            state.generation_state = if settled {
+                GenerationState::Terminal
+            } else {
+                GenerationState::Active(generation)
+            };
+        }
     }
     pub async fn operation(&self) -> Option<(String, String, u64)> {
         let state = self.inner.lock().await;
@@ -277,6 +348,22 @@ impl AcpSession {
     pub async fn emit(&self, event: CanonicalEvent) {
         let mut state = self.inner.lock().await;
         match &event {
+            CanonicalEvent::RunFinished { generation, .. }
+            | CanonicalEvent::RunFailed { generation, .. }
+                if matches!(
+                    state.generation_state,
+                    GenerationState::Handoff {
+                        generation: active,
+                        ..
+                    } if active == *generation
+                ) =>
+            {
+                state.generation_state = GenerationState::Handoff {
+                    generation: *generation,
+                    settled: true,
+                };
+                state.open_messages.remove(generation);
+            }
             CanonicalEvent::RunFinished { generation, .. }
             | CanonicalEvent::RunFailed { generation, .. }
                 if matches!(
@@ -1136,6 +1223,135 @@ mod tests {
             }))
             .expect("valid notification"),
         )
+    }
+
+    #[tokio::test]
+    async fn steer_handoff_blocks_admission_and_ignores_the_old_terminal_after_successor_start() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let (old_generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("old prompt admission");
+        session
+            .reserve_handoff("run", "turn", old_generation)
+            .await
+            .expect("handoff reservation");
+        assert!(session
+            .admit_prompt("other".to_string(), "other-turn".to_string())
+            .await
+            .is_err());
+
+        session
+            .emit(CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation: old_generation,
+                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            })
+            .await;
+        let (successor_generation, _) = session
+            .admit_handoff("run".to_string(), "turn".to_string())
+            .await
+            .expect("successor admission");
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), successor_generation))
+        );
+
+        session
+            .emit(CanonicalEvent::RunFailed {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation: old_generation,
+                message: "late old failure".to_string(),
+            })
+            .await;
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), successor_generation))
+        );
+    }
+
+    #[tokio::test]
+    async fn steer_handoff_rejects_stale_targets_and_releases_each_reservation_state() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        assert!(session.reserve_handoff("run", "turn", 1).await.is_err());
+        assert!(session
+            .admit_handoff("run".to_string(), "turn".to_string())
+            .await
+            .is_err());
+        session.release_handoff().await;
+
+        let (generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("prompt admission");
+        assert!(session
+            .reserve_handoff("other", "turn", generation)
+            .await
+            .is_err());
+        assert!(session
+            .reserve_handoff("run", "other", generation)
+            .await
+            .is_err());
+        assert!(session
+            .reserve_handoff("run", "turn", generation + 1)
+            .await
+            .is_err());
+
+        session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("handoff reservation");
+        assert!(session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .is_err());
+        session.release_handoff().await;
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), generation))
+        );
+
+        session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("second handoff reservation");
+        session
+            .emit(CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation,
+                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            })
+            .await;
+        session.release_handoff().await;
+        assert!(session
+            .admit_prompt("replacement".to_string(), "replacement-turn".to_string())
+            .await
+            .is_ok());
+
+        let closed = AcpSession::new("agent".to_string(), "closed".to_string());
+        let generation = closed
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("closed prompt admission")
+            .0;
+        closed
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("closed reservation");
+        drop(closed.take_events().await.expect("event receiver"));
+        assert!(closed
+            .admit_handoff("run".to_string(), "turn".to_string())
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

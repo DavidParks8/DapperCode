@@ -11,6 +11,9 @@ pub(super) struct AppState {
     pub(super) thread_create_results: Arc<Mutex<HashMap<String, BridgeThreadCreateResponse>>>,
     pub(super) thread_create_order: Arc<Mutex<VecDeque<String>>>,
     pub(super) thread_create_actor: Arc<Mutex<()>>,
+    pub(super) thread_fork_results: Arc<Mutex<HashMap<String, BridgeThreadForkCacheEntry>>>,
+    pub(super) thread_fork_order: Arc<Mutex<VecDeque<String>>>,
+    pub(super) thread_fork_actor: Arc<Mutex<()>>,
     pub(super) approval_resolution_results: Arc<Mutex<HashMap<String, Value>>>,
     pub(super) approval_resolution_order: Arc<Mutex<VecDeque<String>>>,
     pub(super) approval_resolution_actor: Arc<Mutex<()>>,
@@ -44,6 +47,7 @@ pub(super) struct BridgeCapabilitySupport {
     pub(super) plan_mode: bool,
     pub(super) agent_list: bool,
     pub(super) turn_steer: bool,
+    pub(super) thread_fork: bool,
     pub(super) thread_delete: bool,
     pub(super) command_output_delta: bool,
     pub(super) fast_mode: bool,
@@ -89,6 +93,11 @@ impl BridgeCapabilitySupport {
                     .capabilities
                     .as_ref()
                     .is_some_and(|capabilities| capabilities.session_steer),
+            thread_fork: ready
+                && agent
+                    .capabilities
+                    .as_ref()
+                    .is_some_and(|capabilities| capabilities.session_fork),
             thread_delete: ready
                 && agent
                     .capabilities
@@ -130,7 +139,12 @@ mod tests {
     use super::*;
     use crate::acp::manager::{AgentCapabilities, AgentDescriptor, AgentLifecycle};
 
-    fn descriptor(lifecycle: AgentLifecycle, session_delete: bool) -> AgentDescriptor {
+    fn descriptor(
+        lifecycle: AgentLifecycle,
+        session_steer: bool,
+        session_fork: bool,
+        session_delete: bool,
+    ) -> AgentDescriptor {
         AgentDescriptor {
             agent_id: "agent".to_string(),
             display_name: "Agent".to_string(),
@@ -143,7 +157,8 @@ mod tests {
                 session_list: true,
                 session_load: true,
                 session_resume: true,
-                session_steer: false,
+                session_steer,
+                session_fork,
                 session_delete,
             }),
         }
@@ -152,20 +167,96 @@ mod tests {
     #[test]
     fn thread_delete_support_follows_the_agent_capability_and_readiness() {
         assert!(
-            BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Ready, true))
-                .thread_delete
+            BridgeCapabilitySupport::from_agent(&descriptor(
+                AgentLifecycle::Ready,
+                false,
+                false,
+                true
+            ))
+            .thread_delete
         );
         assert!(
-            !BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Ready, false))
-                .thread_delete
+            !BridgeCapabilitySupport::from_agent(&descriptor(
+                AgentLifecycle::Ready,
+                false,
+                false,
+                false
+            ))
+            .thread_delete
         );
         assert!(
-            !BridgeCapabilitySupport::from_agent(&descriptor(AgentLifecycle::Unavailable, true))
-                .thread_delete
+            !BridgeCapabilitySupport::from_agent(&descriptor(
+                AgentLifecycle::Unavailable,
+                false,
+                false,
+                true
+            ))
+            .thread_delete
         );
 
-        let mut unknown = descriptor(AgentLifecycle::Ready, true);
+        let mut unknown = descriptor(AgentLifecycle::Ready, false, false, true);
         unknown.capabilities = None;
         assert!(!BridgeCapabilitySupport::from_agent(&unknown).thread_delete);
+    }
+
+    #[test]
+    fn thread_fork_support_follows_the_agent_capability_and_readiness() {
+        assert!(
+            BridgeCapabilitySupport::from_agent(&descriptor(
+                AgentLifecycle::Ready,
+                false,
+                true,
+                false
+            ))
+            .thread_fork
+        );
+        assert!(
+            !BridgeCapabilitySupport::from_agent(&descriptor(
+                AgentLifecycle::Unavailable,
+                false,
+                true,
+                false
+            ))
+            .thread_fork
+        );
+    }
+
+    #[test]
+    fn contract_capability_cases_project_through_bridge_support() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/bridge-rpc/v2/manifest.json"
+        ))
+        .expect("contract fixture");
+        let cases = manifest["fixtures"]["capabilityCases"]
+            .as_array()
+            .expect("capability cases");
+        for case in cases {
+            let capabilities = &case["agentCapabilities"];
+            let agent = descriptor(
+                AgentLifecycle::Ready,
+                capabilities["sessionSteer"].as_bool().unwrap_or(false),
+                capabilities["sessionFork"].as_bool().unwrap_or(false),
+                capabilities["sessionDelete"].as_bool().unwrap_or(false),
+            );
+            let supports = BridgeCapabilitySupport::from_agent(&agent);
+            assert_eq!(
+                supports.turn_steer,
+                case["supportsByAgent"]["turnSteer"]
+                    .as_bool()
+                    .unwrap_or(false)
+            );
+            assert_eq!(
+                supports.thread_fork,
+                case["supportsByAgent"]["threadFork"]
+                    .as_bool()
+                    .unwrap_or(false)
+            );
+            assert_eq!(
+                supports.thread_delete,
+                case["supportsByAgent"]["threadDelete"]
+                    .as_bool()
+                    .unwrap_or(false)
+            );
+        }
     }
 }

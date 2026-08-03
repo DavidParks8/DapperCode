@@ -128,6 +128,42 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
+export function eligibleForkMessageIds(
+  messages: ChatMessage[],
+  chatStatus: ChatStatus,
+): ReadonlySet<string> {
+  const eligible = new Set<string>();
+  if (chatStatus === 'running') {
+    return eligible;
+  }
+  let userOrdinal = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message?.role !== 'user') {
+      continue;
+    }
+    userOrdinal += 1;
+    if (
+      userOrdinal === 1 ||
+      message.id.startsWith('msg-') ||
+      message.id.startsWith('local-user-')
+    ) {
+      continue;
+    }
+    const remainder = messages.slice(index + 1);
+    const nextUserIndex = remainder.findIndex((candidate) => candidate.role === 'user');
+    const turnMessages = nextUserIndex >= 0 ? remainder.slice(0, nextUserIndex) : remainder;
+    const hasSettledResponse = turnMessages.some(
+      (candidate) =>
+        (candidate.role === 'assistant' || candidate.role === 'reasoning') && !candidate.pending,
+    );
+    if (hasSettledResponse) {
+      eligible.add(message.id);
+    }
+  }
+  return eligible;
+}
+
 function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
   return (
     invocations.length > 0 &&

@@ -158,5 +158,23 @@ mod tests {
             manifest["fixtures"]["capabilities"]["agents"][0]["capabilities"]["sessionDelete"],
             true
         );
+        let capability_cases = manifest["fixtures"]["capabilityCases"]
+            .as_array()
+            .expect("capability case inventory");
+        assert_eq!(capability_cases.len(), 3);
+        for case in capability_cases {
+            assert_eq!(
+                case["supportsByAgent"]["turnSteer"],
+                case["agentCapabilities"]["sessionSteer"]
+            );
+            assert_eq!(
+                case["supportsByAgent"]["threadFork"],
+                case["agentCapabilities"]["sessionFork"]
+            );
+            assert_eq!(
+                case["supportsByAgent"]["threadDelete"],
+                case["agentCapabilities"]["sessionDelete"]
+            );
+        }
     }
 }

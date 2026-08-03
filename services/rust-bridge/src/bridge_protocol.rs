@@ -736,6 +736,28 @@ pub(super) struct BridgeThreadCreateResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct BridgeThreadForkRequest {
+    pub(super) submission_id: String,
+    pub(super) thread_id: String,
+    pub(super) message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadForkResponse {
+    pub(super) submission_id: String,
+    pub(super) thread: Value,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct BridgeThreadForkCacheEntry {
+    pub(super) source_thread_id: String,
+    pub(super) message_id: String,
+    pub(super) response: BridgeThreadForkResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadQueueReadRequest {
     pub(super) thread_id: String,

@@ -3,8 +3,6 @@ import {
   FlatList,
   Keyboard,
   Platform,
-  Pressable,
-  Text,
   type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -33,16 +31,22 @@ import {
   getInitialVisibleMessageStartIndex,
 } from '../helpers/helpers';
 import { createStyles } from '../styles/styles';
-import { buildTranscriptDisplayItems, type TranscriptDisplayItem } from './messages';
+import {
+  buildTranscriptDisplayItems,
+  eligibleForkMessageIds,
+  type TranscriptDisplayItem,
+} from './messages';
 import { projectTranscript } from './controllers/projectionController';
 import type { AgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import type { TranscriptContinuationState } from './controllers/continuationController';
 import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
+import { useForkConversationAction } from './useForkConversationAction';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
+  renderHistoryBoundary,
   renderJumpToLatestButton,
   renderScrollRail,
   resolveListBatchingConfig,
@@ -72,6 +76,8 @@ export interface ChatTranscriptViewProps {
   continuationState?: TranscriptContinuationState;
   onLoadEarlier?: () => void;
   scrollRailEnabled?: boolean;
+  supportsConversationFork?: boolean;
+  onForkConversation?: (messageId: string) => Promise<unknown>;
 }
 
 export const ChatTranscriptView = memo(function ChatTranscriptView({
@@ -96,6 +102,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   continuationState,
   onLoadEarlier,
   scrollRailEnabled = true,
+  supportsConversationFork = false,
+  onForkConversation,
 }: ChatTranscriptViewProps) {
   const theme = useAppTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -103,6 +111,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [restingRailActiveIndex, setRestingRailActiveIndex] = useState(-1);
+  const { forkingMessageId, handleForkConversation } =
+    useForkConversationAction(onForkConversation);
   const showJumpToLatestRef = useRef(false);
   const contentHeightRef = useRef(0);
   const viewportHeightRef = useRef(0);
@@ -167,6 +177,21 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const inlineChoiceSet = useMemo(
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
+  );
+  const forkMessageIds = useMemo(
+    () =>
+      supportsConversationFork &&
+      !chat.parentThreadId &&
+      (continuationState?.unavailableCount ?? 0) === 0
+        ? eligibleForkMessageIds(visibleMessages, chat.status)
+        : new Set<string>(),
+    [
+      chat.parentThreadId,
+      chat.status,
+      continuationState?.unavailableCount,
+      supportsConversationFork,
+      visibleMessages,
+    ],
   );
   const userMessageAnchorCount = userMessageAnchors.length;
   useEffect(() => {
@@ -256,44 +281,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     ],
   );
 
-  const historyBoundary = useMemo(() => {
-    if (!continuationState) {
-      return null;
-    }
-    if (continuationState.loading) {
-      return <Text style={styles.inlineChoiceHint}>Loading earlier history...</Text>;
-    }
-    if (continuationState.error) {
-      return (
-        <Pressable
-          onPress={onLoadEarlier}
-          accessibilityRole="button"
-          accessibilityLabel="Retry loading earlier history"
-        >
-          <Text style={styles.inlineChoiceHint}>Earlier history failed to load. Tap to retry.</Text>
-        </Pressable>
-      );
-    }
-    if (!continuationState.exhausted) {
-      return (
-        <Pressable
-          onPress={onLoadEarlier}
-          accessibilityRole="button"
-          accessibilityLabel="Load earlier messages"
-        >
-          <Text style={styles.inlineChoiceHint}>Load earlier</Text>
-        </Pressable>
-      );
-    }
-    if (continuationState.unavailableCount > 0) {
-      return (
-        <Text style={styles.inlineChoiceHint} accessibilityRole="alert">
-          {`${String(continuationState.unavailableCount)} older history ${continuationState.unavailableCount === 1 ? 'entry is' : 'entries are'} no longer available.`}
-        </Text>
-      );
-    }
-    return null;
-  }, [continuationState, onLoadEarlier, styles.inlineChoiceHint]);
+  const historyBoundary = useMemo(
+    () => renderHistoryBoundary({ continuationState, onLoadEarlier, styles }),
+    [continuationState, onLoadEarlier, styles],
+  );
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -443,15 +434,25 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         onInlineOptionSelect,
         onOpenLocalPreview,
         onOpenSubAgentThread,
+        forkEligible:
+          item.kind === 'message' &&
+          forkMessageIds.has(item.message.id) &&
+          Boolean(onForkConversation),
+        forkBusy: item.kind === 'message' && forkingMessageId === item.message.id,
+        onForkConversation: handleForkConversation,
         threadRunning,
       }),
     [
       bridgeToken,
       bridgeUrl,
+      forkMessageIds,
+      forkingMessageId,
+      handleForkConversation,
       inlineChoiceSet,
       onInlineOptionSelect,
       onOpenLocalPreview,
       onOpenSubAgentThread,
+      onForkConversation,
       styles,
       threadRunning,
     ],
