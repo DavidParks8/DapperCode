@@ -49,6 +49,7 @@ type BodyContentProps = Pick<
   | 'defaultStartWorkspaceLabel'
   | 'readyAgents'
   | 'activeAgentLabel'
+  | 'activeAgentSupports'
   | 'modelOptions'
   | 'activeModelLabel'
   | 'activeModelEffortOptions'
@@ -64,6 +65,7 @@ type BodyContentProps = Pick<
   | 'openEffortModal'
   | 'openCollaborationModeMenu'
   | 'toggleFastMode'
+  | 'forkConversation'
 > & {
   pendingApproval: unknown;
   pendingUserInputRequest: unknown;
@@ -117,6 +119,7 @@ function TranscriptOrComposerContent({
   defaultStartWorkspaceLabel,
   readyAgents,
   activeAgentLabel,
+  activeAgentSupports,
   modelOptions,
   activeModelLabel,
   activeModelEffortOptions,
@@ -133,6 +136,7 @@ function TranscriptOrComposerContent({
   openEffortModal,
   openCollaborationModeMenu,
   toggleFastMode,
+  forkConversation,
 }: BodyContentProps) {
   const handleLoadEarlierPress = useCallback(() => {
     void handleLoadEarlier();
@@ -161,6 +165,8 @@ function TranscriptOrComposerContent({
         liveMessageState={liveMessageState}
         continuationState={transcriptContinuationState}
         onLoadEarlier={handleLoadEarlierPress}
+        supportsConversationFork={activeAgentSupports?.threadFork === true}
+        onForkConversation={forkConversation}
       />
     );
   }
@@ -280,6 +286,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     defaultStartWorkspaceLabel,
     readyAgents,
     activeAgentLabel,
+    activeAgentSupports,
     modelOptions,
     activeModelLabel,
     activeModelEffortOptions,
@@ -295,6 +302,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     openEffortModal,
     openCollaborationModeMenu,
     toggleFastMode,
+    forkConversation,
     shouldShowComposer,
     renderComposer,
     chatBottomInset,
@@ -344,6 +352,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     defaultStartWorkspaceLabel,
     readyAgents,
     activeAgentLabel,
+    activeAgentSupports,
     modelOptions,
     activeModelLabel,
     activeModelEffortOptions,
@@ -359,6 +368,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     openEffortModal,
     openCollaborationModeMenu,
     toggleFastMode,
+    forkConversation,
     liveMessageState: selectedChat ? (liveAssistantByThread[selectedChat.id] ?? null) : null,
     keyboardVisible,
     bottomInset: chatBottomInset,

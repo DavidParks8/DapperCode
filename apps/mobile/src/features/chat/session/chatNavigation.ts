@@ -205,6 +205,36 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     ],
   );
 
+  const forkConversation = useCallback(
+    async (messageId: string) => {
+      const source = selectedChatRef.current;
+      if (!source) {
+        throw new Error('Open a conversation before forking it.');
+      }
+      setError(null);
+      setActivity({ tone: 'running', title: 'Forking conversation' });
+      try {
+        const forked = await api.forkChat(source.id, messageId);
+        api.rememberChat(forked);
+        openChatThread(forked.id, forked);
+        if (profileId) {
+          router.push(routes.chat(profileId, forked.id));
+        }
+        return forked;
+      } catch (error) {
+        const message = (error as Error).message ?? String(error);
+        setError(message);
+        setActivity({
+          tone: 'error',
+          title: 'Could not fork conversation',
+          detail: message,
+        });
+        throw error;
+      }
+    },
+    [api, openChatThread, profileId, router, selectedChatRef, setActivity, setError],
+  );
+
   const closeAgentDetail = useCallback(() => {
     if (profileId && chatId) {
       router.dismissTo(routes.chat(profileId, chatId));
@@ -222,6 +252,7 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
   return {
     handleLoadEarlier,
     openChatThread,
+    forkConversation,
     closeAgentDetail,
     openAgentDetail,
   };

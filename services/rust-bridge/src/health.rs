@@ -103,6 +103,7 @@ mod tests {
                 session_load: true,
                 session_resume: true,
                 session_steer: false,
+                session_fork: false,
                 session_delete: false,
             }),
         }

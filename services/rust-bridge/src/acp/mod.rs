@@ -1,6 +1,7 @@
 pub(crate) mod config;
 pub(crate) mod events;
 pub(crate) mod handlers;
+pub(crate) mod harness;
 pub(crate) mod identity;
 pub(crate) mod interactions;
 pub(crate) mod manager;

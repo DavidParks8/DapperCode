@@ -141,6 +141,153 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
   );
 }
 
+describe('ChatTranscriptView conversation fork checkpoint', () => {
+  it('gates authoritative boundaries and locks duplicate activation until settlement', async () => {
+    let resolveFork: (() => void) | undefined;
+    const onForkConversation = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFork = resolve;
+        }),
+    );
+    const messages: Chat['messages'] = [
+      { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'assistant-1', role: 'assistant', content: 'Done', createdAt: '2026-08-01T00:00:01Z' },
+      { id: 'user-2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+      { id: 'assistant-2', role: 'assistant', content: 'Done', createdAt: '2026-08-01T00:00:03Z' },
+      { id: 'msg-local', role: 'user', content: 'Pending', createdAt: '2026-08-01T00:00:04Z' },
+    ];
+    const tree = render({
+      chat: makeChat({ messages }),
+      supportsConversationFork: true,
+      onForkConversation,
+    });
+    const list = getList(tree);
+    const boundary = list.props.data.find(
+      (item) =>
+        item['kind'] === 'message' &&
+        (item['message'] as { id?: string } | undefined)?.id === 'user-2',
+    );
+    if (!boundary) {
+      throw new Error('Expected fork boundary item');
+    }
+    const rendered = list.props.renderItem({
+      item: boundary,
+      index: 0,
+      separators: {},
+    }) as React.ReactElement<{
+      children: React.ReactElement<{ children: React.ReactElement[] }>[];
+    }>;
+    const checkpoint = rendered.props.children[0]?.props.children[1] as
+      React.ReactElement<{ onPress: () => void }> | undefined;
+    if (!checkpoint) {
+      throw new Error('Expected fork checkpoint');
+    }
+
+    act(() => {
+      checkpoint.props.onPress();
+      checkpoint.props.onPress();
+    });
+    expect(onForkConversation).toHaveBeenCalledTimes(1);
+    expect(onForkConversation).toHaveBeenCalledWith('user-2');
+
+    await act(async () => {
+      resolveFork?.();
+      await Promise.resolve();
+    });
+    act(() => tree.unmount());
+  });
+
+  it('does not render checkpoints when the selected agent lacks fork support', () => {
+    const tree = render({
+      chat: makeChat({
+        messages: [
+          { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:01Z',
+          },
+          { id: 'user-2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+          {
+            id: 'assistant-2',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:03Z',
+          },
+        ],
+      }),
+      supportsConversationFork: false,
+      onForkConversation: jest.fn(),
+    });
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('does not offer checkpoints on inherited sub-agent history', () => {
+    const tree = render({
+      chat: makeChat({
+        parentThreadId: 'parent',
+        messages: [
+          { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:01Z',
+          },
+          { id: 'user-2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+          {
+            id: 'assistant-2',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:03Z',
+          },
+        ],
+      }),
+      supportsConversationFork: true,
+      onForkConversation: jest.fn().mockResolvedValue(undefined),
+    });
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('does not offer checkpoints when complete fork history is unavailable', () => {
+    const tree = render({
+      chat: makeChat({
+        messages: [
+          { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:01Z',
+          },
+          { id: 'user-2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+          {
+            id: 'assistant-2',
+            role: 'assistant',
+            content: 'Done',
+            createdAt: '2026-08-01T00:00:03Z',
+          },
+        ],
+      }),
+      continuationState: { loading: false, error: null, exhausted: true, unavailableCount: 1 },
+      supportsConversationFork: true,
+      onForkConversation: jest.fn().mockResolvedValue(undefined),
+    });
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatTranscriptView magical scroll rail', () => {
   beforeEach(() => {
     resetMockGestures();

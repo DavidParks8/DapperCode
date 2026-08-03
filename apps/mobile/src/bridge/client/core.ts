@@ -108,6 +108,7 @@ export abstract class HostBridgeApiClientCore {
     value: string | boolean,
   ): Promise<Chat>;
   abstract renameChat(threadId: string, title: string): Promise<Chat>;
+  abstract forkChat(threadId: string, messageId: string, submissionId?: string): Promise<Chat>;
   abstract registerPushDevice(input: {
     profileId: string;
     registrationId: string;

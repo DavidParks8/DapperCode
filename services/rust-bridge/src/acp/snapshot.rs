@@ -68,6 +68,14 @@ pub struct SnapshotMessage {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserMessageBoundary {
+    pub ordinal: usize,
+    pub first_text: String,
+    pub first_text_truncated: bool,
+    pub raw_message_id_hint: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotTool {
@@ -271,6 +279,56 @@ struct ToolProjection<'a> {
 }
 
 impl SessionSnapshot {
+    pub fn complete_user_message_boundary(&self, message_id: &str) -> Option<UserMessageBoundary> {
+        if self.unavailable_count != 0
+            || self
+                .history
+                .front()
+                .is_some_and(|entry| entry.sequence != 0)
+        {
+            return None;
+        }
+        let mut ordinal = 0;
+        for entry in &self.history {
+            if entry.kind != SnapshotTimelineKind::Message {
+                continue;
+            }
+            let Some(message) = entry.message.as_ref() else {
+                continue;
+            };
+            if message.role != MessageRole::User {
+                continue;
+            }
+            if message.id == message_id {
+                let first_text = message
+                    .parts
+                    .iter()
+                    .find_map(|part| {
+                        (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                            .then(|| part.get("text").and_then(serde_json::Value::as_str))
+                            .flatten()
+                    })
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let raw_message_id_hint = message
+                    .id
+                    .strip_prefix("export:")
+                    .and_then(|rest| rest.split_once(':').map(|(message_id, _)| message_id))
+                    .filter(|message_id| !message_id.is_empty())
+                    .map(str::to_string);
+                return Some(UserMessageBoundary {
+                    ordinal,
+                    first_text,
+                    first_text_truncated: message.truncated,
+                    raw_message_id_hint,
+                });
+            }
+            ordinal += 1;
+        }
+        None
+    }
+
     /// Restores the transcript recorded before a reload while keeping the session
     /// metadata (mode, commands, config, plan, usage, title) that the agent just
     /// reported. Used when a reload replays no history at all.
@@ -3391,6 +3449,42 @@ mod tests {
         assert_eq!(
             snapshot.usage_cost.as_deref().unwrap().len(),
             MAX_TEXT_BYTES
+        );
+    }
+
+    #[test]
+    fn fork_boundary_uses_complete_history_after_live_messages_roll_over() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        for index in 0..=MAX_MESSAGES {
+            snapshot.apply(&CanonicalEvent::MessageChunk {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: if index % 2 == 0 {
+                    MessageRole::User
+                } else {
+                    MessageRole::Agent
+                },
+                message_id: format!("message-{index}"),
+                content: format!("content-{index}"),
+                content_block: None,
+            });
+        }
+
+        assert!(snapshot
+            .messages
+            .iter()
+            .all(|message| message.id != "message-0"));
+        assert_eq!(
+            snapshot.complete_user_message_boundary("message-126"),
+            Some(UserMessageBoundary {
+                ordinal: 63,
+                first_text: "content-126".to_string(),
+                first_text_truncated: false,
+                raw_message_id_hint: None,
+            })
         );
     }
 }

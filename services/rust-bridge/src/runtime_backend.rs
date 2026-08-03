@@ -14,7 +14,7 @@ use futures_util::future::BoxFuture;
 
 use crate::acp::interactions::ElicitationFieldKind;
 use crate::acp::manager::{
-    AgentLifecycle, AgentManager, LocalAgentManifestSet, ManagedSession, OpenCodeChildSession,
+    AgentLifecycle, AgentManager, HarnessChildSession, LocalAgentManifestSet, ManagedSession,
 };
 use crate::acp::runtime::RequestCancellation;
 use crate::*;
@@ -99,7 +99,7 @@ async fn discover_subagent_session(
             break;
         }
         let mut candidates = Vec::new();
-        for child in manager.opencode_child_sessions(&parent_thread_id).await {
+        for child in manager.harness_child_sessions(&parent_thread_id).await {
             let Some(thread_id) = child_thread_id(&parent_thread_id, &child.acp_session_id) else {
                 continue;
             };
@@ -184,10 +184,10 @@ fn child_matches_tool_title(child_title: Option<&str>, tool_title: &str) -> bool
 /// a parent that already owned an unclaimed child could never resolve its sub-agent while it ran,
 /// and the card stayed unopenable until the tool finished and named the child itself.
 fn select_spawned_child<'a>(
-    candidates: &'a [(OpenCodeChildSession, String)],
+    candidates: &'a [(HarnessChildSession, String)],
     tool_title: &str,
     baseline: &HashSet<String>,
-) -> Option<&'a (OpenCodeChildSession, String)> {
+) -> Option<&'a (HarnessChildSession, String)> {
     candidates
         .iter()
         .find(|(child, _)| child_matches_tool_title(child.title.as_deref(), tool_title))
@@ -837,6 +837,16 @@ impl RuntimeBackend {
                     .await;
                 Ok(json!({ "thread": session_to_thread_value(session)? }))
             }
+            "thread/fork" => {
+                let thread_id = required_string(&params, "threadId")?;
+                let message_id = required_string(&params, "messageId")?;
+                let session = self
+                    .manager
+                    .fork_session(&thread_id, &message_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(json!({ "thread": session_to_thread_value(session)? }))
+            }
             "thread/delete" => {
                 let thread_id = required_string(&params, "threadId")?;
                 let deleted_thread_ids = self
@@ -919,8 +929,8 @@ impl RuntimeBackend {
                 Ok(json!({ "ok": true }))
             }
             "model/list" => Ok(json!({
-                "data": self.manager.opencode_model_catalog(read_string(params.get("agentId")).as_deref()).await,
-                "source": "opencodeCatalog",
+                "data": self.manager.harness_model_catalog(read_string(params.get("agentId")).as_deref()).await,
+                "source": "harnessCatalog",
             })),
             _ => Err(format!("method not supported by ACP runtime: {method}")),
         }
@@ -1409,7 +1419,7 @@ mod client_request_tests {
     fn a_child_that_appears_after_polling_started_is_the_one_the_tool_spawned() {
         let child = |id: &str, title: Option<&str>| {
             (
-                OpenCodeChildSession {
+                HarnessChildSession {
                     title: title.map(str::to_string),
                     acp_session_id: id.to_string(),
                 },

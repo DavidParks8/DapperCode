@@ -242,6 +242,11 @@ export interface BridgeThreadCreateResponse {
   thread: unknown;
 }
 
+export interface BridgeThreadForkResponse {
+  submissionId: string;
+  thread: unknown;
+}
+
 export interface BridgeThreadQueueActionResponse {
   ok: boolean;
   queue: BridgeThreadQueueState;

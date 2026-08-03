@@ -10,7 +10,7 @@
     "bridge/git/stageAll", "bridge/git/status", "bridge/git/switch", "bridge/git/unstage",
     "bridge/git/unstageAll", "bridge/github/auth/install", "bridge/health/read", "bridge/push/list",
     "bridge/push/register", "bridge/push/unregister",
-    "bridge/status/read", "bridge/terminal/exec", "bridge/thread/create",
+    "bridge/status/read", "bridge/terminal/exec", "bridge/thread/create", "bridge/thread/fork",
     "bridge/thread/list/stream/cancel", "bridge/thread/list/stream/start",
     "bridge/thread/queue/cancel", "bridge/thread/queue/read", "bridge/thread/queue/send",
     "bridge/thread/queue/steer", "bridge/ui/dismiss", "bridge/ui/present",
@@ -54,10 +54,37 @@
         "version": "1.0.0",
         "provenance": "local manifest",
         "lifecycle": "ready",
-        "capabilities": { "sessionList": true, "sessionLoad": true, "sessionResume": true, "sessionDelete": true }
+        "capabilities": {
+          "sessionList": true, "sessionLoad": true, "sessionResume": true,
+          "sessionSteer": true, "sessionFork": true, "sessionDelete": true
+        }
       }],
-      "agUiEvents": true
+      "agUiEvents": true,
+      "supports": { "turnSteer": true, "threadFork": true, "threadDelete": true },
+      "supportsByAgent": {
+        "local-primary": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+      }
     },
+    "capabilityCases": [
+      {
+        "name": "partialSupport",
+        "agentId": "agent-partial",
+        "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": false },
+        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": false }
+      },
+      {
+        "name": "fullSupport",
+        "agentId": "agent-full",
+        "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": true },
+        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+      },
+      {
+        "name": "unsupportedOperations",
+        "agentId": "agent-unsupported",
+        "agentCapabilities": { "sessionSteer": false, "sessionFork": false, "sessionDelete": false },
+        "supportsByAgent": { "turnSteer": false, "threadFork": false, "threadDelete": false }
+      }
+    ],
     "operationalStatus": {
       "requests": { "total": 12, "completed": 10, "failed": 2, "timedOut": 1, "pending": 0 },
       "replay": { "entries": 42, "capacity": 2000, "evicted": 0, "clientQueueDrops": 0 },
