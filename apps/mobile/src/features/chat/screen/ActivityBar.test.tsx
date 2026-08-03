@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { ActivityBar, type ActivityTone } from './ActivityBar';
+import { getRenderedGlassViewProps } from '@shared/testing/glassEffectMock';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -77,21 +78,12 @@ function glyphSlotWidth(tree: ReactTestRenderer): number {
 }
 
 describe('ActivityBar', () => {
-  it('renders the status as a bare caption with no card chrome', () => {
-    // The status used to sit inside a blurred, bordered card above the composer, which
-    // read as a component rather than as supporting text.
+  it('renders the status inside the shared glass surface', () => {
     const tree = render('idle', 'Waiting for input');
 
     expect(textContent(tree.root as Queryable)).toContain('Waiting for input');
-    const blurNodes = allNodes(tree).filter(
-      (node) => node.props['intensity'] !== undefined || node.props['tint'] !== undefined,
-    );
-    expect(blurNodes).toHaveLength(0);
-    for (const style of flattenedStyles(tree)) {
-      expect(style['backgroundColor']).toBeUndefined();
-      expect(style['borderWidth']).toBeUndefined();
-      expect(style['borderRadius']).toBeUndefined();
-    }
+    expect(tree.root.findByProps({ testID: 'activity-glass-surface' })).toBeTruthy();
+    expect(getRenderedGlassViewProps().at(-1)?.glassEffectStyle).toBe('none');
     act(() => tree.unmount());
   });
 

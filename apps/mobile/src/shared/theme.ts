@@ -1,4 +1,5 @@
 import { createContext, createElement, useContext, type PropsWithChildren } from 'react';
+import type { GlassStyle } from 'expo-glass-effect';
 import { Platform, type ColorSchemeName, type TextStyle } from 'react-native';
 
 import { SYSTEM_FONT_FAMILIES, type AppFontFamilies } from '@shared/fonts';
@@ -88,11 +89,23 @@ export type AppTypography = {
   mono: TextStyle;
 };
 
+export type GlassSurfaceRole = 'chrome' | 'capsule';
+
+export interface AppGlassSurface {
+  glassEffectStyle: GlassStyle;
+  tintColor?: string;
+  fallbackBackgroundColor: string;
+  fallbackBorderColor: string;
+}
+
+export type AppGlass = Record<GlassSurfaceRole, AppGlassSurface>;
+
 export interface AppTheme {
   mode: ThemeMode;
   isDark: boolean;
   fonts: AppFontFamilies;
   colors: AppColors;
+  glass: AppGlass;
   spacing: typeof spacing;
   radius: typeof radius;
   shadow: typeof shadow;
@@ -228,6 +241,26 @@ const lightColors: AppColors = {
   black: '#000000',
   transparent: 'transparent',
 };
+
+function createGlass(colors: AppColors, isDark: boolean): AppGlass {
+  const chromeTint = isDark ? 'rgba(199, 191, 255, 0.10)' : 'rgba(255, 255, 255, 0.22)';
+  const capsuleTint = isDark ? 'rgba(199, 191, 255, 0.16)' : 'rgba(255, 255, 255, 0.30)';
+
+  return {
+    chrome: {
+      glassEffectStyle: 'regular',
+      tintColor: chromeTint,
+      fallbackBackgroundColor: colors.bgMain,
+      fallbackBorderColor: colors.borderLight,
+    },
+    capsule: {
+      glassEffectStyle: 'regular',
+      tintColor: capsuleTint,
+      fallbackBackgroundColor: colors.bgInput,
+      fallbackBorderColor: colors.borderHighlight,
+    },
+  };
+}
 
 export const spacing = {
   xs: 4,
@@ -365,6 +398,7 @@ export function createAppTheme(mode: ThemeMode): AppTheme {
     isDark,
     fonts,
     colors,
+    glass: createGlass(colors, isDark),
     spacing,
     radius,
     shadow,

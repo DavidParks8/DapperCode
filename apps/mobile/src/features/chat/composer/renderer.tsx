@@ -380,7 +380,7 @@ function FloatingActivityDockView({
   }
 
   return (
-    <View pointerEvents="none" style={styles.activityDock}>
+    <View pointerEvents="none" style={styles.activityDock} testID="floating-activity-dock">
       <ActivityBar
         title={displayedActivity.title}
         detail={activityDetail}

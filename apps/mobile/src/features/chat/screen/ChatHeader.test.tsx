@@ -1,10 +1,15 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
-import { ScrollView } from 'react-native';
+import { Platform, ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { ChatHeader } from './ChatHeader';
 
 jest.mock('@expo/vector-icons', () => {
@@ -14,10 +19,6 @@ jest.mock('@expo/vector-icons', () => {
     Ionicons: ({ name }: { name: string }) => mockReact.createElement(MockText, null, name),
   };
 });
-
-jest.mock('expo-linear-gradient', () => ({
-  LinearGradient: 'LinearGradient',
-}));
 
 type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll' | 'parent'> & {
   type: unknown;
@@ -104,10 +105,6 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
     throw new Error(`Missing callback: ${name}`);
   }
   return (callback as (...callbackArgs: unknown[]) => unknown)(...args);
-}
-
-function findType(root: QueryableInstance, type: unknown): QueryableInstance {
-  return root.findByType(type as React.ElementType) as unknown as QueryableInstance;
 }
 
 /** The native scroll view backing the header title. */
@@ -234,20 +231,27 @@ function createTitleScroller(
   const emit = (nextOffset: number) => {
     offset = nextOffset;
     act(() => {
-      invokeProp(host(), 'onScroll', {
-        nativeEvent: {
-          contentOffset: { x: offset, y: 0 },
-          contentSize: { width: contentWidth, height: 24 },
-          layoutMeasurement: { width: viewportWidth, height: 24 },
-        },
-      });
+      const onScroll = host().props['onScroll'];
+      if (typeof onScroll === 'function') {
+        invokeProp(host(), 'onScroll', {
+          nativeEvent: {
+            contentOffset: { x: offset, y: 0 },
+            contentSize: { width: contentWidth, height: 24 },
+            layoutMeasurement: { width: viewportWidth, height: 24 },
+          },
+        });
+      }
     });
     recordVisible();
   };
 
   act(() => {
-    invokeProp(host(), 'onLayout', { nativeEvent: { layout: { width: viewportWidth } } });
-    invokeProp(host(), 'onContentSizeChange', contentWidth, 24);
+    if (typeof host().props['onLayout'] === 'function') {
+      invokeProp(host(), 'onLayout', { nativeEvent: { layout: { width: viewportWidth } } });
+    }
+    if (typeof host().props['onContentSizeChange'] === 'function') {
+      invokeProp(host(), 'onContentSizeChange', contentWidth, 24);
+    }
   });
   recordVisible();
 
@@ -334,6 +338,34 @@ describe('ChatHeader', () => {
     expect(invokeStyle(findPressable(root, 'Edit session title'), true)).toBeDefined();
     expect(invokeStyle(findPressable(root, 'Edit session title'), false)).toBeDefined();
     act(() => tree.unmount());
+  });
+
+  it('keeps header controls available with active native glass', () => {
+    const originalPlatformOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+    const tree = render(
+      <ChatHeader
+        onOpenDrawer={jest.fn()}
+        title={LONG_TITLE}
+        onRenameTitle={jest.fn()}
+        rightIconName="git-branch-outline"
+        onRightActionPress={jest.fn()}
+      />,
+    );
+    const root = queryRoot(tree);
+
+    expect(tree.root.findByProps({ testID: 'chat-header-glass-surface' })).toBeTruthy();
+    expect(getRenderedGlassViewProps().at(-1)?.glassEffectStyle).toBe(
+      theme.glass.chrome.glassEffectStyle,
+    );
+    expect(findHost(root, 'Open navigation drawer')).toBeTruthy();
+    expect(findHost(root, 'Edit session title')).toBeTruthy();
+    expect(findHost(root, 'Open Git')).toBeTruthy();
+
+    act(() => tree.unmount());
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
   });
 
   it('exposes the rename affordance as a pencil button beside the title', () => {
@@ -434,26 +466,25 @@ describe('ChatHeader', () => {
     act(() => tree.unmount());
   });
 
-  it('tracks the overflow fades while the title is dragged', () => {
+  it('does not paint opaque overflow fades over the glass while the title is dragged', () => {
     const tree = render(
       <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
     );
     const root = queryRoot(tree);
     const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
 
-    // Parked at the start: only the trailing fade hints at more text.
-    expect(gradients(root)).toHaveLength(1);
+    expect(gradients(root)).toHaveLength(0);
 
     scroller.drag(120);
-    expect(gradients(root)).toHaveLength(2);
+    expect(gradients(root)).toHaveLength(0);
 
     scroller.drag(scroller.maxOffset());
     expect(scroller.offset()).toBe(scroller.maxOffset());
-    expect(gradients(root)).toHaveLength(1);
+    expect(gradients(root)).toHaveLength(0);
 
     scroller.drag(-scroller.maxOffset());
     expect(scroller.offset()).toBe(0);
-    expect(gradients(root)).toHaveLength(1);
+    expect(gradients(root)).toHaveLength(0);
     act(() => tree.unmount());
   });
 
@@ -482,7 +513,7 @@ describe('ChatHeader', () => {
     const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
 
     scroller.drag(scroller.maxOffset());
-    expect(gradients(root)).toHaveLength(1);
+    expect(gradients(root)).toHaveLength(0);
     scrollTo.mockClear();
 
     const renamed = `${LONG_TITLE} (renamed)`;
@@ -494,8 +525,7 @@ describe('ChatHeader', () => {
 
     expect(scrollTo).toHaveBeenCalledWith({ x: 0, animated: false });
     expect(textContent(queryRoot(tree))).toContain(renamed);
-    // Back at the start of the new title: the leading fade is gone, the trailing one is back.
-    expect(gradients(queryRoot(tree))).toHaveLength(1);
+    expect(gradients(queryRoot(tree))).toHaveLength(0);
 
     const rewound = createTitleScroller(tree, { title: renamed, viewportWidth: 180 });
     expect(rewound.offset()).toBe(0);
@@ -504,22 +534,25 @@ describe('ChatHeader', () => {
     act(() => tree.unmount());
   });
 
-  it('re-measures fades when the header is relaid out mid-scroll', () => {
+  it('does not add opaque overflow fades after a title update', () => {
     const tree = render(
       <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
     );
     const root = queryRoot(tree);
-    const scroll = findType(root, ScrollView);
-    const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
+    expect(gradients(root)).toHaveLength(0);
 
-    scroller.drag(150);
-    expect(gradients(root)).toHaveLength(2);
-
-    // A wider viewport (rotation, or a smaller right action) fits the rest of the title.
     act(() => {
-      invokeProp(scroll, 'onLayout', { nativeEvent: { layout: { width: 620 } } });
+      tree.update(
+        wrap(
+          <ChatHeader
+            onOpenDrawer={jest.fn()}
+            title={`${LONG_TITLE} (updated)`}
+            onRenameTitle={jest.fn()}
+          />,
+        ),
+      );
     });
-    expect(gradients(root)).toHaveLength(1);
+    expect(gradients(queryRoot(tree))).toHaveLength(0);
     act(() => tree.unmount());
   });
 

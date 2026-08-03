@@ -11,6 +11,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { ChatInput } from './ChatInput';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
@@ -111,6 +116,7 @@ describe('ChatInput behavior', () => {
         ),
       );
     });
+
     const rendered = tree as ReactTestRenderer;
     const root = rendered.root as Queryable;
     act(() => byLabel(root, 'Message').props.onChangeText('changed'));
@@ -163,6 +169,39 @@ describe('ChatInput behavior', () => {
     );
     expect(byLabel(root, 'Agent is responding').props['disabled']).toBe(true);
     act(() => rendered.unmount());
+  });
+
+  it('keeps composer controls usable inside an active interactive glass capsule', () => {
+    const originalPlatformOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+    let tree: ReactTestRenderer | undefined;
+
+    act(() => {
+      tree = renderer.create(
+        wrap(
+          <ChatInput
+            {...base}
+            value="Send this"
+            isLoading={false}
+            onAttachPress={base.onAttachPress}
+          />,
+        ),
+      );
+    });
+
+    const glassProps = getRenderedGlassViewProps().at(-1);
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(glassProps?.isInteractive).toBe(true);
+    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
+    const root = (tree as ReactTestRenderer).root as Queryable;
+    expect(byLabel(root, 'Message')).toBeTruthy();
+    expect(byLabel(root, 'Add attachment')).toBeTruthy();
+    expect(byLabel(root, 'Send message')).toBeTruthy();
+
+    act(() => (tree as ReactTestRenderer).unmount());
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
   });
 
   it('reserves enough height for placeholder descenders', () => {

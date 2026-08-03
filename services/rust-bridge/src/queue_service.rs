@@ -664,6 +664,7 @@ impl BridgeQueueService {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) async fn reconcile_all_threads(self: &Arc<Self>) {
         let thread_ids = self
             .threads
@@ -1534,6 +1535,55 @@ mod tests {
             .await
             .insert("thread".to_string(), active_runtime(item_ids, tool_ids));
         (service, receivers)
+    }
+
+    async fn assert_late_dispatch_blocker<F>(
+        service: &Arc<BridgeQueueService>,
+        calls: &mut FakeReceivers,
+        configure: F,
+    ) where
+        F: FnOnce(&mut BridgeThreadQueueRuntime),
+    {
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            *runtime = active_runtime(&[], &[]);
+            runtime.pending_steers.push_back(queued("steer"));
+        }
+
+        let dispatch_service = Arc::clone(service);
+        let dispatch = tokio::spawn(async move {
+            dispatch_service
+                .drain_pending_steers("thread".to_string())
+                .await;
+        });
+        let prepare = tokio::time::timeout(Duration::from_secs(1), calls.prepare.recv())
+            .await
+            .expect("steer preparation timeout")
+            .expect("steer preparation");
+        prepare.response.send(Ok(1)).unwrap();
+        let verify = tokio::time::timeout(Duration::from_secs(1), calls.verify_epoch.recv())
+            .await
+            .expect("steer epoch verification timeout")
+            .expect("steer epoch verification");
+        {
+            let mut threads = service.threads.write().await;
+            configure(threads.get_mut("thread").unwrap());
+        }
+        verify.response.send(Ok(true)).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), dispatch)
+            .await
+            .expect("blocked steer dispatch timeout")
+            .expect("blocked steer dispatch task");
+
+        assert!(service
+            .read_queue("thread")
+            .await
+            .pending_steers
+            .iter()
+            .any(|entry| entry.id == "steer"));
+        assert!(calls.steer.try_recv().is_err());
     }
 
     #[test]
@@ -3198,5 +3248,207 @@ mod tests {
         }
         service.drain_pending_steers("thread".to_string()).await;
         assert!(calls.steer.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn completion_waiters_and_submission_dedupe_preserve_bounded_state() {
+        let (backend, _calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+
+        let waiting_service = Arc::clone(&service);
+        let waiter =
+            tokio::spawn(async move { waiting_service.wait_for_completion_disposition(77).await });
+        tokio::task::yield_now().await;
+        service
+            .record_completion_disposition(77, QueueCompletionDisposition::Continued)
+            .await;
+        assert_eq!(
+            waiter.await.expect("completion waiter task"),
+            Some(QueueCompletionDisposition::Continued)
+        );
+
+        let queue = service.read_queue("thread").await;
+        for index in 0..=SUBMISSION_DEDUPE_LIMIT {
+            service
+                .remember_submission_result(BridgeThreadQueueSendResponse {
+                    submission_id: format!("submission-{index}"),
+                    disposition: BridgeThreadQueueDisposition::Queued,
+                    queue: queue.clone(),
+                    turn_id: None,
+                })
+                .await;
+        }
+        let results = service.submission_results.lock().await;
+        assert_eq!(results.len(), SUBMISSION_DEDUPE_LIMIT);
+        assert!(!results.contains_key("submission-0"));
+        drop(results);
+
+        let retained_submission_id = format!("submission-{SUBMISSION_DEDUPE_LIMIT}");
+        service
+            .remember_submission_result(BridgeThreadQueueSendResponse {
+                submission_id: retained_submission_id.clone(),
+                disposition: BridgeThreadQueueDisposition::Sent,
+                queue,
+                turn_id: Some("turn".to_string()),
+            })
+            .await;
+        let order = service.submission_order.lock().await;
+        assert_eq!(
+            order
+                .iter()
+                .filter(|submission_id| *submission_id == &retained_submission_id)
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_noops_and_terminal_correlation_preserve_existing_runtime() {
+        let (service, _calls) = service_with_runtime(&["item"], &[]).await;
+
+        service.drain_pending_steers("missing".to_string()).await;
+        service.drain_thread_queue("missing".to_string()).await;
+        service
+            .fail_steer_dispatch("missing", "item", "missing runtime".to_string())
+            .await;
+
+        for (source_turn_id, generation) in [("other-turn", 7), ("turn", 8)] {
+            service
+                .handle_canonical_event(CanonicalHubEvent {
+                    event_id: 88,
+                    event: CanonicalEvent::RunFinished {
+                        agent_id: "agent".to_string(),
+                        thread_id: "thread".to_string(),
+                        run_id: "run".to_string(),
+                        source_turn_id: source_turn_id.to_string(),
+                        generation,
+                        stop_reason: StopReason::EndTurn,
+                    },
+                })
+                .await;
+        }
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").unwrap();
+            assert!(runtime.thread_running);
+            assert_eq!(runtime.active_turn_id.as_deref(), Some("turn"));
+            assert_eq!(runtime.active_prompt_generation, Some(7));
+        }
+
+        {
+            let mut threads = service.threads.write().await;
+            threads.insert(
+                "idle".to_string(),
+                BridgeThreadQueueRuntime {
+                    pending_completion_event_ids: vec![89],
+                    ..BridgeThreadQueueRuntime::default()
+                },
+            );
+        }
+        service.drain_thread_queue("idle".to_string()).await;
+        assert_eq!(
+            service.wait_for_completion_disposition(89).await,
+            Some(QueueCompletionDisposition::Final)
+        );
+    }
+
+    #[tokio::test]
+    async fn resolved_interactions_resume_pending_steers() {
+        let (service, mut calls) = service_with_runtime(&[], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.pending_steers.push_back(queued("approval-steer"));
+            runtime.pending_approval_ids.insert("approval".to_string());
+        }
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 90,
+                event: CanonicalEvent::PermissionResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "approval".to_string(),
+                    outcome: "approved".to_string(),
+                },
+            })
+            .await;
+        let approval_call = tokio::time::timeout(Duration::from_secs(1), calls.steer.recv())
+            .await
+            .expect("approval steer dispatch timeout")
+            .expect("approval steer dispatch");
+        approval_call.response.send(Ok(())).unwrap();
+
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime
+                .pending_steers
+                .push_back(queued("elicitation-steer"));
+            runtime
+                .pending_user_input_ids
+                .insert("elicitation".to_string());
+        }
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 91,
+                event: CanonicalEvent::ElicitationResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "elicitation".to_string(),
+                    action: "accepted".to_string(),
+                },
+            })
+            .await;
+        let elicitation_call = tokio::time::timeout(Duration::from_secs(1), calls.steer.recv())
+            .await
+            .expect("elicitation steer dispatch timeout")
+            .expect("elicitation steer dispatch");
+        elicitation_call.response.send(Ok(())).unwrap();
+    }
+
+    #[tokio::test]
+    async fn late_dispatch_blockers_keep_the_pending_steer_queued() {
+        let (service, mut calls) = service_with_runtime(&[], &[]).await;
+
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.steer_dispatch_in_flight = Some(PendingSteerDispatch {
+                entry: queued("other"),
+                expected_turn_id: "turn".to_string(),
+                expected_run_id: "run".to_string(),
+                prompt_generation: 7,
+                crossed_completion_boundary: false,
+            });
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.turn_start_in_flight = true;
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.action_in_flight_item_id = Some("action".to_string());
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.active_tool_call_ids.insert("tool".to_string());
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.live_generation_known = false;
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.thread_running = false;
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime.pending_approval_ids.insert("approval".to_string());
+        })
+        .await;
+        assert_late_dispatch_blocker(&service, &mut calls, |runtime| {
+            runtime
+                .pending_user_input_ids
+                .insert("elicitation".to_string());
+        })
+        .await;
     }
 }
