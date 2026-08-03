@@ -19,6 +19,7 @@ import { screenSetter } from '../state/registry';
 import { activityAtom } from '../state/composer';
 import type { ChatMessage as ChatTranscriptMessage } from '@bridge/types/types';
 import { getMessageText } from '@bridge/messages';
+import { resolveEquivalentChat } from '../state/chatState';
 import {
   normalizeChatMessageMatchContent,
   shouldAutoEnablePlanModeFromChat,
@@ -34,6 +35,7 @@ export async function executePlanCommand(
     submissionController,
     draftController,
     selectedChatIdRef,
+    selectedChatRef,
     setDraft,
     stopRequestedRef,
     turnExecutionController,
@@ -336,7 +338,11 @@ export async function executePlanCommand(
         planSubmission.id,
         (turnId) => registerTurnStarted(targetChatId, turnId),
       );
-      const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
+      const currentChat =
+        selectedChatRef.current?.id === targetChatId ? selectedChatRef.current : null;
+      const resolvedUpdated = mergeChatWithPendingOptimisticMessages(
+        currentChat ? resolveEquivalentChat(currentChat, updated) : updated,
+      );
       rememberChatModelPreference(
         targetChatId,
         activeModelId,

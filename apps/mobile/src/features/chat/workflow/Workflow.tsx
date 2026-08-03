@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, type ComponentProps, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import type { BridgeQueuedMessage } from '@bridge/types/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { hasStructuredPlanCardContent } from '../plan/cardState';
 import { useAppTheme } from '@shared/theme';
@@ -13,7 +12,6 @@ import {
   PLAN_IMPLEMENTATION_YES,
   PLAN_IMPLEMENTATION_NO,
   renderPlanStatusGlyph,
-  queuedMessageStatusLabel,
   stripMarkdownInline,
 } from '../helpers/helpers';
 
@@ -447,122 +445,6 @@ export function WorkflowCard({
         onStayInPlanMode={onStayInPlanMode}
         styles={styles}
       />
-    </View>
-  );
-}
-
-export function QueuedMessageDock({
-  queuedMessage,
-  remainingQueuedMessagesCount,
-  pendingSubmission,
-  steerEnabled,
-  cancelEnabled,
-  steeringActive,
-  steerPending,
-  waitingForToolCalls,
-  steeringInFlight,
-  steerDisabledReason,
-  onCancelQueuedMessage,
-  onSteerQueuedMessage,
-}: {
-  queuedMessage: BridgeQueuedMessage;
-  remainingQueuedMessagesCount: number;
-  pendingSubmission: boolean;
-  steerEnabled: boolean;
-  cancelEnabled: boolean;
-  steeringActive: boolean;
-  steerPending: boolean;
-  waitingForToolCalls: boolean;
-  steeringInFlight: boolean;
-  steerDisabledReason: string | null;
-  onCancelQueuedMessage: (messageId: string) => void;
-  onSteerQueuedMessage: () => void;
-}) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-
-  return (
-    <View style={styles.queuedMessageDock} accessibilityLiveRegion="polite">
-      <View style={[styles.planCard, styles.planOverlayCard, styles.queuedMessageCard]}>
-        <View style={styles.queuedMessageHeader}>
-          <View style={styles.queuedMessageHeaderText}>
-            <Text style={styles.planCardTitle}>
-              {queuedMessageStatusLabel({
-                pendingSubmission,
-                steeringActive,
-                steeringInFlight,
-                steerPending,
-                waitingForToolCalls,
-              })}
-            </Text>
-            {remainingQueuedMessagesCount > 0 ? (
-              <Text style={styles.queuedMessageSummary}>
-                {`+${String(remainingQueuedMessagesCount)} more queued`}
-              </Text>
-            ) : null}
-          </View>
-          <View style={styles.queuedMessageActions}>
-            <Pressable
-              onPress={() => onCancelQueuedMessage(queuedMessage.id)}
-              disabled={!cancelEnabled}
-              style={({ pressed }) => [
-                styles.queuedMessageActionButton,
-                styles.queuedMessageActionButtonDestructive,
-                !cancelEnabled && styles.queuedMessageActionButtonDisabled,
-                pressed && cancelEnabled && styles.queuedMessageActionButtonPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel queued message"
-              accessibilityState={controlAccessibilityState({ disabled: !cancelEnabled })}
-            >
-              <Text
-                style={[
-                  styles.queuedMessageActionLabel,
-                  styles.queuedMessageActionLabelDestructive,
-                  !cancelEnabled && styles.queuedMessageActionLabelDisabled,
-                ]}
-              >
-                Cancel
-              </Text>
-            </Pressable>
-            {!steerPending ? (
-              <Pressable
-                onPress={onSteerQueuedMessage}
-                disabled={!steerEnabled}
-                style={({ pressed }) => [
-                  styles.queuedMessageActionButton,
-                  !steerEnabled && styles.queuedMessageActionButtonDisabled,
-                  pressed && steerEnabled && styles.queuedMessageActionButtonPressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  steeringActive ? 'Steering queued message' : 'Steer queued message'
-                }
-                accessibilityHint={steerDisabledReason ?? undefined}
-                accessibilityState={controlAccessibilityState({
-                  disabled: !steerEnabled,
-                  busy: steeringActive,
-                })}
-              >
-                <Text
-                  style={[
-                    styles.queuedMessageActionLabel,
-                    !steerEnabled && styles.queuedMessageActionLabelDisabled,
-                  ]}
-                >
-                  {steeringActive ? 'Steering…' : 'Steer'}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-        <Text numberOfLines={3} style={styles.queuedMessageBody}>
-          {queuedMessage.content}
-        </Text>
-        {steerDisabledReason ? (
-          <Text style={styles.queuedMessageHint}>{steerDisabledReason}</Text>
-        ) : null}
-      </View>
     </View>
   );
 }

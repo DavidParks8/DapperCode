@@ -22,6 +22,7 @@ interface RenderChatTranscriptItemOptions {
   forkEligible: boolean;
   forkBusy: boolean;
   onForkConversation?: (messageId: string) => void;
+  threadRunning: boolean;
 }
 
 export function renderChatTranscriptItem({
@@ -36,6 +37,7 @@ export function renderChatTranscriptItem({
   forkEligible,
   forkBusy,
   onForkConversation,
+  threadRunning,
 }: RenderChatTranscriptItemOptions) {
   if (item.kind === 'toolGroup') {
     return (
@@ -60,6 +62,7 @@ export function renderChatTranscriptItem({
           invocation={item.invocation}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
+          threadRunning={threadRunning}
         />
       </View>
     );

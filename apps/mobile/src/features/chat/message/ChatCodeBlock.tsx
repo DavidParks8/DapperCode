@@ -1,149 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import Prism from 'prismjs';
-import 'prismjs/components/prism-bash';
-import 'prismjs/components/prism-c';
-import 'prismjs/components/prism-cpp';
-import 'prismjs/components/prism-csharp';
-import 'prismjs/components/prism-diff';
-import 'prismjs/components/prism-dart';
-import 'prismjs/components/prism-go';
-import 'prismjs/components/prism-java';
-import 'prismjs/components/prism-json';
-import 'prismjs/components/prism-kotlin';
-import 'prismjs/components/prism-markdown';
-import 'prismjs/components/prism-objectivec';
-import 'prismjs/components/prism-powershell';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-ruby';
-import 'prismjs/components/prism-rust';
-import 'prismjs/components/prism-sql';
-import 'prismjs/components/prism-swift';
-import 'prismjs/components/prism-toml';
-import 'prismjs/components/prism-typescript';
-import 'prismjs/components/prism-jsx';
-import 'prismjs/components/prism-tsx';
-import 'prismjs/components/prism-yaml';
-import 'prismjs/components/prism-markup-templating';
-import 'prismjs/components/prism-php';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, type TextStyle, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
 import { type AppTheme, useAppTheme } from '@shared/theme';
+import { highlightCode, renderSyntaxTokens, resolveSyntaxLanguage } from './syntaxHighlight';
 
 const COPY_STATUS_RESET_MS = 1600;
-const MAX_HIGHLIGHT_LENGTH = 20_000;
 
 type CopyStatus = 'idle' | 'copied' | 'error';
-
-const LANGUAGE_ALIASES: Record<string, string> = {
-  csharp: 'csharp',
-  'c#': 'csharp',
-  cs: 'csharp',
-  'c++': 'cpp',
-  html: 'markup',
-  js: 'javascript',
-  md: 'markdown',
-  objc: 'objectivec',
-  py: 'python',
-  rb: 'ruby',
-  rs: 'rust',
-  shell: 'bash',
-  sh: 'bash',
-  ts: 'typescript',
-  yml: 'yaml',
-};
-
-const LANGUAGE_LABELS: Record<string, string> & { text: string } = {
-  bash: 'Shell',
-  csharp: 'C#',
-  cpp: 'C++',
-  dart: 'Dart',
-  javascript: 'JavaScript',
-  jsx: 'JSX',
-  markdown: 'Markdown',
-  markup: 'HTML',
-  objectivec: 'Objective-C',
-  python: 'Python',
-  ruby: 'Ruby',
-  rust: 'Rust',
-  php: 'PHP',
-  powershell: 'PowerShell',
-  sql: 'SQL',
-  swift: 'Swift',
-  text: 'Text',
-  toml: 'TOML',
-  tsx: 'TSX',
-  typescript: 'TypeScript',
-  yaml: 'YAML',
-};
-
-function normalizeLanguage(sourceInfo?: string | null): {
-  grammar: Prism.Grammar | null;
-  label: string;
-} {
-  const rawLanguage =
-    sourceInfo
-      ?.trim()
-      .split(/\s+/, 1)[0]
-      ?.replace(/^language-/i, '')
-      .toLowerCase() ?? '';
-  const safeLanguage = rawLanguage.replace(/[^a-z0-9_+.#-]/g, '').slice(0, 24);
-  const language = LANGUAGE_ALIASES[safeLanguage] ?? safeLanguage;
-  const grammar = language ? (Prism.languages[language] ?? null) : null;
-  const label =
-    LANGUAGE_LABELS[language] ?? (safeLanguage ? safeLanguage.toUpperCase() : LANGUAGE_LABELS.text);
-  return { grammar, label };
-}
-
-function tokenStyle(type: string, styles: ReturnType<typeof createStyles>): TextStyle | undefined {
-  if (['comment', 'prolog', 'doctype', 'cdata'].includes(type)) {
-    return styles.syntaxComment;
-  }
-  if (['keyword', 'atrule', 'important'].includes(type)) {
-    return styles.syntaxKeyword;
-  }
-  if (['string', 'char', 'attr-value', 'inserted', 'builtin'].includes(type)) {
-    return styles.syntaxString;
-  }
-  if (['number', 'boolean', 'constant', 'symbol'].includes(type)) {
-    return styles.syntaxNumber;
-  }
-  if (['function', 'class-name'].includes(type)) {
-    return styles.syntaxFunction;
-  }
-  if (['property', 'tag', 'selector', 'attr-name', 'deleted'].includes(type)) {
-    return styles.syntaxProperty;
-  }
-  if (['operator', 'entity', 'url', 'regex', 'variable'].includes(type)) {
-    return styles.syntaxOperator;
-  }
-  return undefined;
-}
-
-function renderTokens(
-  tokens: Prism.TokenStream,
-  styles: ReturnType<typeof createStyles>,
-  path = 'token',
-): ReactNode {
-  if (typeof tokens === 'string') {
-    return tokens;
-  }
-  if (Array.isArray(tokens)) {
-    return tokens.map((token, index) => (
-      <Text key={`${path}-${String(index)}`}>
-        {renderTokens(token, styles, `${path}-${String(index)}`)}
-      </Text>
-    ));
-  }
-  return (
-    <Text key={path} style={tokenStyle(tokens.type, styles)}>
-      {renderTokens(tokens.content, styles, `${path}-content`)}
-    </Text>
-  );
-}
 
 export function ChatCodeBlock({
   code,
@@ -158,12 +25,9 @@ export function ChatCodeBlock({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syntax = useMemo(() => normalizeLanguage(language), [language]);
+  const syntax = useMemo(() => resolveSyntaxLanguage(language), [language]);
   const highlightedCode = useMemo(
-    () =>
-      syntax.grammar && code.length <= MAX_HIGHLIGHT_LENGTH
-        ? Prism.tokenize(code, syntax.grammar)
-        : code,
+    () => highlightCode(code, syntax.grammar),
     [code, syntax.grammar],
   );
 
@@ -240,7 +104,7 @@ export function ChatCodeBlock({
         contentContainerStyle={styles.scrollContent}
       >
         <Text selectable={selectable} style={styles.code}>
-          {renderTokens(highlightedCode, styles)}
+          {renderSyntaxTokens(highlightedCode, styles)}
         </Text>
       </ScrollView>
     </View>

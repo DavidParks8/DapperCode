@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
@@ -9,55 +10,182 @@ import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
 import { useAppTheme } from '@shared/theme';
 import { motionDuration } from '@shared/ui/motion';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { ScrollableRowText } from './Primitives';
 import { createStyles } from './styles';
+import { ToolHeaderShimmer } from './ToolHeaderShimmer';
+import { createToolCardStyles } from './toolCardStyles';
 import { ToolInvocationOutput } from './ToolOutput';
 import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
+import {
+  resolveToolInvocationHeader,
+  type ToolInvocationHeader,
+} from './toolInvocationPresentation';
+import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
+import type { ChatToolStatus } from '@bridge/types/types';
 
-// The collapsed row is a dense single line (~26pt); pad it toward the 44pt/48dp minimum without
-// growing its visible chrome.
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
 
-function ToolInvocationTitle({
+function ToolHeaderText({
   invocation,
-  expanded,
-  collapsedTitle,
-  theme,
-  styles,
+  header,
+  expandable,
+  running,
+  toggle,
 }: {
   invocation: ToolInvocation;
-  expanded: boolean;
-  collapsedTitle: string;
-  theme: ReturnType<typeof useAppTheme>;
-  styles: ReturnType<typeof createStyles>;
+  header: ToolInvocationHeader;
+  expandable: boolean;
+  running: boolean;
+  toggle: () => void;
 }) {
-  if (invocation.monospaceTitle && !expanded) {
-    return (
-      <ScrollableRowText
-        style={[
-          styles.toolRowTitle,
-          styles.toolRowTitleMono,
-          invocation.isError && styles.toolRowTitleError,
-        ]}
-        backgroundColor={theme.colors.bgMain}
+  const theme = useAppTheme();
+  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
+  const textStyles = [styles.rowSubject, invocation.isError && styles.rowTitleError];
+  const commandOverflow = useHorizontalOverflow();
+  const renderCommand = (highlight: boolean) => (
+    <>
+      {header.action ? (
+        <Animated.Text
+          style={[
+            styles.rowAction,
+            invocation.isError && styles.rowTitleError,
+            highlight && styles.rowTextHighlight,
+          ]}
+        >
+          {header.action}
+        </Animated.Text>
+      ) : null}
+      <Animated.Text
+        style={[textStyles, styles.rowSubjectMono, highlight && styles.rowTextHighlight]}
         numberOfLines={1}
-        testID="tool-command-scroll"
       >
-        {collapsedTitle}
-      </ScrollableRowText>
+        {header.subject}
+      </Animated.Text>
+    </>
+  );
+
+  if (invocation.monospaceTitle && header.subject) {
+    return (
+      <View style={styles.horizontalScrollFrame}>
+        <ScrollView
+          horizontal
+          bounces={false}
+          nestedScrollEnabled
+          directionalLockEnabled
+          style={styles.commandScroll}
+          contentContainerStyle={styles.commandScrollContent}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onLayout={commandOverflow.onLayout}
+          onContentSizeChange={commandOverflow.onContentSizeChange}
+          onScroll={commandOverflow.onScroll}
+          scrollEventThrottle={16}
+          testID="tool-command-scroll"
+          accessible={false}
+        >
+          <Pressable
+            disabled={!expandable}
+            onPress={toggle}
+            accessible={false}
+            accessibilityLabel={invocation.title}
+            style={({ pressed }) => [
+              styles.commandPressable,
+              pressed && expandable && styles.rowPressed,
+            ]}
+            testID="tool-command-toggle"
+          >
+            {renderCommand(false)}
+            <ToolHeaderShimmer active={running} contentStyle={styles.commandPressable}>
+              {renderCommand(true)}
+            </ToolHeaderShimmer>
+          </Pressable>
+        </ScrollView>
+        {commandOverflow.showEndFade ? (
+          <LinearGradient
+            colors={horizontalFadeColors(theme.colors.bgMain)}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            pointerEvents="none"
+            style={styles.horizontalOverflowFade}
+            testID="tool-command-overflow-fade"
+          />
+        ) : null}
+      </View>
     );
   }
+
   return (
-    <Text
-      style={[
-        styles.toolRowTitle,
-        invocation.monospaceTitle && styles.toolRowTitleMono,
-        invocation.isError && styles.toolRowTitleError,
+    <Pressable
+      disabled={!expandable}
+      onPress={toggle}
+      accessible={false}
+      accessibilityLabel={invocation.title}
+      style={({ pressed }) => [
+        styles.rowContentPressable,
+        pressed && expandable && styles.rowPressed,
       ]}
-      numberOfLines={expanded ? 3 : 1}
+      testID="tool-title-toggle"
     >
-      {expanded ? invocation.title : collapsedTitle}
-    </Text>
+      <Animated.Text style={textStyles} numberOfLines={1}>
+        {header.label}
+      </Animated.Text>
+      <ToolHeaderShimmer active={running} contentStyle={styles.rowContentPressable}>
+        <Animated.Text style={[textStyles, styles.rowTextHighlight]} numberOfLines={1}>
+          {header.label}
+        </Animated.Text>
+      </ToolHeaderShimmer>
+    </Pressable>
+  );
+}
+
+function ToolTrailing({
+  status,
+  expanded,
+  expandable,
+  toggle,
+}: {
+  status: ChatToolStatus;
+  expanded: boolean;
+  expandable: boolean;
+  toggle: () => void;
+}) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
+  return (
+    <Pressable
+      disabled={!expandable}
+      onPress={toggle}
+      accessible={false}
+      style={({ pressed }) => [
+        styles.rowRegion,
+        styles.rowTrailing,
+        pressed && expandable && styles.rowPressed,
+      ]}
+      testID="tool-trailing-toggle"
+    >
+      {status === 'failed' ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="close-circle"
+          size={13}
+          color={theme.colors.statusError}
+        />
+      ) : status === 'pending' ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="ellipsis-horizontal"
+          size={13}
+          color={theme.colors.textMuted}
+        />
+      ) : null}
+      {expandable ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name={expanded ? 'chevron-up' : 'chevron-down'}
+          size={13}
+          color={theme.colors.textMuted}
+        />
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -65,71 +193,102 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   invocation,
   bridgeUrl = null,
   bridgeToken = null,
+  threadRunning = true,
 }: {
   invocation: ToolInvocation;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
+  threadRunning?: boolean;
 }) {
   const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const messageStyles = useMemo(() => createStyles(theme), [theme]);
+  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const [expandedIds, setExpandedIds] = useAtom(expandedToolInvocationIdsAtom);
   const expanded = expandedIds[invocation.id] === true;
   const expandable = !invocation.empty || invocation.truncated;
-  const collapsedTitle = useMemo(() => toSingleLine(invocation.title), [invocation.title]);
+  const header = useMemo(
+    () => resolveToolInvocationHeader(invocation, threadRunning),
+    [invocation, threadRunning],
+  );
   const toggle = useCallback(() => {
-    setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
-  }, [invocation.id, setExpandedIds]);
-  const toggleHitSlop = useMemo(() => computeHitSlop(TOOL_ROW_VISIBLE_SIZE), []);
+    if (expandable) {
+      setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
+    }
+  }, [expandable, invocation.id, setExpandedIds]);
+  const running = threadRunning && invocation.status === 'in_progress' && !invocation.isError;
 
   return (
     <Animated.View
-      style={[styles.messageWrapper, styles.messageWrapperAssistant]}
+      style={[messageStyles.messageWrapper, messageStyles.messageWrapperAssistant]}
       layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
     >
-      <Pressable
-        disabled={!expandable}
-        onPress={toggle}
-        hitSlop={toggleHitSlop}
-        style={({ pressed }) => [
-          styles.toolRow,
-          invocation.isError && styles.toolRowError,
-          pressed && expandable && styles.toolRowPressed,
-        ]}
+      <View
+        style={[styles.row, invocation.isError && styles.rowError]}
+        accessible
         accessibilityRole="button"
-        accessibilityLabel={invocation.title}
-        accessibilityHint={expandable ? `${expanded ? 'Hides' : 'Shows'} tool output` : undefined}
+        accessibilityLabel={header.label}
+        accessibilityHint={expandable ? `${expanded ? 'Hides' : 'Shows'} tool results` : undefined}
         accessibilityState={controlAccessibilityState({
           disabled: !expandable,
           expanded: expandable ? expanded : undefined,
         })}
+        accessibilityValue={{ text: header.status.replace('_', ' ') }}
+        accessibilityActions={
+          expandable ? [{ name: 'activate', label: 'Toggle tool results' }] : []
+        }
+        onAccessibilityTap={toggle}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === 'activate') {
+            toggle();
+          }
+        }}
+        testID="tool-row"
       >
-        <View style={styles.toolRowIcon}>
+        <Pressable
+          disabled={!expandable}
+          onPress={toggle}
+          accessible={false}
+          hitSlop={computeHitSlop(TOOL_ROW_VISIBLE_SIZE, { maxHorizontal: 0 })}
+          style={({ pressed }) => [
+            styles.rowTouchTarget,
+            pressed && expandable && styles.rowPressed,
+          ]}
+          testID="tool-row-toggle"
+        />
+        <Pressable
+          disabled={!expandable}
+          onPress={toggle}
+          accessible={false}
+          style={({ pressed }) => [
+            styles.rowRegion,
+            styles.rowIcon,
+            pressed && expandable && styles.rowPressed,
+          ]}
+          testID="tool-icon-toggle"
+        >
           <Ionicons
             {...decorativeAccessibilityProps}
             name={invocation.isError ? 'alert-circle-outline' : toolKindIcon(invocation.kind)}
             size={14}
             color={invocation.isError ? theme.colors.statusError : theme.colors.textMuted}
           />
+        </Pressable>
+        <View style={styles.rowContent}>
+          <ToolHeaderText
+            invocation={invocation}
+            header={header}
+            expandable={expandable}
+            running={running}
+            toggle={toggle}
+          />
         </View>
-        <ToolInvocationTitle
-          invocation={invocation}
+        <ToolTrailing
+          status={header.status}
           expanded={expanded}
-          collapsedTitle={collapsedTitle}
-          theme={theme}
-          styles={styles}
+          expandable={expandable}
+          toggle={toggle}
         />
-        <View style={styles.toolRowTrailing}>
-          <ToolStatusAffordance invocation={invocation} />
-          {expandable ? (
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={13}
-              color={theme.colors.textMuted}
-            />
-          ) : null}
-        </View>
-      </Pressable>
+      </View>
       {expanded ? (
         <Animated.View
           entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
@@ -137,6 +296,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         >
           <ToolInvocationOutput
             invocation={invocation}
+            headerLabel={header.label}
             bridgeUrl={bridgeUrl}
             bridgeToken={bridgeToken}
           />
@@ -147,46 +307,3 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
 });
 
 ToolInvocationRow.displayName = 'ToolInvocationRow';
-
-/**
- * A collapsed row is one line tall, so a title that spans several lines — a
- * chained or heredoc shell command, mostly — is flattened. `numberOfLines`
- * alone would hide everything after the first line even while scrolling.
- */
-function toSingleLine(title: string): string {
-  return title.replace(/\s*\r?\n\s*/g, ' ').trim();
-}
-
-function ToolStatusAffordance({ invocation }: { invocation: ToolInvocation }) {
-  const theme = useAppTheme();
-  if (invocation.status === 'in_progress') {
-    return (
-      <ActivityIndicator
-        size="small"
-        color={theme.colors.statusRunning}
-        accessibilityLabel="Running"
-      />
-    );
-  }
-  if (invocation.status === 'failed') {
-    return (
-      <Ionicons
-        {...decorativeAccessibilityProps}
-        name="close-circle"
-        size={13}
-        color={theme.colors.statusError}
-      />
-    );
-  }
-  if (invocation.status === 'pending') {
-    return (
-      <Ionicons
-        {...decorativeAccessibilityProps}
-        name="ellipsis-horizontal"
-        size={13}
-        color={theme.colors.textMuted}
-      />
-    );
-  }
-  return null;
-}

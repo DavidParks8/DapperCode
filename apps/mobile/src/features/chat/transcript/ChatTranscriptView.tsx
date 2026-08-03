@@ -407,6 +407,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
     [displayMessages.length, isLargeChat],
   );
+  const threadRunning = chat.status === 'running';
+  const listExtraData = useMemo(
+    () => ({ liveMessageState, chatStatus: chat.status }),
+    [chat.status, liveMessageState],
+  );
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
     [],
@@ -428,6 +433,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           Boolean(onForkConversation),
         forkBusy: item.kind === 'message' && forkingMessageId === item.message.id,
         onForkConversation: handleForkConversation,
+        threadRunning,
       }),
     [
       bridgeToken,
@@ -441,6 +447,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onOpenSubAgentThread,
       onForkConversation,
       styles,
+      threadRunning,
     ],
   );
 
@@ -451,13 +458,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           key={chat.id}
           ref={scrollRef}
           data={displayMessages}
-          extraData={
-            forkingMessageId
-              ? `${liveMessageState ? 'live' : chat.status}:${forkingMessageId}`
-              : liveMessageState
-                ? 'live'
-                : chat.status
-          }
+          extraData={listExtraData}
           keyExtractor={keyExtractor}
           renderItem={renderMessageItem}
           ListFooterComponent={historyBoundary}

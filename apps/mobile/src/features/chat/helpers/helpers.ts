@@ -8,3 +8,4 @@ export * from './persistence';
 export * from './plansAndCommands';
 export * from './timeline';
 export * from './status';
+export * from './workingPhrases';

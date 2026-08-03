@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
+import { StyleSheet, type StyleProp, type TextStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -91,5 +92,35 @@ describe('SelectableTextSheet', () => {
     expect(input).toBeDefined();
     expect(input.props['value']).toBe('selectable body text');
     expect(input.props['editable']).toBe(false);
+  });
+
+  it('reads in the app body typography rather than the monospace code face', () => {
+    // Regression: selection rendered prose in the mono family reserved for code and terminal
+    // output, so the same answer changed shape between the transcript and this sheet.
+    const tree = render(<SelectableTextSheet text="selectable body text" onClose={() => {}} />);
+    const root = queryRoot(tree);
+    const input = requireTestValue(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Response text')[0],
+      'indexed test value',
+    );
+    const style = StyleSheet.flatten(input.props['style'] as StyleProp<TextStyle>) ?? {};
+    expect(style.fontFamily).toBeUndefined();
+    expect(style.fontSize).toBe(theme.typography.body.fontSize);
+    expect(style.lineHeight).toBe(theme.typography.body.lineHeight);
+    expect(style.color).toBe(theme.colors.textPrimary);
+  });
+
+  it('titles the sheet with the shared headline style', () => {
+    const tree = render(<SelectableTextSheet text="hello" onClose={() => {}} />);
+    const root = queryRoot(tree);
+    const title = requireTestValue(
+      root.findAll((node) => node.children.includes('Select text'))[0],
+      'indexed test value',
+    );
+    const style = StyleSheet.flatten(title.props['style'] as StyleProp<TextStyle>) ?? {};
+    expect(style.fontFamily).toBeUndefined();
+    expect(style.fontSize).toBe(theme.typography.headline.fontSize);
+    expect(style.lineHeight).toBe(theme.typography.headline.lineHeight);
+    expect(style.color).toBe(theme.colors.textPrimary);
   });
 });

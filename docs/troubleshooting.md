@@ -73,11 +73,11 @@ npm run operator -- stop --workspace /path/to/repository
 
 Repair setup before starting again.
 
-## Phone Cannot Connect
+## Device Cannot Connect
 
 - Use the bridge URL shown by the desktop app.
-- Keep the Mac and phone on the same LAN/VPN or Tailscale network.
-- Do not use `localhost` on a physical phone.
+- Keep the Mac and device on the same LAN/VPN or Tailscale network.
+- Do not use `localhost` on a physical device.
 - Confirm the bearer token or scan the current pairing QR.
 - Keep the bridge private; do not expose it on the public internet.
 

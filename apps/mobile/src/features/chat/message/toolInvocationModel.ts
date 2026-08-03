@@ -2,6 +2,7 @@ import type { Ionicons } from '@expo/vector-icons';
 
 import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
+import { buildCompactDiff, type CompactDiff } from '@shared/diff/compactDiff';
 import { lookupDispatchEntry } from '@shared/runtimeValidation';
 import { parseTimelineEntries, toTimelineVisual } from './timelineHelpers';
 
@@ -14,6 +15,7 @@ export interface ToolInvocationDiff {
   path: string;
   oldText: string | null;
   newText: string;
+  compact?: CompactDiff;
 }
 
 export interface ToolInvocationTerminal {
@@ -31,6 +33,8 @@ export interface ToolInvocation {
   kind: ChatToolKind;
   status: ChatToolStatus;
   title: string;
+  /** Metadata-backed rows can safely synthesize status language; legacy prose cannot. */
+  statusLanguage?: boolean;
   monospaceTitle: boolean;
   isError: boolean;
   locations: ToolInvocationLocation[];
@@ -160,6 +164,7 @@ function computeInvocationEmpty(
     parsed.diffs.length === 0 &&
     parsed.terminals.length === 0 &&
     parsed.images.length === 0 &&
+    !parsed.truncated &&
     locations.length === 0
   );
 }
@@ -187,6 +192,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
     kind: metaFields.kind,
     status: metaFields.status,
     title: stripBullet(title),
+    statusLanguage: meta !== null,
     monospaceTitle: metaFields.monospaceTitle,
     isError: metaFields.isError,
     locations,
@@ -194,7 +200,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
     terminals: parsed.terminals,
     textLines,
     images: parsed.images,
-    truncated: metaFields.truncated,
+    truncated: metaFields.truncated || parsed.truncated,
     empty: computeInvocationEmpty(textLines, parsed, locations),
   };
 }
@@ -276,6 +282,7 @@ interface ParsedStructuredContent {
   images: string[];
   /** Lines already rendered by a richer block, so they are not printed twice. */
   suppressedLines: Set<string>;
+  truncated: boolean;
 }
 
 function parseStructuredContent(content: unknown): ParsedStructuredContent {
@@ -284,8 +291,12 @@ function parseStructuredContent(content: unknown): ParsedStructuredContent {
     terminals: [],
     images: [],
     suppressedLines: new Set(),
+    truncated: false,
   };
   visitStructuredContent(content, parsed, 0);
+  parsed.diffs = dedupeDiffs(parsed.diffs);
+  parsed.terminals = dedupeTerminals(parsed.terminals);
+  parsed.images = [...new Set(parsed.images)];
   return parsed;
 }
 
@@ -293,7 +304,7 @@ function visitDiffContent(entry: Record<string, unknown>, parsed: ParsedStructur
   const path = asString(entry['path']) ?? 'file';
   const newText = asString(entry['newText']) ?? asString(entry['new_text']) ?? '';
   const oldText = asString(entry['oldText']) ?? asString(entry['old_text']) ?? null;
-  parsed.diffs.push({ path, oldText, newText });
+  parsed.diffs.push({ path, oldText, newText, compact: buildCompactDiff(oldText, newText) });
   parsed.suppressedLines.add(`[diff: ${path}]`);
   for (const text of [oldText, newText]) {
     if (text) {
@@ -353,6 +364,9 @@ const STRUCTURED_CONTENT_VISITORS: Partial<Record<string, StructuredContentVisit
   terminal: (entry, parsed) => visitTerminalContent(entry, parsed),
   image: (entry, parsed) => visitImageContent(entry, parsed),
   content: (entry, parsed, depth) => visitStructuredContent(entry['content'], parsed, depth + 1),
+  truncated: (_entry, parsed) => {
+    parsed.truncated = true;
+  },
 };
 
 function visitStructuredContent(
@@ -386,15 +400,65 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.flatMap((entry) => {
+  const parsed = value.flatMap((entry) => {
     const location = asRecord(entry);
     const path = asString(location?.['path']);
     if (!path) {
       return [];
     }
     const line = location?.['line'];
-    return [{ path, ...(typeof line === 'number' ? { line } : {}) }];
+    const normalizedPath = normalizeLocationPath(path);
+    return [{ path: normalizedPath, ...(typeof line === 'number' ? { line } : {}) }];
   });
+  const linedPaths = new Set(
+    parsed.filter((entry) => entry.line !== undefined).map((entry) => entry.path),
+  );
+  const seen = new Set<string>();
+  return parsed.filter((entry) => {
+    if (entry.line === undefined && linedPaths.has(entry.path)) {
+      return false;
+    }
+    const key = `${entry.path}\0${entry.line === undefined ? '' : String(entry.line)}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeLocationPath(path: string): string {
+  return path
+    .trim()
+    .replace(/^\.\//, '')
+    .replace(/\/{2,}/g, '/')
+    .replace(/\/$/, '');
+}
+
+function dedupeDiffs(diffs: ToolInvocationDiff[]): ToolInvocationDiff[] {
+  const latestByPath = new Map<string, ToolInvocationDiff>();
+  for (const diff of diffs) {
+    const key = normalizeLocationPath(diff.path);
+    // Structured tool updates append, so the latest complete before/after payload owns each path.
+    latestByPath.delete(key);
+    latestByPath.set(key, diff);
+  }
+  return [...latestByPath.values()];
+}
+
+function dedupeTerminals(terminals: ToolInvocationTerminal[]): ToolInvocationTerminal[] {
+  const byId = new Map<string, ToolInvocationTerminal>();
+  const anonymous: ToolInvocationTerminal[] = [];
+  const anonymousOutputs = new Set<string>();
+  for (const terminal of terminals) {
+    if (terminal.terminalId) {
+      byId.set(terminal.terminalId, terminal);
+    } else if (!anonymousOutputs.has(terminal.output)) {
+      anonymousOutputs.add(terminal.output);
+      anonymous.push(terminal);
+    }
+  }
+  return [...byId.values(), ...anonymous];
 }
 
 function collectText(values: unknown[]): string {

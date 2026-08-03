@@ -37,6 +37,9 @@ interface ChatInputProps {
   attachments?: Array<{ id: string; label: string }>;
   onRemoveAttachment?: (id: string) => void;
   isLoading: boolean;
+  submitLabel?: string;
+  submitHint?: string;
+  submitDisabled?: boolean;
   showStopButton?: boolean;
   isStopping?: boolean;
   placeholder?: string;
@@ -167,6 +170,8 @@ interface ChatInputSendButtonProps {
   textMutedColor: string;
   textPrimaryColor: string;
   accentTextColor: string;
+  label: string;
+  hint: string;
 }
 
 function ChatInputSendButton({
@@ -180,6 +185,8 @@ function ChatInputSendButton({
   textMutedColor,
   textPrimaryColor,
   accentTextColor,
+  label,
+  hint,
 }: ChatInputSendButtonProps) {
   const busy = isLoading && !canSend;
   return (
@@ -190,8 +197,8 @@ function ChatInputSendButton({
       hitSlop={hitSlop}
       pressRetentionOffset={pressRetentionOffset}
       accessibilityRole="button"
-      accessibilityLabel={busy ? 'Agent is responding' : 'Send message'}
-      accessibilityHint="Sends the current message"
+      accessibilityLabel={busy ? 'Agent is responding' : label}
+      accessibilityHint={hint}
       accessibilityState={controlAccessibilityState({ disabled: !canSend, busy })}
     >
       {busy ? (
@@ -224,6 +231,8 @@ interface ChatInputActionButtonsProps {
   pressRetentionOffset: number;
   styles: ReturnType<typeof createChatInputStyles>;
   colors: ReturnType<typeof useAppTheme>['colors'];
+  submitLabel: string;
+  submitHint: string;
 }
 
 function ChatInputActionButtons({
@@ -239,6 +248,8 @@ function ChatInputActionButtons({
   pressRetentionOffset,
   styles,
   colors,
+  submitLabel,
+  submitHint,
 }: ChatInputActionButtonsProps) {
   return (
     <View style={styles.actionButtons}>
@@ -265,6 +276,8 @@ function ChatInputActionButtons({
           textMutedColor={colors.textMuted}
           textPrimaryColor={colors.textPrimary}
           accentTextColor={colors.accentText}
+          label={submitLabel}
+          hint={submitHint}
         />
       ) : null}
     </View>
@@ -282,6 +295,9 @@ interface NormalizedChatInputProps {
   attachments: Array<{ id: string; label: string }>;
   onRemoveAttachment?: (id: string) => void;
   isLoading: boolean;
+  submitLabel: string;
+  submitHint: string;
+  submitDisabled: boolean;
   showStopButton: boolean;
   isStopping: boolean;
   placeholder: string;
@@ -303,6 +319,9 @@ function normalizeChatInputProps(props: ChatInputProps): NormalizedChatInputProp
     attachments: props.attachments ?? [],
     onRemoveAttachment: props.onRemoveAttachment,
     isLoading: props.isLoading,
+    submitLabel: props.submitLabel ?? 'Send message',
+    submitHint: props.submitHint ?? 'Sends the current message',
+    submitDisabled: props.submitDisabled ?? false,
     showStopButton: props.showStopButton ?? false,
     isStopping: props.isStopping ?? false,
     placeholder: props.placeholder ?? 'Message agent...',
@@ -325,6 +344,9 @@ export function ChatInput(props: ChatInputProps) {
     attachments,
     onRemoveAttachment,
     isLoading,
+    submitLabel,
+    submitHint,
+    submitDisabled,
     showStopButton,
     isStopping,
     placeholder,
@@ -362,7 +384,7 @@ export function ChatInput(props: ChatInputProps) {
     }
   }, [inputHeight, value]);
 
-  const canSend = value.trim().length > 0;
+  const canSend = value.trim().length > 0 && !submitDisabled;
   const canStop = Boolean(showStopButton && onStop);
   const showSendButton = canSend || (isLoading && !canStop);
   const inputScrollEnabled = inputHeight >= INPUT_TEXT_MAX_HEIGHT;
@@ -504,6 +526,8 @@ export function ChatInput(props: ChatInputProps) {
                   pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
                   styles={styles}
                   colors={colors}
+                  submitLabel={submitLabel}
+                  submitHint={submitHint}
                 />
               ) : null}
             </View>

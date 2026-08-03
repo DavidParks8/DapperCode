@@ -160,8 +160,17 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     if (result.disposition === 'queued') {
       return this.getChat(id);
     }
-    options?.onTurnStarted?.(result.turnId);
-    return result.chat;
+    if (result.turnId) {
+      options?.onTurnStarted?.(result.turnId);
+    }
+    if (result.chat) {
+      return result.chat;
+    }
+    const fallback = this.acceptedTurnFallback(id, result.turnId);
+    if (fallback) {
+      return fallback;
+    }
+    throw new Error('Accepted turn could not be hydrated');
   }
   async sendOrQueueChatMessage(
     id: string,
@@ -173,7 +182,7 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       return {
         disposition: 'sent',
         queue: await this.readThreadQueue(id),
-        turnId: '',
+        turnId: null,
         chat: await this.getChat(id),
       };
     }
@@ -196,16 +205,33 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     }
     const turnId = response.turnId?.trim();
     if (!turnId) {
-      throw new Error('bridge/thread/queue/send did not return turn id for sent message');
+      return { disposition: 'sent', queue: response.queue, turnId: null, chat: null };
     }
-    const chat = await this.getChatWithUserMessage(
-      id,
-      turnId,
-      prepared.content,
-      prepared.mentions,
-      prepared.localImages,
-    );
+    let chat: Chat | null = null;
+    try {
+      chat = await this.getChatWithUserMessage(
+        id,
+        turnId,
+        prepared.content,
+        prepared.mentions,
+        prepared.localImages,
+      );
+    } catch {
+      // The queue response already proves delivery. Snapshot hydration is allowed to converge later
+      // through WebSocket events without turning an accepted message into a failed submission.
+    }
     return { disposition: 'sent', queue: response.queue, turnId, chat };
+  }
+  private acceptedTurnFallback(id: string, turnId: string | null): Chat | null {
+    const cached = this.peekChat(id);
+    if (!cached) {
+      return null;
+    }
+    return {
+      ...cached,
+      status: 'running',
+      activeTurnId: turnId ?? cached.activeTurnId,
+    };
   }
   async steerChatTurn(
     threadId: string,
