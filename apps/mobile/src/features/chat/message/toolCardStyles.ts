@@ -104,7 +104,6 @@ export const createToolCardStyles = (theme: AppTheme) =>
     },
     shimmerGradient: { flex: 1 },
     panel: {
-      marginLeft: theme.spacing.sm + 16 + theme.spacing.sm,
       marginTop: theme.spacing.xs,
       marginBottom: theme.spacing.xs,
       borderRadius: theme.radius.md,

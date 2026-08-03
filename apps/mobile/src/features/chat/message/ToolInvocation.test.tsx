@@ -350,6 +350,20 @@ describe('ToolInvocationOutput', () => {
     act(() => tree.unmount());
   });
 
+  it('uses the full transcript width for expanded tool content', () => {
+    const value = invocation({ id: 'tool-full-width', textLines: ['output'] });
+    const tree = render(value);
+    expand(tree, value.title);
+    const panel = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
+      'tool output panel',
+    );
+
+    expect(StyleSheet.flatten(panel.props['style'] as object)).not.toHaveProperty('marginLeft');
+
+    act(() => tree.unmount());
+  });
+
   it('does not repeat one bare location already shown in the header', () => {
     const value = invocation({
       id: 'tool-read-location',
