@@ -534,6 +534,86 @@ pub(super) async fn handle_bridge_method(
             }
             serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
         }
+        "bridge/thread/fork" => {
+            let mut request: BridgeThreadForkRequest =
+                serde_json::from_value(params.unwrap_or_else(|| json!({})))
+                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            request.submission_id = request.submission_id.trim().to_string();
+            request.thread_id = request.thread_id.trim().to_string();
+            request.message_id = request.message_id.trim().to_string();
+            if request.submission_id.is_empty() {
+                return Err(BridgeError::invalid_params(
+                    "submissionId must not be empty",
+                ));
+            }
+            if request.thread_id.is_empty() {
+                return Err(BridgeError::invalid_params("threadId must not be empty"));
+            }
+            if request.message_id.is_empty() {
+                return Err(BridgeError::invalid_params("messageId must not be empty"));
+            }
+            let _fork_guard = state.thread_fork_actor.lock().await;
+            if let Some(cached) = state
+                .thread_fork_results
+                .lock()
+                .await
+                .get(&request.submission_id)
+                .cloned()
+            {
+                if cached.source_thread_id != request.thread_id
+                    || cached.message_id != request.message_id
+                {
+                    return Err(BridgeError::invalid_params(
+                        "submissionId is already bound to another fork request",
+                    ));
+                }
+                return serde_json::to_value(cached.response)
+                    .map_err(|error| BridgeError::server(&error.to_string()));
+            }
+            let queue = state.queue.read_queue(&request.thread_id).await;
+            if !queue.items.is_empty() || queue.pending_steer_count > 0 || queue.steering_in_flight
+            {
+                return Err(BridgeError::server(
+                    "conversation cannot be forked while queued work is pending",
+                ));
+            }
+            let forked = state
+                .backend
+                .request_for_client(
+                    client_id,
+                    "thread/fork",
+                    Some(json!({
+                        "threadId": request.thread_id,
+                        "messageId": request.message_id,
+                    })),
+                )
+                .await
+                .map_err(|error| BridgeError::server(&error))?;
+            let response = BridgeThreadForkResponse {
+                submission_id: request.submission_id.clone(),
+                thread: forked
+                    .get("thread")
+                    .cloned()
+                    .ok_or_else(|| BridgeError::server("thread/fork did not return thread"))?,
+            };
+            let mut results = state.thread_fork_results.lock().await;
+            let mut order = state.thread_fork_order.lock().await;
+            results.insert(
+                request.submission_id.clone(),
+                BridgeThreadForkCacheEntry {
+                    source_thread_id: request.thread_id,
+                    message_id: request.message_id,
+                    response: response.clone(),
+                },
+            );
+            order.push_back(request.submission_id);
+            while order.len() > SUBMISSION_DEDUPE_LIMIT {
+                if let Some(oldest) = order.pop_front() {
+                    results.remove(&oldest);
+                }
+            }
+            serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
+        }
         "bridge/thread/queue/read" => {
             let request: BridgeThreadQueueReadRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))

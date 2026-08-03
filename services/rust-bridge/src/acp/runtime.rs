@@ -27,35 +27,48 @@ use super::session::{AcpSession, ReconstructionError, SessionRegistry, SessionRo
 
 const COMMAND_BUFFER: usize = 64;
 pub const STEER_METHOD: &str = "_dappercode.dev/session/steer";
-const STEER_EXTENSION_VERSION: u64 = 1;
+pub const FORK_METHOD: &str = "_dappercode.dev/session/fork";
+const DAPPERCODE_EXTENSION_VERSION: u64 = 1;
 const MAX_EXTENSION_METADATA_BYTES: usize = 4 * 1024;
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SteerExtensionMetadata {
+struct DapperCodeExtensionMetadata {
     #[serde(rename = "dappercode.dev")]
-    dappercode_dev: SteerExtension,
+    dappercode_dev: DapperCodeExtension,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SteerExtension {
+struct DapperCodeExtension {
     version: u64,
-    capabilities: SteerCapabilities,
+    capabilities: DapperCodeCapabilities,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DapperCodeCapabilities {
+    #[serde(default, rename = "sessionSteer")]
+    session_steer: Option<serde_json::Value>,
+    #[serde(default, rename = "sessionFork")]
+    session_fork: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SteerCapabilities {
-    #[serde(rename = "sessionSteer")]
-    session_steer: SessionSteerCapability,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SessionSteerCapability {
+struct ExtensionCapability {
     method: String,
     version: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NativeAcpCapabilities {
+    pub session_list: bool,
+    pub session_load: bool,
+    pub session_resume: bool,
+    pub session_delete: bool,
+    pub session_close: bool,
+    pub session_steer: bool,
+    pub session_fork: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonRpcRequest)]
@@ -73,6 +86,23 @@ pub struct SteerRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SteerResponse {
     pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonRpcRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[request(method = "_dappercode.dev/session/fork", response = ForkResponse)]
+pub struct ForkRequest {
+    pub session_id: SessionId,
+    pub message_id: Option<String>,
+    pub user_message_ordinal: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonRpcResponse)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ForkResponse {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -143,6 +173,18 @@ pub struct NegotiatedInitialize {
 }
 
 impl NegotiatedInitialize {
+    pub fn native_capabilities(&self) -> NativeAcpCapabilities {
+        NativeAcpCapabilities {
+            session_list: self.supports_session_list(),
+            session_load: self.supports_session_load(),
+            session_resume: self.supports_session_resume(),
+            session_delete: self.supports_session_delete(),
+            session_close: self.supports_session_close(),
+            session_steer: self.supports_session_steer(),
+            session_fork: self.supports_session_fork(),
+        }
+    }
+
     pub fn supports_session_list(&self) -> bool {
         self.response
             .agent_capabilities
@@ -180,6 +222,14 @@ impl NegotiatedInitialize {
     }
 
     pub fn supports_session_steer(&self) -> bool {
+        self.extension_capability("sessionSteer", STEER_METHOD)
+    }
+
+    pub fn supports_session_fork(&self) -> bool {
+        self.extension_capability("sessionFork", FORK_METHOD)
+    }
+
+    fn extension_capability(&self, capability: &str, method: &str) -> bool {
         let Some(meta) = self.response.meta.as_ref() else {
             return false;
         };
@@ -187,14 +237,24 @@ impl NegotiatedInitialize {
         {
             return false;
         }
-        let Ok(metadata) =
-            serde_json::to_value(meta).and_then(serde_json::from_value::<SteerExtensionMetadata>)
+        let Ok(metadata) = serde_json::to_value(meta)
+            .and_then(serde_json::from_value::<DapperCodeExtensionMetadata>)
         else {
             return false;
         };
-        metadata.dappercode_dev.version == STEER_EXTENSION_VERSION
-            && metadata.dappercode_dev.capabilities.session_steer.method == STEER_METHOD
-            && metadata.dappercode_dev.capabilities.session_steer.version == STEER_EXTENSION_VERSION
+        if metadata.dappercode_dev.version != DAPPERCODE_EXTENSION_VERSION {
+            return false;
+        }
+        let descriptor = match capability {
+            "sessionSteer" => metadata.dappercode_dev.capabilities.session_steer,
+            "sessionFork" => metadata.dappercode_dev.capabilities.session_fork,
+            _ => None,
+        };
+        descriptor
+            .and_then(|descriptor| serde_json::from_value::<ExtensionCapability>(descriptor).ok())
+            .is_some_and(|descriptor| {
+                descriptor.method == method && descriptor.version == DAPPERCODE_EXTENSION_VERSION
+            })
     }
 }
 
@@ -675,6 +735,22 @@ impl AcpConnection {
         Ok(())
     }
 
+    pub async fn fork_session_extension(
+        &self,
+        request: ForkRequest,
+    ) -> Result<ForkResponse, AcpRuntimeError> {
+        if !self.negotiated.supports_session_fork() {
+            return Err(AcpRuntimeError::Unsupported(FORK_METHOD));
+        }
+        if self.sessions.get(&request.session_id).await.is_none() {
+            return Err(AcpRuntimeError::UnknownSession(
+                request.session_id.to_string(),
+            ));
+        }
+        self.call(|response| Command::Fork { request, response })
+            .await
+    }
+
     pub async fn session(
         &self,
         session_id: &agent_client_protocol::schema::v1::SessionId,
@@ -791,6 +867,10 @@ enum Command {
         request: SteerRequest,
         interaction_epoch: u64,
         response: oneshot::Sender<Result<SteerResponse, AcpRuntimeError>>,
+    },
+    Fork {
+        request: ForkRequest,
+        response: oneshot::Sender<Result<ForkResponse, AcpRuntimeError>>,
     },
 }
 
@@ -1116,6 +1196,19 @@ impl Command {
                         response.send(Err(AcpRuntimeError::Unsupported("stale interaction epoch")));
                     return;
                 };
+                let _ = connection.spawn(async move {
+                    let result =
+                        match tokio::time::timeout(request_timeout, sent.block_task()).await {
+                            Ok(Ok(value)) => Ok(value),
+                            Ok(Err(error)) => Err(AcpRuntimeError::Connection(error.to_string())),
+                            Err(_) => Err(AcpRuntimeError::RequestTimeout),
+                        };
+                    let _ = response.send(result);
+                    Ok(())
+                });
+            }
+            Self::Fork { request, response } => {
+                let sent = connection.send_request(request);
                 let _ = connection.spawn(async move {
                     let result =
                         match tokio::time::timeout(request_timeout, sent.block_task()).await {
@@ -1504,6 +1597,21 @@ mod tests {
         .expect("valid extension metadata")
     }
 
+    fn fork_meta() -> agent_client_protocol::schema::v1::Meta {
+        serde_json::from_value(serde_json::json!({
+            "dappercode.dev": {
+                "version": 1,
+                "capabilities": {
+                    "sessionFork": {
+                        "method": FORK_METHOD,
+                        "version": 1
+                    }
+                }
+            }
+        }))
+        .expect("valid fork extension metadata")
+    }
+
     fn update(value: serde_json::Value) -> SessionUpdate {
         serde_json::from_value(value).expect("valid typed session update fixture")
     }
@@ -1530,13 +1638,11 @@ mod tests {
             serde_json::json!({"dappercode.dev": {"version": 1, "capabilities": {"sessionSteer": {"method": STEER_METHOD, "version": 2}}}}),
             serde_json::json!({"dappercode.dev": {"version": 1, "capabilities": {"sessionSteer": {"method": STEER_METHOD, "version": 1, "extra": true}}}}),
             serde_json::json!({"dappercode.dev": {"version": 1, "capabilities": {"sessionSteer": {"method": STEER_METHOD, "version": 1}}, "extra": true}}),
-            serde_json::json!({"dappercode.dev": {"version": 1, "capabilities": {"sessionSteer": {"method": STEER_METHOD, "version": 1}}}, "extra": true}),
         ] {
             let mut response = initialized(AgentCapabilities::new());
             response.meta = serde_json::from_value(value).ok();
             assert!(!NegotiatedInitialize { response }.supports_session_steer());
         }
-
         let mut response = initialized(AgentCapabilities::new());
         response.meta = Some(steer_meta());
         assert!(NegotiatedInitialize { response }.supports_session_steer());
@@ -1562,6 +1668,138 @@ mod tests {
         }))
         .ok();
         assert!(!NegotiatedInitialize { response }.supports_session_steer());
+    }
+
+    #[test]
+    fn extension_capabilities_are_independent_and_allow_sibling_vendor_metadata() {
+        for (steer, fork) in [(true, false), (false, true), (true, true)] {
+            let mut capabilities = serde_json::Map::new();
+            if steer {
+                capabilities.insert(
+                    "sessionSteer".to_string(),
+                    serde_json::json!({"method": STEER_METHOD, "version": 1}),
+                );
+            }
+            if fork {
+                capabilities.insert(
+                    "sessionFork".to_string(),
+                    serde_json::json!({"method": FORK_METHOD, "version": 1}),
+                );
+            }
+            let mut response = initialized(AgentCapabilities::new());
+            response.meta = serde_json::from_value(serde_json::json!({
+                "dappercode.dev": {"version": 1, "capabilities": capabilities},
+                "another.vendor": {"enabled": true}
+            }))
+            .ok();
+            let negotiated = NegotiatedInitialize { response };
+            assert_eq!(negotiated.supports_session_steer(), steer);
+            assert_eq!(negotiated.supports_session_fork(), fork);
+        }
+
+        let mut response = initialized(AgentCapabilities::new());
+        response.meta = serde_json::from_value(serde_json::json!({
+            "dappercode.dev": {
+                "version": 1,
+                "capabilities": {
+                    "sessionSteer": {"method": STEER_METHOD, "version": 1},
+                    "sessionFork": true
+                }
+            }
+        }))
+        .ok();
+        let negotiated = NegotiatedInitialize { response };
+        assert!(negotiated.supports_session_steer());
+        assert!(!negotiated.supports_session_fork());
+    }
+
+    #[tokio::test]
+    async fn typed_fork_is_capability_and_session_gated_before_dispatch() {
+        let plain_agent = Agent.builder().on_receive_request(
+            async |_request: InitializeRequest, responder, _| {
+                responder.respond(initialized(AgentCapabilities::new()))
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+        let (plain, _) =
+            AcpConnection::start_transport("plain".into(), plain_agent, Duration::from_secs(1))
+                .await
+                .expect("plain agent starts");
+        assert!(matches!(
+            plain
+                .fork_session_extension(ForkRequest {
+                    session_id: SessionId::new("source"),
+                    message_id: Some("message".to_string()),
+                    user_message_ordinal: 1,
+                })
+                .await,
+            Err(AcpRuntimeError::Unsupported(FORK_METHOD))
+        ));
+        assert!(matches!(
+            plain
+                .verify_steer_epoch(&SessionId::new("missing"), 1)
+                .await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        assert!(matches!(
+            plain
+                .close_session(CloseSessionRequest::new(SessionId::new("missing")))
+                .await,
+            Err(AcpRuntimeError::Unsupported("session/close"))
+        ));
+        plain.shutdown().await.expect("plain shutdown");
+
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel::<ForkRequest>();
+        let fork_agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    let mut response = initialized(AgentCapabilities::new());
+                    response.meta = Some(fork_meta());
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: ForkRequest, responder, _| {
+                    let _ = observed_tx.send(request);
+                    responder.respond(ForkResponse {
+                        session_id: SessionId::new("forked"),
+                        title: Some("Forked".to_string()),
+                    })
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("fork".into(), fork_agent, Duration::from_secs(1))
+                .await
+                .expect("fork agent starts");
+        let request = ForkRequest {
+            session_id: SessionId::new("source"),
+            message_id: Some("message".to_string()),
+            user_message_ordinal: 1,
+        };
+        assert!(matches!(
+            connection.fork_session_extension(request.clone()).await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        connection
+            .ensure_session(SessionId::new("source"))
+            .await
+            .expect("source session");
+        assert_eq!(
+            connection
+                .fork_session_extension(request)
+                .await
+                .expect("fork response")
+                .session_id,
+            SessionId::new("forked")
+        );
+        assert_eq!(
+            observed_rx.recv().await.expect("observed fork").message_id,
+            Some("message".to_string())
+        );
+        connection.shutdown().await.expect("fork shutdown");
     }
 
     #[tokio::test]

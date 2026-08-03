@@ -1197,6 +1197,7 @@ describe('HostBridgeApiClient', () => {
         turns: [],
       },
     });
+
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
     await expect(client.renameChat(' thr_rename ', ' Manual title ')).resolves.toMatchObject({
@@ -1207,6 +1208,40 @@ describe('HostBridgeApiClient', () => {
       threadId: 'thr_rename',
       title: 'Manual title',
     });
+  });
+
+  it('forkChat() caches only a successful idempotent fork response', async () => {
+    const ws = createWsMock();
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    client.rememberChats([]);
+    ws.request.mockRejectedValueOnce(new Error('fork unavailable'));
+
+    await expect(client.forkChat(' source ', ' message ', ' fork-1 ')).rejects.toThrow(
+      'fork unavailable',
+    );
+    expect(client.peekChats()).toEqual([]);
+
+    ws.request.mockResolvedValueOnce({
+      submissionId: 'fork-1',
+      thread: {
+        id: 'forked',
+        name: 'Forked conversation',
+        preview: '',
+        createdAt: 1700000000,
+        updatedAt: 1700000001,
+        status: { type: 'idle' },
+        turns: [],
+      },
+    });
+    await expect(client.forkChat(' source ', ' message ', ' fork-1 ')).resolves.toMatchObject({
+      id: 'forked',
+    });
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/thread/fork', {
+      submissionId: 'fork-1',
+      threadId: 'source',
+      messageId: 'message',
+    });
+    expect(client.peekChats()?.map((entry) => entry.id)).toEqual(['forked']);
   });
 
   it('deleteChat() removes the session through the bridge and purges cached listings', async () => {

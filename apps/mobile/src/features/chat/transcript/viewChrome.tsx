@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
-import { Pressable, type FlatList } from 'react-native';
+import type { Dispatch, ReactElement, ReactNode, RefObject, SetStateAction } from 'react';
+import { Pressable, Text, type FlatList } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion, type SharedValue } from 'react-native-reanimated';
 
 import { TABLET_LAYOUT_MIN_WIDTH } from '@shell/boot/appConstants';
@@ -17,6 +17,7 @@ import type { useAppTheme } from '@shared/theme';
 import type { AutoScrollState } from '../helpers/helpers';
 import type { createStyles } from '../styles/styles';
 import type { TranscriptDisplayItem } from './messages';
+import type { TranscriptContinuationState } from './controllers/continuationController';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import type { computeHitSlop } from '@shared/ui/touchTarget';
 import { motionDuration } from '@shared/ui/motion';
@@ -32,6 +33,49 @@ export const resolveListBatchingConfig = (count: number, isLarge: boolean) => ({
   updateCellsBatchingPeriod: isLarge ? 32 : undefined,
   windowSize: isLarge ? 13 : 11,
 });
+export function renderHistoryBoundary(params: {
+  continuationState?: TranscriptContinuationState;
+  onLoadEarlier?: () => void;
+  styles: ReturnType<typeof createStyles>;
+}): ReactElement | null {
+  const { continuationState, onLoadEarlier, styles } = params;
+  if (!continuationState) {
+    return null;
+  }
+  if (continuationState.loading) {
+    return <Text style={styles.inlineChoiceHint}>Loading earlier history...</Text>;
+  }
+  if (continuationState.error) {
+    return (
+      <Pressable
+        onPress={onLoadEarlier}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading earlier history"
+      >
+        <Text style={styles.inlineChoiceHint}>Earlier history failed to load. Tap to retry.</Text>
+      </Pressable>
+    );
+  }
+  if (!continuationState.exhausted) {
+    return (
+      <Pressable
+        onPress={onLoadEarlier}
+        accessibilityRole="button"
+        accessibilityLabel="Load earlier messages"
+      >
+        <Text style={styles.inlineChoiceHint}>Load earlier</Text>
+      </Pressable>
+    );
+  }
+  if (continuationState.unavailableCount === 0) {
+    return null;
+  }
+  return (
+    <Text style={styles.inlineChoiceHint} accessibilityRole="alert">
+      {`${String(continuationState.unavailableCount)} older history ${continuationState.unavailableCount === 1 ? 'entry is' : 'entries are'} no longer available.`}
+    </Text>
+  );
+}
 export function ensureRailJumpController(params: {
   railJumpControllerRef: RefObject<ChatScrollRailJumpController | null>;
   displayIndexByMessageIdRef: RefObject<Map<string, number>>;

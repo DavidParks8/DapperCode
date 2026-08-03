@@ -19,6 +19,7 @@ function areTranscriptInteractionPropsEqual(
     previous.onPinnedAutoScroll === next.onPinnedAutoScroll &&
     previous.onJumpToLatest === next.onJumpToLatest &&
     previous.onScrollInteractionStart === next.onScrollInteractionStart &&
+    previous.onForkConversation === next.onForkConversation &&
     previous.scrollRef === next.scrollRef &&
     previous.autoScrollStateRef === next.autoScrollStateRef
   );
@@ -37,7 +38,8 @@ function areTranscriptDisplayPropsEqual(
     previous.liveMessageState === next.liveMessageState &&
     previous.continuationState === next.continuationState &&
     previous.onLoadEarlier === next.onLoadEarlier &&
-    previous.scrollRailEnabled === next.scrollRailEnabled
+    previous.scrollRailEnabled === next.scrollRailEnabled &&
+    previous.supportsConversationFork === next.supportsConversationFork
   );
 }
 
