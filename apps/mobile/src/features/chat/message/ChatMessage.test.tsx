@@ -938,10 +938,15 @@ describe('ChatMessage transcript width', () => {
     const tree = expectValue(rendered) as QueryableRenderer;
 
     act(() => {
-      readOnPress(tree.root.findByProps({ accessibilityRole: 'button' }).props)();
+      readOnPress(
+        requireTestValue(
+          tree.root.findAllByProps({ testID: 'tool-command-toggle' })[0],
+          'tool command toggle',
+        ).props,
+      )();
     });
 
-    const body = tree.root.findByProps({ testID: 'tool-output-body' });
+    const body = tree.root.findByProps({ testID: 'tool-output-panel' });
     const bodyStyle = (StyleSheet.flatten(body.props['style'] as never) ?? {}) as {
       marginRight?: number;
     };
@@ -1516,7 +1521,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders an edit invocation as a coloured diff', () => {
+  it('renders an edit invocation with vivid and explicit diff markers', () => {
     const invocation: ToolInvocation = {
       id: 'edit',
       kind: 'edit',
@@ -1551,13 +1556,22 @@ describe('ChatMessage system timeline matrices', () => {
       'indexed test value',
     );
     act(() => readOnPress(control.props)());
-    expect(hasRenderedText(root, '- const a = 1;')).toBe(true);
-    expect(hasRenderedText(root, '+ const a = 2;')).toBe(true);
-    expect(hasRenderedText(root, 'src/app.ts')).toBe(true);
+    expect(hasRenderedText(root, 'const a = 1;')).toBe(true);
+    expect(hasRenderedText(root, 'const a = 2;')).toBe(true);
+    expect(root.findAllByProps({ testID: 'tool-diff-marker-remove' }).length).toBeGreaterThan(0);
+    expect(root.findAllByProps({ testID: 'tool-diff-marker-add' }).length).toBeGreaterThan(0);
+    expect(
+      root.findAllByProps({ accessibilityLabel: 'Removed line: const a = 1;' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      root.findAllByProps({ accessibilityLabel: 'Added line: const a = 2;' }).length,
+    ).toBeGreaterThan(0);
+    expect(hasRenderedText(root, 'Edited app.ts +1 -1')).toBe(true);
+    expect(hasRenderedText(root, 'src/app.ts')).toBe(false);
     act(() => rendered.unmount());
   });
 
-  it('shows a spinner while a tool is still running', () => {
+  it('shows status language and a header shimmer while a tool is still running', () => {
     const invocation: ToolInvocation = {
       id: 'running',
       kind: 'read',
@@ -1583,15 +1597,13 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
-    expect(root.findAllByType(ActivityIndicator).length).toBeGreaterThan(0);
+    expect(root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(root.findAllByProps({ testID: 'tool-header-shimmer' }).length).toBeGreaterThan(0);
     const control = requireTestValue(
-      root.findAll(
-        (node) =>
-          typeof node.props['onPress'] === 'function' &&
-          node.props['accessibilityLabel'] === 'Read package.json',
-      )[0],
-      'indexed test value',
+      root.findAllByProps({ testID: 'tool-row' })[0],
+      'running tool row',
     );
+    expect(control.props['accessibilityLabel']).toBe('Reading package.json');
     expect(control.props['accessibilityState']).toEqual({ disabled: true });
     act(() => rendered.unmount());
   });
@@ -1637,7 +1649,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it('scrolls long tool output and updates command fades', () => {
+  it('keeps a scrollable command header while long output uses a vertical scroller', () => {
     const details = Array.from({ length: 26 }, (_, index) => `line ${String(index + 1)}`);
     const messages: LegacyTestMessage[] = [
       {
@@ -1665,17 +1677,7 @@ describe('ChatMessage system timeline matrices', () => {
     const commandScroll = root
       .findByProps({ testID: 'tool-command-scroll' })
       .findByType(ScrollView) as QueryableTestInstance;
-    act(() => {
-      commandScroll.props.onLayout({ nativeEvent: { layout: { width: 100 } } });
-      commandScroll.props.onContentSizeChange(300);
-      commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 50 } } });
-    });
-    expect(
-      root.findAll((node) => Array.isArray(node.props['colors'])).length,
-    ).toBeGreaterThanOrEqual(1);
-    act(() => {
-      commandScroll.props.onScroll({ nativeEvent: { contentOffset: { x: 200 } } });
-    });
+    expect(commandScroll.props['horizontal']).toBe(true);
     const control = requireTestValue(
       root.findAll(
         (node) =>
@@ -1853,7 +1855,7 @@ function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChat
 }
 
 function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
-  return root.findAll((node) => flattenRenderedText(node.children).includes(text)).length > 0;
+  return root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0;
 }
 
 /** The resolved height of the rendered sub-agent card, which must not depend on its state. */
