@@ -53,10 +53,10 @@ export function OnboardingIntroSection({
                 </Text>
               </View>
               <Text style={styles.introHeroTitleTail} numberOfLines={1} adjustsFontSizeToFit>
-                on your phone
+                on your device
               </Text>
             </View>
-            <Text style={styles.introHeroDescription}>Pair your phone with your own machine.</Text>
+            <Text style={styles.introHeroDescription}>Pair this device with your own machine.</Text>
           </View>
         </Animated.View>
       </View>

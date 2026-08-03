@@ -13,6 +13,8 @@ import {
   GENERIC_RUNNING_ACTIVITY_TITLES,
   normalizeCloneDirectoryName,
   joinWorkspacePath,
+  resolveRotatingWorkingPhrase,
+  type RotatingWorkingPhrase,
 } from '../helpers/helpers';
 import { areChatStatusMapsEquivalent } from '../state/chatState';
 import {
@@ -87,6 +89,36 @@ function resolveGenericRunningActivityState(
     shouldShowGenericRunningActivityImmediately:
       isGenericRunningActivity && (isTurnLoading || Boolean(activeTurnId)),
   };
+}
+
+/**
+ * Identifies the chat state a working phrase was picked for. The turn, the last chat update and
+ * the underlying generic title all move the chat on, so any of them earns a fresh phrase while
+ * re-renders in between keep the strip still.
+ */
+function resolveWorkingPhraseKey(
+  activeTurnId: string | null,
+  chatUpdatedAt: string | null,
+  title: string,
+): string {
+  return `${activeTurnId ?? ''}|${chatUpdatedAt ?? ''}|${title.trim().toLowerCase()}`;
+}
+
+function useRotatingWorkingTitle(
+  isGenericRunningActivity: boolean,
+  activeTurnId: string | null,
+  chatUpdatedAt: string | null,
+  title: string,
+): string | null {
+  const phraseRef = useRef<RotatingWorkingPhrase | null>(null);
+  return useMemo(() => {
+    const next = resolveRotatingWorkingPhrase(phraseRef.current, {
+      isGenericRunningActivity,
+      key: resolveWorkingPhraseKey(activeTurnId, chatUpdatedAt, title),
+    });
+    phraseRef.current = next;
+    return next?.phrase ?? null;
+  }, [activeTurnId, chatUpdatedAt, isGenericRunningActivity, title]);
 }
 
 function resolveShowActivity(
@@ -206,9 +238,18 @@ export function useMainScreenHeaderActivityViewModel(
     turnFailureDetail,
   );
   const visibleActivity = resolveVisibleActivity(indicatorInputs);
-  const displayedActivity = resolveDisplayedActivity(indicatorInputs);
+  const resolvedActivity = resolveDisplayedActivity(indicatorInputs);
   const { isGenericRunningActivity, shouldShowGenericRunningActivityImmediately } =
-    resolveGenericRunningActivityState(displayedActivity, isTurnLoading, activeTurnId);
+    resolveGenericRunningActivityState(resolvedActivity, isTurnLoading, activeTurnId);
+  const rotatingWorkingTitle = useRotatingWorkingTitle(
+    isGenericRunningActivity,
+    activeTurnId,
+    selectedChat?.updatedAt ?? null,
+    resolvedActivity.title,
+  );
+  const displayedActivity = rotatingWorkingTitle
+    ? { ...resolvedActivity, title: rotatingWorkingTitle }
+    : resolvedActivity;
 
   useEffect(() => {
     if (!isGenericRunningActivity) {

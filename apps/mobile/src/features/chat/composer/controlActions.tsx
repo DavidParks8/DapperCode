@@ -244,7 +244,7 @@ export function useMainScreenComposerControlActions(
       },
       {
         key: 'phone-file',
-        title: 'Pick file from phone',
+        title: 'Pick file from device',
         description: `Import a document or asset, up to ${ATTACHMENT_MAX_LABEL}.`,
         icon: 'document-outline',
         disabled: attachmentControlsDisabled,
@@ -254,7 +254,7 @@ export function useMainScreenComposerControlActions(
       },
       {
         key: 'phone-image',
-        title: 'Pick image from phone',
+        title: 'Pick image from device',
         description: `Resize and compress an image, up to ${ATTACHMENT_MAX_LABEL}.`,
         icon: 'image-outline',
         disabled: attachmentControlsDisabled,

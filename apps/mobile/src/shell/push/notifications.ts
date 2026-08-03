@@ -124,12 +124,19 @@ function resolveProjectId(): string | null {
   return null;
 }
 
+/**
+ * A readable name for this client when the device does not report one. DapperCode runs on
+ * phones, tablets, and the browser, so the fallback never claims a specific handset.
+ */
 function resolveDeviceName(): string {
   const name = Device.deviceName;
   if (typeof name === 'string' && name.trim().length > 0) {
     return name.trim();
   }
-  return Platform.OS === 'ios' ? 'iPhone' : 'Android device';
+  if (Platform.OS === 'android') {
+    return 'Android device';
+  }
+  return Platform.OS === 'web' ? 'Web browser' : 'Apple device';
 }
 
 /**

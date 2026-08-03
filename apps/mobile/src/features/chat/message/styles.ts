@@ -165,7 +165,7 @@ export const createStyles = (theme: AppTheme) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.colors.borderLight,
     },
-    selectTextTitle: { ...theme.typography.headline },
+    selectTextTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
     selectTextCloseButton: {
       alignItems: 'center',
       justifyContent: 'center',
@@ -173,12 +173,14 @@ export const createStyles = (theme: AppTheme) =>
       height: 32,
       borderRadius: theme.radius.full,
     },
+    // Selection shows the same prose the transcript shows, so it stays on the app's body face
+    // rather than the monospace one reserved for code blocks and terminal output.
     selectTextInput: {
       flex: 1,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
       ...theme.typography.body,
-      fontFamily: theme.fonts.monoRegular,
+      color: theme.colors.textPrimary,
     },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {
