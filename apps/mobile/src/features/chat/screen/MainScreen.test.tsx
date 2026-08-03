@@ -2285,6 +2285,120 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('dismisses model and thinking sheets before queued ACP config writes resolve', async () => {
+      const configuredChat: Chat = {
+        ...rootChat,
+        acpConfig: [
+          {
+            id: 'model',
+            value: 'github-copilot/gpt-5.4',
+            category: 'model',
+            options: [
+              { value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' },
+              { value: 'github-copilot/gpt-5-mini', name: 'GitHub Copilot/GPT-5 Mini' },
+            ],
+          },
+          {
+            id: 'effort',
+            value: 'high',
+            category: 'thought_level',
+            options: [
+              { value: 'none', name: 'None' },
+              { value: 'high', name: 'High' },
+            ],
+          },
+        ],
+      };
+      const pendingWrites: Array<{
+        configId: string;
+        value: string;
+        resolve: (chat: Chat) => void;
+      }> = [];
+      const api = createApi();
+      (api.getChat as jest.Mock).mockResolvedValue(configuredChat);
+      (api.peekChat as jest.Mock).mockReturnValue(configuredChat);
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'github-copilot/gpt-5.4',
+          displayName: 'GPT-5.4',
+          providerName: 'GitHub Copilot',
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+        {
+          id: 'github-copilot/gpt-5-mini',
+          displayName: 'GPT-5 Mini',
+          providerName: 'GitHub Copilot',
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+      ]);
+      (api.setThreadConfigOption as jest.Mock).mockImplementation(
+        (_threadId: string, configId: string, value: string) =>
+          new Promise<Chat>((resolve) => {
+            pendingWrites.push({ configId, value, resolve });
+          }),
+      );
+      const { tree } = await renderMain({ api, selectedChat: configuredChat });
+      const root = rootOf(tree);
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+      act(() => {
+        byLabel(root, 'GitHub Copilot · GPT-5 Mini').props.onPress();
+      });
+
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await act(async () => {
+        await flush();
+      });
+      expect(pendingWrites).toHaveLength(1);
+      expect(pendingWrites[0]).toMatchObject({
+        configId: 'model',
+        value: 'github-copilot/gpt-5-mini',
+      });
+
+      act(() => {
+        byLabel(root, 'None').props.onPress();
+      });
+
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
+      expect(api.setThreadConfigOption).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pendingWrites[0]?.resolve({
+          ...configuredChat,
+          acpConfig: configuredChat.acpConfig?.map((option) =>
+            option.id === 'model' ? { ...option, value: 'github-copilot/gpt-5-mini' } : option,
+          ),
+        });
+        await flush();
+      });
+
+      expect(api.setThreadConfigOption).toHaveBeenCalledTimes(2);
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
+      expect(pendingWrites[1]).toMatchObject({ configId: 'effort', value: 'none' });
+
+      await act(async () => {
+        pendingWrites[1]?.resolve({
+          ...configuredChat,
+          acpConfig: configuredChat.acpConfig?.map((option) => {
+            if (option.id === 'model') {
+              return { ...option, value: 'github-copilot/gpt-5-mini' };
+            }
+            return option.id === 'effort' ? { ...option, value: 'none' } : option;
+          }),
+        });
+        await flush();
+      });
+
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
+      act(() => tree.unmount());
+    });
+
     it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
       let resolvePreferences: ((value: string) => void) | null = null;
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {

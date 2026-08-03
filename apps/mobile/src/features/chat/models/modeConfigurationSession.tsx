@@ -1,8 +1,14 @@
 import { errorAtom } from '../state/turn';
-import { loadingModelsAtom, modelOptionsByAgentAtom, selectedEffortAtom } from '../state/models';
+import {
+  loadingModelsAtom,
+  modelOptionsByAgentAtom,
+  pendingAcpConfigByChatAtom,
+  selectedEffortAtom,
+  type PendingAcpConfigByChat,
+} from '../state/models';
 import { useSetAtom } from 'jotai';
-import { useCallback } from 'react';
-import type { AcpConfigOption, Chat, ReasoningEffort } from '@bridge/types/types';
+import { useCallback, useRef } from 'react';
+import type { AcpConfigOption, ReasoningEffort } from '@bridge/types/types';
 import { normalizeModelId } from '../helpers/helpers';
 import { agentModelPreferenceKey } from '../helpers/preferences';
 import type {
@@ -42,10 +48,43 @@ export function useMainScreenModeConfigurationSession(
   const setModelOptionsByAgent = useSetAtom(modelOptionsByAgentAtom);
   const setLoadingModels = useSetAtom(loadingModelsAtom);
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
+  const setPendingAcpConfigByChat = useSetAtom(pendingAcpConfigByChatAtom);
   const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
   const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
+  const acpConfigOutboxRef = useRef<Promise<void>>(Promise.resolve());
+  const acpConfigRevisionRef = useRef(0);
+  const pendingAcpConfigRef = useRef<PendingAcpConfigByChat>({});
+
+  const publishPendingAcpConfig = useCallback(
+    (next: PendingAcpConfigByChat) => {
+      pendingAcpConfigRef.current = next;
+      setPendingAcpConfigByChat(next);
+    },
+    [setPendingAcpConfigByChat],
+  );
+
+  const clearPendingAcpConfig = useCallback(
+    (threadId: string, configKey: string, revision: number): boolean => {
+      const threadConfig = pendingAcpConfigRef.current[threadId];
+      if (threadConfig?.[configKey]?.revision !== revision) {
+        return false;
+      }
+
+      const nextThreadConfig = { ...threadConfig };
+      delete nextThreadConfig[configKey];
+      const next = { ...pendingAcpConfigRef.current };
+      if (Object.keys(nextThreadConfig).length > 0) {
+        next[threadId] = nextThreadConfig;
+      } else {
+        delete next[threadId];
+      }
+      publishPendingAcpConfig(next);
+      return true;
+    },
+    [publishPendingAcpConfig],
+  );
 
   const refreshModelOptions = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -135,29 +174,77 @@ export function useMainScreenModeConfigurationSession(
   }, [setEffortModalVisible]);
 
   const applyAcpConfigOption = useCallback(
-    async (config: AcpConfigOption | null, value: string): Promise<Chat | null> => {
+    (config: AcpConfigOption | null, value: string, onSuccess?: () => void): boolean => {
       if (!selectedChatId || !config) {
-        return null;
+        return false;
       }
-      try {
-        const updated = await api.setThreadConfigOption(selectedChatId, config.id, value);
-        selectedChatRef.current = updated;
-        setSelectedChat(updated);
-        return updated;
-      } catch (err) {
-        setError((err as Error).message);
-        return null;
+
+      const threadId = selectedChatId;
+      const configKey = config.category?.trim() || config.id.trim();
+      if (!configKey) {
+        return false;
       }
+
+      const revision = acpConfigRevisionRef.current + 1;
+      acpConfigRevisionRef.current = revision;
+      publishPendingAcpConfig({
+        ...pendingAcpConfigRef.current,
+        [threadId]: {
+          ...pendingAcpConfigRef.current[threadId],
+          [configKey]: { value, revision },
+        },
+      });
+
+      acpConfigOutboxRef.current = acpConfigOutboxRef.current.then(async () => {
+        try {
+          const updated = await api.setThreadConfigOption(threadId, config.id, value);
+          const wasLatest = clearPendingAcpConfig(threadId, configKey, revision);
+          if (selectedChatRef.current?.id === threadId) {
+            selectedChatRef.current = updated;
+            setSelectedChat(updated);
+          }
+          if (wasLatest) {
+            onSuccess?.();
+          }
+        } catch (err) {
+          if (clearPendingAcpConfig(threadId, configKey, revision)) {
+            setError((err as Error).message);
+          }
+        }
+      });
+
+      return true;
     },
-    [api, selectedChatId, selectedChatRef, setError, setSelectedChat],
+    [
+      api,
+      clearPendingAcpConfig,
+      publishPendingAcpConfig,
+      selectedChatId,
+      selectedChatRef,
+      setError,
+      setSelectedChat,
+    ],
   );
 
   const selectEffort = useCallback(
-    async (effort: ReasoningEffort | null) => {
+    (effort: ReasoningEffort | null) => {
       const value = effort ?? effortConfig?.value;
       if (effortConfig && value) {
-        const updated = await applyAcpConfigOption(effortConfig, value);
-        if (!updated) {
+        if (
+          !applyAcpConfigOption(
+            effortConfig,
+            value,
+            selectedChatId
+              ? () =>
+                  rememberChatModelPreference(
+                    selectedChatId,
+                    effectiveModelId,
+                    effort,
+                    activeServiceTier,
+                  )
+              : undefined,
+          )
+        ) {
           return;
         }
       }
@@ -165,7 +252,9 @@ export function useMainScreenModeConfigurationSession(
       setEffortModalVisible(false);
       setError(null);
       if (selectedChatId) {
-        rememberChatModelPreference(selectedChatId, effectiveModelId, effort, activeServiceTier);
+        if (!effortConfig) {
+          rememberChatModelPreference(selectedChatId, effectiveModelId, effort, activeServiceTier);
+        }
       } else if (activeAgentId) {
         const key = agentModelPreferenceKey(activeAgentId);
         const previous = chatModelPreferencesRef.current[key];

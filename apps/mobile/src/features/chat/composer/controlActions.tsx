@@ -67,11 +67,24 @@ export function useMainScreenComposerControlActions(
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
   const selectModel = useCallback(
-    async (modelId: string | null) => {
+    (modelId: string | null) => {
       const normalizedModelId = normalizeModelId(modelId);
       if (normalizedModelId && modelConfig) {
-        const updated = await applyAcpConfigOption(modelConfig, normalizedModelId);
-        if (!updated) {
+        if (
+          !applyAcpConfigOption(
+            modelConfig,
+            normalizedModelId,
+            selectedChatId
+              ? () =>
+                  rememberChatModelPreference(
+                    selectedChatId,
+                    normalizedModelId,
+                    null,
+                    activeServiceTier,
+                  )
+              : undefined,
+          )
+        ) {
           return;
         }
       }
@@ -80,7 +93,9 @@ export function useMainScreenComposerControlActions(
       setModelModalVisible(false);
       setError(null);
       if (selectedChatId) {
-        rememberChatModelPreference(selectedChatId, normalizedModelId, null, activeServiceTier);
+        if (!modelConfig) {
+          rememberChatModelPreference(selectedChatId, normalizedModelId, null, activeServiceTier);
+        }
       } else if (activeAgentId) {
         const key = agentModelPreferenceKey(activeAgentId);
         const nextPreferences = {
