@@ -12,6 +12,7 @@ import {
   ReduceMotion,
   setMockReducedMotionEnabled,
 } from '@shared/testing/reanimatedMock';
+import { compositeOverlayColor } from './useHorizontalOverflow';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
@@ -582,7 +583,11 @@ describe('ToolInvocationOutput', () => {
       diffLayout({ nativeEvent: { layout: { width: 100 } } });
       diffContentSize(300, 16);
     });
-    expect(tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })).not.toHaveLength(0);
+    const diffFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })[0],
+      'diff overflow fade',
+    );
+    expect(diffFade.props['colors']).toEqual(['rgba(10, 10, 10, 0)', '#0A0A0A']);
 
     const scrolledToEnd = { nativeEvent: { contentOffset: { x: 200 } } };
     const commandOnScroll = commandScroll.props['onScroll'] as (
@@ -597,5 +602,9 @@ describe('ToolInvocationOutput', () => {
     expect(tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })).toHaveLength(0);
 
     act(() => tree.unmount());
+  });
+
+  it('composites the diff overflow fade against the actual panel surface', () => {
+    expect(compositeOverlayColor('#DDE7F0', 'rgba(41, 58, 84, 0.09)')).toBe('#CDD7E2');
   });
 });

@@ -57,3 +57,30 @@ export function horizontalFadeColors(backgroundColor: string): [string, string] 
   const blue = Number.parseInt(match[3] ?? '0', 16);
   return [`rgba(${String(red)}, ${String(green)}, ${String(blue)}, 0)`, backgroundColor];
 }
+
+export function compositeOverlayColor(backgroundColor: string, overlayColor: string): string {
+  const background = parseHexColor(backgroundColor);
+  const overlay = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(
+    overlayColor,
+  );
+  if (!background || !overlay) {
+    return backgroundColor;
+  }
+  const alpha = Math.min(1, Math.max(0, Number.parseFloat(overlay[4] ?? '0')));
+  const result = background.map((component, index) => {
+    const overlayComponent = Number.parseInt(overlay[index + 1] ?? '0', 10);
+    return Math.round(overlayComponent * alpha + component * (1 - alpha));
+  });
+  return `#${result.map((component) => component.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+function parseHexColor(color: string): [number, number, number] | null {
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  return match
+    ? [
+        Number.parseInt(match[1] ?? '0', 16),
+        Number.parseInt(match[2] ?? '0', 16),
+        Number.parseInt(match[3] ?? '0', 16),
+      ]
+    : null;
+}

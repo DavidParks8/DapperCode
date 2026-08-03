@@ -8,7 +8,11 @@ import { MarkdownImage, SelectableMessageText } from './Primitives';
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
-import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
+import {
+  compositeOverlayColor,
+  horizontalFadeColors,
+  useHorizontalOverflow,
+} from './useHorizontalOverflow';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
@@ -175,6 +179,7 @@ function ToolDiffBlock({
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const stats = compactToolDiff(diff);
   const overflow = useHorizontalOverflow();
+  const fadeSurface = compositeOverlayColor(theme.colors.bgMain, theme.colors.bgCanvasAccent);
   return (
     <View>
       {separated ? <View style={styles.panelDivider} /> : null}
@@ -257,7 +262,7 @@ function ToolDiffBlock({
           </ScrollView>
           {overflow.showEndFade ? (
             <LinearGradient
-              colors={horizontalFadeColors(theme.colors.bgMain)}
+              colors={horizontalFadeColors(fadeSurface)}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               pointerEvents="none"
