@@ -455,6 +455,7 @@ impl BridgeQueueService {
     }
 
     #[cfg(test)]
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub(super) async fn reconcile_all_threads(self: &Arc<Self>) {
         let thread_ids = self
             .threads
