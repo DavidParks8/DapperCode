@@ -43,6 +43,7 @@ export interface ThreadRuntimeSnapshot {
   bridgeUiSurfaces?: BridgeUiSurface[];
   queuedMessages?: BridgeQueuedMessage[];
   pendingSteerMessageIds?: string[];
+  editingQueuedMessageId?: string | null;
   waitingForToolCalls?: boolean;
   steeringInFlight?: boolean;
   queuedMessageError?: BridgeThreadQueueError | null;

@@ -257,6 +257,7 @@ export function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueSt
     items,
     pendingSteers,
     pendingSteerCount: parsePendingSteerCount(record['pendingSteerCount'], pendingSteers.length),
+    editingItemId: readString(record['editingItemId'])?.trim() || null,
     waitingForToolCalls: record['waitingForToolCalls'] === true,
     steeringInFlight: record['steeringInFlight'] === true,
     lastError: parseBridgeThreadQueueError(record['lastError']),

@@ -1,5 +1,19 @@
 use crate::*;
 
+fn replace_turn_start_text(turn_start: &mut Value, content: &str) -> Result<(), String> {
+    let input = turn_start
+        .get_mut("input")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "queued turnStart input is unavailable".to_string())?;
+    let text_input = input
+        .iter_mut()
+        .find(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "queued turnStart text input is unavailable".to_string())?;
+    text_input.insert("text".to_string(), Value::String(content.to_string()));
+    Ok(())
+}
+
 impl BridgeQueuedMessageEntry {
     pub(super) fn to_public(&self) -> BridgeQueuedMessage {
         BridgeQueuedMessage {
@@ -66,6 +80,7 @@ impl BridgeQueueService {
                 items: Vec::new(),
                 pending_steers: Vec::new(),
                 pending_steer_count: 0,
+                editing_item_id: None,
                 waiting_for_tool_calls: false,
                 steering_in_flight: false,
                 last_error: None,
@@ -321,6 +336,9 @@ impl BridgeQueueService {
             if runtime.turn_start_in_flight || runtime.action_in_flight_item_id.is_some() {
                 return Err("queue is busy processing another action".to_string());
             }
+            if runtime.editing_item_id.is_some() {
+                return Err("finish editing the queued message before steering".to_string());
+            }
             if !runtime.thread_running
                 || runtime.active_turn_id.is_none()
                 || runtime.active_run_id.is_none()
@@ -353,7 +371,7 @@ impl BridgeQueueService {
     }
 
     pub(super) async fn cancel_message(
-        &self,
+        self: &Arc<Self>,
         request: BridgeThreadQueueCancelRequest,
     ) -> Result<BridgeThreadQueueActionResponse, String> {
         let normalized_thread_id = request.thread_id.trim().to_string();
@@ -368,7 +386,7 @@ impl BridgeQueueService {
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
 
-        let snapshot = {
+        let (snapshot, should_dispatch) = {
             let mut threads = self.threads.write().await;
             let runtime = threads
                 .entry(normalized_thread_id.clone())
@@ -384,6 +402,9 @@ impl BridgeQueueService {
                 .position(|item| item.id == normalized_item_id)
             {
                 runtime.items.remove(item_index);
+                if runtime.editing_item_id.as_deref() == Some(normalized_item_id.as_str()) {
+                    runtime.editing_item_id = None;
+                }
             } else if let Some(item_index) = runtime
                 .pending_steers
                 .iter()
@@ -400,11 +421,199 @@ impl BridgeQueueService {
                 return Err("queued message not found".to_string());
             }
             runtime.last_error = None;
-            Self::snapshot_for_thread(&normalized_thread_id, Some(runtime))
+            (
+                Self::snapshot_for_thread(&normalized_thread_id, Some(runtime)),
+                !Self::runtime_has_blockers(runtime),
+            )
         };
 
         self.broadcast_snapshot(&snapshot).await;
+        if should_dispatch {
+            self.spawn_auto_dispatch(normalized_thread_id);
+        }
 
+        Ok(BridgeThreadQueueActionResponse {
+            ok: true,
+            queue: snapshot,
+        })
+    }
+
+    pub(super) async fn start_message_edit(
+        &self,
+        request: BridgeThreadQueueEditRequest,
+    ) -> Result<BridgeThreadQueueActionResponse, String> {
+        let normalized_thread_id = request.thread_id.trim().to_string();
+        let normalized_item_id = request.item_id.trim().to_string();
+        if normalized_thread_id.is_empty() {
+            return Err("threadId must not be empty".to_string());
+        }
+        if normalized_item_id.is_empty() {
+            return Err("itemId must not be empty".to_string());
+        }
+
+        let actor = self.thread_actor(&normalized_thread_id).await;
+        let _actor_guard = actor.lock().await;
+        let snapshot = {
+            let mut threads = self.threads.write().await;
+            let runtime = threads
+                .get_mut(&normalized_thread_id)
+                .ok_or_else(|| "queue state unavailable".to_string())?;
+            if runtime.turn_start_in_flight || runtime.action_in_flight_item_id.is_some() {
+                return Err("queue is busy processing another action".to_string());
+            }
+            if runtime.steer_prepare_in_flight
+                || runtime.steer_dispatch_in_flight.is_some()
+                || !runtime.pending_steers.is_empty()
+            {
+                return Err("finish steering queued messages before editing".to_string());
+            }
+            if let Some(editing_item_id) = runtime.editing_item_id.as_deref() {
+                if editing_item_id != normalized_item_id {
+                    return Err("another queued message is already being edited".to_string());
+                }
+                Self::snapshot_for_thread(&normalized_thread_id, Some(runtime))
+            } else {
+                let next_item_id = runtime.items.front().map(|item| item.id.as_str());
+                if next_item_id != Some(normalized_item_id.as_str()) {
+                    return Err("only the next queued message can be edited".to_string());
+                }
+                runtime.editing_item_id = Some(normalized_item_id);
+                runtime.last_error = None;
+                Self::snapshot_for_thread(&normalized_thread_id, Some(runtime))
+            }
+        };
+
+        self.broadcast_snapshot(&snapshot).await;
+        Ok(BridgeThreadQueueActionResponse {
+            ok: true,
+            queue: snapshot,
+        })
+    }
+
+    pub(super) async fn commit_message_edit(
+        self: &Arc<Self>,
+        request: BridgeThreadQueueEditCommitRequest,
+    ) -> Result<BridgeThreadQueueActionResponse, String> {
+        let normalized_thread_id = request.thread_id.trim().to_string();
+        let normalized_item_id = request.item_id.trim().to_string();
+        let content = request.content.trim().to_string();
+        if normalized_thread_id.is_empty() {
+            return Err("threadId must not be empty".to_string());
+        }
+        if normalized_item_id.is_empty() {
+            return Err("itemId must not be empty".to_string());
+        }
+        if content.is_empty() {
+            return Err("content must not be empty".to_string());
+        }
+        if content.len() > QUEUE_MAX_CONTENT_BYTES {
+            return Err(format!(
+                "queue content exceeds {QUEUE_MAX_CONTENT_BYTES} bytes (actual {})",
+                content.len()
+            ));
+        }
+
+        let actor = self.thread_actor(&normalized_thread_id).await;
+        let _actor_guard = actor.lock().await;
+        let (snapshot, should_dispatch) = {
+            let mut threads = self.threads.write().await;
+            let runtime = threads
+                .get_mut(&normalized_thread_id)
+                .ok_or_else(|| "queue state unavailable".to_string())?;
+            if runtime.editing_item_id.as_deref() != Some(normalized_item_id.as_str()) {
+                return Err("queued message is not being edited".to_string());
+            }
+            let item_index = runtime
+                .items
+                .iter()
+                .position(|item| item.id == normalized_item_id)
+                .ok_or_else(|| "queued message not found".to_string())?;
+            let mut turn_start = runtime.items[item_index].turn_start.clone();
+            replace_turn_start_text(&mut turn_start, &content)?;
+            let item_bytes = serde_json::to_vec(&turn_start)
+                .map(|value| value.len())
+                .unwrap_or(usize::MAX)
+                .saturating_add(content.len());
+            if item_bytes > QUEUE_MAX_ITEM_BYTES {
+                return Err(format!(
+                    "queue item exceeds {QUEUE_MAX_ITEM_BYTES} bytes (actual {item_bytes})"
+                ));
+            }
+            let other_queued_bytes = runtime
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != item_index)
+                .map(|(_, item)| {
+                    item.content.len().saturating_add(
+                        serde_json::to_vec(&item.turn_start)
+                            .map(|value| value.len())
+                            .unwrap_or(usize::MAX),
+                    )
+                })
+                .fold(0usize, usize::saturating_add);
+            if other_queued_bytes.saturating_add(item_bytes) > QUEUE_MAX_BYTES_PER_THREAD {
+                return Err(format!(
+                    "resource_limit:queue_thread_bytes:{QUEUE_MAX_BYTES_PER_THREAD}:{}",
+                    other_queued_bytes.saturating_add(item_bytes)
+                ));
+            }
+            let item = &mut runtime.items[item_index];
+            item.content = content;
+            item.turn_start = turn_start;
+            runtime.editing_item_id = None;
+            runtime.last_error = None;
+            (
+                Self::snapshot_for_thread(&normalized_thread_id, Some(runtime)),
+                !Self::runtime_has_blockers(runtime),
+            )
+        };
+
+        self.broadcast_snapshot(&snapshot).await;
+        if should_dispatch {
+            self.spawn_auto_dispatch(normalized_thread_id);
+        }
+        Ok(BridgeThreadQueueActionResponse {
+            ok: true,
+            queue: snapshot,
+        })
+    }
+
+    pub(super) async fn cancel_message_edit(
+        self: &Arc<Self>,
+        request: BridgeThreadQueueEditRequest,
+    ) -> Result<BridgeThreadQueueActionResponse, String> {
+        let normalized_thread_id = request.thread_id.trim().to_string();
+        let normalized_item_id = request.item_id.trim().to_string();
+        if normalized_thread_id.is_empty() {
+            return Err("threadId must not be empty".to_string());
+        }
+        if normalized_item_id.is_empty() {
+            return Err("itemId must not be empty".to_string());
+        }
+
+        let actor = self.thread_actor(&normalized_thread_id).await;
+        let _actor_guard = actor.lock().await;
+        let (snapshot, should_dispatch) = {
+            let mut threads = self.threads.write().await;
+            let runtime = threads
+                .get_mut(&normalized_thread_id)
+                .ok_or_else(|| "queue state unavailable".to_string())?;
+            if runtime.editing_item_id.as_deref() != Some(normalized_item_id.as_str()) {
+                return Err("queued message is not being edited".to_string());
+            }
+            runtime.editing_item_id = None;
+            runtime.last_error = None;
+            (
+                Self::snapshot_for_thread(&normalized_thread_id, Some(runtime)),
+                !Self::runtime_has_blockers(runtime),
+            )
+        };
+
+        self.broadcast_snapshot(&snapshot).await;
+        if should_dispatch {
+            self.spawn_auto_dispatch(normalized_thread_id);
+        }
         Ok(BridgeThreadQueueActionResponse {
             ok: true,
             queue: snapshot,
@@ -723,8 +932,16 @@ impl BridgeQueueService {
         thread_id: &str,
         runtime: Option<&BridgeThreadQueueRuntime>,
     ) -> BridgeThreadQueueState {
-        let (items, pending_steers, waiting_for_tool_calls, steering_in_flight, last_error) =
-            runtime.map_or((Vec::new(), Vec::new(), false, false, None), |runtime| {
+        let (
+            items,
+            pending_steers,
+            editing_item_id,
+            waiting_for_tool_calls,
+            steering_in_flight,
+            last_error,
+        ) = runtime.map_or(
+            (Vec::new(), Vec::new(), None, false, false, None),
+            |runtime| {
                 (
                     runtime
                         .items
@@ -738,11 +955,13 @@ impl BridgeQueueService {
                         .chain(runtime.pending_steers.iter())
                         .map(BridgeQueuedMessageEntry::to_public)
                         .collect::<Vec<_>>(),
+                    runtime.editing_item_id.clone(),
                     !runtime.pending_steers.is_empty() && !runtime.active_tool_call_ids.is_empty(),
                     runtime.steer_dispatch_in_flight.is_some(),
                     runtime.last_error.clone(),
                 )
-            });
+            },
+        );
         let pending_steer_count = pending_steers.len();
 
         BridgeThreadQueueState {
@@ -750,6 +969,7 @@ impl BridgeQueueService {
             items,
             pending_steers,
             pending_steer_count,
+            editing_item_id,
             waiting_for_tool_calls,
             steering_in_flight,
             last_error,
@@ -760,6 +980,7 @@ impl BridgeQueueService {
         runtime.thread_running
             || runtime.turn_start_in_flight
             || runtime.action_in_flight_item_id.is_some()
+            || runtime.editing_item_id.is_some()
             || runtime.steer_prepare_in_flight
             || runtime.steer_dispatch_in_flight.is_some()
             || !runtime.pending_steers.is_empty()
@@ -808,7 +1029,12 @@ impl BridgeQueueService {
                 generation,
                 ..
             } => {
-                let (should_dispatch, should_queue_completion, should_wait_for_continuation) = {
+                let (
+                    should_dispatch,
+                    should_queue_completion,
+                    should_wait_for_continuation,
+                    should_finalize_for_edit,
+                ) = {
                     let mut threads = self.threads.write().await;
                     let runtime = threads.entry(thread_id.clone()).or_default();
                     if runtime.active_turn_id.as_deref() != Some(source_turn_id.as_str())
@@ -836,21 +1062,22 @@ impl BridgeQueueService {
                     (
                         !continuation_already_in_flight
                             && runtime.steer_dispatch_in_flight.is_none()
+                            && runtime.editing_item_id.is_none()
                             && !runtime.items.is_empty(),
                         continuation_already_in_flight,
                         continuation_already_in_flight
                             || runtime.steer_dispatch_in_flight.is_some(),
+                        runtime.editing_item_id.is_some(),
                     )
                 };
                 if should_queue_completion || should_dispatch {
-                    {
-                        let mut threads = self.threads.write().await;
-                        if let Some(runtime) = threads.get_mut(&thread_id) {
-                            runtime.pending_completion_event_ids.push(received.event_id);
-                        }
+                    let mut threads = self.threads.write().await;
+                    if let Some(runtime) = threads.get_mut(&thread_id) {
+                        runtime.pending_completion_event_ids.push(received.event_id);
                     }
+                    drop(threads);
                     self.spawn_auto_dispatch(thread_id);
-                } else if !should_wait_for_continuation {
+                } else if should_finalize_for_edit || !should_wait_for_continuation {
                     self.record_completion_disposition(
                         received.event_id,
                         QueueCompletionDisposition::Final,
@@ -972,6 +1199,7 @@ impl BridgeQueueService {
             if runtime.thread_running
                 || runtime.turn_start_in_flight
                 || runtime.action_in_flight_item_id.is_some()
+                || runtime.editing_item_id.is_some()
                 || runtime.steer_prepare_in_flight
                 || runtime.steer_dispatch_in_flight.is_some()
                 || !runtime.pending_steers.is_empty()
@@ -2334,6 +2562,214 @@ mod tests {
         );
         assert_eq!(service.wait_for_completion_disposition(999).await, None);
         service.drain_thread_queue("missing".to_string()).await;
+    }
+
+    #[tokio::test]
+    async fn queued_message_edit_pauses_completion_and_preserves_turn_metadata() {
+        let (service, mut calls) = service_with_runtime(&["item"], &[]).await;
+        let started = service
+            .start_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edit starts");
+        assert_eq!(started.queue.editing_item_id.as_deref(), Some("item"));
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 40))
+            .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.turn_start.recv())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            service
+                .read_queue("thread")
+                .await
+                .editing_item_id
+                .as_deref(),
+            Some("item")
+        );
+
+        let committed = service
+            .commit_message_edit(BridgeThreadQueueEditCommitRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+                content: "edited content".to_string(),
+            })
+            .await
+            .expect("edit commits");
+        assert!(committed.queue.editing_item_id.is_none());
+        assert_eq!(committed.queue.items[0].content, "edited content");
+
+        let turn_start = calls.turn_start.recv().await.expect("edited queue resumes");
+        assert_eq!(turn_start.turn_start["input"][0]["text"], "edited content");
+        assert_eq!(turn_start.turn_start["input"][1]["type"], "mention");
+        assert_eq!(turn_start.turn_start["input"][1]["path"], "/repo/source.rs");
+        assert_eq!(turn_start.turn_start["input"][2]["type"], "localImage");
+        turn_start
+            .response
+            .send(Ok("edited-turn".to_string()))
+            .expect("turn starts");
+        assert_eq!(
+            service.wait_for_completion_disposition(40).await,
+            Some(QueueCompletionDisposition::Final)
+        );
+    }
+
+    #[tokio::test]
+    async fn canceling_queued_message_edit_resumes_original_content() {
+        let (service, mut calls) = service_with_runtime(&["item"], &[]).await;
+        service
+            .start_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edit starts");
+        service
+            .handle_canonical_event(finish_event("turn", 7, 41))
+            .await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.turn_start.recv())
+                .await
+                .is_err()
+        );
+
+        service
+            .cancel_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edit cancels");
+        let turn_start = calls
+            .turn_start
+            .recv()
+            .await
+            .expect("original queue resumes");
+        assert_eq!(turn_start.turn_start["input"][0]["text"], "text-item");
+        turn_start
+            .response
+            .send(Ok("original-turn".to_string()))
+            .expect("turn starts");
+    }
+
+    #[tokio::test]
+    async fn queued_message_edit_rejects_dispatch_and_steer_races() {
+        let (service, mut calls) = service_with_runtime(&["item"], &[]).await;
+        service
+            .handle_canonical_event(finish_event("turn", 7, 42))
+            .await;
+        let turn_start = calls
+            .turn_start
+            .recv()
+            .await
+            .expect("queue dispatch starts first");
+        let edit = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .start_message_edit(BridgeThreadQueueEditRequest {
+                        thread_id: "thread".to_string(),
+                        item_id: "item".to_string(),
+                    })
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(!edit.is_finished());
+        turn_start
+            .response
+            .send(Ok("dispatched-turn".to_string()))
+            .expect("turn starts");
+        assert!(edit.await.expect("edit task completes").is_err());
+
+        let (service, _) = service_with_runtime(&["item"], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            threads
+                .get_mut("thread")
+                .expect("runtime")
+                .pending_steers
+                .push_back(queued("steer"));
+        }
+        assert!(service
+            .start_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn queued_message_edit_enforces_thread_byte_budget() {
+        let (service, _) = service_with_runtime(&["item", "other"], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            threads
+                .get_mut("thread")
+                .expect("runtime")
+                .items
+                .get_mut(1)
+                .expect("other item")
+                .content = "x".repeat(QUEUE_MAX_BYTES_PER_THREAD - (32 * 1024));
+        }
+        service
+            .start_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edit starts");
+        let error = service
+            .commit_message_edit(BridgeThreadQueueEditCommitRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+                content: "y".repeat(QUEUE_MAX_CONTENT_BYTES),
+            })
+            .await
+            .expect_err("thread byte budget rejects edit");
+        assert!(error.contains("resource_limit:queue_thread_bytes"));
+        assert_eq!(
+            service
+                .read_queue("thread")
+                .await
+                .editing_item_id
+                .as_deref(),
+            Some("item")
+        );
+    }
+
+    #[tokio::test]
+    async fn canceling_edited_item_resolves_a_previously_parked_completion() {
+        let (service, _) = service_with_runtime(&["item"], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            runtime.thread_running = false;
+            runtime.active_turn_id = None;
+            runtime.active_run_id = None;
+            runtime.active_prompt_generation = None;
+            runtime.live_generation_known = false;
+            runtime.editing_item_id = Some("item".to_string());
+            runtime.pending_completion_event_ids.push(43);
+        }
+
+        service
+            .cancel_message(BridgeThreadQueueCancelRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edited item cancels");
+        assert_eq!(
+            service.wait_for_completion_disposition(43).await,
+            Some(QueueCompletionDisposition::Final)
+        );
     }
 
     #[tokio::test]

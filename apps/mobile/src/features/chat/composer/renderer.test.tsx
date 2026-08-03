@@ -40,6 +40,7 @@ function baseContext(
     attachmentControlsDisabled: false,
     bannerBridgeUiSurfaces: [],
     canCancelQueuedMessage: false,
+    canEditQueuedMessage: false,
     canSteerQueuedMessage: false,
     composerAttachments: [],
     composerOverlayInset: 0,
@@ -47,9 +48,12 @@ function baseContext(
     dismissBridgeUiSurface: jest.fn(),
     displayedActivity: { tone: 'idle', title: '' },
     draft: '',
+    editingQueuedMessage: false,
     handleBridgeUiAction: jest.fn(),
     handleCancelQueuedMessage: jest.fn(),
+    handleCancelQueuedMessageEdit: jest.fn(),
     handleComposerFocus: jest.fn(),
+    handleEditQueuedMessage: jest.fn(),
     handleResolveApproval: jest.fn(),
     handleSteerQueuedMessage: jest.fn(),
     handleStopTurn: jest.fn(),
@@ -57,9 +61,6 @@ function baseContext(
     isLoading: false,
     isTurnLikelyRunning: false,
     isTurnLoading: false,
-    loadingAttachmentFileCandidates: false,
-    mentionPathSuggestions: [],
-    mentionQuery: null,
     oldestQueuedMessage: null,
     oldestQueuedMessageIsPendingSteer: false,
     onOpenBridgeRecoveryGuide: jest.fn(),
@@ -67,7 +68,6 @@ function baseContext(
     queuedMessageSteerDisabledReason: null,
     remainingQueuedMessagesCount: 0,
     removeComposerAttachment: jest.fn(),
-    selectMentionSuggestion: jest.fn(),
     selectedChat: null,
     selectedThreadRuntimeSnapshot: null,
     setDraft: jest.fn(),
@@ -157,6 +157,33 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     act(() => tree.unmount());
     enteringSpy.mockRestore();
     exitingSpy.mockRestore();
+  });
+
+  it('disables attachments and labels submit as save while editing a queued message', () => {
+    const context = baseContext({
+      draft: 'Updated queued message',
+      editingQueuedMessage: true,
+    });
+    const tree = render(context);
+
+    expect(
+      root(tree).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Save queued message' &&
+          typeof node.props['onPress'] === 'function',
+      ),
+    ).toHaveLength(1);
+    expect(
+      root(tree).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Add attachment' &&
+          typeof node.props['onPress'] === 'function' &&
+          (node.props['disabled'] === true ||
+            (node.props['accessibilityState'] as { disabled?: boolean } | undefined)?.disabled ===
+              true),
+      ),
+    ).toHaveLength(1);
+    act(() => tree.unmount());
   });
 
   it('renders the bridge recovery banner button with an effective touch target', () => {

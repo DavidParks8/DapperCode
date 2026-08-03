@@ -1,21 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAtom } from 'jotai';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, type LayoutChangeEvent, View } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  Easing,
-  FadeIn,
-  FadeOut,
-  LinearTransition,
-  ReduceMotion,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import { memo, useCallback, useMemo } from 'react';
+import { Pressable, ScrollView, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
@@ -23,6 +11,7 @@ import { useAppTheme } from '@shared/theme';
 import { motionDuration } from '@shared/ui/motion';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { createStyles } from './styles';
+import { ToolHeaderShimmer } from './ToolHeaderShimmer';
 import { createToolCardStyles } from './toolCardStyles';
 import { ToolInvocationOutput } from './ToolOutput';
 import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
@@ -34,96 +23,45 @@ import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOver
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
-const SHIMMER_WIDTH = 120;
-const SHIMMER_SPEED_POINTS_PER_SECOND = 320;
-const REDUCED_MOTION_PULSE_MS = 1200;
-
-function ToolHeaderShimmer({ active }: { active: boolean }) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
-  const reduceMotion = useReducedMotion();
-  const progress = useSharedValue(0);
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    if (!active || width <= 0) {
-      cancelAnimation(progress);
-      progress.value = 0;
-      return;
-    }
-    const duration = reduceMotion
-      ? REDUCED_MOTION_PULSE_MS
-      : ((width + SHIMMER_WIDTH) / SHIMMER_SPEED_POINTS_PER_SECOND) * 1000;
-    progress.value = withRepeat(
-      withTiming(1, {
-        duration,
-        easing: reduceMotion ? Easing.inOut(Easing.ease) : Easing.linear,
-        reduceMotion: ReduceMotion.Never,
-      }),
-      -1,
-      reduceMotion,
-      undefined,
-      ReduceMotion.Never,
-    );
-    return () => cancelAnimation(progress);
-  }, [active, progress, reduceMotion, width]);
-
-  const animatedStyle = useAnimatedStyle(() =>
-    reduceMotion
-      ? { opacity: 0.12 + progress.value * 0.12 }
-      : {
-          opacity: 0.55,
-          transform: [{ translateX: -SHIMMER_WIDTH + progress.value * (width + SHIMMER_WIDTH) }],
-        },
-  );
-  const onLayout = useCallback((event: LayoutChangeEvent) => {
-    const nextWidth = event.nativeEvent.layout.width;
-    setWidth((current) => (current === nextWidth ? current : nextWidth));
-  }, []);
-
-  if (!active) {
-    return null;
-  }
-  return (
-    <View
-      testID="tool-header-shimmer"
-      style={styles.shimmerClip}
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      onLayout={onLayout}
-    >
-      <Animated.View style={[styles.shimmerBand, animatedStyle]}>
-        <LinearGradient
-          colors={[
-            theme.colors.transparent,
-            theme.colors.borderHighlight,
-            theme.colors.transparent,
-          ]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={styles.shimmerGradient}
-        />
-      </Animated.View>
-    </View>
-  );
-}
 
 function ToolHeaderText({
   invocation,
   header,
   expandable,
+  running,
   toggle,
 }: {
   invocation: ToolInvocation;
   header: ToolInvocationHeader;
   expandable: boolean;
+  running: boolean;
   toggle: () => void;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const textStyles = [styles.rowSubject, invocation.isError && styles.rowTitleError];
   const commandOverflow = useHorizontalOverflow();
+  const renderCommand = (highlight: boolean) => (
+    <>
+      {header.action ? (
+        <Animated.Text
+          style={[
+            styles.rowAction,
+            invocation.isError && styles.rowTitleError,
+            highlight && styles.rowTextHighlight,
+          ]}
+        >
+          {header.action}
+        </Animated.Text>
+      ) : null}
+      <Animated.Text
+        style={[textStyles, styles.rowSubjectMono, highlight && styles.rowTextHighlight]}
+        numberOfLines={1}
+      >
+        {header.subject}
+      </Animated.Text>
+    </>
+  );
 
   if (invocation.monospaceTitle && header.subject) {
     return (
@@ -155,14 +93,10 @@ function ToolHeaderText({
             ]}
             testID="tool-command-toggle"
           >
-            {header.action ? (
-              <Animated.Text style={[styles.rowAction, invocation.isError && styles.rowTitleError]}>
-                {header.action}
-              </Animated.Text>
-            ) : null}
-            <Animated.Text style={[textStyles, styles.rowSubjectMono]} numberOfLines={1}>
-              {header.subject}
-            </Animated.Text>
+            {renderCommand(false)}
+            <ToolHeaderShimmer active={running} contentStyle={styles.commandPressable}>
+              {renderCommand(true)}
+            </ToolHeaderShimmer>
           </Pressable>
         </ScrollView>
         {commandOverflow.showEndFade ? (
@@ -194,6 +128,11 @@ function ToolHeaderText({
       <Animated.Text style={textStyles} numberOfLines={1}>
         {header.label}
       </Animated.Text>
+      <ToolHeaderShimmer active={running} contentStyle={styles.rowContentPressable}>
+        <Animated.Text style={[textStyles, styles.rowTextHighlight]} numberOfLines={1}>
+          {header.label}
+        </Animated.Text>
+      </ToolHeaderShimmer>
     </Pressable>
   );
 }
@@ -339,6 +278,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
             invocation={invocation}
             header={header}
             expandable={expandable}
+            running={running}
             toggle={toggle}
           />
         </View>
@@ -348,7 +288,6 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
           expandable={expandable}
           toggle={toggle}
         />
-        <ToolHeaderShimmer active={running} />
       </View>
       {expanded ? (
         <Animated.View

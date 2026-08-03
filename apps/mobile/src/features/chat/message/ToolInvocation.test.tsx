@@ -138,6 +138,72 @@ function hexColorDistance(left: string, right: string): number {
   );
 }
 
+function ancestorTestIDs(node: Queryable): string[] {
+  const testIDs: string[] = [];
+  let ancestor = node.parent;
+  while (ancestor) {
+    const testID = ancestor.props['testID'];
+    if (typeof testID === 'string') {
+      testIDs.push(testID);
+    }
+    ancestor = ancestor.parent;
+  }
+  return testIDs;
+}
+
+function layout(node: Queryable, size: { width: number; height: number }): void {
+  const onLayout = node.props['onLayout'] as (event: {
+    nativeEvent: { layout: { width: number; height: number } };
+  }) => void;
+  act(() => {
+    onLayout({ nativeEvent: { layout: size } });
+  });
+}
+
+/** Text nodes rendered by the shimmer overlay, which must be recolored copies of the header. */
+function highlightCopies(shimmer: Queryable): Queryable[] {
+  return shimmer
+    .findAllByType(Text)
+    .filter((node) => !hasTextAncestor(node))
+    .filter(
+      (node) =>
+        (StyleSheet.flatten(node.props['style'] as object) as { color?: string } | undefined)
+          ?.color === theme.colors.textPrimary,
+    );
+}
+
+/** Any surface inside the shimmer that would tint the row instead of the glyphs. */
+function paintedBackgrounds(shimmer: Queryable): unknown[] {
+  return shimmer
+    .findAll((node) => typeof node.type === 'string')
+    .map((node) => StyleSheet.flatten(node.props['style'] as object) as Record<string, unknown>)
+    .filter((style) => Boolean(style?.['backgroundColor'] ?? style?.['colors']));
+}
+
+function clippingWindows(shimmer: Queryable): Queryable[] {
+  return hostNodes(shimmer, 'tool-header-shimmer-window').filter(
+    (node) =>
+      (StyleSheet.flatten(node.props['style'] as object) as { overflow?: string } | undefined)
+        ?.overflow === 'hidden',
+  );
+}
+
+function shimmerCopies(shimmer: Queryable): Queryable[] {
+  return hostNodes(shimmer, 'tool-header-shimmer-copy');
+}
+
+/** react-test-renderer surfaces both the composite and its host view, so keep only hosts. */
+function hostNodes(root: Queryable, testID: string): Queryable[] {
+  return root.findAll((node) => typeof node.type === 'string' && node.props['testID'] === testID);
+}
+
+function transformShift(node: Queryable): number {
+  const style = StyleSheet.flatten(node.props['style'] as object) as {
+    transform?: [{ translateX: number }];
+  };
+  return style.transform?.[0]?.translateX ?? 0;
+}
+
 function hexContrastRatio(left: string, right: string): number {
   const luminance = (hex: string) => {
     const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255);
@@ -213,6 +279,85 @@ describe('ToolInvocationRow', () => {
     ) as { opacity: number; transform?: unknown };
     expect(animatedStyle.opacity).toBeGreaterThan(0);
     expect(animatedStyle.transform).toBeUndefined();
+    expect(highlightCopies(shimmer).map(flattenTestText)).toEqual(['Read app.ts']);
+    expect(paintedBackgrounds(shimmer)).toEqual([]);
+    act(() => tree.unmount());
+  });
+
+  it('shimmers the header glyphs instead of painting the row background', () => {
+    const tree = render(
+      invocation({
+        id: 'tool-glyph-shimmer',
+        kind: 'read',
+        status: 'in_progress',
+        title: 'Read app.ts',
+      }),
+    );
+    const shimmer = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-header-shimmer' })[0],
+      'header shimmer',
+    );
+    expect(ancestorTestIDs(shimmer)).toContain('tool-title-toggle');
+    expect(highlightCopies(shimmer)).toHaveLength(0);
+
+    layout(shimmer, { width: 220, height: 16 });
+
+    const copies = highlightCopies(shimmer);
+    expect(copies.length).toBeGreaterThan(1);
+    copies.forEach((copy) => expect(flattenTestText(copy)).toBe('Reading app.ts'));
+    expect(paintedBackgrounds(shimmer)).toEqual([]);
+
+    const windows = clippingWindows(shimmer);
+    expect(windows).toHaveLength(copies.length);
+    const centers = windows.map((window) => {
+      const style = StyleSheet.flatten(window.props['style'] as object) as {
+        width: number;
+        opacity: number;
+        transform: [{ translateX: number }];
+      };
+      expect(style.width).toBeLessThan(220);
+      expect(style.opacity).toBeGreaterThan(0);
+      expect(style.opacity).toBeLessThan(1);
+      expect(style.transform[0].translateX).toBeLessThan(0);
+      return style.transform[0].translateX + style.width / 2;
+    });
+    // Concentric passes keep the highlight symmetrical instead of hard-edged on one side.
+    expect(new Set(centers).size).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the command shimmer aligned with the scrollable monospace header', () => {
+    const tree = render(
+      invocation({
+        id: 'tool-command-shimmer',
+        kind: 'execute',
+        status: 'in_progress',
+        monospaceTitle: true,
+        title: 'sleep 90 && echo done',
+      }),
+    );
+    const shimmer = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-header-shimmer' })[0],
+      'command shimmer',
+    );
+    expect(ancestorTestIDs(shimmer)).toContain('tool-command-toggle');
+
+    layout(shimmer, { width: 260, height: 16 });
+
+    const copies = highlightCopies(shimmer);
+    expect(copies.length).toBeGreaterThan(1);
+    expect(new Set(copies.map(flattenTestText))).toEqual(
+      new Set(['Running', 'sleep 90 && echo done']),
+    );
+    expect(paintedBackgrounds(shimmer)).toEqual([]);
+    clippingWindows(shimmer).forEach((window, index) => {
+      const copy = requireTestValue(shimmerCopies(shimmer)[index], 'shimmer copy');
+      expect(transformShift(window) + transformShift(copy)).toBe(0);
+      expect(StyleSheet.flatten(copy.props['style'] as object)).toMatchObject({
+        width: 260,
+        height: 16,
+      });
+    });
     act(() => tree.unmount());
   });
 

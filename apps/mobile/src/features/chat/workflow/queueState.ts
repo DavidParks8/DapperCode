@@ -46,6 +46,7 @@ import {
   effortModalVisibleAtom,
   modelModalVisibleAtom,
 } from '../state/modals';
+import { resolveQueuedMessageSteerDisabledReason } from './queuePresentation';
 
 export type MainScreenWorkflowQueueStateContext = MainScreenHeaderActivityViewModelContext &
   MainScreenHeaderActivityViewModelResult;
@@ -95,30 +96,6 @@ function resolveBridgeUiSurfaceBuckets(
   return buckets;
 }
 
-function resolveQueuedMessageSteerDisabledReason(options: {
-  showingOptimisticQueuedMessage: boolean;
-  selectedQueueError: ThreadRuntimeSnapshot['queuedMessageError'] | null;
-  queueActionKind: string | null;
-  activeAgentSupports: MainScreenWorkflowQueueStateContext['activeAgentSupports'];
-}): string | null {
-  if (options.showingOptimisticQueuedMessage) {
-    return 'Sending the queued message to the bridge.';
-  }
-  if (options.selectedQueueError?.message) {
-    return options.selectedQueueError.message;
-  }
-  if (options.queueActionKind === 'steer') {
-    return 'Sending the queued message to the current turn.';
-  }
-  if (options.queueActionKind === 'cancel') {
-    return 'Removing the queued message.';
-  }
-  if (options.activeAgentSupports?.turnSteer !== true) {
-    return 'The active agent does not support steering.';
-  }
-  return null;
-}
-
 function resolveSelectedOptimisticQueuedMessages(
   selectedChat: ChatSummary | null,
   pendingOptimisticQueuedMessagesRef: MainScreenWorkflowQueueStateContext['pendingOptimisticQueuedMessagesRef'],
@@ -157,12 +134,14 @@ function resolveCanCancelQueuedMessage(
   oldestQueuedMessage: { id: string } | null,
   showingOptimisticQueuedMessage: boolean,
   queueActionInFlight: boolean,
+  editingQueuedMessage: boolean,
   selectedThreadRuntimeSnapshot: ThreadRuntimeSnapshot | null,
 ): boolean {
   return (
     Boolean(oldestQueuedMessage) &&
     !showingOptimisticQueuedMessage &&
     !queueActionInFlight &&
+    !editingQueuedMessage &&
     selectedThreadRuntimeSnapshot?.steeringInFlight !== true
   );
 }
@@ -192,6 +171,9 @@ function resolveQueuedMessageState(options: {
     oldestQueuedMessage,
   );
   const remainingQueuedMessagesCount = Math.max(0, selectedQueuedMessages.length - 1);
+  const editingQueuedMessage =
+    Boolean(oldestQueuedMessage) &&
+    options.selectedThreadRuntimeSnapshot?.editingQueuedMessageId === oldestQueuedMessage?.id;
   const queueActionInFlight = Boolean(options.queueActionItemId);
   const canSteerQueuedMessage = canOfferQueuedMessageSteer({
     hasQueuedMessage: Boolean(oldestQueuedMessage),
@@ -199,14 +181,24 @@ function resolveQueuedMessageState(options: {
     supportsSteer: options.activeAgentSupports?.turnSteer === true,
     isPendingSteer: oldestQueuedMessageIsPendingSteer,
     isOptimistic: showingOptimisticQueuedMessage,
-    actionInFlight: queueActionInFlight,
+    actionInFlight: queueActionInFlight || editingQueuedMessage,
   });
   const canCancelQueuedMessage = resolveCanCancelQueuedMessage(
     oldestQueuedMessage,
     showingOptimisticQueuedMessage,
     queueActionInFlight,
+    editingQueuedMessage,
     options.selectedThreadRuntimeSnapshot,
   );
+  const canEditQueuedMessage =
+    canOfferQueuedMessageSteer({
+      hasQueuedMessage: Boolean(oldestQueuedMessage),
+      hasSelectedThread: Boolean(options.selectedChatId),
+      supportsSteer: true,
+      isPendingSteer: oldestQueuedMessageIsPendingSteer,
+      isOptimistic: showingOptimisticQueuedMessage,
+      actionInFlight: queueActionInFlight || editingQueuedMessage,
+    }) && options.selectedThreadRuntimeSnapshot?.steeringInFlight !== true;
 
   return {
     selectedBridgeQueuedMessages,
@@ -216,15 +208,18 @@ function resolveQueuedMessageState(options: {
     selectedQueueError,
     oldestQueuedMessage,
     oldestQueuedMessageIsPendingSteer,
+    editingQueuedMessage,
     remainingQueuedMessagesCount,
     queueActionInFlight,
     canSteerQueuedMessage,
     canCancelQueuedMessage,
+    canEditQueuedMessage,
     queuedMessageSteerDisabledReason: resolveQueuedMessageSteerDisabledReason({
       showingOptimisticQueuedMessage,
       selectedQueueError,
       queueActionKind: options.queueActionKind,
-      activeAgentSupports: options.activeAgentSupports,
+      editingQueuedMessage,
+      supportsSteer: options.activeAgentSupports?.turnSteer === true,
     }),
   };
 }
@@ -420,10 +415,12 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     selectedQueueError,
     oldestQueuedMessage,
     oldestQueuedMessageIsPendingSteer,
+    editingQueuedMessage,
     remainingQueuedMessagesCount,
     queueActionInFlight,
     canSteerQueuedMessage,
     canCancelQueuedMessage,
+    canEditQueuedMessage,
     queuedMessageSteerDisabledReason,
   } = resolveQueuedMessageState({
     selectedChat,
@@ -515,6 +512,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     selectedQueueError,
     oldestQueuedMessage,
     oldestQueuedMessageIsPendingSteer,
+    editingQueuedMessage,
     remainingQueuedMessagesCount,
     queueActionInFlight,
     inMemorySelectedThreadPlan,
@@ -529,6 +527,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     showSlashSuggestions,
     canSteerQueuedMessage,
     canCancelQueuedMessage,
+    canEditQueuedMessage,
     queuedMessageSteerDisabledReason,
     showQueuedMessageDock,
     showPlanImplementationPrompt,

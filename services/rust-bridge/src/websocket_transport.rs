@@ -588,6 +588,39 @@ pub(super) async fn handle_bridge_method(
                 .map_err(|error| BridgeError::server(&error))?;
             serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
         }
+        "bridge/thread/queue/edit/start" => {
+            let request: BridgeThreadQueueEditRequest =
+                serde_json::from_value(params.unwrap_or_else(|| json!({})))
+                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            let result = state
+                .queue
+                .start_message_edit(request)
+                .await
+                .map_err(|error| BridgeError::server(&error))?;
+            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+        }
+        "bridge/thread/queue/edit/commit" => {
+            let request: BridgeThreadQueueEditCommitRequest =
+                serde_json::from_value(params.unwrap_or_else(|| json!({})))
+                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            let result = state
+                .queue
+                .commit_message_edit(request)
+                .await
+                .map_err(queue_operation_error)?;
+            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+        }
+        "bridge/thread/queue/edit/cancel" => {
+            let request: BridgeThreadQueueEditRequest =
+                serde_json::from_value(params.unwrap_or_else(|| json!({})))
+                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            let result = state
+                .queue
+                .cancel_message_edit(request)
+                .await
+                .map_err(|error| BridgeError::server(&error))?;
+            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+        }
         "bridge/workspaces/list" => {
             let request: WorkspaceListRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))

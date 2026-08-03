@@ -12,14 +12,24 @@
     "bridge/push/register", "bridge/push/unregister",
     "bridge/thread/create",
     "bridge/thread/list/stream/cancel", "bridge/thread/list/stream/start",
-    "bridge/thread/queue/cancel", "bridge/thread/queue/read", "bridge/thread/queue/send",
+    "bridge/thread/queue/cancel",
+    "bridge/thread/queue/edit/cancel",
+    "bridge/thread/queue/edit/commit",
+    "bridge/thread/queue/edit/start",
+    "bridge/thread/queue/read", "bridge/thread/queue/send",
     "bridge/thread/queue/steer", "bridge/ui/dismiss", "bridge/ui/present",
     "bridge/ui/resolve", "bridge/ui/update", "bridge/userInput/list",
     "bridge/userInput/resolve",
     "bridge/workspaces/list"
   ],
   "httpEndpoints": [
-    { "method": "POST", "path": "/attachments", "auth": "bearer", "contentType": "multipart/form-data", "maxFileBytes": 20971520 }
+    {
+      "method": "POST",
+      "path": "/attachments",
+      "auth": "bearer",
+      "contentType": "multipart/form-data",
+      "maxFileBytes": 20971520
+    }
   ],
   "mobileForwardedMethods": [
     "model/list", "thread/config/set", "thread/delete", "thread/list", "thread/loaded/list", "thread/name/update", "thread/read", "thread/resume",
@@ -48,14 +58,21 @@
       "streamId": "00000000-0000-4000-8000-000000000001",
       "preferredAgentId": "local-primary",
       "activeAgentId": "local-primary",
-      "agents": [{
-        "agentId": "local-primary",
-        "displayName": "Local Primary",
-        "version": "1.0.0",
-        "provenance": "local manifest",
-        "lifecycle": "ready",
-        "capabilities": { "sessionList": true, "sessionLoad": true, "sessionResume": true, "sessionDelete": true }
-      }],
+      "agents": [
+        {
+          "agentId": "local-primary",
+          "displayName": "Local Primary",
+          "version": "1.0.0",
+          "provenance": "local manifest",
+          "lifecycle": "ready",
+          "capabilities": {
+            "sessionList": true,
+            "sessionLoad": true,
+            "sessionResume": true,
+            "sessionDelete": true
+          }
+        }
+      ],
       "agUiEvents": true
     },
     "operationalStatus": {
@@ -71,24 +88,44 @@
       "streamId": "00000000-0000-4000-8000-000000000001",
       "eventId": 7,
       "params": {
-        "requestId": "approval-1", "agentId": "agent-alpha", "kind": "commandExecution",
-        "threadId": "thread-1", "turnId": "turn-1", "itemId": "tool-1",
-        "title": "Run tests", "message": "Run tests", "requestedAt": "2026-07-20T00:00:00+00:00",
-        "reason": "Run tests", "command": null, "cwd": null, "grantRoot": null,
+        "requestId": "approval-1",
+        "agentId": "agent-alpha",
+        "kind": "commandExecution",
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "tool-1",
+        "title": "Run tests",
+        "message": "Run tests",
+        "requestedAt": "2026-07-20T00:00:00+00:00",
+        "reason": "Run tests",
+        "command": null,
+        "cwd": null,
+        "grantRoot": null,
         "proposedExecpolicyAmendment": null,
         "options": [{ "id": "allow-once", "label": "Allow once", "kind": "AllowOnce" }]
       }
     },
     "pendingUserInput": {
-      "requestId": "input-1", "agentId": "agent-alpha", "threadId": "thread-1",
-      "turnId": "turn-1", "itemId": "tool-1", "message": "Deployment settings",
+      "requestId": "input-1",
+      "agentId": "agent-alpha",
+      "threadId": "thread-1",
+      "turnId": "turn-1",
+      "itemId": "tool-1",
+      "message": "Deployment settings",
       "requestedAt": "2026-07-20T00:00:01+00:00",
-      "questions": [{
-        "id": "environment", "header": "Environment", "question": "Choose an environment",
-        "isOther": false, "isSecret": true, "required": true, "fieldType": "string",
-        "defaultValue": null,
-        "options": [{ "value": "production", "label": "Production", "description": "" }]
-      }]
+      "questions": [
+        {
+          "id": "environment",
+          "header": "Environment",
+          "question": "Choose an environment",
+          "isOther": false,
+          "isSecret": true,
+          "required": true,
+          "fieldType": "string",
+          "defaultValue": null,
+          "options": [{ "value": "production", "label": "Production", "description": "" }]
+        }
+      ]
     },
     "agUiNotification": {
       "method": "bridge/agui.event",
@@ -108,31 +145,136 @@
       }
     },
     "agUiEvents": [
-      { "type": "RUN_STARTED", "threadId": "thread-1", "runId": "run-1", "timestamp": 1784371200000 },
-      { "type": "TEXT_MESSAGE_START", "messageId": "message-1", "role": "assistant", "timestamp": 1784371200000 },
-      { "type": "TEXT_MESSAGE_CONTENT", "messageId": "message-1", "delta": "Hello", "timestamp": 1784371200000 },
+      {
+        "type": "RUN_STARTED",
+        "threadId": "thread-1",
+        "runId": "run-1",
+        "timestamp": 1784371200000
+      },
+      {
+        "type": "TEXT_MESSAGE_START",
+        "messageId": "message-1",
+        "role": "assistant",
+        "timestamp": 1784371200000
+      },
+      {
+        "type": "TEXT_MESSAGE_CONTENT",
+        "messageId": "message-1",
+        "delta": "Hello",
+        "timestamp": 1784371200000
+      },
       { "type": "TEXT_MESSAGE_END", "messageId": "message-1", "timestamp": 1784371200000 },
-      { "type": "REASONING_MESSAGE_START", "messageId": "reasoning-1", "role": "reasoning", "timestamp": 1784371200001 },
-      { "type": "REASONING_MESSAGE_CONTENT", "messageId": "reasoning-1", "delta": "Checking the workspace", "timestamp": 1784371200002 },
+      {
+        "type": "REASONING_MESSAGE_START",
+        "messageId": "reasoning-1",
+        "role": "reasoning",
+        "timestamp": 1784371200001
+      },
+      {
+        "type": "REASONING_MESSAGE_CONTENT",
+        "messageId": "reasoning-1",
+        "delta": "Checking the workspace",
+        "timestamp": 1784371200002
+      },
       { "type": "REASONING_MESSAGE_END", "messageId": "reasoning-1", "timestamp": 1784371200003 },
-      { "type": "TOOL_CALL_START", "toolCallId": "tool-1", "toolCallName": "Read file", "timestamp": 1784371200004 },
-      { "type": "TOOL_CALL_ARGS", "toolCallId": "tool-1", "delta": "{}", "timestamp": 1784371200005 },
+      {
+        "type": "TOOL_CALL_START",
+        "toolCallId": "tool-1",
+        "toolCallName": "Read file",
+        "timestamp": 1784371200004
+      },
+      {
+        "type": "TOOL_CALL_ARGS",
+        "toolCallId": "tool-1",
+        "delta": "{}",
+        "timestamp": 1784371200005
+      },
       { "type": "TOOL_CALL_END", "toolCallId": "tool-1", "timestamp": 1784371200006 },
-      { "type": "TOOL_CALL_RESULT", "messageId": "tool-result-1", "toolCallId": "tool-1", "role": "tool", "content": "done", "timestamp": 1784371200007 },
-      { "type": "CUSTOM", "name": "dappercode.dev/plan", "value": { "entries": [] }, "timestamp": 1784371200008 },
-      { "type": "RUN_FINISHED", "threadId": "thread-1", "runId": "run-1", "timestamp": 1784371200009 },
-      { "type": "RUN_ERROR", "message": "failed", "code": "acp_run_failed", "timestamp": 1784371200010 }
+      {
+        "type": "TOOL_CALL_RESULT",
+        "messageId": "tool-result-1",
+        "toolCallId": "tool-1",
+        "role": "tool",
+        "content": "done",
+        "timestamp": 1784371200007
+      },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/plan",
+        "value": { "entries": [] },
+        "timestamp": 1784371200008
+      },
+      {
+        "type": "RUN_FINISHED",
+        "threadId": "thread-1",
+        "runId": "run-1",
+        "timestamp": 1784371200009
+      },
+      {
+        "type": "RUN_ERROR",
+        "message": "failed",
+        "code": "acp_run_failed",
+        "timestamp": 1784371200010
+      }
     ],
     "toolRevisionEvents": [
       { "type": "TOOL_CALL_START", "toolCallId": "tool-revision", "toolCallName": "Terminal" },
       { "type": "TOOL_CALL_ARGS", "toolCallId": "tool-revision", "delta": "{}" },
-      { "type": "CUSTOM", "name": "dappercode.dev/tool-text", "value": { "toolCallId": "tool-revision", "revision": "sha256:text-first", "content": "first" } },
-      { "type": "CUSTOM", "name": "dappercode.dev/tool-content", "value": { "toolCallId": "tool-revision", "revision": "sha256:structured-one", "content": [{ "type": "terminal", "terminalId": "terminal-1" }], "locations": [] } },
-      { "type": "CUSTOM", "name": "dappercode.dev/tool-text", "value": { "toolCallId": "tool-revision", "revision": "sha256:text-second", "content": "second" } },
-      { "type": "CUSTOM", "name": "dappercode.dev/tool-content", "value": { "toolCallId": "tool-revision", "revision": "sha256:structured-two", "content": [{ "type": "terminal", "terminalId": "terminal-2" }], "locations": [] } },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/tool-text",
+        "value": {
+          "toolCallId": "tool-revision",
+          "revision": "sha256:text-first",
+          "content": "first"
+        }
+      },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/tool-content",
+        "value": {
+          "toolCallId": "tool-revision",
+          "revision": "sha256:structured-one",
+          "content": [{ "type": "terminal", "terminalId": "terminal-1" }],
+          "locations": []
+        }
+      },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/tool-text",
+        "value": {
+          "toolCallId": "tool-revision",
+          "revision": "sha256:text-second",
+          "content": "second"
+        }
+      },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/tool-content",
+        "value": {
+          "toolCallId": "tool-revision",
+          "revision": "sha256:structured-two",
+          "content": [{ "type": "terminal", "terminalId": "terminal-2" }],
+          "locations": []
+        }
+      },
       { "type": "TOOL_CALL_END", "toolCallId": "tool-revision" },
-      { "type": "TOOL_CALL_RESULT", "messageId": "tool-result-revision", "toolCallId": "tool-revision", "role": "tool", "content": "!" },
-      { "type": "CUSTOM", "name": "dappercode.dev/tool-text", "value": { "toolCallId": "tool-revision", "revision": "sha256:text-second", "content": "second" } }
+      {
+        "type": "TOOL_CALL_RESULT",
+        "messageId": "tool-result-revision",
+        "toolCallId": "tool-revision",
+        "role": "tool",
+        "content": "!"
+      },
+      {
+        "type": "CUSTOM",
+        "name": "dappercode.dev/tool-text",
+        "value": {
+          "toolCallId": "tool-revision",
+          "revision": "sha256:text-second",
+          "content": "second"
+        }
+      }
     ],
     "threadSnapshot": {
       "id": "agent-alpha:thread-snapshot",
@@ -147,59 +289,108 @@
           { "sequence": 2, "kind": "reasoning", "canonicalId": "reasoning-1" }
         ],
         "messages": [
-          { "id": "message-1", "role": "agent", "parts": [
-            { "type": "text", "text": "Snapshot A" },
-            { "type": "image", "data": "aW1hZ2U=", "mimeType": "image/png" },
-            { "type": "text", "text": "Snapshot B" },
-            { "type": "resource", "resource": { "uri": "file:///tmp/result.txt", "text": "embedded result", "mimeType": "text/plain" } },
-            { "type": "audio", "data": "YXVkaW8=", "mimeType": "audio/wav" }
-          ], "truncated": false },
-          { "id": "reasoning-1", "role": "thought", "parts": [{ "type": "text", "text": "Snapshot reasoning" }], "truncated": false }
+          {
+            "id": "message-1",
+            "role": "agent",
+            "parts": [
+              { "type": "text", "text": "Snapshot A" },
+              { "type": "image", "data": "aW1hZ2U=", "mimeType": "image/png" },
+              { "type": "text", "text": "Snapshot B" },
+              {
+                "type": "resource",
+                "resource": {
+                  "uri": "file:///tmp/result.txt",
+                  "text": "embedded result",
+                  "mimeType": "text/plain"
+                }
+              },
+              { "type": "audio", "data": "YXVkaW8=", "mimeType": "audio/wav" }
+            ],
+            "truncated": false
+          },
+          {
+            "id": "reasoning-1",
+            "role": "thought",
+            "parts": [{ "type": "text", "text": "Snapshot reasoning" }],
+            "truncated": false
+          }
         ],
-        "tools": [{
-          "id": "tool-1", "generation": 7, "kind": "read", "status": "completed",
-          "title": "Read file", "content": "done",
-          "structuredContent": [
-            { "type": "content", "content": { "type": "text", "text": "structured" } },
-            { "type": "diff", "path": "src/file.ts", "oldText": "old", "newText": "new" },
-            { "type": "terminal", "terminalId": "terminal-1" }
-          ],
-          "locations": [{ "path": "src/file.ts", "line": 7 }],
-          "truncated": false,
-          "subagent": false
-        }],
+        "tools": [
+          {
+            "id": "tool-1",
+            "generation": 7,
+            "kind": "read",
+            "status": "completed",
+            "title": "Read file",
+            "content": "done",
+            "structuredContent": [
+              { "type": "content", "content": { "type": "text", "text": "structured" } },
+              { "type": "diff", "path": "src/file.ts", "oldText": "old", "newText": "new" },
+              { "type": "terminal", "terminalId": "terminal-1" }
+            ],
+            "locations": [{ "path": "src/file.ts", "line": 7 }],
+            "truncated": false,
+            "subagent": false
+          }
+        ],
         "messageCollection": {
-          "truncated": false, "omittedCount": 0, "oldestAvailableSequence": 0,
-          "newestSequence": 0, "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjowLCJyZXZpc2lvbiI6M30", "revision": 3
+          "truncated": false,
+          "omittedCount": 0,
+          "oldestAvailableSequence": 0,
+          "newestSequence": 0,
+          "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjowLCJyZXZpc2lvbiI6M30",
+          "revision": 3
         },
         "reasoningCollection": {
-          "truncated": false, "omittedCount": 0, "oldestAvailableSequence": 2,
-          "newestSequence": 2, "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjoyLCJyZXZpc2lvbiI6M30", "revision": 3
+          "truncated": false,
+          "omittedCount": 0,
+          "oldestAvailableSequence": 2,
+          "newestSequence": 2,
+          "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjoyLCJyZXZpc2lvbiI6M30",
+          "revision": 3
         },
         "toolCollection": {
-          "truncated": false, "omittedCount": 0, "oldestAvailableSequence": 1,
-          "newestSequence": 1, "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjoxLCJyZXZpc2lvbiI6M30", "revision": 3
+          "truncated": false,
+          "omittedCount": 0,
+          "oldestAvailableSequence": 1,
+          "newestSequence": 1,
+          "beforeCursor": "eyJ0aHJlYWRJZCI6ImFnZW50LWFscGhhOnRocmVhZC1zbmFwc2hvdCIsInNlcXVlbmNlIjoxLCJyZXZpc2lvbiI6M30",
+          "revision": 3
         },
         "continuation": {
-          "revision": 3, "unavailableCount": 0, "earliestAvailableSequence": 0,
-          "latestAvailableSequence": 2, "maxPageSize": 100,
-          "maxHistoryEntries": 1024, "maxHistoryBytes": 4194304
+          "revision": 3,
+          "unavailableCount": 0,
+          "earliestAvailableSequence": 0,
+          "latestAvailableSequence": 2,
+          "maxPageSize": 100,
+          "maxHistoryEntries": 1024,
+          "maxHistoryBytes": 4194304
         },
         "plan": [{ "content": "Inspect state", "priority": "high", "status": "completed" }],
         "usage": { "used": 120, "size": 4096, "cost": "$0.01" },
         "mode": "plan",
-        "config": [{
-          "id": "model", "value": "example-model", "name": "Model",
-          "description": null, "category": "model", "options": []
-        }],
+        "config": [
+          {
+            "id": "model",
+            "value": "example-model",
+            "name": "Model",
+            "description": null,
+            "category": "model",
+            "options": []
+          }
+        ],
         "commands": [{ "name": "test", "description": "Run tests" }],
         "session": {
-          "agentId": "agent-alpha", "threadId": "agent-alpha:thread-snapshot",
-          "title": "Typed ACP snapshot", "updatedAt": "2026-07-19T00:00:00Z",
+          "agentId": "agent-alpha",
+          "threadId": "agent-alpha:thread-snapshot",
+          "title": "Typed ACP snapshot",
+          "updatedAt": "2026-07-19T00:00:00Z",
           "historyReconstruction": false
         },
         "active": {
-          "runId": "run-7", "sourceTurnId": "turn-7", "generation": 7,
+          "runId": "run-7",
+          "sourceTurnId": "turn-7",
+          "generation": 7,
           "toolIds": ["tool-live"]
         }
       }
@@ -209,7 +400,12 @@
       "error": {
         "code": -32005,
         "message": "Bridge request capacity is exhausted",
-        "data": { "error": "overloaded", "resource": "global_in_flight_requests", "limit": 128, "retryable": true }
+        "data": {
+          "error": "overloaded",
+          "resource": "global_in_flight_requests",
+          "limit": 128,
+          "retryable": true
+        }
       }
     },
     "resourceLimitError": {
@@ -217,7 +413,12 @@
       "error": {
         "code": -32602,
         "message": "attachment_bytes exceeds limit of 20971520",
-        "data": { "error": "resource_limit_exceeded", "resource": "attachment_bytes", "limit": 20971520, "actual": 20971521 }
+        "data": {
+          "error": "resource_limit_exceeded",
+          "resource": "attachment_bytes",
+          "limit": 20971520,
+          "actual": 20971521
+        }
       }
     },
     "browserPreviewSession": {

@@ -217,6 +217,7 @@ export interface BridgeThreadQueueState {
   items: BridgeQueuedMessage[];
   pendingSteers: BridgeQueuedMessage[];
   pendingSteerCount: number;
+  editingItemId?: string | null;
   waitingForToolCalls: boolean;
   steeringInFlight: boolean;
   lastError?: BridgeThreadQueueError | null;

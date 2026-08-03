@@ -766,6 +766,21 @@ pub(super) struct BridgeThreadQueueCancelRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadQueueEditRequest {
+    pub(super) thread_id: String,
+    pub(super) item_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadQueueEditCommitRequest {
+    pub(super) thread_id: String,
+    pub(super) item_id: String,
+    pub(super) content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct BridgeQueuedMessage {
     pub(super) id: String,
     pub(super) created_at: String,
@@ -796,6 +811,7 @@ pub(super) struct BridgeThreadQueueState {
     pub(super) items: Vec<BridgeQueuedMessage>,
     pub(super) pending_steers: Vec<BridgeQueuedMessage>,
     pub(super) pending_steer_count: usize,
+    pub(super) editing_item_id: Option<String>,
     pub(super) waiting_for_tool_calls: bool,
     pub(super) steering_in_flight: bool,
     pub(super) last_error: Option<BridgeThreadQueueError>,
@@ -828,6 +844,7 @@ pub(super) struct BridgeThreadQueueActionResponse {
 pub(super) struct BridgeThreadQueueRuntime {
     pub(super) items: VecDeque<BridgeQueuedMessageEntry>,
     pub(super) pending_steers: VecDeque<BridgeQueuedMessageEntry>,
+    pub(super) editing_item_id: Option<String>,
     pub(super) steer_prepare_in_flight: bool,
     pub(super) steer_dispatch_in_flight: Option<PendingSteerDispatch>,
     pub(super) active_turn_id: Option<String>,

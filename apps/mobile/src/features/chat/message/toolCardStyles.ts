@@ -61,6 +61,7 @@ export const createToolCardStyles = (theme: AppTheme) =>
       paddingRight: theme.spacing.lg,
     },
     rowTitleError: { color: theme.colors.statusError },
+    rowTextHighlight: { color: theme.colors.textPrimary },
     rowTrailing: {
       minWidth: 18 + theme.spacing.sm * 2,
       flexDirection: 'row',
@@ -87,22 +88,6 @@ export const createToolCardStyles = (theme: AppTheme) =>
       bottom: 0,
       width: theme.spacing.xl,
     },
-    shimmerClip: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      left: 0,
-      overflow: 'hidden',
-      borderRadius: theme.radius.sm,
-    },
-    shimmerBand: {
-      position: 'absolute',
-      top: 0,
-      bottom: 0,
-      width: 120,
-    },
-    shimmerGradient: { flex: 1 },
     panel: {
       marginLeft: theme.spacing.sm,
       marginTop: theme.spacing.xs,
