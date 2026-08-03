@@ -30,6 +30,7 @@ export function ComposeView({
   fastModeLabel,
   keyboardVisible,
   bottomInset,
+  topInset,
   onSuggestion,
   onOpenWorkspacePicker,
   onOpenAgentPicker,
@@ -51,6 +52,7 @@ export function ComposeView({
   fastModeLabel: string;
   keyboardVisible: boolean;
   bottomInset: number;
+  topInset: number;
   onSuggestion: (s: string) => void;
   onOpenWorkspacePicker: () => void;
   onOpenAgentPicker: () => void;
@@ -61,14 +63,16 @@ export function ComposeView({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const contentContainerStyle =
-    Platform.OS === 'android'
-      ? [
-          styles.composeContainer,
-          keyboardVisible ? styles.composeContainerKeyboardOpen : null,
-          { paddingBottom: bottomInset },
-        ]
-      : styles.composeContainer;
+  const composeTopPadding = (keyboardVisible ? theme.spacing.xl : 0) + topInset;
+  const contentContainerStyle = [
+    styles.composeContainer,
+    keyboardVisible ? styles.composeContainerKeyboardOpen : null,
+    {
+      paddingBottom:
+        Platform.OS === 'ios' ? Math.max(theme.spacing.xxl * 2, bottomInset) : bottomInset,
+      paddingTop: composeTopPadding,
+    },
+  ];
 
   return (
     <ScrollView
@@ -265,13 +269,13 @@ export function ComposeView({
   );
 }
 
-export function ChatOpeningView() {
+export function ChatOpeningView({ topInset = 0 }: { topInset?: number }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <View
-      style={styles.chatOpeningShell}
+      style={[styles.chatOpeningShell, { paddingTop: theme.spacing.lg + topInset }]}
       accessibilityRole="progressbar"
       accessibilityLabel="Opening chat"
       accessibilityLiveRegion="polite"

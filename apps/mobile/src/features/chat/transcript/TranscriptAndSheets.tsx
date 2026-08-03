@@ -5,7 +5,7 @@ import {
   pendingUserInputRequestAtom,
 } from '../state/turn';
 import { loadingAgentThreadsAtom } from '../../workspace/state/workspace';
-import { keyboardVisibleAtom } from '../state/composer';
+import { keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
@@ -70,6 +70,7 @@ type BodyContentProps = Pick<
   liveMessageState: ChatTranscriptViewProps['liveMessageState'];
   keyboardVisible: boolean;
   bottomInset: number;
+  topInset: number;
 };
 
 type SelectionSheetsProps = Pick<
@@ -111,6 +112,7 @@ function TranscriptOrComposerContent({
   clearPendingScrollRetries,
   autoScrollStateRef,
   bottomInset,
+  topInset,
   liveMessageState,
   transcriptContinuationState,
   handleLoadEarlier,
@@ -158,6 +160,7 @@ function TranscriptOrComposerContent({
         onScrollInteractionStart={clearPendingScrollRetries}
         autoScrollStateRef={autoScrollStateRef}
         bottomInset={bottomInset}
+        topInset={topInset}
         liveMessageState={liveMessageState}
         continuationState={transcriptContinuationState}
         onLoadEarlier={handleLoadEarlierPress}
@@ -166,7 +169,7 @@ function TranscriptOrComposerContent({
   }
 
   if (isOpeningChat) {
-    return <ChatOpeningView />;
+    return <ChatOpeningView topInset={topInset} />;
   }
 
   return (
@@ -184,6 +187,7 @@ function TranscriptOrComposerContent({
       fastModeLabel={fastModeLabel}
       keyboardVisible={keyboardVisible}
       bottomInset={bottomInset}
+      topInset={topInset}
       onSuggestion={(suggestion) => setDraft(suggestion)}
       onOpenWorkspacePicker={openWorkspaceModal}
       onOpenAgentPicker={openAgentModal}
@@ -274,7 +278,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     handleJumpToLatest,
     clearPendingScrollRetries,
     autoScrollStateRef,
-    androidComposerReservedInset,
+    composerReservedInset,
     transcriptContinuationState,
     handleLoadEarlier,
     defaultStartWorkspaceLabel,
@@ -297,7 +301,6 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     toggleFastMode,
     shouldShowComposer,
     renderComposer,
-    chatBottomInset,
     showFloatingActivity,
     displayedActivity,
     activityDetail,
@@ -315,11 +318,14 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
   const loadingAgentThreads = useAtomValue(loadingAgentThreadsAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
+  const topChromeHeight = useAtomValue(topChromeHeightAtom);
   const agentThreadMenuVisible = useAtomValue(agentThreadMenuVisibleAtom);
   const agentModalVisible = useAtomValue(agentModalVisibleAtom);
   const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const usesOverlayComposer = Platform.OS === 'android' || Platform.OS === 'ios';
+  const contentBottomInset = usesOverlayComposer ? composerReservedInset : 0;
   const contentProps: BodyContentProps = {
     selectedChat,
     isOpeningChat,
@@ -361,32 +367,25 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     toggleFastMode,
     liveMessageState: selectedChat ? (liveAssistantByThread[selectedChat.id] ?? null) : null,
     keyboardVisible,
-    bottomInset: chatBottomInset,
+    bottomInset: contentBottomInset,
+    topInset: topChromeHeight,
   };
 
   return (
     <>
-      {Platform.OS === 'android' ? (
-        <View style={styles.bodyContainer}>
-          <KeyboardAvoidingView style={styles.keyboardAvoiding} enabled={false}>
-            <TranscriptOrComposerContent
-              {...contentProps}
-              keyboardVisible={keyboardVisible}
-              bottomInset={androidComposerReservedInset}
-            />
-          </KeyboardAvoidingView>
-
-          {shouldShowComposer ? renderComposer(true) : null}
-        </View>
-      ) : (
+      <View style={styles.bodyContainer}>
         <KeyboardAvoidingView
           style={styles.keyboardAvoiding}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           enabled={Platform.OS === 'ios'}
         >
-          <TranscriptOrComposerContent {...contentProps} keyboardVisible={false} bottomInset={0} />
-
-          {showFloatingActivity ? (
+          <TranscriptOrComposerContent
+            {...contentProps}
+            keyboardVisible={Platform.OS === 'android' ? keyboardVisible : false}
+            bottomInset={contentBottomInset}
+          />
+          {Platform.OS === 'ios' && shouldShowComposer ? renderComposer(true) : null}
+          {!usesOverlayComposer && showFloatingActivity ? (
             <View pointerEvents="none" style={styles.activityDock}>
               <ActivityBar
                 title={displayedActivity.title}
@@ -395,10 +394,10 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
               />
             </View>
           ) : null}
-
-          {shouldShowComposer ? renderComposer(false) : null}
+          {!usesOverlayComposer && shouldShowComposer ? renderComposer(false) : null}
         </KeyboardAvoidingView>
-      )}
+        {Platform.OS === 'android' && shouldShowComposer ? renderComposer(true) : null}
+      </View>
       <MainScreenSelectionSheets
         attachmentMenuVisible={attachmentMenuVisible}
         attachmentMenuOptions={attachmentMenuOptions}

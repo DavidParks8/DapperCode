@@ -66,6 +66,7 @@ export interface ChatTranscriptViewProps {
   onScrollInteractionStart: () => void;
   autoScrollStateRef: RefObject<AutoScrollState>;
   bottomInset: number;
+  topInset?: number;
   liveMessageState?: AgUiThreadMessageState | null;
   onOpenSubAgentThread?: (threadId: string) => void;
   continuationState?: TranscriptContinuationState;
@@ -89,6 +90,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   onScrollInteractionStart,
   autoScrollStateRef,
   bottomInset,
+  topInset = 0,
   liveMessageState = null,
   onOpenSubAgentThread,
   continuationState,
@@ -112,6 +114,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const userMessageAnchorCountRef = useRef(0);
   const displayIndexByMessageIdRef = useRef(new Map<string, number>());
   const anchorDisplayIndicesRef = useRef<readonly (number | null)[]>([]);
+  const topInsetRef = useRef(topInset);
   const scrollRefRef = useRef(scrollRef);
   const railJumpControllerRef = useRef<ChatScrollRailJumpController | null>(null);
 
@@ -157,6 +160,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, [displayMessages]);
   displayIndexByMessageIdRef.current = displayIndexByMessageId;
   scrollRefRef.current = scrollRef;
+  topInsetRef.current = topInset;
   anchorDisplayIndicesRef.current = userMessageAnchors.map(
     (anchor) => displayIndexByMessageId.get(anchor.messageId) ?? null,
   );
@@ -176,6 +180,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     scrollRefRef,
     setVisibleStartIndex,
     spacingLg: theme.spacing.lg,
+    topInsetRef,
   });
 
   useEffect(() => {
@@ -356,7 +361,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     },
   ).current;
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 1 }).current;
-  const railCapacity = railWindowCapacity(viewportHeight);
+  const railViewportHeight = Math.max(0, viewportHeight - topInset);
+  const railCapacity = railWindowCapacity(railViewportHeight);
   const handleRailInteractionStart = useCallback(() => {
     onScrollInteractionStart();
     autoScrollStateRef.current.isUserInteracting = true;
@@ -379,7 +385,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     resetKey: chat.id,
     anchors: userMessageAnchors,
     capacity: railCapacity,
-    viewportHeight,
+    viewportHeight: railViewportHeight,
+    topInset,
     restingActiveIndex: resolveRailRestingActiveIndex(
       restingRailActiveIndex,
       userMessageAnchorCount,
@@ -406,9 +413,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const messageListContentStyle = useMemo(
     () =>
       Platform.OS === 'android'
-        ? [styles.messageListContent, { paddingTop: bottomInset }]
-        : [styles.messageListContent, { paddingBottom: bottomInset }],
-    [bottomInset, styles.messageListContent],
+        ? [styles.messageListContent, { paddingTop: bottomInset, paddingBottom: topInset }]
+        : [styles.messageListContent, { paddingBottom: bottomInset, paddingTop: topInset }],
+    [bottomInset, styles.messageListContent, topInset],
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
@@ -527,7 +534,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           engaged: rail.engaged,
           fingerY: rail.fingerY,
           scrollRailEnabled,
-          viewportHeight,
+          topInset,
+          viewportHeight: railViewportHeight,
           windowStart: rail.state.windowStart,
           windowWidth,
         })}

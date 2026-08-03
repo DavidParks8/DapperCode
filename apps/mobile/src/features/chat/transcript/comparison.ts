@@ -33,6 +33,7 @@ function areTranscriptDisplayPropsEqual(
     previous.agentThreadStatusById === next.agentThreadStatusById &&
     previous.inlineChoicesEnabled === next.inlineChoicesEnabled &&
     previous.bottomInset === next.bottomInset &&
+    previous.topInset === next.topInset &&
     previous.liveMessageState === next.liveMessageState &&
     previous.continuationState === next.continuationState &&
     previous.onLoadEarlier === next.onLoadEarlier &&

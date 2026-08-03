@@ -4,10 +4,7 @@ const jest = require('eslint-plugin-jest');
 const prettierRecommended = require('eslint-plugin-prettier/recommended');
 const reactHooks = require('eslint-plugin-react-hooks');
 
-const jestFiles = [
-  '**/*.{test,spec}.{ts,tsx}',
-  'src/shared/testing/**/*.{ts,tsx}',
-];
+const jestFiles = ['**/*.{test,spec}.{ts,tsx}', 'src/shared/testing/**/*.{ts,tsx}'];
 
 module.exports = [
   {

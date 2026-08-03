@@ -38,6 +38,7 @@ export function ensureRailJumpController(params: {
   scrollRefRef: RefObject<RefObject<FlatList<TranscriptDisplayItem> | null>>;
   setVisibleStartIndex: Dispatch<SetStateAction<number>>;
   spacingLg: number;
+  topInsetRef: RefObject<number>;
 }) {
   if (params.railJumpControllerRef.current) {
     return;
@@ -54,7 +55,7 @@ export function ensureRailJumpController(params: {
         index,
         animated: false,
         viewPosition: 1,
-        viewOffset: -params.spacingLg,
+        viewOffset: -(params.spacingLg + params.topInsetRef.current),
       }),
     scrollToOffset: (offset) =>
       params.scrollRefRef.current.current?.scrollToOffset({ offset, animated: false }),
@@ -67,6 +68,7 @@ export function renderScrollRail(params: {
   engaged: SharedValue<number>;
   fingerY: SharedValue<number>;
   scrollRailEnabled: boolean;
+  topInset: number;
   viewportHeight: number;
   windowStart: number;
   windowWidth: number;
@@ -80,6 +82,7 @@ export function renderScrollRail(params: {
       activeIndex={params.activeIndex}
       windowStart={params.windowStart}
       capacity={params.capacity}
+      topInset={params.topInset}
       viewportHeight={params.viewportHeight}
       alwaysVisible={params.windowWidth >= TABLET_LAYOUT_MIN_WIDTH}
       engaged={params.engaged}

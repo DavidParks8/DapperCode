@@ -266,6 +266,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
             windowStart={0}
             capacity={8}
             viewportHeight={300}
+            topInset={0}
             alwaysVisible={false}
             engaged={shared as never}
             fingerY={shared as never}
@@ -289,6 +290,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
             windowStart={0}
             capacity={8}
             viewportHeight={500}
+            topInset={0}
             alwaysVisible
             engaged={shared as never}
             fingerY={shared as never}
@@ -741,19 +743,41 @@ describe('ChatTranscriptView continuation', () => {
   it('uses platform keyboard and inset behavior', () => {
     const originalOS = Platform.OS;
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
-    const androidTree = render({ bottomInset: 24 });
+    const androidTree = render({ bottomInset: 24, topInset: 40 });
     const androidList = getList(androidTree);
     expect(androidList.props['keyboardDismissMode']).toBe('on-drag');
-    expect(androidList.props.contentContainerStyle[1]).toEqual({ paddingTop: 24 });
+    expect(androidList.props.contentContainerStyle[1]).toEqual({
+      paddingTop: 24,
+      paddingBottom: 40,
+    });
     act(() => androidTree.unmount());
 
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
-    const iosTree = render({ bottomInset: 12 });
+    const iosTree = render({ bottomInset: 12, topInset: 40 });
     const iosList = getList(iosTree);
     expect(iosList.props['keyboardDismissMode']).toBe('interactive');
-    expect(iosList.props.contentContainerStyle[1]).toEqual({ paddingBottom: 12 });
+    expect(iosList.props.contentContainerStyle[1]).toEqual({
+      paddingBottom: 12,
+      paddingTop: 40,
+    });
     act(() => iosTree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
+  });
+
+  it('applies a measured top inset after the memoized transcript has mounted', () => {
+    const tree = render({ topInset: 24 });
+    expect(getList(tree).props.contentContainerStyle[1]).toEqual({
+      paddingBottom: 0,
+      paddingTop: 24,
+    });
+
+    update(tree, { topInset: 64 });
+
+    expect(getList(tree).props.contentContainerStyle[1]).toEqual({
+      paddingBottom: 0,
+      paddingTop: 64,
+    });
+    act(() => tree.unmount());
   });
 
   it('resets paging and scroll state for a new chat id', () => {

@@ -16,6 +16,7 @@ import { resolveComposerBottomSpacing } from './inputLayout';
 import { createChatInputStyles } from './inputStyles';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useAppTheme } from '@shared/theme';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { feedback } from '@shared/feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 
@@ -422,7 +423,9 @@ export function ChatInput(props: ChatInputProps) {
           },
         ]}
       >
-        <View
+        <GlassSurface
+          isInteractive
+          role="capsule"
           style={[
             styles.composerBar,
             inputHeight > INPUT_TEXT_MIN_HEIGHT && styles.composerBarMultiline,
@@ -532,7 +535,7 @@ export function ChatInput(props: ChatInputProps) {
               ) : null}
             </View>
           </View>
-        </View>
+        </GlassSurface>
         {footer || reserveFooterSpace ? (
           <View style={[styles.footer, !footer && styles.footerPlaceholder]}>{footer}</View>
         ) : null}

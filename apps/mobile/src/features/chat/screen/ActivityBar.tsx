@@ -6,6 +6,7 @@ import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 import { AtomGlyph } from './AtomGlyph';
 import { motionDuration } from '@shared/ui/motion';
 import { useAppTheme, type AppTheme } from '@shared/theme';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import type { ActivityTone } from '../state/runtime';
 
 export type { ActivityTone } from '../state/runtime';
@@ -24,8 +25,8 @@ const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
 };
 
 /**
- * A single quiet caption line, not a card: the agent's status sits directly on the
- * chat background above the composer so it reads as chrome-free supporting text.
+ * A single quiet caption line that keeps its own native-glass backing while transcript content
+ * passes beneath it.
  */
 export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const theme = useAppTheme();
@@ -46,49 +47,57 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const labelStyle = [styles.titleText, tone === 'error' ? styles.titleTextError : null];
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      style={[styles.row, stacked ? styles.rowStacked : null]}
-    >
-      <View
-        style={[
-          styles.iconWrap,
-          running ? styles.iconWrapRunning : null,
-          stacked ? styles.iconWrapStacked : null,
-        ]}
+    <GlassSurface role="chrome" style={styles.surface} testID="activity-glass-surface">
+      <Animated.View
+        entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+        style={[styles.row, stacked ? styles.rowStacked : null]}
       >
-        {running ? (
-          <AtomGlyph color={color} />
-        ) : (
-          <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
-        )}
-      </View>
-      {stacked ? (
-        <View style={styles.textColumn}>
-          <Text style={labelStyle} numberOfLines={1}>
-            {titleText}
-          </Text>
-          <Text style={styles.detailText} numberOfLines={1}>
-            {normalizedDetail}
-          </Text>
+        <View
+          style={[
+            styles.iconWrap,
+            running ? styles.iconWrapRunning : null,
+            stacked ? styles.iconWrapStacked : null,
+          ]}
+        >
+          {running ? (
+            <AtomGlyph color={color} />
+          ) : (
+            <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
+          )}
         </View>
-      ) : (
-        <Text style={[...labelStyle, styles.titleTextInline]} numberOfLines={1}>
-          {hasDetail ? normalizedDetail : titleText}
-        </Text>
-      )}
-    </Animated.View>
+        {stacked ? (
+          <View style={styles.textColumn}>
+            <Text style={labelStyle} numberOfLines={1}>
+              {titleText}
+            </Text>
+            <Text style={styles.detailText} numberOfLines={1}>
+              {normalizedDetail}
+            </Text>
+          </View>
+        ) : (
+          <Text style={[...labelStyle, styles.titleTextInline]} numberOfLines={1}>
+            {hasDetail ? normalizedDetail : titleText}
+          </Text>
+        )}
+      </Animated.View>
+    </GlassSurface>
   );
 }
 
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
+    surface: {
+      alignSelf: 'stretch',
+      borderCurve: 'continuous',
+      borderRadius: theme.radius.lg,
+      marginHorizontal: theme.spacing.lg,
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.xs,
-      paddingHorizontal: theme.spacing.lg,
-      paddingVertical: 2,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.xs,
     },
     rowStacked: {
       alignItems: 'flex-start',

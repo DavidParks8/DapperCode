@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
 
@@ -89,9 +90,11 @@ function baseContext(
 
 function Harness({
   context,
+  overlay = false,
   resultRef,
 }: {
   context: Omit<MainScreenComposerRendererContext, 'styles' | 'theme'>;
+  overlay?: boolean;
   resultRef: { current: ReturnType<typeof useMainScreenComposerRenderer> | null };
 }) {
   const { theme: resolvedTheme, styles } = useMainScreenStyles();
@@ -101,11 +104,12 @@ function Harness({
     styles,
   } as unknown as MainScreenComposerRendererContext;
   resultRef.current = useMainScreenComposerRenderer(fullContext);
-  return resultRef.current.renderComposer(false);
+  return resultRef.current.renderComposer(overlay);
 }
 
 function render(
   context: Omit<MainScreenComposerRendererContext, 'styles' | 'theme'>,
+  overlay = false,
 ): ReactTestRenderer {
   const store: AppStore = createTestStore();
   const resultRef: { current: ReturnType<typeof useMainScreenComposerRenderer> | null } = {
@@ -117,7 +121,7 @@ function render(
       withAppStore(
         store,
         <AppThemeProvider theme={theme}>
-          <Harness context={context} resultRef={resultRef} />
+          <Harness context={context} overlay={overlay} resultRef={resultRef} />
         </AppThemeProvider>,
       ),
     );
@@ -133,6 +137,38 @@ function root(tree: ReactTestRenderer): QueryableInstance {
 }
 
 describe('mainScreenComposerRenderer suggestion surfaces', () => {
+  it('offsets the overlay composer by the measured iOS keyboard inset', () => {
+    const tree = render(baseContext({ composerOverlayInset: 291 }), true);
+    const overlay = root(tree).findAll((node) => {
+      const style = StyleSheet.flatten(node.props['style'] as never) as {
+        bottom?: number;
+        position?: string;
+      };
+      return style?.position === 'absolute' && style?.bottom === 291;
+    })[0];
+
+    expect(requireTestValue(overlay, 'composer overlay')).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
+  it('keeps floating activity status non-interactive above the composer', () => {
+    const tree = render(
+      baseContext({
+        activityDetail: 'Installing dependencies',
+        displayedActivity: { tone: 'running', title: 'Working' },
+        showFloatingActivity: true,
+      }),
+      true,
+    );
+    const dock = root(tree).findAll((node) => node.props['testID'] === 'floating-activity-dock')[0];
+
+    expect(requireTestValue(dock, 'floating activity dock').props['pointerEvents']).toBe('none');
+    expect(
+      root(tree).findAll((node) => node.children.includes('Installing dependencies')).length,
+    ).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
   it('renders slash suggestions with reduce-motion aware entering/exiting animations', () => {
     const enteringSpy = jest.spyOn(
       jest.requireActual('@shared/testing/reanimatedMock').FadeIn,
