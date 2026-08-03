@@ -2,6 +2,7 @@ import { errorAtom, pendingApprovalAtom, pendingUserInputRequestAtom } from '../
 import { queueActionItemIdAtom, queueActionKindAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
+import type { BridgeQueuedMessage } from '@bridge/types/types';
 import type {
   MainScreenSendMessageHandlerContext,
   MainScreenSendMessageHandlerResult,
@@ -38,6 +39,7 @@ export function useMainScreenComposerSubmitActions(
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const setError = useSetAtom(errorAtom);
+  const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
   const setQueueActionKind = useSetAtom(queueActionKindAtom);
 
@@ -63,6 +65,42 @@ export function useMainScreenComposerSubmitActions(
       return;
     }
 
+    const threadId = selectedChatIdRef.current?.trim();
+    const editingMessageId = threadId
+      ? threadRuntimeSnapshotsRef.current[threadId]?.editingQueuedMessageId?.trim()
+      : null;
+    if (threadId && editingMessageId) {
+      if (queueActionItemId) {
+        return;
+      }
+      try {
+        setError(null);
+        setQueueActionItemId(editingMessageId);
+        setQueueActionKind('editCommit');
+        const response = await turnExecutionController.commitQueuedEdit(
+          threadId,
+          editingMessageId,
+          content,
+        );
+        cacheThreadQueueState(threadId, response.queue);
+        const currentDraft = draftController.snapshot();
+        const draftIsUnchanged = [
+          selectedChatIdRef.current === threadId,
+          currentDraft.scopeKey === draftSnapshot.scopeKey,
+          currentDraft.revision === draftSnapshot.revision,
+        ].every(Boolean);
+        if (draftIsUnchanged) {
+          setDraft('');
+        }
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setQueueActionItemId((previous) => (previous === editingMessageId ? null : previous));
+        setQueueActionKind((previous) => (previous === 'editCommit' ? null : previous));
+      }
+      return;
+    }
+
     if (await handleSlashCommand(content)) {
       setDraft('');
       return;
@@ -75,15 +113,111 @@ export function useMainScreenComposerSubmitActions(
     await sendMessageContent(content, { allowSlashCommands: false, submission });
   }, [
     draftController,
+    cacheThreadQueueState,
     handleSlashCommand,
     sendMessageContent,
+    selectedChatIdRef,
     setDraft,
     setError,
+    setQueueActionItemId,
+    setQueueActionKind,
     submissionController,
+    threadRuntimeSnapshotsRef,
+    turnExecutionController,
     pendingMentionPaths,
     pendingLocalImagePaths,
     uploadingAttachment,
     hasFailedAttachmentUploads,
+    queueActionItemId,
+  ]);
+
+  const handleEditQueuedMessage = useCallback(
+    async (message: BridgeQueuedMessage) => {
+      const threadId = selectedChatIdRef.current?.trim();
+      const messageId = message.id.trim();
+      if (!threadId || !messageId || queueActionItemId) {
+        return;
+      }
+      const draftSnapshot = draftController.snapshot();
+      const composerHasContent =
+        Boolean(draftSnapshot.value.trim()) ||
+        pendingMentionPaths.length > 0 ||
+        pendingLocalImagePaths.length > 0;
+      if (composerHasContent) {
+        setError('Send or clear the current draft before editing a queued message.');
+        return;
+      }
+
+      try {
+        setError(null);
+        setQueueActionItemId(messageId);
+        setQueueActionKind('editStart');
+        const response = await turnExecutionController.startQueuedEdit(threadId, messageId);
+        cacheThreadQueueState(threadId, response.queue);
+        const currentDraft = draftController.snapshot();
+        if (
+          selectedChatIdRef.current === threadId &&
+          currentDraft.scopeKey === draftSnapshot.scopeKey &&
+          currentDraft.revision === draftSnapshot.revision
+        ) {
+          setDraft(message.content);
+        }
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setQueueActionItemId((previous) => (previous === messageId ? null : previous));
+        setQueueActionKind((previous) => (previous === 'editStart' ? null : previous));
+      }
+    },
+    [
+      cacheThreadQueueState,
+      draftController,
+      pendingLocalImagePaths,
+      pendingMentionPaths,
+      queueActionItemId,
+      selectedChatIdRef,
+      setDraft,
+      setError,
+      setQueueActionItemId,
+      setQueueActionKind,
+      turnExecutionController,
+    ],
+  );
+
+  const handleCancelQueuedMessageEdit = useCallback(async () => {
+    const threadId = selectedChatIdRef.current?.trim();
+    const messageId = threadId
+      ? threadRuntimeSnapshotsRef.current[threadId]?.editingQueuedMessageId?.trim()
+      : null;
+    if (!threadId || !messageId || queueActionItemId) {
+      return;
+    }
+
+    try {
+      setError(null);
+      setQueueActionItemId(messageId);
+      setQueueActionKind('editCancel');
+      const response = await turnExecutionController.cancelQueuedEdit(threadId, messageId);
+      cacheThreadQueueState(threadId, response.queue);
+      if (selectedChatIdRef.current === threadId) {
+        setDraft('');
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setQueueActionItemId((previous) => (previous === messageId ? null : previous));
+      setQueueActionKind((previous) => (previous === 'editCancel' ? null : previous));
+    }
+  }, [
+    cacheThreadQueueState,
+    queueActionItemId,
+    selectedChatIdRef,
+    setDraft,
+    setError,
+    setQueueActionItemId,
+    setQueueActionKind,
+    threadRuntimeSnapshotsRef,
+    turnExecutionController,
   ]);
 
   const handleSteerQueuedMessage = useCallback(async () => {
@@ -191,6 +325,8 @@ export function useMainScreenComposerSubmitActions(
   return {
     sendMessageContentRef,
     sendMessage,
+    handleEditQueuedMessage,
+    handleCancelQueuedMessageEdit,
     handleSteerQueuedMessage,
     handleCancelQueuedMessage,
     handleInlineOptionSelect,

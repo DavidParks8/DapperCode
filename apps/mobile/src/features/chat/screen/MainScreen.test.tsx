@@ -17,6 +17,7 @@ import {
 } from '@bridge/messages';
 import type {
   BridgeCapabilities,
+  BridgeThreadQueueState,
   BridgeUiAction,
   BridgeUiSurface,
   Chat,
@@ -295,6 +296,12 @@ function MainRouteShell() {
       resolveUserInput: jest.fn().mockResolvedValue({ ok: true }),
       steerQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
       cancelQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
+      startQueuedThreadMessageEdit: jest.fn().mockResolvedValue({
+        ok: true,
+        queue: { ...emptyQueue, editingItemId: 'queued-1' },
+      }),
+      commitQueuedThreadMessageEdit: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
+      cancelQueuedThreadMessageEdit: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
       sendOrQueueChatMessage: jest.fn().mockResolvedValue({
         disposition: 'sent',
         queue: emptyQueue,
@@ -757,6 +764,112 @@ function MainRouteShell() {
       });
       await pressLabel(root, 'Cancel queued message');
       expect(api.cancelQueuedThreadMessage).toHaveBeenCalledWith(chat.id, 'queued-1');
+      act(() => tree.unmount());
+    });
+
+    it('pauses a queued message before opening it for editing and commits without sending', async () => {
+      const api = createApi();
+      let resolveEditStart:
+        ((value: { ok: boolean; queue: BridgeThreadQueueState }) => void) | null = null;
+      const editStart = new Promise<{
+        ok: boolean;
+        queue: BridgeThreadQueueState;
+      }>((resolve) => {
+        resolveEditStart = resolve;
+      });
+      (api.startQueuedThreadMessageEdit as jest.Mock).mockReturnValueOnce(editStart);
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const queuedMessage = {
+        id: 'queued-1',
+        createdAt: '2026-07-20T00:00:03.000Z',
+        content: 'Use the smaller implementation.',
+      };
+      await emitWs({
+        method: 'bridge/thread/queue/updated',
+        params: { ...emptyQueue, items: [queuedMessage] },
+      });
+
+      await pressLabel(root, 'Edit queued message');
+      expect(api.startQueuedThreadMessageEdit).toHaveBeenCalledWith(chat.id, queuedMessage.id);
+      expect(messageInput(root).props['value']).toBe('');
+      expect(api.commitQueuedThreadMessageEdit).not.toHaveBeenCalled();
+      expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveEditStart?.({
+          ok: true,
+          queue: { ...emptyQueue, items: [queuedMessage], editingItemId: queuedMessage.id },
+        });
+        await editStart;
+        await Promise.resolve();
+      });
+      expect(messageInput(root).props['value']).toBe(queuedMessage.content);
+      expect(
+        hasText(root, 'Queue paused. Send your changes or discard them to resume the original.'),
+      ).toBe(true);
+
+      act(() => messageInput(root).props.onChangeText('Use the smallest implementation.'));
+      await pressLabel(root, 'Save queued message');
+      expect(api.commitQueuedThreadMessageEdit).toHaveBeenCalledWith(
+        chat.id,
+        queuedMessage.id,
+        'Use the smallest implementation.',
+      );
+      expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
+      act(() => tree.unmount());
+    });
+
+    it('keeps a queued edit recoverable across replay snapshot replacement', async () => {
+      const api = createApi();
+      const queuedMessage = {
+        id: 'queued-1',
+        createdAt: '2026-07-20T00:00:03.000Z',
+        content: 'Keep this edit paused.',
+      };
+      const editingQueue = {
+        ...emptyQueue,
+        items: [queuedMessage],
+        editingItemId: queuedMessage.id,
+      };
+      (api.startQueuedThreadMessageEdit as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        queue: editingQueue,
+      });
+      (api.readThreadQueue as jest.Mock).mockResolvedValue(editingQueue);
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      await emitWs({
+        method: 'bridge/thread/queue/updated',
+        params: { ...emptyQueue, items: [queuedMessage] },
+      });
+      await pressLabel(root, 'Edit queued message');
+      expect(messageInput(root).props['value']).toBe(queuedMessage.content);
+
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 44 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(
+        hasText(root, 'Queue paused. Send your changes or discard them to resume the original.'),
+      ).toBe(true);
+      await pressLabel(root, 'Discard queued message edits');
+      expect(api.cancelQueuedThreadMessageEdit).toHaveBeenCalledWith(chat.id, queuedMessage.id);
+      expect(messageInput(root).props['value']).toBe('');
+      expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
       act(() => tree.unmount());
     });
 

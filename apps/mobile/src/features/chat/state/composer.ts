@@ -9,7 +9,9 @@ export const composerHeightAtom = screenAtom(0);
 
 export const queueActionItemIdAtom = screenAtom<string | null>(null);
 
-export const queueActionKindAtom = screenAtom<'steer' | 'cancel' | null>(null);
+export const queueActionKindAtom = screenAtom<
+  'steer' | 'cancel' | 'editStart' | 'editCommit' | 'editCancel' | null
+>(null);
 
 export const activityAtom = screenAtom<ActivityState>((): ActivityState => ({
   tone: 'idle',
