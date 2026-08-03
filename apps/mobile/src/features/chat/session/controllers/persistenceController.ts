@@ -15,15 +15,8 @@ import {
   getChatBridgeUiSurfacesPath,
   getChatModelPreferencesPath,
   getChatPlanSnapshotsPath,
-  getLegacyChatBridgeUiSurfacesPath,
-  getLegacyChatModelPreferencesPath,
-  getLegacyChatPlanSnapshotsPath,
-  getLegacyWorkspaceFavoritesPath,
-  getPersistenceMigrationMarkerPath,
-  getWebPersistenceMigrationMarkerKey,
   getWebProfilePersistenceKey,
   getWorkspaceFavoritesPath,
-  migrateLegacyPersistenceEntry,
   parseChatBridgeUiSurfaces,
   parseChatModelPreferences,
   parseChatPlanSnapshots,
@@ -37,14 +30,6 @@ export interface MainScreenPersistencePaths {
   planSnapshots: () => string | null;
   bridgeUiSurfaces: () => string | null;
   workspaceFavorites: () => string | null;
-  legacyModelPreferences: () => string | null;
-  legacyPlanSnapshots: () => string | null;
-  legacyBridgeUiSurfaces: () => string | null;
-  legacyWorkspaceFavorites: () => string | null;
-  modelPreferencesMigrationMarker: () => string | null;
-  planSnapshotsMigrationMarker: () => string | null;
-  bridgeUiSurfacesMigrationMarker: () => string | null;
-  workspaceFavoritesMigrationMarker: () => string | null;
 }
 
 export interface MainScreenPersistenceControllerOptions {
@@ -52,7 +37,6 @@ export interface MainScreenPersistenceControllerOptions {
   storage?: MainScreenStorage;
   paths?: Partial<MainScreenPersistencePaths>;
   platform?: string;
-  migrateLegacy?: boolean;
   onPersistenceError?: (error: ProfilePersistenceError) => void;
 }
 
@@ -86,13 +70,6 @@ const webStorage: MainScreenStorage = {
   exists: (key) => Promise.resolve(getWebStorage()?.getItem(key) != null),
 };
 
-const WEB_LEGACY_PATHS = {
-  modelPreferences: 'dappercode.main-screen.model-preferences.v1',
-  planSnapshots: 'dappercode.main-screen.plan-snapshots.v1',
-  bridgeUiSurfaces: 'dappercode.main-screen.bridge-ui-surfaces.v1',
-  workspaceFavorites: 'dappercode.main-screen.workspace-favorites.v1',
-} as const;
-
 type PersistedCollection =
   'modelPreferences' | 'planSnapshots' | 'bridgeUiSurfaces' | 'workspaceFavorites';
 
@@ -101,13 +78,6 @@ const RESOURCE_NAMES: Record<PersistedCollection, ProfilePersistenceResource> = 
   planSnapshots: 'plan snapshots',
   bridgeUiSurfaces: 'bridge UI surfaces',
   workspaceFavorites: 'workspace favorites',
-};
-
-const MIGRATION_KEYS: Record<PersistedCollection, string> = {
-  modelPreferences: 'model-preferences',
-  planSnapshots: 'plan-snapshots',
-  bridgeUiSurfaces: 'bridge-ui-surfaces',
-  workspaceFavorites: 'workspace-favorites',
 };
 
 function resolveStorage(
@@ -143,45 +113,6 @@ function buildPersistencePaths(
       createProfilePathResolver(profileId, platform, 'workspace-favorites.v1', () =>
         getWorkspaceFavoritesPath(profileId),
       ),
-    legacyModelPreferences:
-      overrides.legacyModelPreferences ??
-      createLegacyPathResolver(
-        platform,
-        WEB_LEGACY_PATHS.modelPreferences,
-        getLegacyChatModelPreferencesPath,
-      ),
-    legacyPlanSnapshots:
-      overrides.legacyPlanSnapshots ??
-      createLegacyPathResolver(
-        platform,
-        WEB_LEGACY_PATHS.planSnapshots,
-        getLegacyChatPlanSnapshotsPath,
-      ),
-    legacyBridgeUiSurfaces:
-      overrides.legacyBridgeUiSurfaces ??
-      createLegacyPathResolver(
-        platform,
-        WEB_LEGACY_PATHS.bridgeUiSurfaces,
-        getLegacyChatBridgeUiSurfacesPath,
-      ),
-    legacyWorkspaceFavorites:
-      overrides.legacyWorkspaceFavorites ??
-      createLegacyPathResolver(
-        platform,
-        WEB_LEGACY_PATHS.workspaceFavorites,
-        getLegacyWorkspaceFavoritesPath,
-      ),
-    modelPreferencesMigrationMarker:
-      overrides.modelPreferencesMigrationMarker ??
-      createMarkerPathResolver(platform, 'modelPreferences'),
-    planSnapshotsMigrationMarker:
-      overrides.planSnapshotsMigrationMarker ?? createMarkerPathResolver(platform, 'planSnapshots'),
-    bridgeUiSurfacesMigrationMarker:
-      overrides.bridgeUiSurfacesMigrationMarker ??
-      createMarkerPathResolver(platform, 'bridgeUiSurfaces'),
-    workspaceFavoritesMigrationMarker:
-      overrides.workspaceFavoritesMigrationMarker ??
-      createMarkerPathResolver(platform, 'workspaceFavorites'),
   };
 }
 
@@ -195,47 +126,17 @@ function createProfilePathResolver(
     platform === 'web' ? getWebProfilePersistenceKey(webName, profileId) : nativePath();
 }
 
-function createLegacyPathResolver(
-  platform: string,
-  webKey: string,
-  nativePath: () => string | null,
-): () => string | null {
-  return () => (platform === 'web' ? webKey : nativePath());
-}
-
-function createMarkerPathResolver(
-  platform: string,
-  collection: PersistedCollection,
-): () => string | null {
-  return () =>
-    platform === 'web'
-      ? getWebPersistenceMigrationMarkerKey(MIGRATION_KEYS[collection])
-      : getPersistenceMigrationMarkerPath(MIGRATION_KEYS[collection]);
-}
-
 export class MainScreenPersistenceController {
   private readonly storage: MainScreenStorage;
   private readonly paths: MainScreenPersistencePaths;
-  private readonly profileId: string;
-  private readonly migrateLegacy: boolean;
   private readonly onPersistenceError?: (error: ProfilePersistenceError) => void;
-  private readonly migrated = new Set<PersistedCollection>();
   private readonly writeChains = new Map<PersistedCollection, Promise<void>>();
 
   constructor(options: MainScreenPersistenceControllerOptions) {
-    const {
-      profileId,
-      storage,
-      paths = {},
-      platform = Platform.OS,
-      migrateLegacy = true,
-      onPersistenceError,
-    } = options;
-    this.profileId = profileId.trim();
+    const { profileId, storage, paths = {}, platform = Platform.OS, onPersistenceError } = options;
     this.storage = resolveStorage(storage, platform);
-    this.migrateLegacy = migrateLegacy;
     this.onPersistenceError = onPersistenceError;
-    this.paths = buildPersistencePaths(this.profileId, platform, paths);
+    this.paths = buildPersistencePaths(profileId.trim(), platform, paths);
   }
 
   loadModelPreferences(): Promise<Record<string, ChatModelPreference>> {
@@ -290,36 +191,11 @@ export class MainScreenPersistenceController {
     );
   }
 
-  private async migrate(collection: PersistedCollection): Promise<void> {
-    if (!this.migrateLegacy || this.migrated.has(collection)) {
-      return;
-    }
-
-    const suffix = collection.charAt(0).toUpperCase() + collection.slice(1);
-    await migrateLegacyPersistenceEntry({
-      storage: this.storage,
-      profileId: this.profileId,
-      targetPath: this.paths[collection](),
-      legacyPath: this.paths[`legacy${suffix}` as keyof MainScreenPersistencePaths](),
-      markerPath: this.paths[`${collection}MigrationMarker` as keyof MainScreenPersistencePaths](),
-    });
-    this.migrated.add(collection);
-  }
-
   private async read<T>(
     collection: PersistedCollection,
     parse: (raw: string) => T,
     fallback: T,
   ): Promise<T> {
-    try {
-      await this.migrate(collection);
-    } catch (cause) {
-      this.reportError(
-        new ProfilePersistenceError(RESOURCE_NAMES[collection], 'migrate', { cause }),
-      );
-      return fallback;
-    }
-
     const path = this.paths[collection]();
     if (!path) {
       return fallback;
@@ -362,7 +238,6 @@ export class MainScreenPersistenceController {
     reliable: boolean,
   ): Promise<void> {
     try {
-      await this.migrate(collection);
       const path = this.paths[collection]();
       if (!path) {
         throw new Error('Persistence path is unavailable.');

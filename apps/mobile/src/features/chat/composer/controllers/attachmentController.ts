@@ -8,10 +8,7 @@ import {
   type ComposerAttachmentChip,
   draftContainsMentionLabel,
   normalizeAttachmentPath,
-  normalizeWorkspacePath,
-  replaceActiveMentionQueryWithSelection,
   scheduleIdleTask,
-  toAttachmentPathSuggestions,
   toMentionInput,
   toPathBasename,
 } from '../../helpers/helpers';
@@ -25,7 +22,7 @@ export {
 } from './attachmentUploadController';
 export type { PreparedAttachment } from './attachmentUploadController';
 
-type AttachmentApi = Pick<HostBridgeApiClient, 'execTerminal' | 'uploadAttachment'>;
+type AttachmentApi = Pick<HostBridgeApiClient, 'uploadAttachment'>;
 
 export function addUniqueAttachmentPath(paths: string[], rawPath: string): string[] | null {
   const normalized = normalizeAttachmentPath(rawPath);
@@ -44,21 +41,15 @@ export interface AttachmentController {
   setAttachmentPathDraft: React.Dispatch<React.SetStateAction<string>>;
   pendingMentionPaths: string[];
   pendingLocalImagePaths: string[];
-  fileCandidates: string[];
-  loadingFileCandidates: boolean;
   pickerBusy: boolean;
   uploading: boolean;
   hasFailedUploads: boolean;
   composerAttachments: ComposerAttachmentChip[];
-  pathSuggestions: string[];
-  mentionSuggestions: (query: string) => string[];
   openMenu: () => void;
   closeMenu: () => void;
   requestMenuAction: (action: Exclude<AttachmentMenuAction, null>) => void;
   closePathModal: () => void;
   submitPath: () => void;
-  selectPathSuggestion: (path: string) => void;
-  selectMentionSuggestion: (path: string) => void;
   removeComposerAttachment: (id: string) => void;
   removeMentionPath: (path: string) => void;
   retryFailedUploads: () => void;
@@ -74,16 +65,12 @@ export interface AttachmentController {
 export function useAttachmentController({
   api,
   chat,
-  workspace,
   draft,
-  setDraft,
   setError,
 }: {
   api: AttachmentApi;
   chat: Chat | null;
-  workspace: string | null;
   draft: string;
-  setDraft: React.Dispatch<React.SetStateAction<string>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
 }): AttachmentController {
   const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
@@ -92,14 +79,8 @@ export function useAttachmentController({
   const [pendingAction, setPendingAction] = useState<AttachmentMenuAction>(null);
   const [pendingMentionPaths, setPendingMentionPaths] = useState<string[]>([]);
   const [pendingLocalImagePaths, setPendingLocalImagePaths] = useState<string[]>([]);
-  const [fileCandidates, setFileCandidates] = useState<string[]>([]);
-  const [loadingFileCandidates, setLoadingFileCandidates] = useState(false);
-  const cacheRef = useRef<Record<string, string[]>>({});
-  const inFlightRef = useRef<Partial<Record<string, Promise<string[]>>>>({});
-  const workspaceRef = useRef<string | null>(workspace);
   const submissionPendingRef = useRef(false);
   const skipNextDraftReconcileRef = useRef(false);
-  workspaceRef.current = workspace;
 
   const addMention = useCallback(
     (rawPath: string) => {
@@ -143,68 +124,6 @@ export function useAttachmentController({
     uploading,
   } = useAttachmentUploadController({ api, chat, addImage, addMention, setError });
 
-  const fetchCandidates = useCallback(
-    async (cwd: string): Promise<string[]> => {
-      try {
-        const response = await api.execTerminal({
-          command: 'git ls-files --cached --others --exclude-standard',
-          cwd,
-          timeoutMs: 15_000,
-        });
-        if (response.code !== 0) {
-          return [];
-        }
-        return response.stdout
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .slice(0, 8_000);
-      } catch {
-        return [];
-      }
-    },
-    [api],
-  );
-
-  const loadCandidates = useCallback(
-    async (override?: string | null) => {
-      const cwd = normalizeWorkspacePath(override ?? workspace);
-      if (!cwd) {
-        if (!workspaceRef.current) {
-          setFileCandidates([]);
-          setLoadingFileCandidates(false);
-        }
-        return [];
-      }
-      const cached = cacheRef.current[cwd];
-      if (cached) {
-        if (workspaceRef.current === cwd) {
-          setFileCandidates(cached);
-        }
-        return cached;
-      }
-      let pending = inFlightRef.current[cwd];
-      if (!pending) {
-        pending = fetchCandidates(cwd).then((lines) => {
-          cacheRef.current[cwd] = lines;
-          delete inFlightRef.current[cwd];
-          return lines;
-        });
-        inFlightRef.current[cwd] = pending;
-      }
-      if (workspaceRef.current === cwd) {
-        setLoadingFileCandidates(true);
-      }
-      const lines = await pending;
-      if (workspaceRef.current === cwd) {
-        setFileCandidates(lines);
-        setLoadingFileCandidates(false);
-      }
-      return lines;
-    },
-    [fetchCandidates, workspace],
-  );
-
   const openPathModal = useCallback(() => {
     if (pickerInProgressRef.current) {
       return;
@@ -212,23 +131,7 @@ export function useAttachmentController({
     setAttachmentPathDraft('');
     setAttachmentModalVisible(true);
     setError(null);
-    void loadCandidates();
-  }, [loadCandidates, pickerInProgressRef, setError]);
-
-  useEffect(() => {
-    const cwd = normalizeWorkspacePath(workspace);
-    if (!cwd) {
-      setFileCandidates([]);
-      setLoadingFileCandidates(false);
-      return;
-    }
-    const cached = cacheRef.current[cwd];
-    setFileCandidates(cached ?? []);
-    setLoadingFileCandidates(false);
-    if (!cached) {
-      void loadCandidates(cwd);
-    }
-  }, [loadCandidates, workspace]);
+  }, [pickerInProgressRef, setError]);
 
   useEffect(() => {
     if (submissionPendingRef.current) {
@@ -289,8 +192,6 @@ export function useAttachmentController({
     setAttachmentPathDraft('');
     setPendingMentionPaths([]);
     setPendingLocalImagePaths([]);
-    setFileCandidates([]);
-    setLoadingFileCandidates(false);
     setPreparedAttachments([]);
   }, [setPreparedAttachments]);
 
@@ -315,19 +216,10 @@ export function useAttachmentController({
     setAttachmentPathDraft,
     pendingMentionPaths,
     pendingLocalImagePaths,
-    fileCandidates,
-    loadingFileCandidates,
     pickerBusy,
     uploading,
     hasFailedUploads: preparedAttachments.some((attachment) => attachment.status === 'failed'),
     composerAttachments,
-    pathSuggestions: toAttachmentPathSuggestions(
-      fileCandidates,
-      attachmentPathDraft,
-      pendingMentionPaths,
-    ),
-    mentionSuggestions: (query) =>
-      toAttachmentPathSuggestions(fileCandidates, query, pendingMentionPaths),
     openMenu: () => {
       if (!pickerInProgressRef.current && !uploading) {
         Keyboard.dismiss();
@@ -344,19 +236,6 @@ export function useAttachmentController({
       if (addMention(attachmentPathDraft)) {
         setAttachmentPathDraft('');
         setAttachmentModalVisible(false);
-      }
-    },
-    selectPathSuggestion: (path) => {
-      if (addMention(path)) {
-        setAttachmentPathDraft('');
-        setAttachmentModalVisible(false);
-      }
-    },
-    selectMentionSuggestion: (path) => {
-      if (addMention(path)) {
-        setDraft((current) =>
-          replaceActiveMentionQueryWithSelection(current, toPathBasename(path)),
-        );
       }
     },
     removeComposerAttachment: (id) => {

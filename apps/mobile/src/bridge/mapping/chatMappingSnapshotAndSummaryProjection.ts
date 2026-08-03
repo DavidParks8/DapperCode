@@ -192,7 +192,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
   const session = toRecord(snapshot?.['session']);
   const active = toRecord(snapshot?.['active']);
   const version = readCoercedFiniteNumber(snapshot?.['version']);
-  if (!snapshot || (version !== 1 && version !== 2) || !session || !active) {
+  if (!snapshot || version !== 2 || !session || !active) {
     return undefined;
   }
   const timeline = parseSnapshotTimeline(snapshot);

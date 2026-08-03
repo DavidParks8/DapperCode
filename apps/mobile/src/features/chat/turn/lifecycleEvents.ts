@@ -239,7 +239,6 @@ function handleCurrentItemCompleted(
       completedToolEvent.eventType,
       completedToolEvent.detail,
     );
-    context.pushActiveCommand(threadId, completedToolEvent.eventType, completedToolEvent.detail);
   }
 
   const itemType = readString(item?.['type']);
@@ -414,7 +413,6 @@ function resetSettledExternalThreadState(
     return;
   }
 
-  context.setActiveCommands([]);
   context.setStreamingText(null);
   context.reasoningSummaryRef.current = {};
   context.reasoningBufferRef.current = '';

@@ -24,13 +24,6 @@ pub(super) fn read_string(value: Option<&Value>) -> Option<String> {
     value.and_then(Value::as_str).map(str::to_string)
 }
 
-pub(super) fn read_non_empty_env(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 pub(super) fn required_push_id(params: &Value, field: &str) -> Result<String, BridgeError> {
     let value = read_string(params.get(field))
         .map(|value| value.trim().to_string())
@@ -182,12 +175,6 @@ pub(super) fn validate_bridge_ui_block(block: &BridgeUiBlock) -> Result<(), Brid
         }
         _ => Ok(()),
     }
-}
-
-pub(super) fn contains_disallowed_control_chars(value: &str) -> bool {
-    value
-        .chars()
-        .any(|char| matches!(char, ';' | '|' | '&' | '<' | '>' | '`'))
 }
 
 pub(super) fn now_iso() -> String {

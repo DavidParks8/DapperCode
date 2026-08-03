@@ -1,7 +1,7 @@
 import { useMainScreenStyles } from '../styles/useStyles';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { AppSheet } from '@shared/ui/AppSheet';
 import type {
@@ -19,9 +19,6 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
     setAttachmentPathDraft,
     isLoading,
     submitAttachmentPath,
-    loadingAttachmentFileCandidates,
-    attachmentPathSuggestions,
-    selectAttachmentSuggestion,
     pendingMentionPaths,
     removePendingMentionPath,
   } = context;
@@ -52,36 +49,6 @@ export function MainScreenAttachmentModals({ context }: { context: Context }) {
         returnKeyType="done"
         accessibilityLabel="Workspace file path"
       />
-      {loadingAttachmentFileCandidates ? (
-        <Text style={styles.workspaceModalLoading}>Indexing files…</Text>
-      ) : null}
-      {attachmentPathSuggestions.length > 0 ? (
-        <ScrollView
-          style={styles.attachmentSuggestionsList}
-          contentContainerStyle={styles.attachmentSuggestionsListContent}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
-          {attachmentPathSuggestions.map((path, index) => (
-            <Pressable
-              key={`${path}-${String(index)}`}
-              onPress={() => selectAttachmentSuggestion(path)}
-              style={({ pressed }) => [
-                styles.attachmentSuggestionItem,
-                index === attachmentPathSuggestions.length - 1 &&
-                  styles.attachmentSuggestionItemLast,
-                pressed && styles.attachmentSuggestionItemPressed,
-              ]}
-            >
-              <Text style={styles.attachmentSuggestionText} numberOfLines={1}>
-                {path}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      ) : attachmentPathDraft.trim() && !loadingAttachmentFileCandidates ? (
-        <Text style={styles.workspaceModalLoading}>No matching files found.</Text>
-      ) : null}
       {pendingMentionPaths.length > 0 ? (
         <View style={styles.attachmentListColumn}>
           {pendingMentionPaths.map((path, index) => (

@@ -15,7 +15,6 @@ pub(super) struct AppState {
     pub(super) approval_resolution_order: Arc<Mutex<VecDeque<String>>>,
     pub(super) approval_resolution_actor: Arc<Mutex<()>>,
     pub(super) thread_list_streams: Arc<Mutex<HashMap<String, Arc<ThreadListStreamCancellation>>>>,
-    pub(super) terminal: Arc<TerminalService>,
     pub(super) git: Arc<GitService>,
     pub(super) preview: Arc<BrowserPreviewService>,
     pub(super) push: Arc<PushService>,
@@ -75,7 +74,6 @@ impl AppState {
             replay: self.hub.replay_status().await,
             queue: self.queue.status().await,
             push: self.metrics.push_snapshot(),
-            terminal: self.terminal.status(),
             recent_errors: self.metrics.recent_errors(),
         };
         bridge_status(self.started_at, devices, agents, operational)

@@ -410,41 +410,6 @@ describe('chatSnapshotCache', () => {
     expect(toolMeta?.locations).toBeUndefined();
   });
 
-  it('re-sanitizes oversized payloads left over from an older on-disk cache when re-priming', () => {
-    const legacyChat = chat('legacy');
-    requireTestValue(legacyChat.messages[0], 'indexed test value').parts = [
-      {
-        type: 'image',
-        data: 'z'.repeat(CHAT_SNAPSHOT_INLINE_PAYLOAD_MAX_BYTES + 1),
-        mimeType: 'image/png',
-      },
-    ];
-    const legacyRaw = JSON.stringify({
-      version: 1,
-      profileId: 'profile-a',
-      selectedChatId: 'legacy',
-      updatedAt: '2026-07-17T00:00:00.000Z',
-      entries: [
-        {
-          chat: legacyChat,
-          cachedAt: '2026-07-17T00:00:00.000Z',
-          lastAccessedAt: '2026-07-17T00:00:00.000Z',
-        },
-      ],
-    });
-
-    const parsed = parseChatSnapshotCache(
-      legacyRaw,
-      'profile-a',
-      Date.parse('2026-07-18T00:00:00.000Z'),
-    );
-
-    expect(parsed.entries).toHaveLength(1);
-    expect(parsed.entries[0]?.chat.messages[0]?.parts).toEqual([
-      { type: 'image', mimeType: 'image/png' },
-    ]);
-  });
-
   it('does not let in-flight, queued, or delayed stale saves resurrect a purged snapshot', async () => {
     const originalDirectory = FileSystem.documentDirectory;
     Object.defineProperty(FileSystem, 'documentDirectory', {

@@ -9,7 +9,7 @@ import {
 } from '@shell/session/chatSnapshotCache';
 import { deleteChatSummaryCache } from '@shell/session/chatSummaryCache';
 import type { OnboardingBridgeProfileDraft } from '../../../features/onboarding/screen/OnboardingScreen';
-import { bridgeProfilesAtom, bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
+import { bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
 import { dispatchDurableAppStateAtom } from '@shell/state/appState/actions';
 import {
   applyRestoredChatSnapshotAtom,
@@ -120,61 +120,3 @@ export const switchBridgeProfileAtom = atom(
     }
   },
 );
-
-export const renameBridgeProfileAtom = atom(
-  null,
-  async (get, set, profileId: string, nextName: string): Promise<void> => {
-    await set(dispatchDurableAppStateAtom, {
-      type: 'profiles/rename',
-      profileId,
-      name: nextName,
-    });
-  },
-);
-
-export const deleteBridgeProfileAtom = atom(
-  null,
-  async (get, set, profileId: string): Promise<void> => {
-    const deletingActiveProfile = get(activeBridgeProfileAtom)?.id === profileId;
-    if (deletingActiveProfile) {
-      set(bridgeProfileTransitioningAtom, true);
-    }
-    try {
-      const nextState = await set(dispatchDurableAppStateAtom, {
-        type: 'profiles/remove',
-        profileId,
-      });
-      const nextStore = nextState.bridgeProfiles;
-      await Promise.all([deleteChatSnapshotCache(profileId), deleteChatSummaryCache(profileId)]);
-
-      if (deletingActiveProfile) {
-        set(resetChatSessionStateAtom);
-        const nextCache = nextStore.activeProfileId
-          ? await loadChatSnapshotCache(nextStore.activeProfileId)
-          : null;
-        set(applyRestoredCacheAtom, nextCache);
-      }
-    } finally {
-      if (deletingActiveProfile) {
-        set(bridgeProfileTransitioningAtom, false);
-      }
-    }
-  },
-);
-
-export const clearSavedBridgesAtom = atom(null, async (get, set): Promise<void> => {
-  set(bridgeProfileTransitioningAtom, true);
-  try {
-    const profiles = get(bridgeProfilesAtom);
-    await set(dispatchDurableAppStateAtom, { type: 'profiles/clear' });
-    await Promise.all(
-      profiles.flatMap((profile) => [
-        deleteChatSnapshotCache(profile.id),
-        deleteChatSummaryCache(profile.id),
-      ]),
-    );
-    set(resetChatSessionStateAtom);
-  } finally {
-    set(bridgeProfileTransitioningAtom, false);
-  }
-});

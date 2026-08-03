@@ -4,17 +4,11 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 jest.mock('../../helpers/helpers', () => ({
   ...jest.requireActual('../../helpers/helpers'),
   getChatDraftsPath: jest.fn((profileId: string) => `/drafts-${profileId}.json`),
-  getLegacyChatDraftsPath: jest.fn(() => '/drafts.json'),
-  getPersistenceMigrationMarkerPath: jest.fn(
-    (resource: string, profileId?: string) =>
-      `/migration-${resource}-${profileId ?? 'global'}.json`,
-  ),
 }));
 
 import {
   type DraftController,
   type DraftStorage,
-  migrateLegacyDraftEntries,
   serializeDraftEntries,
   updateDraftEntries,
   useDraftController,
@@ -69,16 +63,6 @@ describe('draftController', () => {
     const entries = updateDraftEntries({ first: 'draft' }, 'first', '  ');
     expect(entries).toEqual({});
     expect(JSON.parse(serializeDraftEntries(entries))).toEqual({ version: 2, entries: {} });
-  });
-
-  it('partitions legacy drafts by profile', () => {
-    const firstKey = JSON.stringify(['first', 'thread']);
-    const secondKey = JSON.stringify(['second', 'thread']);
-    const migrated = migrateLegacyDraftEntries(
-      serializeDraftEntries({ [firstKey]: 'first draft', [secondKey]: 'second draft' }),
-      'first',
-    );
-    expect(JSON.parse(migrated).entries).toEqual({ [firstKey]: 'first draft' });
   });
 
   it('loads, updates, debounces, switches scope, and flushes on unmount', async () => {
@@ -235,47 +219,9 @@ describe('draftController', () => {
     act(() => tree!.unmount());
   });
 
-  it('restores each profile legacy draft without copying another profile into its file', async () => {
-    const firstKey = JSON.stringify(['first', 'thread']);
-    const secondKey = JSON.stringify(['second', 'thread']);
-    const storage = memoryStorage({
-      '/drafts.json': serializeDraftEntries({
-        [firstKey]: 'first legacy',
-        [secondKey]: 'second legacy',
-      }),
-    });
-    let current: DraftController;
-    function Probe({ profileId }: { profileId: string }) {
-      current = useDraftController(profileId, 'thread', storage);
-      return null;
-    }
-
-    let tree: ReactTestRenderer;
-    await act(async () => {
-      tree = renderer.create(React.createElement(Probe, { profileId: 'first' }));
-    });
-    expect(current!.draft).toBe('first legacy');
-    act(() => tree!.unmount());
-
-    await act(async () => {
-      tree = renderer.create(React.createElement(Probe, { profileId: 'second' }));
-    });
-    expect(current!.draft).toBe('second legacy');
-    expect(JSON.parse(storage.values.get('/drafts-first.json')!).entries).toEqual({
-      [firstKey]: 'first legacy',
-    });
-    expect(JSON.parse(storage.values.get('/drafts-second.json')!).entries).toEqual({
-      [secondKey]: 'second legacy',
-    });
-    expect(storage.values.get('/drafts.json')).toContain('first legacy');
-    act(() => tree!.unmount());
-  });
-
   it('exposes and reports an actionable typed write failure', async () => {
     jest.useFakeTimers();
-    const marker = JSON.stringify({ version: 1, profileId: 'profile', complete: true });
     const storage = memoryStorage({
-      '/migration-drafts-profile.json': marker,
       '/drafts-profile.json': serializeDraftEntries({}),
     });
     (storage.write as jest.Mock).mockRejectedValue(new Error('disk full'));

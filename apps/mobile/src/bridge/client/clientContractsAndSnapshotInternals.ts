@@ -3,12 +3,6 @@ import { StaleSnapshotRevisionError } from '@bridge/client/clientSnapshotErrors'
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import type { RawAcpSnapshot, RawThread } from '@bridge/mapping/chatMapping';
 
-export interface HealthResponse {
-  status: 'ok' | 'degraded' | 'unhealthy';
-  at: string;
-  uptimeSec: number;
-}
-
 export interface ApiClientOptions {
   ws: HostBridgeWsClient;
   bridgeUrl?: string;

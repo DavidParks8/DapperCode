@@ -52,35 +52,6 @@ function message(
 }
 
 describe('getVisibleTranscriptMessages', () => {
-  it('hides system timeline rows when tool calls are disabled', () => {
-    const messages = [
-      message('u1', 'user', 'Investigate this bug'),
-      message('s1', 'system', '• Searched web for "react native flatlist"'),
-      message('a1', 'assistant', 'Found the issue.'),
-    ];
-
-    expect(getVisibleTranscriptMessages(messages, false).map((entry) => entry.id)).toEqual([
-      'u1',
-      'a1',
-    ]);
-  });
-
-  it('shows system timeline rows when tool calls are enabled', () => {
-    const messages = [
-      message('u1', 'user', 'Investigate this bug'),
-      message('s1', 'system', '• Searched web for "react native flatlist"'),
-      message('s2', 'system', '• Called tool `openaiDeveloperDocs / search_openai_docs`'),
-      message('a1', 'assistant', 'Found the issue.'),
-    ];
-
-    expect(getVisibleTranscriptMessages(messages, true).map((entry) => entry.id)).toEqual([
-      'u1',
-      's1',
-      's2',
-      'a1',
-    ]);
-  });
-
   it('hides tool rows when detailed tool calls are disabled', () => {
     const messages = [
       message('u1', 'user', 'Investigate this bug'),
@@ -379,94 +350,6 @@ describe('buildTranscriptDisplayItems', () => {
     ]);
   });
 
-  it('turns legacy untyped tool timeline rows into individual invocations', () => {
-    const messages = [
-      message('u1', 'user', 'Audit this'),
-      message('s1', 'system', '• Searched web for "react native flatlist"'),
-      message('s2', 'system', '• Called tool `openaiDeveloperDocs / search_openai_docs`'),
-      message('a1', 'assistant', 'Done.'),
-    ];
-
-    expect(summarizeItems(buildTranscriptDisplayItems(messages))).toEqual([
-      { kind: 'message', id: 'user-1-Audit this' },
-      {
-        kind: 'toolInvocation',
-        id: 's1-0',
-        title: 'Searched web for "react native flatlist"',
-      },
-      {
-        kind: 'toolInvocation',
-        id: 's2-0',
-        title: 'Called tool `openaiDeveloperDocs / search_openai_docs`',
-      },
-      { kind: 'message', id: 'a1' },
-    ]);
-  });
-
-  it('keeps legacy untyped reasoning rows out of tool groups', () => {
-    const messages = [
-      message('u1', 'user', 'Think through this'),
-      message('r1', 'system', '• Reasoning\n  └ Inspecting the workspace state'),
-      message('a1', 'assistant', 'Done.'),
-    ];
-
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
-      {
-        kind: 'message',
-        message: messages[0],
-        renderKey: 'user-1-Think through this',
-      },
-      {
-        kind: 'message',
-        message: messages[1],
-        renderKey: 'r1',
-      },
-      {
-        kind: 'message',
-        message: messages[2],
-        renderKey: 'a1',
-      },
-    ]);
-  });
-
-  it('keeps legacy untyped sub-agent lifecycle rows out of tool groups', () => {
-    const messages = [
-      message('u1', 'user', 'Review this'),
-      message('s1', 'system', '• Waiting on sub-agent\n  └ Thread: child'),
-      message('s2', 'system', '• Sent follow-up to sub-agent\n  └ Thread: child'),
-      message('s3', 'system', '• Closed sub-agent thread\n  └ Thread: child'),
-      message('a1', 'assistant', 'Done.'),
-    ];
-
-    expect(buildTranscriptDisplayItems(messages)).toEqual([
-      {
-        kind: 'message',
-        message: messages[0],
-        renderKey: 'user-1-Review this',
-      },
-      {
-        kind: 'message',
-        message: messages[1],
-        renderKey: 's1',
-      },
-      {
-        kind: 'message',
-        message: messages[2],
-        renderKey: 's2',
-      },
-      {
-        kind: 'message',
-        message: messages[3],
-        renderKey: 's3',
-      },
-      {
-        kind: 'message',
-        message: messages[4],
-        renderKey: 'a1',
-      },
-    ]);
-  });
-
   it('keeps compaction rows separate from grouped tool activity', () => {
     const messages = [
       message('t1', 'system', '• Ran `pwd`', { systemKind: 'tool' }),
@@ -542,7 +425,7 @@ describe('buildTranscriptDisplayItems', () => {
     expect(insertedUserKeys).toEqual(baseUserKeys);
   });
 
-  it('does not group non-system, typed non-tool, or malformed legacy rows', () => {
+  it('does not group non-tool messages', () => {
     const messages = [
       message('assistant', 'assistant', '• Ran `pwd`'),
       message('typed', 'system', '• Ran `pwd`', { systemKind: 'reasoning' }),
@@ -552,22 +435,5 @@ describe('buildTranscriptDisplayItems', () => {
     expect(buildTranscriptDisplayItems(messages).every((item) => item.kind === 'message')).toBe(
       true,
     );
-  });
-
-  it.each([
-    '• Thinking',
-    '• Spawned sub-agent',
-    '• Spawning sub-agent',
-    '• Sub-agent',
-    '• Updated sub-agent thread',
-    '• Task',
-    '• Conversation compacted',
-  ])('keeps legacy lifecycle row %s outside tool groups', (content) => {
-    expect(
-      requireTestValue(
-        buildTranscriptDisplayItems([message('s', 'system', content)])[0],
-        'indexed test value',
-      ).kind,
-    ).toBe('message');
   });
 });

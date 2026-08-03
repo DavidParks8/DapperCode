@@ -320,9 +320,7 @@ impl BridgeSupervisor {
                 return Err(error).context("failed to establish bridge process ownership");
             }
         };
-        if let Err(error) = write_ownership_record(&self.ownership_path(), &ownership)
-            .and_then(|_| write_compatibility_pid_file(&self.pid_path(), pid))
-        {
+        if let Err(error) = write_ownership_record(&self.ownership_path(), &ownership) {
             let _ = child.kill();
             let _ = child.wait();
             let _ = self.remove_ownership_if_matches(&ownership);
@@ -493,10 +491,6 @@ impl BridgeSupervisor {
         })
     }
 
-    fn pid_path(&self) -> PathBuf {
-        self.paths.pid_path(&self.profile.profile_id)
-    }
-
     fn ownership_path(&self) -> PathBuf {
         self.paths.ownership_path(&self.profile.profile_id)
     }
@@ -516,7 +510,6 @@ impl BridgeSupervisor {
         config: &BridgeRuntimeConfig,
     ) -> Result<()> {
         let Some(ownership) = read_ownership_record(&self.ownership_path())? else {
-            remove_compatibility_pid_file(&self.pid_path(), None)?;
             return Ok(());
         };
         if !process_matches_ownership(&ownership) {
@@ -538,7 +531,7 @@ impl BridgeSupervisor {
         if read_ownership_record(&self.ownership_path())?.as_ref() == Some(expected) {
             remove_file_if_exists(&self.ownership_path())?;
         }
-        remove_compatibility_pid_file(&self.pid_path(), Some(expected.pid))
+        Ok(())
     }
 
     fn stop_owned_process(&self, ownership: &ProcessOwnershipRecord) -> Result<()> {
@@ -620,22 +613,6 @@ fn read_ownership_record(path: &Path) -> Result<Option<ProcessOwnershipRecord>> 
 
 fn write_ownership_record(path: &Path, record: &ProcessOwnershipRecord) -> Result<()> {
     atomic_private_write(path, &serde_json::to_vec_pretty(record)?)
-}
-
-fn write_compatibility_pid_file(path: &Path, pid: u32) -> Result<()> {
-    atomic_private_write(path, format!("{pid}\n").as_bytes())
-}
-
-fn remove_compatibility_pid_file(path: &Path, expected_pid: Option<u32>) -> Result<()> {
-    if let Some(expected_pid) = expected_pid {
-        let actual = fs::read_to_string(path)
-            .ok()
-            .and_then(|value| value.trim().parse::<u32>().ok());
-        if actual != Some(expected_pid) {
-            return Ok(());
-        }
-    }
-    remove_file_if_exists(path)
 }
 
 fn process_identity(
@@ -1105,25 +1082,6 @@ mod tests {
     }
 
     #[test]
-    fn pid_mirror_is_only_removed_for_the_recorded_process() {
-        let temp = tempdir().unwrap();
-        let pid_path = temp.path().join("bridge.pid");
-
-        remove_compatibility_pid_file(&pid_path, None).unwrap();
-        write_compatibility_pid_file(&pid_path, 4321).unwrap();
-
-        remove_compatibility_pid_file(&pid_path, Some(1234)).unwrap();
-        assert!(pid_path.is_file(), "another process's pid must survive");
-
-        remove_compatibility_pid_file(&pid_path, Some(4321)).unwrap();
-        assert!(!pid_path.exists());
-
-        fs::write(&pid_path, b"not-a-pid\n").unwrap();
-        remove_compatibility_pid_file(&pid_path, Some(4321)).unwrap();
-        assert!(pid_path.is_file(), "unparsable mirrors are left alone");
-    }
-
-    #[test]
     fn validates_digest_shape_before_trusting_a_record() {
         assert!(valid_sha256_digest(&format!("sha256:{}", "a".repeat(64))));
         assert!(!valid_sha256_digest(&format!("sha256:{}", "z".repeat(64))));
@@ -1188,11 +1146,9 @@ mod tests {
         let mut dead = record(&workspace.path().canonicalize().unwrap());
         dead.pid = u32::MAX - 1;
         write_ownership_record(&supervisor.ownership_path(), &dead).unwrap();
-        write_compatibility_pid_file(&supervisor.pid_path(), dead.pid).unwrap();
 
         assert_eq!(supervisor.stop().unwrap().state, BridgeState::Stopped);
         assert!(!supervisor.ownership_path().exists());
-        assert!(!supervisor.pid_path().exists());
     }
 
     #[test]
@@ -1535,7 +1491,6 @@ mod tests {
         let ownership = wait_for_identity(child.id(), &sleep_binary, workspace.path(), &digest);
 
         write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
-        write_compatibility_pid_file(&supervisor.pid_path(), ownership.pid).unwrap();
 
         assert!(supervisor.owns_running_process());
         assert!(process_matches_ownership(&ownership));
@@ -1545,7 +1500,6 @@ mod tests {
         let _ = child.wait();
         assert!(!process_matches_ownership(&ownership));
         assert!(!supervisor.ownership_path().exists());
-        assert!(!supervisor.pid_path().exists());
     }
 
     #[cfg(unix)]
@@ -1697,9 +1651,7 @@ mod tests {
             })
             .expect("sleep process identity");
         let ownership_path = paths.ownership_path(&profile.profile_id);
-        let pid_path = paths.pid_path(&profile.profile_id);
         write_ownership_record(&ownership_path, &ownership).unwrap();
-        write_compatibility_pid_file(&pid_path, ownership.pid).unwrap();
         let before = fs::read(&ownership_path).unwrap();
 
         let runtime = RuntimePaths {
@@ -1715,17 +1667,12 @@ mod tests {
         assert_eq!(start_result.state, BridgeState::Inaccessible);
         assert!(start_result.managed_process);
         assert_eq!(fs::read(&ownership_path).unwrap(), before);
-        assert_eq!(
-            fs::read_to_string(&pid_path).unwrap().trim(),
-            child.id().to_string()
-        );
         assert!(child.try_wait().unwrap().is_none());
 
         let stopped = supervisor.stop().unwrap();
         assert_eq!(stopped.state, BridgeState::Stopped);
         let _ = child.wait();
         assert!(!ownership_path.exists());
-        assert!(!pid_path.exists());
         drop(listener);
     }
 

@@ -5,7 +5,7 @@ import { readIntegerLike } from '@shared/runtimeValidation';
 import { EventType } from '@ag-ui/core';
 
 export function readEventId(record: Record<string, unknown>): number | null {
-  const eventId = readIntegerLike(record['eventId']) ?? readIntegerLike(record['event_id']);
+  const eventId = readIntegerLike(record['eventId']);
   if (eventId === null || eventId < 1) {
     return null;
   }

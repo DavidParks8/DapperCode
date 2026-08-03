@@ -174,7 +174,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     replayRecoveryRetryTimerRef,
     selectedChat,
     selectedChatId,
-    setDraft,
   } = context;
   const store = useStore();
   const setError = useSetAtom(errorAtom);
@@ -322,13 +321,10 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const { preferredDefaultModelId, preferredDefaultEffort, preferredServiceTier } =
     resolvePreferredModelDefaults(chatModelPreferencesRef.current, selectedNewAgentId);
   const activeApprovalPolicy = toApprovalPolicyForMode(approvalMode);
-  const attachmentWorkspace = selectedChat?.cwd ?? preferredStartCwd ?? null;
   const attachmentController = useAttachmentController({
     api,
     chat: selectedChat,
-    workspace: attachmentWorkspace,
     draft,
-    setDraft,
     setError,
   });
   const {
@@ -338,17 +334,13 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     setAttachmentPathDraft,
     pendingMentionPaths,
     pendingLocalImagePaths,
-    loadingFileCandidates: loadingAttachmentFileCandidates,
     pickerBusy: attachmentPickerBusy,
     uploading: uploadingAttachment,
     hasFailedUploads: hasFailedAttachmentUploads,
     composerAttachments,
-    pathSuggestions: attachmentPathSuggestions,
     openMenu: openAttachmentMenu,
     closePathModal: closeAttachmentModal,
     submitPath: submitAttachmentPath,
-    selectPathSuggestion: selectAttachmentSuggestion,
-    selectMentionSuggestion,
     removeComposerAttachment,
     removeMentionPath: removePendingMentionPath,
     retryFailedUploads,
@@ -420,7 +412,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     preferredServiceTier,
     preferredCollaborationMode,
     activeApprovalPolicy,
-    attachmentWorkspace,
     attachmentController,
     attachmentModalVisible,
     attachmentMenuVisible,
@@ -428,17 +419,13 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     setAttachmentPathDraft,
     pendingMentionPaths,
     pendingLocalImagePaths,
-    loadingAttachmentFileCandidates,
     attachmentPickerBusy,
     uploadingAttachment,
     hasFailedAttachmentUploads,
     composerAttachments,
-    attachmentPathSuggestions,
     openAttachmentMenu,
     closeAttachmentModal,
     submitAttachmentPath,
-    selectAttachmentSuggestion,
-    selectMentionSuggestion,
     removeComposerAttachment,
     removePendingMentionPath,
     retryFailedUploads,

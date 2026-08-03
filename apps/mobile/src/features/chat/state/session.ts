@@ -1,4 +1,4 @@
-import type { Chat, RunEvent } from '@bridge/types/types';
+import type { Chat } from '@bridge/types/types';
 import type { TranscriptContinuationState } from '../transcript/controllers/continuationController';
 import { screenAtom } from './registry';
 
@@ -18,8 +18,6 @@ export const selectedParentChatAtom = screenAtom<Chat | null>(null);
 export const selectedChatIdAtom = screenAtom<string | null>(null);
 
 export const openingChatIdAtom = screenAtom<string | null>(null);
-
-export const activeCommandsAtom = screenAtom<RunEvent[]>(() => []);
 
 export const loadingWorkspaceRootsAtom = screenAtom(false);
 

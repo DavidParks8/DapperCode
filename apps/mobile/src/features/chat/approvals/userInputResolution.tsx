@@ -48,7 +48,6 @@ export function useMainScreenApprovalAndUserInputResolution(
     selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
-    setActiveCommands,
     setSelectedChat,
     setStreamingText,
   } = context;
@@ -102,7 +101,6 @@ export function useMainScreenApprovalAndUserInputResolution(
         });
       } else if (!hasPendingApproval && !hasPendingUserInput) {
         clearRunWatchdog();
-        setActiveCommands([]);
         setStreamingText(null);
         setActiveTurnId(null);
         setStoppingTurn(false);
@@ -148,7 +146,6 @@ export function useMainScreenApprovalAndUserInputResolution(
       reasoningBufferRef,
       reasoningSummaryRef,
       selectedChatIdRef,
-      setActiveCommands,
       setActiveTurnId,
       setActivity,
       setSelectedChat,

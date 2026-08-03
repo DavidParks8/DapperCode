@@ -38,7 +38,7 @@ describe('chatSummaryCache', () => {
     jest.restoreAllMocks();
   });
 
-  it('parses the current format, migrates v0, and rejects corruption', () => {
+  it('parses the current format and rejects old or corrupt data', () => {
     const current = mergeChatSummaryCache(
       createEmptyChatSummaryCache('profile-a'),
       [summary('one')],
@@ -52,22 +52,17 @@ describe('chatSummaryCache', () => {
       ),
     ).toEqual(current);
 
-    const migrated = parseChatSummaryCache(
+    const obsolete = parseChatSummaryCache(
       JSON.stringify({
         version: 0,
         profileId: 'profile-a',
         updatedAt: '2026-07-17T00:00:00.000Z',
-        chats: [{ ...summary('legacy'), authToken: 'must-not-survive' }, { id: 'malformed' }, null],
+        chats: [summary('obsolete')],
       }),
       'profile-a',
       Date.parse('2026-07-18T00:00:00.000Z'),
     );
-    expect(migrated).toMatchObject({
-      version: 1,
-      lastSuccessfulRefreshAt: '2026-07-17T00:00:00.000Z',
-      entries: [{ summary: { id: 'legacy' }, cachedAt: '2026-07-17T00:00:00.000Z' }],
-    });
-    expect(migrated.entries[0]?.summary).not.toHaveProperty('authToken');
+    expect(obsolete.entries).toEqual([]);
 
     expect(parseChatSummaryCache('{', 'profile-a').entries).toEqual([]);
     expect(

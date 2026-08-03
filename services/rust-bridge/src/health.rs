@@ -7,7 +7,6 @@ use crate::{
     now_iso,
     observability::{OperationalError, PushMetrics, RequestMetrics},
     replay::ReplayStatus,
-    services::terminal::TerminalStatus,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,7 +38,6 @@ pub(crate) struct BridgeOperationalStatus {
     pub(crate) replay: ReplayStatus,
     pub(crate) queue: QueueStatus,
     pub(crate) push: PushMetrics,
-    pub(crate) terminal: TerminalStatus,
     pub(crate) recent_errors: Vec<OperationalError>,
 }
 
@@ -121,13 +119,6 @@ mod tests {
                 busy_threads: 0,
             },
             push: metrics.push_snapshot(),
-            terminal: TerminalStatus {
-                max_concurrent: 4,
-                running: 0,
-                waiting: 0,
-                saturation_count: 0,
-                timed_out: 0,
-            },
             recent_errors: Vec::new(),
         }
     }

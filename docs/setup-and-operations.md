@@ -139,9 +139,8 @@ a versioned ownership record containing:
 - canonical workspace
 - secure-config SHA-256
 
-The legacy pid file under `profiles/<profileId>/runtime/` is only a compatibility mirror and never
-authorizes a signal by itself. A live owned process remains stoppable when health is temporarily
-unavailable or its stored configuration needs repair.
+A live owned process remains stoppable when health is temporarily unavailable or its stored
+configuration needs repair.
 
 The recorded configuration digest covers everything the bridge was started with **except** the token,
 so the ownership record never contains a secret.
@@ -162,7 +161,6 @@ The operator builds the bridge environment in memory and passes it directly to t
 the token never reaches disk outside the keychain. The bridge itself is still configured purely by
 environment variables, which is what keeps `npm run bridge` working:
 
-- `BRIDGE_NETWORK_MODE`
 - `BRIDGE_HOST`, `BRIDGE_PORT`
 - `BRIDGE_PREVIEW_HOST`, `BRIDGE_PREVIEW_PORT`
 - `BRIDGE_CONNECT_URL`, `BRIDGE_PREVIEW_CONNECT_URL`

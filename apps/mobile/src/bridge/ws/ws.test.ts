@@ -1316,21 +1316,6 @@ describe('HostBridgeWsClient', () => {
     expect(listener).toHaveBeenCalledWith({ method: 'bad', params: {} });
   });
 
-  it('accepts numeric string event metadata and resets legacy event-id epochs', () => {
-    const client = new HostBridgeWsClient('http://localhost:8787');
-    const listener = jest.fn();
-    client.onEvent(listener);
-    client.connect();
-    const socket = latestMockSocket();
-    socket.simulateOpen();
-    socket.simulateMessage(JSON.stringify({ method: 'event/one', event_id: '9.8', params: null }));
-    socket.simulateMessage(JSON.stringify({ method: 'event/reset', eventId: 1, params: {} }));
-    expect(listener).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'bridge/events/snapshotRequired' }),
-    );
-    expect(readDeliveredEventIds(listener)).toContain(1);
-  });
-
   it('disables replay when the bridge does not support it', async () => {
     const client = new HostBridgeWsClient('http://localhost:8787');
     client.connect();

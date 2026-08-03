@@ -132,8 +132,6 @@ function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
   return (
     invocations.length > 0 &&
     invocations.every((invocation) =>
-      // Metadata-backed titles arrive without the backticks the legacy timeline
-      // text used, so the tool label is quoted before it is matched.
       isComputerUseTraceEntry({
         title: invocation.title.includes('`') ? invocation.title : `\`${invocation.title}\``,
       }),
@@ -166,7 +164,6 @@ function shouldHideToolTranscriptMessage(
     message.role === 'tool' ||
     hasToolCalls ||
     Boolean(message.toolMeta) ||
-    (message.role === 'system' && isLegacyToolTimelineContent(text)) ||
     isHiddenActivityTranscriptMessage(message)
   );
 }
@@ -195,25 +192,7 @@ function isToolTranscriptMessage(message: ChatMessage): boolean {
   if (message.role === 'tool' || message.toolMeta || getToolCallDisplayLines(message).length > 0) {
     return true;
   }
-  if (message.role !== 'system') {
-    return false;
-  }
-  return isLegacyToolTimelineContent(getMessageText(message));
-}
-
-function isLegacyToolTimelineContent(content: string): boolean {
-  const firstContentLine = content
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  const title = firstContentLine?.match(/^•\s+(.+)$/)?.[1]?.trim();
-  if (!title) {
-    return false;
-  }
-
-  return !/^(reasoning|thinking|spawned sub-agent|spawning sub-agent|sub-agent|waiting on sub-agent|sent follow-up to sub-agent|closed sub-agent thread|updated sub-agent thread|task|compacted conversation context|conversation compacted)\b/i.test(
-    title,
-  );
+  return false;
 }
 
 function buildTranscriptRenderKey(message: ChatMessage, userMessageOrdinal: number): string {

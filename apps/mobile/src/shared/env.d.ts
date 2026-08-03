@@ -6,8 +6,6 @@ declare namespace NodeJS {
     EXPO_PUBLIC_HOST_BRIDGE_TOKEN?: string;
     EXPO_PUBLIC_HOST_BRIDGE_URL?: string;
     EXPO_PUBLIC_IOS_APP_STORE_ID?: string;
-    EXPO_PUBLIC_MAC_BRIDGE_TOKEN?: string;
-    EXPO_PUBLIC_MAC_BRIDGE_URL?: string;
     EXPO_PUBLIC_PRIVACY_POLICY_URL?: string;
     EXPO_PUBLIC_TERMS_OF_SERVICE_URL?: string;
   }

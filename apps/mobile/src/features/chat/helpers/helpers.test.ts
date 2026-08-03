@@ -707,31 +707,9 @@ describe('mainScreenHelpers branch behavior', () => {
     ).toBe('fallback');
   });
 
-  it('ranks attachment suggestions and edits active mentions', () => {
+  it('normalizes attachment labels and detects draft mentions', () => {
     expect(helpers.toPathBasename('')).toBe('image');
     expect(helpers.toPathBasename('a\\b.ts')).toBe('b.ts');
-    expect(helpers.toAttachmentPathSuggestions([], 'a', [])).toEqual([]);
-    expect(
-      helpers.toAttachmentPathSuggestions(
-        ['', 'a.ts', 'src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts'],
-        'apple',
-        ['a.ts'],
-      ),
-    ).toEqual(['src/apple.ts', 'apple/path.ts', 'src/mapple.ts', 'lib/apple/file.ts']);
-    expect(
-      helpers.toAttachmentPathSuggestions(
-        Array.from({ length: 10 }, (_, index) => `f${index}`),
-        '',
-        [],
-      ),
-    ).toHaveLength(8);
-    expect(helpers.parseMentionQuery('hello')).toBeNull();
-    expect(helpers.parseMentionQuery('hello (@src')).toBe('src');
-    expect(helpers.parseMentionQuery('@')).toBe('');
-    expect(helpers.replaceActiveMentionQueryWithSelection('hello @src', ' ')).toBe('hello @src');
-    expect(helpers.replaceActiveMentionQueryWithSelection('hello  @src', 'file.ts')).toBe(
-      'hello @file.ts ',
-    );
     expect(helpers.escapeRegex('a+b')).toBe('a\\+b');
     expect(helpers.draftContainsMentionLabel('hello', '')).toBe(false);
     expect(helpers.draftContainsMentionLabel('use @a+b now', 'a+b')).toBe(true);

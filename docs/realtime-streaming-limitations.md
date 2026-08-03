@@ -10,9 +10,8 @@ Last reviewed: July 19, 2026
 4. ACP session notifications become typed `CanonicalEvent` values.
 5. The bridge projects canonical events into AG-UI envelopes and replayable control notifications.
 
-The bridge does not discover remote agents at runtime. The Node installer validates the remote ACP
-registry, installs exact agent distributions, and atomically writes the local manifest. Rust consumes
-only that local manifest.
+The bridge does not discover or install remote agents. Desktop setup validates an already-installed
+ACP executable and writes the local manifest consumed by Rust.
 
 ## Live Delivery And Replay
 
@@ -88,7 +87,7 @@ start is retried without one — losing sub-agent streaming rather than the agen
 
 1. Start work through DapperCode when live mobile updates are required.
 2. Use `bridge/events/replay` for reconnect gaps and treat `streamId` changes as snapshot boundaries.
-3. Check `bridge/status/read` for agent lifecycle, negotiated capability, replay, queue, push, and
+3. Check `bridge/health/read` for agent lifecycle, negotiated capability, replay, queue, push, and
    request diagnostics.
 4. Repair agent installation or the local manifest when an agent is unavailable; do not add a
    second backend-specific control plane to the Rust bridge.

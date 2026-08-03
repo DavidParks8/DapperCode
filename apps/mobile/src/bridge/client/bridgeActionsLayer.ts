@@ -14,8 +14,6 @@ import type {
   GitDiffResponse,
   GitFileRequest,
   GitHistoryResponse,
-  GitHubAuthGrantInput,
-  GitHubAuthInstallResponse,
   GitStageAllResponse,
   GitStageResponse,
   GitStatusResponse,
@@ -30,8 +28,6 @@ import type {
   ResolveBridgeUiSurfaceResponse,
   ResolveUserInputRequest,
   ResolveUserInputResponse,
-  TerminalExecRequest,
-  TerminalExecResponse,
   UploadAttachmentRequest,
   UploadAttachmentResponse,
 } from '@bridge/types/types';
@@ -137,36 +133,6 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
     return this.ws.request<DismissBridgeUiSurfaceResponse>('bridge/ui/dismiss', {
       id,
       threadId: threadId ?? null,
-    });
-  }
-  execTerminal(body: TerminalExecRequest): Promise<TerminalExecResponse> {
-    return this.ws.request<TerminalExecResponse>('bridge/terminal/exec', body);
-  }
-  installGitHubAuth(
-    body: { accessToken: string; repositories?: string[] } | { grants: GitHubAuthGrantInput[] },
-  ): Promise<GitHubAuthInstallResponse> {
-    const grants =
-      'grants' in body
-        ? body.grants
-        : [
-            {
-              accessToken: body.accessToken,
-              repositories: body.repositories ?? [],
-            },
-          ];
-    const normalizedGrants = grants
-      .map((grant) => ({
-        accessToken: grant.accessToken.trim(),
-        repositories: (grant.repositories ?? [])
-          .map((repository) => repository.trim())
-          .filter((repository) => repository.length > 0),
-      }))
-      .filter((grant) => grant.accessToken.length > 0);
-    if (normalizedGrants.length === 0) {
-      return Promise.reject(new Error('At least one GitHub auth grant is required'));
-    }
-    return this.ws.request<GitHubAuthInstallResponse>('bridge/github/auth/install', {
-      grants: normalizedGrants,
     });
   }
   gitStatus(cwd?: string): Promise<GitStatusResponse> {

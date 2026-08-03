@@ -159,36 +159,6 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     exitingSpy.mockRestore();
   });
 
-  it('renders the indexing status while loading mention suggestions', () => {
-    const context = baseContext({
-      mentionQuery: 'read',
-      loadingAttachmentFileCandidates: true,
-      mentionPathSuggestions: [],
-    });
-    const tree = render(context);
-
-    const status = root(tree).findAll(
-      (node) => typeof node.children[0] === 'string' && node.children[0] === 'Indexing files…',
-    );
-    expect(status.length).toBeGreaterThan(0);
-
-    act(() => tree.unmount());
-  });
-
-  it('renders mention path suggestions as pressable rows', () => {
-    const context = baseContext({
-      mentionQuery: 'read',
-      loadingAttachmentFileCandidates: false,
-      mentionPathSuggestions: ['src/README.md'],
-    });
-    const tree = render(context);
-
-    const pressableRows = root(tree).findAll((node) => typeof node.props['onPress'] === 'function');
-    expect(pressableRows.length).toBeGreaterThan(0);
-
-    act(() => tree.unmount());
-  });
-
   it('renders the bridge recovery banner button with an effective touch target', () => {
     const context = baseContext({ showBridgeRecoveryBanner: true });
     const tree = render(context);

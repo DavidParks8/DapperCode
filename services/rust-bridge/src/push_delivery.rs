@@ -229,27 +229,6 @@ impl PushService {
         }
     }
 
-    pub(super) async fn list(&self) -> Vec<Value> {
-        let registry = self.registry.snapshot().await;
-        registry
-            .devices
-            .iter()
-            .map(|device| {
-                json!({
-                    "platform": device.platform,
-                    "profileId": device.profile_id,
-                    "registrationId": device.registration_id,
-                    "deviceName": device.device_name,
-                    "events": device.events,
-                    "createdAt": device.created_at,
-                    "updatedAt": device.updated_at,
-                    // Never echo full tokens back to clients; expose only a short suffix.
-                    "tokenSuffix": token_suffix(&device.token),
-                })
-            })
-            .collect()
-    }
-
     /// Remove and format the accumulated reply for a thread into a one-line
     /// preview: last non-empty line (agents usually end with the conclusion),
     /// whitespace-collapsed, length-capped.

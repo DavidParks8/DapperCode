@@ -16,7 +16,6 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   buildUserInputDrafts,
   resolveSnapshotCollaborationMode,
-  appendRunEventHistory,
   upsertBridgeUiSurfaceList,
   mergePersistedPlanSnapshots,
 } from '../helpers/helpers';
@@ -45,7 +44,6 @@ export function useMainScreenSelectedRuntimeSelectors(
     runWatchdogUntilRef,
     scheduleRunWatchdogExpiry,
     selectedChat,
-    setActiveCommands,
     setChatPlanSnapshotsLoaded,
     setRunWatchdogNow,
     setStreamingText,
@@ -102,9 +100,6 @@ export function useMainScreenSelectedRuntimeSelectors(
       setSelectedCollaborationMode(
         resolveSnapshotCollaborationMode(snapshot, supportsPlanModeForThread(threadId)),
       );
-      if (snapshot.activeCommands !== undefined) {
-        setActiveCommands(snapshot.activeCommands);
-      }
       if (snapshot.streamingText !== undefined) {
         setStreamingText(snapshot.streamingText);
       }
@@ -142,7 +137,6 @@ export function useMainScreenSelectedRuntimeSelectors(
       runWatchdogUntilRef,
       scheduleRunWatchdogExpiry,
       setActiveBridgeUiSurfaces,
-      setActiveCommands,
       setActivePlan,
       setActiveTurnId,
       setActivity,
@@ -265,13 +259,6 @@ export function useMainScreenSelectedRuntimeSelectors(
     [approvalController, cacheThreadPendingApproval, chatIdRef, setActivity, setPendingApproval],
   );
 
-  const pushActiveCommand = useCallback(
-    (threadId: string, eventType: string, detail: string) => {
-      setActiveCommands((prev) => appendRunEventHistory(prev, threadId, eventType, detail));
-    },
-    [setActiveCommands],
-  );
-
   useEffect(() => {
     onChatContextChange?.(selectedChat);
   }, [onChatContextChange, selectedChat]);
@@ -283,7 +270,6 @@ export function useMainScreenSelectedRuntimeSelectors(
   return {
     applyThreadRuntimeSnapshot,
     refreshPendingApprovalsForThread,
-    pushActiveCommand,
   };
 }
 

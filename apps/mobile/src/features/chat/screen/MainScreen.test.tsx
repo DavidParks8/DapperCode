@@ -1632,11 +1632,6 @@ function MainRouteShell() {
           ? Promise.resolve(response)
           : Promise.reject(new Error(`Cannot browse ${request.path ?? 'default'}`));
       }),
-      execTerminal: jest.fn().mockResolvedValue({
-        code: 0,
-        stdout: 'apps/mobile/src/screens/MainScreen.tsx\nREADME.md\n',
-        stderr: '',
-      }),
       uploadAttachment: jest.fn().mockResolvedValue({
         path: '/uploads/report.txt',
         kind: 'file',
@@ -4734,9 +4729,8 @@ function MainRouteShell() {
     it('keeps a live plan update authoritative over a slower persisted hydration', async () => {
       let resolvePersistedPlanRead: ((value: string) => void) | null = null;
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
-        // Only the profile-scoped plan snapshot file is held pending here; the
-        // legacy migration path and every other persisted collection must
-        // still resolve immediately (as "missing") so mounting isn't blocked.
+        // Only the profile-scoped plan snapshot file is held pending here; every
+        // other persisted collection still resolves immediately as missing.
         if (path.includes('dappercode-profile-') && path.endsWith('chat-plan-snapshots.json')) {
           return new Promise<string>((resolve) => {
             resolvePersistedPlanRead = resolve;

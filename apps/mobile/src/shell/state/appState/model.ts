@@ -20,7 +20,6 @@ import {
   dedupeRecentPreviewTargets,
   normalizePreviewTargetInput,
 } from '../../../features/browser/preview';
-import type { AppearancePreference, DarkUiPalette } from '@shared/theme';
 
 const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
   turnCompleted: true,
@@ -53,8 +52,6 @@ export interface AppSettingsState {
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
-  appearancePreference: AppearancePreference;
-  darkUiPalette: DarkUiPalette;
   recentBrowserTargetUrls: string[];
 }
 
@@ -64,7 +61,7 @@ export interface AppStateData {
   push: PushSettingsState;
 }
 
-export type AppStatePersistenceOperation = 'load' | 'import' | 'write';
+export type AppStatePersistenceOperation = 'load' | 'write';
 export type AppStatePersistenceErrorCode = 'read_failed' | 'invalid_data' | 'write_failed';
 
 export class AppStatePersistenceError extends Error {
@@ -86,15 +83,9 @@ export class AppStatePersistenceError extends Error {
   }
 }
 
-export interface LegacyAppStateSource {
-  settingsRaw: string | null;
-  bridgeProfilesRaw: string | null;
-}
-
 export interface AppStatePersistenceAdapter {
   readCurrent(): Promise<string | null>;
   writeCurrent(raw: string): Promise<void>;
-  readLegacy(): Promise<LegacyAppStateSource>;
 }
 
 export interface AppStateSnapshot {
@@ -112,9 +103,6 @@ export type AppStateAction =
     }
   | { type: 'profiles/save'; draft: BridgeProfileDraft }
   | { type: 'profiles/switch'; profileId: string }
-  | { type: 'profiles/rename'; profileId: string; name: string }
-  | { type: 'profiles/remove'; profileId: string }
-  | { type: 'profiles/clear' }
   | { type: 'push/update'; patch: Partial<Pick<PushSettingsState, 'optedOut' | 'events'>> }
   | { type: 'push/ensure-registration'; profileId: string; registrationId: string }
   | {
@@ -133,8 +121,6 @@ export function createDefaultAppSettings(): AppSettingsState {
     approvalMode: 'normal',
     showToolCalls: true,
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
-    appearancePreference: 'system',
-    darkUiPalette: 'classic',
     recentBrowserTargetUrls: [],
   };
 }
@@ -281,8 +267,6 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       approvalMode: record['approvalMode'],
       showToolCalls: record['showToolCalls'],
       workspaceChatLimit: record['workspaceChatLimit'],
-      appearancePreference: record['appearancePreference'],
-      darkUiPalette: record['darkUiPalette'],
       recentBrowserTargetUrls: record['recentBrowserTargetUrls'],
     }),
   );
@@ -293,8 +277,6 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     approvalMode: parsed.approvalMode,
     showToolCalls: parsed.showToolCalls,
     workspaceChatLimit: parsed.workspaceChatLimit,
-    appearancePreference: parsed.appearancePreference,
-    darkUiPalette: parsed.darkUiPalette,
     recentBrowserTargetUrls: dedupeRecentPreviewTargets(
       parsed.recentBrowserTargetUrls
         .map(normalizePreviewTargetInput)

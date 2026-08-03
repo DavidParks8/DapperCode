@@ -68,7 +68,6 @@ pub(crate) fn is_forwarded_method(method: &str) -> bool {
             | "thread/start"
             | "turn/interrupt"
             | "turn/start"
-            | "turn/steer"
     )
 }
 
@@ -123,7 +122,7 @@ mod tests {
         assert!(is_forwarded_method("thread/read"));
         assert!(is_forwarded_method("thread/delete"));
         assert!(is_forwarded_method("turn/start"));
-        assert!(!is_forwarded_method("bridge/status/read"));
+        assert!(!is_forwarded_method("bridge/capabilities/read"));
         assert!(!is_forwarded_method("thread/read/extra"));
     }
 

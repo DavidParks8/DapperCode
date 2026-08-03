@@ -39,25 +39,14 @@ export function readAgentId(value: unknown): AgentId | null {
 }
 
 export function readThreadSourceMetadata(source: unknown): ThreadSourceMetadata {
-  if (typeof source === 'string') {
-    return { kind: source };
-  }
   const sourceRecord = toRecord(source);
   if (!sourceRecord) {
     return {};
-  } // Legacy shape used by older adapters.
-  const legacyKind = readString(sourceRecord['kind']);
-  if (legacyKind) {
-    return withSourceFields(legacyKind, sourceRecord);
   }
   // Current app-server shape: { subAgent: ... } tagged union.
   const subAgentValue = sourceRecord['subAgent'] ?? sourceRecord['subagent'];
   if (subAgentValue !== undefined) {
     return readSubAgentSourceMetadata(subAgentValue);
-  }
-  const typeKind = readString(sourceRecord['type']);
-  if (typeKind && typeKind.startsWith('subAgent')) {
-    return withSourceFields(typeKind, sourceRecord);
   }
   return {};
 }
@@ -165,7 +154,6 @@ export function applySnapshotToChat(chat: Chat, acpSnapshot: RawAcpSnapshot): Ch
     updatedAt: Date.parse(chat.updatedAt) / 1000,
     status: { type: chat.status },
     cwd: chat.cwd,
-    source: chat.sourceKind ? { kind: chat.sourceKind } : undefined,
     acpSnapshot,
   });
   return {
@@ -174,6 +162,9 @@ export function applySnapshotToChat(chat: Chat, acpSnapshot: RawAcpSnapshot): Ch
     title: chat.title,
     status: chat.status,
     statusUpdatedAt: chat.statusUpdatedAt,
+    sourceKind: chat.sourceKind,
+    parentThreadId: chat.parentThreadId,
+    subAgentDepth: chat.subAgentDepth,
     acpSnapshot,
   };
 }

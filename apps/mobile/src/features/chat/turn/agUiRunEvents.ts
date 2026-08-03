@@ -41,7 +41,6 @@ export function processAgUiRunEvents(
     planItemTurnIdByThreadRef,
     upsertThreadRuntimeSnapshot,
     registerTurnStarted,
-    setActiveCommands,
     bumpRunWatchdog,
     cacheThreadTurnState,
     cacheThreadActivity,
@@ -103,7 +102,6 @@ export function processAgUiRunEvents(
         registerTurnStarted(agUiEnvelope.threadId, sourceTurnId);
         setError(null);
         setActiveTurnId(sourceTurnId);
-        setActiveCommands([]);
         setActivity({ tone: 'running', title: 'Working' });
         bumpRunWatchdog();
         return;
@@ -151,7 +149,6 @@ export function processAgUiRunEvents(
       return;
     }
     clearRunWatchdog();
-    setActiveCommands([]);
     setStreamingText(null);
     setPendingUserInputRequest(null);
     setUserInputDrafts({});

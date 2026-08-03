@@ -39,22 +39,15 @@ const launchCamera = ImagePicker.launchCameraAsync as jest.Mock;
 
 function makeHarness(workspace: string | null = '/repo', draft = '') {
   const api = {
-    execTerminal: jest.fn().mockResolvedValue({ code: 0, stdout: 'src/a.ts\n image.png \n\n' }),
     uploadAttachment: jest.fn().mockResolvedValue({ kind: 'file', path: '/repo/uploaded.txt' }),
   };
   const setError = jest.fn();
   let current: AttachmentController;
-  let draftValue = draft;
   function Probe(props: { workspace: string | null; draft: string }) {
-    const [localDraft, setLocalDraft] = React.useState(props.draft);
-    React.useEffect(() => setLocalDraft(props.draft), [props.draft]);
-    draftValue = localDraft;
     current = useAttachmentController({
       api: api,
       chat: { id: 'thread-1' } as never,
-      workspace: props.workspace,
-      draft: localDraft,
-      setDraft: setLocalDraft,
+      draft: props.draft,
       setError,
     });
     return null;
@@ -65,9 +58,6 @@ function makeHarness(workspace: string | null = '/repo', draft = '') {
     setError,
     get current() {
       return current!;
-    },
-    get draft() {
-      return draftValue;
     },
     async mount(props = { workspace, draft }) {
       await act(async () => {
@@ -160,39 +150,6 @@ describe('attachmentController', () => {
     delete (globalThis as { cancelIdleCallback?: unknown }).cancelIdleCallback;
   });
 
-  it('loads and caches workspace candidates, including failures and workspace removal', async () => {
-    const harness = makeHarness();
-    await harness.mount();
-    expect(harness.current.fileCandidates).toEqual(['src/a.ts', 'image.png']);
-    expect(harness.current.mentionSuggestions('a')).toEqual(expect.any(Array));
-
-    act(() => harness.current.openMenu());
-    expect(harness.current.attachmentMenuVisible).toBe(true);
-    act(() => harness.current.closeMenu());
-    await runAction(harness.current, 'workspace-path');
-    expect(harness.current.attachmentModalVisible).toBe(true);
-    act(() => harness.current.closePathModal());
-
-    harness.api.execTerminal.mockResolvedValueOnce({ code: 1, stdout: 'ignored' });
-    await harness.update({ workspace: '/other', draft: '' });
-    expect(harness.current.fileCandidates).toEqual([]);
-    harness.api.execTerminal.mockRejectedValueOnce(new Error('offline'));
-    await harness.update({ workspace: '/third', draft: '' });
-    expect(harness.current.fileCandidates).toEqual([]);
-    await harness.update({ workspace: '/repo', draft: '' });
-    expect(harness.current.fileCandidates).toEqual(['src/a.ts', 'image.png']);
-    await harness.update({ workspace: null, draft: '' });
-    expect(harness.current.loadingFileCandidates).toBe(false);
-    await runAction(harness.current, 'workspace-path');
-    expect(harness.current.attachmentModalVisible).toBe(true);
-    harness.unmount();
-
-    const blankWorkspace = makeHarness(' ');
-    await blankWorkspace.mount();
-    expect(blankWorkspace.current.fileCandidates).toEqual([]);
-    blankWorkspace.unmount();
-  });
-
   it('dismisses the keyboard before opening the attachment menu', async () => {
     const harness = makeHarness();
     await harness.mount();
@@ -205,7 +162,7 @@ describe('attachmentController', () => {
     harness.unmount();
   });
 
-  it('adds, deduplicates, selects, removes, clears, and projects paths', async () => {
+  it('adds, deduplicates, removes, clears, and projects paths', async () => {
     const harness = makeHarness('/repo', '@a');
     await harness.mount();
     act(() => harness.current.submitPath());
@@ -213,14 +170,11 @@ describe('attachmentController', () => {
     act(() => harness.current.setAttachmentPathDraft('/repo/a.ts'));
     act(() => harness.current.submitPath());
     expect(harness.current.pendingMentionPaths).toEqual(['/repo/a.ts']);
-    act(() => harness.current.selectPathSuggestion('/repo/A.ts'));
+    act(() => harness.current.setAttachmentPathDraft('/repo/A.ts'));
+    act(() => harness.current.submitPath());
     expect(harness.current.pendingMentionPaths).toEqual(['/repo/a.ts']);
-
-    act(() => harness.current.selectMentionSuggestion('/repo/src/a.ts'));
-    expect(harness.draft).toContain('@a.ts');
-    expect(harness.current.toTurnInputs('/repo').mentions).toHaveLength(2);
+    expect(harness.current.toTurnInputs('/repo').mentions).toHaveLength(1);
     act(() => harness.current.removeComposerAttachment('file:/repo/a.ts'));
-    act(() => harness.current.removeMentionPath('/repo/src/a.ts'));
     act(() => harness.current.removeComposerAttachment('unknown'));
     expect(harness.current.pendingMentionPaths).toEqual([]);
     act(() => harness.current.clearPending());
@@ -424,7 +378,8 @@ describe('attachmentController', () => {
   it('handles image preparation failures and submission reconciliation', async () => {
     const harness = makeHarness('/repo', '@a.ts');
     await harness.mount();
-    act(() => harness.current.selectPathSuggestion('/repo/a.ts'));
+    act(() => harness.current.setAttachmentPathDraft('/repo/a.ts'));
+    act(() => harness.current.submitPath());
     act(() => harness.current.beginSubmission());
     await harness.update({ workspace: '/repo', draft: '' });
     expect(harness.current.pendingMentionPaths).toEqual(['/repo/a.ts']);
@@ -433,7 +388,8 @@ describe('attachmentController', () => {
     expect(harness.current.pendingMentionPaths).toEqual(['/repo/a.ts']);
     await harness.update({ workspace: '/repo', draft: 'changed' });
     expect(harness.current.pendingMentionPaths).toEqual([]);
-    act(() => harness.current.selectPathSuggestion('/repo/a.ts'));
+    act(() => harness.current.setAttachmentPathDraft('/repo/a.ts'));
+    act(() => harness.current.submitPath());
     act(() => harness.current.finishSubmission(true));
     expect(harness.current.pendingMentionPaths).toEqual([]);
 

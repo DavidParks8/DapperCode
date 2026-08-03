@@ -5,13 +5,8 @@ const defaultPrivacyPolicyUrl =
 const defaultTermsOfServiceUrl =
   'https://github.com/DavidParks8/DapperCode/blob/main/docs/terms-of-service.md';
 
-const legacyHostBridgeUrl = normalizeBridgeUrlInput(
-  process.env.EXPO_PUBLIC_HOST_BRIDGE_URL ?? process.env.EXPO_PUBLIC_MAC_BRIDGE_URL ?? '',
-);
-const hostBridgeToken =
-  process.env.EXPO_PUBLIC_HOST_BRIDGE_TOKEN?.trim() ||
-  process.env.EXPO_PUBLIC_MAC_BRIDGE_TOKEN?.trim() ||
-  null;
+const hostBridgeUrl = normalizeBridgeUrlInput(process.env.EXPO_PUBLIC_HOST_BRIDGE_URL ?? '');
+const hostBridgeToken = process.env.EXPO_PUBLIC_HOST_BRIDGE_TOKEN?.trim() || null;
 const allowWsQueryTokenAuth =
   process.env.EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH?.trim().toLowerCase() === 'true';
 const allowInsecureRemoteBridge =
@@ -25,14 +20,14 @@ const externalStatusFullSyncDebounceMs = parseNonNegativeIntEnv(
   450,
 );
 
-if (legacyHostBridgeUrl && isInsecureRemoteUrl(legacyHostBridgeUrl) && !allowInsecureRemoteBridge) {
+if (hostBridgeUrl && isInsecureRemoteUrl(hostBridgeUrl) && !allowInsecureRemoteBridge) {
   console.warn(
     'Using build-time bridge URL fallback from env. Configure bridge URL in-app from onboarding/settings when possible.',
   );
 }
 
 export const env = {
-  legacyHostBridgeUrl,
+  hostBridgeUrl,
   hostBridgeToken,
   allowWsQueryTokenAuth,
   allowInsecureRemoteBridge,
