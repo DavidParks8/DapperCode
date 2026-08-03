@@ -55,12 +55,11 @@ export function useMainScreenLocalTranscriptActions(
         selectedChatRef.current?.id === threadId
           ? selectedChatRef.current
           : (options?.baseChat ?? null);
-      const nextUserOrdinal =
-        options?.userOrdinal ??
-        Math.max(
-          countUserMessages(visibleChat?.messages ?? []),
-          existingPendingMessages[existingPendingMessages.length - 1]?.userOrdinal ?? 0,
-        ) + 1;
+      const nextUserOrdinal = Math.max(
+        options?.userOrdinal ?? 0,
+        countUserMessages(visibleChat?.messages ?? []) + 1,
+        (existingPendingMessages[existingPendingMessages.length - 1]?.userOrdinal ?? 0) + 1,
+      );
 
       pendingOptimisticUserMessagesRef.current[threadId] = [
         ...existingPendingMessages,

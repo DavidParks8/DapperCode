@@ -2285,6 +2285,62 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps a plan-mode send visible when accepted-turn hydration is still pending', async () => {
+      const modeConfig = {
+        id: 'mode',
+        value: 'build',
+        category: 'mode' as const,
+        options: [
+          { value: 'build', name: 'build' },
+          { value: 'plan', name: 'plan', description: 'Plan before changes.' },
+        ],
+      };
+      const configuredChat: Chat = {
+        ...rootChat,
+        activeTurnId: 'stale-turn-signal',
+        acpConfig: [modeConfig],
+      };
+      const planChat: Chat = {
+        ...configuredChat,
+        acpConfig: [{ ...modeConfig, value: 'plan' }],
+      };
+      const api = createApi();
+      (api.getChat as jest.Mock).mockResolvedValue(configuredChat);
+      (api.peekChat as jest.Mock).mockReturnValue(configuredChat);
+      (api.setThreadConfigOption as jest.Mock).mockResolvedValue(planChat);
+      (api.sendOrQueueChatMessage as jest.Mock).mockResolvedValue({
+        disposition: 'sent',
+        queue: { ...emptyQueue, threadId: configuredChat.id },
+        turnId: 'turn-plan-pending',
+        chat: null,
+      });
+      const { tree } = await renderMain({ api, selectedChat: configuredChat });
+      const root = rootOf(tree);
+
+      await press(byLabelPrefix(root, 'Agent mode, '));
+      await press(pressForText(root, 'plan'));
+      act(() => textInput(root, 'Message').props.onChangeText('Plan the next change'));
+      await press(byLabel(root, 'Send message'));
+
+      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+        configuredChat.id,
+        expect.objectContaining({
+          content: 'Plan the next change',
+          collaborationMode: 'plan',
+        }),
+        expect.any(Object),
+      );
+      expect(textInput(root, 'Message').props['value']).toBe('');
+      expect(root.findAll((node) => node.children.includes('Plan the next change'))).toHaveLength(
+        1,
+      );
+      expect(hasText(root, 'Preview at http://127.0.0.1:5173')).toBe(true);
+      expect(hasText(root, 'Working')).toBe(true);
+      expect(byLabel(root, 'Stop agent')).toBeTruthy();
+
+      act(() => tree.unmount());
+    });
+
     it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
       let resolvePreferences: ((value: string) => void) | null = null;
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
