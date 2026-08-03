@@ -1521,7 +1521,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders an edit invocation as a coloured diff', () => {
+  it('renders an edit invocation with color-independent diff markers', () => {
     const invocation: ToolInvocation = {
       id: 'edit',
       kind: 'edit',
@@ -1556,8 +1556,16 @@ describe('ChatMessage system timeline matrices', () => {
       'indexed test value',
     );
     act(() => readOnPress(control.props)());
-    expect(hasRenderedText(root, '- const a = 1;')).toBe(true);
-    expect(hasRenderedText(root, '+ const a = 2;')).toBe(true);
+    expect(hasRenderedText(root, 'const a = 1;')).toBe(true);
+    expect(hasRenderedText(root, 'const a = 2;')).toBe(true);
+    expect(root.findAllByProps({ testID: 'tool-diff-marker-remove' }).length).toBeGreaterThan(0);
+    expect(root.findAllByProps({ testID: 'tool-diff-marker-add' }).length).toBeGreaterThan(0);
+    expect(
+      root.findAllByProps({ accessibilityLabel: 'Removed line: const a = 1;' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      root.findAllByProps({ accessibilityLabel: 'Added line: const a = 2;' }).length,
+    ).toBeGreaterThan(0);
     expect(hasRenderedText(root, 'Edited app.ts +1 -1')).toBe(true);
     expect(hasRenderedText(root, 'src/app.ts')).toBe(false);
     act(() => rendered.unmount());

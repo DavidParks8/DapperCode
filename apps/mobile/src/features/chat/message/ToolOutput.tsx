@@ -185,10 +185,20 @@ function ToolDiffBlock({
           </Text>
           <View style={styles.diffStats}>
             {stats.additions > 0 ? (
-              <Text style={styles.diffAddedStat}>+{String(stats.additions)}</Text>
+              <Text
+                style={[styles.diffStat, styles.diffAddedStat]}
+                accessibilityLabel={formatChangedLineCount(stats.additions, 'added')}
+              >
+                +{String(stats.additions)}
+              </Text>
             ) : null}
             {stats.deletions > 0 ? (
-              <Text style={styles.diffRemovedStat}>-{String(stats.deletions)}</Text>
+              <Text
+                style={[styles.diffStat, styles.diffRemovedStat]}
+                accessibilityLabel={formatChangedLineCount(stats.deletions, 'removed')}
+              >
+                -{String(stats.deletions)}
+              </Text>
             ) : null}
           </View>
         </View>
@@ -218,15 +228,28 @@ function ToolDiffBlock({
                     line.kind === 'add' && styles.diffLineAdded,
                     line.kind === 'remove' && styles.diffLineRemoved,
                   ]}
+                  accessible={line.kind !== 'context'}
+                  accessibilityLabel={
+                    line.kind === 'add'
+                      ? `Added line: ${line.content}`
+                      : line.kind === 'remove'
+                        ? `Removed line: ${line.content}`
+                        : undefined
+                  }
                 >
-                  <SelectableMessageText
+                  <Text
                     style={[
-                      styles.diffLineText,
-                      line.kind === 'add' && styles.diffLineTextAdded,
-                      line.kind === 'remove' && styles.diffLineTextRemoved,
+                      styles.diffLineMarker,
+                      line.kind === 'add' && styles.diffLineMarkerAdded,
+                      line.kind === 'remove' && styles.diffLineMarkerRemoved,
                     ]}
+                    accessible={false}
+                    testID={`tool-diff-marker-${line.kind}`}
                   >
-                    {`${line.prefix} ${line.content}`}
+                    {line.prefix}
+                  </Text>
+                  <SelectableMessageText style={styles.diffLineText}>
+                    {line.content || ' '}
                   </SelectableMessageText>
                 </View>
               ))}
@@ -251,6 +274,10 @@ function ToolDiffBlock({
       ) : null}
     </View>
   );
+}
+
+function formatChangedLineCount(count: number, kind: 'added' | 'removed'): string {
+  return `${String(count)} ${count === 1 ? 'line' : 'lines'} ${kind}`;
 }
 
 function locationsNotRepeatedInHeader(

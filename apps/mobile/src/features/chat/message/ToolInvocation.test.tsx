@@ -434,11 +434,62 @@ describe('ToolInvocationOutput', () => {
     expand(tree, value.title);
     const lines = textLines(tree);
 
-    expect(lines).toContain('- const a = 1;');
-    expect(lines).toContain('+ const a = 2;');
-    expect(lines).toContain('+ export {};');
-    expect(lines.filter((line) => line.startsWith('- '))).toHaveLength(1);
+    expect(lines).toContain('const a = 1;');
+    expect(lines).toContain('const a = 2;');
+    expect(lines).toContain('export {};');
+    const addedMarkers = tree.root.findAllByProps({ testID: 'tool-diff-marker-add' });
+    const removedMarkers = tree.root.findAllByProps({ testID: 'tool-diff-marker-remove' });
+    expect(addedMarkers.length).toBeGreaterThanOrEqual(2);
+    expect(addedMarkers.every((marker) => marker.props['children'] === '+')).toBe(true);
+    expect(removedMarkers.length).toBeGreaterThan(0);
+    expect(removedMarkers.every((marker) => marker.props['children'] === '-')).toBe(true);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: '1 line added' }).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: '1 line removed' }).length,
+    ).toBeGreaterThan(0);
     expect(tree.root.findAllByProps({ testID: 'tool-output-panel' }).length).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('distinguishes added and removed lines without relying on color', () => {
+    const value = invocation({
+      id: 'tool-color-independent-diff',
+      kind: 'edit',
+      diffs: [{ path: 'src/a.ts', oldText: 'before', newText: 'after' }],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+    const addedMarker = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-diff-marker-add' })[0],
+      'added marker',
+    );
+    const removedMarker = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-diff-marker-remove' })[0],
+      'removed marker',
+    );
+    const addedStyle = StyleSheet.flatten(addedMarker.props['style'] as object);
+    const removedStyle = StyleSheet.flatten(removedMarker.props['style'] as object);
+
+    expect(addedMarker.props['children']).toBe('+');
+    expect(addedStyle).toMatchObject({
+      color: theme.colors.bgMain,
+      backgroundColor: theme.colors.textPrimary,
+    });
+    expect(removedMarker.props['children']).toBe('-');
+    expect(removedStyle).toMatchObject({
+      color: theme.colors.textPrimary,
+      borderWidth: 1,
+      borderColor: theme.colors.textPrimary,
+    });
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Added line: after' })).not.toHaveLength(
+      0,
+    );
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Removed line: before' }),
+    ).not.toHaveLength(0);
 
     act(() => tree.unmount());
   });
