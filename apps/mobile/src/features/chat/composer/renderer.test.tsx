@@ -40,6 +40,7 @@ function baseContext(
     attachmentControlsDisabled: false,
     bannerBridgeUiSurfaces: [],
     canCancelQueuedMessage: false,
+    canEditQueuedMessage: false,
     canSteerQueuedMessage: false,
     composerAttachments: [],
     composerOverlayInset: 0,
@@ -47,9 +48,12 @@ function baseContext(
     dismissBridgeUiSurface: jest.fn(),
     displayedActivity: { tone: 'idle', title: '' },
     draft: '',
+    editingQueuedMessage: false,
     handleBridgeUiAction: jest.fn(),
     handleCancelQueuedMessage: jest.fn(),
+    handleCancelQueuedMessageEdit: jest.fn(),
     handleComposerFocus: jest.fn(),
+    handleEditQueuedMessage: jest.fn(),
     handleResolveApproval: jest.fn(),
     handleSteerQueuedMessage: jest.fn(),
     handleStopTurn: jest.fn(),
@@ -185,6 +189,37 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
 
     const pressableRows = root(tree).findAll((node) => typeof node.props['onPress'] === 'function');
     expect(pressableRows.length).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('suppresses mention attachments and labels submit as save while editing a queued message', () => {
+    const context = baseContext({
+      draft: '@read',
+      editingQueuedMessage: true,
+      mentionQuery: 'read',
+      mentionPathSuggestions: ['src/README.md'],
+    });
+    const tree = render(context);
+
+    expect(root(tree).findAll((node) => node.children.includes('src/README.md'))).toHaveLength(0);
+    expect(
+      root(tree).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Save queued message' &&
+          typeof node.props['onPress'] === 'function',
+      ),
+    ).toHaveLength(1);
+    expect(
+      root(tree).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Add attachment' &&
+          typeof node.props['onPress'] === 'function' &&
+          (node.props['disabled'] === true ||
+            (node.props['accessibilityState'] as { disabled?: boolean } | undefined)?.disabled ===
+              true),
+      ),
+    ).toHaveLength(1);
 
     act(() => tree.unmount());
   });

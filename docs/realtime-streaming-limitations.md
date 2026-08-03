@@ -18,6 +18,8 @@ only that local manifest.
 
 - Canonical ACP events are the internal authority for queue coordination, push delivery, and AG-UI
   projection.
+- Editing the next queued message pauses bridge auto-dispatch until the client commits the revised
+  text or resumes the original item; queue order and non-text turn input remain intact.
 - Outward WebSocket notifications receive monotonically increasing `eventId` values and are stored
   in a bounded replay buffer.
 - `protocolVersion` and the per-process `streamId` let mobile distinguish a reconnect from a bridge

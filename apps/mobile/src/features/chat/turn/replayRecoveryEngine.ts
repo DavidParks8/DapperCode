@@ -147,6 +147,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             bridgeUiSurfaces: [],
             queuedMessages: [...queue.pendingSteers, ...queue.items],
             pendingSteerMessageIds: queue.pendingSteers.map((item) => item.id),
+            editingQueuedMessageId: queue.editingItemId ?? null,
             waitingForToolCalls: queue.waitingForToolCalls,
             steeringInFlight: queue.steeringInFlight,
             queuedMessageError: queue.lastError,

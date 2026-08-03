@@ -1706,17 +1706,45 @@ describe('HostBridgeApiClient', () => {
       .mockResolvedValueOnce({
         ok: true,
         queue: { threadId: 'thr_queue', items: [], lastError: null },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        queue: { threadId: 'thr_queue', items: [], editingItemId: 'queue_1', lastError: null },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        queue: { threadId: 'thr_queue', items: [], editingItemId: null, lastError: null },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        queue: { threadId: 'thr_queue', items: [], editingItemId: null, lastError: null },
       });
 
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     await client.steerQueuedThreadMessage('thr_queue', 'queue_1');
     await client.cancelQueuedThreadMessage('thr_queue', 'queue_1');
+    await client.startQueuedThreadMessageEdit('thr_queue', 'queue_1');
+    await client.commitQueuedThreadMessageEdit('thr_queue', 'queue_1', ' edited ');
+    await client.cancelQueuedThreadMessageEdit('thr_queue', 'queue_1');
 
     expect(ws.request).toHaveBeenNthCalledWith(1, 'bridge/thread/queue/steer', {
       threadId: 'thr_queue',
       itemId: 'queue_1',
     });
     expect(ws.request).toHaveBeenNthCalledWith(2, 'bridge/thread/queue/cancel', {
+      threadId: 'thr_queue',
+      itemId: 'queue_1',
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(3, 'bridge/thread/queue/edit/start', {
+      threadId: 'thr_queue',
+      itemId: 'queue_1',
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(4, 'bridge/thread/queue/edit/commit', {
+      threadId: 'thr_queue',
+      itemId: 'queue_1',
+      content: 'edited',
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(5, 'bridge/thread/queue/edit/cancel', {
       threadId: 'thr_queue',
       itemId: 'queue_1',
     });

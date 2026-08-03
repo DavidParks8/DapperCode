@@ -55,6 +55,35 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
       itemId: itemId.trim(),
     });
   }
+  startQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+  ): Promise<BridgeThreadQueueActionResponse> {
+    return this.ws.request<BridgeThreadQueueActionResponse>('bridge/thread/queue/edit/start', {
+      threadId: threadId.trim(),
+      itemId: itemId.trim(),
+    });
+  }
+  commitQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+    content: string,
+  ): Promise<BridgeThreadQueueActionResponse> {
+    return this.ws.request<BridgeThreadQueueActionResponse>('bridge/thread/queue/edit/commit', {
+      threadId: threadId.trim(),
+      itemId: itemId.trim(),
+      content: content.trim(),
+    });
+  }
+  cancelQueuedThreadMessageEdit(
+    threadId: string,
+    itemId: string,
+  ): Promise<BridgeThreadQueueActionResponse> {
+    return this.ws.request<BridgeThreadQueueActionResponse>('bridge/thread/queue/edit/cancel', {
+      threadId: threadId.trim(),
+      itemId: itemId.trim(),
+    });
+  }
   async uploadAttachment(body: UploadAttachmentRequest): Promise<UploadAttachmentResponse> {
     if (!this.bridgeUrl) {
       throw new Error('Bridge URL is required for attachment uploads');

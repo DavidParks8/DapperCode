@@ -50,6 +50,9 @@ describe('turnExecutionController', () => {
       interruptTurn: jest.fn(),
       steerQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true }),
       cancelQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true }),
+      startQueuedThreadMessageEdit: jest.fn().mockResolvedValue({ ok: true }),
+      commitQueuedThreadMessageEdit: jest.fn().mockResolvedValue({ ok: true }),
+      cancelQueuedThreadMessageEdit: jest.fn().mockResolvedValue({ ok: true }),
     };
     const controller = new TurnExecutionController(api);
     await controller.createAndStart({
@@ -72,8 +75,18 @@ describe('turnExecutionController', () => {
     );
     await controller.steer('thread-1', 'message-1');
     await controller.cancelQueued('thread-1', 'message-2');
+    await controller.startQueuedEdit('thread-1', 'message-3');
+    await controller.commitQueuedEdit('thread-1', 'message-3', 'edited');
+    await controller.cancelQueuedEdit('thread-1', 'message-3');
     expect(api.steerQueuedThreadMessage).toHaveBeenCalledWith('thread-1', 'message-1');
     expect(api.cancelQueuedThreadMessage).toHaveBeenCalledWith('thread-1', 'message-2');
+    expect(api.startQueuedThreadMessageEdit).toHaveBeenCalledWith('thread-1', 'message-3');
+    expect(api.commitQueuedThreadMessageEdit).toHaveBeenCalledWith(
+      'thread-1',
+      'message-3',
+      'edited',
+    );
+    expect(api.cancelQueuedThreadMessageEdit).toHaveBeenCalledWith('thread-1', 'message-3');
   });
 
   it('omits send options when no turn callback is provided', async () => {
