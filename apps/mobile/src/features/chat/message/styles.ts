@@ -135,11 +135,6 @@ export const createStyles = (theme: AppTheme) =>
       pointerEvents: 'none',
     },
     reasoningDetailWrap: { marginTop: theme.spacing.xs, gap: theme.spacing.xs },
-    reasoningDetailLine: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
-      lineHeight: 17,
-    },
     reasoningToggleText: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
