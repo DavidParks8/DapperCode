@@ -5,6 +5,7 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
+import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation } from './toolInvocationModel';
 import {
   LinearTransition,
@@ -454,7 +455,7 @@ describe('ToolInvocationOutput', () => {
     act(() => tree.unmount());
   });
 
-  it('distinguishes added and removed lines without relying on color', () => {
+  it('uses vivid colors plus redundant markers for added and removed lines', () => {
     const value = invocation({
       id: 'tool-color-independent-diff',
       kind: 'edit',
@@ -475,14 +476,15 @@ describe('ToolInvocationOutput', () => {
 
     expect(addedMarker.props['children']).toBe('+');
     expect(addedStyle).toMatchObject({
-      color: theme.colors.bgMain,
-      backgroundColor: theme.colors.textPrimary,
+      color: theme.colors.black,
+      backgroundColor: theme.colors.statusComplete,
     });
     expect(removedMarker.props['children']).toBe('-');
     expect(removedStyle).toMatchObject({
-      color: theme.colors.textPrimary,
+      color: theme.colors.black,
+      backgroundColor: theme.colors.statusError,
       borderWidth: 1,
-      borderColor: theme.colors.textPrimary,
+      borderColor: theme.colors.statusError,
     });
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Added line: after' })).not.toHaveLength(
       0,
@@ -492,6 +494,17 @@ describe('ToolInvocationOutput', () => {
     ).not.toHaveLength(0);
 
     act(() => tree.unmount());
+
+    const lightTheme = createAppTheme('light');
+    const lightStyles = createToolCardStyles(lightTheme);
+    expect(StyleSheet.flatten(lightStyles.diffLineMarkerAdded)).toMatchObject({
+      color: lightTheme.colors.black,
+      backgroundColor: lightTheme.colors.statusComplete,
+    });
+    expect(StyleSheet.flatten(lightStyles.diffLineMarkerRemoved)).toMatchObject({
+      color: lightTheme.colors.white,
+      backgroundColor: lightTheme.colors.statusError,
+    });
   });
 
   it('renders usable images and skips ones the bridge cannot serve', () => {

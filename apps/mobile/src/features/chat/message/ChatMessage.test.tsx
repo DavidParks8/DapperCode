@@ -1521,7 +1521,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders an edit invocation with color-independent diff markers', () => {
+  it('renders an edit invocation with vivid and explicit diff markers', () => {
     const invocation: ToolInvocation = {
       id: 'edit',
       kind: 'edit',
