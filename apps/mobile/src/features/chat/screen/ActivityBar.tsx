@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
-import { SparkleGlyph } from './SparkleGlyph';
+import { AtomGlyph } from './AtomGlyph';
 import { motionDuration } from '@shared/ui/motion';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import type { ActivityTone } from '../state/runtime';
@@ -58,7 +58,7 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
         ]}
       >
         {running ? (
-          <SparkleGlyph color={color} />
+          <AtomGlyph color={color} />
         ) : (
           <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
         )}
@@ -98,7 +98,7 @@ const createStyles = (theme: AppTheme) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    // The sparkle is a 20pt square glyph, so the running row gets a wider slot than the icon rows.
+    // The atom is a 20pt square glyph, so the running row gets a wider slot than the icon rows.
     iconWrapRunning: {
       width: 20,
     },
