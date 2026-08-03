@@ -3487,4 +3487,49 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn fork_boundary_fails_closed_for_incomplete_history_and_skips_non_user_entries() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+
+        let mut unavailable = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        unavailable.apply(&message("user", MessageRole::User));
+        unavailable.unavailable_count = 1;
+        assert!(unavailable.complete_user_message_boundary("user").is_none());
+
+        let mut shifted = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        shifted.apply(&message("user", MessageRole::User));
+        shifted.history.front_mut().expect("history entry").sequence = 1;
+        assert!(shifted.complete_user_message_boundary("user").is_none());
+
+        let mut mixed = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        mixed.apply(&tool("tool", None, ToolCallStatus::Completed));
+        mixed.apply(&message("agent-message", MessageRole::Agent));
+        mixed.apply(&message("user-message", MessageRole::User));
+        mixed
+            .history
+            .iter_mut()
+            .find(|entry| entry.canonical_id == "agent-message")
+            .expect("agent history")
+            .message = None;
+        assert_eq!(
+            mixed.complete_user_message_boundary("user-message"),
+            Some(UserMessageBoundary {
+                ordinal: 0,
+                first_text: "user-message".to_string(),
+                first_text_truncated: false,
+                raw_message_id_hint: None,
+            })
+        );
+    }
 }

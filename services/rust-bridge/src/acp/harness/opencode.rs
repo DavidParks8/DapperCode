@@ -171,16 +171,7 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
             let bytes = bounded_body(response).await?;
             let forked = serde_json::from_slice::<OpenCodeForkResponse>(&bytes)
                 .map_err(|error| HarnessError::InvalidResponse(error.to_string()))?;
-            if forked.id.is_empty()
-                || forked.id.len() > MAX_OPENCODE_SESSION_ID_BYTES
-                || forked.id == source_session_id
-                || forked.parent_id.as_deref() != Some(source_session_id.as_str())
-                || Path::new(&forked.directory) != context.cwd
-            {
-                return Err(HarnessError::InvalidResponse(
-                    "fork identity, parent, or directory did not match the request".to_string(),
-                ));
-            }
+            validate_fork_response(&forked, &source_session_id, &context.cwd)?;
             let forked_session_id = forked.id.clone();
             let copied_user_messages = opencode_messages(context, &forked_session_id)
                 .await?
@@ -214,6 +205,24 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
         )
         .boxed()
     }
+}
+
+fn validate_fork_response(
+    forked: &OpenCodeForkResponse,
+    source_session_id: &str,
+    cwd: &Path,
+) -> Result<(), HarnessError> {
+    if forked.id.is_empty()
+        || forked.id.len() > MAX_OPENCODE_SESSION_ID_BYTES
+        || forked.id == source_session_id
+        || forked.parent_id.as_deref() != Some(source_session_id)
+        || Path::new(&forked.directory) != cwd
+    {
+        return Err(HarnessError::InvalidResponse(
+            "fork identity, parent, or directory did not match the request".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 async fn wait_for_opencode_idle(
@@ -495,12 +504,34 @@ mod tests {
     use crate::acp::config::RuntimeIntegrity;
     use agent_client_protocol::schema::v1::SessionId;
     use axum::extract::{Path as AxumPath, State};
-    use axum::routing::{get, post};
+    use axum::routing::{delete, get, post};
     use axum::{Json, Router};
     use reqwest::Client;
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::mpsc;
+
+    async fn fixture_context(
+        app: Router,
+        session_id: &str,
+    ) -> (SessionContext, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("test server");
+        });
+        (
+            SessionContext {
+                http: Client::new(),
+                http_base: format!("http://{address}/"),
+                session_id: SessionId::new(session_id),
+                cwd: std::env::current_dir().expect("current directory"),
+            },
+            server,
+        )
+    }
 
     fn manifest(executable: &str, agent_id: &str, argv: &[&str]) -> ResolvedAgentManifest {
         ResolvedAgentManifest {
@@ -552,6 +583,193 @@ mod tests {
             "second request",
             false
         ));
+
+        let verified = manifest("/usr/local/bin/opencode", "opencode", &["acp"]);
+        assert_eq!(
+            OpenCodeHarnessAdapter.capabilities(&HarnessContext {
+                manifest: &verified,
+                http_base: None,
+            }),
+            HarnessCapabilities::default()
+        );
+        let spoofed = manifest("/usr/local/bin/other", "opencode", &["acp"]);
+        assert_eq!(
+            OpenCodeHarnessAdapter.capabilities(&HarnessContext {
+                manifest: &spoofed,
+                http_base: Some("http://127.0.0.1"),
+            }),
+            HarnessCapabilities::default()
+        );
+        let launch = OpenCodeHarnessAdapter
+            .launch_config()
+            .expect("loopback launch configuration");
+        assert_eq!(launch.extra_args[0], "--port");
+        assert!(launch.http_base.starts_with("http://127.0.0.1:"));
+    }
+
+    #[test]
+    fn fork_response_validation_rejects_each_mismatched_field() {
+        let cwd = std::env::current_dir().expect("current directory");
+        let valid = || OpenCodeForkResponse {
+            id: "forked".to_string(),
+            parent_id: Some("source".to_string()),
+            directory: cwd.to_string_lossy().to_string(),
+            title: None,
+        };
+        assert!(validate_fork_response(&valid(), "source", &cwd).is_ok());
+
+        let mut forked = valid();
+        forked.id.clear();
+        assert!(matches!(
+            validate_fork_response(&forked, "source", &cwd),
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        let mut forked = valid();
+        forked.id = "x".repeat(MAX_OPENCODE_SESSION_ID_BYTES + 1);
+        assert!(validate_fork_response(&forked, "source", &cwd).is_err());
+        let mut forked = valid();
+        forked.id = "source".to_string();
+        assert!(validate_fork_response(&forked, "source", &cwd).is_err());
+        let mut forked = valid();
+        forked.parent_id = Some("other".to_string());
+        assert!(validate_fork_response(&forked, "source", &cwd).is_err());
+        let mut forked = valid();
+        forked.directory = cwd.join("other").to_string_lossy().to_string();
+        assert!(validate_fork_response(&forked, "source", &cwd).is_err());
+    }
+
+    #[tokio::test]
+    async fn opencode_delete_handles_not_found_and_surfaces_http_and_verification_failures() {
+        let adapter = OpenCodeHarnessAdapter;
+        let request = || HarnessDeleteRequest {
+            affected_session_ids: vec!["source".to_string()],
+        };
+
+        let app = Router::new()
+            .route(
+                "/session/source",
+                delete(|| async { StatusCode::NOT_FOUND }),
+            )
+            .route("/session", get(|| async { Json(serde_json::json!([])) }));
+        let (context, server) = fixture_context(app, "source").await;
+        adapter
+            .delete(&context, request())
+            .await
+            .expect("not found is already deleted");
+        server.abort();
+
+        let app = Router::new().route(
+            "/session/source",
+            delete(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            adapter.delete(&context, request()).await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new()
+            .route("/session/source", delete(|| async { StatusCode::OK }))
+            .route(
+                "/session",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            adapter.delete(&context, request()).await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new()
+            .route("/session/source", delete(|| async { StatusCode::OK }))
+            .route(
+                "/session",
+                get(|| async { Json(serde_json::json!([{"id": "source"}])) }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            adapter.delete(&context, request()).await,
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_steer_surfaces_abort_prompt_and_content_failures() {
+        let adapter = OpenCodeHarnessAdapter;
+        let text = || {
+            serde_json::from_value(serde_json::json!({"type": "text", "text": "replacement"}))
+                .expect("text content")
+        };
+
+        let app = Router::new().route(
+            "/session/source/abort",
+            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            adapter
+                .steer(
+                    &context,
+                    HarnessSteerRequest {
+                        prompt: vec![text()],
+                    },
+                )
+                .await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new()
+            .route("/session/source/abort", post(|| async { StatusCode::OK }))
+            .route(
+                "/session/source/prompt_async",
+                post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            adapter
+                .steer(
+                    &context,
+                    HarnessSteerRequest {
+                        prompt: vec![text()],
+                    },
+                )
+                .await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new()
+            .route("/session/source/abort", post(|| async { StatusCode::OK }))
+            .route(
+                "/session/source/prompt_async",
+                post(|| async { StatusCode::OK }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        adapter
+            .steer(
+                &context,
+                HarnessSteerRequest {
+                    prompt: vec![text()],
+                },
+            )
+            .await
+            .expect("successful non-204 prompt response");
+        server.abort();
+
+        let image: ContentBlock = serde_json::from_value(serde_json::json!({
+            "type": "image",
+            "data": "aW1hZ2U=",
+            "mimeType": "image/png"
+        }))
+        .expect("image content");
+        assert!(matches!(
+            opencode_prompt_parts(&[image]),
+            Err(HarnessError::UnsupportedContent)
+        ));
     }
 
     #[derive(Clone)]
@@ -574,6 +792,16 @@ mod tests {
             ])
         };
         Json(users)
+    }
+
+    async fn opencode_mismatched_messages_fixture(
+        AxumPath(session_id): AxumPath<String>,
+    ) -> Json<serde_json::Value> {
+        if session_id == "source" {
+            opencode_messages_fixture(AxumPath(session_id)).await
+        } else {
+            Json(serde_json::json!([]))
+        }
     }
 
     async fn opencode_fork_fixture(
@@ -638,6 +866,106 @@ mod tests {
         assert_eq!(forked.parent_session_id, "source");
         assert_eq!(forked.directory, directory);
         assert_eq!(observed_rx.recv().await.as_deref(), Some("raw-user-2"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_fork_and_message_validation_fail_closed() {
+        let request = |first_text: &str, raw_message_id_hint: Option<&str>| HarnessForkRequest {
+            user_message_ordinal: 1,
+            first_text: first_text.to_string(),
+            first_text_truncated: false,
+            raw_message_id_hint: raw_message_id_hint.map(str::to_string),
+        };
+
+        let app = Router::new()
+            .route(
+                "/session/{session_id}/message",
+                get(opencode_mismatched_messages_fixture),
+            )
+            .route(
+                "/session/source/fork",
+                post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            OpenCodeHarnessAdapter
+                .fork(&context, request("second", None))
+                .await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new()
+            .route(
+                "/session/{session_id}/message",
+                get(opencode_mismatched_messages_fixture),
+            )
+            .route(
+                "/session/source/fork",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "id": "forked",
+                        "parentID": "source",
+                        "directory": std::env::current_dir()
+                            .expect("current directory")
+                            .to_string_lossy(),
+                        "title": "Forked"
+                    }))
+                }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            OpenCodeHarnessAdapter
+                .fork(
+                    &context,
+                    HarnessForkRequest {
+                        user_message_ordinal: 1,
+                        first_text: "second".to_string(),
+                        first_text_truncated: false,
+                        raw_message_id_hint: None,
+                    },
+                )
+                .await,
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        server.abort();
+
+        let app = Router::new().route(
+            "/session/{session_id}/message",
+            get(opencode_messages_fixture),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            resolve_opencode_message_id(&context, &request("different", None)).await,
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        assert!(matches!(
+            resolve_opencode_message_id(&context, &request("second", Some("wrong"))).await,
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        server.abort();
+
+        let app = Router::new().route(
+            "/session/source/message",
+            get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            opencode_messages(&context, "source").await,
+            Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+        ));
+        server.abort();
+
+        let app = Router::new().route(
+            "/session/source/message",
+            get(|| async { "x".repeat(MAX_OPENCODE_RESPONSE_BYTES + 1) }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        assert!(matches!(
+            opencode_messages(&context, "source").await,
+            Err(HarnessError::ResponseTooLarge)
+        ));
         server.abort();
     }
 

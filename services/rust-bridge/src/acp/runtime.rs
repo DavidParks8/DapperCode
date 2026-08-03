@@ -1597,6 +1597,21 @@ mod tests {
         .expect("valid extension metadata")
     }
 
+    fn fork_meta() -> agent_client_protocol::schema::v1::Meta {
+        serde_json::from_value(serde_json::json!({
+            "dappercode.dev": {
+                "version": 1,
+                "capabilities": {
+                    "sessionFork": {
+                        "method": FORK_METHOD,
+                        "version": 1
+                    }
+                }
+            }
+        }))
+        .expect("valid fork extension metadata")
+    }
+
     fn update(value: serde_json::Value) -> SessionUpdate {
         serde_json::from_value(value).expect("valid typed session update fixture")
     }
@@ -1696,6 +1711,83 @@ mod tests {
         let negotiated = NegotiatedInitialize { response };
         assert!(negotiated.supports_session_steer());
         assert!(!negotiated.supports_session_fork());
+    }
+
+    #[tokio::test]
+    async fn typed_fork_is_capability_and_session_gated_before_dispatch() {
+        let plain_agent = Agent.builder().on_receive_request(
+            async |_request: InitializeRequest, responder, _| {
+                responder.respond(initialized(AgentCapabilities::new()))
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+        let (plain, _) =
+            AcpConnection::start_transport("plain".into(), plain_agent, Duration::from_secs(1))
+                .await
+                .expect("plain agent starts");
+        assert!(matches!(
+            plain
+                .fork_session_extension(ForkRequest {
+                    session_id: SessionId::new("source"),
+                    message_id: Some("message".to_string()),
+                    user_message_ordinal: 1,
+                })
+                .await,
+            Err(AcpRuntimeError::Unsupported(FORK_METHOD))
+        ));
+        plain.shutdown().await.expect("plain shutdown");
+
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel::<ForkRequest>();
+        let fork_agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    let mut response = initialized(AgentCapabilities::new());
+                    response.meta = Some(fork_meta());
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: ForkRequest, responder, _| {
+                    let _ = observed_tx.send(request);
+                    responder.respond(ForkResponse {
+                        session_id: SessionId::new("forked"),
+                        title: Some("Forked".to_string()),
+                    })
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("fork".into(), fork_agent, Duration::from_secs(1))
+                .await
+                .expect("fork agent starts");
+        let request = ForkRequest {
+            session_id: SessionId::new("source"),
+            message_id: Some("message".to_string()),
+            user_message_ordinal: 1,
+        };
+        assert!(matches!(
+            connection.fork_session_extension(request.clone()).await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        connection
+            .ensure_session(SessionId::new("source"))
+            .await
+            .expect("source session");
+        assert_eq!(
+            connection
+                .fork_session_extension(request)
+                .await
+                .expect("fork response")
+                .session_id,
+            SessionId::new("forked")
+        );
+        assert_eq!(
+            observed_rx.recv().await.expect("observed fork").message_id,
+            Some("message".to_string())
+        );
+        connection.shutdown().await.expect("fork shutdown");
     }
 
     #[tokio::test]

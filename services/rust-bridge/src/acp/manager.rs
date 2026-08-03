@@ -3327,6 +3327,7 @@ mod tests {
     use axum::routing::{delete, get, post};
     use axum::{Json, Router};
     use sha2::{Digest, Sha256};
+    use std::sync::atomic::AtomicUsize;
     use tokio::sync::mpsc;
 
     fn echo_digest() -> String {
@@ -3371,6 +3372,117 @@ mod tests {
             "https://example.test/{}",
             "x".repeat(2_048)
         ))));
+    }
+
+    #[tokio::test]
+    async fn manager_projects_native_extension_capabilities_without_a_harness() {
+        let connection = native_extension_connection("native-agent").await;
+        let manager = AgentManager::from_start_results(
+            "native-agent".to_string(),
+            vec![(manifest("native-agent", "Native"), Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        let capabilities = manager
+            .list_agents()
+            .into_iter()
+            .find(|agent| agent.agent_id == "native-agent")
+            .and_then(|agent| agent.capabilities)
+            .expect("native capabilities");
+        assert!(capabilities.session_steer);
+        assert!(capabilities.session_fork);
+        assert!(capabilities.session_delete);
+        assert!(manager
+            .supports_steer(
+                &AgentSessionId::new("native-agent", "source")
+                    .expect("identity")
+                    .encode()
+            )
+            .expect("native steer support"));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_rejects_native_forks_that_reuse_source_or_existing_ids() {
+        let connection = native_extension_connection("native-agent").await;
+        let session = connection
+            .0
+            .ensure_session(SessionId::new("source"))
+            .await
+            .expect("source session");
+        let manager = AgentManager::from_start_results(
+            "native-agent".to_string(),
+            vec![(manifest("native-agent", "Native"), Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        let identity = AgentSessionId::new("native-agent", "source").unwrap();
+        let thread_id = identity.encode();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([
+                index_entry(
+                    AgentSessionId::new("a-agent", "source").unwrap(),
+                    PathBuf::from("/tmp"),
+                ),
+                index_entry(
+                    AgentSessionId::new("native-agent", "aaa").unwrap(),
+                    PathBuf::from("/tmp"),
+                ),
+                index_entry(identity, PathBuf::from("/tmp")),
+                index_entry(
+                    AgentSessionId::new("native-agent", "existing").unwrap(),
+                    PathBuf::from("/tmp"),
+                ),
+            ])
+            .await
+            .expect("source index");
+        for id in ["first-id", "source-id", "existing-id"] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: "native-agent".to_string(),
+                    thread_id: thread_id.clone(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::User,
+                    message_id: id.to_string(),
+                    content: id.to_string(),
+                    content_block: None,
+                })
+                .await;
+        }
+
+        assert!(matches!(
+            manager.fork_session(&thread_id, "source-id").await,
+            Err(AgentManagerError::Fork(_))
+        ));
+        assert!(matches!(
+            manager.fork_session(&thread_id, "existing-id").await,
+            Err(AgentManagerError::Fork(_))
+        ));
+        let (generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("native prompt");
+        let epoch = manager
+            .prepare_steer(&thread_id)
+            .await
+            .expect("prepare native steer");
+        manager
+            .steer(
+                &thread_id,
+                "run".to_string(),
+                "turn".to_string(),
+                generation,
+                epoch,
+                Vec::new(),
+            )
+            .await
+            .expect("native steer");
+        manager.shutdown().await;
     }
 
     async fn connection(
@@ -3541,6 +3653,60 @@ mod tests {
         AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
             .await
             .expect("deleting agent starts")
+    }
+
+    async fn native_extension_connection(agent_id: &str) -> (AcpConnection, NegotiatedInitialize) {
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _| {
+                    let mut response = InitializeResponse::new(request.protocol_version)
+                        .agent_capabilities(AgentCapabilities::new().session_capabilities(
+                            SessionCapabilities::new().delete(SessionDeleteCapabilities::new()),
+                        ));
+                    response.meta = serde_json::from_value(serde_json::json!({
+                        "dappercode.dev": {
+                            "version": 1,
+                            "capabilities": {
+                                "sessionSteer": {
+                                    "method": "_dappercode.dev/session/steer",
+                                    "version": 1
+                                },
+                                "sessionFork": {
+                                    "method": "_dappercode.dev/session/fork",
+                                    "version": 1
+                                }
+                            }
+                        }
+                    }))
+                    .ok();
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |request: ForkRequest, responder, _| {
+                    let session_id = match request.message_id.as_deref() {
+                        Some("source-id") => request.session_id,
+                        Some("existing-id") => SessionId::new("existing"),
+                        _ => SessionId::new("forked"),
+                    };
+                    responder.respond(crate::acp::runtime::ForkResponse {
+                        session_id,
+                        title: Some("Forked".to_string()),
+                    })
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_request: SteerRequest, responder, _| {
+                    responder.respond(crate::acp::runtime::SteerResponse { accepted: true })
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
+            .await
+            .expect("native extension agent starts")
     }
 
     #[derive(Clone)]
@@ -5299,6 +5465,233 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manager_fork_rejects_busy_missing_first_unindexed_and_unsupported_sources() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("plain-agent", false, false, observed_tx).await;
+        let session_id = SessionId::new("fork-source");
+        let session = connection
+            .0
+            .ensure_session(session_id.clone())
+            .await
+            .expect("source session");
+        let manager = AgentManager::from_start_results(
+            "plain-agent".to_string(),
+            vec![(manifest("plain-agent", "Plain"), Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        let identity = AgentSessionId::new("plain-agent", "fork-source").unwrap();
+        let thread_id = identity.encode();
+
+        let (generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("active prompt");
+        assert!(matches!(
+            manager.fork_session(&thread_id, "missing").await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::SessionBusy))
+        ));
+        session
+            .emit(CanonicalEvent::RunFinished {
+                agent_id: "plain-agent".to_string(),
+                thread_id: thread_id.clone(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation,
+                stop_reason: StopReason::EndTurn,
+            })
+            .await;
+        assert!(matches!(
+            manager.fork_session(&thread_id, "missing").await,
+            Err(AgentManagerError::Fork(_))
+        ));
+
+        for (id, content) in [("user-1", "first"), ("user-2", "second")] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: "plain-agent".to_string(),
+                    thread_id: thread_id.clone(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::User,
+                    message_id: id.to_string(),
+                    content: content.to_string(),
+                    content_block: None,
+                })
+                .await;
+        }
+        assert!(matches!(
+            manager.fork_session(&thread_id, "user-1").await,
+            Err(AgentManagerError::Fork(_))
+        ));
+        assert!(matches!(
+            manager.fork_session(&thread_id, "user-2").await,
+            Err(AgentManagerError::SessionIndex(_))
+        ));
+
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity, PathBuf::from("/tmp"))])
+            .await
+            .expect("index source");
+        assert!(matches!(
+            manager.fork_session(&thread_id, "user-2").await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::Unsupported(
+                "session/fork"
+            )))
+        ));
+        assert!(!manager
+            .supports_steer(&thread_id)
+            .expect("unsupported steer projection"));
+        let epoch = manager
+            .prepare_steer(&thread_id)
+            .await
+            .expect("prepare unsupported steer");
+        assert!(matches!(
+            manager
+                .steer(
+                    &thread_id,
+                    "run".to_string(),
+                    "turn".to_string(),
+                    1,
+                    epoch + 1,
+                    Vec::new(),
+                )
+                .await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::Unsupported(
+                "stale steer interaction epoch"
+            )))
+        ));
+        assert!(matches!(
+            manager
+                .steer(
+                    &thread_id,
+                    "run".to_string(),
+                    "turn".to_string(),
+                    1,
+                    epoch,
+                    Vec::new(),
+                )
+                .await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::Unsupported(
+                "session/steer"
+            )))
+        ));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_rolls_back_an_adapter_fork_that_cannot_be_reconstructed() {
+        async fn messages(AxumPath(session_id): AxumPath<String>) -> Json<serde_json::Value> {
+            if session_id == "source" {
+                Json(serde_json::json!([
+                    {"info": {"id": "raw-1", "role": "user"}, "parts": [{"type": "text", "text": "first"}]},
+                    {"info": {"id": "raw-2", "role": "user"}, "parts": [{"type": "text", "text": "second"}]}
+                ]))
+            } else {
+                Json(serde_json::json!([
+                    {"info": {"id": "raw-1", "role": "user"}, "parts": [{"type": "text", "text": "first"}]}
+                ]))
+            }
+        }
+
+        let app = Router::new()
+            .route("/session/{session_id}/message", get(messages))
+            .route(
+                "/session/source/fork",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "id": "forked",
+                        "parentID": "source",
+                        "directory": "/tmp",
+                        "title": "Forked"
+                    }))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener");
+        let http_base = format!(
+            "http://{}",
+            listener.local_addr().expect("fixture local address")
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve fork fixture");
+        });
+
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("opencode", false, true, observed_tx).await;
+        let session_id = SessionId::new("source");
+        let session = connection
+            .0
+            .ensure_session(session_id)
+            .await
+            .expect("source session");
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable = PathBuf::from("/usr/local/bin/opencode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager = AgentManager::from_start_results(
+            "opencode".to_string(),
+            vec![(opencode, Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        manager
+            .agents
+            .get_mut("opencode")
+            .expect("runtime")
+            .http_base = Some(http_base);
+        let identity = AgentSessionId::new("opencode", "source").unwrap();
+        let thread_id = identity.encode();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .expect("source index");
+        for (id, text) in [("user-1", "first"), ("user-2", "second")] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: "opencode".to_string(),
+                    thread_id: thread_id.clone(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::User,
+                    message_id: id.to_string(),
+                    content: text.to_string(),
+                    content_block: None,
+                })
+                .await;
+        }
+
+        assert!(matches!(
+            manager.fork_session(&thread_id, "user-2").await,
+            Err(AgentManagerError::Runtime(AcpRuntimeError::Unsupported(
+                "session/resume or session/load"
+            )))
+        ));
+        assert_eq!(manager.session_index.lock().await.entries.len(), 1);
+        assert!(manager
+            .agents
+            .get("opencode")
+            .and_then(|runtime| runtime.connection.as_ref())
+            .expect("connection")
+            .session(&SessionId::new("forked"))
+            .await
+            .is_none());
+
+        server.abort();
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn manager_deletes_opencode_sessions_through_its_loopback_api() {
         let (acp_observed_tx, mut acp_observed_rx) = mpsc::unbounded_channel();
         let connection = deleting_connection("opencode", false, true, acp_observed_tx).await;
@@ -5444,10 +5837,21 @@ mod tests {
             .await
             .expect("admit source prompt");
 
+        let abort_calls = Arc::new(AtomicUsize::new(0));
+        let abort_calls_for_route = abort_calls.clone();
         let app = Router::new()
             .route(
                 "/session/opencode-listed/abort",
-                post(|| async { AxumStatusCode::OK }),
+                post(move || {
+                    let abort_calls = abort_calls_for_route.clone();
+                    async move {
+                        if abort_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                            AxumStatusCode::OK
+                        } else {
+                            AxumStatusCode::INTERNAL_SERVER_ERROR
+                        }
+                    }
+                }),
             )
             .route(
                 "/session/opencode-listed/prompt_async",
@@ -5530,6 +5934,33 @@ mod tests {
                     part.get("text").and_then(serde_json::Value::as_str) == Some("replacement")
                 })
         }));
+        let failed_epoch = manager
+            .prepare_steer(&identity.encode())
+            .await
+            .expect("prepare failed steer");
+        assert!(matches!(
+            manager
+                .steer(
+                    &identity.encode(),
+                    "run".to_string(),
+                    "turn".to_string(),
+                    generation + 1,
+                    failed_epoch,
+                    vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "rejected replacement"
+                    }))
+                    .expect("text content block")],
+                )
+                .await,
+            Err(AgentManagerError::Harness(HarnessError::Http(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            )))
+        ));
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), generation + 1))
+        );
 
         server.abort();
         manager.shutdown().await;

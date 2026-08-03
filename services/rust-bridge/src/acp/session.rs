@@ -1277,6 +1277,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn steer_handoff_rejects_stale_targets_and_releases_each_reservation_state() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        assert!(session.reserve_handoff("run", "turn", 1).await.is_err());
+        assert!(session
+            .admit_handoff("run".to_string(), "turn".to_string())
+            .await
+            .is_err());
+        session.release_handoff().await;
+
+        let (generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("prompt admission");
+        assert!(session
+            .reserve_handoff("other", "turn", generation)
+            .await
+            .is_err());
+        assert!(session
+            .reserve_handoff("run", "other", generation)
+            .await
+            .is_err());
+        assert!(session
+            .reserve_handoff("run", "turn", generation + 1)
+            .await
+            .is_err());
+
+        session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("handoff reservation");
+        assert!(session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .is_err());
+        session.release_handoff().await;
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), generation))
+        );
+
+        session
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("second handoff reservation");
+        session
+            .emit(CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation,
+                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            })
+            .await;
+        session.release_handoff().await;
+        assert!(session
+            .admit_prompt("replacement".to_string(), "replacement-turn".to_string())
+            .await
+            .is_ok());
+
+        let closed = AcpSession::new("agent".to_string(), "closed".to_string());
+        let generation = closed
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("closed prompt admission")
+            .0;
+        closed
+            .reserve_handoff("run", "turn", generation)
+            .await
+            .expect("closed reservation");
+        drop(closed.take_events().await.expect("event receiver"));
+        assert!(closed
+            .admit_handoff("run".to_string(), "turn".to_string())
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
     async fn session_tracks_prompt_reconstruction_messages_and_failure() {
         let session = AcpSession::new("agent".to_string(), "thread".to_string());
         assert_eq!(session.operation().await, None);
