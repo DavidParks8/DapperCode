@@ -180,7 +180,7 @@ describe('OnboardingScreen behavior', () => {
     const { tree } = await renderOnboarding();
     const root = tree.root as Queryable;
     expect(hasText(root, 'DapperCode')).toBe(true);
-    expect(hasText(root, 'Pair your phone with your own machine.')).toBe(true);
+    expect(hasText(root, 'Pair this device with your own machine.')).toBe(true);
     await press(findPressableByText(root, 'Private connection'));
     expect(findByLabel(root, 'Bridge URL')).toBeTruthy();
     expect(hasText(root, '1. Start')).toBe(true);

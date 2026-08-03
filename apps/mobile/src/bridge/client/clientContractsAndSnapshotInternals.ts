@@ -227,8 +227,8 @@ export type SendOrQueueChatMessageResult =
   | {
       disposition: 'sent';
       queue: BridgeThreadQueueState;
-      turnId: string;
-      chat: Chat;
+      turnId: string | null;
+      chat: Chat | null;
     };
 
 export interface ListChatsOptions {

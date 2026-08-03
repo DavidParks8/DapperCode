@@ -235,7 +235,7 @@ function renderCompactionChatMessage(ctx: ChatMessageRenderContext) {
 }
 
 function renderReasoningChatMessage(ctx: ChatMessageRenderContext) {
-  const { message, styles, timelineEntries, messageText } = ctx;
+  const { message, styles, markdownRules, timelineEntries, messageText } = ctx;
   const entries = timelineEntries?.length
     ? timelineEntries
     : [{ title: 'Reasoning', details: [messageText] }];
@@ -247,6 +247,7 @@ function renderReasoningChatMessage(ctx: ChatMessageRenderContext) {
             key={`${message.id}-reasoning-${String(index)}`}
             entry={entry}
             pending={message.pending === true}
+            markdownRules={markdownRules}
           />
         ))}
       </View>

@@ -4,7 +4,7 @@ import Markdown from 'react-native-markdown-display';
 
 import { createWorkflowMarkdownStyles } from '../workflow/markdownStyles';
 import { createAppTheme } from '@shared/theme';
-import { createMarkdownStyles } from './markdownStyles';
+import { createMarkdownStyles, createReasoningMarkdownStyles } from './markdownStyles';
 
 type MarkdownStyles = ReturnType<typeof createMarkdownStyles>;
 type QueryableTestInstance = ReactTestInstance & {
@@ -71,6 +71,7 @@ function findTableStyles(styles: object): { table: ViewStyle; row: ViewStyle } {
 
 describe.each([
   ['chat message markdown', createMarkdownStyles],
+  ['reasoning markdown', createReasoningMarkdownStyles],
   ['workflow markdown', createWorkflowMarkdownStyles],
 ] as const)('%s block styling', (_label, createStyles) => {
   it.each(['dark', 'light'] as const)('stays readable in the %s theme', (mode) => {

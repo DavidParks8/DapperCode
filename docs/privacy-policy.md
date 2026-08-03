@@ -23,7 +23,7 @@ DapperCode can process:
 
 The app uses this information to:
 
-- connect your phone to your self-hosted bridge
+- connect your device to your self-hosted bridge
 - display and continue assistant threads
 - execute approved terminal and Git workflows on infrastructure you control
 - upload user-selected files and images to your own workflow

@@ -26,3 +26,17 @@ export const defaultServiceTierAtom = screenAtom<ServiceTier | null>(null);
 export const selectedCollaborationModeAtom = screenAtom<CollaborationMode>('default');
 
 export const selectedAcpModeIdAtom = screenAtom<string | null>(null);
+
+export interface PendingAcpConfigValue {
+  value: string;
+  revision: number;
+}
+
+export type PendingAcpConfigByChat = Record<
+  string,
+  Record<string, PendingAcpConfigValue | undefined> | undefined
+>;
+
+export const pendingAcpConfigByChatAtom = screenAtom<PendingAcpConfigByChat>(
+  (): PendingAcpConfigByChat => ({}),
+);

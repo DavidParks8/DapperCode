@@ -1,13 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Pressable, Text, View, type TextLayoutEvent } from 'react-native';
+import Markdown from 'react-native-markdown-display';
 import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { motionDuration } from '@shared/ui/motion';
+import type { createMarkdownRules } from './markdownRules';
+import { createReasoningMarkdownStyles } from './markdownStyles';
 import { SelectableMessageText } from './Primitives';
 import { createStyles } from './styles';
+import { stripMarkdownInline } from '../helpers/timeline';
 import { summarizeReasoningPreview } from './timelineHelpers';
 import type { TimelineEntry } from './types';
 
@@ -45,7 +49,7 @@ function ReasoningCardHeader({
     <View style={styles.reasoningHeader}>
       <Ionicons
         {...decorativeAccessibilityProps}
-        name="sparkles-outline"
+        name="bulb-outline"
         size={13}
         color={theme.colors.textMuted}
       />
@@ -101,10 +105,14 @@ function ReasoningCardDetails({
   entry,
   showDetails,
   styles,
+  markdownStyles,
+  markdownRules,
 }: {
   entry: TimelineEntry;
   showDetails: boolean;
   styles: ReturnType<typeof createStyles>;
+  markdownStyles: ReturnType<typeof createReasoningMarkdownStyles>;
+  markdownRules: ReturnType<typeof createMarkdownRules>;
 }) {
   if (!showDetails) {
     return null;
@@ -115,25 +123,30 @@ function ReasoningCardDetails({
       exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       style={styles.reasoningDetailWrap}
     >
-      {entry.details.map((line, lineIndex) => (
-        <SelectableMessageText
-          key={`reasoning-line-${String(lineIndex)}`}
-          style={styles.reasoningDetailLine}
-        >
-          {line}
-        </SelectableMessageText>
-      ))}
+      <Markdown style={markdownStyles} rules={markdownRules}>
+        {entry.details.join('\n')}
+      </Markdown>
     </Animated.View>
   );
 }
 
-export function ReasoningEntryCard({ entry, pending }: { entry: TimelineEntry; pending: boolean }) {
+export function ReasoningEntryCard({
+  entry,
+  pending,
+  markdownRules,
+}: {
+  entry: TimelineEntry;
+  pending: boolean;
+  markdownRules: ReturnType<typeof createMarkdownRules>;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [expanded, setExpanded] = useState(false);
   const [measurement, setMeasurement] = useState<PreviewMeasurement | null>(null);
 
-  const preview = entry.details.length > 0 ? summarizeReasoningPreview(entry.details) : null;
+  const rawPreview = entry.details.length > 0 ? summarizeReasoningPreview(entry.details) : null;
+  const preview = rawPreview ? stripMarkdownInline(rawPreview) : null;
+  const markdownStyles = useMemo(() => createReasoningMarkdownStyles(theme), [theme]);
   // While a changed preview is re-measured, keep the previous result so the
   // toggle affordance does not flicker mid-stream.
   const clipped = resolveReasoningClipped(measurement, preview);
@@ -188,7 +201,13 @@ export function ReasoningEntryCard({ entry, pending }: { entry: TimelineEntry; p
           onPreviewTextLayout={onPreviewTextLayout}
           styles={styles}
         />
-        <ReasoningCardDetails entry={entry} showDetails={showDetails} styles={styles} />
+        <ReasoningCardDetails
+          entry={entry}
+          showDetails={showDetails}
+          styles={styles}
+          markdownStyles={markdownStyles}
+          markdownRules={markdownRules}
+        />
         {pending && canToggle ? (
           <Text style={styles.reasoningToggleText}>
             {showDetails ? 'Tap to hide thinking' : 'Tap to show thinking'}

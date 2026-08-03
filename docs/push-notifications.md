@@ -1,6 +1,6 @@
 # Push Notifications
 
-DapperCode can notify you on your phone when a top-level agent turn finishes or when
+DapperCode can notify you on your device when a top-level agent turn finishes or when
 it needs an approval — even when the app is backgrounded or closed. Subagent
 turn completions remain visible in the live UI but do not send push notifications.
 
@@ -8,14 +8,14 @@ turn completions remain visible in the live UI but do not send push notification
 
 The mobile app can only run JavaScript (and therefore keep its bridge WebSocket
 open) while it is foregrounded. The instant it is backgrounded or killed, the
-socket closes, so the **phone can never observe a turn completing**. The bridge,
+socket closes, so the **device can never observe a turn completing**. The bridge,
 on the other hand, owns the ACP agent sessions and stays alive regardless of
-whether any phone is connected. So the bridge is the sender:
+whether any device is connected. So the bridge is the sender:
 
 ```
-ACP canonical event ──▶ bridge ──HTTPS POST──▶ Expo push service ──▶ APNs/FCM ──▶ phone
+ACP canonical event ──▶ bridge ──HTTPS POST──▶ Expo push service ──▶ APNs/FCM ──▶ device
                          ▲
-         (phone registered its Expo push token over the authenticated WS)
+         (device registered its Expo push token over the authenticated WS)
 ```
 
 Waking a backgrounded/killed app is only possible through the OS push transports

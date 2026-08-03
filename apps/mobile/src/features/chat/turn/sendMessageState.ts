@@ -15,14 +15,19 @@ import {
   normalizeChatMessageMatchContent,
   shouldAutoEnablePlanModeFromChat,
   isChatLikelyRunning,
+  countUserMessages,
   parseGoalSlashObjective,
   buildOptimisticGoalBridgeUiSurface,
 } from '../helpers/helpers';
 import type { MainScreenSendMessageHandlerContext } from './sendMessageHandler';
 import type { ComposerSubmission } from './controllers/submissionController';
-import { resolveEquivalentChat } from '../state/chatState';
 import type { ThreadRuntimeSnapshot } from '../state/runtime';
 import type { SendMessageOptions } from './sendMessage';
+import {
+  applyPendingAcceptedTurn,
+  registerAcceptedTurn,
+  resolveAcceptedTurnChat,
+} from './acceptedTurnState';
 
 export type PrepareSendMessageRequestArgs = {
   rawContent: string;
@@ -68,6 +73,7 @@ export type SentMessageStateArgs = {
   queueOptimisticUserMessage: MainScreenSendMessageHandlerContext['queueOptimisticUserMessage'];
   discardOptimisticUserMessage: MainScreenSendMessageHandlerContext['discardOptimisticUserMessage'];
   setSelectedChat: MainScreenSendMessageHandlerContext['setSelectedChat'];
+  selectedChatIdRef: MainScreenSendMessageHandlerContext['selectedChatIdRef'];
   selectedChatState?: Chat | null;
   selectedChatRef: MainScreenSendMessageHandlerContext['selectedChatRef'];
   scrollToBottomReliable: MainScreenSendMessageHandlerContext['scrollToBottomReliable'];
@@ -79,6 +85,7 @@ export type OptimisticSendStateArgs = GoalSurfaceStateArgs &
     queueOptimisticUserMessage: MainScreenSendMessageHandlerContext['queueOptimisticUserMessage'];
     discardOptimisticUserMessage: MainScreenSendMessageHandlerContext['discardOptimisticUserMessage'];
     setSelectedChat: MainScreenSendMessageHandlerContext['setSelectedChat'];
+    selectedChatIdRef: MainScreenSendMessageHandlerContext['selectedChatIdRef'];
     selectedChatState?: Chat | null;
     selectedChatRef: MainScreenSendMessageHandlerContext['selectedChatRef'];
     scrollToBottomReliable: MainScreenSendMessageHandlerContext['scrollToBottomReliable'];
@@ -106,10 +113,12 @@ export type ResolvedChatActivityArgs = {
   bumpRunWatchdog: MainScreenSendMessageHandlerContext['bumpRunWatchdog'];
 };
 export type StartedTurnResultArgs = {
-  result: { turnId: string; chat: Chat };
+  result: { turnId: string | null; chat: Chat | null };
   targetChatId: string;
   selectedChatIdRef: MainScreenSendMessageHandlerContext['selectedChatIdRef'];
   registerTurnStarted: MainScreenSendMessageHandlerContext['registerTurnStarted'];
+  interruptLatestTurn: (threadId: string) => Promise<void>;
+  setActiveTurnId: (value: string | null) => void;
   setStoppingTurn: (value: boolean) => void;
   stopRequestedRef: MainScreenSendMessageHandlerContext['stopRequestedRef'];
   shouldPreservePlan: boolean;
@@ -172,6 +181,8 @@ export type RunSendMessageTurnArgs = {
   setError: (value: string | null) => void;
   selectedChatRef: MainScreenSendMessageHandlerContext['selectedChatRef'];
   registerTurnStarted: MainScreenSendMessageHandlerContext['registerTurnStarted'];
+  interruptLatestTurn: (threadId: string) => Promise<void>;
+  setActiveTurnId: (value: string | null) => void;
   setStoppingTurn: (value: boolean) => void;
   stopRequestedRef: MainScreenSendMessageHandlerContext['stopRequestedRef'];
   setActivePlan: (value: null) => void;
@@ -293,10 +304,11 @@ export function createQueuedMessageState(args: QueuedMessageStateArgs) {
 }
 
 export function createSentMessageState(args: SentMessageStateArgs) {
-  const optimisticSentContent =
-    args.optimisticQueuedMessage === null
-      ? toOptimisticUserContent(args.content, args.turnMentions, args.turnLocalImages)
-      : null;
+  const optimisticSentContent = toOptimisticUserContent(
+    args.content,
+    args.turnMentions,
+    args.turnLocalImages,
+  );
   const optimisticSentMessage = optimisticSentContent
     ? ({
         id: `msg-${Date.now()}`,
@@ -305,49 +317,74 @@ export function createSentMessageState(args: SentMessageStateArgs) {
         createdAt: new Date().toISOString(),
       } satisfies ChatTranscriptMessage)
     : null;
+  let sentMessageApplied = false;
   const previousSelectedChatPreview =
     args.selectedChatRef.current?.id === args.targetChatId
       ? args.selectedChatRef.current.lastMessagePreview
       : args.selectedChatState?.id === args.targetChatId
         ? args.selectedChatState.lastMessagePreview
         : null;
+  const initialChat =
+    args.selectedChatRef.current?.id === args.targetChatId
+      ? args.selectedChatRef.current
+      : args.selectedChatState?.id === args.targetChatId
+        ? args.selectedChatState
+        : null;
+  const optimisticUserOrdinal = initialChat
+    ? countUserMessages(initialChat.messages) + 1
+    : undefined;
+  const applySentMessage = () => {
+    if (!optimisticSentMessage || sentMessageApplied) {
+      return;
+    }
+    sentMessageApplied = true;
+    args.queueOptimisticUserMessage(args.targetChatId, optimisticSentMessage, {
+      userOrdinal: optimisticUserOrdinal,
+    });
+    if (args.selectedChatIdRef.current !== args.targetChatId) {
+      return;
+    }
+    let appliedToSelectedChat = false;
+    args.setSelectedChat((prev) => {
+      if (!prev || prev.id !== args.targetChatId) {
+        return prev;
+      }
+      appliedToSelectedChat = true;
+      const nowIso = new Date().toISOString();
+      const updated: Chat = {
+        ...prev,
+        status: 'running',
+        updatedAt: nowIso,
+        statusUpdatedAt: nowIso,
+        lastError: undefined,
+        lastMessagePreview:
+          normalizeChatMessageMatchContent(optimisticSentMessage.content).slice(0, 120) ||
+          prev.lastMessagePreview,
+        messages: [...prev.messages, optimisticSentMessage],
+      };
+      args.selectedChatRef.current = updated;
+      return updated;
+    });
+    if (appliedToSelectedChat) {
+      args.scrollToBottomReliable(true);
+    }
+  };
   return {
     applySentMessage: () => {
-      if (!optimisticSentMessage) {
-        return;
+      if (args.optimisticQueuedMessage === null) {
+        applySentMessage();
       }
-      args.queueOptimisticUserMessage(args.targetChatId, optimisticSentMessage);
-      args.setSelectedChat((prev) => {
-        const baseChat =
-          args.selectedChatState?.id === args.targetChatId
-            ? args.selectedChatState
-            : prev?.id === args.targetChatId
-              ? prev
-              : prev;
-        if (!baseChat) {
-          return prev;
-        }
-        const nowIso = new Date().toISOString();
-        const updated: Chat = {
-          ...baseChat,
-          status: 'running',
-          updatedAt: nowIso,
-          statusUpdatedAt: nowIso,
-          lastError: undefined,
-          lastMessagePreview:
-            normalizeChatMessageMatchContent(optimisticSentMessage.content).slice(0, 120) ||
-            baseChat.lastMessagePreview,
-          messages: [...baseChat.messages, optimisticSentMessage],
-        };
-        args.selectedChatRef.current = updated;
-        return updated;
-      });
-      args.scrollToBottomReliable(true);
+    },
+    promoteQueuedToSentMessage: () => {
+      if (args.optimisticQueuedMessage !== null) {
+        applySentMessage();
+      }
     },
     clearSentMessage: () => {
-      if (!optimisticSentMessage) {
+      if (!optimisticSentMessage || !sentMessageApplied) {
         return;
       }
+      sentMessageApplied = false;
       args.discardOptimisticUserMessage(args.targetChatId, optimisticSentMessage.id);
       args.setSelectedChat((prev) => {
         if (!prev || prev.id !== args.targetChatId) {
@@ -389,6 +426,7 @@ export function createOptimisticSendState(args: OptimisticSendStateArgs) {
     applyGoalSurface: goal.applyGoalSurface,
     restoreGoalSurfaces: goal.restoreGoalSurfaces,
     applySentMessage: sent.applySentMessage,
+    promoteQueuedToSentMessage: sent.promoteQueuedToSentMessage,
     clearSentMessage: sent.clearSentMessage,
   };
 }
@@ -431,12 +469,8 @@ export function applyResolvedChatActivity(args: ResolvedChatActivityArgs) {
 }
 
 export function applyStartedTurnResult(args: StartedTurnResultArgs) {
-  args.registerTurnStarted(args.targetChatId, args.result.turnId);
   const isStillSelected = args.selectedChatIdRef.current === args.targetChatId;
-  if (isStillSelected) {
-    args.setStoppingTurn(false);
-    args.stopRequestedRef.current = false;
-  }
+  registerAcceptedTurn(args, isStillSelected);
   if (!args.shouldPreservePlan) {
     if (isStillSelected) {
       args.setActivePlan(null);
@@ -451,21 +485,27 @@ export function applyStartedTurnResult(args: StartedTurnResultArgs) {
   }
   const currentChat =
     args.selectedChatRef.current?.id === args.targetChatId ? args.selectedChatRef.current : null;
-  const resolvedUpdated = args.mergeChatWithPendingOptimisticMessages(
-    currentChat ? resolveEquivalentChat(currentChat, args.result.chat) : args.result.chat,
-  );
+  const resolvedChat = resolveAcceptedTurnChat(args, currentChat);
   const autoEnabledPlan =
+    args.result.chat !== null &&
+    resolvedChat !== null &&
     !args.suppressPlanModeAutoEnable &&
-    shouldAutoEnablePlanModeFromChat(resolvedUpdated, args.supportsPlanMode);
+    shouldAutoEnablePlanModeFromChat(resolvedChat, args.supportsPlanMode);
   if (autoEnabledPlan && isStillSelected) {
     args.setSelectedCollaborationMode('plan');
   }
   if (!isStillSelected) {
     return;
   }
-  args.setSelectedChat(resolvedUpdated);
+  if (applyPendingAcceptedTurn(args, resolvedChat)) {
+    return;
+  }
+  if (!resolvedChat) {
+    return;
+  }
+  args.setSelectedChat(resolvedChat);
   applyResolvedChatActivity({
-    chat: resolvedUpdated,
+    chat: resolvedChat,
     autoEnabledPlan,
     resolvedCollaborationMode: args.resolvedCollaborationMode,
     optimisticState: args.optimisticState,

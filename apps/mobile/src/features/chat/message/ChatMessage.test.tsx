@@ -1282,6 +1282,33 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('renders reasoning details as markdown with a thinking icon', () => {
+    const tree = renderMessage({
+      id: 'reasoning-markdown',
+      role: 'reasoning',
+      content: '• Plan\n  └ **Bold** thought\n  └ `code`',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const root = tree.root;
+    expect(root.findAll((node) => node.props['name'] === 'bulb-outline').length).toBeGreaterThan(0);
+    const control = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Plan' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'indexed test value',
+    );
+
+    act(() => readOnPress(control.props)());
+
+    expect(hasRenderedText(root, 'Bold thought')).toBe(true);
+    expect(hasRenderedText(root, 'code')).toBe(true);
+    expect(hasRenderedText(root, '**Bold**')).toBe(false);
+    expect(hasRenderedText(root, '`code`')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('wires the reasoning and tool timeline layout transitions to honor system Reduce Motion', () => {
     const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
 

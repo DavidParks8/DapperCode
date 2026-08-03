@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
-import { LoadingGlyph } from './LoadingGlyph';
+import { AtomGlyph } from './AtomGlyph';
 import { motionDuration } from '@shared/ui/motion';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import type { ActivityTone } from '../state/runtime';
@@ -42,6 +42,7 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const normalizedTitle = title.trim();
   const titleText = normalizedTitle || title;
   const stacked = hasDetail && tone !== 'running';
+  const running = tone === 'running';
   const labelStyle = [styles.titleText, tone === 'error' ? styles.titleTextError : null];
 
   return (
@@ -49,9 +50,15 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
       entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       style={[styles.row, stacked ? styles.rowStacked : null]}
     >
-      <View style={[styles.iconWrap, stacked ? styles.iconWrapStacked : null]}>
-        {tone === 'running' ? (
-          <LoadingGlyph color={color} variant="bars" size="small" />
+      <View
+        style={[
+          styles.iconWrap,
+          running ? styles.iconWrapRunning : null,
+          stacked ? styles.iconWrapStacked : null,
+        ]}
+      >
+        {running ? (
+          <AtomGlyph color={color} />
         ) : (
           <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
         )}
@@ -90,6 +97,10 @@ const createStyles = (theme: AppTheme) =>
       width: 14,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    // The atom is a 20pt square glyph, so the running row gets a wider slot than the icon rows.
+    iconWrapRunning: {
+      width: 20,
     },
     iconWrapStacked: {
       paddingTop: 2,

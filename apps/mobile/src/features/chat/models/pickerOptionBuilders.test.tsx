@@ -129,6 +129,32 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
     expect(context.selectEffort).toHaveBeenCalledWith('high');
   });
 
+  it('fires a selection haptic and delegates immediately when an agent option is pressed', () => {
+    const selectPendingAgent = jest.fn();
+    const context = createContext({
+      readyAgents: [
+        {
+          agentId: 'claude',
+          displayName: 'Claude',
+          version: '1.0.0',
+          provenance: 'test',
+          lifecycle: 'ready',
+        },
+      ],
+      selectPendingAgent,
+    });
+    const result = render(context);
+    const agentOption = result.agentPickerOptions.find((option) => option.key === 'claude');
+    expect(agentOption).toBeDefined();
+
+    act(() => {
+      agentOption!.onPress();
+    });
+
+    expect(mockFeedback.selection).toHaveBeenCalledTimes(1);
+    expect(selectPendingAgent).toHaveBeenCalledWith('claude');
+  });
+
   it('fires a selection haptic when a collaboration mode option is pressed', async () => {
     const context = createContext();
     const result = render(context);

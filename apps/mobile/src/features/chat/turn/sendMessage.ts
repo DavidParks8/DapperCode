@@ -1,6 +1,7 @@
 import {
   activeBridgeUiSurfacesAtom,
   activePlanAtom,
+  activeTurnIdAtom,
   errorAtom,
   pendingApprovalAtom,
   pendingUserInputRequestAtom,
@@ -73,6 +74,9 @@ async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
       args.targetChatId,
       args.optimisticState.optimisticQueuedMessage?.id,
     );
+    if (result.disposition === 'sent') {
+      args.optimisticState.promoteQueuedToSentMessage();
+    }
     args.cacheThreadQueueState(args.targetChatId, result.queue);
     args.rememberChatModelPreference(
       args.targetChatId,
@@ -98,6 +102,8 @@ async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
       targetChatId: args.targetChatId,
       selectedChatIdRef: args.selectedChatIdRef,
       registerTurnStarted: args.registerTurnStarted,
+      interruptLatestTurn: (threadId) => args.interruptLatestTurn(threadId),
+      setActiveTurnId: (value) => args.setActiveTurnId(value),
       setStoppingTurn: args.setStoppingTurn,
       stopRequestedRef: args.stopRequestedRef,
       shouldPreservePlan: args.shouldPreservePlan,
@@ -177,6 +183,7 @@ export async function executeSendMessage(
     rememberChatModelPreference,
     clearRunWatchdog,
     registerTurnStarted,
+    interruptLatestTurn,
     stopRequestedRef,
     cacheThreadPlan,
     mergeChatWithPendingOptimisticMessages,
@@ -194,6 +201,7 @@ export async function executeSendMessage(
   const setUserInputError = screenSetter(store, userInputErrorAtom);
   const setResolvingUserInput = screenSetter(store, resolvingUserInputAtom);
   const setActivePlan = screenSetter(store, activePlanAtom);
+  const setActiveTurnId = screenSetter(store, activeTurnIdAtom);
   const setActiveBridgeUiSurfaces = screenSetter(store, activeBridgeUiSurfacesAtom);
   const setStoppingTurn = screenSetter(store, stoppingTurnAtom);
   const selectedEffort = store.get(selectedEffortAtom);
@@ -287,6 +295,8 @@ export async function executeSendMessage(
     setError,
     selectedChatRef,
     registerTurnStarted,
+    interruptLatestTurn,
+    setActiveTurnId,
     setStoppingTurn,
     stopRequestedRef,
     setActivePlan,

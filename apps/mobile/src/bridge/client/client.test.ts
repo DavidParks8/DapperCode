@@ -1696,6 +1696,63 @@ describe('HostBridgeApiClient', () => {
     expect(result.chat?.messages[0]?.content).toBe('hello');
   });
 
+  it('keeps an acknowledged turn sent when immediate transcript hydration fails', async () => {
+    const ws = createWsMock();
+    ws.request
+      .mockResolvedValueOnce({
+        thread: {
+          id: 'thr_plan',
+          name: 'Plan thread',
+          preview: 'Existing answer',
+          createdAt: 1700000000,
+          updatedAt: 1700000001,
+          status: { type: 'idle' },
+          turns: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        disposition: 'sent',
+        queue: {
+          threadId: 'thr_plan',
+          items: [],
+          lastError: null,
+        },
+        turnId: 'turn_plan',
+      })
+      .mockRejectedValueOnce(new Error('thread read unavailable while turn is running'));
+
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    await client.setThreadConfigOption('thr_plan', 'mode', 'plan');
+    const result = await client.sendOrQueueChatMessage(
+      'thr_plan',
+      {
+        content: 'Plan the next change',
+        cwd: '/workspace',
+        collaborationMode: 'plan',
+      },
+      { skipResume: true },
+    );
+
+    expect(ws.request).toHaveBeenNthCalledWith(1, 'thread/config/set', {
+      threadId: 'thr_plan',
+      configId: 'mode',
+      value: 'plan',
+    });
+    expect(ws.request).toHaveBeenNthCalledWith(
+      2,
+      'bridge/thread/queue/send',
+      expect.objectContaining({
+        threadId: 'thr_plan',
+        content: 'Plan the next change',
+      }),
+    );
+    expect(result).toMatchObject({
+      disposition: 'sent',
+      turnId: 'turn_plan',
+      chat: null,
+    });
+  });
+
   it('queued message actions call bridge queue endpoints', async () => {
     const ws = createWsMock();
     ws.request
@@ -2451,7 +2508,7 @@ describe('HostBridgeApiClient', () => {
     });
     await expect(
       client.sendOrQueueChatMessage('thr', { content: 'x', cwd: '/workspace' }),
-    ).rejects.toThrow('did not return turn id');
+    ).resolves.toMatchObject({ disposition: 'sent', turnId: null, chat: null });
     await expect(client.uploadAttachment({ uri: 'file://x', kind: 'file' })).rejects.toThrow(
       'Bridge URL is required',
     );
@@ -2621,7 +2678,7 @@ describe('HostBridgeApiClient', () => {
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     await expect(client.sendOrQueueChatMessage('thr', { content: ' ' })).resolves.toMatchObject({
       disposition: 'sent',
-      turnId: '',
+      turnId: null,
     });
 
     ws.request
@@ -3177,10 +3234,10 @@ describe('HostBridgeApiClient', () => {
         client.sendChatMessage('thread', { content: 'x', cwd: '/workspace' }),
       ).rejects.toThrow('turn id');
       const empty = await client.sendOrQueueChatMessage('thread', { content: ' ' });
-      expect(empty).toMatchObject({ disposition: 'sent', turnId: '' });
+      expect(empty).toMatchObject({ disposition: 'sent', turnId: null });
       await expect(
         client.sendOrQueueChatMessage('thread', { content: 'x', cwd: '/workspace' }),
-      ).rejects.toThrow('did not return turn id');
+      ).resolves.toMatchObject({ disposition: 'sent', turnId: null, chat: null });
     });
 
     it('covers malformed public response defaults and option normalizers', async () => {
