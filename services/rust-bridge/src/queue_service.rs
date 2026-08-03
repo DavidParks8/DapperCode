@@ -808,7 +808,7 @@ impl BridgeQueueService {
                 generation,
                 ..
             } => {
-                let (should_dispatch, should_wait_for_steer) = {
+                let (should_dispatch, should_queue_completion, should_wait_for_continuation) = {
                     let mut threads = self.threads.write().await;
                     let runtime = threads.entry(thread_id.clone()).or_default();
                     if runtime.active_turn_id.as_deref() != Some(source_turn_id.as_str())
@@ -816,10 +816,13 @@ impl BridgeQueueService {
                     {
                         return;
                     }
+                    let continuation_already_in_flight = runtime.turn_start_in_flight;
                     runtime.thread_running = false;
-                    runtime.active_turn_id = None;
-                    runtime.active_run_id = None;
-                    runtime.active_prompt_generation = None;
+                    if !continuation_already_in_flight {
+                        runtime.active_turn_id = None;
+                        runtime.active_run_id = None;
+                        runtime.active_prompt_generation = None;
+                    }
                     runtime.active_tool_call_ids.clear();
                     runtime.live_generation_known = false;
                     runtime.pending_approval_ids.clear();
@@ -831,11 +834,15 @@ impl BridgeQueueService {
                         in_flight.crossed_completion_boundary = true;
                     }
                     (
-                        runtime.steer_dispatch_in_flight.is_none() && !runtime.items.is_empty(),
-                        runtime.steer_dispatch_in_flight.is_some(),
+                        !continuation_already_in_flight
+                            && runtime.steer_dispatch_in_flight.is_none()
+                            && !runtime.items.is_empty(),
+                        continuation_already_in_flight,
+                        continuation_already_in_flight
+                            || runtime.steer_dispatch_in_flight.is_some(),
                     )
                 };
-                if should_dispatch {
+                if should_queue_completion || should_dispatch {
                     {
                         let mut threads = self.threads.write().await;
                         if let Some(runtime) = threads.get_mut(&thread_id) {
@@ -843,7 +850,7 @@ impl BridgeQueueService {
                         }
                     }
                     self.spawn_auto_dispatch(thread_id);
-                } else if !should_wait_for_steer {
+                } else if !should_wait_for_continuation {
                     self.record_completion_disposition(
                         received.event_id,
                         QueueCompletionDisposition::Final,
@@ -2327,6 +2334,53 @@ mod tests {
         );
         assert_eq!(service.wait_for_completion_disposition(999).await, None);
         service.drain_thread_queue("missing".to_string()).await;
+    }
+
+    #[tokio::test]
+    async fn queue_completion_waits_for_in_flight_turn_start_continuation() {
+        let (service, _) = service_with_runtime(&[], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            runtime.turn_start_in_flight = true;
+            runtime.items.clear();
+        }
+
+        let completion_event = CanonicalHubEvent {
+            event_id: 34,
+            event: CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation: 7,
+                stop_reason: StopReason::EndTurn,
+            },
+        };
+        service.handle_canonical_event(completion_event).await;
+
+        assert!(!service
+            .completion_dispositions
+            .lock()
+            .await
+            .contains_key(&34));
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("runtime remains");
+            assert!(runtime.turn_start_in_flight);
+            assert_eq!(runtime.pending_completion_event_ids, vec![34]);
+            assert_eq!(runtime.active_turn_id.as_deref(), Some("turn"));
+            assert_eq!(runtime.active_run_id.as_deref(), Some("run"));
+            assert_eq!(runtime.active_prompt_generation, Some(7));
+        }
+
+        service
+            .record_completion_disposition(34, QueueCompletionDisposition::Continued)
+            .await;
+        assert_eq!(
+            service.wait_for_completion_disposition(34).await,
+            Some(QueueCompletionDisposition::Continued)
+        );
     }
 
     #[tokio::test]
