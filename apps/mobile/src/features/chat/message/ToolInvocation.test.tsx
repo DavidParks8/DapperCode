@@ -1,5 +1,5 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -21,8 +21,10 @@ jest.mock('@expo/vector-icons', () => ({
 }));
 
 type Queryable = ReactTestInstance & {
+  children: Array<Queryable | string | number>;
   parent: Queryable | null;
   props: Record<string, unknown>;
+  type: unknown;
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
   findAllByProps(props: Record<string, unknown>): Queryable[];
   findAllByType(type: unknown): Queryable[];
@@ -98,8 +100,30 @@ function expand(tree: QueryableRenderer, title: string) {
 function textLines(tree: QueryableRenderer): string[] {
   return tree.root
     .findAllByType(Text)
-    .map((node) => node.props['children'])
-    .filter((child): child is string => typeof child === 'string');
+    .filter((node) => !hasTextAncestor(node))
+    .map((node) => flattenTestText(node))
+    .filter(Boolean);
+}
+
+function flattenTestText(node: Queryable): string {
+  return node.children
+    .map((child) =>
+      typeof child === 'string' || typeof child === 'number'
+        ? String(child)
+        : flattenTestText(child),
+    )
+    .join('');
+}
+
+function hasTextAncestor(node: Queryable): boolean {
+  let ancestor = node.parent;
+  while (ancestor) {
+    if (ancestor.type === Text || ancestor.type === 'Text') {
+      return true;
+    }
+    ancestor = ancestor.parent;
+  }
+  return false;
 }
 
 describe('ToolInvocationRow', () => {
@@ -454,6 +478,61 @@ describe('ToolInvocationOutput', () => {
       tree.root.findAllByProps({ accessibilityLabel: '1 line removed' }).length,
     ).toBeGreaterThan(0);
     expect(tree.root.findAllByProps({ testID: 'tool-output-panel' }).length).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('clips each file diff to a rounded surface and highlights recognized source code', () => {
+    const value = invocation({
+      id: 'tool-rounded-highlighted-diff',
+      kind: 'edit',
+      diffs: [
+        {
+          path: 'src/a.ts',
+          oldText: '/**\n * before\n */\nconst label = "before";\n',
+          newText: '/**\n * after\n */\nconst label = "after";\n',
+        },
+        {
+          path: 'fixtures/data.unknown',
+          oldText: 'const value = 1;\n',
+          newText: 'const value = 2;\n',
+        },
+      ],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+    const blocks = tree.root
+      .findAllByType(View)
+      .filter((node) => node.props['testID'] === 'tool-diff-block');
+
+    expect(blocks).toHaveLength(2);
+    expect(StyleSheet.flatten(blocks[0]?.props['style'] as object)).toMatchObject({
+      borderRadius: theme.radius.sm,
+      overflow: 'hidden',
+    });
+    expect(StyleSheet.flatten(blocks[1]?.props['style'] as object)).toMatchObject({
+      marginTop: theme.spacing.sm,
+    });
+    expect(StyleSheet.flatten(createToolCardStyles(theme).diffScrollFrame)).toMatchObject({
+      paddingVertical: 2,
+    });
+
+    const sourceTokens = blocks[0]?.findAllByType(Text) ?? [];
+    const keywords = sourceTokens.filter((node) => node.props['children'] === 'const');
+    const strings = sourceTokens.filter((node) => node.props['children'] === '"after"');
+    const comments = sourceTokens.filter((node) => node.props['children'] === ' * after');
+    expect(keywords).toHaveLength(2);
+    expect(strings).not.toHaveLength(0);
+    expect(comments).not.toHaveLength(0);
+    expect(StyleSheet.flatten(keywords[0]?.props['style'] as object)).toMatchObject({
+      color: theme.colors.codeSyntaxKeyword,
+    });
+    expect(StyleSheet.flatten(comments[0]?.props['style'] as object)).toMatchObject({
+      color: theme.colors.codeSyntaxComment,
+    });
+    expect(blocks[1]?.findAllByType(Text).some((node) => node.props['children'] === 'const')).toBe(
+      false,
+    );
 
     act(() => tree.unmount());
   });

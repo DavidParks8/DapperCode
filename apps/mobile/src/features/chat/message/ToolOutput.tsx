@@ -5,6 +5,12 @@ import { ScrollView, Text, View } from 'react-native';
 import { useAppTheme } from '@shared/theme';
 import { toMarkdownImageSource } from './imageSource';
 import { MarkdownImage, SelectableMessageText } from './Primitives';
+import {
+  highlightDiffCodeLines,
+  renderSyntaxTokens,
+  resolveSyntaxLanguage,
+  syntaxLanguageFromPath,
+} from './syntaxHighlight';
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
@@ -178,11 +184,21 @@ function ToolDiffBlock({
   const theme = useAppTheme();
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const stats = compactToolDiff(diff);
+  const syntax = useMemo(
+    () => resolveSyntaxLanguage(syntaxLanguageFromPath(diff.path)),
+    [diff.path],
+  );
+  const highlightedLines = useMemo(
+    () => highlightDiffCodeLines(stats.lines, syntax.grammar),
+    [stats.lines, syntax.grammar],
+  );
   const overflow = useHorizontalOverflow();
   const fadeSurface = compositeOverlayColor(theme.colors.bgMain, theme.colors.bgCanvasAccent);
   return (
-    <View>
-      {separated ? <View style={styles.panelDivider} /> : null}
+    <View
+      style={[styles.diffBlock, separated && styles.diffBlockSeparated]}
+      testID="tool-diff-block"
+    >
       {showHeader ? (
         <View style={styles.diffFileHeader}>
           <Text style={styles.diffFilePath} numberOfLines={1} accessibilityLabel={diff.path}>
@@ -209,7 +225,7 @@ function ToolDiffBlock({
         </View>
       ) : null}
       {stats.unavailable ? (
-        <Text style={styles.errorNote}>Diff too large to display.</Text>
+        <Text style={[styles.errorNote, styles.diffBlockNote]}>Diff too large to display.</Text>
       ) : (
         <View style={styles.diffScrollFrame}>
           <ScrollView
@@ -254,7 +270,11 @@ function ToolDiffBlock({
                     {line.prefix}
                   </Text>
                   <SelectableMessageText style={styles.diffLineText}>
-                    {line.content || ' '}
+                    {renderSyntaxTokens(
+                      highlightedLines[index] ?? (line.content || ' '),
+                      styles,
+                      `diff-line-${String(index)}`,
+                    )}
                   </SelectableMessageText>
                 </View>
               ))}
@@ -273,7 +293,7 @@ function ToolDiffBlock({
         </View>
       )}
       {stats.omittedChangedLines > 0 ? (
-        <Text style={styles.note}>
+        <Text style={[styles.note, styles.diffBlockNote]}>
           {String(stats.omittedChangedLines)} additional changed lines omitted.
         </Text>
       ) : null}

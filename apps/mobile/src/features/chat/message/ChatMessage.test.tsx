@@ -1855,7 +1855,7 @@ function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChat
 }
 
 function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
-  return root.findAll((node) => flattenRenderedText(node.children).includes(text)).length > 0;
+  return root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0;
 }
 
 /** The resolved height of the rendered sub-agent card, which must not depend on its state. */
