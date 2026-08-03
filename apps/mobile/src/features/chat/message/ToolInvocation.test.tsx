@@ -335,7 +335,7 @@ describe('ToolInvocationRow', () => {
 });
 
 describe('ToolInvocationOutput', () => {
-  it('renders a location chip without a line number', () => {
+  it('renders a location chip when the header does not already contain it', () => {
     const value = invocation({
       id: 'tool-read',
       kind: 'read',
@@ -346,6 +346,63 @@ describe('ToolInvocationOutput', () => {
     expand(tree, value.title);
 
     expect(textLines(tree)).toContain('README.md');
+
+    act(() => tree.unmount());
+  });
+
+  it('does not repeat one bare location already shown in the header', () => {
+    const value = invocation({
+      id: 'tool-read-location',
+      kind: 'read',
+      title: 'Read README.md',
+      locations: [{ path: 'README.md' }],
+      textLines: ['# Title'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    expect(textLines(tree)).not.toContain('Locations');
+    expect(textLines(tree)).not.toContain('README.md');
+
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    [
+      'Read apps/mobile/src/features/chat/message/ToolOutput.tsx',
+      'apps/mobile/src/features/chat/message/ToolOutput.tsx',
+    ],
+    ['Read src/app.tsx', 'src/app.ts'],
+  ])('keeps a location when "%s" does not visibly duplicate "%s"', (title, path) => {
+    const value = invocation({
+      id: `tool-location-${path}`,
+      kind: 'read',
+      title,
+      locations: [{ path }],
+      textLines: ['content'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    expect(textLines(tree)).toContain('Locations');
+    expect(textLines(tree)).toContain(path);
+
+    act(() => tree.unmount());
+  });
+
+  it('shows one truncation note when an unavailable diff is also marked truncated', () => {
+    const value = invocation({
+      id: 'tool-truncated-diff',
+      kind: 'edit',
+      truncated: true,
+      diffs: [{ path: 'src/a.ts', oldText: 'x'.repeat(16 * 1024), newText: 'replacement' }],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    expect(textLines(tree).filter((line) => line.startsWith('Diff too large'))).toEqual([
+      'Diff too large to display.',
+    ]);
 
     act(() => tree.unmount());
   });
@@ -401,5 +458,64 @@ describe('ToolInvocationOutput', () => {
     expand(longTree, long.title);
     expect(longTree.root.findAllByType(ScrollView)).toHaveLength(1);
     act(() => longTree.unmount());
+  });
+
+  it('shows measured overflow fades until horizontal content reaches the end', () => {
+    const value = invocation({
+      id: 'tool-overflow',
+      kind: 'execute',
+      monospaceTitle: true,
+      title: 'npm run a-very-long-command -- --with-many-options',
+      diffs: [{ path: 'src/a.ts', oldText: 'short', newText: 'a very long replacement line' }],
+    });
+    const tree = render(value);
+    const commandScroll = tree.root.findByProps({ testID: 'tool-command-scroll' });
+    const commandLayout = commandScroll.props['onLayout'] as (event: {
+      nativeEvent: { layout: { width: number } };
+    }) => void;
+    const commandContentSize = commandScroll.props['onContentSizeChange'] as (
+      width: number,
+      height: number,
+    ) => void;
+    act(() => {
+      commandLayout({ nativeEvent: { layout: { width: 100 } } });
+      commandContentSize(300, 16);
+    });
+    const commandFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade' })[0],
+      'command overflow fade',
+    );
+    expect(commandFade.props['start']).toEqual({ x: 0, y: 0.5 });
+    expect(commandFade.props['end']).toEqual({ x: 1, y: 0.5 });
+    expect(commandFade.props['colors']).toEqual(['rgba(0, 0, 0, 0)', theme.colors.bgMain]);
+
+    expand(tree, value.title);
+    const diffScroll = tree.root.findByProps({ testID: 'tool-diff-scroll' });
+    const diffLayout = diffScroll.props['onLayout'] as (event: {
+      nativeEvent: { layout: { width: number } };
+    }) => void;
+    const diffContentSize = diffScroll.props['onContentSizeChange'] as (
+      width: number,
+      height: number,
+    ) => void;
+    act(() => {
+      diffLayout({ nativeEvent: { layout: { width: 100 } } });
+      diffContentSize(300, 16);
+    });
+    expect(tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })).not.toHaveLength(0);
+
+    const scrolledToEnd = { nativeEvent: { contentOffset: { x: 200 } } };
+    const commandOnScroll = commandScroll.props['onScroll'] as (
+      event: typeof scrolledToEnd,
+    ) => void;
+    const diffOnScroll = diffScroll.props['onScroll'] as (event: typeof scrolledToEnd) => void;
+    act(() => {
+      commandOnScroll(scrolledToEnd);
+      diffOnScroll(scrolledToEnd);
+    });
+    expect(tree.root.findAllByProps({ testID: 'tool-command-overflow-fade' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })).toHaveLength(0);
+
+    act(() => tree.unmount());
   });
 });

@@ -30,6 +30,7 @@ import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
 } from './toolInvocationPresentation';
+import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
@@ -122,42 +123,59 @@ function ToolHeaderText({
   const theme = useAppTheme();
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const textStyles = [styles.rowSubject, invocation.isError && styles.rowTitleError];
+  const commandOverflow = useHorizontalOverflow();
 
   if (invocation.monospaceTitle && header.subject) {
     return (
-      <ScrollView
-        horizontal
-        bounces={false}
-        nestedScrollEnabled
-        directionalLockEnabled
-        style={styles.commandScroll}
-        contentContainerStyle={styles.commandScrollContent}
-        showsHorizontalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        testID="tool-command-scroll"
-        accessible={false}
-      >
-        <Pressable
-          disabled={!expandable}
-          onPress={toggle}
+      <View style={styles.horizontalScrollFrame}>
+        <ScrollView
+          horizontal
+          bounces={false}
+          nestedScrollEnabled
+          directionalLockEnabled
+          style={styles.commandScroll}
+          contentContainerStyle={styles.commandScrollContent}
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          onLayout={commandOverflow.onLayout}
+          onContentSizeChange={commandOverflow.onContentSizeChange}
+          onScroll={commandOverflow.onScroll}
+          scrollEventThrottle={16}
+          testID="tool-command-scroll"
           accessible={false}
-          accessibilityLabel={invocation.title}
-          style={({ pressed }) => [
-            styles.commandPressable,
-            pressed && expandable && styles.rowPressed,
-          ]}
-          testID="tool-command-toggle"
         >
-          {header.action ? (
-            <Animated.Text style={[styles.rowAction, invocation.isError && styles.rowTitleError]}>
-              {header.action}
+          <Pressable
+            disabled={!expandable}
+            onPress={toggle}
+            accessible={false}
+            accessibilityLabel={invocation.title}
+            style={({ pressed }) => [
+              styles.commandPressable,
+              pressed && expandable && styles.rowPressed,
+            ]}
+            testID="tool-command-toggle"
+          >
+            {header.action ? (
+              <Animated.Text style={[styles.rowAction, invocation.isError && styles.rowTitleError]}>
+                {header.action}
+              </Animated.Text>
+            ) : null}
+            <Animated.Text style={[textStyles, styles.rowSubjectMono]} numberOfLines={1}>
+              {header.subject}
             </Animated.Text>
-          ) : null}
-          <Animated.Text style={[textStyles, styles.rowSubjectMono]} numberOfLines={1}>
-            {header.subject}
-          </Animated.Text>
-        </Pressable>
-      </ScrollView>
+          </Pressable>
+        </ScrollView>
+        {commandOverflow.showEndFade ? (
+          <LinearGradient
+            colors={horizontalFadeColors(theme.colors.bgMain)}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            pointerEvents="none"
+            style={styles.horizontalOverflowFade}
+            testID="tool-command-overflow-fade"
+          />
+        ) : null}
+      </View>
     );
   }
 
@@ -339,6 +357,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         >
           <ToolInvocationOutput
             invocation={invocation}
+            headerLabel={header.label}
             bridgeUrl={bridgeUrl}
             bridgeToken={bridgeToken}
           />

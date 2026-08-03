@@ -394,6 +394,29 @@ describe('buildToolInvocations', () => {
       );
       expect(header.label).toBe('Edited MainScreen.test.tsx +1 -1');
     });
+
+    it('does not count unchanged lines between sparse edits as additions or deletions', () => {
+      const before = Array.from({ length: 12 }, (_, index) => `line ${String(index)}`);
+      const after = [...before];
+      after[1] = 'changed one';
+      after[10] = 'changed ten';
+
+      expect(
+        resolveToolInvocationHeader(
+          displayInvocation({
+            kind: 'edit',
+            title: 'Edit src/config.ts',
+            diffs: [
+              {
+                path: 'src/config.ts',
+                oldText: before.join('\n'),
+                newText: after.join('\n'),
+              },
+            ],
+          }),
+        ).label,
+      ).toBe('Edited config.ts +2 -2');
+    });
   });
 });
 

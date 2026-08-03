@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, type ReactElement, type ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
@@ -7,21 +8,26 @@ import { MarkdownImage, SelectableMessageText } from './Primitives';
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
+import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
 
 export function ToolInvocationOutput({
   invocation,
+  headerLabel,
   bridgeUrl,
   bridgeToken,
 }: {
   invocation: ToolInvocation;
+  headerLabel: string;
   bridgeUrl: string | null;
   bridgeToken: string | null;
 }): ReactElement | null {
   const theme = useAppTheme();
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
+  const visibleLocations = locationsNotRepeatedInHeader(invocation, headerLabel);
+  const hasUnavailableDiff = invocation.diffs.some((diff) => compactToolDiff(diff).unavailable);
   const sections: ReactElement[] = [];
   const addSection = (key: string, content: ReactNode) => {
     if (sections.length > 0) {
@@ -34,8 +40,8 @@ export function ToolInvocationOutput({
     );
   };
 
-  if (invocation.locations.length > 0) {
-    const shown = invocation.locations.slice(0, MAX_LOCATION_CHIPS);
+  if (visibleLocations.length > 0) {
+    const shown = visibleLocations.slice(0, MAX_LOCATION_CHIPS);
     addSection(
       'locations',
       <>
@@ -53,10 +59,8 @@ export function ToolInvocationOutput({
               </Text>
             </View>
           ))}
-          {invocation.locations.length > shown.length ? (
-            <Text style={styles.note}>
-              +{String(invocation.locations.length - shown.length)} more
-            </Text>
+          {visibleLocations.length > shown.length ? (
+            <Text style={styles.note}>+{String(visibleLocations.length - shown.length)} more</Text>
           ) : null}
         </View>
       </>,
@@ -124,7 +128,7 @@ export function ToolInvocationOutput({
     );
   }
 
-  if (invocation.truncated) {
+  if (invocation.truncated && !hasUnavailableDiff) {
     addSection(
       'truncated',
       <Text style={invocation.diffs.length > 0 ? styles.errorNote : styles.note}>
@@ -170,6 +174,7 @@ function ToolDiffBlock({
   const theme = useAppTheme();
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const stats = compactToolDiff(diff);
+  const overflow = useHorizontalOverflow();
   return (
     <View>
       {separated ? <View style={styles.panelDivider} /> : null}
@@ -191,37 +196,53 @@ function ToolDiffBlock({
       {stats.unavailable ? (
         <Text style={styles.errorNote}>Diff too large to display.</Text>
       ) : (
-        <ScrollView
-          horizontal
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          showsHorizontalScrollIndicator
-          contentContainerStyle={styles.diffScrollContent}
-          testID="tool-diff-scroll"
-        >
-          <View style={styles.diffLines}>
-            {stats.lines.map((line, index) => (
-              <View
-                key={`${line.kind}-${String(index)}`}
-                style={[
-                  styles.diffLine,
-                  line.kind === 'add' && styles.diffLineAdded,
-                  line.kind === 'remove' && styles.diffLineRemoved,
-                ]}
-              >
-                <SelectableMessageText
+        <View style={styles.diffScrollFrame}>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator
+            contentContainerStyle={styles.diffScrollContent}
+            onLayout={overflow.onLayout}
+            onContentSizeChange={overflow.onContentSizeChange}
+            onScroll={overflow.onScroll}
+            scrollEventThrottle={16}
+            testID="tool-diff-scroll"
+          >
+            <View style={styles.diffLines}>
+              {stats.lines.map((line, index) => (
+                <View
+                  key={`${line.kind}-${String(index)}`}
                   style={[
-                    styles.diffLineText,
-                    line.kind === 'add' && styles.diffLineTextAdded,
-                    line.kind === 'remove' && styles.diffLineTextRemoved,
+                    styles.diffLine,
+                    line.kind === 'add' && styles.diffLineAdded,
+                    line.kind === 'remove' && styles.diffLineRemoved,
                   ]}
                 >
-                  {`${line.prefix} ${line.content}`}
-                </SelectableMessageText>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
+                  <SelectableMessageText
+                    style={[
+                      styles.diffLineText,
+                      line.kind === 'add' && styles.diffLineTextAdded,
+                      line.kind === 'remove' && styles.diffLineTextRemoved,
+                    ]}
+                  >
+                    {`${line.prefix} ${line.content}`}
+                  </SelectableMessageText>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+          {overflow.showEndFade ? (
+            <LinearGradient
+              colors={horizontalFadeColors(theme.colors.bgMain)}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              pointerEvents="none"
+              style={styles.horizontalOverflowFade}
+              testID="tool-diff-overflow-fade"
+            />
+          ) : null}
+        </View>
       )}
       {stats.omittedChangedLines > 0 ? (
         <Text style={styles.note}>
@@ -230,6 +251,27 @@ function ToolDiffBlock({
       ) : null}
     </View>
   );
+}
+
+function locationsNotRepeatedInHeader(
+  invocation: ToolInvocation,
+  headerLabel: string,
+): ToolInvocation['locations'] {
+  if (invocation.locations.length !== 1) {
+    return invocation.locations;
+  }
+  const location = invocation.locations[0];
+  if (!location) {
+    return invocation.locations;
+  }
+  const label =
+    location.line === undefined ? location.path : `${location.path}:${String(location.line)}`;
+  const normalizedHeader = headerLabel.toLowerCase();
+  const normalizedLabel = label.toLowerCase();
+  const labelIsFullyVisible = normalizedLabel.length <= 24;
+  const labelEndsHeader =
+    normalizedHeader === normalizedLabel || normalizedHeader.endsWith(` ${normalizedLabel}`);
+  return labelIsFullyVisible && labelEndsHeader ? [] : invocation.locations;
 }
 
 function renderedLineCount(invocation: ToolInvocation): number {

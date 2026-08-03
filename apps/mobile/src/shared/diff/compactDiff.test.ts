@@ -46,7 +46,8 @@ describe('buildCompactDiff', () => {
   it('bounds large changed regions and rejects bridge-limit-shaped text', () => {
     const changed = Array.from({ length: 50 }, (_, index) => `line ${String(index)}`).join('\n');
     const compact = buildCompactDiff('', changed);
-    expect(compact.lines).toHaveLength(40);
+    expect(compact.lines.filter((line) => line.kind === 'add')).toHaveLength(40);
+    expect(compact.lines).toContainEqual({ kind: 'context', prefix: ' ', content: '...' });
     expect(compact.additions).toBe(50);
     expect(compact.omittedChangedLines).toBe(10);
 
@@ -61,9 +62,36 @@ describe('buildCompactDiff', () => {
     const after = Array.from({ length: 60 }, (_, index) => `new ${String(index)}`).join('\n');
     const compact = buildCompactDiff(before, after);
 
-    expect(compact.lines).toHaveLength(40);
     expect(compact.lines.filter((line) => line.kind === 'remove')).toHaveLength(20);
     expect(compact.lines.filter((line) => line.kind === 'add')).toHaveLength(20);
     expect(compact.omittedChangedLines).toBe(80);
+  });
+
+  it('keeps sparse inner context out of edit counts and collapses distant regions', () => {
+    const before = Array.from({ length: 12 }, (_, index) => `line ${String(index)}`);
+    const after = [...before];
+    after[1] = 'changed one';
+    after[10] = 'changed ten';
+    const compact = buildCompactDiff(before.join('\n'), after.join('\n'));
+
+    expect(compact).toMatchObject({ additions: 2, deletions: 2, omittedChangedLines: 0 });
+    expect(compact.lines).toContainEqual({ kind: 'context', prefix: ' ', content: '...' });
+    expect(
+      compact.lines.filter(
+        (line) => line.content === 'line 5' && (line.kind === 'add' || line.kind === 'remove'),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('declines a pathologically expensive line matrix instead of blocking the UI', () => {
+    const before = Array.from({ length: 1_000 }, (_, index) => `a${String(index)}`).join('\n');
+    const after = Array.from({ length: 1_000 }, (_, index) => `b${String(index)}`).join('\n');
+
+    expect(buildCompactDiff(before, after)).toMatchObject({ unavailable: true, lines: [] });
+  });
+
+  it('reuses stable compact results across transcript rebuilds', () => {
+    const first = buildCompactDiff('before', 'after');
+    expect(buildCompactDiff('before', 'after')).toBe(first);
   });
 });

@@ -70,6 +70,7 @@ export const createToolCardStyles = (theme: AppTheme) =>
       paddingLeft: theme.spacing.sm,
       paddingRight: theme.spacing.sm,
     },
+    horizontalScrollFrame: { flex: 1, minWidth: 0, position: 'relative' },
     commandScroll: { flex: 1, minWidth: 0 },
     commandScrollContent: { flexDirection: 'row', flexGrow: 1 },
     commandPressable: {
@@ -78,6 +79,13 @@ export const createToolCardStyles = (theme: AppTheme) =>
       alignItems: 'center',
       gap: 4,
       paddingLeft: theme.spacing.sm,
+    },
+    horizontalOverflowFade: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      width: theme.spacing.xl,
     },
     shimmerClip: {
       position: 'absolute',
@@ -174,6 +182,7 @@ export const createToolCardStyles = (theme: AppTheme) =>
       color: theme.colors.diffRemovedText,
     },
     diffScrollContent: { minWidth: '100%' },
+    diffScrollFrame: { position: 'relative' },
     diffLines: { minWidth: '100%' },
     diffLine: {
       minWidth: '100%',
