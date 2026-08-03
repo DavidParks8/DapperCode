@@ -351,7 +351,7 @@ describe('ToolInvocationOutput', () => {
     act(() => tree.unmount());
   });
 
-  it('uses the full transcript width for expanded tool content', () => {
+  it('aligns expanded tool content to the icon column', () => {
     const value = invocation({ id: 'tool-full-width', textLines: ['output'] });
     const tree = render(value);
     expand(tree, value.title);
@@ -360,7 +360,9 @@ describe('ToolInvocationOutput', () => {
       'tool output panel',
     );
 
-    expect(StyleSheet.flatten(panel.props['style'] as object)).not.toHaveProperty('marginLeft');
+    expect(StyleSheet.flatten(panel.props['style'] as object)).toMatchObject({
+      marginLeft: theme.spacing.sm,
+    });
 
     act(() => tree.unmount());
   });
@@ -455,7 +457,7 @@ describe('ToolInvocationOutput', () => {
     act(() => tree.unmount());
   });
 
-  it('uses vivid colors plus redundant markers for added and removed lines', () => {
+  it('uses vivid blue and red plus redundant markers for changed lines', () => {
     const value = invocation({
       id: 'tool-color-independent-diff',
       kind: 'edit',
@@ -476,15 +478,15 @@ describe('ToolInvocationOutput', () => {
 
     expect(addedMarker.props['children']).toBe('+');
     expect(addedStyle).toMatchObject({
-      color: theme.colors.black,
-      backgroundColor: theme.colors.statusComplete,
+      color: theme.colors.diffAddedText,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.diffAddedText,
     });
     expect(removedMarker.props['children']).toBe('-');
     expect(removedStyle).toMatchObject({
-      color: theme.colors.black,
-      backgroundColor: theme.colors.statusError,
-      borderWidth: 1,
-      borderColor: theme.colors.statusError,
+      color: theme.colors.diffRemovedText,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.diffRemovedText,
     });
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Added line: after' })).not.toHaveLength(
       0,
@@ -498,12 +500,12 @@ describe('ToolInvocationOutput', () => {
     const lightTheme = createAppTheme('light');
     const lightStyles = createToolCardStyles(lightTheme);
     expect(StyleSheet.flatten(lightStyles.diffLineMarkerAdded)).toMatchObject({
-      color: lightTheme.colors.black,
-      backgroundColor: lightTheme.colors.statusComplete,
+      color: lightTheme.colors.diffAddedText,
+      borderLeftColor: lightTheme.colors.diffAddedText,
     });
     expect(StyleSheet.flatten(lightStyles.diffLineMarkerRemoved)).toMatchObject({
-      color: lightTheme.colors.white,
-      backgroundColor: lightTheme.colors.statusError,
+      color: lightTheme.colors.diffRemovedText,
+      borderLeftColor: lightTheme.colors.diffRemovedText,
     });
   });
 
