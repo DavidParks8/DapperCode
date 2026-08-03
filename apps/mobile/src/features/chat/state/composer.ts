@@ -3,7 +3,7 @@ import { screenAtom } from './registry';
 
 export const keyboardVisibleAtom = screenAtom(false);
 
-export const androidKeyboardInsetAtom = screenAtom(0);
+export const keyboardInsetAtom = screenAtom(0);
 
 export const composerHeightAtom = screenAtom(0);
 

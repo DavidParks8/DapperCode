@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
 
@@ -132,6 +133,20 @@ function root(tree: ReactTestRenderer): QueryableInstance {
 }
 
 describe('mainScreenComposerRenderer suggestion surfaces', () => {
+  it('offsets the overlay composer by the measured iOS keyboard inset', () => {
+    const tree = render(baseContext({ composerOverlayInset: 291 }), true);
+    const overlay = root(tree).findAll((node) => {
+      const style = StyleSheet.flatten(node.props['style'] as never) as {
+        bottom?: number;
+        position?: string;
+      };
+      return style?.position === 'absolute' && style?.bottom === 291;
+    })[0];
+
+    expect(requireTestValue(overlay, 'composer overlay')).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
   it('keeps floating activity status non-interactive above the composer', () => {
     const tree = render(
       baseContext({

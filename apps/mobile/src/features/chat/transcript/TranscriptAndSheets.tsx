@@ -9,6 +9,7 @@ import { keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import { KeyboardAvoidingView, Platform, View } from 'react-native';
+import { ActivityBar } from '../screen/ActivityBar';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { ComposeView } from '../screen/Presentation';
@@ -300,6 +301,9 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     toggleFastMode,
     shouldShowComposer,
     renderComposer,
+    showFloatingActivity,
+    displayedActivity,
+    activityDetail,
     attachmentMenuVisible,
     attachmentMenuOptions,
     attachmentController,
@@ -320,6 +324,8 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   const collaborationModeMenuVisible = useAtomValue(collaborationModeMenuVisibleAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const usesOverlayComposer = Platform.OS === 'android' || Platform.OS === 'ios';
+  const contentBottomInset = usesOverlayComposer ? composerReservedInset : 0;
   const contentProps: BodyContentProps = {
     selectedChat,
     isOpeningChat,
@@ -361,7 +367,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     toggleFastMode,
     liveMessageState: selectedChat ? (liveAssistantByThread[selectedChat.id] ?? null) : null,
     keyboardVisible,
-    bottomInset: composerReservedInset,
+    bottomInset: contentBottomInset,
     topInset: topChromeHeight,
   };
 
@@ -376,9 +382,19 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
           <TranscriptOrComposerContent
             {...contentProps}
             keyboardVisible={Platform.OS === 'android' ? keyboardVisible : false}
-            bottomInset={composerReservedInset}
+            bottomInset={contentBottomInset}
           />
           {Platform.OS === 'ios' && shouldShowComposer ? renderComposer(true) : null}
+          {!usesOverlayComposer && showFloatingActivity ? (
+            <View pointerEvents="none" style={styles.activityDock}>
+              <ActivityBar
+                title={displayedActivity.title}
+                detail={activityDetail}
+                tone={displayedActivity.tone}
+              />
+            </View>
+          ) : null}
+          {!usesOverlayComposer && shouldShowComposer ? renderComposer(false) : null}
         </KeyboardAvoidingView>
         {Platform.OS === 'android' && shouldShowComposer ? renderComposer(true) : null}
       </View>

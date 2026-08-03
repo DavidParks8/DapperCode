@@ -1,7 +1,7 @@
 import { activeTurnIdAtom, errorAtom } from '../state/turn';
 import { bridgeCapabilitiesAtom, modelOptionsByAgentAtom } from '../state/models';
 import { agentRootThreadIdAtom } from '../../workspace/state/workspace';
-import { androidKeyboardInsetAtom, keyboardVisibleAtom } from '../state/composer';
+import { keyboardInsetAtom, keyboardVisibleAtom } from '../state/composer';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import {
@@ -29,6 +29,7 @@ import { useAttachmentController } from '../composer/controllers/attachmentContr
 import { mergeModelOptions, modelOptionsFromAcpConfig } from '../state/chatState';
 import { lastUsedModelPreference } from '../helpers/preferences';
 import { useMountTimestampRef } from '../screen/useMountTimestampRef';
+import { resolveKeyboardInset } from './keyboardLayout';
 import type {
   MainScreenLifecycleRecoveryContext,
   MainScreenLifecycleRecoveryResult,
@@ -181,7 +182,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const bridgeCapabilities = useAtomValue(bridgeCapabilitiesAtom);
   const modelOptionsByAgent = useAtomValue(modelOptionsByAgentAtom);
   const setKeyboardVisible = useSetAtom(keyboardVisibleAtom);
-  const setAndroidKeyboardInset = useSetAtom(androidKeyboardInsetAtom);
+  const setKeyboardInset = useSetAtom(keyboardInsetAtom);
 
   useEffect(() => {
     return () => {
@@ -196,33 +197,32 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   }, [replayRecoveryAbortControllerRef, replayRecoveryGenerationRef, replayRecoveryRetryTimerRef]);
 
   useEffect(() => {
+    const updateKeyboardFrame = (event: KeyboardEvent) => {
+      const inset = resolveKeyboardInset(
+        Dimensions.get('screen').height,
+        event.endCoordinates?.screenY,
+        event.endCoordinates?.height,
+      );
+      setKeyboardVisible(inset > 0);
+      setKeyboardInset(inset);
+    };
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (event: KeyboardEvent) => {
-      setKeyboardVisible(true);
-
-      if (Platform.OS !== 'android') {
-        return;
-      }
-
-      const keyboardTop = event.endCoordinates?.screenY;
-      const keyboardHeight = event.endCoordinates?.height ?? 0;
-      const screenHeight = Dimensions.get('screen').height;
-      const overlap =
-        typeof keyboardTop === 'number' && Number.isFinite(keyboardTop)
-          ? Math.max(0, screenHeight - keyboardTop)
-          : Math.max(0, keyboardHeight);
-      setAndroidKeyboardInset(overlap);
-    });
+    const showSub = Keyboard.addListener(showEvent, updateKeyboardFrame);
+    const frameSub =
+      Platform.OS === 'ios'
+        ? Keyboard.addListener('keyboardWillChangeFrame', updateKeyboardFrame)
+        : null;
     const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
-      setAndroidKeyboardInset(0);
+      setKeyboardInset(0);
     });
     return () => {
       showSub.remove();
+      frameSub?.remove();
       hideSub.remove();
     };
-  }, [setAndroidKeyboardInset, setKeyboardVisible]);
+  }, [setKeyboardInset, setKeyboardVisible]);
 
   // Live views so callbacks always read the newest value without re-subscribing. They are
   // memoized on the store so every consumer that lists one as a hook dependency keeps a stable

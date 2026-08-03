@@ -11,8 +11,8 @@ import {
 } from '../state/turn';
 import { selectedCollaborationModeAtom } from '../state/models';
 import {
-  androidKeyboardInsetAtom,
   composerHeightAtom,
+  keyboardInsetAtom,
   keyboardVisibleAtom,
   pendingPlanImplementationPromptsAtom,
   planPanelCollapsedByThreadAtom,
@@ -20,7 +20,6 @@ import {
   queueActionKindAtom,
 } from '../state/composer';
 import { useAtomValue } from 'jotai';
-import { Platform } from 'react-native';
 import type { BridgeUiSurface, Chat, ChatSummary } from '@bridge/types/types';
 import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import { isSettledIdleActivity } from '../screen/activityIndicator';
@@ -328,15 +327,14 @@ function resolveComposerInsets(options: {
   theme: MainScreenWorkflowQueueStateContext['theme'];
   safeAreaInsets: MainScreenWorkflowQueueStateContext['safeAreaInsets'];
   keyboardVisible: boolean;
-  androidKeyboardInset: number;
+  keyboardInset: number;
   composerHeight: number;
 }) {
   const chatBottomInset = options.shouldShowComposer
     ? options.theme.spacing.lg
     : Math.max(options.theme.spacing.xxl, options.safeAreaInsets.bottom + options.theme.spacing.lg);
   const composerSafeAreaBottomInset = options.safeAreaInsets.bottom;
-  const composerOverlayInset =
-    Platform.OS === 'android' && options.keyboardVisible ? options.androidKeyboardInset : 0;
+  const composerOverlayInset = options.keyboardVisible ? options.keyboardInset : 0;
   const composerReservedInset = options.shouldShowComposer
     ? Math.max(
         options.theme.spacing.lg,
@@ -390,7 +388,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
-  const androidKeyboardInset = useAtomValue(androidKeyboardInsetAtom);
+  const keyboardInset = useAtomValue(keyboardInsetAtom);
   const composerHeight = useAtomValue(composerHeightAtom);
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const queueActionKind = useAtomValue(queueActionKindAtom);
@@ -490,7 +488,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
       theme,
       safeAreaInsets,
       keyboardVisible,
-      androidKeyboardInset,
+      keyboardInset,
       composerHeight,
     });
   const visibleError = resolveVisibleError(ws.isConnected, error);

@@ -166,6 +166,28 @@ describe('MainScreenTranscriptAndSheets', () => {
     expect(mockTranscriptProps.at(-1)?.['bottomInset']).toBe(88);
   });
 
+  it('keeps the web composer in flow instead of dropping it during native overlay handling', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'web' });
+    const store = createStore();
+    const renderComposer = jest.fn(() => null);
+    const context = createContext({
+      composerReservedInset: 88,
+      renderComposer,
+      shouldShowComposer: true,
+    });
+
+    act(() => {
+      renderer.create(
+        <Provider store={store}>
+          <MainScreenTranscriptAndSheets context={context as never} />
+        </Provider>,
+      );
+    });
+
+    expect(renderComposer).toHaveBeenCalledWith(false);
+    expect(mockTranscriptProps.at(-1)?.['bottomInset']).toBe(0);
+  });
+
   it('keeps compose and opening content clear of the measured top chrome', () => {
     const store = createStore();
     store.set(topChromeHeightAtom, 72);
