@@ -135,11 +135,6 @@ export const createStyles = (theme: AppTheme) =>
       pointerEvents: 'none',
     },
     reasoningDetailWrap: { marginTop: theme.spacing.xs, gap: theme.spacing.xs },
-    reasoningDetailLine: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
-      lineHeight: 17,
-    },
     reasoningToggleText: {
       ...theme.typography.caption,
       color: theme.colors.textMuted,
@@ -170,7 +165,7 @@ export const createStyles = (theme: AppTheme) =>
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: theme.colors.borderLight,
     },
-    selectTextTitle: { ...theme.typography.headline },
+    selectTextTitle: { ...theme.typography.headline, color: theme.colors.textPrimary },
     selectTextCloseButton: {
       alignItems: 'center',
       justifyContent: 'center',
@@ -178,12 +173,14 @@ export const createStyles = (theme: AppTheme) =>
       height: 32,
       borderRadius: theme.radius.full,
     },
+    // Selection shows the same prose the transcript shows, so it stays on the app's body face
+    // rather than the monospace one reserved for code blocks and terminal output.
     selectTextInput: {
       flex: 1,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,
       ...theme.typography.body,
-      fontFamily: theme.fonts.monoRegular,
+      color: theme.colors.textPrimary,
     },
     localPreviewLinkList: { marginTop: theme.spacing.sm, gap: theme.spacing.xs },
     localPreviewLink: {
@@ -229,85 +226,6 @@ export const createStyles = (theme: AppTheme) =>
       ...theme.typography.caption,
       color: theme.colors.textMuted,
       fontWeight: '600',
-    },
-    toolRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.sm,
-      paddingVertical: 5,
-      paddingHorizontal: theme.spacing.sm,
-      borderRadius: theme.radius.sm,
-    },
-    toolRowPressed: { backgroundColor: theme.colors.bgItem },
-    toolRowError: {
-      backgroundColor: theme.colors.errorBg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.errorBorder,
-    },
-    toolRowIcon: { width: 16, alignItems: 'center' },
-    toolRowTitle: {
-      ...theme.typography.caption,
-      color: theme.colors.textSecondary,
-      flex: 1,
-      lineHeight: 16,
-    },
-    toolRowTitleMono: { fontFamily: theme.fonts.monoRegular },
-    toolRowTitleError: { color: theme.colors.statusError },
-    toolRowTrailing: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    toolRowBody: {
-      marginLeft: theme.spacing.sm + 16 + theme.spacing.sm,
-      marginTop: theme.spacing.xs,
-      marginBottom: theme.spacing.xs,
-      gap: theme.spacing.xs,
-    },
-    toolBodyScroll: { maxHeight: 260 },
-    toolOutputSurface: {
-      paddingVertical: theme.spacing.xs,
-      paddingHorizontal: theme.spacing.sm,
-      gap: 2,
-      borderRadius: theme.radius.sm,
-      backgroundColor: theme.colors.bgInput,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderLight,
-    },
-    toolConsoleSurface: {
-      backgroundColor: theme.colors.bgElevated,
-      borderColor: theme.colors.toolBlockBorder,
-    },
-    toolOutputLine: {
-      ...theme.typography.mono,
-      lineHeight: 16,
-      color: theme.colors.textSecondary,
-    },
-    toolOutputHeader: {
-      ...theme.typography.metadata,
-      fontFamily: theme.fonts.monoRegular,
-      marginBottom: 2,
-    },
-    toolDiffLineAdded: {
-      color: theme.colors.diffAddedText,
-      backgroundColor: theme.colors.diffAddedBg,
-    },
-    toolDiffLineRemoved: {
-      color: theme.colors.diffRemovedText,
-      backgroundColor: theme.colors.diffRemovedBg,
-    },
-    toolLocationChips: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.xs },
-    toolLocationChip: {
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-      borderRadius: theme.radius.sm,
-      backgroundColor: theme.colors.inlineCodeBg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.inlineCodeBorder,
-    },
-    toolLocationChipText: {
-      ...theme.typography.metadata,
-      fontFamily: theme.fonts.monoRegular,
-      color: theme.colors.inlineCodeText,
-    },
-    toolTruncatedNote: {
-      ...theme.typography.metadata,
     },
     scrollableRowTextViewport: { flex: 1, minWidth: 0, overflow: 'hidden' },
     scrollableRowTextScroll: { width: '100%' },

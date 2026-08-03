@@ -64,7 +64,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "DapperCode uses your photo library so you can choose an image from your phone and attach it to a chat prompt or workflow sent to your own host bridge.",
+          "photosPermission": "DapperCode uses your photo library so you can choose an image from your device and attach it to a chat prompt or workflow sent to your own host bridge.",
           "cameraPermission": "DapperCode uses the camera to scan bridge pairing QR codes and capture photos you want to attach to a chat."
         }
       ],

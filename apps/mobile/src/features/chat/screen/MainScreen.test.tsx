@@ -48,9 +48,18 @@ import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import { refreshBridgeCapabilitiesAtom } from '@shell/state/bridge/capabilities';
 import { routes } from '@shell/navigation/routes';
+import { WORKING_PHRASES } from '../helpers/workingPhrases';
 
 function accessibilityLabel(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+/** Marker for the running status, which rotates through phrases instead of one fixed string. */
+const ROTATING_WORKING_STATUS = '__rotating-working-status__';
+
+/** Whether the rotating running status is on screen, whichever phrase it landed on. */
+function hasWorkingStatus<T>(root: T, matcher: (root: T, value: string) => boolean): boolean {
+  return WORKING_PHRASES.some((phrase) => matcher(root, phrase));
 }
 
 jest.mock('@expo/vector-icons', () => ({
@@ -110,7 +119,7 @@ jest.mock('../approvals/ApprovalBanner', () => ({
   },
 }));
 
-jest.mock('./LoadingGlyph', () => ({ LoadingGlyph: () => null }));
+jest.mock('./AtomGlyph', () => ({ AtomGlyph: () => null }));
 
 let mockBridgeUiProps: {
   surface: BridgeUiSurface;
@@ -2335,9 +2344,123 @@ function MainRouteShell() {
         1,
       );
       expect(hasText(root, 'Preview at http://127.0.0.1:5173')).toBe(true);
-      expect(hasText(root, 'Working')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
       expect(byLabel(root, 'Stop agent')).toBeTruthy();
 
+      act(() => tree.unmount());
+    });
+
+    it('dismisses model and thinking sheets before queued ACP config writes resolve', async () => {
+      const configuredChat: Chat = {
+        ...rootChat,
+        acpConfig: [
+          {
+            id: 'model',
+            value: 'github-copilot/gpt-5.4',
+            category: 'model',
+            options: [
+              { value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' },
+              { value: 'github-copilot/gpt-5-mini', name: 'GitHub Copilot/GPT-5 Mini' },
+            ],
+          },
+          {
+            id: 'effort',
+            value: 'high',
+            category: 'thought_level',
+            options: [
+              { value: 'none', name: 'None' },
+              { value: 'high', name: 'High' },
+            ],
+          },
+        ],
+      };
+      const pendingWrites: Array<{
+        configId: string;
+        value: string;
+        resolve: (chat: Chat) => void;
+      }> = [];
+      const api = createApi();
+      (api.getChat as jest.Mock).mockResolvedValue(configuredChat);
+      (api.peekChat as jest.Mock).mockReturnValue(configuredChat);
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'github-copilot/gpt-5.4',
+          displayName: 'GPT-5.4',
+          providerName: 'GitHub Copilot',
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+        {
+          id: 'github-copilot/gpt-5-mini',
+          displayName: 'GPT-5 Mini',
+          providerName: 'GitHub Copilot',
+          reasoningEffort: [{ effort: 'none' }, { effort: 'high' }],
+        },
+      ]);
+      (api.setThreadConfigOption as jest.Mock).mockImplementation(
+        (_threadId: string, configId: string, value: string) =>
+          new Promise<Chat>((resolve) => {
+            pendingWrites.push({ configId, value, resolve });
+          }),
+      );
+      const { tree } = await renderMain({ api, selectedChat: configuredChat });
+      const root = rootOf(tree);
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+      act(() => {
+        byLabel(root, 'GitHub Copilot · GPT-5 Mini').props.onPress();
+      });
+
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(byLabel(root, 'Set thinking level')).toBeTruthy();
+      await act(async () => {
+        await flush();
+      });
+      expect(pendingWrites).toHaveLength(1);
+      expect(pendingWrites[0]).toMatchObject({
+        configId: 'model',
+        value: 'github-copilot/gpt-5-mini',
+      });
+
+      act(() => {
+        byLabel(root, 'None').props.onPress();
+      });
+
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
+      expect(api.setThreadConfigOption).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        pendingWrites[0]?.resolve({
+          ...configuredChat,
+          acpConfig: configuredChat.acpConfig?.map((option) =>
+            option.id === 'model' ? { ...option, value: 'github-copilot/gpt-5-mini' } : option,
+          ),
+        });
+        await flush();
+      });
+
+      expect(api.setThreadConfigOption).toHaveBeenCalledTimes(2);
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
+      expect(pendingWrites[1]).toMatchObject({ configId: 'effort', value: 'none' });
+
+      await act(async () => {
+        pendingWrites[1]?.resolve({
+          ...configuredChat,
+          acpConfig: configuredChat.acpConfig?.map((option) => {
+            if (option.id === 'model') {
+              return { ...option, value: 'github-copilot/gpt-5-mini' };
+            }
+            return option.id === 'effort' ? { ...option, value: 'none' } : option;
+          }),
+        });
+        await flush();
+      });
+
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(byLabel(root, 'Thinking level, None')).toBeTruthy();
       act(() => tree.unmount());
     });
 
@@ -2614,7 +2737,7 @@ function MainRouteShell() {
         ],
       });
       await press(byLabel(root, 'Add attachment'));
-      await press(byLabel(root, 'Pick file from phone'));
+      await press(byLabel(root, 'Pick file from device'));
       await advance();
       expect(api.uploadAttachment).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2631,7 +2754,7 @@ function MainRouteShell() {
         ],
       });
       await press(byLabel(root, 'Add attachment'));
-      await press(byLabel(root, 'Pick file from phone'));
+      await press(byLabel(root, 'Pick file from device'));
       await advance();
       expect(hasText(root, 'upload failed')).toBe(true);
       await press(byLabel(root, 'retry · broken.txt, remove attachment'));
@@ -2806,7 +2929,7 @@ function MainRouteShell() {
         await flush();
       });
 
-      expect(hasText(root, 'Working')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
       expect(hasText(root, 'Turn completed')).toBe(false);
       act(() => tree.unmount());
     });
@@ -4269,7 +4392,7 @@ function MainRouteShell() {
       },
       {
         status: 'running' as const,
-        expected: 'Working',
+        expected: ROTATING_WORKING_STATUS,
         indicatorVisible: true,
         activeTurnId: 'turn-active',
         lastError: undefined,
@@ -4295,7 +4418,11 @@ function MainRouteShell() {
         const harness = await renderMain({ chat });
 
         expect(text(harness.tree.root as Queryable, 'Runtime truth')).toBe(true);
-        expect(text(harness.tree.root as Queryable, expected)).toBe(indicatorVisible);
+        expect(
+          expected === ROTATING_WORKING_STATUS
+            ? hasWorkingStatus(harness.tree.root as Queryable, text)
+            : text(harness.tree.root as Queryable, expected),
+        ).toBe(indicatorVisible);
         expect(harness.store.get(pendingMainChatIdAtom)).toBeNull();
         expect(harness.store.get(mainOpeningChatIdAtom)).toBeNull();
         harness.unmount();
@@ -4338,7 +4465,7 @@ function MainRouteShell() {
       const harness = await renderMain({ api, chat: running });
       const root = harness.tree.root as Queryable;
 
-      expect(text(root, 'Working')).toBe(true);
+      expect(hasWorkingStatus(root, text)).toBe(true);
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
@@ -4352,7 +4479,7 @@ function MainRouteShell() {
       });
 
       const answerVisible = transcript(root).some(({ message }) => message.id === 'answer');
-      const workingVisible = text(root, 'Working');
+      const workingVisible = hasWorkingStatus(root, text);
       const stopControlCount = root.findAll(
         (node) => node.props['accessibilityLabel'] === 'Stop agent',
       ).length;
@@ -4361,6 +4488,62 @@ function MainRouteShell() {
       expect(answerVisible).toBe(true);
       expect(workingVisible).toBe(false);
       expect(stopControlCount).toBe(0);
+    });
+
+    it('rotates the running status phrase as the chat keeps updating', async () => {
+      // Regression: the strip repeated one word for the whole turn, which read like a frozen app.
+      // The phrase must be stable across re-renders of the same state and move on when the chat does.
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+      const firstPhrase = requireTestValue(WORKING_PHRASES[0], 'indexed test value');
+      try {
+        const running: Chat = {
+          ...baseChat,
+          status: 'running',
+          activeTurnId: 'turn-rotating',
+          messages: [
+            { id: 'prompt', role: 'user' as const, content: 'Keep going.', createdAt: now },
+          ],
+        };
+        let latest = running;
+        const api = createApi({ chat: running });
+        requireTestValue(api['getChat'], 'indexed test value').mockImplementation(() =>
+          Promise.resolve(latest),
+        );
+        const harness = await renderMain({ api, chat: running });
+        const root = harness.tree.root as Queryable;
+
+        expect(text(root, firstPhrase)).toBe(true);
+
+        // The same chat state keeps the same phrase, so the strip does not reshuffle on re-render.
+        await act(async () => {
+          jest.advanceTimersByTime(15_000);
+          for (let index = 0; index < 10; index += 1) {
+            await Promise.resolve();
+          }
+        });
+        expect(text(root, firstPhrase)).toBe(true);
+
+        latest = {
+          ...running,
+          updatedAt: '2026-07-25T00:00:05.000Z',
+          statusUpdatedAt: '2026-07-25T00:00:05.000Z',
+        };
+        await act(async () => {
+          jest.advanceTimersByTime(15_000);
+          for (let index = 0; index < 10; index += 1) {
+            await Promise.resolve();
+          }
+        });
+
+        expect(text(root, firstPhrase)).toBe(false);
+        expect(hasWorkingStatus(root, text)).toBe(true);
+        expect(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+        ).not.toHaveLength(0);
+        harness.unmount();
+      } finally {
+        randomSpy.mockRestore();
+      }
     });
 
     it('settles a reasoning-only turn and later reconciles a delayed assistant response', async () => {
@@ -4413,7 +4596,7 @@ function MainRouteShell() {
           ({ message }) => message.id === reasoning.id && message.role === 'reasoning',
         ),
       ).toBe(true);
-      expect(text(root, 'Working')).toBe(true);
+      expect(hasWorkingStatus(root, text)).toBe(true);
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
@@ -4432,7 +4615,7 @@ function MainRouteShell() {
         ),
       ).toBe(true);
       expect(text(root, 'Turn completed')).toBe(true);
-      expect(text(root, 'Working')).toBe(false);
+      expect(hasWorkingStatus(root, text)).toBe(false);
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
@@ -4456,7 +4639,7 @@ function MainRouteShell() {
           ({ message }) => message.id === 'delayed-answer' && message.role === 'assistant',
         ),
       ).toBe(true);
-      expect(text(root, 'Working')).toBe(false);
+      expect(hasWorkingStatus(root, text)).toBe(false);
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
@@ -5021,9 +5204,9 @@ function MainRouteShell() {
         expect(
           requireTestValue(api['sendOrQueueChatMessage'], 'indexed test value').mock.calls.length,
         ).toBeGreaterThan(0);
-        expect(text(root, expected) || (disposition === 'sent' && text(root, 'Working'))).toBe(
-          true,
-        );
+        expect(
+          text(root, expected) || (disposition === 'sent' && hasWorkingStatus(root, text)),
+        ).toBe(true);
         harness.unmount();
       },
     );
@@ -5533,7 +5716,7 @@ function MainRouteShell() {
           statusUpdatedAt: running.statusUpdatedAt,
         }),
       );
-      expect(hasText(harness.root, 'Working')).toBe(true);
+      expect(hasWorkingStatus(harness.root, hasText)).toBe(true);
       expect(
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
@@ -5557,7 +5740,7 @@ function MainRouteShell() {
       );
       expect(harness.store.get(selectedChatAtom)?.status).toBe('complete');
       expect(hasText(harness.root, 'Turn completed')).toBe(true);
-      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(hasWorkingStatus(harness.root, hasText)).toBe(false);
       expect(
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
@@ -5575,7 +5758,7 @@ function MainRouteShell() {
       expect(transcriptMessages(harness.root).map(({ message }) => message.content)).toEqual(
         immediateMessages,
       );
-      expect(hasText(harness.root, 'Working')).toBe(false);
+      expect(hasWorkingStatus(harness.root, hasText)).toBe(false);
       expect(
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);

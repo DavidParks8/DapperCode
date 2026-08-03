@@ -44,11 +44,10 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
 
   const collaborationModeOptions = useMemo<SelectionSheetOption[]>(() => {
-    const setMode = async (mode: CollaborationMode, acpMode: string) => {
+    const setMode = (mode: CollaborationMode, acpMode: string) => {
       void feedback.selection();
       if (modeConfig) {
-        const updated = await applyAcpConfigOption(modeConfig, acpMode);
-        if (!updated) {
+        if (!applyAcpConfigOption(modeConfig, acpMode)) {
           return;
         }
       }
@@ -126,7 +125,10 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         description: [agent.version, agent.provenance].filter(Boolean).join(' · '),
         icon: 'hardware-chip-outline' as const,
         selected: activeAgentId === agent.agentId,
-        onPress: () => selectPendingAgent(agent.agentId),
+        onPress: () => {
+          void feedback.selection();
+          selectPendingAgent(agent.agentId);
+        },
       })),
     [activeAgentId, readyAgents, selectPendingAgent],
   );

@@ -76,7 +76,7 @@ Bridge ports are allocated per workspace rather than defaulted, so several bridg
 - Setup scans upward from port 8787 in steps of two for a free consecutive `(bridge, preview)` pair.
 - Pairs already assigned to another profile are skipped, and each candidate is bind-probed so ports
   held by unrelated processes are skipped too.
-- The assignment is persisted, so a paired phone keeps working across restarts.
+- The assignment is persisted, so a paired device keeps working across restarts.
 - Passing an explicit `--port` that another workspace owns fails and names that workspace.
 
 `dappercode list` reports every configured profile with its state and port. `dappercode stop --all`
@@ -208,7 +208,7 @@ npm run mobile
 ```
 
 The Expo bootstrap reads the bridge host from the central `config.json`, falling back to a repo-root
-`.env.secure` for the `npm run bridge` development flow. Real phones must use a LAN or Tailscale
+`.env.secure` for the `npm run bridge` development flow. Physical devices must use a LAN or Tailscale
 bridge URL, not localhost.
 
 The mobile app uses Expo Router with the `dappercode` scheme. Canonical links include

@@ -416,6 +416,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
     [displayMessages.length, isLargeChat],
   );
+  const threadRunning = chat.status === 'running';
+  const listExtraData = useMemo(
+    () => ({ liveMessageState, chatStatus: chat.status }),
+    [chat.status, liveMessageState],
+  );
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
     [],
@@ -431,6 +436,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         onInlineOptionSelect,
         onOpenLocalPreview,
         onOpenSubAgentThread,
+        threadRunning,
       }),
     [
       bridgeToken,
@@ -440,6 +446,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onOpenLocalPreview,
       onOpenSubAgentThread,
       styles,
+      threadRunning,
     ],
   );
 
@@ -450,7 +457,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           key={chat.id}
           ref={scrollRef}
           data={displayMessages}
-          extraData={liveMessageState ?? chat.status}
+          extraData={listExtraData}
           keyExtractor={keyExtractor}
           renderItem={renderMessageItem}
           ListFooterComponent={historyBoundary}

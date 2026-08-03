@@ -823,7 +823,10 @@ describe('ChatTranscriptView continuation', () => {
     for (const changedChat of changedChats) {
       const changedTree = render({ chat: stableChat });
       update(changedTree, { chat: changedChat });
-      expect(getList(changedTree).props['extraData']).toBe(changedChat.status);
+      expect(getList(changedTree).props['extraData']).toEqual({
+        liveMessageState: null,
+        chatStatus: changedChat.status,
+      });
       act(() => changedTree.unmount());
     }
 

@@ -6,6 +6,7 @@ import type {
 } from '@bridge/types/types';
 import { formatModelOptionLabel } from './options';
 import type { MainScreenModelCatalogStateContext } from './catalogState';
+import type { PendingAcpConfigByChat } from '../state/models';
 import {
   normalizeModelId,
   normalizeReasoningEffort,
@@ -136,10 +137,18 @@ function resolveSupportsSelectedEffort(params: {
 }
 function resolveCollaborationModeLabel(params: {
   modeConfig: MainScreenModelCatalogStateContext['modeConfig'];
+  pendingModeValue?: string;
   selectedAcpModeId: string | null;
   selectedCollaborationMode: CollaborationMode;
 }): string {
-  const { modeConfig, selectedAcpModeId, selectedCollaborationMode } = params;
+  const { modeConfig, pendingModeValue, selectedAcpModeId, selectedCollaborationMode } = params;
+  const pendingLabel = pendingModeValue
+    ? (modeConfig?.options?.find((option) => option.value === pendingModeValue)?.name ??
+      pendingModeValue)
+    : null;
+  if (pendingLabel) {
+    return pendingLabel;
+  }
   const configuredLabel =
     modeConfig?.options?.find((option) => option.value === modeConfig.value)?.name ??
     modeConfig?.value;
@@ -183,12 +192,15 @@ function resolveRequestedSelections(params: {
   selectedEffort: ReasoningEffort | null;
   preferredDefaultModelId: string | null;
   preferredDefaultEffort: ReasoningEffort | null;
+  pendingAcpConfig?: PendingAcpConfigByChat[string];
 }) {
   const authoritativeModelId = params.selectedChatId
-    ? normalizeModelId(params.modelConfig?.value)
+    ? normalizeModelId(params.pendingAcpConfig?.['model']?.value ?? params.modelConfig?.value)
     : null;
   const authoritativeEffort = params.selectedChatId
-    ? normalizeReasoningEffort(params.effortConfig?.value)
+    ? normalizeReasoningEffort(
+        params.pendingAcpConfig?.['thought_level']?.value ?? params.effortConfig?.value,
+      )
     : null;
   const localSelectedModelId = params.selectionBelongsToCurrentChat ? params.selectedModelId : null;
   const localSelectedEffort = params.selectionBelongsToCurrentChat ? params.selectedEffort : null;
@@ -310,6 +322,7 @@ function resolveDisplayLabels(params: {
   modeConfig: MainScreenModelCatalogStateContext['modeConfig'];
   selectedAcpModeId: string | null;
   selectedCollaborationMode: CollaborationMode;
+  pendingModeValue?: string;
 }) {
   return {
     activeModelLabel: params.activeModel
@@ -322,6 +335,7 @@ function resolveDisplayLabels(params: {
       : 'Model default',
     collaborationModeLabel: resolveCollaborationModeLabel({
       modeConfig: params.modeConfig,
+      pendingModeValue: params.pendingModeValue,
       selectedAcpModeId: params.selectedAcpModeId,
       selectedCollaborationMode: params.selectedCollaborationMode,
     }),
@@ -345,6 +359,7 @@ export function deriveModelCatalogState(params: {
   effortPickerModelId: string | null;
   selectedModelId: string | null;
   selectedEffort: ReasoningEffort | null;
+  pendingAcpConfig?: PendingAcpConfigByChat[string];
 }): DerivedModelCatalogState {
   const requestedSelections = resolveRequestedSelections({
     selectedChatId: params.selectedChatId,
@@ -355,6 +370,7 @@ export function deriveModelCatalogState(params: {
     selectedEffort: params.selectedEffort,
     preferredDefaultModelId: params.preferredDefaultModelId,
     preferredDefaultEffort: params.preferredDefaultEffort,
+    pendingAcpConfig: params.pendingAcpConfig,
   });
   const modelState = resolveModelState({
     selectedChatId: params.selectedChatId,
@@ -383,6 +399,7 @@ export function deriveModelCatalogState(params: {
     modeConfig: params.modeConfig,
     selectedAcpModeId: params.selectedAcpModeId,
     selectedCollaborationMode: params.selectedCollaborationMode,
+    pendingModeValue: params.pendingAcpConfig?.['mode']?.value,
   });
   return {
     ...modelState,

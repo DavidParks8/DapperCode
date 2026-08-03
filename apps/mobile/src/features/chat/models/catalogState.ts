@@ -1,6 +1,7 @@
 import {
   bridgeCapabilitiesAtom,
   defaultServiceTierAtom,
+  pendingAcpConfigByChatAtom,
   selectedAcpModeIdAtom,
   selectedCollaborationModeAtom,
   selectedEffortAtom,
@@ -46,6 +47,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const defaultServiceTier = useAtomValue(defaultServiceTierAtom);
   const selectedCollaborationMode = useAtomValue(selectedCollaborationModeAtom);
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
+  const pendingAcpConfigByChat = useAtomValue(pendingAcpConfigByChatAtom);
   const setSelectedModelId = useSetAtom(selectedModelIdAtom);
   const setSelectedEffort = useSetAtom(selectedEffortAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
@@ -149,6 +151,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     effortPickerModelId,
     selectedModelId,
     selectedEffort,
+    pendingAcpConfig: selectedChatId ? pendingAcpConfigByChat[selectedChatId] : undefined,
   });
   // Auto-transition complete/error → idle after 3s so the bar hides.
   useEffect(() => {
