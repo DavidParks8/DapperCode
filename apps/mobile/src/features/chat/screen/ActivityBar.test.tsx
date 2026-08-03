@@ -64,8 +64,8 @@ function iconNames(tree: ReactTestRenderer): string[] {
     .filter((name): name is string => typeof name === 'string');
 }
 
-function helixNodes(tree: ReactTestRenderer): Queryable[] {
-  return allNodes(tree).filter((node) => node.props['testID'] === 'helix-glyph');
+function glyphNodes(tree: ReactTestRenderer): Queryable[] {
+  return allNodes(tree).filter((node) => node.props['testID'] === 'sparkle-glyph');
 }
 
 /** Width of the leading glyph slot: the only fixed-width box in the row. */
@@ -124,11 +124,11 @@ describe('ActivityBar', () => {
     act(() => tree.unmount());
   });
 
-  it('spins the helix while running and shows a settled icon otherwise', () => {
+  it('sparkles while running and shows a settled icon otherwise', () => {
     // A live turn used to get the same three static-looking bars as every other loading
-    // surface; the running row is now the only one with the animated helix.
+    // surface; the running row is now the only one with the animated sparkle.
     const running = render('running', 'Working');
-    expect(helixNodes(running)).not.toHaveLength(0);
+    expect(glyphNodes(running)).not.toHaveLength(0);
     expect(iconNames(running)).toHaveLength(0);
     act(() => running.unmount());
 
@@ -139,14 +139,14 @@ describe('ActivityBar', () => {
     ];
     for (const [tone, icon] of settled) {
       const tree = render(tone, 'Status');
-      expect(helixNodes(tree)).toHaveLength(0);
+      expect(glyphNodes(tree)).toHaveLength(0);
       expect(iconNames(tree)).toContain(icon);
       act(() => tree.unmount());
     }
   });
 
   it('gives the running row a wider glyph slot than the icon rows', () => {
-    // The helix is wider than a 12pt icon, so a shared 14pt slot would clip it.
+    // The sparkle is wider than a 12pt icon, so a shared 14pt slot would clip it.
     const running = render('running', 'Working');
     const idle = render('idle', 'Waiting for input');
 

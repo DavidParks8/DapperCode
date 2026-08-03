@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
-import { HelixGlyph } from './HelixGlyph';
+import { SparkleGlyph } from './SparkleGlyph';
 import { motionDuration } from '@shared/ui/motion';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import type { ActivityTone } from '../state/runtime';
@@ -58,7 +58,7 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
         ]}
       >
         {running ? (
-          <HelixGlyph color={color} secondaryColor={theme.colors.accent} />
+          <SparkleGlyph color={color} />
         ) : (
           <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
         )}
@@ -98,9 +98,9 @@ const createStyles = (theme: AppTheme) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    // The helix is a wide glyph, so the running row gets a wider slot than the 14pt icon rows.
+    // The sparkle is a 20pt square glyph, so the running row gets a wider slot than the icon rows.
     iconWrapRunning: {
-      width: 26,
+      width: 20,
     },
     iconWrapStacked: {
       paddingTop: 2,
