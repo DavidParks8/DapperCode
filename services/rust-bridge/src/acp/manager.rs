@@ -5839,6 +5839,8 @@ mod tests {
 
         let abort_calls = Arc::new(AtomicUsize::new(0));
         let abort_calls_for_route = abort_calls.clone();
+        let status_idle = Arc::new(AtomicBool::new(false));
+        let status_idle_for_route = status_idle.clone();
         let app = Router::new()
             .route(
                 "/session/opencode-listed/abort",
@@ -5859,10 +5861,17 @@ mod tests {
             )
             .route(
                 "/session/status",
-                get(|| async {
-                    Json(serde_json::json!({
-                        "opencode-listed": {"type": "busy"}
-                    }))
+                get(move || {
+                    let status_idle = status_idle_for_route.clone();
+                    async move {
+                        if status_idle.load(Ordering::SeqCst) {
+                            Json(serde_json::json!({}))
+                        } else {
+                            Json(serde_json::json!({
+                                "opencode-listed": {"type": "busy"}
+                            }))
+                        }
+                    }
                 }),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -5961,6 +5970,17 @@ mod tests {
             session.operation().await,
             Some(("run".to_string(), "turn".to_string(), generation + 1))
         );
+        status_idle.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if session.operation().await.is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("steered generation settles");
 
         server.abort();
         manager.shutdown().await;

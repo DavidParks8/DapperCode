@@ -1735,6 +1735,18 @@ mod tests {
                 .await,
             Err(AcpRuntimeError::Unsupported(FORK_METHOD))
         ));
+        assert!(matches!(
+            plain
+                .verify_steer_epoch(&SessionId::new("missing"), 1)
+                .await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        assert!(matches!(
+            plain
+                .close_session(CloseSessionRequest::new(SessionId::new("missing")))
+                .await,
+            Err(AcpRuntimeError::Unsupported("session/close"))
+        ));
         plain.shutdown().await.expect("plain shutdown");
 
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel::<ForkRequest>();
