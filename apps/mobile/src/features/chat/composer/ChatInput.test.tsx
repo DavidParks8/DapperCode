@@ -4,6 +4,7 @@ import {
   Platform,
   StyleSheet,
   TextInput,
+  View,
   type TextInputProps,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -51,6 +52,25 @@ function byLabel(root: Queryable, label: string) {
   }
   return node;
 }
+
+function composerBarRadius(root: Queryable): number {
+  const composerBar = root.findAllByType(View).find((candidate) => {
+    const style = StyleSheet.flatten(candidate.props.style) as {
+      backgroundColor?: string;
+      borderColor?: string;
+    };
+    return (
+      style.backgroundColor === theme.colors.bgInput &&
+      style.borderColor === theme.colors.borderHighlight
+    );
+  });
+  if (!composerBar) {
+    throw new Error('Missing composer bar');
+  }
+  const style = StyleSheet.flatten(composerBar.props.style) as { borderRadius?: number };
+  return Number(style.borderRadius);
+}
+
 function wrap(child: React.ReactElement): React.ReactElement {
   return (
     <SafeAreaProvider
@@ -188,6 +208,7 @@ describe('ChatInput behavior', () => {
     });
     const rendered = tree as ReactTestRenderer;
     const root = rendered.root as Queryable;
+    expect(composerBarRadius(root)).toBe(theme.radius.full);
     const input = root
       .findAllByType(TextInput)
       .find((node) => node.props['accessibilityLabel'] === 'Message');
@@ -200,6 +221,7 @@ describe('ChatInput behavior', () => {
       'indexed test value',
     );
     act(() => measure.props.onTextLayout({ nativeEvent: { lines: [{}, {}, {}, {}, {}, {}] } }));
+    expect(composerBarRadius(root)).toBe(theme.radius.lg);
     expect(
       root.findAllByType(TextInput).find((node) => node.props['accessibilityLabel'] === 'Message')
         ?.props['scrollEnabled'],
@@ -217,6 +239,7 @@ describe('ChatInput behavior', () => {
         ),
       ),
     );
+    expect(composerBarRadius(root)).toBe(theme.radius.full);
     act(() => rendered.unmount());
   });
 

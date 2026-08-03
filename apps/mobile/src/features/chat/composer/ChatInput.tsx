@@ -400,7 +400,12 @@ export function ChatInput(props: ChatInputProps) {
           },
         ]}
       >
-        <View style={styles.composerBar}>
+        <View
+          style={[
+            styles.composerBar,
+            inputHeight > INPUT_TEXT_MIN_HEIGHT && styles.composerBarMultiline,
+          ]}
+        >
           <ChatInputAttachmentList
             attachments={attachments}
             onRemoveAttachment={onRemoveAttachment}

@@ -22,6 +22,9 @@ export const createChatInputStyles = (theme: AppTheme) =>
       paddingVertical: 5,
       gap: theme.spacing.xs,
     },
+    composerBarMultiline: {
+      borderRadius: theme.radius.lg,
+    },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
