@@ -1,0 +1,200 @@
+import { StyleSheet } from 'react-native';
+
+import type { AppTheme } from '@shared/theme';
+
+export const createToolCardStyles = (theme: AppTheme) =>
+  StyleSheet.create({
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 26,
+      paddingVertical: 5,
+      borderRadius: theme.radius.sm,
+    },
+    rowPressed: { backgroundColor: theme.colors.bgCanvasAccent },
+    rowTouchTarget: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderRadius: theme.radius.sm,
+    },
+    rowError: {
+      backgroundColor: theme.colors.errorBg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.errorBorder,
+    },
+    rowRegion: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 18,
+    },
+    rowIcon: {
+      width: 16 + theme.spacing.sm,
+      paddingLeft: theme.spacing.sm,
+    },
+    rowContent: { flex: 1, minWidth: 0 },
+    rowContentPressable: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingLeft: theme.spacing.sm,
+    },
+    rowAction: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      lineHeight: 16,
+      flexShrink: 0,
+    },
+    rowSubject: {
+      ...theme.typography.caption,
+      color: theme.colors.textMuted,
+      lineHeight: 16,
+      flexShrink: 1,
+    },
+    rowSubjectMono: {
+      fontFamily: theme.fonts.monoRegular,
+      flexShrink: 0,
+      paddingRight: theme.spacing.lg,
+    },
+    rowTitleError: { color: theme.colors.statusError },
+    rowTrailing: {
+      minWidth: 18 + theme.spacing.sm * 2,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 4,
+      paddingLeft: theme.spacing.sm,
+      paddingRight: theme.spacing.sm,
+    },
+    commandScroll: { flex: 1, minWidth: 0 },
+    commandScrollContent: { flexDirection: 'row', flexGrow: 1 },
+    commandPressable: {
+      flexGrow: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingLeft: theme.spacing.sm,
+    },
+    shimmerClip: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      overflow: 'hidden',
+      borderRadius: theme.radius.sm,
+    },
+    shimmerBand: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      width: 120,
+    },
+    shimmerGradient: { flex: 1 },
+    panel: {
+      marginLeft: theme.spacing.sm + 16 + theme.spacing.sm,
+      marginTop: theme.spacing.xs,
+      marginBottom: theme.spacing.xs,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgCanvasAccent,
+      overflow: 'hidden',
+    },
+    panelScroll: { maxHeight: 300 },
+    panelSection: {
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+      gap: theme.spacing.xs,
+    },
+    panelDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.colors.borderLight,
+    },
+    sectionLabel: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+    },
+    outputSurface: {
+      paddingVertical: theme.spacing.xs,
+      gap: 2,
+    },
+    consoleSurface: {
+      paddingHorizontal: theme.spacing.sm,
+      borderRadius: theme.radius.sm,
+      backgroundColor: theme.colors.bgElevated,
+    },
+    outputLine: {
+      ...theme.typography.mono,
+      lineHeight: 16,
+      color: theme.colors.textSecondary,
+    },
+    locationChips: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: theme.spacing.xs,
+    },
+    locationChip: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: theme.radius.sm,
+      backgroundColor: theme.colors.inlineCodeBg,
+    },
+    locationChipText: {
+      ...theme.typography.metadata,
+      fontFamily: theme.fonts.monoRegular,
+      color: theme.colors.textMuted,
+    },
+    diffFileHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.sm,
+    },
+    diffFilePath: {
+      ...theme.typography.metadata,
+      fontFamily: theme.fonts.monoRegular,
+      color: theme.colors.textMuted,
+      flex: 1,
+    },
+    diffStats: {
+      flexDirection: 'row',
+      gap: theme.spacing.xs,
+    },
+    diffAddedStat: {
+      ...theme.typography.metadata,
+      color: theme.colors.diffAddedText,
+    },
+    diffRemovedStat: {
+      ...theme.typography.metadata,
+      color: theme.colors.diffRemovedText,
+    },
+    diffScrollContent: { minWidth: '100%' },
+    diffLines: { minWidth: '100%' },
+    diffLine: {
+      minWidth: '100%',
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: 1,
+    },
+    diffLineAdded: { backgroundColor: theme.colors.diffAddedBg },
+    diffLineRemoved: { backgroundColor: theme.colors.diffRemovedBg },
+    diffLineText: {
+      ...theme.typography.mono,
+      color: theme.colors.textSecondary,
+      lineHeight: 17,
+    },
+    diffLineTextAdded: { color: theme.colors.diffAddedText },
+    diffLineTextRemoved: { color: theme.colors.diffRemovedText },
+    note: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+    },
+    errorNote: {
+      ...theme.typography.caption,
+      color: theme.colors.statusError,
+    },
+  });

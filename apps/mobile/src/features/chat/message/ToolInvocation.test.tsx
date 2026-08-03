@@ -1,12 +1,16 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
-import { Image, ScrollView, Text } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
 import type { ToolInvocation } from './toolInvocationModel';
-import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
+import {
+  LinearTransition,
+  ReduceMotion,
+  setMockReducedMotionEnabled,
+} from '@shared/testing/reanimatedMock';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
@@ -15,6 +19,7 @@ jest.mock('@expo/vector-icons', () => ({
 }));
 
 type Queryable = ReactTestInstance & {
+  parent: Queryable | null;
   props: Record<string, unknown>;
   findAll(predicate: (node: Queryable) => boolean): Queryable[];
   findAllByProps(props: Record<string, unknown>): Queryable[];
@@ -30,6 +35,7 @@ function invocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
     kind: 'other',
     status: 'completed',
     title: 'Did a thing',
+    statusLanguage: true,
     monospaceTitle: false,
     isError: false,
     locations: [],
@@ -43,7 +49,11 @@ function invocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
   };
 }
 
-function render(value: ToolInvocation, bridgeUrl: string | null = null): QueryableRenderer {
+function render(
+  value: ToolInvocation,
+  bridgeUrl: string | null = null,
+  threadRunning = true,
+): QueryableRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
@@ -54,7 +64,12 @@ function render(value: ToolInvocation, bridgeUrl: string | null = null): Queryab
         }}
       >
         <AppThemeProvider theme={theme}>
-          <ToolInvocationRow invocation={value} bridgeUrl={bridgeUrl} bridgeToken={null} />
+          <ToolInvocationRow
+            invocation={value}
+            bridgeUrl={bridgeUrl}
+            bridgeToken={null}
+            threadRunning={threadRunning}
+          />
         </AppThemeProvider>
       </SafeAreaProvider>,
     );
@@ -86,23 +101,80 @@ function textLines(tree: QueryableRenderer): string[] {
 }
 
 describe('ToolInvocationRow', () => {
+  afterEach(() => setMockReducedMotionEnabled(false));
+
   it('marks a pending tool with a waiting affordance', () => {
     const tree = render(invocation({ id: 'tool-pending', status: 'pending', empty: true }));
 
     expect(JSON.stringify(tree.toJSON())).toContain('ellipsis-horizontal');
+    expect(tree.root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
 
+    act(() => tree.unmount());
+  });
+
+  it('uses a pointer-inert header shimmer only while a tool is actively running', () => {
+    const running = render(
+      invocation({ id: 'tool-running', kind: 'read', status: 'in_progress', title: 'Read app.ts' }),
+    );
+    const shimmer = running.root.findByProps({ testID: 'tool-header-shimmer' });
+    expect(shimmer.props['pointerEvents']).toBe('none');
+    expect(shimmer.props['accessibilityElementsHidden']).toBe(true);
+    expect(running.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+    act(() => running.unmount());
+
+    const settled = render(
+      invocation({ id: 'tool-stale', kind: 'execute', status: 'in_progress', title: 'npm test' }),
+      null,
+      false,
+    );
+    expect(settled.root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
+    expect(settled.root.findByProps({ testID: 'tool-row' }).props['accessibilityLabel']).toBe(
+      'Ran npm test',
+    );
+    act(() => settled.unmount());
+  });
+
+  it('uses a non-traveling shimmer treatment when Reduce Motion is enabled', () => {
+    setMockReducedMotionEnabled(true);
+    const tree = render(
+      invocation({ id: 'tool-reduced-shimmer', status: 'in_progress', title: 'Read app.ts' }),
+    );
+    const shimmer = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-header-shimmer' })[0],
+      'reduced-motion shimmer',
+    );
+    const animatedBand = requireTestValue(
+      shimmer.findAll(
+        (node) =>
+          Array.isArray(node.props['style']) &&
+          node.props['style'].some(
+            (style: unknown) =>
+              Boolean(style) && typeof style === 'object' && 'opacity' in (style as object),
+          ),
+      )[0],
+      'animated shimmer band',
+    );
+    const animatedStyle = (animatedBand.props['style'] as unknown[]).find(
+      (style) => style !== null && typeof style === 'object' && 'opacity' in style,
+    ) as { opacity: number; transform?: unknown };
+    expect(animatedStyle.opacity).toBeGreaterThan(0);
+    expect(animatedStyle.transform).toBeUndefined();
     act(() => tree.unmount());
   });
 
   it('gives the collapsed row an effective touch target without inflating its visible chrome', () => {
     const tree = render(invocation({ id: 'tool-hitslop', textLines: ['out'] }));
-    const row = requireTestValue(
-      tree.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
-      'indexed test value',
+    const row = requireTestValue(tree.root.findAllByProps({ testID: 'tool-row' })[0], 'tool row');
+    expect(StyleSheet.flatten(row.props['style'] as object)).not.toHaveProperty(
+      'overflow',
+      'hidden',
     );
-    const hitSlop = row.props['hitSlop'] as
+    const target = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-row-toggle' })[0],
+      'tool row toggle',
+    );
+    const hitSlop = target.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
-
     expect(hitSlop).toBeDefined();
     expect(hitSlop!.top).toBeGreaterThan(0);
     expect(hitSlop!.bottom).toBeGreaterThan(0);
@@ -136,23 +208,29 @@ describe('ToolInvocationRow', () => {
   it('only highlights the press state while the row can actually expand', () => {
     const open = render(invocation({ id: 'tool-pressable', textLines: ['out'] }));
     const openStyle = requireTestValue(
-      open.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
+      open.root.findAllByProps({ testID: 'tool-row-toggle' })[0],
       'indexed test value',
     ).props['style'] as (state: { pressed: boolean }) => unknown[];
-    expect(openStyle({ pressed: true })[2]).toBeTruthy();
-    expect(openStyle({ pressed: false })[2]).toBeFalsy();
+    expect(StyleSheet.flatten(openStyle({ pressed: true }) as object)).toHaveProperty(
+      'backgroundColor',
+    );
+    expect(StyleSheet.flatten(openStyle({ pressed: false }) as object)).not.toHaveProperty(
+      'backgroundColor',
+    );
     act(() => open.unmount());
 
     const closed = render(invocation({ id: 'tool-inert', empty: true }));
     const closedStyle = requireTestValue(
-      closed.root.findAll((node) => typeof node.props['onPress'] === 'function')[0],
+      closed.root.findAllByProps({ testID: 'tool-row-toggle' })[0],
       'indexed test value',
     ).props['style'] as (state: { pressed: boolean }) => unknown[];
-    expect(closedStyle({ pressed: true })[2]).toBeFalsy();
+    expect(StyleSheet.flatten(closedStyle({ pressed: true }) as object)).not.toHaveProperty(
+      'backgroundColor',
+    );
     act(() => closed.unmount());
   });
 
-  it('stops scrolling a monospace title once the row is expanded', () => {
+  it('keeps a stable horizontally scrollable command header when expanded', () => {
     const value = invocation({
       id: 'tool-mono',
       kind: 'execute',
@@ -163,13 +241,30 @@ describe('ToolInvocationRow', () => {
     const tree = render(value);
 
     expect(tree.root.findAllByProps({ testID: 'tool-command-scroll' }).length).toBeGreaterThan(0);
+    const commandScroll = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-scroll' })[0],
+      'command scroll',
+    );
+    const commandToggle = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-toggle' })[0],
+      'command toggle',
+    );
+    expect(
+      StyleSheet.flatten(commandScroll.props['contentContainerStyle'] as object),
+    ).toMatchObject({
+      flexGrow: 1,
+    });
+    const commandToggleStyle = commandToggle.props['style'] as (state: {
+      pressed: boolean;
+    }) => object[];
+    expect(StyleSheet.flatten(commandToggleStyle({ pressed: false }))).toMatchObject({
+      flexGrow: 1,
+    });
 
     expand(tree, value.title);
-    expect(tree.root.findAllByProps({ testID: 'tool-command-scroll' })).toHaveLength(0);
-    const title = tree.root
-      .findAllByType(Text)
-      .find((node) => node.props['children'] === value.title);
-    expect(title?.props['numberOfLines']).toBe(3);
+    expect(tree.root.findAllByProps({ testID: 'tool-command-scroll' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'tool-output-panel' }).length).toBeGreaterThan(0);
+    expect(textLines(tree).filter((line) => line === value.title)).toHaveLength(1);
 
     act(() => tree.unmount());
   });
@@ -187,15 +282,39 @@ describe('ToolInvocationRow', () => {
 
     const collapsedTitle = tree.root
       .findAllByType(Text)
-      .find((node) => typeof node.props['children'] === 'string');
+      .find((node) => node.props['children'] === 'cd apps/mobile grep -rn "tool" src echo done');
     expect(collapsedTitle?.props['numberOfLines']).toBe(1);
     expect(collapsedTitle?.props['children']).toBe('cd apps/mobile grep -rn "tool" src echo done');
 
     expand(tree, command);
-    const expandedTitle = tree.root
-      .findAllByType(Text)
-      .find((node) => node.props['children'] === command);
-    expect(expandedTitle?.props['numberOfLines']).toBe(3);
+    expect(tree.root.findAllByProps({ testID: 'tool-command-scroll' }).length).toBeGreaterThan(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('puts the command press target inside the scroll view with no pressable ancestor', () => {
+    const value = invocation({
+      id: 'tool-gesture',
+      kind: 'execute',
+      monospaceTitle: true,
+      title: 'npm run test -- --coverage',
+      textLines: ['ok'],
+    });
+    const tree = render(value);
+    const scroll = tree.root.findByProps({ testID: 'tool-command-scroll' });
+    let ancestor: Queryable | null = (scroll as Queryable).parent;
+    while (ancestor) {
+      expect(typeof ancestor.props['onPress']).not.toBe('function');
+      ancestor = ancestor.parent;
+    }
+    const toggle = scroll.findByProps({ testID: 'tool-command-toggle' });
+    expect(typeof toggle.props['onPress']).toBe('function');
+    const accessibleRow = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-row' })[0],
+      'tool accessibility row',
+    );
+    expect(accessibleRow.props['accessibilityRole']).toBe('button');
+    expect(toggle.props['accessible']).toBe(false);
 
     act(() => tree.unmount());
   });
@@ -248,6 +367,7 @@ describe('ToolInvocationOutput', () => {
     expect(lines).toContain('+ const a = 2;');
     expect(lines).toContain('+ export {};');
     expect(lines.filter((line) => line.startsWith('- '))).toHaveLength(1);
+    expect(tree.root.findAllByProps({ testID: 'tool-output-panel' }).length).toBeGreaterThan(0);
 
     act(() => tree.unmount());
   });

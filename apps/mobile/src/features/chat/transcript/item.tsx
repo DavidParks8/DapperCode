@@ -18,6 +18,7 @@ interface RenderChatTranscriptItemOptions {
   onInlineOptionSelect: (value: string) => void;
   onOpenLocalPreview?: (targetUrl: string) => void;
   onOpenSubAgentThread?: (threadId: string) => void;
+  threadRunning: boolean;
 }
 
 export function renderChatTranscriptItem({
@@ -29,6 +30,7 @@ export function renderChatTranscriptItem({
   onInlineOptionSelect,
   onOpenLocalPreview,
   onOpenSubAgentThread,
+  threadRunning,
 }: RenderChatTranscriptItemOptions) {
   if (item.kind === 'toolGroup') {
     return (
@@ -53,6 +55,7 @@ export function renderChatTranscriptItem({
           invocation={item.invocation}
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
+          threadRunning={threadRunning}
         />
       </View>
     );

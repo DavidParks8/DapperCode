@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ChatMessage, ChatToolMeta } from '@bridge/types/types';
-import { buildToolInvocations, toolKindIcon } from './toolInvocationModel';
+import { buildToolInvocations, toolKindIcon, type ToolInvocation } from './toolInvocationModel';
+import { resolveToolInvocationHeader } from './toolInvocationPresentation';
 
 function toolMessage(
   id: string,
@@ -95,7 +96,7 @@ describe('buildToolInvocations', () => {
     ]);
 
     expect(requireTestValue(invocations[0], 'indexed test value').diffs).toEqual([
-      { path: 'src/app.ts', oldText: 'old', newText: 'new' },
+      expect.objectContaining({ path: 'src/app.ts', oldText: 'old', newText: 'new' }),
     ]);
     expect(requireTestValue(invocations[0], 'indexed test value').terminals).toEqual([
       { terminalId: 'term-1', output: 'boot' },
@@ -144,7 +145,7 @@ describe('buildToolInvocations', () => {
       { path: 'a.ts' },
     ]);
     expect(requireTestValue(invocations[0], 'indexed test value').diffs).toEqual([
-      { path: 'file', oldText: null, newText: 'body' },
+      expect.objectContaining({ path: 'file', oldText: null, newText: 'body' }),
     ]);
   });
 
@@ -250,6 +251,64 @@ describe('buildToolInvocations', () => {
     ]);
   });
 
+  it('deduplicates repeated structured updates and prefers lined locations', () => {
+    const repeatedDiff = { type: 'diff', path: 'src/a.ts', oldText: 'old', newText: 'new' };
+    const completedDiff = {
+      type: 'diff',
+      path: './src/a.ts',
+      oldText: 'old',
+      newText: 'newest',
+    };
+    const invocations = buildToolInvocations([
+      toolMessage(
+        't1',
+        '',
+        meta({
+          kind: 'edit',
+          title: 'Edit src/a.ts',
+          content: [
+            repeatedDiff,
+            repeatedDiff,
+            completedDiff,
+            { type: 'image', url: 'https://example.test/a.png' },
+            { type: 'image', url: 'https://example.test/a.png' },
+            { type: 'terminal', terminalId: 'term', output: 'partial' },
+            { type: 'terminal', terminalId: 'term', output: 'complete' },
+          ],
+          locations: [
+            { path: './src//a.ts' },
+            { path: 'src/a.ts', line: 3 },
+            { path: 'src/a.ts', line: 3 },
+          ],
+        }),
+      ),
+    ]);
+    const invocation = requireTestValue(invocations[0], 'deduplicated invocation');
+
+    expect(invocation.diffs).toHaveLength(1);
+    expect(invocation.diffs[0]).toMatchObject({
+      path: './src/a.ts',
+      oldText: 'old',
+      newText: 'newest',
+    });
+    expect(invocation.images).toEqual(['https://example.test/a.png']);
+    expect(invocation.terminals).toEqual([{ terminalId: 'term', output: 'complete' }]);
+    expect(invocation.locations).toEqual([{ path: 'src/a.ts', line: 3 }]);
+    expect(resolveToolInvocationHeader(invocation).label).toBe('Edited a.ts +1 -1');
+  });
+
+  it('keeps a structured truncation sentinel expandable and visible', () => {
+    const invocation = requireTestValue(
+      buildToolInvocations([
+        toolMessage('t1', '', meta({ content: [{ type: 'truncated', truncated: true }] })),
+      ])[0],
+      'truncated invocation',
+    );
+
+    expect(invocation.truncated).toBe(true);
+    expect(invocation.empty).toBe(false);
+  });
+
   it('uses the first output line as a title when nothing else names the tool', () => {
     const invocations = buildToolInvocations([
       toolMessage('t1', 'raw output\nsecond line'),
@@ -261,6 +320,79 @@ describe('buildToolInvocations', () => {
     expect(invocations[0]).toMatchObject({
       title: 'raw output',
       textLines: ['second line'],
+    });
+  });
+
+  function displayInvocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
+    return {
+      id: 'display',
+      kind: 'read',
+      status: 'completed',
+      title: 'Read package.json',
+      statusLanguage: true,
+      monospaceTitle: false,
+      isError: false,
+      locations: [],
+      diffs: [],
+      terminals: [],
+      textLines: [],
+      images: [],
+      truncated: false,
+      empty: true,
+      ...overrides,
+    };
+  }
+
+  describe('resolveToolInvocationHeader', () => {
+    it.each([
+      ['pending', 'Waiting to read package.json'],
+      ['in_progress', 'Reading package.json'],
+      ['completed', 'Read package.json'],
+      ['failed', 'Failed to read package.json'],
+    ] as const)('uses status-aware read copy for %s', (status, label) => {
+      expect(resolveToolInvocationHeader(displayInvocation({ status })).label).toBe(label);
+    });
+
+    it('preserves execute commands and settles stale running rows with past-tense copy', () => {
+      const invocation = displayInvocation({
+        kind: 'execute',
+        status: 'in_progress',
+        title: 'read -p "continue?"',
+        monospaceTitle: true,
+      });
+      expect(resolveToolInvocationHeader(invocation).label).toBe('Running read -p "continue?"');
+      expect(resolveToolInvocationHeader(invocation, false).label).toBe('Ran read -p "continue?"');
+    });
+
+    it('uses a phrase alone for kind-only titles and leaves legacy or foreign verbs untouched', () => {
+      expect(resolveToolInvocationHeader(displayInvocation({ title: 'read' })).label).toBe('Read');
+      expect(
+        resolveToolInvocationHeader(
+          displayInvocation({ kind: 'other', title: 'Updated plan', status: 'completed' }),
+        ).label,
+      ).toBe('Updated plan');
+      expect(
+        resolveToolInvocationHeader(
+          displayInvocation({ title: 'Legacy prose', statusLanguage: false }),
+        ).label,
+      ).toBe('Legacy prose');
+    });
+
+    it('summarizes edit diffs with real counts without repeating the full path', () => {
+      const header = resolveToolInvocationHeader(
+        displayInvocation({
+          kind: 'edit',
+          title: 'Edit src/MainScreen.test.tsx',
+          diffs: [
+            {
+              path: 'src/MainScreen.test.tsx',
+              oldText: 'old\nsame',
+              newText: 'new\nsame',
+            },
+          ],
+        }),
+      );
+      expect(header.label).toBe('Edited MainScreen.test.tsx +1 -1');
     });
   });
 });

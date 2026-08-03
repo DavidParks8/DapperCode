@@ -66,7 +66,7 @@ describe('Wire-keyed dispatch tables never reach Object.prototype', () => {
     ];
 
     expect(buildToolInvocations(messages)[0]?.diffs).toEqual([
-      { path: 'app.ts', oldText: 'prev', newText: 'next' },
+      expect.objectContaining({ path: 'app.ts', oldText: 'prev', newText: 'next' }),
     ]);
   });
 
