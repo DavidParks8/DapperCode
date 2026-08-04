@@ -22,6 +22,7 @@ import {
 import { useChatScrollRail } from './scrollRail/useChatScrollRail';
 import { useAppTheme } from '@shared/theme';
 import {
+  type ActivityState,
   type AutoScrollState,
   CHAT_AUTO_LOAD_OLDER_TOP_THRESHOLD_PX,
   CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX,
@@ -43,6 +44,7 @@ import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkConversationAction } from './useForkConversationAction';
+import { ActivityEvent } from './ActivityEvent';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
@@ -78,6 +80,7 @@ export interface ChatTranscriptViewProps {
   scrollRailEnabled?: boolean;
   supportsConversationFork?: boolean;
   onForkConversation?: (messageId: string) => Promise<unknown>;
+  activity?: ActivityState | null;
 }
 
 export const ChatTranscriptView = memo(function ChatTranscriptView({
@@ -104,6 +107,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   scrollRailEnabled = true,
   supportsConversationFork = false,
   onForkConversation,
+  activity = null,
 }: ChatTranscriptViewProps) {
   const theme = useAppTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -419,6 +423,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
+  const activityEvent = activity ? (
+    <ActivityEvent title={activity.title} detail={activity.detail} tone={activity.tone} />
+  ) : null;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
     [],
@@ -468,6 +475,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           extraData={listExtraData}
           keyExtractor={keyExtractor}
           renderItem={renderMessageItem}
+          ListHeaderComponent={activityEvent}
           ListFooterComponent={historyBoundary}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}

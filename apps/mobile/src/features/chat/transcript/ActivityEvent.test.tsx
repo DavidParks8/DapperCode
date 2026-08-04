@@ -1,10 +1,8 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { ActivityBar, type ActivityTone } from './ActivityBar';
-import { getRenderedGlassViewProps } from '@shared/testing/glassEffectMock';
+import { ActivityEvent, type ActivityTone } from './ActivityEvent';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -20,20 +18,14 @@ type Queryable = ReactTestInstance & {
 };
 
 const theme = createAppTheme('dark');
-const safeAreaMetrics = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
-};
 
 function render(tone: ActivityTone, title: string, detail?: string | null): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
-      <SafeAreaProvider initialMetrics={safeAreaMetrics}>
-        <AppThemeProvider theme={theme}>
-          <ActivityBar tone={tone} title={title} detail={detail} />
-        </AppThemeProvider>
-      </SafeAreaProvider>,
+      <AppThemeProvider theme={theme}>
+        <ActivityEvent tone={tone} title={title} detail={detail} />
+      </AppThemeProvider>,
     );
   });
   if (!tree) {
@@ -69,35 +61,30 @@ function glyphNodes(tree: ReactTestRenderer): Queryable[] {
   return allNodes(tree).filter((node) => node.props['testID'] === 'atom-glyph');
 }
 
-/** Width of the leading glyph slot: the only fixed-width box in the row. */
-function glyphSlotWidth(tree: ReactTestRenderer): number {
-  const widths = flattenedStyles(tree)
-    .map((style) => style['width'])
-    .filter((width): width is number => typeof width === 'number');
-  return Math.max(...widths);
-}
-
-describe('ActivityBar', () => {
-  it('renders the status inside the shared glass surface', () => {
+describe('ActivityEvent', () => {
+  it('renders as a high-contrast transcript row instead of a glass surface', () => {
     const tree = render('idle', 'Waiting for input');
 
     expect(textContent(tree.root as Queryable)).toContain('Waiting for input');
-    expect(tree.root.findByProps({ testID: 'activity-glass-surface' })).toBeTruthy();
-    expect(getRenderedGlassViewProps().at(-1)?.glassEffectStyle).toBe('none');
+    expect(tree.root.findByProps({ testID: 'transcript-activity-event' })).toBeTruthy();
+    expect(
+      flattenedStyles(tree).some(
+        (style) =>
+          style['fontSize'] === theme.typography.label.fontSize &&
+          style['color'] === theme.colors.textPrimary,
+      ),
+    ).toBe(true);
     act(() => tree.unmount());
   });
 
-  it('shows the detail alone while running and stacked once settled', () => {
-    const running = render('running', 'Working', 'npm test');
-    // A live turn shows what it is doing, not the generic title next to it.
-    expect(textContent(running.root as Queryable)).toBe('npm test');
-    act(() => running.unmount());
-
-    const failed = render('error', 'Turn failed', 'agent exited 1');
-    const failedContent = textContent(failed.root as Queryable);
-    expect(failedContent).toContain('Turn failed');
-    expect(failedContent).toContain('agent exited 1');
-    act(() => failed.unmount());
+  it('keeps the activity verb and detail together for every tone', () => {
+    for (const tone of ['running', 'error'] as const) {
+      const tree = render(tone, tone === 'running' ? 'Editing file' : 'Turn failed', 'src/main.ts');
+      expect(textContent(tree.root as Queryable)).toContain(
+        `${tone === 'running' ? 'Editing file' : 'Turn failed'} · src/main.ts`,
+      );
+      act(() => tree.unmount());
+    }
   });
 
   it('falls back to the title when there is no detail', () => {
@@ -135,16 +122,5 @@ describe('ActivityBar', () => {
       expect(iconNames(tree)).toContain(icon);
       act(() => tree.unmount());
     }
-  });
-
-  it('gives the running row a wider glyph slot than the icon rows', () => {
-    // The atom is wider than a 12pt icon, so a shared 14pt slot would clip it.
-    const running = render('running', 'Working');
-    const idle = render('idle', 'Waiting for input');
-
-    expect(glyphSlotWidth(running)).toBeGreaterThan(glyphSlotWidth(idle));
-
-    act(() => running.unmount());
-    act(() => idle.unmount());
   });
 });

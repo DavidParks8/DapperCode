@@ -141,6 +141,33 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
   );
 }
 
+describe('ChatTranscriptView activity event', () => {
+  it('renders the live status at the newest transcript edge and updates through settlement', () => {
+    const tree = render({
+      activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
+    });
+
+    let header = getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
+      detail?: string;
+      title: string;
+      tone: string;
+    }>;
+    expect(header.props).toMatchObject({
+      detail: 'src/main.ts',
+      title: 'Editing file',
+      tone: 'running',
+    });
+
+    update(tree, { activity: { tone: 'complete', title: 'Turn completed' } });
+    header = getList(tree).props['ListHeaderComponent'] as typeof header;
+    expect(header.props).toMatchObject({ title: 'Turn completed', tone: 'complete' });
+
+    update(tree, { activity: null });
+    expect(getList(tree).props['ListHeaderComponent']).toBeNull();
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatTranscriptView conversation fork checkpoint', () => {
   it('gates authoritative boundaries and locks duplicate activation until settlement', async () => {
     let resolveFork: (() => void) | undefined;

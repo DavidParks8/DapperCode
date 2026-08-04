@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react';
 import type { Ionicons } from '@expo/vector-icons';
 
 import type { ChatSummary } from '@bridge/types/types';
-import type { ActivityTone } from '../screen/ActivityBar';
+import type { ActivityTone } from '../state/runtime';
 import { colors } from '@shared/theme';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];

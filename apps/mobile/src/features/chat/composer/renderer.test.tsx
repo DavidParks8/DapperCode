@@ -37,7 +37,6 @@ function baseContext(
 ): Omit<MainScreenComposerRendererContext, 'styles' | 'theme'> {
   return {
     activeAgentLabel: 'Codex',
-    activityDetail: null,
     attachmentControlsDisabled: false,
     bannerBridgeUiSurfaces: [],
     canCancelQueuedMessage: false,
@@ -73,7 +72,7 @@ function baseContext(
     selectedThreadRuntimeSnapshot: null,
     setDraft: jest.fn(),
     showBridgeRecoveryBanner: false,
-    showFloatingActivity: false,
+    showTranscriptActivity: false,
     showQueuedMessageDock: false,
     showSlashSuggestions: false,
     showingOptimisticQueuedMessage: false,
@@ -147,21 +146,25 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps floating activity status non-interactive above the composer', () => {
+  it('does not duplicate transcript activity inside the composer overlay', () => {
     const tree = render(
       baseContext({
-        activityDetail: 'Installing dependencies',
-        displayedActivity: { tone: 'running', title: 'Working' },
-        showFloatingActivity: true,
+        displayedActivity: {
+          tone: 'running',
+          title: 'Working',
+          detail: 'Installing dependencies',
+        },
+        showTranscriptActivity: true,
       }),
       true,
     );
-    const dock = root(tree).findAll((node) => node.props['testID'] === 'floating-activity-dock')[0];
 
-    expect(requireTestValue(dock, 'floating activity dock').props['pointerEvents']).toBe('none');
     expect(
       root(tree).findAll((node) => node.children.includes('Installing dependencies')).length,
-    ).toBeGreaterThan(0);
+    ).toBe(0);
+    expect(
+      root(tree).findAll((node) => node.props['testID'] === 'transcript-activity-event'),
+    ).toHaveLength(0);
     act(() => tree.unmount());
   });
 

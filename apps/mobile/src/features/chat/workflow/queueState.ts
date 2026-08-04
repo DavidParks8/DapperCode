@@ -473,7 +473,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
   });
   const showTopCardsRow =
     !isOpeningChat && (workflowCardMode !== null || workflowBridgeUiSurfaces.length > 0);
-  const showFloatingActivity =
+  const showTranscriptActivity =
     shouldShowComposer &&
     Boolean(selectedChat) &&
     !isOpeningChat &&
@@ -526,7 +526,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     showPlanImplementationPrompt,
     workflowCardMode,
     showTopCardsRow,
-    showFloatingActivity,
+    showTranscriptActivity,
     composerSafeAreaBottomInset,
     composerOverlayInset,
     visibleError,
