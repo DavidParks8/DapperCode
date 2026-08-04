@@ -28,7 +28,7 @@ export const createChatInputStyles = (theme: AppTheme) =>
     composerGroup: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      gap: theme.spacing.sm,
+      gap: theme.spacing.md,
     },
     footer: {
       alignItems: 'flex-start',
@@ -66,21 +66,16 @@ export const createChatInputStyles = (theme: AppTheme) =>
       color: theme.colors.textSecondary,
       flexShrink: 1,
     },
-    addButtonGlass: {
-      width: 44,
-      height: 44,
+    actionButtonFrame: {
+      width: 48,
+      height: 48,
       borderRadius: theme.radius.full,
-      borderCurve: 'continuous',
-    },
-    plusBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: theme.radius.full,
+      flexShrink: 0,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    plusBtnDisabled: {
-      opacity: 0.45,
+    actionButtonPressed: {
+      transform: [{ scale: 0.96 }],
     },
     inputWrapper: {
       flex: 1,
@@ -109,15 +104,10 @@ export const createChatInputStyles = (theme: AppTheme) =>
       top: theme.spacing.xs,
     },
     actionButtonGlass: {
-      width: 44,
-      height: 44,
+      width: 48,
+      height: 48,
       borderRadius: theme.radius.full,
       borderCurve: 'continuous',
-    },
-    sendBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
     },

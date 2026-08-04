@@ -157,18 +157,28 @@ describe('theme', () => {
     }
   });
 
+  it('uses accessible blue text on drawer surfaces in every palette', () => {
+    const palettes = [createAppTheme('dark'), createAppTheme('light')];
+
+    for (const theme of palettes) {
+      expect(
+        contrastRatio(theme.colors.userBubbleOnSurface, theme.colors.bgSidebar),
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT_CONTRAST);
+    }
+  });
+
   it('tints glass surfaces with a restrained version of the user-message blue', () => {
     const dark = createAppTheme('dark');
     const light = createAppTheme('light');
 
-    expect(dark.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.14)');
-    expect(dark.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.20)');
-    expect(dark.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.11)');
-    expect(dark.glass.prominent.tintColor).toBe('rgba(0, 111, 230, 0.78)');
-    expect(light.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.08)');
-    expect(light.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.12)');
-    expect(light.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.07)');
-    expect(light.glass.prominent.tintColor).toBe('rgba(0, 111, 230, 0.86)');
+    expect(dark.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.26)');
+    expect(dark.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.34)');
+    expect(dark.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.24)');
+    expect(dark.glass.prominent.tintColor).toBe(dark.colors.userBubble);
+    expect(light.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.10)');
+    expect(light.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.15)');
+    expect(light.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.12)');
+    expect(light.glass.prominent.tintColor).toBe(light.colors.userBubble);
   });
 
   it('uses a composed indigo-lavender surface for sub-agent work', () => {

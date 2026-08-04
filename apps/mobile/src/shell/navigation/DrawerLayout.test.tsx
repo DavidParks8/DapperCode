@@ -45,13 +45,13 @@ describe('DrawerLayout responsive sizing', () => {
     mockDrawerProps = null;
   });
 
-  it('fills a compact phone window, then becomes a push-aside sidebar when unfolded', () => {
+  it('reveals chat beside a compact drawer, then becomes a push-aside sidebar when unfolded', () => {
     const tree = renderLayout(430);
 
     expect(readScreenOptions()).toMatchObject({
       drawerType: 'front',
       swipeEnabled: true,
-      drawerStyle: { width: 430, backgroundColor: 'transparent' },
+      drawerStyle: { width: 360, backgroundColor: 'transparent' },
       overlayColor: 'transparent',
       sceneStyle: { backgroundColor: '#000000' },
     });

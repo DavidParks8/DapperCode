@@ -12,7 +12,6 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import {
-  getRenderedGlassContainerProps,
   getRenderedGlassViewProps,
   setMockGlassEffectAPIAvailable,
   setMockLiquidGlassAvailable,
@@ -172,7 +171,7 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('keeps composer controls usable inside an active interactive glass capsule', () => {
+  it('renders independent 48-point glass composer controls without a merging container', () => {
     const originalPlatformOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     setMockLiquidGlassAvailable(true);
@@ -201,17 +200,21 @@ describe('ChatInput behavior', () => {
       (entry) => entry.testID === 'composer-submit-glass-surface',
     );
     expect(addSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
-    expect(addSurface?.isInteractive).toBe(true);
     expect(addSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
     expect(inputSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
     expect(inputSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
     expect(submitSurface?.glassEffectStyle).toBe(theme.glass.prominent.glassEffectStyle);
     expect(submitSurface?.tintColor).toBe(theme.glass.prominent.tintColor);
     const root = (tree as ReactTestRenderer).root as Queryable;
-    expect(getRenderedGlassContainerProps().at(-1)?.spacing).toBe(theme.spacing.xs);
+    const addButton = byLabel(root, 'Add attachment');
+    const sendButton = byLabel(root, 'Send message');
+    expect(
+      addButton.findAll((node) => node.props['testID'] === 'composer-add-glass-surface'),
+    ).not.toHaveLength(0);
+    expect(
+      sendButton.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
+    ).not.toHaveLength(0);
     expect(byLabel(root, 'Message')).toBeTruthy();
-    expect(byLabel(root, 'Add attachment')).toBeTruthy();
-    expect(byLabel(root, 'Send message')).toBeTruthy();
 
     act(() => (tree as ReactTestRenderer).unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
@@ -403,10 +406,10 @@ describe('ChatInput behavior', () => {
     const sendStyle = StyleSheet.flatten(
       glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
     ) as Record<string, unknown>;
-    expect(addStyle['width']).toBe(44);
-    expect(addStyle['height']).toBe(44);
-    expect(sendStyle['width']).toBe(44);
-    expect(sendStyle['height']).toBe(44);
+    expect(addStyle['width']).toBe(48);
+    expect(addStyle['height']).toBe(48);
+    expect(sendStyle['width']).toBe(48);
+    expect(sendStyle['height']).toBe(48);
     const stopStyle = StyleSheet.flatten(
       glassProps.find((entry) => entry.testID === 'composer-stop-glass-surface')?.style,
     ) as Record<string, unknown>;

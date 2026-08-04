@@ -141,6 +141,7 @@ function SessionMetaRow(props: {
 
   return (
     <GlassSurface role="capsule" style={styles.sessionMetaRow} testID="session-meta-glass-surface">
+      <View pointerEvents="none" style={styles.sessionMetaRailOutline} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

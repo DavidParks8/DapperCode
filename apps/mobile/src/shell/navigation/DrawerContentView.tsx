@@ -84,7 +84,7 @@ export function DrawerContentView() {
                   {...decorativeAccessibilityProps}
                   name="add"
                   size={24}
-                  color={theme.colors.accent}
+                  color={theme.colors.userBubble}
                 />
               </Pressable>
               {handleClose ? (
@@ -102,7 +102,7 @@ export function DrawerContentView() {
                     {...decorativeAccessibilityProps}
                     name="chevron-forward"
                     size={22}
-                    color={theme.colors.accent}
+                    color={theme.colors.userBubble}
                   />
                 </Pressable>
               ) : null}
@@ -192,7 +192,7 @@ export function DrawerContentView() {
                 {...decorativeAccessibilityProps}
                 name="chevron-down"
                 size={14}
-                color={theme.colors.accent}
+                color={theme.colors.userBubble}
               />
             </Pressable>
           </View>
@@ -248,7 +248,7 @@ export function DrawerContentView() {
               {...decorativeAccessibilityProps}
               name="globe-outline"
               size={17}
-              color={theme.colors.accent}
+              color={theme.colors.userBubble}
             />
             <Text style={styles.footerBrowserText}>Browser</Text>
           </Pressable>
@@ -265,7 +265,7 @@ export function DrawerContentView() {
               {...decorativeAccessibilityProps}
               name="settings-outline"
               size={18}
-              color={theme.colors.accent}
+              color={theme.colors.userBubble}
             />
           </Pressable>
         </View>

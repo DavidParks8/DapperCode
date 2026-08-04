@@ -159,29 +159,29 @@ export function renderJumpToLatestButton(params: {
         { bottom: params.bottomInset + params.theme.spacing.xs },
       ]}
     >
-      <GlassSurface
-        isInteractive
-        role="capsule"
-        style={params.styles.jumpToLatestGlass}
-        testID="jump-to-latest-glass-surface"
+      <Pressable
+        onPress={() => {
+          params.railJumpControllerRef.current?.cancel();
+          params.autoScrollStateRef.current.shouldStickToBottom = true;
+          params.autoScrollStateRef.current.isUserInteracting = false;
+          params.autoScrollStateRef.current.isMomentumScrolling = false;
+          params.showJumpToLatestRef.current = false;
+          params.setShowJumpToLatest(false);
+          params.onJumpToLatest();
+        }}
+        hitSlop={params.hitSlop}
+        style={({ pressed }) => [
+          params.styles.jumpToLatestButtonInner,
+          pressed && params.styles.jumpToLatestButtonPressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Jump to latest message"
       >
-        <Pressable
-          onPress={() => {
-            params.railJumpControllerRef.current?.cancel();
-            params.autoScrollStateRef.current.shouldStickToBottom = true;
-            params.autoScrollStateRef.current.isUserInteracting = false;
-            params.autoScrollStateRef.current.isMomentumScrolling = false;
-            params.showJumpToLatestRef.current = false;
-            params.setShowJumpToLatest(false);
-            params.onJumpToLatest();
-          }}
-          hitSlop={params.hitSlop}
-          style={({ pressed }) => [
-            params.styles.jumpToLatestButtonInner,
-            pressed && params.styles.jumpToLatestButtonPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel="Jump to latest message"
+        <GlassSurface
+          pointerEvents="none"
+          role="capsule"
+          style={params.styles.jumpToLatestGlass}
+          testID="jump-to-latest-glass-surface"
         >
           <Ionicons
             {...decorativeAccessibilityProps}
@@ -189,8 +189,8 @@ export function renderJumpToLatestButton(params: {
             size={18}
             color={params.theme.colors.textPrimary}
           />
-        </Pressable>
-      </GlassSurface>
+        </GlassSurface>
+      </Pressable>
     </Animated.View>
   );
 }

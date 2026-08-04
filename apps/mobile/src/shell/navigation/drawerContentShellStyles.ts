@@ -88,7 +88,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       ...theme.typography.label,
       flex: 1,
       minWidth: 0,
-      color: theme.colors.accent,
+      color: theme.colors.userBubbleOnSurface,
       textAlign: 'right',
     },
     searchField: {
@@ -183,7 +183,7 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
     },
     footerBrowserText: {
       ...theme.typography.metadata,
-      color: theme.colors.accent,
+      color: theme.colors.userBubbleOnSurface,
       fontWeight: '600',
     },
     footerIconButton: {

@@ -69,6 +69,8 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       alignSelf: 'center',
     },
     jumpToLatestGlass: {
+      alignItems: 'center',
+      justifyContent: 'center',
       borderCurve: 'continuous',
       borderRadius: theme.radius.full,
       width: 48,
@@ -84,7 +86,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       height: 48,
       borderRadius: theme.radius.full,
     },
-    jumpToLatestButtonPressed: { opacity: 0.84 },
+    jumpToLatestButtonPressed: { transform: [{ scale: 0.96 }] },
     messageListContent: {
       flexGrow: 1,
       padding: theme.spacing.lg,
@@ -283,12 +285,15 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       ...theme.typography.caption,
       color: theme.colors.error,
       alignSelf: 'stretch',
-      backgroundColor: theme.colors.errorBg,
+      backgroundColor: theme.colors.bgElevated,
       borderColor: theme.colors.errorBorder,
       borderRadius: theme.radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       marginHorizontal: theme.spacing.lg,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.sm,
+      boxShadow: theme.isDark
+        ? '0 8px 20px rgba(0, 0, 0, 0.28)'
+        : '0 8px 18px rgba(15, 31, 54, 0.12)',
     },
   }) as const;

@@ -5,6 +5,7 @@ import { useWindowDimensions } from 'react-native';
 
 import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
+import { resolveCompactDrawerWidth } from '@shell/navigation/compactDrawerLayout';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
@@ -31,7 +32,7 @@ export function ResponsiveDrawerLayout({ width }: { width: number }) {
         drawerType: permanent ? 'permanent' : 'front',
         swipeEnabled: !permanent,
         drawerStyle: {
-          width: permanent ? TABLET_SIDEBAR_WIDTH : width,
+          width: permanent ? TABLET_SIDEBAR_WIDTH : resolveCompactDrawerWidth(width),
           backgroundColor: theme.colors.transparent,
         },
         overlayColor: theme.colors.transparent,

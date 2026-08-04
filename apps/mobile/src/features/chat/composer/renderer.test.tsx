@@ -165,6 +165,18 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     act(() => tree.unmount());
   });
 
+  it('renders composer errors on an opaque elevated surface', () => {
+    const tree = render(baseContext({ visibleError: 'Connection failed' }), true);
+    const alert = root(tree).findAll((node) => node.props['accessibilityRole'] === 'alert')[0];
+    const style = StyleSheet.flatten(
+      requireTestValue(alert, 'composer error alert').props['style'] as never,
+    ) as { backgroundColor?: string };
+
+    expect(style.backgroundColor).toBe(theme.colors.bgElevated);
+    expect(style.backgroundColor).not.toContain('rgba');
+    act(() => tree.unmount());
+  });
+
   it('renders slash suggestions with reduce-motion aware entering/exiting animations', () => {
     const enteringSpy = jest.spyOn(
       jest.requireActual('@shared/testing/reanimatedMock').FadeIn,

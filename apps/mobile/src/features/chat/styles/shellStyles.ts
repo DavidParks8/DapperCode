@@ -1,3 +1,5 @@
+import { StyleSheet } from 'react-native';
+
 import type { AppTheme } from '@shared/theme';
 
 export const createMainScreenShellStyles = (theme: AppTheme) =>
@@ -52,10 +54,20 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       overflow: 'hidden',
       paddingVertical: theme.spacing.xs + 2,
     },
+    sessionMetaRailOutline: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderColor: theme.colors.borderHighlight,
+      borderRadius: theme.radius.full,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
     sessionMetaRowContent: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: theme.spacing.xs,
+      gap: 0,
       paddingHorizontal: theme.spacing.sm,
     },
     topCardsRow: {

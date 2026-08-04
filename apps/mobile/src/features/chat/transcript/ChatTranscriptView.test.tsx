@@ -780,6 +780,9 @@ describe('ChatTranscriptView continuation', () => {
     >;
     expect(hitSlop).toBeDefined();
     expect(JUMP_TO_LATEST_VISIBLE_SIZE).toEqual({ width: 48, height: 48 });
+    expect(
+      jump.findAll((node) => node.props['testID'] === 'jump-to-latest-glass-surface'),
+    ).not.toHaveLength(0);
     expect(glassStyle['width']).toBe(48);
     expect(glassStyle['height']).toBe(48);
     expect(JUMP_TO_LATEST_VISIBLE_SIZE.width).toBeGreaterThanOrEqual(resolveMinimumTouchTarget());
@@ -787,7 +790,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
-  it('renders jump-to-latest with interactive Liquid Glass without fading the material', () => {
+  it('renders jump-to-latest with Liquid Glass without fading or native size compression', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
     const tree = render({});
@@ -797,7 +800,7 @@ describe('ChatTranscriptView continuation', () => {
       (props) => props.testID === 'jump-to-latest-glass-surface',
     );
     expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
-    expect(glassProps?.isInteractive).toBe(true);
+    expect(glassProps?.isInteractive).toBe(false);
 
     act(() => tree.unmount());
   });

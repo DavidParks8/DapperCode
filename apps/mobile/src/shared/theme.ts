@@ -23,6 +23,7 @@ export interface AppColors {
   accentPressed: string;
   accentText: string;
   userBubble: string;
+  userBubbleOnSurface: string;
   userBubbleBorder: string;
   userBubbleText: string;
   userBubbleSecondaryText: string;
@@ -135,6 +136,7 @@ const darkClassicColors: AppColors = {
   accentPressed: '#AFA0FF',
   accentText: '#000000',
   userBubble: '#006FE6',
+  userBubbleOnSurface: '#4DA3FF',
   userBubbleBorder: 'transparent',
   userBubbleText: '#FFFFFF',
   userBubbleSecondaryText: 'rgba(255, 255, 255, 0.82)',
@@ -197,6 +199,7 @@ const lightColors: AppColors = {
   accentPressed: '#3C2FB0',
   accentText: '#FFFFFF',
   userBubble: '#006FE6',
+  userBubbleOnSurface: '#0057B8',
   userBubbleBorder: 'transparent',
   userBubbleText: '#FFFFFF',
   userBubbleSecondaryText: 'rgba(255, 255, 255, 0.82)',
@@ -243,10 +246,9 @@ const lightColors: AppColors = {
 };
 
 function createGlass(colors: AppColors, isDark: boolean): AppGlass {
-  const chromeTint = isDark ? 'rgba(0, 111, 230, 0.14)' : 'rgba(0, 111, 230, 0.08)';
-  const capsuleTint = isDark ? 'rgba(0, 111, 230, 0.20)' : 'rgba(0, 111, 230, 0.12)';
-  const drawerTint = isDark ? 'rgba(0, 111, 230, 0.11)' : 'rgba(0, 111, 230, 0.07)';
-  const prominentTint = isDark ? 'rgba(0, 111, 230, 0.78)' : 'rgba(0, 111, 230, 0.86)';
+  const chromeTint = isDark ? 'rgba(0, 111, 230, 0.26)' : 'rgba(0, 111, 230, 0.10)';
+  const capsuleTint = isDark ? 'rgba(0, 111, 230, 0.34)' : 'rgba(0, 111, 230, 0.15)';
+  const drawerTint = isDark ? 'rgba(0, 111, 230, 0.24)' : 'rgba(0, 111, 230, 0.12)';
 
   return {
     chrome: {
@@ -269,7 +271,7 @@ function createGlass(colors: AppColors, isDark: boolean): AppGlass {
     },
     prominent: {
       glassEffectStyle: 'regular',
-      tintColor: prominentTint,
+      tintColor: colors.userBubble,
       fallbackBackgroundColor: colors.userBubble,
       fallbackBorderColor: colors.userBubbleBorder,
     },

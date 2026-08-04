@@ -74,7 +74,7 @@ export function createDrawerContentFilterListStyles(theme: AppTheme) {
     },
     noticeAction: {
       ...theme.typography.metadata,
-      color: theme.colors.accent,
+      color: theme.colors.userBubbleOnSurface,
       fontWeight: '600',
     },
   });
