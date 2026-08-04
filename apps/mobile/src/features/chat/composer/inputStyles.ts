@@ -13,6 +13,8 @@ export const createChatInputStyles = (theme: AppTheme) =>
       paddingTop: theme.spacing.xs + 2,
     },
     composerBar: {
+      flex: 1,
+      minWidth: 0,
       borderRadius: theme.radius.full,
       borderCurve: 'continuous',
       borderWidth: StyleSheet.hairlineWidth,
@@ -23,10 +25,10 @@ export const createChatInputStyles = (theme: AppTheme) =>
     composerBarMultiline: {
       borderRadius: theme.radius.lg,
     },
-    row: {
+    composerGroup: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
+      alignItems: 'flex-end',
+      gap: theme.spacing.sm,
     },
     footer: {
       alignItems: 'flex-start',
@@ -64,15 +66,18 @@ export const createChatInputStyles = (theme: AppTheme) =>
       color: theme.colors.textSecondary,
       flexShrink: 1,
     },
+    addButtonGlass: {
+      width: 44,
+      height: 44,
+      borderRadius: theme.radius.full,
+      borderCurve: 'continuous',
+    },
     plusBtn: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       borderRadius: theme.radius.full,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    plusBtnPressed: {
-      backgroundColor: theme.colors.bgItem,
     },
     plusBtnDisabled: {
       opacity: 0.45,
@@ -103,22 +108,18 @@ export const createChatInputStyles = (theme: AppTheme) =>
       left: 2,
       top: theme.spacing.xs,
     },
-    actionButtons: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginLeft: theme.spacing.xs,
-      gap: 2,
+    actionButtonGlass: {
+      width: 44,
+      height: 44,
+      borderRadius: theme.radius.full,
+      borderCurve: 'continuous',
     },
     sendBtn: {
-      width: 36,
-      height: 36,
+      width: 44,
+      height: 44,
       borderRadius: theme.radius.full,
-      backgroundColor: theme.colors.bgElevated,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    sendBtnPrimary: {
-      backgroundColor: theme.colors.accent,
     },
     stopButtonContent: {
       width: 24,

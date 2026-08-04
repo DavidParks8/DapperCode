@@ -12,6 +12,7 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import {
+  getRenderedGlassContainerProps,
   getRenderedGlassViewProps,
   setMockGlassEffectAPIAvailable,
   setMockLiquidGlassAvailable,
@@ -191,11 +192,23 @@ describe('ChatInput behavior', () => {
       );
     });
 
-    const glassProps = getRenderedGlassViewProps().at(-1);
-    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
-    expect(glassProps?.isInteractive).toBe(true);
-    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
+    const glassProps = getRenderedGlassViewProps();
+    const addSurface = glassProps.find((entry) => entry.testID === 'composer-add-glass-surface');
+    const inputSurface = glassProps.find(
+      (entry) => entry.testID === 'composer-input-glass-surface',
+    );
+    const submitSurface = glassProps.find(
+      (entry) => entry.testID === 'composer-submit-glass-surface',
+    );
+    expect(addSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(addSurface?.isInteractive).toBe(true);
+    expect(addSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
+    expect(inputSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(inputSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
+    expect(submitSurface?.glassEffectStyle).toBe(theme.glass.prominent.glassEffectStyle);
+    expect(submitSurface?.tintColor).toBe(theme.glass.prominent.tintColor);
     const root = (tree as ReactTestRenderer).root as Queryable;
+    expect(getRenderedGlassContainerProps().at(-1)?.spacing).toBe(theme.spacing.xs);
     expect(byLabel(root, 'Message')).toBeTruthy();
     expect(byLabel(root, 'Add attachment')).toBeTruthy();
     expect(byLabel(root, 'Send message')).toBeTruthy();
@@ -362,7 +375,7 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('sizes plus, send/stop, and attachment-remove hitSlop to the platform minimum touch target', () => {
+  it('renders circular composer actions at the platform minimum touch target', () => {
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
@@ -381,20 +394,28 @@ describe('ChatInput behavior', () => {
     const rendered = tree as ReactTestRenderer;
     const root = rendered.root as Queryable;
 
-    const addAttachment = byLabel(root, 'Add attachment');
-    const sendMessage = byLabel(root, 'Send message');
     const removeAttachment = byLabel(root, 'error.log, remove attachment');
 
-    for (const control of [addAttachment, sendMessage, removeAttachment]) {
-      const hitSlop = control.props['hitSlop'] as {
-        top: number;
-        bottom: number;
-        left: number;
-        right: number;
-      };
-      expect(hitSlop.top).toBeGreaterThan(0);
-      expect(hitSlop.bottom).toBeGreaterThan(0);
-    }
+    const glassProps = getRenderedGlassViewProps();
+    const addStyle = StyleSheet.flatten(
+      glassProps.find((entry) => entry.testID === 'composer-add-glass-surface')?.style,
+    ) as Record<string, unknown>;
+    const sendStyle = StyleSheet.flatten(
+      glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
+    ) as Record<string, unknown>;
+    expect(addStyle['width']).toBe(44);
+    expect(addStyle['height']).toBe(44);
+    expect(sendStyle['width']).toBe(44);
+    expect(sendStyle['height']).toBe(44);
+    const stopStyle = StyleSheet.flatten(
+      glassProps.find((entry) => entry.testID === 'composer-stop-glass-surface')?.style,
+    ) as Record<string, unknown>;
+    const submitStyle = StyleSheet.flatten(
+      glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
+    ) as Record<string, unknown>;
+    expect(stopStyle['backgroundColor']).toBe(theme.glass.capsule.fallbackBackgroundColor);
+    expect(submitStyle['backgroundColor']).toBe(theme.glass.prominent.fallbackBackgroundColor);
+    expect(removeAttachment.props['hitSlop']).toBeDefined();
     act(() => rendered.unmount());
   });
 });

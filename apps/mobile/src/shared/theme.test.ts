@@ -164,9 +164,11 @@ describe('theme', () => {
     expect(dark.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.14)');
     expect(dark.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.20)');
     expect(dark.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.11)');
+    expect(dark.glass.prominent.tintColor).toBe('rgba(0, 111, 230, 0.78)');
     expect(light.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.08)');
     expect(light.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.12)');
     expect(light.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.07)');
+    expect(light.glass.prominent.tintColor).toBe('rgba(0, 111, 230, 0.86)');
   });
 
   it('uses a composed indigo-lavender surface for sub-agent work', () => {

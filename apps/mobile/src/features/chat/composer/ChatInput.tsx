@@ -17,11 +17,12 @@ import { createChatInputStyles } from './inputStyles';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useAppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
+import { GlassGroup } from '@shared/ui/glass/GlassGroup';
 import { feedback } from '@shared/feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 
 const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
-const ACTION_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
+const ACTION_BUTTON_VISIBLE_SIZE = { width: 44, height: 44 };
 const INPUT_TEXT_LINE_HEIGHT = 20;
 const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
 const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
@@ -170,7 +171,7 @@ interface ChatInputSendButtonProps {
   styles: ReturnType<typeof createChatInputStyles>;
   textMutedColor: string;
   textPrimaryColor: string;
-  accentTextColor: string;
+  prominentTextColor: string;
   label: string;
   hint: string;
 }
@@ -185,7 +186,7 @@ function ChatInputSendButton({
   styles,
   textMutedColor,
   textPrimaryColor,
-  accentTextColor,
+  prominentTextColor,
   label,
   hint,
 }: ChatInputSendButtonProps) {
@@ -193,7 +194,7 @@ function ChatInputSendButton({
   return (
     <Pressable
       onPress={canSend ? onSubmit : undefined}
-      style={[styles.sendBtn, submitUsesPrimaryChrome && styles.sendBtnPrimary]}
+      style={styles.sendBtn}
       disabled={!canSend}
       hitSlop={hitSlop}
       pressRetentionOffset={pressRetentionOffset}
@@ -205,83 +206,17 @@ function ChatInputSendButton({
       {busy ? (
         <ActivityIndicator
           size="small"
-          color={submitUsesPrimaryChrome ? accentTextColor : textMutedColor}
+          color={submitUsesPrimaryChrome ? prominentTextColor : textMutedColor}
         />
       ) : (
         <Ionicons
           {...decorativeAccessibilityProps}
           name="arrow-up"
-          size={14}
-          color={submitUsesPrimaryChrome ? accentTextColor : textPrimaryColor}
+          size={16}
+          color={submitUsesPrimaryChrome ? prominentTextColor : textPrimaryColor}
         />
       )}
     </Pressable>
-  );
-}
-
-interface ChatInputActionButtonsProps {
-  canStop: boolean;
-  showSendButton: boolean;
-  onStop: () => void;
-  onSubmit: () => void;
-  isStopping: boolean;
-  isLoading: boolean;
-  canSend: boolean;
-  submitUsesPrimaryChrome: boolean;
-  hitSlop: ReturnType<typeof computeHitSlop>;
-  pressRetentionOffset: number;
-  styles: ReturnType<typeof createChatInputStyles>;
-  colors: ReturnType<typeof useAppTheme>['colors'];
-  submitLabel: string;
-  submitHint: string;
-}
-
-function ChatInputActionButtons({
-  canStop,
-  showSendButton,
-  onStop,
-  onSubmit,
-  isStopping,
-  isLoading,
-  canSend,
-  submitUsesPrimaryChrome,
-  hitSlop,
-  pressRetentionOffset,
-  styles,
-  colors,
-  submitLabel,
-  submitHint,
-}: ChatInputActionButtonsProps) {
-  return (
-    <View style={styles.actionButtons}>
-      {canStop ? (
-        <ChatInputStopButton
-          onStop={onStop}
-          isStopping={isStopping}
-          hitSlop={hitSlop}
-          pressRetentionOffset={pressRetentionOffset}
-          styles={styles}
-          textMutedColor={colors.textMuted}
-          textPrimaryColor={colors.textPrimary}
-        />
-      ) : null}
-      {showSendButton ? (
-        <ChatInputSendButton
-          onSubmit={onSubmit}
-          canSend={canSend}
-          isLoading={isLoading}
-          submitUsesPrimaryChrome={submitUsesPrimaryChrome}
-          hitSlop={hitSlop}
-          pressRetentionOffset={pressRetentionOffset}
-          styles={styles}
-          textMutedColor={colors.textMuted}
-          textPrimaryColor={colors.textPrimary}
-          accentTextColor={colors.accentText}
-          label={submitLabel}
-          hint={submitHint}
-        />
-      ) : null}
-    </View>
   );
 }
 
@@ -389,8 +324,7 @@ export function ChatInput(props: ChatInputProps) {
   const canStop = Boolean(showStopButton && onStop);
   const showSendButton = canSend || (isLoading && !canStop);
   const inputScrollEnabled = inputHeight >= INPUT_TEXT_MAX_HEIGHT;
-  const submitUsesPrimaryChrome = showSendButton && !canStop;
-  const shouldShowActionButton = canStop || showSendButton;
+  const submitUsesPrimaryChrome = canSend;
   const composerBottomSpacing = resolveComposerBottomSpacing(
     Platform.OS,
     safeAreaBottomInset,
@@ -423,32 +357,22 @@ export function ChatInput(props: ChatInputProps) {
           },
         ]}
       >
-        <GlassSurface
-          isInteractive
-          role="capsule"
-          style={[
-            styles.composerBar,
-            inputHeight > INPUT_TEXT_MIN_HEIGHT && styles.composerBarMultiline,
-          ]}
+        <GlassGroup
+          spacing={theme.spacing.xs}
+          style={styles.composerGroup}
+          testID="composer-glass-group"
         >
-          <ChatInputAttachmentList
-            attachments={attachments}
-            onRemoveAttachment={onRemoveAttachment}
-            hitSlop={attachmentChipHitSlop}
-            styles={styles}
-            textMutedColor={colors.textMuted}
-          />
-
-          <View style={styles.row}>
+          <GlassSurface
+            isInteractive={!attachDisabled}
+            role="capsule"
+            style={styles.addButtonGlass}
+            testID="composer-add-glass-surface"
+          >
             <Pressable
               disabled={attachDisabled}
               onPress={onAttachPress}
               hitSlop={actionButtonHitSlop}
-              style={({ pressed }) => [
-                styles.plusBtn,
-                attachDisabled && styles.plusBtnDisabled,
-                pressed && !attachDisabled && styles.plusBtnPressed,
-              ]}
+              style={[styles.plusBtn, attachDisabled && styles.plusBtnDisabled]}
               accessibilityRole="button"
               accessibilityLabel="Add attachment"
               accessibilityHint="Opens attachment choices"
@@ -461,7 +385,24 @@ export function ChatInput(props: ChatInputProps) {
                 color={colors.textPrimary}
               />
             </Pressable>
+          </GlassSurface>
 
+          <GlassSurface
+            isInteractive
+            role="capsule"
+            style={[
+              styles.composerBar,
+              inputHeight > INPUT_TEXT_MIN_HEIGHT && styles.composerBarMultiline,
+            ]}
+            testID="composer-input-glass-surface"
+          >
+            <ChatInputAttachmentList
+              attachments={attachments}
+              onRemoveAttachment={onRemoveAttachment}
+              hitSlop={attachmentChipHitSlop}
+              styles={styles}
+              textMutedColor={colors.textMuted}
+            />
             <View style={styles.inputWrapper}>
               <Text
                 pointerEvents="none"
@@ -515,27 +456,52 @@ export function ChatInput(props: ChatInputProps) {
                   }
                 }}
               />
-              {shouldShowActionButton ? (
-                <ChatInputActionButtons
-                  canStop={canStop}
-                  showSendButton={showSendButton}
-                  onStop={handleStop}
-                  onSubmit={handleSubmit}
-                  isStopping={isStopping}
-                  isLoading={isLoading}
-                  canSend={canSend}
-                  submitUsesPrimaryChrome={submitUsesPrimaryChrome}
-                  hitSlop={actionButtonHitSlop}
-                  pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-                  styles={styles}
-                  colors={colors}
-                  submitLabel={submitLabel}
-                  submitHint={submitHint}
-                />
-              ) : null}
             </View>
-          </View>
-        </GlassSurface>
+          </GlassSurface>
+
+          {canStop ? (
+            <GlassSurface
+              isInteractive={!isStopping}
+              role="capsule"
+              style={styles.actionButtonGlass}
+              testID="composer-stop-glass-surface"
+            >
+              <ChatInputStopButton
+                onStop={handleStop}
+                isStopping={isStopping}
+                hitSlop={actionButtonHitSlop}
+                pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+                styles={styles}
+                textMutedColor={colors.textMuted}
+                textPrimaryColor={colors.textPrimary}
+              />
+            </GlassSurface>
+          ) : null}
+
+          {showSendButton ? (
+            <GlassSurface
+              isInteractive={canSend}
+              role={submitUsesPrimaryChrome ? 'prominent' : 'capsule'}
+              style={styles.actionButtonGlass}
+              testID="composer-submit-glass-surface"
+            >
+              <ChatInputSendButton
+                onSubmit={handleSubmit}
+                canSend={canSend}
+                isLoading={isLoading}
+                submitUsesPrimaryChrome={submitUsesPrimaryChrome}
+                hitSlop={actionButtonHitSlop}
+                pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+                styles={styles}
+                textMutedColor={colors.textMuted}
+                textPrimaryColor={colors.textPrimary}
+                prominentTextColor={colors.userBubbleText}
+                label={submitLabel}
+                hint={submitHint}
+              />
+            </GlassSurface>
+          ) : null}
+        </GlassGroup>
         {footer || reserveFooterSpace ? (
           <View style={[styles.footer, !footer && styles.footerPlaceholder]}>{footer}</View>
         ) : null}

@@ -89,7 +89,7 @@ export type AppTypography = {
   mono: TextStyle;
 };
 
-export type GlassSurfaceRole = 'chrome' | 'capsule' | 'drawer';
+export type GlassSurfaceRole = 'chrome' | 'capsule' | 'drawer' | 'prominent';
 
 export interface AppGlassSurface {
   glassEffectStyle: GlassStyle;
@@ -246,6 +246,7 @@ function createGlass(colors: AppColors, isDark: boolean): AppGlass {
   const chromeTint = isDark ? 'rgba(0, 111, 230, 0.14)' : 'rgba(0, 111, 230, 0.08)';
   const capsuleTint = isDark ? 'rgba(0, 111, 230, 0.20)' : 'rgba(0, 111, 230, 0.12)';
   const drawerTint = isDark ? 'rgba(0, 111, 230, 0.11)' : 'rgba(0, 111, 230, 0.07)';
+  const prominentTint = isDark ? 'rgba(0, 111, 230, 0.78)' : 'rgba(0, 111, 230, 0.86)';
 
   return {
     chrome: {
@@ -265,6 +266,12 @@ function createGlass(colors: AppColors, isDark: boolean): AppGlass {
       tintColor: drawerTint,
       fallbackBackgroundColor: colors.bgSidebar,
       fallbackBorderColor: colors.borderLight,
+    },
+    prominent: {
+      glassEffectStyle: 'regular',
+      tintColor: prominentTint,
+      fallbackBackgroundColor: colors.userBubble,
+      fallbackBorderColor: colors.userBubbleBorder,
     },
   };
 }

@@ -14,14 +14,20 @@ export interface MockGlassViewProps extends ViewProps {
   tintColor?: string;
 }
 
+export interface MockGlassContainerProps extends ViewProps {
+  spacing?: number;
+}
+
 let mockLiquidGlassAvailable = false;
 let mockGlassEffectAPIAvailable = false;
 const renderedGlassViewProps: MockGlassViewProps[] = [];
+const renderedGlassContainerProps: MockGlassContainerProps[] = [];
 
 export function resetMockGlassEffect(): void {
   mockLiquidGlassAvailable = false;
   mockGlassEffectAPIAvailable = false;
   renderedGlassViewProps.length = 0;
+  renderedGlassContainerProps.length = 0;
 }
 
 export function setMockLiquidGlassAvailable(value: boolean): void {
@@ -34,6 +40,10 @@ export function setMockGlassEffectAPIAvailable(value: boolean): void {
 
 export function getRenderedGlassViewProps(): readonly MockGlassViewProps[] {
   return renderedGlassViewProps;
+}
+
+export function getRenderedGlassContainerProps(): readonly MockGlassContainerProps[] {
+  return renderedGlassContainerProps;
 }
 
 export function isLiquidGlassAvailable(): boolean {
@@ -64,4 +74,10 @@ export const GlassView = forwardRef<View, MockGlassViewProps>(function MockGlass
   return <View ref={ref} {...viewProps} />;
 });
 
-export const GlassContainer = View;
+export const GlassContainer = forwardRef<View, MockGlassContainerProps>(function MockGlassContainer(
+  { spacing, ...viewProps },
+  ref,
+) {
+  renderedGlassContainerProps.push({ ...viewProps, spacing });
+  return <View ref={ref} {...viewProps} />;
+});
