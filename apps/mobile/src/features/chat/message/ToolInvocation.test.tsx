@@ -707,11 +707,7 @@ describe('ToolInvocationOutput', () => {
       false,
     );
 
-    for (const palette of [
-      createAppTheme('dark', 'classic'),
-      createAppTheme('dark', 'grey'),
-      createAppTheme('light'),
-    ]) {
+    for (const palette of [createAppTheme('dark'), createAppTheme('light')]) {
       const syntaxColors = [
         palette.colors.codeSyntaxComment,
         palette.colors.codeSyntaxKeyword,

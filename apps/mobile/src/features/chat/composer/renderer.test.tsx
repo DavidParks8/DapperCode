@@ -62,9 +62,6 @@ function baseContext(
     isLoading: false,
     isTurnLikelyRunning: false,
     isTurnLoading: false,
-    loadingAttachmentFileCandidates: false,
-    mentionPathSuggestions: [],
-    mentionQuery: null,
     oldestQueuedMessage: null,
     oldestQueuedMessageIsPendingSteer: false,
     onOpenBridgeRecoveryGuide: jest.fn(),
@@ -72,7 +69,6 @@ function baseContext(
     queuedMessageSteerDisabledReason: null,
     remainingQueuedMessagesCount: 0,
     removeComposerAttachment: jest.fn(),
-    selectMentionSuggestion: jest.fn(),
     selectedChat: null,
     selectedThreadRuntimeSnapshot: null,
     setDraft: jest.fn(),
@@ -199,46 +195,13 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     exitingSpy.mockRestore();
   });
 
-  it('renders the indexing status while loading mention suggestions', () => {
+  it('disables attachments and labels submit as save while editing a queued message', () => {
     const context = baseContext({
-      mentionQuery: 'read',
-      loadingAttachmentFileCandidates: true,
-      mentionPathSuggestions: [],
-    });
-    const tree = render(context);
-
-    const status = root(tree).findAll(
-      (node) => typeof node.children[0] === 'string' && node.children[0] === 'Indexing files…',
-    );
-    expect(status.length).toBeGreaterThan(0);
-
-    act(() => tree.unmount());
-  });
-
-  it('renders mention path suggestions as pressable rows', () => {
-    const context = baseContext({
-      mentionQuery: 'read',
-      loadingAttachmentFileCandidates: false,
-      mentionPathSuggestions: ['src/README.md'],
-    });
-    const tree = render(context);
-
-    const pressableRows = root(tree).findAll((node) => typeof node.props['onPress'] === 'function');
-    expect(pressableRows.length).toBeGreaterThan(0);
-
-    act(() => tree.unmount());
-  });
-
-  it('suppresses mention attachments and labels submit as save while editing a queued message', () => {
-    const context = baseContext({
-      draft: '@read',
+      draft: 'Updated queued message',
       editingQueuedMessage: true,
-      mentionQuery: 'read',
-      mentionPathSuggestions: ['src/README.md'],
     });
     const tree = render(context);
 
-    expect(root(tree).findAll((node) => node.children.includes('src/README.md'))).toHaveLength(0);
     expect(
       root(tree).findAll(
         (node) =>
@@ -256,7 +219,6 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
               true),
       ),
     ).toHaveLength(1);
-
     act(() => tree.unmount());
   });
 

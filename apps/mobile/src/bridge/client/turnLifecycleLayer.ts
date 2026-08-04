@@ -6,12 +6,7 @@ import {
   normalizeCwd,
   normalizeUniqueThreadIds,
 } from '@bridge/client/clientChatListInternals';
-import {
-  buildTurnInput,
-  normalizeLocalImages,
-  normalizeMentions,
-  readThreadRuntimeSettings,
-} from '@bridge/client/clientTurnInputInternals';
+import { readThreadRuntimeSettings } from '@bridge/client/clientTurnInputInternals';
 import {
   normalizeApprovalPolicy,
   normalizeModel,
@@ -37,7 +32,6 @@ import type {
   Chat,
   ChatSummary,
   SendChatMessageRequest,
-  SteerChatTurnRequest,
 } from '@bridge/types/types';
 
 export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeApiClientWorkspaceAndChatReadLayer {
@@ -232,25 +226,6 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       status: 'running',
       activeTurnId: turnId ?? cached.activeTurnId,
     };
-  }
-  async steerChatTurn(
-    threadId: string,
-    expectedTurnId: string,
-    body: SteerChatTurnRequest,
-  ): Promise<void> {
-    const normalizedThreadId = threadId.trim();
-    const normalizedExpectedTurnId = expectedTurnId.trim();
-    const content = body.content.trim();
-    if (!normalizedThreadId || !normalizedExpectedTurnId || !content) {
-      return;
-    }
-    const normalizedMentions = normalizeMentions(body.mentions);
-    const normalizedLocalImages = normalizeLocalImages(body.localImages);
-    await this.ws.request<Record<string, never>>('turn/steer', {
-      threadId: normalizedThreadId,
-      expectedTurnId: normalizedExpectedTurnId,
-      input: buildTurnInput(content, normalizedMentions, normalizedLocalImages),
-    });
   }
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     const normalizedThreadId = threadId.trim();

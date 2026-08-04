@@ -58,7 +58,6 @@ jobs:
 
       - name: Validate mobile release source
         run: |
-          npm run version:check
           npm run payment:check
           npm run format:check
           npm run lint -w @dappercode/mobile

@@ -149,24 +149,14 @@ describe('buildToolInvocations', () => {
     ]);
   });
 
-  it('falls back to legacy timeline text when no metadata arrives', () => {
-    const invocations = buildToolInvocations([
-      toolMessage('t1', '• Ran `pwd`\n  └ /repo'),
-      {
-        id: 's1',
-        role: 'system',
-        content: '• Tool failed `build`\n  └ boom\n• Reading src/app.ts',
-        createdAt: '2026-05-01T00:00:00.000Z',
-      },
-    ]);
+  it('uses tool result text when no metadata arrives', () => {
+    const invocations = buildToolInvocations([toolMessage('t1', '• Ran `pwd`\n  └ /repo')]);
 
-    expect(invocations.map((invocation) => invocation.title)).toEqual([
-      'Ran `pwd`',
-      'Tool failed `build`',
-      'Reading src/app.ts',
-    ]);
-    expect(invocations[0]).toMatchObject({ monospaceTitle: true, textLines: ['/repo'] });
-    expect(invocations[1]).toMatchObject({ isError: true, textLines: ['boom'] });
+    expect(invocations.map((invocation) => invocation.title)).toEqual(['Ran `pwd`']);
+    expect(invocations[0]).toMatchObject({
+      monospaceTitle: false,
+      textLines: ['  └ /repo'],
+    });
   });
 
   it('titles a metadata-less tool call from its synthetic timeline line', () => {
@@ -190,18 +180,6 @@ describe('buildToolInvocations', () => {
       id: 'call-9',
       title: 'Called tool `grep`',
       textLines: ['  {"q":"x"}'],
-    });
-  });
-
-  it('keeps every entry when a legacy tool message holds several timeline rows', () => {
-    const invocations = buildToolInvocations([
-      toolMessage('t1', '• Ran `pwd`\n  └ /repo\n• Ran `ls`\n  └ a.txt'),
-    ]);
-
-    expect(invocations).toHaveLength(1);
-    expect(invocations[0]).toMatchObject({
-      title: 'Ran `pwd`',
-      textLines: ['/repo', 'Ran `ls`', 'a.txt'],
     });
   });
 

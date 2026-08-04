@@ -1271,9 +1271,12 @@ fn session_to_thread_value(session: crate::acp::manager::ManagedSession) -> Resu
     let updated_at = snapshot.session.updated_at.clone();
     let source = session.parent_thread_id.as_ref().map(|parent_thread_id| {
         json!({
-            "kind": "subAgentThreadSpawn",
-            "parentThreadId": parent_thread_id,
-            "depth": 1,
+            "subAgent": {
+                "thread_spawn": {
+                    "parentThreadId": parent_thread_id,
+                    "depth": 1,
+                },
+            },
         })
     });
     Ok(json!({
@@ -1410,6 +1413,33 @@ mod client_request_tests {
         ));
         assert!(!child_matches_tool_title(None, "Read txt files"));
         assert!(!child_matches_tool_title(Some("anything"), "   "));
+    }
+
+    #[test]
+    fn session_threads_emit_the_current_subagent_source_shape() {
+        let value = session_to_thread_value(ManagedSession {
+            thread_id: "child-thread".to_string(),
+            agent_id: "alpha-agent".to_string(),
+            cwd: PathBuf::from("/tmp"),
+            parent_thread_id: Some("parent-thread".to_string()),
+            snapshot: crate::acp::snapshot::SessionSnapshot::new(
+                "alpha-agent".to_string(),
+                "child-thread".to_string(),
+            ),
+        })
+        .expect("thread response");
+
+        assert_eq!(
+            value["source"],
+            json!({
+                "subAgent": {
+                    "thread_spawn": {
+                        "parentThreadId": "parent-thread",
+                        "depth": 1,
+                    },
+                },
+            })
+        );
     }
 
     /// A sub-agent has to be found while it is still running, because that is the only thing that

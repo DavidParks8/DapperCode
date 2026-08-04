@@ -275,8 +275,6 @@ pub(super) async fn handle_bridge_method(
     match method {
         "bridge/health/read" => serde_json::to_value(state.bridge_status().await)
             .map_err(|error| BridgeError::server(&error.to_string())),
-        "bridge/status/read" => serde_json::to_value(state.bridge_status().await)
-            .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/push/register" => {
@@ -336,7 +334,6 @@ pub(super) async fn handle_bridge_method(
             let removed = state.push.unregister(&profile_id, &registration_id).await?;
             Ok(json!({ "ok": true, "removed": removed }))
         }
-        "bridge/push/list" => Ok(json!({ "devices": state.push.list().await })),
         "bridge/browser/session/create" => {
             let request: BrowserPreviewCreateRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
@@ -346,11 +343,6 @@ pub(super) async fn handle_bridge_method(
                 .create_session(client_id, &request.target_url)
                 .await?;
             serde_json::to_value(session).map_err(|error| BridgeError::server(&error.to_string()))
-        }
-        "bridge/browser/sessions/list" => {
-            let sessions = state.preview.list_sessions(client_id).await;
-            serde_json::to_value(json!({ "sessions": sessions }))
-                .map_err(|error| BridgeError::server(&error.to_string()))
         }
         "bridge/browser/session/close" => {
             let request: BrowserPreviewCloseRequest =
@@ -721,29 +713,6 @@ pub(super) async fn handle_bridge_method(
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
                     .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
             let result = list_filesystem_entries(state, request).await?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
-        }
-        "bridge/terminal/exec" => {
-            let request: TerminalExecRequest =
-                serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
-
-            let result = state.terminal.execute_shell(request).await?;
-            let result_value = serde_json::to_value(&result)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
-
-            state
-                .hub
-                .broadcast_notification("bridge/terminal/completed", result_value.clone())
-                .await;
-
-            Ok(result_value)
-        }
-        "bridge/github/auth/install" => {
-            let request: GitHubAuthInstallRequest =
-                serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
-            let result = install_github_git_auth(state, request).await?;
             serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
         }
         "bridge/git/status" => {
@@ -1474,7 +1443,6 @@ mod tests {
             no_auth_allowed_origins: HashSet::new(),
             allow_query_token_auth: true,
             allow_outside_root_cwd: false,
-            terminal_exec_policies: HashSet::new(),
             show_pairing_qr: false,
             ws_limits: WebSocketResourceLimits {
                 max_frame_bytes: DEFAULT_WS_MAX_FRAME_BYTES,

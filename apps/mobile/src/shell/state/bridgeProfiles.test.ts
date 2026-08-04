@@ -3,8 +3,6 @@ import {
   deriveBridgeProfileName,
   getActiveBridgeProfile,
   parseBridgeProfileStore,
-  removeBridgeProfile,
-  renameBridgeProfile,
   setActiveBridgeProfile,
   upsertBridgeProfile,
 } from '@shell/state/bridgeProfiles';
@@ -58,27 +56,6 @@ describe('bridgeProfiles', () => {
     expect(parsed.profiles).toHaveLength(1);
   });
 
-  it('parses legacy auth fields without exposing them on profiles', () => {
-    const parsed = parseBridgeProfileStore(
-      JSON.stringify({
-        activeProfileId: 'profile-1',
-        profiles: [
-          {
-            id: 'profile-1',
-            name: 'Legacy profile',
-            bridgeUrl: 'http://10.0.0.1:8787',
-            bridgeToken: 'gho_old',
-            authMode: 'githubOAuth',
-          },
-        ],
-      }),
-    );
-
-    expect(parsed.activeProfileId).toBe('profile-1');
-    expect(parsed.profiles).toHaveLength(1);
-    expect(parsed.profiles[0]).not.toHaveProperty('authMode');
-  });
-
   it('changes the active profile without altering saved entries', () => {
     const base = parseBridgeProfileStore(
       JSON.stringify({
@@ -104,56 +81,6 @@ describe('bridgeProfiles', () => {
 
     expect(switched.activeProfileId).toBe('profile-2');
     expect(switched.profiles).toHaveLength(2);
-  });
-
-  it('renames a saved profile without touching its bridge config', () => {
-    const base = parseBridgeProfileStore(
-      JSON.stringify({
-        activeProfileId: 'profile-1',
-        profiles: [
-          {
-            id: 'profile-1',
-            name: 'Server A',
-            bridgeUrl: 'http://10.0.0.1:8787',
-            bridgeToken: 'token-a',
-          },
-        ],
-      }),
-    );
-
-    const renamed = renameBridgeProfile(base, 'profile-1', 'Office Bridge');
-
-    expect(renamed.profiles[0]?.name).toBe('Office Bridge');
-    expect(renamed.profiles[0]?.bridgeUrl).toBe('http://10.0.0.1:8787');
-    expect(renamed.profiles[0]?.bridgeToken).toBe('token-a');
-  });
-
-  it('removes the active profile and promotes another saved profile', () => {
-    const base = parseBridgeProfileStore(
-      JSON.stringify({
-        activeProfileId: 'profile-1',
-        profiles: [
-          {
-            id: 'profile-1',
-            name: 'Server A',
-            bridgeUrl: 'http://10.0.0.1:8787',
-            bridgeToken: 'token-a',
-          },
-          {
-            id: 'profile-2',
-            name: 'Server B',
-            bridgeUrl: 'http://10.0.0.2:8787',
-            bridgeToken: 'token-b',
-          },
-        ],
-      }),
-    );
-
-    const next = removeBridgeProfile(base, 'profile-1');
-
-    expect(next.activeProfileId).toBe('profile-2');
-    expect(next.profiles).toHaveLength(1);
-    expect(next.profiles[0]?.id).toBe('profile-2');
   });
 
   it('returns empty stores for missing, malformed, and non-object data', () => {
@@ -228,9 +155,6 @@ describe('bridgeProfiles', () => {
     expect(getActiveBridgeProfile({ ...base, activeProfileId: 'missing' })).toBeNull();
     expect(setActiveBridgeProfile(base, null).activeProfileId).toBeNull();
     expect(setActiveBridgeProfile(base, 'missing').activeProfileId).toBe('one');
-    expect(renameBridgeProfile(base, 'missing', 'Name')).toEqual(base);
-    expect(removeBridgeProfile(base, 'missing').activeProfileId).toBe('one');
-    expect(removeBridgeProfile(base, 'one')).toEqual(createEmptyBridgeProfileStore());
   });
 
   it('derives safe fallback names', () => {

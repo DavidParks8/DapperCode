@@ -1947,13 +1947,6 @@ impl AgentManager {
             .await?)
     }
 
-    #[allow(dead_code)]
-    pub async fn cancel(&self, thread_id: &str) -> Result<(), AgentManagerError> {
-        let (_, session_id, connection) = self.route_thread(thread_id)?;
-        connection.cancel(session_id).await?;
-        Ok(())
-    }
-
     pub async fn cancel_turn(
         &self,
         thread_id: &str,
@@ -4168,8 +4161,6 @@ mod tests {
             manager.cancel_turn(&unavailable, "turn-beta").await,
             Err(AgentManagerError::UnknownAgent(_))
         ));
-        manager.cancel(&beta_session.thread_id).await.unwrap();
-        assert_eq!(observed_rx.recv().await.as_deref(), Some("cancel:beta-lab"));
         manager
             .prepare_steer(&beta_session.thread_id)
             .await

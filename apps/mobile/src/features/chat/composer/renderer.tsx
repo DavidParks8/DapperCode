@@ -17,7 +17,6 @@ import { ChatInput } from './ChatInput';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { motionDuration } from '@shared/ui/motion';
-import { toPathBasename } from '../helpers/helpers';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
 import type {
   MainScreenWorkflowQueueStateContext,
@@ -29,13 +28,6 @@ export type MainScreenComposerRendererContext = MainScreenWorkflowQueueStateCont
 
 type ComposerPendingApproval = ComponentProps<typeof ApprovalBanner>['approval'];
 type BridgeRecoveryBannerButtonHitSlop = NonNullable<ComponentProps<typeof Pressable>['hitSlop']>;
-
-function resolveComposerMentionQuery(
-  editingQueuedMessage: boolean,
-  mentionQuery: MainScreenComposerRendererContext['mentionQuery'],
-) {
-  return editingQueuedMessage ? null : mentionQuery;
-}
 
 export function useMainScreenComposerRenderer(context: MainScreenComposerRendererContext) {
   const {
@@ -65,9 +57,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     isLoading,
     isTurnLikelyRunning,
     isTurnLoading,
-    loadingAttachmentFileCandidates,
-    mentionPathSuggestions,
-    mentionQuery,
     oldestQueuedMessage,
     oldestQueuedMessageIsPendingSteer,
     onOpenBridgeRecoveryGuide,
@@ -75,7 +64,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     queuedMessageSteerDisabledReason,
     remainingQueuedMessagesCount,
     removeComposerAttachment,
-    selectMentionSuggestion,
     selectedChat,
     selectedThreadRuntimeSnapshot,
     setDraft,
@@ -154,15 +142,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         slashSuggestions={slashSuggestions}
         slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
         setDraft={setDraft}
-        styles={styles}
-      />
-      <MentionSuggestionsView
-        showSlashSuggestions={showSlashSuggestions}
-        mentionQuery={resolveComposerMentionQuery(editingQueuedMessage, mentionQuery)}
-        loadingAttachmentFileCandidates={loadingAttachmentFileCandidates}
-        mentionPathSuggestions={mentionPathSuggestions}
-        slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
-        selectMentionSuggestion={selectMentionSuggestion}
         styles={styles}
       />
       <FloatingActivityDockView
@@ -379,114 +358,6 @@ function SlashSuggestionsView({
           </Pressable>
         );
       })}
-    </Animated.ScrollView>
-  );
-}
-
-function MentionSuggestionsView({
-  showSlashSuggestions,
-  mentionQuery,
-  loadingAttachmentFileCandidates,
-  mentionPathSuggestions,
-  slashSuggestionsMaxHeight,
-  selectMentionSuggestion,
-  styles,
-}: {
-  showSlashSuggestions: boolean;
-  mentionQuery: MainScreenComposerRendererContext['mentionQuery'];
-  loadingAttachmentFileCandidates: boolean;
-  mentionPathSuggestions: MainScreenComposerRendererContext['mentionPathSuggestions'];
-  slashSuggestionsMaxHeight: number;
-  selectMentionSuggestion: MainScreenComposerRendererContext['selectMentionSuggestion'];
-  styles: MainScreenComposerRendererContext['styles'];
-}) {
-  if (showSlashSuggestions || mentionQuery === null) {
-    return null;
-  }
-  if (loadingAttachmentFileCandidates && mentionPathSuggestions.length === 0) {
-    return (
-      <InlineMentionStatus
-        accessibilityLiveRegion="polite"
-        styles={styles}
-        text="Indexing files…"
-      />
-    );
-  }
-  if (mentionPathSuggestions.length > 0) {
-    return (
-      <MentionSuggestionList
-        mentionPathSuggestions={mentionPathSuggestions}
-        slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
-        selectMentionSuggestion={selectMentionSuggestion}
-        styles={styles}
-      />
-    );
-  }
-  return mentionQuery.trim().length > 0 ? (
-    <InlineMentionStatus styles={styles} text="No matching files found." />
-  ) : null;
-}
-
-function InlineMentionStatus({
-  accessibilityLiveRegion,
-  styles,
-  text,
-}: {
-  accessibilityLiveRegion?: 'polite';
-  styles: MainScreenComposerRendererContext['styles'];
-  text: string;
-}) {
-  return (
-    <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
-      style={styles.inlineMentionStatus}
-    >
-      <Text accessibilityLiveRegion={accessibilityLiveRegion} style={styles.workspaceModalLoading}>
-        {text}
-      </Text>
-    </Animated.View>
-  );
-}
-
-function MentionSuggestionList({
-  mentionPathSuggestions,
-  slashSuggestionsMaxHeight,
-  selectMentionSuggestion,
-  styles,
-}: {
-  mentionPathSuggestions: MainScreenComposerRendererContext['mentionPathSuggestions'];
-  slashSuggestionsMaxHeight: number;
-  selectMentionSuggestion: MainScreenComposerRendererContext['selectMentionSuggestion'];
-  styles: MainScreenComposerRendererContext['styles'];
-}) {
-  return (
-    <Animated.ScrollView
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
-      style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
-      contentContainerStyle={styles.slashSuggestionsContent}
-      keyboardShouldPersistTaps="handled"
-      nestedScrollEnabled
-    >
-      {mentionPathSuggestions.map((path, index) => (
-        <Pressable
-          key={`${path}-${String(index)}`}
-          onPress={() => selectMentionSuggestion(path)}
-          style={({ pressed }) => [
-            styles.slashSuggestionItem,
-            index === mentionPathSuggestions.length - 1 && styles.slashSuggestionItemLast,
-            pressed && styles.slashSuggestionItemPressed,
-          ]}
-        >
-          <Text style={styles.slashSuggestionTitle} numberOfLines={1}>
-            {toPathBasename(path)}
-          </Text>
-          <Text style={styles.slashSuggestionSummary} numberOfLines={1}>
-            {path}
-          </Text>
-        </Pressable>
-      ))}
     </Animated.ScrollView>
   );
 }

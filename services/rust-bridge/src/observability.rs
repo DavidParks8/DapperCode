@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn request_counts_track_terminal_outcomes() {
         let metrics = OperationalMetrics::new();
-        let completed = metrics.start_request("bridge/status/read", "bridge");
+        let completed = metrics.start_request("bridge/capabilities/read", "bridge");
         metrics.finish_request(&completed, "ok");
         let timed_out = metrics.start_request("thread/read", "codex");
         metrics.finish_request(&timed_out, "timeout");

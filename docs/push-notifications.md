@@ -52,7 +52,6 @@ not sent. Approval notifications never include reply content.
 - Push registration RPC methods (over the existing authenticated WS):
   - `bridge/push/register` `{ profileId, registrationId, token, platform, deviceName, events }`
   - `bridge/push/unregister` `{ profileId, registrationId }`
-  - `bridge/push/list` → device list (tokens are masked to a short suffix)
 - Registrations persist to `.dappercode-push-registry.json` in the bridge working
   directory (gitignored).
 - A `PushService` subscribes to the canonical ACP event channel and, on final

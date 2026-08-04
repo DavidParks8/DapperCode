@@ -1314,7 +1314,6 @@ mod tests {
     };
     use crate::{path_policy::PathPolicy, GitBranchSummary};
     use std::{
-        collections::HashSet,
         fs,
         path::{Path, PathBuf},
         process::Command,
@@ -1359,7 +1358,7 @@ mod tests {
 
         fn service(&self) -> super::GitService {
             let policy = Arc::new(PathPolicy::new(self.0.clone(), false).expect("create policy"));
-            let terminal = Arc::new(super::TerminalService::new(policy.clone(), HashSet::new()));
+            let terminal = Arc::new(super::TerminalService::new(policy.clone()));
             super::GitService::new(terminal, policy).with_environment_probe(Arc::new(|_| false))
         }
     }
@@ -1512,7 +1511,7 @@ mod tests {
         fs::create_dir_all(&outside).expect("create outside");
         symlink(&outside, root.join("escape")).expect("create escape symlink");
         let policy = Arc::new(PathPolicy::new(root, false).expect("create policy"));
-        let terminal = Arc::new(super::TerminalService::new(policy.clone(), HashSet::new()));
+        let terminal = Arc::new(super::TerminalService::new(policy.clone()));
         let git = super::GitService::new(terminal, policy);
 
         let error = git

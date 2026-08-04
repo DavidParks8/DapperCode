@@ -1,7 +1,7 @@
 import {
   appStateReducer,
   AppStatePersistenceError,
-  importLegacyAppState,
+  createDefaultAppStateData,
   parsePersistedAppState,
   persistenceError,
   serializeAppState,
@@ -104,43 +104,19 @@ export class AppStatePersistenceCoordinator {
         this.publish(data, null, true);
         return;
       }
-      await this.importLegacyState();
+      const data = createDefaultAppStateData();
+      await this.persistence.writeCurrent(serializeAppState(data)).catch((error: unknown) => {
+        throw persistenceError('write_failed', 'write', 'Could not save initial app state.', error);
+      });
+      this.pendingData = null;
+      this.initializedSuccessfully = true;
+      this.publish(data, null, true);
     } catch (error) {
       this.publish(
         this.data,
         error instanceof AppStatePersistenceError
           ? error
           : persistenceError('read_failed', 'load', 'Could not load saved app state.', error),
-        true,
-      );
-    }
-  }
-
-  private async importLegacyState(): Promise<void> {
-    const legacy = await this.persistence.readLegacy().catch((error: unknown) => {
-      throw persistenceError(
-        'read_failed',
-        'import',
-        'Could not import the existing app settings.',
-        error,
-      );
-    });
-    const data = importLegacyAppState(legacy);
-    try {
-      await this.persistence.writeCurrent(serializeAppState(data));
-      this.pendingData = null;
-      this.initializedSuccessfully = true;
-      this.publish(data, null, true);
-    } catch (error) {
-      this.pendingData = data;
-      this.publish(
-        data,
-        persistenceError(
-          'write_failed',
-          'import',
-          'Imported settings could not be saved. Retry before changing connections.',
-          error,
-        ),
         true,
       );
     }

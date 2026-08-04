@@ -1,8 +1,6 @@
 const CONFIG_ENV_KEYS = [
   'EXPO_PUBLIC_HOST_BRIDGE_URL',
-  'EXPO_PUBLIC_MAC_BRIDGE_URL',
   'EXPO_PUBLIC_HOST_BRIDGE_TOKEN',
-  'EXPO_PUBLIC_MAC_BRIDGE_TOKEN',
   'EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH',
   'EXPO_PUBLIC_ALLOW_INSECURE_REMOTE_BRIDGE',
   'EXPO_PUBLIC_PRIVACY_POLICY_URL',
@@ -15,7 +13,7 @@ const originalEnvironment = Object.fromEntries(
 );
 
 interface ConfigEnvironment {
-  legacyHostBridgeUrl: string | null;
+  hostBridgeUrl: string | null;
   hostBridgeToken: string | null;
   allowWsQueryTokenAuth: boolean;
   allowInsecureRemoteBridge: boolean;
@@ -54,7 +52,7 @@ describe('mobile environment configuration', () => {
   it('uses safe defaults when optional values are absent', () => {
     expect(loadEnvironment({})).toEqual(
       expect.objectContaining({
-        legacyHostBridgeUrl: null,
+        hostBridgeUrl: null,
         hostBridgeToken: null,
         allowWsQueryTokenAuth: false,
         allowInsecureRemoteBridge: false,
@@ -67,11 +65,11 @@ describe('mobile environment configuration', () => {
     );
   });
 
-  it('normalizes legacy aliases, flags, URLs, and debounce values', () => {
+  it('normalizes current bridge values, flags, URLs, and debounce values', () => {
     expect(
       loadEnvironment({
-        EXPO_PUBLIC_MAC_BRIDGE_URL: ' ws://localhost:8787/rpc/ ',
-        EXPO_PUBLIC_MAC_BRIDGE_TOKEN: ' token ',
+        EXPO_PUBLIC_HOST_BRIDGE_URL: ' ws://localhost:8787/rpc/ ',
+        EXPO_PUBLIC_HOST_BRIDGE_TOKEN: ' token ',
         EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH: ' TRUE ',
         EXPO_PUBLIC_ALLOW_INSECURE_REMOTE_BRIDGE: 'true',
         EXPO_PUBLIC_PRIVACY_POLICY_URL: ' https://example.com/privacy ',
@@ -80,7 +78,7 @@ describe('mobile environment configuration', () => {
       }),
     ).toEqual(
       expect.objectContaining({
-        legacyHostBridgeUrl: 'http://localhost:8787/rpc',
+        hostBridgeUrl: 'http://localhost:8787/rpc',
         hostBridgeToken: 'token',
         allowWsQueryTokenAuth: true,
         allowInsecureRemoteBridge: true,

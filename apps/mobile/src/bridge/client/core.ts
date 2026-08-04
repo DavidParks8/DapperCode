@@ -14,7 +14,6 @@ import type {
   AgentId,
   ApprovalPolicy,
   BridgeCapabilities,
-  BridgeStatus,
   BridgeThreadQueueActionResponse,
   BridgeThreadQueueState,
   BrowserPreviewDiscoveryResponse,
@@ -33,8 +32,6 @@ import type {
   GitDiffResponse,
   GitFileRequest,
   GitHistoryResponse,
-  GitHubAuthGrantInput,
-  GitHubAuthInstallResponse,
   GitPushResponse,
   GitStageAllResponse,
   GitStageResponse,
@@ -52,9 +49,6 @@ import type {
   ResolveUserInputRequest,
   ResolveUserInputResponse,
   SendChatMessageRequest,
-  SteerChatTurnRequest,
-  TerminalExecRequest,
-  TerminalExecResponse,
   UploadAttachmentRequest,
   UploadAttachmentResponse,
   WorkspaceListResponse,
@@ -65,7 +59,6 @@ import type {
   AppServerThreadRuntimeSettings,
   ChatListPageOptions,
   ChatSnapshot,
-  HealthResponse,
   ListChatsOptions,
   PreparedTurnRequest,
   PrepareTurnRequestOptions,
@@ -97,8 +90,6 @@ export abstract class HostBridgeApiClientCore {
     this.bridgeUrl = options.bridgeUrl?.replace(/\/$/, '') ?? null;
     this.authToken = options.authToken?.trim() || null;
   }
-  abstract health(): Promise<HealthResponse>;
-  abstract readBridgeStatus(): Promise<BridgeStatus>;
   abstract readBridgeCapabilities(): Promise<BridgeCapabilities>;
   abstract listModelOptions(agentId?: AgentId | null): Promise<ModelOption[]>;
   abstract peekModelOptions(agentId?: AgentId | null): ModelOption[] | null;
@@ -124,7 +115,6 @@ export abstract class HostBridgeApiClientCore {
   abstract peekChats(options?: ListChatsOptions): ChatSummary[] | null;
   abstract rememberChats(chats: ChatSummary[], options?: ListChatsOptions): void;
   abstract peekAllChats(options?: ListAllChatsOptions): ChatSummary[] | null;
-  abstract rememberAllChats(chats: ChatSummary[], options?: ListAllChatsOptions): void;
   abstract peekChat(id: string): Chat | null;
   abstract peekChatSummary(id: string): ChatSummary | null;
   abstract peekChatShell(id: string): Chat | null;
@@ -155,7 +145,6 @@ export abstract class HostBridgeApiClientCore {
   abstract listWorkspaceRoots(limit?: number): Promise<WorkspaceListResponse>;
   abstract listFilesystemEntries(request?: FileSystemListRequest): Promise<FileSystemListResponse>;
   abstract createBrowserPreviewSession(targetUrl: string): Promise<BrowserPreviewSession>;
-  abstract listBrowserPreviewSessions(): Promise<BrowserPreviewSession[]>;
   abstract closeBrowserPreviewSession(sessionId: string): Promise<boolean>;
   abstract discoverBrowserPreviewTargets(): Promise<BrowserPreviewDiscoveryResponse>;
   abstract createChat(body: CreateChatRequest): Promise<Chat>;
@@ -191,11 +180,6 @@ export abstract class HostBridgeApiClientCore {
     body: SendChatMessageRequest,
     options?: PrepareTurnRequestOptions,
   ): Promise<SendOrQueueChatMessageResult>;
-  abstract steerChatTurn(
-    threadId: string,
-    expectedTurnId: string,
-    body: SteerChatTurnRequest,
-  ): Promise<void>;
   abstract interruptTurn(threadId: string, turnId: string): Promise<void>;
   abstract interruptLatestTurn(threadId: string): Promise<string | null>;
   abstract readThreadQueue(threadId: string): Promise<BridgeThreadQueueState>;
@@ -240,10 +224,6 @@ export abstract class HostBridgeApiClientCore {
     id: string,
     threadId?: string | null,
   ): Promise<DismissBridgeUiSurfaceResponse>;
-  abstract execTerminal(body: TerminalExecRequest): Promise<TerminalExecResponse>;
-  abstract installGitHubAuth(
-    body: { accessToken: string; repositories?: string[] } | { grants: GitHubAuthGrantInput[] },
-  ): Promise<GitHubAuthInstallResponse>;
   abstract gitStatus(cwd?: string): Promise<GitStatusResponse>;
   abstract gitDiff(cwd?: string): Promise<GitDiffResponse>;
   abstract gitHistory(cwd?: string, limit?: number): Promise<GitHistoryResponse>;

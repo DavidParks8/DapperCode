@@ -60,7 +60,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     selectedChat,
     selectedChatRef,
     selectedNewAgentId,
-    setActiveCommands,
     setLoadingWorkspaceRoots,
     setOpeningChatId,
     setPendingAgentId,
@@ -130,7 +129,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       setOpeningChatId(null);
       setError(null);
       setSelectedServiceTier(undefined);
-      setActiveCommands([]);
       setPendingApproval(null);
       setPendingUserInputRequest(null);
       setUserInputDrafts({});
@@ -169,7 +167,6 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       openingChatStartedAtRef,
       reasoningSummaryRef,
       selectedNewAgentId,
-      setActiveCommands,
       setActivePlan,
       setActiveTurnId,
       setActivity,

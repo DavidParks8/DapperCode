@@ -95,7 +95,6 @@ function handleSnapshotRequiredEvent(
   const resumeAfterEventId = readFiniteNumber(params?.['resumeAfterEventId']);
   const reason = readString(params?.['reason']);
   context.clearRunWatchdog();
-  context.setActiveCommands([]);
   context.setStreamingText(null);
   context.setLiveAssistantByThread({});
   context.setActiveTurnId(null);
@@ -231,7 +230,6 @@ function handleCurrentItemStarted(
   const startedToolEvent = describeStartedToolEvent(item);
   if (startedToolEvent) {
     context.cacheThreadActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
-    context.pushActiveCommand(threadId, startedToolEvent.eventType, startedToolEvent.detail);
   }
 
   if (itemType === 'plan') {

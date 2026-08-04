@@ -1,7 +1,5 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     env,
@@ -35,7 +33,7 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use reqwest::{Client as HttpClient, Method as HttpMethod, Url};
+use reqwest::{Method as HttpMethod, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use services::{GitService, TerminalService};
@@ -85,10 +83,7 @@ use preview::{
     normalize_browser_preview_target_url, BrowserPreviewResolvedSession, BrowserPreviewService,
     BROWSER_PREVIEW_SESSION_TTL,
 };
-use push::{
-    parse_push_event_preferences, token_suffix, truncate_chars, PushEventPreferences,
-    PushRegistryStore,
-};
+use push::{parse_push_event_preferences, truncate_chars, PushEventPreferences, PushRegistryStore};
 use replay::NotificationReplay;
 use resource_limits::{
     FILESYSTEM_LIST_MAX_ENTRIES, LOCAL_IMAGE_MAX_BYTES, NOTIFICATION_MAX_BYTES,
@@ -104,7 +99,6 @@ use rpc::{is_forwarded_method, parse_client_request_id, parse_request, RpcReques
 mod app_state;
 mod bridge_protocol;
 mod client_hub;
-mod github_auth;
 mod http_routes;
 mod interaction_validation;
 mod pairing;
@@ -119,7 +113,6 @@ use agui::*;
 use app_state::*;
 use bridge_protocol::*;
 use client_hub::*;
-use github_auth::*;
 use http_routes::*;
 use interaction_validation::*;
 use pairing::*;
@@ -189,10 +182,7 @@ async fn main() {
         .expect("validated bridge path policy"),
     );
 
-    let terminal = Arc::new(TerminalService::new(
-        path_policy.clone(),
-        config.terminal_exec_policies.clone(),
-    ));
+    let terminal = Arc::new(TerminalService::new(path_policy.clone()));
     let git = Arc::new(GitService::new(terminal.clone(), path_policy.clone()));
     let preview = Arc::new(BrowserPreviewService::new(
         config.port,
@@ -228,7 +218,6 @@ async fn main() {
         approval_resolution_order: Arc::new(Mutex::new(VecDeque::new())),
         approval_resolution_actor: Arc::new(Mutex::new(())),
         thread_list_streams: Arc::new(Mutex::new(HashMap::new())),
-        terminal,
         git,
         preview,
         push,

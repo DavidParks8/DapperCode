@@ -31,6 +31,4 @@ export const agentSettingsAtom = settingAtom('agentSettings');
 export const approvalModeAtom = settingAtom('approvalMode');
 export const showToolCallsAtom = settingAtom('showToolCalls');
 export const workspaceChatLimitAtom = settingAtom('workspaceChatLimit');
-export const appearancePreferenceAtom = settingAtom('appearancePreference');
-export const darkUiPaletteAtom = settingAtom('darkUiPalette');
 export const recentBrowserTargetUrlsAtom = settingAtom('recentBrowserTargetUrls');

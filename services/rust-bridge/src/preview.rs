@@ -144,26 +144,9 @@ impl BrowserPreviewService {
         Ok(self.to_session_response(&entry))
     }
 
-    pub(crate) async fn list_sessions(
-        &self,
-        owner_client_id: u64,
-    ) -> Vec<BrowserPreviewSessionResponse> {
-        let mut sessions = self.sessions.write().await;
-        prune_expired_preview_sessions(&mut sessions);
-        let mut entries = sessions
-            .values()
-            .filter(|entry| entry.owner_client_id == owner_client_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| right.last_accessed_at.cmp(&left.last_accessed_at));
-        entries
-            .iter()
-            .map(|entry| self.to_session_response(entry))
-            .collect()
-    }
-
     pub(crate) async fn close_session(&self, owner_client_id: u64, session_id: &str) -> bool {
         let mut sessions = self.sessions.write().await;
+        prune_expired_preview_sessions(&mut sessions);
         let owned = sessions
             .get(session_id)
             .is_some_and(|entry| entry.owner_client_id == owner_client_id);
@@ -535,8 +518,6 @@ mod tests {
             .resolve_bootstrap(&first.session_id, "irrelevant")
             .await
             .is_none());
-        assert_eq!(service.list_sessions(7).await.len(), 1);
-        assert!(service.list_sessions(8).await.is_empty());
     }
 
     #[tokio::test]
@@ -561,7 +542,6 @@ mod tests {
         assert!(!service.close_session(8, &session.session_id).await);
         assert_eq!(service.revoke_owner(8).await, 0);
         assert_eq!(service.revoke_owner(7).await, 1);
-        assert!(service.list_sessions(7).await.is_empty());
     }
 
     #[tokio::test]
@@ -615,7 +595,7 @@ mod tests {
             .unwrap()
             .expires_at = SystemTime::UNIX_EPOCH;
 
-        assert!(service.list_sessions(7).await.is_empty());
+        assert!(!service.close_session(7, &session.session_id).await);
     }
 
     #[test]

@@ -4,7 +4,6 @@ import {
   type PendingOptimisticQueuedMessage,
   countUserMessages,
   reconcileChatWithPendingOptimisticMessages,
-  parseMentionQuery,
   parseSlashQuery,
   filterSlashCommands,
 } from '../helpers/helpers';
@@ -21,7 +20,6 @@ export function useMainScreenLocalTranscriptActions(
 ) {
   const {
     activeSlashCommands,
-    attachmentController,
     bumpAgentRuntimeRevision,
     draft,
     parentChatCacheRef,
@@ -35,9 +33,6 @@ export function useMainScreenLocalTranscriptActions(
   const slashQuery = parseSlashQuery(draft);
   const slashSuggestions =
     slashQuery !== null ? filterSlashCommands(slashQuery, activeSlashCommands) : [];
-  const mentionQuery = parseMentionQuery(draft);
-  const mentionPathSuggestions =
-    mentionQuery !== null ? attachmentController.mentionSuggestions(mentionQuery) : [];
   const slashSuggestionsMaxHeight = Math.max(148, Math.min(300, Math.floor(windowHeight * 0.34)));
 
   const queueOptimisticUserMessage = useCallback(
@@ -175,8 +170,6 @@ export function useMainScreenLocalTranscriptActions(
   return {
     slashQuery,
     slashSuggestions,
-    mentionQuery,
-    mentionPathSuggestions,
     slashSuggestionsMaxHeight,
     queueOptimisticUserMessage,
     discardOptimisticUserMessage,

@@ -2,7 +2,6 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { type RefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import { creatingAtom, errorAtom, sendingAtom, stoppingTurnAtom } from '../state/turn';
 import {
-  activeCommandsAtom,
   loadingWorkspaceRootsAtom,
   openingChatIdAtom,
   pendingAgentIdAtom,
@@ -169,7 +168,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     reportPersistenceError,
   );
   const { draft, setDraft } = draftController;
-  const setActiveCommands = useSetAtom(activeCommandsAtom);
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(
     (next: string | null | ((previous: string | null) => string | null)) => {
@@ -222,7 +220,6 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     draftController,
     draft,
     setDraft,
-    setActiveCommands,
     streamingTextRef,
     setStreamingText,
     setLoadingWorkspaceRoots,

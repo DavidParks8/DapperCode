@@ -7,11 +7,7 @@ import {
   ProfilePersistenceError,
   type ProfilePersistenceStorage,
   getChatDraftsPath,
-  getLegacyChatDraftsPath,
-  getPersistenceMigrationMarkerPath,
-  getWebPersistenceMigrationMarkerKey,
   getWebProfilePersistenceKey,
-  migrateLegacyPersistenceEntry,
   parseChatDrafts,
 } from '../../helpers/helpers';
 import {
@@ -69,21 +65,6 @@ export function serializeDraftEntries(entries: Readonly<Record<string, string>>)
   return JSON.stringify({ version: CHAT_DRAFTS_VERSION, entries });
 }
 
-export function migrateLegacyDraftEntries(raw: string, profileId: string): string {
-  const entries = parseChatDrafts(raw);
-  const profileEntries = Object.fromEntries(
-    Object.entries(entries).filter(([key]) => {
-      try {
-        const scope = JSON.parse(key) as unknown;
-        return Array.isArray(scope) && scope[0] === profileId;
-      } catch {
-        return false;
-      }
-    }),
-  );
-  return serializeDraftEntries(profileEntries);
-}
-
 export interface DraftController {
   draft: string;
   persistenceError: ProfilePersistenceError | null;
@@ -122,18 +103,12 @@ export function useDraftController(
   const unsyncedEditRef = useRef(false);
   const normalizedProfileId = profileId.trim();
   const paths = useMemo(
-    () =>
-      platform === 'web'
-        ? {
-            target: getWebProfilePersistenceKey('drafts.v2', normalizedProfileId),
-            legacy: 'dappercode.main-screen.drafts.v2',
-            marker: getWebPersistenceMigrationMarkerKey('drafts', normalizedProfileId),
-          }
-        : {
-            target: getChatDraftsPath(normalizedProfileId),
-            legacy: getLegacyChatDraftsPath(),
-            marker: getPersistenceMigrationMarkerPath('drafts', normalizedProfileId),
-          },
+    () => ({
+      target:
+        platform === 'web'
+          ? getWebProfilePersistenceKey('drafts.v2', normalizedProfileId)
+          : getChatDraftsPath(normalizedProfileId),
+    }),
     [normalizedProfileId, platform],
   );
 
@@ -145,7 +120,7 @@ export function useDraftController(
   }
 
   const reportPersistenceError = useCallback(
-    (operation: 'migrate' | 'write', cause: unknown) => {
+    (operation: 'write', cause: unknown) => {
       const error = new ProfilePersistenceError('chat drafts', operation, { cause });
       setPersistenceError(error);
       onPersistenceError?.(error);
@@ -207,21 +182,6 @@ export function useDraftController(
     entriesRef.current = {};
 
     const load = async () => {
-      try {
-        await migrateLegacyPersistenceEntry({
-          storage: resolvedStorage,
-          profileId: normalizedProfileId,
-          targetPath: paths.target,
-          legacyPath: paths.legacy,
-          markerPath: paths.marker,
-          transform: (raw) => migrateLegacyDraftEntries(raw, normalizedProfileId),
-        });
-      } catch (cause) {
-        if (!cancelled) {
-          reportPersistenceError('migrate', cause);
-        }
-      }
-
       if (paths.target) {
         try {
           const raw = await resolvedStorage.read(paths.target);

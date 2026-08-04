@@ -237,11 +237,6 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
     format!("{}…", truncated.trim_end())
 }
 
-pub(crate) fn token_suffix(token: &str) -> String {
-    let visible: String = token.chars().rev().take(6).collect::<String>();
-    visible.chars().rev().collect()
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -449,8 +444,5 @@ mod tests {
         assert_eq!(truncate_chars("abc", 0), "");
         assert_eq!(truncate_chars("ab  cd", 4), "ab…");
         assert_eq!(truncate_chars("éclair", 3), "éc…");
-        assert_eq!(token_suffix("abc"), "abc");
-        assert_eq!(token_suffix("token-123456"), "123456");
-        assert_eq!(token_suffix("abé日文xyz"), "é日文xyz");
     }
 }

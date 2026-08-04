@@ -140,7 +140,6 @@ function setLoadedSettledChatState(params: {
 function resetLoadedChatRuntimeState(params: {
   chatId: string;
   chat: Chat;
-  setActiveCommands: MainScreenChatLoadPipelineContext['setActiveCommands'];
   setPendingApproval: (value: null) => void;
   setStreamingText: MainScreenChatLoadPipelineContext['setStreamingText'];
   setActiveTurnId: (value: string | null) => void;
@@ -158,7 +157,6 @@ function resetLoadedChatRuntimeState(params: {
   const {
     chatId,
     chat,
-    setActiveCommands,
     setPendingApproval,
     setStreamingText,
     setActiveTurnId,
@@ -173,7 +171,6 @@ function resetLoadedChatRuntimeState(params: {
     hadCommandRef,
     applyThreadRuntimeSnapshot,
   } = params;
-  setActiveCommands([]);
   setPendingApproval(null);
   setStreamingText(null);
   setActiveTurnId(null);
@@ -211,7 +208,6 @@ function applyLoadedChat(params: {
   setSelectedChatId: MainScreenChatLoadPipelineContext['setSelectedChatId'];
   setSelectedChat: MainScreenChatLoadPipelineContext['setSelectedChat'];
   setTranscriptContinuationState: MainScreenChatLoadPipelineContext['setTranscriptContinuationState'];
-  setActiveCommands: MainScreenChatLoadPipelineContext['setActiveCommands'];
   setStreamingText: MainScreenChatLoadPipelineContext['setStreamingText'];
   stopSystemMessageLoggedRef: MainScreenChatLoadPipelineContext['stopSystemMessageLoggedRef'];
   cacheThreadTurnState: MainScreenChatLoadPipelineContext['cacheThreadTurnState'];
@@ -237,7 +233,6 @@ function applyLoadedChat(params: {
     setSelectedChatId,
     setSelectedChat,
     setTranscriptContinuationState,
-    setActiveCommands,
     setStreamingText,
     stopSystemMessageLoggedRef,
     cacheThreadTurnState,
@@ -277,7 +272,6 @@ function applyLoadedChat(params: {
     resetLoadedChatRuntimeState({
       chatId,
       chat,
-      setActiveCommands,
       setPendingApproval,
       setStreamingText,
       setActiveTurnId,
@@ -416,7 +410,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
     scrollToBottomIfPinned,
     scrollToBottomReliable,
     selectedChatRef,
-    setActiveCommands,
     setOpeningChatId,
     setSelectedChat,
     setSelectedChatId,
@@ -459,7 +452,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
             setSelectedChatId,
             setSelectedChat,
             setTranscriptContinuationState,
-            setActiveCommands,
             setStreamingText,
             stopSystemMessageLoggedRef,
             cacheThreadTurnState,
@@ -519,7 +511,6 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
       scrollToBottomIfPinned,
       scrollToBottomReliable,
       selectedChatRef,
-      setActiveCommands,
       setActiveTurnId,
       setActivity,
       setError,

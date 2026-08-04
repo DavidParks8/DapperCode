@@ -153,10 +153,6 @@ export const workspaceBridgeRootAtom = derivedScreenAtom(
   },
 );
 
-export const workspaceRootsRefreshingAtom = derivedScreenAtom(
-  (get) => get(workspaceRootsResourceAtom).refreshing,
-);
-
 export const workspaceRootsRefreshErrorAtom = derivedScreenAtom(
   (get) => get(workspaceRootsResourceAtom).error,
 );

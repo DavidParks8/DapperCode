@@ -1,35 +1,5 @@
 import type { AgentId } from '@bridge/types/chat';
 
-export interface TerminalExecRequest {
-  command: string;
-  cwd?: string;
-  timeoutMs?: number;
-}
-
-export interface TerminalExecResponse {
-  command: string;
-  cwd: string;
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  durationMs: number;
-}
-
-export interface GitHubAuthGrantInput {
-  accessToken: string;
-  repositories?: string[];
-}
-
-export interface GitHubAuthInstallResponse {
-  installed: boolean;
-  host: string;
-  login: string | null;
-  scopes: string[];
-  credentialFile: string;
-  grantsInstalled: number;
-}
-
 export interface GitStatusResponse {
   branch: string;
   clean: boolean;

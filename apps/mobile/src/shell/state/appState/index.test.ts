@@ -4,7 +4,6 @@ import {
   AppStatePersistenceError,
   appStateReducer,
   createDefaultAppStateData,
-  importLegacyAppState,
   parsePersistedAppState,
   serializeAppState,
   type AppStatePersistenceAdapter,
@@ -17,7 +16,6 @@ function createPersistence(
   return {
     readCurrent: jest.fn().mockResolvedValue(serializeAppState(createDefaultAppStateData())),
     writeCurrent: jest.fn().mockResolvedValue(undefined),
-    readLegacy: jest.fn().mockResolvedValue({ settingsRaw: null, bridgeProfilesRaw: null }),
     ...overrides,
   };
 }
@@ -42,7 +40,6 @@ function persistence(
 ): AppStatePersistenceAdapter {
   return {
     readCurrent: jest.fn().mockResolvedValue(null),
-    readLegacy: jest.fn().mockResolvedValue({ settingsRaw: null, bridgeProfilesRaw: null }),
     writeCurrent: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -109,12 +106,6 @@ describe('current appState production behavior', () => {
       registrationId: 'registration',
     });
     expect(state.push.registrations).toEqual([]);
-    state = appStateReducer(state, { type: 'profiles/rename', profileId, name: 'Renamed' });
-    state = appStateReducer(state, { type: 'profiles/remove', profileId });
-    expect(state.bridgeProfiles.profiles).toEqual([]);
-    expect(
-      appStateReducer(withProfile(), { type: 'profiles/clear' }).bridgeProfiles.activeProfileId,
-    ).toBeNull();
   });
 
   it('rejects invalid actions and clears registration on identity changes', () => {
@@ -169,27 +160,18 @@ describe('current appState production behavior', () => {
       },
     });
     expect(parsePersistedAppState(raw).push.registrations).toHaveLength(1);
-    for (const version of [1, 2, 3]) {
-      expect(
-        parsePersistedAppState(JSON.stringify({ ...JSON.parse(raw), version })).bridgeProfiles
-          .profiles,
-      ).toHaveLength(1);
+    expect(JSON.parse(raw).version).toBe(APP_STATE_VERSION);
+    for (const version of [1, 2]) {
+      expect(() => parsePersistedAppState(JSON.stringify({ ...JSON.parse(raw), version }))).toThrow(
+        AppStatePersistenceError,
+      );
     }
     for (const rawValue of ['', '{}', '{bad', JSON.stringify({ version: 99 })]) {
       expect(() => parsePersistedAppState(rawValue)).toThrow(AppStatePersistenceError);
     }
   });
 
-  it('imports legacy credentials and initializes current, legacy, and failed stores', async () => {
-    const settingsRaw = JSON.stringify({
-      version: 13,
-      bridgeUrl: 'http://127.0.0.1:3001',
-      bridgeToken: 'token',
-      defaultStartCwd: '/workspace',
-    });
-    expect(
-      importLegacyAppState({ settingsRaw, bridgeProfilesRaw: null }).bridgeProfiles.profiles,
-    ).toHaveLength(1);
+  it('initializes current and new stores and reports read failures', async () => {
     const current = withProfile();
     const currentStore = createAppStateHarness(
       persistence({ readCurrent: jest.fn().mockResolvedValue(serializeAppState(current)) }),
@@ -198,17 +180,14 @@ describe('current appState production behavior', () => {
     currentStore.subscribe(listener);
     await currentStore.initialize();
     expect(listener).toHaveBeenCalled();
-    const legacyPersistence = persistence();
-    await createAppStateHarness(legacyPersistence).initialize();
-    expect(legacyPersistence.writeCurrent).toHaveBeenCalled();
-    for (const adapter of [
+    const newPersistence = persistence();
+    await createAppStateHarness(newPersistence).initialize();
+    expect(newPersistence.writeCurrent).toHaveBeenCalled();
+    const failedStore = createAppStateHarness(
       persistence({ readCurrent: jest.fn().mockRejectedValue(new Error('read')) }),
-      persistence({ readLegacy: jest.fn().mockRejectedValue(new Error('legacy')) }),
-    ]) {
-      const store = createAppStateHarness(adapter);
-      await store.initialize();
-      expect(store.getSnapshot().persistenceError).toBeInstanceOf(AppStatePersistenceError);
-    }
+    );
+    await failedStore.initialize();
+    expect(failedStore.getSnapshot().persistenceError).toBeInstanceOf(AppStatePersistenceError);
   });
 
   it('persists ordinary actions, retries failures, and rejects durable failures', async () => {
@@ -234,16 +213,16 @@ describe('current appState production behavior', () => {
 
 describe('appStateReducer', () => {
   it('merges rapid unrelated settings changes against the latest state', () => {
-    const appearanceChanged = appStateReducer(createDefaultAppStateData(), {
+    const cwdChanged = appStateReducer(createDefaultAppStateData(), {
       type: 'settings/update',
-      patch: { appearancePreference: 'light' },
+      patch: { defaultStartCwd: '/workspace' },
     });
-    const toolsChanged = appStateReducer(appearanceChanged, {
+    const toolsChanged = appStateReducer(cwdChanged, {
       type: 'settings/update',
       patch: { showToolCalls: false },
     });
 
-    expect(toolsChanged.settings.appearancePreference).toBe('light');
+    expect(toolsChanged.settings.defaultStartCwd).toBe('/workspace');
     expect(toolsChanged.settings.showToolCalls).toBe(false);
     expect(toolsChanged.settings.approvalMode).toBe('normal');
   });
@@ -261,47 +240,38 @@ describe('appStateReducer', () => {
   });
 
   it('keeps push registration identity immutable per profile', () => {
-    const withProfile = importLegacyAppState({
-      settingsRaw: null,
-      bridgeProfilesRaw: JSON.stringify({
-        activeProfileId: 'profile-1',
-        profiles: [
-          {
-            id: 'profile-1',
-            name: 'One',
-            bridgeUrl: 'http://10.0.0.1:8787',
-            bridgeToken: 'token',
-          },
-        ],
-      }),
+    const withProfile = appStateReducer(createDefaultAppStateData(), {
+      type: 'profiles/save',
+      draft: {
+        id: 'profile-1',
+        name: 'One',
+        bridgeUrl: 'http://10.0.0.1:8787',
+        bridgeToken: 'token',
+      },
     });
+    const profileId = withProfile.bridgeProfiles.activeProfileId as string;
     const registered = appStateReducer(withProfile, {
       type: 'push/ensure-registration',
-      profileId: 'profile-1',
+      profileId,
       registrationId: 'registration-1',
     });
     const replacement = appStateReducer(registered, {
       type: 'push/ensure-registration',
-      profileId: 'profile-1',
+      profileId,
       registrationId: 'registration-2',
     });
     expect(replacement.push.registrations[0]?.registrationId).toBe('registration-1');
   });
 
   it('drops a registration when its profile bridge identity changes', () => {
-    const withProfile = importLegacyAppState({
-      settingsRaw: null,
-      bridgeProfilesRaw: JSON.stringify({
-        activeProfileId: 'profile-1',
-        profiles: [
-          {
-            id: 'profile-1',
-            name: 'One',
-            bridgeUrl: 'http://10.0.0.1:8787',
-            bridgeToken: 'token-1',
-          },
-        ],
-      }),
+    const withProfile = appStateReducer(createDefaultAppStateData(), {
+      type: 'profiles/save',
+      draft: {
+        id: 'profile-1',
+        name: 'One',
+        bridgeUrl: 'http://10.0.0.1:8787',
+        bridgeToken: 'token-1',
+      },
     });
     const registered = appStateReducer(withProfile, {
       type: 'push/ensure-registration',
@@ -319,23 +289,17 @@ describe('appStateReducer', () => {
     expect(edited.push.registrations).toEqual([]);
   });
 
-  it('supports profile rename, switch, removal, and clearing', () => {
+  it('supports profile switching', () => {
     let state = appStateReducer(createDefaultAppStateData(), {
       type: 'profiles/save',
       draft: { bridgeUrl: 'http://one', bridgeToken: 'token' },
     });
     const profileId = requireTestValue(state.bridgeProfiles.profiles[0], 'indexed test value').id;
-    state = appStateReducer(state, { type: 'profiles/rename', profileId, name: 'Renamed' });
-    expect(state.bridgeProfiles.profiles[0]?.name).toBe('Renamed');
     state = appStateReducer(state, { type: 'profiles/switch', profileId });
     expect(state.bridgeProfiles.activeProfileId).toBe(profileId);
     expect(() => appStateReducer(state, { type: 'profiles/switch', profileId: 'missing' })).toThrow(
       'no longer exists',
     );
-    state = appStateReducer(state, { type: 'profiles/remove', profileId });
-    expect(state.bridgeProfiles.profiles).toEqual([]);
-    state = appStateReducer(state, { type: 'profiles/clear' });
-    expect(state.bridgeProfiles.activeProfileId).toBeNull();
   });
 
   it('retains registrations when profile identity is unchanged', () => {
@@ -492,23 +456,6 @@ describe('app-state persistence format', () => {
     expect(parsePersistedAppState(raw)).toEqual(createDefaultAppStateData());
   });
 
-  it('migrates version 1 while preserving only an explicit YOLO choice', () => {
-    const base = createDefaultAppStateData();
-    const explicitYolo = JSON.stringify({
-      version: 1,
-      settings: { ...base.settings, approvalMode: 'yolo' },
-      bridgeProfiles: base.bridgeProfiles,
-    });
-    const invalidMode = JSON.stringify({
-      version: 1,
-      settings: { ...base.settings, approvalMode: 'unexpected' },
-      bridgeProfiles: base.bridgeProfiles,
-    });
-
-    expect(parsePersistedAppState(explicitYolo).settings.approvalMode).toBe('yolo');
-    expect(parsePersistedAppState(invalidMode).settings.approvalMode).toBe('normal');
-  });
-
   it('rejects unknown versions without falling back and overwriting them', () => {
     expect(() => parsePersistedAppState('{"version":999}')).toThrow(AppStatePersistenceError);
   });
@@ -522,44 +469,6 @@ describe('app-state persistence format', () => {
         expect(error).toMatchObject({ code: 'invalid_data', operation: 'load' });
       }
     }
-  });
-
-  it('imports the currently persisted settings and bridge credentials', () => {
-    const imported = importLegacyAppState({
-      settingsRaw: JSON.stringify({
-        version: 13,
-        bridgeUrl: 'http://10.0.0.4:8787',
-        bridgeToken: 'secret',
-        approvalMode: 'normal',
-        appearancePreference: 'dark',
-      }),
-      bridgeProfilesRaw: null,
-    });
-
-    expect(imported.settings.approvalMode).toBe('normal');
-    expect(imported.settings.appearancePreference).toBe('dark');
-    expect(imported.bridgeProfiles.profiles[0]).toMatchObject({
-      bridgeUrl: 'http://10.0.0.4:8787',
-      bridgeToken: 'secret',
-    });
-    expect(imported.bridgeProfiles.activeProfileId).toBe(imported.bridgeProfiles.profiles[0]?.id);
-  });
-
-  it('keeps existing profiles and does not create profiles from partial credentials', () => {
-    const existing = importLegacyAppState({
-      settingsRaw: JSON.stringify({ version: 12, bridgeUrl: 'http://new', bridgeToken: 'new' }),
-      bridgeProfilesRaw: JSON.stringify({
-        activeProfileId: 'old',
-        profiles: [{ id: 'old', bridgeUrl: 'http://old', bridgeToken: 'old' }],
-      }),
-    });
-    expect(existing.bridgeProfiles.profiles.map((profile) => profile.id)).toEqual(['old']);
-    expect(
-      importLegacyAppState({
-        settingsRaw: JSON.stringify({ version: 12, bridgeUrl: 'http://new' }),
-        bridgeProfilesRaw: null,
-      }).bridgeProfiles.profiles,
-    ).toEqual([]);
   });
 });
 
@@ -576,7 +485,7 @@ describe('app-state atoms', () => {
     const store = createAppStateHarness(createPersistence({ writeCurrent }));
     await store.initialize();
 
-    store.dispatch({ type: 'settings/update', patch: { appearancePreference: 'light' } });
+    store.dispatch({ type: 'settings/update', patch: { defaultStartCwd: '/workspace' } });
     await Promise.resolve();
     store.dispatch({ type: 'settings/update', patch: { showToolCalls: false } });
     store.dispatch({ type: 'settings/update', patch: { workspaceChatLimit: 10 } });
@@ -590,7 +499,7 @@ describe('app-state atoms', () => {
       requireTestValue(writeCurrent.mock.calls[1], 'indexed test value')[0],
     );
     expect(persisted.settings).toMatchObject({
-      appearancePreference: 'light',
+      defaultStartCwd: '/workspace',
       showToolCalls: false,
       workspaceChatLimit: 10,
     });
@@ -621,16 +530,28 @@ describe('app-state atoms', () => {
   });
 
   it('does not publish a profile switch until that exact state is durable', async () => {
-    const initial = importLegacyAppState({
-      settingsRaw: null,
-      bridgeProfilesRaw: JSON.stringify({
-        activeProfileId: 'one',
-        profiles: [
-          { id: 'one', name: 'One', bridgeUrl: 'http://10.0.0.1:8787', bridgeToken: 'a' },
-          { id: 'two', name: 'Two', bridgeUrl: 'http://10.0.0.2:8787', bridgeToken: 'b' },
-        ],
-      }),
-    });
+    const initial = createDefaultAppStateData();
+    initial.bridgeProfiles = {
+      activeProfileId: 'one',
+      profiles: [
+        {
+          id: 'one',
+          name: 'One',
+          bridgeUrl: 'http://10.0.0.1:8787',
+          bridgeToken: 'a',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'two',
+          name: 'Two',
+          bridgeUrl: 'http://10.0.0.2:8787',
+          bridgeToken: 'b',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    };
     let releaseSwitch!: () => void;
     const switchWrite = new Promise<void>((resolve) => {
       releaseSwitch = resolve;
@@ -677,14 +598,6 @@ describe('app-state atoms', () => {
 
   it.each([
     ['current read', { readCurrent: jest.fn().mockRejectedValue(new Error('read')) }, 'load'],
-    [
-      'legacy read',
-      {
-        readCurrent: jest.fn().mockResolvedValue(null),
-        readLegacy: jest.fn().mockRejectedValue(new Error('legacy')),
-      },
-      'import',
-    ],
     ['invalid current data', { readCurrent: jest.fn().mockResolvedValue('{') }, 'load'],
   ] as const)('exposes %s failures', async (_name, overrides, operation) => {
     const store = createAppStateHarness(createPersistence(overrides));
@@ -707,7 +620,7 @@ describe('app-state atoms', () => {
     expect(readCurrent).toHaveBeenCalledTimes(2);
   });
 
-  it('publishes imported state when its initial write fails and retries it', async () => {
+  it('publishes initial state when its first write fails and retries it', async () => {
     const writeCurrent = jest
       .fn()
       .mockRejectedValueOnce(new Error('disk'))
@@ -719,7 +632,7 @@ describe('app-state atoms', () => {
       }),
     );
     await store.initialize();
-    expect(store.getSnapshot().persistenceError).toMatchObject({ operation: 'import' });
+    expect(store.getSnapshot().persistenceError).toMatchObject({ operation: 'write' });
     await store.retryPersistence();
     expect(store.getSnapshot().persistenceError).toBeNull();
   });
@@ -741,8 +654,8 @@ describe('app-state atoms', () => {
     const store = createAppStateHarness(createPersistence());
     const data = await store.dispatchDurable({
       type: 'settings/update',
-      patch: { appearancePreference: 'dark' },
+      patch: { showToolCalls: false },
     });
-    expect(data.settings.appearancePreference).toBe('dark');
+    expect(data.settings.showToolCalls).toBe(false);
   });
 });

@@ -80,10 +80,6 @@ impl AppPaths {
         self.runtime_dir(profile_id).join("transition.lock")
     }
 
-    pub fn pid_path(&self, profile_id: &str) -> PathBuf {
-        self.runtime_dir(profile_id).join("bridge.pid")
-    }
-
     pub fn state_dir(&self, profile_id: &str) -> PathBuf {
         self.profile_dir(profile_id).join("state")
     }
@@ -231,7 +227,6 @@ pub struct Profile {
     pub preview_port: u16,
     pub connect_url: String,
     pub preview_connect_url: String,
-    #[serde(default)]
     pub auto_start: bool,
     #[serde(default = "default_true")]
     pub allow_query_token_auth: bool,
@@ -507,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn persists_the_profile_autostart_intent_and_defaults_legacy_profiles_to_off() {
+    fn persists_the_profile_autostart_intent_and_rejects_missing_current_fields() {
         let temp = tempdir().unwrap();
         let paths = AppPaths {
             base: temp.path().to_path_buf(),
@@ -531,10 +526,10 @@ mod tests {
                 .auto_start
         );
 
-        let mut legacy = serde_json::to_value(sample_profile("legacy-000000000002", 8789)).unwrap();
-        legacy.as_object_mut().unwrap().remove("autoStart");
-        let decoded: Profile = serde_json::from_value(legacy).unwrap();
-        assert!(!decoded.auto_start);
+        let mut incomplete =
+            serde_json::to_value(sample_profile("incomplete-000000000002", 8789)).unwrap();
+        incomplete.as_object_mut().unwrap().remove("autoStart");
+        assert!(serde_json::from_value::<Profile>(incomplete).is_err());
     }
 
     #[test]

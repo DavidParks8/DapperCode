@@ -42,7 +42,6 @@ jobs:
 
       - name: Validate repository policy
         run: |
-          npm run version:check
           npm run docs:check
           npm run payment:check
           npm run format:check

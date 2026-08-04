@@ -158,8 +158,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
     if (!notification) {
       return;
     }
-    const { method, protocolVersion, identityResult, eventId, event } = notification;
-    if (!this.deliverNotification(event, eventId, protocolVersion, options)) {
+    const { method, identityResult, eventId, event } = notification;
+    if (!this.deliverNotification(event, eventId, options)) {
       return;
     }
     this.scheduleConnectionReplay(method, identityResult);
@@ -204,14 +204,13 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
   private deliverNotification(
     event: RpcNotification,
     eventId: number | null,
-    protocolVersion: number | null,
     options: { source?: 'live' | 'replay' } | undefined,
   ): boolean {
     if (eventId === null) {
       this.deliverUnnumberedEvent(event);
       return true;
     }
-    return this.deliverNumberedNotification(event, eventId, protocolVersion, options);
+    return this.deliverNumberedNotification(event, eventId, options);
   }
   private deliverUnnumberedEvent(event: RpcNotification): void {
     const completion = toAgUiTurnCompletionSnapshot(event);
@@ -223,12 +222,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
   private deliverNumberedNotification(
     event: RpcNotification,
     eventId: number,
-    protocolVersion: number | null,
     options: { source?: 'live' | 'replay' } | undefined,
   ): boolean {
-    if (protocolVersion === null && eventId === 1 && this.lastSeenEventId > 1) {
-      this.resetDeliveryEpoch('streamChanged', null, null);
-    }
     if (eventId <= this.lastSeenEventId || this.pendingEvents.has(eventId)) {
       return false;
     }

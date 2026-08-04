@@ -61,51 +61,6 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
 }
 
 describe('HostBridgeApiClient', () => {
-  it('health() calls bridge/health/read', async () => {
-    const ws = createWsMock();
-    ws.request.mockResolvedValue({ status: 'ok', at: '2026-01-01T00:00:00Z', uptimeSec: 10 });
-
-    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    const result = await client.health();
-
-    expect(ws.request).toHaveBeenCalledWith('bridge/health/read');
-    expect(result.status).toBe('ok');
-  });
-
-  it('readBridgeStatus() calls bridge/status/read', async () => {
-    const ws = createWsMock();
-    ws.request.mockResolvedValue({
-      status: 'ok',
-      at: '2026-01-01T00:00:00Z',
-      uptimeSec: 10,
-      connectedClients: 1,
-      devices: [
-        {
-          clientId: 1,
-          clientType: 'mobile',
-          clientName: 'David iPhone',
-          connectedAt: '2026-01-01T00:00:00Z',
-          lastSeenAt: '2026-01-01T00:00:01Z',
-        },
-      ],
-      agents: [],
-      operational: {
-        requests: { total: 1, completed: 1, failed: 0, timedOut: 0, pending: 0 },
-        replay: { entries: 0, capacity: 2000 },
-      },
-    });
-
-    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    const result = await client.readBridgeStatus();
-
-    expect(ws.request).toHaveBeenCalledWith('bridge/status/read');
-    expect(result.connectedClients).toBe(1);
-    expect(requireTestValue(result.devices[0], 'indexed test value').clientName).toBe(
-      'David iPhone',
-    );
-    expect(result.operational.replay.capacity).toBe(2000);
-  });
-
   it('listChats() maps app-server list response', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({
@@ -433,48 +388,6 @@ describe('HostBridgeApiClient', () => {
     expect(ws.request).toHaveBeenCalledTimes(32);
   });
 
-  it('rememberChats() keeps an already-loaded full chat list monotonic', () => {
-    const ws = createWsMock();
-    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-
-    client.rememberAllChats([
-      {
-        id: 'thr_old',
-        title: 'old',
-        createdAt: '2023-11-14T22:13:20.000Z',
-        updatedAt: '2023-11-14T22:13:20.000Z',
-        statusUpdatedAt: '2023-11-14T22:13:20.000Z',
-        status: 'complete',
-        lastMessagePreview: 'old chat',
-        agentId: 'agent-alpha',
-      },
-    ]);
-
-    expect(client.peekChatShell('thr_old')).toMatchObject({
-      id: 'thr_old',
-      title: 'old',
-      messages: [],
-    });
-
-    client.rememberChats(
-      [
-        {
-          id: 'thr_new',
-          title: 'new',
-          createdAt: '2023-11-14T22:13:21.000Z',
-          updatedAt: '2023-11-14T22:13:21.000Z',
-          statusUpdatedAt: '2023-11-14T22:13:21.000Z',
-          status: 'running',
-          lastMessagePreview: 'new chat',
-          agentId: 'agent-alpha',
-        },
-      ],
-      { limit: 5 },
-    );
-
-    expect(client.peekAllChats()?.map((chat) => chat.id)).toEqual(['thr_new', 'thr_old']);
-  });
-
   it('getChat() caches full thread snapshots for immediate reuse', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({
@@ -653,15 +566,6 @@ describe('HostBridgeApiClient', () => {
               },
             },
           },
-          turns: [],
-        },
-        {
-          id: 'thr_sub_legacy',
-          preview: 'legacy sub-agent',
-          createdAt: 1700000000,
-          updatedAt: 1700000003,
-          status: { type: 'idle' },
-          source: { kind: 'subAgent' },
           turns: [],
         },
       ],
@@ -1497,42 +1401,6 @@ describe('HostBridgeApiClient', () => {
     );
   });
 
-  it('steerChatTurn() forwards expected turn id and structured input', async () => {
-    const ws = createWsMock();
-    ws.request.mockResolvedValueOnce({});
-
-    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    await client.steerChatTurn('thr_steer', 'turn_steer', {
-      content: 'continue with this direction',
-      mentions: [{ path: '/tmp/src', name: 'src' }],
-      localImages: [{ path: '/tmp/screenshot.png' }],
-    });
-
-    expect(ws.request).toHaveBeenCalledWith(
-      'turn/steer',
-      expect.objectContaining({
-        threadId: 'thr_steer',
-        expectedTurnId: 'turn_steer',
-        input: [
-          {
-            type: 'text',
-            text: 'continue with this direction',
-            text_elements: [],
-          },
-          {
-            type: 'mention',
-            path: '/tmp/src',
-            name: 'src',
-          },
-          {
-            type: 'localImage',
-            path: '/tmp/screenshot.png',
-          },
-        ],
-      }),
-    );
-  });
-
   it('readThreadQueue() requests bridge/thread/queue/read', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValueOnce({
@@ -2275,7 +2143,7 @@ describe('HostBridgeApiClient', () => {
     );
   });
 
-  it('forwards simple bridge, push, approval, UI, terminal, and git operations', async () => {
+  it('forwards simple bridge, push, approval, UI, and git operations', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({ ok: true });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -2294,7 +2162,6 @@ describe('HostBridgeApiClient', () => {
     await client.resolveUserInput('input', { answers: { question: 'yes' } });
     await client.resolveBridgeUiSurface('ui', { threadId: 'thr', actionId: 'accept' });
     await client.dismissBridgeUiSurface('ui');
-    await client.execTerminal({ command: 'pwd' });
     await client.gitStatus(' /repo ');
     await client.gitDiff();
     await client.gitHistory('/repo', 4);
@@ -2310,26 +2177,11 @@ describe('HostBridgeApiClient', () => {
     expect(ws.request).toHaveBeenCalledWith('bridge/ui/dismiss', { id: 'ui', threadId: null });
   });
 
-  it('normalizes GitHub grants and validates git mutation inputs', async () => {
+  it('validates git mutation inputs', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({ installed: true });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
-    await client.installGitHubAuth({ accessToken: ' token ', repositories: [' a/b ', ''] });
-    await client.installGitHubAuth({
-      grants: [
-        { accessToken: ' second ', repositories: undefined },
-        { accessToken: ' ', repositories: [] },
-      ],
-    });
-    expect(ws.request).toHaveBeenNthCalledWith(1, 'bridge/github/auth/install', {
-      grants: [{ accessToken: 'token', repositories: ['a/b'] }],
-    });
-    expect(ws.request).toHaveBeenNthCalledWith(2, 'bridge/github/auth/install', {
-      grants: [{ accessToken: 'second', repositories: [] }],
-    });
-
-    await expect(client.installGitHubAuth({ grants: [] })).rejects.toThrow('At least one');
     await expect(
       client.gitClone({ url: '', parentPath: '', directoryName: 'repo' }),
     ).rejects.toThrow('url must');
@@ -2372,7 +2224,6 @@ describe('HostBridgeApiClient', () => {
       agentId: 'agent-alpha',
     };
     client.rememberChats([summary]);
-    client.rememberAllChats([summary]);
     client.rememberChat({
       ...summary,
       title: 'Updated',
@@ -2383,9 +2234,6 @@ describe('HostBridgeApiClient', () => {
       activeTurnId: null,
     });
     expect(requireTestValue(client.peekChats()?.[0], 'indexed test value').title).toBe('Updated');
-    expect(requireTestValue(client.peekAllChats()?.[0], 'indexed test value').title).toBe(
-      'Updated',
-    );
 
     let resolveRead: (value: unknown) => void = () => {};
     ws.request.mockImplementationOnce(
@@ -2471,27 +2319,11 @@ describe('HostBridgeApiClient', () => {
     await expect(client.startChatListStream({}, jest.fn())).rejects.toThrow('did not start');
   });
 
-  it('validates browser payloads and lists only valid sessions', async () => {
+  it('validates browser payloads and close results', async () => {
     const ws = createWsMock();
-    ws.request
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({
-        sessions: [
-          null,
-          {
-            sessionId: 's',
-            targetUrl: 'url',
-            previewPort: '5',
-            bootstrapPath: '/b',
-            createdAt: 1,
-            expiresAt: 2,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ closed: false });
+    ws.request.mockResolvedValueOnce({}).mockResolvedValueOnce({ closed: false });
     const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
     await expect(client.createBrowserPreviewSession('url')).rejects.toThrow('invalid session');
-    await expect(client.listBrowserPreviewSessions()).resolves.toHaveLength(1);
     await expect(client.closeBrowserPreviewSession('s')).resolves.toBe(false);
   });
 
@@ -2523,7 +2355,6 @@ describe('HostBridgeApiClient', () => {
     await expect(client.sendChatMessage('empty', { content: ' ' })).resolves.toMatchObject({
       id: 'empty',
     });
-    await expect(client.steerChatTurn('', '', { content: '' })).resolves.toBeUndefined();
     await expect(
       client.sendChatMessage('thr', { content: 'x', role: 'assistant' }),
     ).rejects.toThrow('Only user role');
@@ -2813,7 +2644,6 @@ describe('HostBridgeApiClient', () => {
         preview: 'cached',
         updatedAt: 2,
       }) as ChatSummary;
-      client.rememberAllChats([summary]);
       client.rememberChats([summary]);
       expect(client.peekChatSummary('thread')).toEqual(summary);
       expect(client.peekChatShell('thread')).toMatchObject({ id: 'thread', messages: [] });
@@ -2821,7 +2651,6 @@ describe('HostBridgeApiClient', () => {
       client.rememberChat(chat);
       expect(client.peekChatSummary('thread')?.title).toBe('full');
       expect(client.peekChats()?.[0]?.title).toBe('full');
-      expect(client.peekAllChats()?.[0]?.title).toBe('full');
       const cloned = client.peekChat('thread') as Chat;
       cloned.title = 'mutated';
       expect(client.peekChat('thread')?.title).toBe('full');
@@ -3046,22 +2875,6 @@ describe('HostBridgeApiClient', () => {
           ],
         })
         .mockResolvedValueOnce({
-          sessions: [
-            null,
-            {},
-            {
-              sessionId: 'one',
-              targetUrl: 'http://localhost:3000',
-              previewPort: '3000',
-              previewBaseUrl: '',
-              bootstrapPath: '/preview',
-              createdAt: 1700000000,
-              lastAccessedAt: 'bad',
-              expiresAt: 1700000100,
-            },
-          ],
-        })
-        .mockResolvedValueOnce({
           scannedAt: 'bad',
           suggestions: [null, {}, { targetUrl: 'http://localhost:4', label: 'Dev', port: '4' }],
         });
@@ -3106,13 +2919,6 @@ describe('HostBridgeApiClient', () => {
         selectable: false,
         isGitRepo: true,
       });
-      expect(await client.listBrowserPreviewSessions()).toEqual([
-        expect.objectContaining({
-          sessionId: 'one',
-          previewPort: 3000,
-          lastAccessedAt: '2023-11-14T22:13:20.000Z',
-        }),
-      ]);
       expect((await client.discoverBrowserPreviewTargets()).suggestions).toEqual([
         { targetUrl: 'http://localhost:4', label: 'Dev', port: 4 },
       ]);
@@ -3133,7 +2939,6 @@ describe('HostBridgeApiClient', () => {
           steeringInFlight: false,
           lastError: null,
         })
-        .mockResolvedValueOnce({})
         .mockResolvedValueOnce({
           thread: {
             id: 'thread',
@@ -3181,27 +2986,8 @@ describe('HostBridgeApiClient', () => {
           approvalPolicy: 'invalid' as never,
         }),
       ).resolves.toEqual({ model: 'resumed', effort: 'high' });
-      await client.steerChatTurn(' thread ', ' turn ', {
-        content: ' steer ',
-        mentions: [
-          { name: ' ', path: ' src/a.ts ' },
-          { name: 'duplicate', path: 'SRC/A.TS' },
-          { name: 'bad', path: ' ' },
-        ],
-        localImages: [{ path: ' /tmp/a.png ' }, { path: '/TMP/A.PNG' }, { path: '' }],
-      });
-      expect(ws.request).toHaveBeenNthCalledWith(3, 'turn/steer', {
-        threadId: 'thread',
-        expectedTurnId: 'turn',
-        input: [
-          { type: 'text', text: 'steer', text_elements: [] },
-          { type: 'mention', name: 'a.ts', path: 'src/a.ts' },
-          { type: 'localImage', path: '/tmp/a.png' },
-        ],
-      });
       await expect(client.readThreadQueue(' ')).resolves.toMatchObject({ threadId: '', items: [] });
       await client.readThreadQueue(' thread ');
-      await expect(client.steerChatTurn('', 'turn', { content: 'x' })).resolves.toBeUndefined();
       await expect(client.interruptTurn('', 'turn')).rejects.toThrow('required');
       await client.interruptTurn(' thread ', ' turn ');
       await expect(client.interruptLatestTurn(' ')).rejects.toThrow('threadId is required');
@@ -3311,7 +3097,6 @@ describe('HostBridgeApiClient', () => {
       await expect(client.discoverBrowserPreviewTargets()).resolves.toMatchObject({
         suggestions: [],
       });
-      await expect(client.listBrowserPreviewSessions()).resolves.toEqual([]);
     });
 
     it('covers list cache lookup order, all-list caching, and default stream options', async () => {
@@ -3335,10 +3120,6 @@ describe('HostBridgeApiClient', () => {
       const summary = mapChatSummary({ id: 'thread', updatedAt: 1 }) as ChatSummary;
       client.rememberChats([summary], { includeSubAgents: true, limit: 50 });
       expect(client.peekChatSummary('thread')).toEqual(summary);
-      const other = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      other.rememberAllChats([summary], { includeSubAgents: true });
-      expect(other.peekChatSummary('thread')).toEqual(summary);
-      await other.listAllChats({ includeSubAgents: true, cacheTtlMs: 1000 });
       const controller = await client.startChatListStream({}, () => {});
       handler({
         method: 'bridge/thread/list/stream/batch',
@@ -3452,10 +3233,8 @@ describe('HostBridgeApiClient', () => {
 
       const summary = mapChatSummary({ id: 'thread', updatedAt: 1 }) as ChatSummary;
       client.rememberChats([summary]);
-      client.rememberAllChats([summary]);
       const now = jest.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValue(1000);
       client.rememberChats([summary], { limit: 9 });
-      client.rememberAllChats([summary], { includeSubAgents: true });
       await client.listChats({ limit: 9, cacheTtlMs: 1 });
       await client.listAllChats({ includeSubAgents: true, cacheTtlMs: 1 });
       now.mockRestore();
@@ -3464,7 +3243,6 @@ describe('HostBridgeApiClient', () => {
       await client.gitStageAll();
       await client.gitUnstageAll();
       await client.gitPush();
-      await client.installGitHubAuth({ accessToken: 'token' });
       const started = jest.fn();
       await expect(
         client.sendChatMessageIdempotent(
@@ -3569,18 +3347,6 @@ describe('HostBridgeApiClient', () => {
           ],
         })
         .mockResolvedValueOnce({
-          sessions: [
-            {
-              sessionId: 'session',
-              targetUrl: 'https://example.com',
-              bootstrapPath: '/preview',
-              previewPort: 'bad',
-              createdAt: 1700000000,
-              expiresAt: 1700000001,
-            },
-          ],
-        })
-        .mockResolvedValueOnce({
           suggestions: [{ targetUrl: 'https://example.com', label: 'bad', port: 'bad' }],
         });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
@@ -3594,9 +3360,6 @@ describe('HostBridgeApiClient', () => {
         { path: '/blank', chatCount: 0 },
         expect.objectContaining({ path: '/milliseconds', updatedAt: '2023-11-14T22:13:20.000Z' }),
         expect.objectContaining({ path: '/date', updatedAt: '2026-01-01T00:00:00.000Z' }),
-      ]);
-      expect(await client.listBrowserPreviewSessions()).toEqual([
-        expect.objectContaining({ sessionId: 'session', previewPort: 1 }),
       ]);
       expect((await client.discoverBrowserPreviewTargets()).suggestions).toEqual([
         { targetUrl: 'https://example.com', label: 'bad', port: 1 },
@@ -3617,10 +3380,6 @@ describe('HostBridgeApiClient', () => {
       client.rememberChat(cached);
       await expect(client.getChat('cached', { cacheTtlMs: 1000 })).resolves.toMatchObject({
         id: 'cached',
-      });
-      client.rememberAllChats([cached]);
-      await expect(client.listAllChats({ cacheTtlMs: 1000 })).resolves.toMatchObject({
-        chats: [expect.objectContaining({ id: 'cached' })],
       });
       await expect(
         client.getChatSummaries([3 as never, ' ', 'one', 'one'], { concurrency: Number.NaN }),
@@ -3677,14 +3436,9 @@ describe('HostBridgeApiClient', () => {
       );
     });
 
-    it('covers final cache hits, null session response, malformed interrupt state, and deep clones', async () => {
+    it('covers final cache hits and deep clones', async () => {
       const ws = createWsMock();
-      ws.request
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ thread: { id: 'thread', turns: 'bad' } });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      await expect(client.listBrowserPreviewSessions()).resolves.toEqual([]);
-      await expect(client.interruptLatestTurn('thread')).resolves.toBeNull();
 
       const chat = mapChat({ id: 'cached', turns: [] });
       chat.messages = [
@@ -3726,11 +3480,6 @@ describe('HostBridgeApiClient', () => {
         throw new Error('Expected cached source message to be an activity message.');
       }
       expect(cachedMessage.content.subAgent?.receiverThreadIds).toEqual(['child']);
-
-      client.rememberAllChats([chat]);
-      await expect(client.listAllChats({ cacheTtlMs: 1000 })).resolves.toMatchObject({
-        chats: [expect.objectContaining({ id: 'cached' })],
-      });
     });
 
     it('covers isolated summary cache matches and repeated progressing cursors', async () => {
@@ -3739,10 +3488,6 @@ describe('HostBridgeApiClient', () => {
       const listClient = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
       listClient.rememberChats([summary]);
       expect(listClient.peekChatSummary('thread')).toEqual(summary);
-
-      const allListClient = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-      allListClient.rememberAllChats([summary]);
-      expect(allListClient.peekChatSummary('thread')).toEqual(summary);
 
       ws.request
         .mockResolvedValueOnce({ data: [{ id: 'one', updatedAt: 1 }], nextCursor: 'repeat' })
@@ -3763,14 +3508,6 @@ describe('HostBridgeApiClient', () => {
         'thread/list',
         expect.objectContaining({ limit: 50 }),
       );
-
-      const summary = mapChatSummary({ id: 'cached', updatedAt: 1 }) as ChatSummary;
-      client.rememberAllChats([summary]);
-      ws.request.mockClear();
-      await expect(client.listAllChats({ cacheTtlMs: 1000 })).resolves.toMatchObject({
-        chats: [expect.objectContaining({ id: 'cached' })],
-      });
-      expect(ws.request).not.toHaveBeenCalled();
     });
 
     it('ignores a turn whose normalized status is empty', async () => {
@@ -3839,13 +3576,11 @@ describe('HostBridgeApiClient', () => {
       await client.resolveUserInput('u', { answers: { q: 'a' }, action: 'submit' });
       await client.resolveBridgeUiSurface('surface', { threadId: 'thread', actionId: 'ok' });
       await client.dismissBridgeUiSurface('surface');
-      await client.execTerminal({ command: 'pwd' });
       expect(ws.request).toHaveBeenCalledWith('bridge/capabilities/read');
       expect(ws.request).toHaveBeenCalledWith('bridge/ui/dismiss', {
         id: 'surface',
         threadId: null,
       });
-      expect(ws.request).toHaveBeenCalledWith('bridge/terminal/exec', { command: 'pwd' });
     });
 
     it('covers git validation and normalized request boundaries', async () => {
@@ -3853,15 +3588,6 @@ describe('HostBridgeApiClient', () => {
       ws.request.mockResolvedValue({ ok: true });
       const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
 
-      await expect(
-        client.installGitHubAuth({ accessToken: ' ', repositories: [] }),
-      ).rejects.toThrow('grant');
-      await client.installGitHubAuth({
-        grants: [
-          { accessToken: ' token ', repositories: [' repo ', ' '] },
-          { accessToken: ' ', repositories: [] },
-        ],
-      });
       await expect(
         client.gitClone({ url: ' ', parentPath: '/tmp', directoryName: 'x' }),
       ).rejects.toThrow('url');
@@ -3883,9 +3609,6 @@ describe('HostBridgeApiClient', () => {
       await client.gitCommit({ message: 'message', cwd: ' /repo ' });
       await client.gitSwitch({ branch: ' main ', cwd: '/repo' });
       await client.gitPush();
-      expect(ws.request).toHaveBeenCalledWith('bridge/github/auth/install', {
-        grants: [{ accessToken: 'token', repositories: ['repo'] }],
-      });
       expect(ws.request).toHaveBeenCalledWith('bridge/git/clone', {
         url: 'url',
         parentPath: null,

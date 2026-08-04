@@ -1868,12 +1868,6 @@ describe('chatMapping', () => {
   });
 
   it.each([
-    ['string source', 'cli', { sourceKind: 'cli' }],
-    [
-      'legacy source',
-      { kind: 'subAgent', parent_thread_id: 'root', agent_depth: '2' },
-      { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 2 },
-    ],
     ['review source', { subAgent: 'review' }, { sourceKind: 'subAgentReview' }],
     ['compact source', { subagent: 'compact' }, { sourceKind: 'subAgentCompact' }],
     ['memory source', { subAgent: 'memory_consolidation' }, { sourceKind: 'subAgentOther' }],
@@ -1886,9 +1880,9 @@ describe('chatMapping', () => {
       { sourceKind: 'subAgent', parentThreadId: 'root', subAgentDepth: 3 },
     ],
     [
-      'typed source',
-      { type: 'subAgentReview', parentThreadId: 'root', depth: 4 },
-      { sourceKind: 'subAgentReview', parentThreadId: 'root', subAgentDepth: 4 },
+      'bridge sub-agent thread source',
+      { subAgent: { thread_spawn: { parentThreadId: 'root', depth: 1 } } },
+      { sourceKind: 'subAgentThreadSpawn', parentThreadId: 'root', subAgentDepth: 1 },
     ],
     ['unknown source', { type: 'cli' }, { sourceKind: undefined }],
   ])('maps %s metadata', (_label, source, expected) => {
@@ -2120,7 +2114,6 @@ describe('chatMapping', () => {
         updatedAt: '1700000001',
         status: null,
         turns: [null, 3, { id: 4, status: 5, items: 'bad' }],
-        acpSnapshot: { version: 1, session: {}, active: {} },
       });
       expect(raw).toMatchObject({
         name: 'title fallback',
@@ -2129,23 +2122,7 @@ describe('chatMapping', () => {
         updatedAt: 1700000001,
         turns: [{ items: undefined }],
       });
-      expect(raw.acpSnapshot).toMatchObject({
-        version: 1,
-        messages: [],
-        tools: [],
-        plan: [],
-        usage: { used: null, size: null, cost: null },
-        config: [],
-        commands: [],
-        session: {
-          agentId: '',
-          threadId: '',
-          title: null,
-          updatedAt: null,
-          historyReconstruction: false,
-        },
-        active: { runId: null, sourceTurnId: null, generation: null, toolIds: [] },
-      });
+      expect(raw.acpSnapshot).toBeUndefined();
       expect(mapChatSummary(raw)).toMatchObject({
         title: 'title fallback',
         createdAt: '2023-11-14T22:13:21.000Z',
@@ -2242,10 +2219,6 @@ describe('chatMapping', () => {
       });
 
       const summaries = [
-        toRawThread({
-          id: 'legacy',
-          source: { kind: 'subAgentLegacy', parent_thread_id: 'parent', agent_depth: '2' },
-        }),
         toRawThread({ id: 'review', source: { subAgent: 'review' } }),
         toRawThread({ id: 'compact', source: { subagent: 'compact' } }),
         toRawThread({ id: 'memory', source: { subAgent: 'memory_consolidation' } }),
@@ -2254,18 +2227,13 @@ describe('chatMapping', () => {
           source: { subAgent: { thread_spawn: { parent_thread_id: 'p', depth: 3 } } },
         }),
         toRawThread({ id: 'other', source: { subAgent: { other: 'kind' } } }),
-        toRawThread({ id: 'typed', source: { type: 'subAgentCustom', parentThreadId: 'p' } }),
-        toRawThread({ id: 'plain', source: 'cli' }),
       ].map((raw) => mapChatSummary(raw));
       expect(summaries.map((summary) => summary?.sourceKind)).toEqual([
-        'subAgentLegacy',
         'subAgentReview',
         'subAgentCompact',
         'subAgentOther',
         'subAgentThreadSpawn',
         'subAgentOther',
-        'subAgentCustom',
-        'cli',
       ]);
 
       const errorFields = [
@@ -2429,10 +2397,10 @@ describe('chatMapping', () => {
       expect(withoutTimeline.latestTurnStatus).toBe('running');
     });
 
-    it('maps legacy plans, structured messages, and every tool timeline family', () => {
+    it('maps plans, structured messages, and every tool timeline family', () => {
       const chat = mapChat(
         toRawThread({
-          id: 'legacy-items',
+          id: 'structured-items',
           createdAt: 1700000000,
           turns: [
             {
@@ -2724,19 +2692,8 @@ describe('chatMapping', () => {
         id: 'active-turn',
         status: 'active',
         turns: [{ status: 'unknown' }],
-        source: { kind: 'legacy', parentThreadId: 'parent', depth: 2 },
       });
-      expect(summary).toMatchObject({
-        status: 'complete',
-        parentThreadId: 'parent',
-        subAgentDepth: 2,
-      });
-      expect(
-        mapChatSummary({
-          id: 'typed-source',
-          source: { type: 'subAgentType', parent_thread_id: 'parent', agent_depth: 3 },
-        }),
-      ).toMatchObject({ parentThreadId: 'parent', subAgentDepth: 3 });
+      expect(summary).toMatchObject({ status: 'complete' });
       expect(
         mapChatSummary({
           id: 'spawn-source',
@@ -2842,6 +2799,9 @@ describe('chatMapping', () => {
         latestTurnPlan: null,
         latestTurnStatus: null,
         activeTurnId: null,
+        sourceKind: 'subAgentThreadSpawn',
+        parentThreadId: 'parent-thread',
+        subAgentDepth: 1,
       };
       const updated = applySnapshotToChat(
         shell,
@@ -2856,7 +2816,13 @@ describe('chatMapping', () => {
           ],
         }),
       );
-      expect(updated).toMatchObject({ title: 'Pinned title', status: 'running' });
+      expect(updated).toMatchObject({
+        title: 'Pinned title',
+        status: 'running',
+        sourceKind: 'subAgentThreadSpawn',
+        parentThreadId: 'parent-thread',
+        subAgentDepth: 1,
+      });
       expect(updated.messages[0]?.content).toBe('done');
     });
   });

@@ -106,14 +106,6 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     }
     return session;
   }
-  async listBrowserPreviewSessions(): Promise<BrowserPreviewSession[]> {
-    const response = await this.ws.request<Record<string, unknown>>('bridge/browser/sessions/list');
-    const record = toRecord(response) ?? {};
-    const rawSessions = Array.isArray(record['sessions']) ? record['sessions'] : [];
-    return rawSessions
-      .map((entry) => readBrowserPreviewSession(entry))
-      .filter((entry): entry is BrowserPreviewSession => entry !== null);
-  }
   async closeBrowserPreviewSession(sessionId: string): Promise<boolean> {
     const response = await this.ws.request<Record<string, unknown>>(
       'bridge/browser/session/close',

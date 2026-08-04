@@ -57,7 +57,7 @@ describe('GlassSurface', () => {
   it('uses the native material without a fallback background when glass is available', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
-    const theme = createAppTheme('dark', 'grey');
+    const theme = createAppTheme('dark');
 
     renderSurface(<GlassSurface role="capsule" testID="glass-surface" />, theme);
 

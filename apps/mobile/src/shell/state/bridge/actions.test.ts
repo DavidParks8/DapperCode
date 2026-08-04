@@ -7,11 +7,7 @@ import {
   persistChatSummaries,
 } from '@shell/session/chatSummaryCache';
 import { createTestStore } from '@shell/state/testing';
-import {
-  clearSavedBridgesAtom,
-  deleteBridgeProfileAtom,
-  saveBridgeProfileAtom,
-} from '@shell/state/bridge/actions';
+import { saveBridgeProfileAtom } from '@shell/state/bridge/actions';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 
 /**
@@ -85,46 +81,6 @@ describe('bridge profile purge coordinates with pending summary writes', () => {
     };
     return createTestStore({ data });
   }
-
-  it('drops a pending write scheduled before profile deletion and flushed after it completes', async () => {
-    const { restore } = mockFileSystem();
-    try {
-      const profileId = 'profile-delete';
-      await persistChatSummaries(profileId, [summary('kept')]);
-      // A drawer debounce timer captures the current generation before the
-      // user deletes the profile...
-      const staleGeneration = getChatSummaryCacheGeneration(profileId);
-
-      const store = storeWithProfile(profileId);
-      await store.set(deleteBridgeProfileAtom, profileId);
-
-      // ...but its setTimeout only fires afterward, once the profile (and
-      // its cache) are already gone.
-      await persistChatSummaries(profileId, [summary('ghost')], undefined, staleGeneration);
-
-      await expect(loadChatSummaryCache(profileId)).resolves.toMatchObject({ entries: [] });
-    } finally {
-      restore();
-    }
-  });
-
-  it('drops a pending write scheduled before clearing all profiles and flushed after it completes', async () => {
-    const { restore } = mockFileSystem();
-    try {
-      const profileId = 'profile-clear';
-      await persistChatSummaries(profileId, [summary('kept')]);
-      const staleGeneration = getChatSummaryCacheGeneration(profileId);
-
-      const store = storeWithProfile(profileId);
-      await store.set(clearSavedBridgesAtom);
-
-      await persistChatSummaries(profileId, [summary('ghost')], undefined, staleGeneration);
-
-      await expect(loadChatSummaryCache(profileId)).resolves.toMatchObject({ entries: [] });
-    } finally {
-      restore();
-    }
-  });
 
   it('drops a pending write scheduled before an in-place bridge identity edit and flushed after it completes, without hydrating old-identity data', async () => {
     const { restore } = mockFileSystem();

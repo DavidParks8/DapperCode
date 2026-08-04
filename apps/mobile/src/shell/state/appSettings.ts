@@ -3,8 +3,6 @@ import {
   dedupeRecentPreviewTargets,
   normalizePreviewTargetInput,
 } from '../../features/browser/preview';
-import { normalizeBridgeUrlInput } from '@shell/state/bridgeUrl';
-import type { AppearancePreference, DarkUiPalette } from '@shared/theme';
 
 export const APP_SETTINGS_VERSION = 13;
 export const DEFAULT_WORKSPACE_CHAT_LIMIT = 5;
@@ -12,29 +10,21 @@ export const WORKSPACE_CHAT_LIMIT_OPTIONS = [5, 10, 25, null] as const;
 export type WorkspaceChatLimit = (typeof WORKSPACE_CHAT_LIMIT_OPTIONS)[number];
 
 export function parseAppSettings(raw: string): {
-  bridgeUrl: string | null;
-  bridgeToken: string | null;
   defaultStartCwd: string | null;
   preferredAgentId: AgentId | null;
   agentSettings: AgentDefaultSettingsMap;
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
-  appearancePreference: AppearancePreference;
-  darkUiPalette: DarkUiPalette;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
 } {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return {
-      bridgeUrl: null,
-      bridgeToken: null,
       defaultStartCwd: null,
       preferredAgentId: null,
       agentSettings: {},
       approvalMode: 'normal',
       showToolCalls: true,
-      appearancePreference: 'system',
-      darkUiPalette: 'classic',
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
@@ -45,23 +35,17 @@ export function parseAppSettings(raw: string): {
     const parsedVersion = (parsed as { version?: unknown }).version;
     if (!parsed || typeof parsed !== 'object' || parsedVersion !== APP_SETTINGS_VERSION) {
       return {
-        bridgeUrl: null,
-        bridgeToken: null,
         defaultStartCwd: null,
         preferredAgentId: null,
         agentSettings: {},
         approvalMode: 'normal',
         showToolCalls: true,
-        appearancePreference: 'system',
-        darkUiPalette: 'classic',
         workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
       };
     }
 
     return {
-      bridgeUrl: normalizeBridgeUrl((parsed as { bridgeUrl?: unknown }).bridgeUrl),
-      bridgeToken: normalizeBridgeToken((parsed as { bridgeToken?: unknown }).bridgeToken),
       defaultStartCwd: normalizeDefaultStartCwd(
         (parsed as { defaultStartCwd?: unknown }).defaultStartCwd,
       ),
@@ -76,13 +60,6 @@ export function parseAppSettings(raw: string): {
         typeof (parsed as { showToolCalls?: unknown }).showToolCalls === 'undefined'
           ? true
           : normalizeBoolean((parsed as { showToolCalls?: unknown }).showToolCalls),
-      appearancePreference: normalizeStoredAppearancePreference(
-        (parsed as { appearancePreference?: unknown }).appearancePreference,
-        'system',
-      ),
-      darkUiPalette: normalizeStoredDarkUiPalette(
-        (parsed as { darkUiPalette?: unknown }).darkUiPalette,
-      ),
       workspaceChatLimit: normalizeWorkspaceChatLimit(
         (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit,
       ),
@@ -92,36 +69,15 @@ export function parseAppSettings(raw: string): {
     };
   } catch {
     return {
-      bridgeUrl: null,
-      bridgeToken: null,
       defaultStartCwd: null,
       preferredAgentId: null,
       agentSettings: {},
       approvalMode: 'normal',
       showToolCalls: true,
-      appearancePreference: 'system',
-      darkUiPalette: 'classic',
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
   }
-}
-
-function normalizeBridgeUrl(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  return normalizeBridgeUrlInput(value);
-}
-
-function normalizeBridgeToken(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeDefaultStartCwd(value: unknown): string | null {
@@ -210,15 +166,4 @@ function normalizeStoredApprovalMode(value: unknown): ApprovalMode {
 
 function normalizeBoolean(value: unknown): boolean {
   return value === true;
-}
-
-function normalizeStoredDarkUiPalette(value: unknown): DarkUiPalette {
-  return value === 'grey' ? 'grey' : 'classic';
-}
-
-function normalizeStoredAppearancePreference(
-  value: unknown,
-  fallback: AppearancePreference,
-): AppearancePreference {
-  return value === 'light' || value === 'dark' || value === 'system' ? value : fallback;
 }

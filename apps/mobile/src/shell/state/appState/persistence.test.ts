@@ -16,10 +16,8 @@ describe('appStatePersistence', () => {
     }
   });
 
-  it('stores the canonical document and imports legacy profile storage on web', async () => {
-    const getItem = jest.fn((key: string) =>
-      key === 'dappercode.bridge-profiles.v1' ? '{"profiles":[]}' : null,
-    );
+  it('stores the canonical document on web', async () => {
+    const getItem = jest.fn().mockReturnValue(null);
     const setItem = jest.fn();
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -39,10 +37,6 @@ describe('appStatePersistence', () => {
     const persistence = module.createAppStatePersistence();
 
     expect(await persistence.readCurrent()).toBeNull();
-    expect(await persistence.readLegacy()).toEqual({
-      settingsRaw: '{"version":11}',
-      bridgeProfilesRaw: '{"profiles":[]}',
-    });
     await persistence.writeCurrent('{"version":1}');
 
     expect(setItem).toHaveBeenCalledWith('dappercode.app-state.v1', '{"version":1}');
@@ -76,7 +70,7 @@ describe('appStatePersistence', () => {
     );
   });
 
-  it('reports unavailable browser storage and tolerates a missing legacy file', async () => {
+  it('reports unavailable browser storage', async () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: { getItem: jest.fn() },
@@ -96,30 +90,5 @@ describe('appStatePersistence', () => {
     const persistence = module.createAppStatePersistence();
     await expect(persistence.readCurrent()).resolves.toBeNull();
     await expect(persistence.writeCurrent('{}')).rejects.toThrow('unavailable');
-    await expect(persistence.readLegacy()).resolves.toEqual({
-      settingsRaw: null,
-      bridgeProfilesRaw: null,
-    });
-  });
-
-  it('skips legacy settings reads without a document directory', async () => {
-    const readAsStringAsync = jest.fn();
-    jest.doMock('react-native', () => ({ Platform: { OS: 'web' } }));
-    jest.doMock('expo-secure-store', () => ({}));
-    jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: ' ',
-      readAsStringAsync,
-    }));
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: { getItem: jest.fn().mockReturnValue(null), setItem: jest.fn() },
-    });
-
-    let module!: typeof AppStatePersistenceModule;
-    jest.isolateModules(() => {
-      module = jest.requireActual('@shell/state/appState/persistence');
-    });
-    await module.createAppStatePersistence().readLegacy();
-    expect(readAsStringAsync).not.toHaveBeenCalled();
   });
 });

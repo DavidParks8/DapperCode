@@ -85,24 +85,11 @@ pub(super) fn queue_operation_error(error: String) -> BridgeError {
     BridgeError::server(&error)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct TerminalExecRequest {
-    pub(super) command: String,
-    pub(super) cwd: Option<String>,
-    pub(super) timeout_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct TerminalExecResponse {
-    pub(super) command: String,
-    pub(super) cwd: String,
+#[derive(Debug, Clone)]
+pub(super) struct GitCommandOutput {
     pub(super) code: Option<i32>,
     pub(super) stdout: String,
     pub(super) stderr: String,
-    pub(super) timed_out: bool,
-    pub(super) duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,32 +248,6 @@ pub(super) struct GitPushResponse {
 #[serde(rename_all = "camelCase")]
 pub(super) struct GitQueryRequest {
     pub(super) cwd: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct GitHubAuthInstallRequest {
-    pub(super) access_token: Option<String>,
-    pub(super) repositories: Option<Vec<String>>,
-    pub(super) grants: Option<Vec<GitHubAuthGrantInput>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct GitHubAuthGrantInput {
-    pub(super) access_token: String,
-    pub(super) repositories: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct GitHubAuthInstallResponse {
-    pub(super) installed: bool,
-    pub(super) host: String,
-    pub(super) login: Option<String>,
-    pub(super) scopes: Vec<String>,
-    pub(super) credential_file: String,
-    pub(super) grants_installed: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

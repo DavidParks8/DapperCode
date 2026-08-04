@@ -4,7 +4,6 @@ import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
 import { buildCompactDiff, type CompactDiff } from '@shared/diff/compactDiff';
 import { lookupDispatchEntry } from '@shared/runtimeValidation';
-import { parseTimelineEntries, toTimelineVisual } from './timelineHelpers';
 
 export interface ToolInvocationLocation {
   path: string;
@@ -33,7 +32,7 @@ export interface ToolInvocation {
   kind: ChatToolKind;
   status: ChatToolStatus;
   title: string;
-  /** Metadata-backed rows can safely synthesize status language; legacy prose cannot. */
+  /** Metadata-backed rows can safely synthesize status language. */
   statusLanguage?: boolean;
   monospaceTitle: boolean;
   isError: boolean;
@@ -77,7 +76,6 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
       id,
       meta: null,
       textLines: [],
-      legacyTitle: null,
     };
     drafts.set(id, created);
     order.push(id);
@@ -92,15 +90,7 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
       if (meta) {
         draft.meta = meta;
       }
-      const parsed = readToolMessage(message, Boolean(meta ?? draft.meta));
-      draft.legacyTitle ??= parsed.title;
-      appendLines(draft.textLines, parsed.lines);
-      continue;
-    }
-    for (const legacy of legacyInvocations(message)) {
-      const draft = draftFor(legacy.id);
-      draft.legacyTitle ??= legacy.title;
-      appendLines(draft.textLines, legacy.details);
+      appendLines(draft.textLines, readToolMessage(message, Boolean(meta ?? draft.meta)));
     }
   }
 
@@ -113,7 +103,6 @@ interface ToolInvocationDraft {
   id: string;
   meta: ChatToolMeta | null;
   textLines: string[];
-  legacyTitle: string | null;
 }
 
 function resolveInvocationTitleInfo(
@@ -121,35 +110,30 @@ function resolveInvocationTitleInfo(
 ): { title: string; rawLines: string[] } | null {
   const meta = draft.meta;
   const metaTitle = meta?.title.trim() ?? '';
-  const legacyTitle = draft.legacyTitle?.trim() ?? '';
   const fallbackTitle = draft.textLines[0]?.trim() ?? '';
-  const title = metaTitle || legacyTitle || fallbackTitle;
+  const title = metaTitle || fallbackTitle;
   if (!title) {
     return null;
   }
   // A title lifted out of the output must not also be printed inside it.
-  const rawLines = metaTitle || legacyTitle ? draft.textLines : draft.textLines.slice(1);
+  const rawLines = metaTitle ? draft.textLines : draft.textLines.slice(1);
   return { title, rawLines };
 }
 
-function resolveInvocationMetaFields(
-  meta: ChatToolMeta | null,
-  title: string,
-): {
+function resolveInvocationMetaFields(meta: ChatToolMeta | null): {
   kind: ChatToolKind;
   status: ChatToolStatus;
   monospaceTitle: boolean;
   isError: boolean;
   truncated: boolean;
 } {
-  const legacyVisual = meta ? null : toTimelineVisual(title);
   const kind = meta?.kind ?? 'other';
   const status = meta?.status ?? 'completed';
   return {
     kind,
     status,
-    monospaceTitle: meta ? kind === 'execute' : legacyVisual?.useMonospaceTitle === true,
-    isError: status === 'failed' || legacyVisual?.isError === true,
+    monospaceTitle: kind === 'execute',
+    isError: status === 'failed',
     truncated: meta?.truncated === true,
   };
 }
@@ -179,7 +163,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   }
   const { title, rawLines } = titleInfo;
   const meta = draft.meta;
-  const metaFields = resolveInvocationMetaFields(meta, title);
+  const metaFields = resolveInvocationMetaFields(meta);
   const parsed = parseStructuredContent(meta?.content);
   const locations = parseLocations(meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
@@ -216,55 +200,19 @@ function toolCallIdOf(message: ChatMessage): string | null {
 }
 
 /**
- * A tool-call message only carries the synthetic `• Called tool ...` line, which
- * the row header already says better, so it is dropped once metadata exists.
- * Without metadata the legacy timeline text is the only source of a title.
+ * A tool-call message only carries a synthetic display line, which the metadata
+ * row header already says better, so it is dropped once metadata exists.
  */
-function readToolMessage(
-  message: ChatMessage,
-  hasMeta: boolean,
-): { title: string | null; lines: string[] } {
+function readToolMessage(message: ChatMessage, hasMeta: boolean): string[] {
   const isToolCall = message.role === 'assistant';
   const text = isToolCall ? getToolCallDisplayLines(message).join('\n') : getMessageText(message);
   if (!text.trim()) {
-    return { title: null, lines: [] };
+    return [];
   }
   if (hasMeta) {
-    return { title: null, lines: isToolCall ? [] : text.split('\n') };
+    return isToolCall ? [] : text.split('\n');
   }
-  const entries = parseTimelineEntries(text);
-  const [firstEntry, ...remainingEntries] = entries ?? [];
-  if (firstEntry) {
-    return {
-      title: firstEntry.title,
-      lines: [
-        ...firstEntry.details,
-        ...remainingEntries.flatMap((entry) => [entry.title, ...entry.details]),
-      ],
-    };
-  }
-  return { title: null, lines: text.split('\n') };
-}
-
-interface LegacyInvocation {
-  id: string;
-  title: string;
-  details: string[];
-}
-
-function legacyInvocations(message: ChatMessage): LegacyInvocation[] {
-  if (message.role !== 'system' && message.role !== 'tool') {
-    return [];
-  }
-  const entries = parseTimelineEntries(getMessageText(message));
-  if (!entries?.length) {
-    return [];
-  }
-  return entries.map((entry, index) => ({
-    id: `${message.id}-${String(index)}`,
-    title: entry.title,
-    details: entry.details,
-  }));
+  return text.split('\n');
 }
 
 function appendLines(target: string[], lines: string[]): void {

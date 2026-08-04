@@ -46,7 +46,7 @@ type QueryableTestInstance = ReactTestInstance & {
 };
 
 type QueryableRenderer = ReactTestRenderer & { root: QueryableTestInstance; toJSON(): unknown };
-type LegacyTestMessage = Omit<ApiChatMessage, 'role' | 'content'> & {
+type TestMessageInput = Omit<ApiChatMessage, 'role' | 'content'> & {
   id: string;
   role: ApiChatMessage['role'] | 'system';
   content: string;
@@ -794,7 +794,7 @@ describe('ChatMessage command rows', () => {
   const theme = createAppTheme('dark');
 
   it('renders long command titles in single-line horizontal scroll viewports', () => {
-    const messages: LegacyTestMessage[] = [
+    const messages: TestMessageInput[] = [
       {
         id: 'tool_command',
         role: 'system',
@@ -814,8 +814,15 @@ describe('ChatMessage command rows', () => {
     });
     const tree = expectValue(rendered);
     const viewport = tree.root.findByProps({ testID: 'tool-command-scroll' });
-    const horizontalScroll = viewport.findByType(ScrollView);
-    const commandText = horizontalScroll.findByType(Text);
+    const horizontalScroll = viewport.findByType(ScrollView) as QueryableTestInstance;
+    const commandText = requireTestValue(
+      horizontalScroll
+        .findAllByType(Text)
+        .find((node) =>
+          flattenRenderedText(node.props['children']).includes('ChatMessage.test.tsx'),
+        ),
+      'command title',
+    );
 
     expect(horizontalScroll.props['horizontal']).toBe(true);
     // The row is one line tall until it is expanded, and the scroll viewport
@@ -1244,12 +1251,6 @@ describe('ChatMessage system timeline matrices', () => {
       label: 'Plan',
       hint: null,
     },
-    {
-      kind: 'tool' as const,
-      content: '• Called tool `search`\n  └ query=coverage\n  └ 3 results',
-      label: 'Called tool `search`',
-      hint: 'Tap to show 2 lines',
-    },
   ])('expands $kind timeline details', ({ kind, content, label, hint }) => {
     const tree = renderMessage({
       id: `timeline-${kind}`,
@@ -1635,50 +1636,9 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders the computer-use action family with metadata and image output', () => {
-    const actions: ReadonlyArray<readonly [string, string]> = [
-      ['getAppState', 'Captured screen'],
-      ['click', 'Clicked'],
-      ['scroll', 'Scrolled'],
-      ['typeText', 'Typed text'],
-      ['pressKey', 'Pressed key'],
-      ['drag', 'Dragged'],
-      ['setValue', 'Set value'],
-      ['listApps', 'Listed apps'],
-      ['customAction', 'Custom Action'],
-    ];
-    const content = actions
-      .map(
-        ([action], index) =>
-          `• Called tool \`computerUse/${action}\`\n  └ ${index === 0 ? '[image: https://example.test/screen.png]' : index === 1 ? 'Window: "Editor", App: com.microsoft.VSCode.' : 'App=com.apple.Safari (active)'}`,
-      )
-      .join('\n');
-    const tree = renderMessage({
-      id: 'computer-use',
-      role: 'system',
-      systemKind: 'tool',
-      content,
-      createdAt: '2026-04-17T00:00:00.000Z',
-    });
-    const root = tree.root;
-    expect(hasRenderedText(root, '9 actions')).toBe(true);
-    for (const [, label] of actions) {
-      expect(hasRenderedText(root, requireTestValue(label, 'computer-use action label'))).toBe(
-        true,
-      );
-    }
-    expect(hasRenderedText(root, 'VSCode')).toBe(true);
-    expect(
-      root
-        .findAllByType(Image)
-        .some((node) => node.props.source?.uri === 'https://example.test/screen.png'),
-    ).toBe(true);
-    act(() => tree.unmount());
-  });
-
   it('keeps a scrollable command header while long output uses a vertical scroller', () => {
     const details = Array.from({ length: 26 }, (_, index) => `line ${String(index + 1)}`);
-    const messages: LegacyTestMessage[] = [
+    const messages: TestMessageInput[] = [
       {
         id: 'long',
         role: 'system',
@@ -1790,22 +1750,10 @@ describe('ChatMessage system timeline matrices', () => {
     expect(hasRenderedText(tree.root, expected)).toBe(true);
     act(() => tree.unmount());
   });
-
-  it('falls back to plain system markdown for malformed timeline content', () => {
-    const tree = renderMessage({
-      id: 'malformed',
-      role: 'system',
-      systemKind: 'tool',
-      content: 'before bullet\n• Tool call',
-      createdAt: '2026-04-17T00:00:00.000Z',
-    });
-    expect(hasRenderedText(tree.root, 'before bullet')).toBe(true);
-    act(() => tree.unmount());
-  });
 });
 
 function renderMessage(
-  message: ApiChatMessage | LegacyTestMessage,
+  message: ApiChatMessage | TestMessageInput,
   props: {
     bridgeUrl?: string;
     bridgeToken?: string;
@@ -1831,7 +1779,7 @@ function renderMessage(
   return expectValue(tree) as QueryableRenderer;
 }
 
-function onlyInvocation(messages: LegacyTestMessage[]): ToolInvocation {
+function onlyInvocation(messages: TestMessageInput[]): ToolInvocation {
   const invocations = buildToolInvocations(messages.map(toOfficialMessage));
   const invocation = invocations[0];
   if (!invocation) {
@@ -1840,42 +1788,49 @@ function onlyInvocation(messages: LegacyTestMessage[]): ToolInvocation {
   return invocation;
 }
 
-function toOfficialMessage(message: ApiChatMessage | LegacyTestMessage): ApiChatMessage {
-  const legacy = message as LegacyTestMessage;
-  if (legacy.systemKind === 'reasoning') {
+function toOfficialMessage(message: ApiChatMessage | TestMessageInput): ApiChatMessage {
+  const input = message as TestMessageInput;
+  if (input.systemKind === 'reasoning') {
     return {
-      id: legacy.id,
+      id: input.id,
       role: 'reasoning',
-      content: legacy.content,
-      createdAt: legacy.createdAt,
+      content: input.content,
+      createdAt: input.createdAt,
     };
   }
-  if (legacy.systemKind === 'tool') {
+  if (input.systemKind === 'tool') {
+    const [titleLine = '', ...outputLines] = input.content.split('\n');
     return {
-      id: legacy.id,
+      id: input.id,
       role: 'tool',
-      toolCallId: legacy.id,
-      content: legacy.content,
-      createdAt: legacy.createdAt,
+      toolCallId: input.id,
+      toolMeta: {
+        toolCallId: input.id,
+        kind: 'execute',
+        status: 'completed',
+        title: titleLine.replace(/^•\s*/, ''),
+      },
+      content: outputLines.join('\n'),
+      createdAt: input.createdAt,
     };
   }
-  if (legacy.systemKind === 'subAgent') {
+  if (input.systemKind === 'subAgent') {
     return createActivityMessage(
-      legacy.id,
+      input.id,
       SUBAGENT_ACTIVITY_TYPE,
       {
-        text: legacy.content,
-        ...(legacy.subAgentMeta ? { subAgent: legacy.subAgentMeta } : {}),
+        text: input.content,
+        ...(input.subAgentMeta ? { subAgent: input.subAgentMeta } : {}),
       },
-      legacy.createdAt,
+      input.createdAt,
     );
   }
-  if (legacy.systemKind === 'compaction') {
+  if (input.systemKind === 'compaction') {
     return createActivityMessage(
-      legacy.id,
+      input.id,
       COMPACTION_ACTIVITY_TYPE,
-      { text: legacy.content },
-      legacy.createdAt,
+      { text: input.content },
+      input.createdAt,
     );
   }
   return message as ApiChatMessage;

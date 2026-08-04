@@ -82,7 +82,7 @@ export function ConnectionScreen({ mode, profileId = null, onSaved }: Connection
     ? (activeBridgeProfile?.bridgeUrl ?? '')
     : mode === 'add'
       ? ''
-      : (env.legacyHostBridgeUrl ?? '');
+      : (env.hostBridgeUrl ?? '');
   const initialToken = shouldUseSavedBridgeCredentials
     ? (activeBridgeProfile?.bridgeToken ?? '')
     : mode === 'add'

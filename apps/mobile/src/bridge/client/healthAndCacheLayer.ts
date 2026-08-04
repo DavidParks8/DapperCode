@@ -18,7 +18,6 @@ import { readString, toRecord } from '@bridge/mapping/chatMapping';
 import type {
   AgentId,
   BridgeCapabilities,
-  BridgeStatus,
   Chat,
   ChatSummary,
   ModelOption,
@@ -26,19 +25,12 @@ import type {
 } from '@bridge/types/types';
 import type {
   AppServerStartResponse,
-  HealthResponse,
   ListChatsOptions,
 } from '@bridge/client/clientContractsAndSnapshotInternals';
 
 export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
   private static readonly MODEL_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 
-  health(): Promise<HealthResponse> {
-    return this.ws.request<HealthResponse>('bridge/health/read');
-  }
-  readBridgeStatus(): Promise<BridgeStatus> {
-    return this.ws.request<BridgeStatus>('bridge/status/read');
-  }
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
     return this.ws.request<BridgeCapabilities>('bridge/capabilities/read');
   }
@@ -236,16 +228,6 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
   peekAllChats(options: ListAllChatsOptions = {}): ChatSummary[] | null {
     const cached = this.allChatListCache.get(this.allChatListCacheKey(options));
     return cached ? cloneChatSummaries(cached.value.chats) : null;
-  }
-  rememberAllChats(chats: ChatSummary[], options: ListAllChatsOptions = {}): void {
-    this.allChatListCache.set(this.allChatListCacheKey(options), {
-      value: {
-        chats: cloneChatSummaries(chats),
-        diagnostics: [],
-        partial: false,
-      },
-      loadedAt: Date.now(),
-    });
   }
   peekChat(id: string): Chat | null {
     const cached = this.chatCache.get(id.trim());

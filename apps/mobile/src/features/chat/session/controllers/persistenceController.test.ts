@@ -47,7 +47,6 @@ describe('mainScreenPersistenceController', () => {
       profileId: ' bridge/a ',
       storage,
       platform: 'ios',
-      migrateLegacy: false,
     });
 
     await controller.saveModelPreferences({
@@ -72,12 +71,10 @@ describe('mainScreenPersistenceController', () => {
     const first = new MainScreenPersistenceController({
       profileId: 'profile/one',
       platform: 'web',
-      migrateLegacy: false,
     });
     const second = new MainScreenPersistenceController({
       profileId: 'profile two',
       platform: 'web',
-      migrateLegacy: false,
     });
 
     await first.saveModelPreferences({
@@ -114,90 +111,6 @@ describe('mainScreenPersistenceController', () => {
     );
   });
 
-  it('migrates a legacy global collection to only the first active profile exactly once', async () => {
-    const legacy = JSON.stringify({
-      version: 1,
-      entries: {
-        thread: { modelId: 'legacy', effort: null, serviceTier: null, updatedAt: 'then' },
-      },
-    });
-    const values = new Map<string, string>([
-      ['dappercode.main-screen.model-preferences.v1', legacy],
-    ]);
-    const setItem = jest.fn((key: string, value: string) => values.set(key, value));
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: {
-        getItem: jest.fn((key: string) => values.get(key) ?? null),
-        setItem,
-      },
-    });
-
-    const first = new MainScreenPersistenceController({
-      profileId: 'first',
-      platform: 'web',
-    });
-    await expect(first.loadModelPreferences()).resolves.toMatchObject({
-      thread: { modelId: 'legacy' },
-    });
-    const second = new MainScreenPersistenceController({
-      profileId: 'second',
-      platform: 'web',
-    });
-    await expect(second.loadModelPreferences()).resolves.toEqual({});
-
-    await first.loadModelPreferences();
-    expect(
-      setItem.mock.calls.filter(
-        ([key]) => key === 'dappercode.main-screen.profile.first.model-preferences.v1',
-      ),
-    ).toHaveLength(1);
-    expect(values.has('dappercode.main-screen.profile.second.model-preferences.v1')).toBe(false);
-    expect(values.get('dappercode.main-screen.model-preferences.v1')).toBe(legacy);
-  });
-
-  it('keeps a claimed migration retryable after the target write fails', async () => {
-    const storage = memoryStorage({
-      '/legacy': JSON.stringify({
-        version: 1,
-        entries: { thread: { modelId: 'legacy', updatedAt: 'then' } },
-      }),
-    });
-    const write = storage.write as jest.Mock;
-    let failTargetWrite = true;
-    write.mockImplementation(async (path: string, value: string) => {
-      if (path === '/profile' && failTargetWrite) {
-        failTargetWrite = false;
-        throw new Error('target unavailable');
-      }
-      storage.values.set(path, value);
-    });
-    const errors: ProfilePersistenceError[] = [];
-    const paths = {
-      modelPreferences: () => '/profile',
-      legacyModelPreferences: () => '/legacy',
-      modelPreferencesMigrationMarker: () => '/marker',
-    };
-    const failed = new MainScreenPersistenceController({
-      profileId: 'profile',
-      storage,
-      paths,
-      onPersistenceError: (error) => errors.push(error),
-    });
-    await expect(failed.loadModelPreferences()).resolves.toEqual({});
-    expect(errors[0]).toMatchObject({ operation: 'migrate', resource: 'model preferences' });
-    expect(JSON.parse(storage.values.get('/marker')!)).toMatchObject({
-      profileId: 'profile',
-      complete: false,
-    });
-    expect(storage.values.get('/legacy')).toBeDefined();
-
-    const retried = new MainScreenPersistenceController({ profileId: 'profile', storage, paths });
-    await expect(retried.loadModelPreferences()).resolves.toMatchObject({
-      thread: { modelId: 'legacy' },
-    });
-  });
-
   it('loads and saves every persisted collection', async () => {
     const storage = memoryStorage({
       '/models': JSON.stringify({ version: 1, entries: { thread: { modelId: 'm' } } }),
@@ -208,7 +121,6 @@ describe('mainScreenPersistenceController', () => {
     const controller = new MainScreenPersistenceController({
       profileId: 'profile',
       storage,
-      migrateLegacy: false,
       paths: {
         modelPreferences: () => '/models',
         planSnapshots: () => '/plans',
@@ -239,7 +151,6 @@ describe('mainScreenPersistenceController', () => {
     const controller = new MainScreenPersistenceController({
       profileId: 'profile',
       storage,
-      migrateLegacy: false,
       paths: {
         modelPreferences: () => '/models',
         planSnapshots: () => '/plans',

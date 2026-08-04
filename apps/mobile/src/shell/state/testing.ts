@@ -10,7 +10,6 @@ import {
   type AppStateData,
   type AppStatePersistenceAdapter,
   type AppStateSnapshot,
-  type LegacyAppStateSource,
 } from '@shell/state/appState';
 import {
   dispatchAppStateAtom,
@@ -31,7 +30,7 @@ export interface MemoryPersistence extends AppStatePersistenceAdapter {
 }
 
 export function createMemoryPersistence(
-  options: { current?: string | null; legacy?: LegacyAppStateSource } = {},
+  options: { current?: string | null } = {},
 ): MemoryPersistence {
   let current = options.current ?? null;
   const writes: string[] = [];
@@ -43,8 +42,6 @@ export function createMemoryPersistence(
       writes.push(raw);
       return Promise.resolve();
     },
-    readLegacy: () =>
-      Promise.resolve(options.legacy ?? { settingsRaw: null, bridgeProfilesRaw: null }),
   };
 }
 

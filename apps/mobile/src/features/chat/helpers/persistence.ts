@@ -46,26 +46,16 @@ export interface ProfilePersistenceStorage {
   exists?(path: string): Promise<boolean>;
 }
 
-interface PersistenceMigrationMarker {
-  version: 1;
-  profileId: string;
-  complete: boolean;
-}
-
-const migrationLocks = new Map<string, Promise<void>>();
-
 export class ProfilePersistenceError extends Error {
   override readonly name = 'ProfilePersistenceError';
 
   constructor(
     readonly resource: ProfilePersistenceResource,
-    readonly operation: 'migrate' | 'write',
+    readonly operation: 'write',
     options?: { cause?: unknown },
   ) {
     super(
-      operation === 'write'
-        ? `Could not save ${resource} for this bridge profile. Check available device storage and try again.`
-        : `Could not migrate ${resource} for this bridge profile. Your legacy data was left unchanged.`,
+      `Could not save ${resource} for this bridge profile. Check available device storage and try again.`,
       options,
     );
   }
@@ -143,153 +133,9 @@ export function getWorkspaceFavoritesPath(profileId: string): string | null {
   return getProfileDocumentPath(profileId, WORKSPACE_FAVORITES_FILE);
 }
 
-export function getLegacyChatModelPreferencesPath(): string | null {
-  return getDocumentPath(CHAT_MODEL_PREFERENCES_FILE);
-}
-
-export function getLegacyChatDraftsPath(): string | null {
-  return getDocumentPath(CHAT_DRAFTS_FILE);
-}
-
-export function getLegacyChatPlanSnapshotsPath(): string | null {
-  return getDocumentPath(CHAT_PLAN_SNAPSHOTS_FILE);
-}
-
-export function getLegacyChatBridgeUiSurfacesPath(): string | null {
-  return getDocumentPath(CHAT_BRIDGE_UI_SURFACES_FILE);
-}
-
-export function getLegacyWorkspaceFavoritesPath(): string | null {
-  return getDocumentPath(WORKSPACE_FAVORITES_FILE);
-}
-
-export function getPersistenceMigrationMarkerPath(
-  resourceKey: string,
-  profileId?: string,
-): string | null {
-  const encodedProfileId = profileId ? encodePersistenceProfileId(profileId) : null;
-  const suffix = encodedProfileId ? `-${encodedProfileId}` : '';
-  return getDocumentPath(`dappercode-profile-migration-${resourceKey}${suffix}.v1.json`);
-}
-
 export function getWebProfilePersistenceKey(name: string, profileId: string): string | null {
   const encodedProfileId = encodePersistenceProfileId(profileId);
   return encodedProfileId ? `dappercode.main-screen.profile.${encodedProfileId}.${name}` : null;
-}
-
-export function getWebPersistenceMigrationMarkerKey(
-  resourceKey: string,
-  profileId?: string,
-): string | null {
-  const encodedProfileId = profileId ? encodePersistenceProfileId(profileId) : null;
-  const suffix = encodedProfileId ? `.${encodedProfileId}` : '';
-  return `dappercode.main-screen.profile-migration.${resourceKey}${suffix}.v1`;
-}
-
-async function storageEntryExists(
-  storage: ProfilePersistenceStorage,
-  path: string,
-): Promise<boolean> {
-  if (storage.exists) {
-    return storage.exists(path);
-  }
-  try {
-    await storage.read(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parseMigrationMarker(raw: string): PersistenceMigrationMarker | null {
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistenceMigrationMarker>;
-    return parsed.version === 1 &&
-      typeof parsed.profileId === 'string' &&
-      typeof parsed.complete === 'boolean'
-      ? { version: 1, profileId: parsed.profileId, complete: parsed.complete }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function migrateLegacyPersistenceEntry(options: {
-  storage: ProfilePersistenceStorage;
-  profileId: string;
-  targetPath: string | null;
-  legacyPath: string | null;
-  markerPath: string | null;
-  transform?: (raw: string) => string | null;
-}): Promise<void> {
-  const { storage, profileId, targetPath, legacyPath, markerPath, transform } = options;
-  const normalizedProfileId = profileId.trim();
-  if (!normalizedProfileId || !targetPath || !legacyPath || !markerPath) {
-    return;
-  }
-
-  const previous = migrationLocks.get(markerPath) ?? Promise.resolve();
-  const migration = previous
-    .catch(() => undefined)
-    .then(async () => {
-      let marker: PersistenceMigrationMarker | null = null;
-      let markerWasRead = false;
-      try {
-        const markerRaw = await storage.read(markerPath);
-        markerWasRead = true;
-        marker = parseMigrationMarker(markerRaw);
-      } catch {
-        // A missing marker means this profile can claim the one-time migration.
-      }
-
-      if (markerWasRead && !marker) {
-        return;
-      }
-      if (marker && marker.profileId !== normalizedProfileId) {
-        return;
-      }
-      if (marker?.complete) {
-        return;
-      }
-      if (!marker) {
-        const claim: PersistenceMigrationMarker = {
-          version: 1,
-          profileId: normalizedProfileId,
-          complete: false,
-        };
-        await storage.write(markerPath, JSON.stringify(claim));
-      }
-
-      if (!(await storageEntryExists(storage, targetPath))) {
-        let legacyRaw: string | null = null;
-        try {
-          legacyRaw = await storage.read(legacyPath);
-        } catch {
-          // Legacy data may legitimately be absent.
-        }
-        const migratedRaw =
-          legacyRaw === null ? null : transform ? transform(legacyRaw) : legacyRaw;
-        if (migratedRaw !== null) {
-          await storage.write(targetPath, migratedRaw);
-        }
-      }
-
-      const completed: PersistenceMigrationMarker = {
-        version: 1,
-        profileId: normalizedProfileId,
-        complete: true,
-      };
-      await storage.write(markerPath, JSON.stringify(completed));
-    });
-
-  migrationLocks.set(markerPath, migration);
-  try {
-    await migration;
-  } finally {
-    if (migrationLocks.get(markerPath) === migration) {
-      migrationLocks.delete(markerPath);
-    }
-  }
 }
 
 export function parseWorkspaceFavoritePaths(raw: string): string[] {

@@ -61,7 +61,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     replayRecoveryEpochResetPendingRef,
     replayRecoveryGenerationRef,
     replayRecoveryRetryTimerRef,
-    setActiveCommands,
     setSelectedChat,
     setStreamingText,
     setTranscriptContinuationState,
@@ -181,7 +180,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
           applyThreadRuntimeSnapshot(selected.id);
         }
       } else if (!selectedId && !selectionChanged) {
-        setActiveCommands([]);
         setStreamingText(null);
         setPendingApproval(null);
         setPendingUserInputRequest(null);
@@ -203,7 +201,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       mergeChatWithPendingOptimisticMessages,
       readThreadContextUsage,
       setActiveBridgeUiSurfaces,
-      setActiveCommands,
       setActivePlan,
       setActiveTurnId,
       setActivity,

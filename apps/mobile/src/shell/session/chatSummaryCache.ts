@@ -81,16 +81,16 @@ export function parseChatSummaryCache(
       return createEmptyChatSummaryCache(profileId, new Date(now).toISOString());
     }
 
-    const migrated = migrateCache(record, profileId, now);
-    if (!migrated) {
+    const cache = parseCurrentCache(record, profileId, now);
+    if (!cache) {
       return createEmptyChatSummaryCache(profileId, new Date(now).toISOString());
     }
-    const entries = migrated.entries
+    const entries = cache.entries
       .map(normalizeEntry)
       .filter((entry): entry is ChatSummaryCacheEntry => entry !== null)
       .filter((entry) => now - Date.parse(entry.cachedAt) <= CHAT_SUMMARY_CACHE_MAX_AGE_MS);
     return boundChatSummaryCache({
-      ...migrated,
+      ...cache,
       entries,
     });
   } catch {
@@ -268,35 +268,21 @@ export function getChatSummaryCachePath(
   return `${base}dappercode-chat-cache/${encodeURIComponent(profileId)}/summaries.json`;
 }
 
-function migrateCache(
+function parseCurrentCache(
   parsed: Record<string, unknown>,
   profileId: string,
   now: number,
 ): ChatSummaryCache | null {
-  if (parsed['version'] === CHAT_SUMMARY_CACHE_VERSION && Array.isArray(parsed['entries'])) {
-    return {
-      version: CHAT_SUMMARY_CACHE_VERSION,
-      profileId,
-      updatedAt: normalizeTimestamp(parsed['updatedAt'], now),
-      lastSuccessfulRefreshAt: normalizeNullableTimestamp(parsed['lastSuccessfulRefreshAt']),
-      entries: parsed['entries'] as ChatSummaryCacheEntry[],
-    };
+  if (parsed['version'] !== CHAT_SUMMARY_CACHE_VERSION || !Array.isArray(parsed['entries'])) {
+    return null;
   }
-  if (parsed['version'] === 0 && Array.isArray(parsed['chats'])) {
-    const updatedAt = normalizeTimestamp(parsed['updatedAt'], now);
-    const entries = (parsed['chats'] as unknown[])
-      .map(normalizeSummary)
-      .filter((summary): summary is ChatSummary => summary !== null)
-      .map((summary) => ({ summary, cachedAt: updatedAt }));
-    return {
-      version: CHAT_SUMMARY_CACHE_VERSION,
-      profileId,
-      updatedAt,
-      lastSuccessfulRefreshAt: updatedAt,
-      entries,
-    };
-  }
-  return null;
+  return {
+    version: CHAT_SUMMARY_CACHE_VERSION,
+    profileId,
+    updatedAt: normalizeTimestamp(parsed['updatedAt'], now),
+    lastSuccessfulRefreshAt: normalizeNullableTimestamp(parsed['lastSuccessfulRefreshAt']),
+    entries: parsed['entries'] as ChatSummaryCacheEntry[],
+  };
 }
 
 function normalizeEntry(value: unknown): ChatSummaryCacheEntry | null {

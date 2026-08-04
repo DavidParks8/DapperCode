@@ -129,45 +129,6 @@ export function setActiveBridgeProfile(
   };
 }
 
-export function renameBridgeProfile(
-  store: BridgeProfileStore,
-  profileId: string,
-  nextName: string | null | undefined,
-): BridgeProfileStore {
-  const existing = store.profiles.find((profile) => profile.id === profileId);
-  if (!existing) {
-    return sanitizeBridgeProfileStore(store);
-  }
-
-  const updatedAt = new Date().toISOString();
-  return sanitizeBridgeProfileStore({
-    ...store,
-    profiles: store.profiles.map((profile) =>
-      profile.id === profileId
-        ? {
-            ...profile,
-            name: deriveBridgeProfileName(nextName, profile.bridgeUrl),
-            updatedAt,
-          }
-        : profile,
-    ),
-  });
-}
-
-export function removeBridgeProfile(
-  store: BridgeProfileStore,
-  profileId: string,
-): BridgeProfileStore {
-  const nextProfiles = store.profiles.filter((profile) => profile.id !== profileId);
-  const nextActiveProfileId =
-    store.activeProfileId === profileId ? (nextProfiles[0]?.id ?? null) : store.activeProfileId;
-
-  return sanitizeBridgeProfileStore({
-    activeProfileId: nextActiveProfileId,
-    profiles: nextProfiles,
-  });
-}
-
 export function getActiveBridgeProfile(store: BridgeProfileStore): BridgeProfile | null {
   if (!store.activeProfileId) {
     return null;

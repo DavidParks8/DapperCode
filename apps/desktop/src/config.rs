@@ -188,7 +188,6 @@ impl BridgeRuntimeConfig {
             Ok(())
         };
 
-        insert("BRIDGE_NETWORK_MODE", profile.network_mode.clone())?;
         insert("BRIDGE_HOST", profile.bridge_host.clone())?;
         insert("BRIDGE_PORT", profile.bridge_port.to_string())?;
         insert("BRIDGE_PREVIEW_HOST", profile.bridge_host.clone())?;
@@ -743,7 +742,7 @@ mod tests {
         let data = tempdir().unwrap();
         let paths = AppPaths::for_tests(data.path().to_path_buf());
         let mut profile = profile("alpha-000000000001", workspace.path(), 18791);
-        profile.network_mode = "local\nBRIDGE_AUTH_TOKEN=stolen".to_string();
+        profile.connect_url = "http://127.0.0.1\nBRIDGE_AUTH_TOKEN=stolen".to_string();
         paths.prepare_profile(&profile.profile_id).unwrap();
         std::fs::write(paths.manifest_path(&profile.profile_id), b"{}").unwrap();
 

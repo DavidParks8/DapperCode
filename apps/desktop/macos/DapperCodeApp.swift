@@ -80,10 +80,6 @@ private struct SetupResult: Decodable {
     let secretBackend: String
 }
 
-private struct StopAllResult: Decodable {
-    let stopped: Int
-}
-
 private enum NetworkMode: String, CaseIterable, Identifiable {
     case tailscale
     case local

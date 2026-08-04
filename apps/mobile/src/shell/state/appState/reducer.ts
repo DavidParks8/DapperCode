@@ -1,8 +1,5 @@
 import {
-  createEmptyBridgeProfileStore,
   parseBridgeProfileStore,
-  removeBridgeProfile,
-  renameBridgeProfile,
   setActiveBridgeProfile,
   upsertBridgeProfile,
 } from '@shell/state/bridgeProfiles';
@@ -12,8 +9,6 @@ import {
   type AppStateAction,
   type AppStateData,
   AppStatePersistenceError,
-  type LegacyAppStateSource,
-  createDefaultPushSettings,
   normalizeAppSettings,
   normalizeAppStateData,
   normalizeCollaborationMode,
@@ -23,7 +18,6 @@ import {
   persistenceError,
   updatePushRegistration,
 } from '@shell/state/appState/model';
-import { parseAppSettings } from '@shell/state/appSettings';
 
 type ProfileAction = Extract<AppStateAction, { type: `profiles/${string}` }>;
 type PushAction = Extract<AppStateAction, { type: `push/${string}` }>;
@@ -98,28 +92,6 @@ function reduceProfileAction(state: AppStateData, action: ProfileAction): AppSta
         bridgeProfiles: setActiveBridgeProfile(state.bridgeProfiles, action.profileId),
       };
     }
-    case 'profiles/rename':
-      return {
-        ...state,
-        bridgeProfiles: renameBridgeProfile(state.bridgeProfiles, action.profileId, action.name),
-      };
-    case 'profiles/remove':
-      return {
-        ...state,
-        bridgeProfiles: removeBridgeProfile(state.bridgeProfiles, action.profileId),
-        push: {
-          ...state.push,
-          registrations: state.push.registrations.filter(
-            (registration) => registration.profileId !== action.profileId,
-          ),
-        },
-      };
-    case 'profiles/clear':
-      return {
-        ...state,
-        bridgeProfiles: createEmptyBridgeProfileStore(),
-        push: { ...state.push, registrations: [] },
-      };
   }
 }
 
@@ -185,13 +157,7 @@ export function serializeAppState(data: AppStateData): string {
 export function parsePersistedAppState(raw: string): AppStateData {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      (parsed['version'] !== 1 &&
-        parsed['version'] !== 2 &&
-        parsed['version'] !== APP_STATE_VERSION)
-    ) {
+    if (!parsed || typeof parsed !== 'object' || parsed['version'] !== APP_STATE_VERSION) {
       throw new Error(`Unsupported app-state version: ${String(parsed?.['version'])}`);
     }
     return normalizeAppStateData({
@@ -210,29 +176,6 @@ export function parsePersistedAppState(raw: string): AppStateData {
       error,
     );
   }
-}
-
-export function importLegacyAppState(source: LegacyAppStateSource): AppStateData {
-  const parsedSettings = parseAppSettings(source.settingsRaw ?? '');
-  let bridgeProfiles = parseBridgeProfileStore(source.bridgeProfilesRaw);
-  if (
-    bridgeProfiles.profiles.length === 0 &&
-    parsedSettings.bridgeUrl &&
-    parsedSettings.bridgeToken
-  ) {
-    bridgeProfiles = upsertBridgeProfile(bridgeProfiles, {
-      name: null,
-      bridgeUrl: parsedSettings.bridgeUrl,
-      bridgeToken: parsedSettings.bridgeToken,
-      activate: true,
-    }).store;
-  }
-
-  return {
-    settings: normalizeAppSettings(parsedSettings),
-    bridgeProfiles,
-    push: createDefaultPushSettings(),
-  };
 }
 
 export { persistenceError };
