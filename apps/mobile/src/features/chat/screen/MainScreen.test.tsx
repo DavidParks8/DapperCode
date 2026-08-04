@@ -38,6 +38,8 @@ import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { selectedChatAtom } from '../state/session';
 import { activeTurnIdAtom } from '../state/turn';
+import { liveAssistantByThreadAtom } from '../state/turn';
+import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { activityAtom } from '../state/composer';
 import {
   agentRootThreadIdAtom,
@@ -3084,9 +3086,25 @@ function MainRouteShell() {
       const commands = store.get(mainScreenCommandsAtom);
       expect(commands).toBeTruthy();
       act(() => {
+        store.set(liveAssistantByThreadAtom, {
+          [rootChat.id]: {
+            ...createAgUiThreadMessageState(),
+            messages: [
+              {
+                id: 'stale-live-message',
+                role: 'assistant',
+                content: 'Prior session context',
+                createdAt: '2026-08-03T00:00:00.000Z',
+              },
+            ],
+          },
+        });
+      });
+      act(() => {
         commands?.startNewChat();
         expect(store.get(relatedAgentThreadsAtom)).toEqual([]);
         expect(store.get(agentRootThreadIdAtom)).toBeNull();
+        expect(store.get(liveAssistantByThreadAtom)).toEqual({});
       });
       expect(hasText(root, "Let's build")).toBe(true);
 

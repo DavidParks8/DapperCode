@@ -1,5 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { ChatMessage, ToolInvocationRow } from '../message/ChatMessage';
 import { ComputerUseTimeline } from '../message/ComputerUse';
@@ -19,7 +18,7 @@ interface RenderChatTranscriptItemOptions {
   onInlineOptionSelect: (value: string) => void;
   onOpenLocalPreview?: (targetUrl: string) => void;
   onOpenSubAgentThread?: (threadId: string) => void;
-  forkEligible: boolean;
+  forkBoundaryMessageId?: string;
   forkBusy: boolean;
   onForkConversation?: (messageId: string) => void;
   threadRunning: boolean;
@@ -34,7 +33,7 @@ export function renderChatTranscriptItem({
   onInlineOptionSelect,
   onOpenLocalPreview,
   onOpenSubAgentThread,
-  forkEligible,
+  forkBoundaryMessageId,
   forkBusy,
   onForkConversation,
   threadRunning,
@@ -77,6 +76,10 @@ export function renderChatTranscriptItem({
       bridgeToken={bridgeToken}
       onOpenLocalPreview={onOpenLocalPreview}
       onOpenSubAgentThread={onOpenSubAgentThread}
+      onForkConversation={
+        forkBoundaryMessageId ? () => onForkConversation?.(forkBoundaryMessageId) : undefined
+      }
+      forkBusy={forkBusy}
     />
   );
   const inlineChoices = showInlineChoices ? (
@@ -105,39 +108,6 @@ export function renderChatTranscriptItem({
       <Text style={styles.inlineChoiceHint}>Tap an option to fill the reply box.</Text>
     </View>
   ) : null;
-  if (forkEligible) {
-    return (
-      <View style={styles.chatMessageBlock}>
-        <View style={styles.forkCheckpoint}>
-          <View style={styles.forkCheckpointLine} />
-          <Pressable
-            style={({ pressed }) => [
-              styles.forkCheckpointButton,
-              pressed && !forkBusy && styles.forkCheckpointButtonPressed,
-            ]}
-            disabled={forkBusy}
-            onPress={() => onForkConversation?.(message.id)}
-            accessibilityRole="button"
-            accessibilityLabel="Fork conversation from this point"
-            accessibilityHint="Creates a new conversation containing the completed requests before this one"
-            accessibilityState={{ busy: forkBusy, disabled: forkBusy }}
-          >
-            {forkBusy ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Ionicons name="git-branch-outline" size={15} style={styles.forkCheckpointIcon} />
-            )}
-            <Text style={styles.forkCheckpointLabel}>
-              {forkBusy ? 'Forking conversation' : 'Fork from here'}
-            </Text>
-          </Pressable>
-          <View style={styles.forkCheckpointLine} />
-        </View>
-        {chatMessage}
-        {inlineChoices}
-      </View>
-    );
-  }
   return (
     <View style={styles.chatMessageBlock}>
       {chatMessage}

@@ -22,6 +22,8 @@ function ChatMessageComponent({
   bridgeToken = null,
   onOpenLocalPreview,
   onOpenSubAgentThread,
+  onForkConversation,
+  forkBusy = false,
 }: ChatMessageProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -90,6 +92,8 @@ function ChatMessageComponent({
     bridgeToken,
     onOpenLocalPreview,
     onOpenSubAgentThread,
+    onForkConversation,
+    forkBusy,
   };
   const kind = classifyChatMessageKind(message, Boolean(timelineEntries?.length));
   return CHAT_MESSAGE_RENDERERS[kind](ctx);
@@ -173,6 +177,20 @@ function isShallowRecordEqual(
   return previousKeys.every((key) => previous[key] === next[key]);
 }
 
+function areChatMessageActionPropsEqual(
+  previous: ChatMessageProps,
+  next: ChatMessageProps,
+): boolean {
+  return (
+    previous.bridgeUrl === next.bridgeUrl &&
+    previous.bridgeToken === next.bridgeToken &&
+    previous.onOpenLocalPreview === next.onOpenLocalPreview &&
+    previous.onOpenSubAgentThread === next.onOpenSubAgentThread &&
+    previous.onForkConversation === next.onForkConversation &&
+    previous.forkBusy === next.forkBusy
+  );
+}
+
 /** Exported for direct unit testing of the memo comparator's field-aware equality. */
 export function areChatMessagePropsEqual(
   previousProps: ChatMessageProps,
@@ -195,10 +213,7 @@ export function areChatMessagePropsEqual(
     (previous.role !== 'activity' ||
       next.role !== 'activity' ||
       previous.activityType === next.activityType) &&
-    previousProps.bridgeUrl === nextProps.bridgeUrl &&
-    previousProps.bridgeToken === nextProps.bridgeToken &&
-    previousProps.onOpenLocalPreview === nextProps.onOpenLocalPreview &&
-    previousProps.onOpenSubAgentThread === nextProps.onOpenSubAgentThread
+    areChatMessageActionPropsEqual(previousProps, nextProps)
   );
 }
 

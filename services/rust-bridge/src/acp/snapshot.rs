@@ -278,6 +278,15 @@ struct ToolProjection<'a> {
     locations: &'a FieldUpdate<Vec<serde_json::Value>>,
 }
 
+fn raw_opencode_message_id(message_id: &str) -> Option<&str> {
+    let candidate = message_id
+        .strip_prefix("export:")
+        .and_then(|rest| rest.split_once(':').map(|(raw_id, _)| raw_id))
+        .or_else(|| message_id.rsplit_once("::item::").map(|(_, raw_id)| raw_id))
+        .unwrap_or(message_id);
+    candidate.starts_with("msg_").then_some(candidate)
+}
+
 impl SessionSnapshot {
     pub fn complete_user_message_boundary(&self, message_id: &str) -> Option<UserMessageBoundary> {
         if self.unavailable_count != 0
@@ -299,7 +308,11 @@ impl SessionSnapshot {
             if message.role != MessageRole::User {
                 continue;
             }
-            if message.id == message_id {
+            let target_raw_id = raw_opencode_message_id(message_id);
+            let message_raw_id = raw_opencode_message_id(&message.id);
+            if message.id == message_id
+                || target_raw_id.is_some_and(|target| Some(target) == message_raw_id)
+            {
                 let first_text = message
                     .parts
                     .iter()
@@ -311,12 +324,7 @@ impl SessionSnapshot {
                     .unwrap_or_default()
                     .trim()
                     .to_string();
-                let raw_message_id_hint = message
-                    .id
-                    .strip_prefix("export:")
-                    .and_then(|rest| rest.split_once(':').map(|(message_id, _)| message_id))
-                    .filter(|message_id| !message_id.is_empty())
-                    .map(str::to_string);
+                let raw_message_id_hint = message_raw_id.map(str::to_string);
                 return Some(UserMessageBoundary {
                     ordinal,
                     first_text,
@@ -3529,6 +3537,34 @@ mod tests {
                 first_text: "user-message".to_string(),
                 first_text_truncated: false,
                 raw_message_id_hint: None,
+            })
+        );
+    }
+
+    #[test]
+    fn fork_boundary_accepts_live_wrapped_opencode_ids_and_preserves_the_raw_identity() {
+        let mut snapshot = SessionSnapshot::new("opencode".to_string(), "thread".to_string());
+        for (id, content) in [("msg_first", "first"), ("msg_boundary", "second")] {
+            snapshot.apply(&CanonicalEvent::MessageChunk {
+                agent_id: "opencode".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: MessageRole::User,
+                message_id: id.to_string(),
+                content: content.to_string(),
+                content_block: None,
+            });
+        }
+
+        assert_eq!(
+            snapshot.complete_user_message_boundary("thread::item::msg_boundary"),
+            Some(UserMessageBoundary {
+                ordinal: 1,
+                first_text: "second".to_string(),
+                first_text_truncated: false,
+                raw_message_id_hint: Some("msg_boundary".to_string()),
             })
         );
     }

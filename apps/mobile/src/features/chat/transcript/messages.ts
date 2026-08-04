@@ -128,26 +128,33 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
-export function eligibleForkMessageIds(
+export function forkBoundariesByActionMessageId(
   messages: ChatMessage[],
   chatStatus: ChatStatus,
-): ReadonlySet<string> {
-  const eligible = new Set<string>();
+): ReadonlyMap<string, string> {
+  const boundaries = new Map<string, string>();
   if (chatStatus === 'running') {
-    return eligible;
+    return boundaries;
   }
   let userOrdinal = 0;
+  let precedingResponseId: string | null = null;
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (message?.role === 'assistant' && !message.pending) {
+      precedingResponseId = message.id;
+      continue;
+    }
     if (message?.role !== 'user') {
       continue;
     }
     userOrdinal += 1;
     if (
       userOrdinal === 1 ||
+      !precedingResponseId ||
       message.id.startsWith('msg-') ||
       message.id.startsWith('local-user-')
     ) {
+      precedingResponseId = null;
       continue;
     }
     const remainder = messages.slice(index + 1);
@@ -158,10 +165,11 @@ export function eligibleForkMessageIds(
         (candidate.role === 'assistant' || candidate.role === 'reasoning') && !candidate.pending,
     );
     if (hasSettledResponse) {
-      eligible.add(message.id);
+      boundaries.set(precedingResponseId, message.id);
     }
+    precedingResponseId = null;
   }
-  return eligible;
+  return boundaries;
 }
 
 function isComputerUseTrace(invocations: ToolInvocation[]): boolean {

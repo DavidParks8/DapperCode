@@ -2,6 +2,7 @@ import {
   activePlanAtom,
   activeTurnIdAtom,
   errorAtom,
+  liveAssistantByThreadAtom,
   pendingApprovalAtom,
   pendingUserInputRequestAtom,
   resolvingUserInputAtom,
@@ -79,6 +80,7 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const setResolvingUserInput = useSetAtom(resolvingUserInputAtom);
   const setActivePlan = useSetAtom(activePlanAtom);
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
+  const setLiveAssistantByThread = useSetAtom(liveAssistantByThreadAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
   const setSelectedServiceTier = useSetAtom(selectedServiceTierAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
@@ -136,6 +138,7 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       setResolvingUserInput(false);
       setActivePlan(null);
       setStreamingText(null);
+      setLiveAssistantByThread({});
       clearAttachments();
       setActiveTurnId(null);
       setStoppingTurn(false);
@@ -176,6 +179,7 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       setEffortModalVisible,
       setError,
       setLoadingAgentThreads,
+      setLiveAssistantByThread,
       setModelModalVisible,
       setOpeningChatId,
       setPendingAgentId,

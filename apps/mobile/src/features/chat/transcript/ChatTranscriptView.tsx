@@ -34,7 +34,7 @@ import {
 import { createStyles } from '../styles/styles';
 import {
   buildTranscriptDisplayItems,
-  eligibleForkMessageIds,
+  forkBoundariesByActionMessageId,
   type TranscriptDisplayItem,
 } from './messages';
 import { projectTranscript } from './controllers/projectionController';
@@ -182,13 +182,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
   );
-  const forkMessageIds = useMemo(
+  const forkBoundaries = useMemo(
     () =>
       supportsConversationFork &&
       !chat.parentThreadId &&
       (continuationState?.unavailableCount ?? 0) === 0
-        ? eligibleForkMessageIds(visibleMessages, chat.status)
-        : new Set<string>(),
+        ? forkBoundariesByActionMessageId(visibleMessages, chat.status)
+        : new Map<string, string>(),
     [
       chat.parentThreadId,
       chat.status,
@@ -441,18 +441,19 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         onInlineOptionSelect,
         onOpenLocalPreview,
         onOpenSubAgentThread,
-        forkEligible:
-          item.kind === 'message' &&
-          forkMessageIds.has(item.message.id) &&
-          Boolean(onForkConversation),
-        forkBusy: item.kind === 'message' && forkingMessageId === item.message.id,
+        forkBoundaryMessageId:
+          item.kind === 'message' && onForkConversation
+            ? forkBoundaries.get(item.message.id)
+            : undefined,
+        forkBusy:
+          item.kind === 'message' && forkBoundaries.get(item.message.id) === forkingMessageId,
         onForkConversation: handleForkConversation,
         threadRunning,
       }),
     [
       bridgeToken,
       bridgeUrl,
-      forkMessageIds,
+      forkBoundaries,
       forkingMessageId,
       handleForkConversation,
       inlineChoiceSet,

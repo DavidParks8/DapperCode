@@ -8,6 +8,8 @@ export interface ChatMessageProps {
   bridgeToken?: string | null;
   onOpenLocalPreview?: (targetUrl: string) => void;
   onOpenSubAgentThread?: (threadId: string) => void;
+  onForkConversation?: () => void;
+  forkBusy?: boolean;
 }
 
 export interface TimelineEntry {
