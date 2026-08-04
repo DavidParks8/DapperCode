@@ -1,9 +1,11 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Chat } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { requireTestValue } from '@shared/testing/requireTestValue';
 import {
   getRenderedGlassViewProps,
   setMockGlassEffectAPIAvailable,
@@ -163,8 +165,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       const hitSlop = chip.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
-      expect(hitSlop!.top).toBeGreaterThan(0);
-      expect(hitSlop!.bottom).toBeGreaterThan(0);
+      expect(28 + hitSlop!.top + hitSlop!.bottom).toBeGreaterThanOrEqual(48);
     }
     act(() => tree.unmount());
   });
@@ -205,7 +206,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     act(() => tree.unmount());
   });
 
-  it('renders the selector rail with the native capsule material when Liquid Glass is available', () => {
+  it('renders selectors as a full-width extension of the header glass', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
 
@@ -214,8 +215,32 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       (props) => props.testID === 'session-meta-glass-surface',
     );
 
-    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
-    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.chrome.glassEffectStyle);
+    expect(glassProps?.tintColor).toBe(theme.glass.chrome.tintColor);
+    expect(StyleSheet.flatten(glassProps?.style)).toMatchObject({ minHeight: 48 });
+    expect(StyleSheet.flatten(glassProps?.style)).not.toHaveProperty('borderRadius');
+    expect(StyleSheet.flatten(glassProps?.style)).not.toHaveProperty('paddingVertical');
+
+    const root = queryRoot(tree);
+    const selectorScrollView = root.findAll(
+      (node) =>
+        node.props['horizontal'] === true && node.props['contentContainerStyle'] !== undefined,
+    )[0];
+    expect(
+      StyleSheet.flatten(
+        requireTestValue(selectorScrollView, 'selector scroll view').props[
+          'contentContainerStyle'
+        ] as never,
+      ),
+    ).toMatchObject({ minHeight: 48 });
+
+    const modelChip = findPressableByLabelPrefix(root, 'Model,');
+    const modelChipStyle = modelChip.props['style'] as (state: { pressed: boolean }) => unknown;
+    expect(StyleSheet.flatten(modelChipStyle({ pressed: false }) as never)).toMatchObject({
+      backgroundColor: theme.colors.bgCanvasAccent,
+      borderRadius: theme.radius.full,
+      borderWidth: StyleSheet.hairlineWidth,
+    });
     act(() => tree.unmount());
   });
 

@@ -581,17 +581,17 @@ describe('ChatHeader', () => {
     );
     const root = queryRoot(tree);
 
-    const expectMinimumHitSlop = (label: string) => {
+    const expect48PointTarget = (label: string, visibleSize: number) => {
       const hitSlop = findPressable(root, label).props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
-      expect(hitSlop!.top).toBeGreaterThan(0);
-      expect(hitSlop!.bottom).toBeGreaterThan(0);
+      expect(visibleSize + hitSlop!.top + hitSlop!.bottom).toBeGreaterThanOrEqual(48);
+      expect(visibleSize + hitSlop!.left + hitSlop!.right).toBeGreaterThanOrEqual(48);
     };
 
-    expectMinimumHitSlop('Open navigation drawer');
-    expectMinimumHitSlop('Edit session title');
-    expectMinimumHitSlop('Open Git');
+    expect48PointTarget('Open navigation drawer', 24);
+    expect48PointTarget('Edit session title', 22);
+    expect48PointTarget('Open Git', 22);
     act(() => tree.unmount());
   });
 });

@@ -171,13 +171,13 @@ describe('theme', () => {
     const dark = createAppTheme('dark');
     const light = createAppTheme('light');
 
-    expect(dark.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.26)');
-    expect(dark.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.34)');
-    expect(dark.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.24)');
+    expect(dark.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.10)');
+    expect(dark.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.14)');
+    expect(dark.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.12)');
     expect(dark.glass.prominent.tintColor).toBe(dark.colors.userBubble);
-    expect(light.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.10)');
-    expect(light.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.15)');
-    expect(light.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.12)');
+    expect(light.glass.chrome.tintColor).toBe('rgba(0, 111, 230, 0.05)');
+    expect(light.glass.capsule.tintColor).toBe('rgba(0, 111, 230, 0.08)');
+    expect(light.glass.drawer.tintColor).toBe('rgba(0, 111, 230, 0.07)');
     expect(light.glass.prominent.tintColor).toBe(light.colors.userBubble);
   });
 

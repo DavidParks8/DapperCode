@@ -35,9 +35,12 @@ export function ChatHeader({
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const titleDisplay = title.trim() || 'New chat';
-  const menuHitSlop = useMemo(() => computeHitSlop(MENU_BUTTON_VISIBLE_SIZE), []);
-  const rightHitSlop = useMemo(() => computeHitSlop(RIGHT_BUTTON_VISIBLE_SIZE), []);
-  const editHitSlop = useMemo(() => computeHitSlop(EDIT_BUTTON_VISIBLE_SIZE), []);
+  const menuHitSlop = useMemo(() => computeHitSlop(MENU_BUTTON_VISIBLE_SIZE, { minimum: 48 }), []);
+  const rightHitSlop = useMemo(
+    () => computeHitSlop(RIGHT_BUTTON_VISIBLE_SIZE, { minimum: 48 }),
+    [],
+  );
+  const editHitSlop = useMemo(() => computeHitSlop(EDIT_BUTTON_VISIBLE_SIZE, { minimum: 48 }), []);
 
   return (
     <GlassSurface role="chrome" style={styles.headerContainer} testID="chat-header-glass-surface">
@@ -150,6 +153,7 @@ const createStyles = (theme: AppTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.sm,
+      minHeight: 48,
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.sm,
     },

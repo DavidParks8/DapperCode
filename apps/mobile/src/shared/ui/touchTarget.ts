@@ -23,9 +23,9 @@ export interface HitSlop {
  */
 export function computeHitSlop(
   visibleSize: { width: number; height: number },
-  options?: { maxHorizontal?: number; maxVertical?: number },
+  options?: { maxHorizontal?: number; maxVertical?: number; minimum?: number },
 ): HitSlop {
-  const minimum = resolveMinimumTouchTarget();
+  const minimum = options?.minimum ?? resolveMinimumTouchTarget();
   const verticalSlop = Math.max(0, Math.ceil((minimum - visibleSize.height) / 2));
   const horizontalSlop = Math.max(0, Math.ceil((minimum - visibleSize.width) / 2));
   const vertical =

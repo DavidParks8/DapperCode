@@ -22,6 +22,7 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared
 
 const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
 const ACTION_BUTTON_VISIBLE_SIZE = { width: 48, height: 48 };
+const ADD_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
 const INPUT_TEXT_LINE_HEIGHT = 20;
 const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
 const INPUT_TEXT_MIN_HEIGHT = INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
@@ -311,6 +312,10 @@ export function ChatInput(props: ChatInputProps) {
   const { colors } = theme;
   const styles = useMemo(() => createChatInputStyles(theme), [theme]);
   const actionButtonHitSlop = useMemo(() => computeHitSlop(ACTION_BUTTON_VISIBLE_SIZE), []);
+  const addButtonHitSlop = useMemo(
+    () => computeHitSlop(ADD_BUTTON_VISIBLE_SIZE, { minimum: 48 }),
+    [],
+  );
   // Attachment chips vary in width with their label; the removal affordance shares the chip's
   // full Pressable area, so only vertical slop is needed and horizontal is capped to avoid
   // overlapping a neighboring chip in the tightly packed scroll row.
@@ -338,7 +343,7 @@ export function ChatInput(props: ChatInputProps) {
 
   const canSend = value.trim().length > 0 && !submitDisabled;
   const canStop = Boolean(showStopButton && onStop);
-  const showSendButton = canSend || (isLoading && !canStop);
+  const showSendButton = !canStop || canSend;
   const inputScrollEnabled = inputHeight >= INPUT_TEXT_MAX_HEIGHT;
   const submitUsesPrimaryChrome = canSend;
   const composerBottomSpacing = resolveComposerBottomSpacing(
@@ -374,34 +379,6 @@ export function ChatInput(props: ChatInputProps) {
         ]}
       >
         <View style={styles.composerGroup} testID="composer-control-groups">
-          <Pressable
-            disabled={attachDisabled}
-            onPress={onAttachPress}
-            hitSlop={actionButtonHitSlop}
-            style={({ pressed }) => [
-              styles.actionButtonFrame,
-              pressed && !attachDisabled && styles.actionButtonPressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Add attachment"
-            accessibilityHint="Opens attachment choices"
-            accessibilityState={controlAccessibilityState({ disabled: attachDisabled })}
-          >
-            <GlassSurface
-              pointerEvents="none"
-              role="capsule"
-              style={styles.actionButtonGlass}
-              testID="composer-add-glass-surface"
-            >
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="add"
-                size={21}
-                color={attachDisabled ? colors.textMuted : colors.textPrimary}
-              />
-            </GlassSurface>
-          </Pressable>
-
           <GlassSurface
             isInteractive
             role="capsule"
@@ -418,59 +395,81 @@ export function ChatInput(props: ChatInputProps) {
               styles={styles}
               textMutedColor={colors.textMuted}
             />
-            <View style={styles.inputWrapper}>
-              <Text
-                pointerEvents="none"
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={[
-                  styles.inputMeasure,
-                  {
-                    width: inputWidth,
-                    lineHeight: INPUT_TEXT_LINE_HEIGHT,
-                    paddingVertical: INPUT_TEXT_VERTICAL_PADDING,
-                  },
+            <View style={styles.composerInputRow}>
+              <Pressable
+                disabled={attachDisabled}
+                onPress={onAttachPress}
+                hitSlop={addButtonHitSlop}
+                style={({ pressed }) => [
+                  styles.addButton,
+                  pressed && !attachDisabled && styles.addButtonPressed,
                 ]}
-                onTextLayout={(event: TextLayoutEvent) => {
-                  if (inputWidth <= 0) {
-                    return;
-                  }
-                  const lineCount = Math.max(1, event.nativeEvent.lines.length);
-                  const measuredHeight =
-                    lineCount * INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
-                  updateInputHeight(measuredHeight);
-                }}
+                accessibilityRole="button"
+                accessibilityLabel="Add attachment"
+                accessibilityHint="Opens attachment choices"
+                accessibilityState={controlAccessibilityState({ disabled: attachDisabled })}
               >
-                {value.length > 0 ? `${value}\u200b` : ' '}
-              </Text>
-              <TextInput
-                style={[styles.input, { height: inputHeight }]}
-                value={value}
-                onChangeText={onChangeText}
-                keyboardAppearance={theme.keyboardAppearance}
-                onLayout={(event) => {
-                  const nextWidth = Math.floor(event.nativeEvent.layout.width);
-                  setInputWidth((previousWidth) =>
-                    previousWidth === nextWidth ? previousWidth : nextWidth,
-                  );
-                }}
-                onFocus={onFocus}
-                placeholder={placeholder}
-                placeholderTextColor={colors.textMuted}
-                multiline
-                accessibilityLabel="Message"
-                accessibilityHint="Enter a message for the agent"
-                scrollEnabled={inputScrollEnabled}
-                onKeyPress={(e: TextInputKeyPressEvent) => {
-                  const keyEvent = e.nativeEvent as TextInputKeyPressEvent['nativeEvent'] & {
-                    shiftKey?: boolean;
-                  };
-                  if (Platform.OS === 'web' && keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-              />
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="add"
+                  size={21}
+                  color={attachDisabled ? colors.textMuted : colors.textPrimary}
+                />
+              </Pressable>
+              <View style={styles.inputWrapper}>
+                <Text
+                  pointerEvents="none"
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  style={[
+                    styles.inputMeasure,
+                    {
+                      width: inputWidth,
+                      lineHeight: INPUT_TEXT_LINE_HEIGHT,
+                      paddingVertical: INPUT_TEXT_VERTICAL_PADDING,
+                    },
+                  ]}
+                  onTextLayout={(event: TextLayoutEvent) => {
+                    if (inputWidth <= 0) {
+                      return;
+                    }
+                    const lineCount = Math.max(1, event.nativeEvent.lines.length);
+                    const measuredHeight =
+                      lineCount * INPUT_TEXT_LINE_HEIGHT + INPUT_TEXT_VERTICAL_PADDING * 2;
+                    updateInputHeight(measuredHeight);
+                  }}
+                >
+                  {value.length > 0 ? `${value}\u200b` : ' '}
+                </Text>
+                <TextInput
+                  style={[styles.input, { height: inputHeight }]}
+                  value={value}
+                  onChangeText={onChangeText}
+                  keyboardAppearance={theme.keyboardAppearance}
+                  onLayout={(event) => {
+                    const nextWidth = Math.floor(event.nativeEvent.layout.width);
+                    setInputWidth((previousWidth) =>
+                      previousWidth === nextWidth ? previousWidth : nextWidth,
+                    );
+                  }}
+                  onFocus={onFocus}
+                  placeholder={placeholder}
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  accessibilityLabel="Message"
+                  accessibilityHint="Enter a message for the agent"
+                  scrollEnabled={inputScrollEnabled}
+                  onKeyPress={(e: TextInputKeyPressEvent) => {
+                    const keyEvent = e.nativeEvent as TextInputKeyPressEvent['nativeEvent'] & {
+                      shiftKey?: boolean;
+                    };
+                    if (Platform.OS === 'web' && keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
+                      e.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                />
+              </View>
             </View>
           </GlassSurface>
 

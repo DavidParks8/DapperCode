@@ -171,7 +171,7 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders independent 48-point glass composer controls without a merging container', () => {
+  it('embeds Add in the input glass while keeping Send as a separate action', () => {
     const originalPlatformOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     setMockLiquidGlassAvailable(true);
@@ -192,15 +192,12 @@ describe('ChatInput behavior', () => {
     });
 
     const glassProps = getRenderedGlassViewProps();
-    const addSurface = glassProps.find((entry) => entry.testID === 'composer-add-glass-surface');
     const inputSurface = glassProps.find(
       (entry) => entry.testID === 'composer-input-glass-surface',
     );
     const submitSurface = glassProps.find(
       (entry) => entry.testID === 'composer-submit-glass-surface',
     );
-    expect(addSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
-    expect(addSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
     expect(inputSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
     expect(inputSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
     expect(submitSurface?.glassEffectStyle).toBe(theme.glass.prominent.glassEffectStyle);
@@ -208,16 +205,43 @@ describe('ChatInput behavior', () => {
     const root = (tree as ReactTestRenderer).root as Queryable;
     const addButton = byLabel(root, 'Add attachment');
     const sendButton = byLabel(root, 'Send message');
+    const inputGlass = root.findAll(
+      (node) => node.props['testID'] === 'composer-input-glass-surface',
+    )[0];
     expect(
-      addButton.findAll((node) => node.props['testID'] === 'composer-add-glass-surface'),
+      requireTestValue(inputGlass, 'composer input glass').findAll(
+        (node) => node.props['accessibilityLabel'] === 'Add attachment',
+      ),
     ).not.toHaveLength(0);
     expect(
       sendButton.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
     ).not.toHaveLength(0);
+    expect(
+      requireTestValue(inputGlass, 'composer input glass').findAll(
+        (node) => node.props['accessibilityLabel'] === 'Send message',
+      ),
+    ).toHaveLength(0);
+    expect(addButton.props['hitSlop']).toEqual({ top: 6, right: 6, bottom: 6, left: 6 });
     expect(byLabel(root, 'Message')).toBeTruthy();
 
     act(() => (tree as ReactTestRenderer).unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
+  });
+
+  it('keeps the disabled Send action visible beside an empty composer', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        wrap(<ChatInput {...base} value="" isLoading={false} onAttachPress={base.onAttachPress} />),
+      );
+    });
+
+    const sendButton = byLabel((tree as ReactTestRenderer).root as Queryable, 'Send message');
+    expect(sendButton.props['disabled']).toBe(true);
+    expect(
+      sendButton.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
+    ).not.toHaveLength(0);
+    act(() => (tree as ReactTestRenderer).unmount());
   });
 
   it('reserves enough height for placeholder descenders', () => {
@@ -378,7 +402,7 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders circular composer actions at the platform minimum touch target', () => {
+  it('renders trailing composer actions at 48 points and keeps Add embedded', () => {
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
@@ -400,14 +424,9 @@ describe('ChatInput behavior', () => {
     const removeAttachment = byLabel(root, 'error.log, remove attachment');
 
     const glassProps = getRenderedGlassViewProps();
-    const addStyle = StyleSheet.flatten(
-      glassProps.find((entry) => entry.testID === 'composer-add-glass-surface')?.style,
-    ) as Record<string, unknown>;
     const sendStyle = StyleSheet.flatten(
       glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
     ) as Record<string, unknown>;
-    expect(addStyle['width']).toBe(48);
-    expect(addStyle['height']).toBe(48);
     expect(sendStyle['width']).toBe(48);
     expect(sendStyle['height']).toBe(48);
     const stopStyle = StyleSheet.flatten(
@@ -418,6 +437,12 @@ describe('ChatInput behavior', () => {
     ) as Record<string, unknown>;
     expect(stopStyle['backgroundColor']).toBe(theme.glass.capsule.fallbackBackgroundColor);
     expect(submitStyle['backgroundColor']).toBe(theme.glass.prominent.fallbackBackgroundColor);
+    expect(byLabel(root, 'Add attachment').props['hitSlop']).toEqual({
+      top: 6,
+      right: 6,
+      bottom: 6,
+      left: 6,
+    });
     expect(removeAttachment.props['hitSlop']).toBeDefined();
     act(() => rendered.unmount());
   });

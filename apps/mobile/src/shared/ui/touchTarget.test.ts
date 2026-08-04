@@ -32,5 +32,14 @@ describe('touchTarget', () => {
       expect(slop.top).toBeLessThanOrEqual(3);
       expect(slop.bottom).toBeLessThanOrEqual(3);
     });
+
+    it('supports a stricter local minimum without changing platform defaults', () => {
+      expect(computeHitSlop({ width: 36, height: 36 }, { minimum: 48 })).toEqual({
+        top: 6,
+        bottom: 6,
+        left: 6,
+        right: 6,
+      });
+    });
   });
 });

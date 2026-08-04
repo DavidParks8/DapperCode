@@ -33,7 +33,7 @@ type MainScreenStyles = ReturnType<typeof useMainScreenStyles>['styles'];
 // target, and maxHorizontal caps the added slop so neighboring chips (separated by a ~6px gap)
 // don't steal each other's taps.
 const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 28 };
-const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3 };
+const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3, minimum: 48 };
 
 function handleSessionMetaChipPress(action: () => void | Promise<void>): void {
   void feedback.selection();
@@ -140,8 +140,8 @@ function SessionMetaRow(props: {
   } = context;
 
   return (
-    <GlassSurface role="capsule" style={styles.sessionMetaRow} testID="session-meta-glass-surface">
-      <View pointerEvents="none" style={styles.sessionMetaRailOutline} />
+    <GlassSurface role="chrome" style={styles.sessionMetaRow} testID="session-meta-glass-surface">
+      <View pointerEvents="none" style={styles.sessionMetaDivider} />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}

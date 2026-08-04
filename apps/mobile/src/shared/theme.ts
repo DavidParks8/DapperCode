@@ -246,9 +246,9 @@ const lightColors: AppColors = {
 };
 
 function createGlass(colors: AppColors, isDark: boolean): AppGlass {
-  const chromeTint = isDark ? 'rgba(0, 111, 230, 0.26)' : 'rgba(0, 111, 230, 0.10)';
-  const capsuleTint = isDark ? 'rgba(0, 111, 230, 0.34)' : 'rgba(0, 111, 230, 0.15)';
-  const drawerTint = isDark ? 'rgba(0, 111, 230, 0.24)' : 'rgba(0, 111, 230, 0.12)';
+  const chromeTint = isDark ? 'rgba(0, 111, 230, 0.10)' : 'rgba(0, 111, 230, 0.05)';
+  const capsuleTint = isDark ? 'rgba(0, 111, 230, 0.14)' : 'rgba(0, 111, 230, 0.08)';
+  const drawerTint = isDark ? 'rgba(0, 111, 230, 0.12)' : 'rgba(0, 111, 230, 0.07)';
 
   return {
     chrome: {
