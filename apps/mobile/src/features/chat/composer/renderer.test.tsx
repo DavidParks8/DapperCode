@@ -177,6 +177,31 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps the disabled Send control in the empty idle chat composer', () => {
+    const tree = render(
+      baseContext({
+        draft: '',
+        selectedChat: {
+          id: 'chat-1',
+          title: 'Chat',
+          status: 'idle',
+          createdAt: '2026-08-03T00:00:00.000Z',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+          statusUpdatedAt: '2026-08-03T00:00:00.000Z',
+          lastMessagePreview: '',
+          messages: [],
+        },
+      }),
+    );
+    const send = root(tree).findAll(
+      (node) =>
+        node.props['accessibilityLabel'] === 'Send message' && node.props['disabled'] === true,
+    );
+
+    expect(send).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
   it('renders slash suggestions with reduce-motion aware entering/exiting animations', () => {
     const enteringSpy = jest.spyOn(
       jest.requireActual('@shared/testing/reanimatedMock').FadeIn,

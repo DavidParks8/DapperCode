@@ -343,7 +343,6 @@ export function ChatInput(props: ChatInputProps) {
 
   const canSend = value.trim().length > 0 && !submitDisabled;
   const canStop = Boolean(showStopButton && onStop);
-  const showSendButton = !canStop || canSend;
   const inputScrollEnabled = inputHeight >= INPUT_TEXT_MAX_HEIGHT;
   const submitUsesPrimaryChrome = canSend;
   const composerBottomSpacing = resolveComposerBottomSpacing(
@@ -485,22 +484,20 @@ export function ChatInput(props: ChatInputProps) {
             />
           ) : null}
 
-          {showSendButton ? (
-            <ChatInputSendButton
-              onSubmit={handleSubmit}
-              canSend={canSend}
-              isLoading={isLoading}
-              submitUsesPrimaryChrome={submitUsesPrimaryChrome}
-              hitSlop={actionButtonHitSlop}
-              pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-              styles={styles}
-              textMutedColor={colors.textMuted}
-              textPrimaryColor={colors.textPrimary}
-              prominentTextColor={colors.userBubbleText}
-              label={submitLabel}
-              hint={submitHint}
-            />
-          ) : null}
+          <ChatInputSendButton
+            onSubmit={handleSubmit}
+            canSend={canSend}
+            isLoading={isLoading}
+            submitUsesPrimaryChrome={submitUsesPrimaryChrome}
+            hitSlop={actionButtonHitSlop}
+            pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+            styles={styles}
+            textMutedColor={colors.textMuted}
+            textPrimaryColor={colors.textPrimary}
+            prominentTextColor={colors.userBubbleText}
+            label={submitLabel}
+            hint={submitHint}
+          />
         </View>
         {footer || reserveFooterSpace ? (
           <View style={[styles.footer, !footer && styles.footerPlaceholder]}>{footer}</View>

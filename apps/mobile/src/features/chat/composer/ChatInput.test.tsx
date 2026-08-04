@@ -145,6 +145,7 @@ describe('ChatInput behavior', () => {
     act(() => byLabel(root, 'Stop agent').props.onPress());
     expect(base.onStop).toHaveBeenCalled();
     expect(mockHaptics.impactAsync).toHaveBeenCalledWith('heavy');
+    expect(byLabel(root, 'Agent is responding').props['disabled']).toBe(true);
     act(() =>
       rendered.update(
         wrap(
