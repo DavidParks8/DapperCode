@@ -10,6 +10,7 @@ import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionS
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
 import { useDrawerContentViewModel } from '@shell/navigation/drawerContentViewContext';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 
 const CLEAR_SEARCH_HIT_SLOP = computeHitSlop({ width: 28, height: 28 });
 
@@ -70,33 +71,18 @@ export function DrawerContentView() {
                 <Text style={styles.title}>Agent activity</Text>
                 <Text style={styles.subtitle}>Ordered by what needs you next</Text>
               </View>
-              <Pressable
-                accessibilityLabel="New chat"
-                accessibilityRole="button"
-                hitSlop={4}
-                onPress={handleNewChat}
-                style={({ pressed }) => [
-                  styles.headerIconButton,
-                  pressed && styles.headerIconButtonPressed,
-                ]}
-              >
+              <CircularToolbarButton accessibilityLabel="New chat" onPress={handleNewChat}>
                 <Ionicons
                   {...decorativeAccessibilityProps}
                   name="add"
                   size={24}
                   color={theme.colors.userBubble}
                 />
-              </Pressable>
+              </CircularToolbarButton>
               {handleClose ? (
-                <Pressable
+                <CircularToolbarButton
                   accessibilityLabel="Close session list"
-                  accessibilityRole="button"
-                  hitSlop={4}
                   onPress={handleClose}
-                  style={({ pressed }) => [
-                    styles.headerIconButton,
-                    pressed && styles.headerIconButtonPressed,
-                  ]}
                 >
                   <Ionicons
                     {...decorativeAccessibilityProps}
@@ -104,7 +90,7 @@ export function DrawerContentView() {
                     size={22}
                     color={theme.colors.userBubble}
                   />
-                </Pressable>
+                </CircularToolbarButton>
               ) : null}
             </View>
 
@@ -252,14 +238,9 @@ export function DrawerContentView() {
             />
             <Text style={styles.footerBrowserText}>Browser</Text>
           </Pressable>
-          <Pressable
+          <CircularToolbarButton
             accessibilityLabel="Open settings"
-            accessibilityRole="button"
             onPress={() => handleNavigate('Settings')}
-            style={({ pressed }) => [
-              styles.footerIconButton,
-              pressed && styles.footerActionPressed,
-            ]}
           >
             <Ionicons
               {...decorativeAccessibilityProps}
@@ -267,7 +248,7 @@ export function DrawerContentView() {
               size={18}
               color={theme.colors.userBubble}
             />
-          </Pressable>
+          </CircularToolbarButton>
         </View>
       </SafeAreaView>
 

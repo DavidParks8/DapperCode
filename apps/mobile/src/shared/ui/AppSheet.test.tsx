@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppSheet } from '@shared/ui/AppSheet';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import {
   MIN_TOUCH_TARGET,
   SHEET_CORNER_CLEARANCE,
@@ -72,6 +73,20 @@ function renderBackdrop(tree: ReactTestRenderer): { props: Record<string, unknow
     props: Record<string, unknown>,
   ) => { props: Record<string, unknown> };
   return backdropComponent({ animatedIndex: { value: 0 }, animatedPosition: { value: 0 } });
+}
+
+function renderSheetBackground(
+  tree: ReactTestRenderer,
+  providedStyle: unknown = { backgroundColor: 'rgb(255, 0, 0)' },
+): { type: unknown; props: Record<string, unknown> } {
+  const backgroundComponent = findModal(tree).props['backgroundComponent'] as (
+    props: Record<string, unknown>,
+  ) => { type: unknown; props: Record<string, unknown> };
+  return backgroundComponent({
+    animatedIndex: { value: 0 },
+    animatedPosition: { value: 0 },
+    style: providedStyle,
+  });
 }
 
 function renderSheet(node: React.ReactElement): ReactTestRenderer {
@@ -387,6 +402,29 @@ describe('AppSheet', () => {
     expect(lockedBackdrop.props['pressBehavior']).toBe('none');
     expect(lockedBackdrop.props['accessibilityLabel']).toBe('Close sheet');
     act(() => lockedTree.unmount());
+  });
+
+  it('paints the sheet background with the drawer glass material', () => {
+    const tree = renderSheet(
+      wrap(
+        <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose a model">
+          <Text>Model list</Text>
+        </AppSheet>,
+      ),
+    );
+    // An opaque `backgroundStyle` would sit in front of the material and defeat the glass.
+    expect(findModal(tree).props['backgroundStyle']).toBeUndefined();
+
+    const background = renderSheetBackground(tree);
+    expect(background.type).toBe(GlassSurface);
+    expect(background.props['role']).toBe('drawer');
+    const backgroundStyle = flatten(background.props['style']);
+    expect(backgroundStyle['backgroundColor']).toBeUndefined();
+    expect(backgroundStyle).toMatchObject({
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+    });
+    act(() => tree.unmount());
   });
 
   it('keeps the handle target and edge insets in the light theme', () => {

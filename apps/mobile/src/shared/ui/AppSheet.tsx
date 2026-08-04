@@ -4,6 +4,7 @@ import {
   BottomSheetScrollView,
   BottomSheetView,
   type BottomSheetBackdropProps,
+  type BottomSheetBackgroundProps,
 } from '@gorhom/bottom-sheet';
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Keyboard, StyleSheet, View } from 'react-native';
@@ -17,6 +18,7 @@ import {
   sheetContentHorizontalPadding,
   sheetHandleVerticalPadding,
 } from '@shared/ui/sheetLayout';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 
 export interface AppSheetProps {
@@ -157,6 +159,26 @@ export function AppSheet({
     [accessibilityLabel, dismissible],
   );
 
+  // The sheet is a Liquid Glass plane, so the material has to own the whole rounded background
+  // rather than a solid colour layered underneath it.
+  const renderBackground = useCallback(
+    ({ style: providedStyle }: BottomSheetBackgroundProps) => {
+      // gorhom paints an opaque default fill here; the glass material has to own the surface.
+      const layoutStyle = {
+        ...(StyleSheet.flatten(providedStyle) ?? {}),
+        backgroundColor: undefined,
+      };
+      return (
+        <GlassSurface
+          role="drawer"
+          style={[layoutStyle, styles.background]}
+          testID="app-sheet-background"
+        />
+      );
+    },
+    [styles.background],
+  );
+
   return (
     <BottomSheetModal
       ref={sheetRef}
@@ -169,7 +191,7 @@ export function AppSheet({
       android_keyboardInputMode="adjustResize"
       onDismiss={handleDismiss}
       backdropComponent={renderBackdrop}
-      backgroundStyle={styles.background}
+      backgroundComponent={renderBackground}
       handleStyle={styles.handle}
       handleIndicatorStyle={styles.handleIndicator}
       style={styles.sheet}
@@ -211,12 +233,9 @@ function createAppSheetStyles(theme: AppTheme) {
         : '0 -10px 34px rgba(15, 23, 42, 0.12)',
     },
     background: {
-      backgroundColor: theme.colors.bgElevated,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       borderCurve: 'continuous',
-      borderWidth: 1,
-      borderColor: theme.colors.borderLight,
     },
     handle: {
       paddingTop: HANDLE_VERTICAL_PADDING,

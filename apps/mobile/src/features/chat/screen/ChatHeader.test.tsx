@@ -10,6 +10,7 @@ import {
   setMockGlassEffectAPIAvailable,
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 import { ChatHeader } from './ChatHeader';
 
 jest.mock('@expo/vector-icons', () => {
@@ -83,20 +84,14 @@ function queryHost(root: QueryableInstance, label: string): QueryableInstance | 
   return hostNodes(root).find((node) => node.props['accessibilityLabel'] === label) ?? null;
 }
 
-function findPressable(root: QueryableInstance, label: string): QueryableInstance {
+function findToolbarButton(root: QueryableInstance, label: string): QueryableInstance {
   const match = root.findAll(
-    (node) =>
-      typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
+    (node) => node.type === CircularToolbarButton && node.props['accessibilityLabel'] === label,
   )[0];
   if (!match) {
-    throw new Error(`Missing pressable: ${label}`);
+    throw new Error(`Missing circular toolbar button: ${label}`);
   }
   return match;
-}
-
-function invokeStyle(node: QueryableInstance, pressed: boolean): unknown {
-  const style = node.props['style'];
-  return typeof style === 'function' ? style({ pressed }) : style;
 }
 
 function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): unknown {
@@ -335,8 +330,7 @@ describe('ChatHeader', () => {
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
     expect(onRenameTitle).toHaveBeenCalledTimes(1);
     expect(onRightActionPress).toHaveBeenCalledTimes(1);
-    expect(invokeStyle(findPressable(root, 'Edit session title'), true)).toBeDefined();
-    expect(invokeStyle(findPressable(root, 'Edit session title'), false)).toBeDefined();
+    expect(findToolbarButton(root, 'Edit session title')).toBeDefined();
     act(() => tree.unmount());
   });
 
@@ -378,11 +372,7 @@ describe('ChatHeader', () => {
     expect(textContent(editButton)).toBe('pencil');
     expect(editButton.props['accessibilityRole']).toBe('button');
     expect(editButton.props['accessibilityHint']).toBe('Opens the rename form for this session');
-    const editPressable = findPressable(root, 'Edit session title');
-    expect(StyleSheet.flatten(invokeStyle(editPressable, false) as never)).toMatchObject({
-      width: 48,
-      height: 48,
-    });
+    expect(findToolbarButton(root, 'Edit session title')).toBeDefined();
     // The old chat-options chevron menu is gone; renaming is the only header title action.
     expect(textContent(root)).not.toContain('chevron-down');
     expect(queryHost(root, `${LONG_TITLE}, chat options`)).toBeNull();
@@ -587,7 +577,7 @@ describe('ChatHeader', () => {
     act(() => tree.unmount());
   });
 
-  it('gives every header action a 48pt touch target and makes rename visibly 48pt', () => {
+  it('lays out every header action as an aligned 48pt circular toolbar control', () => {
     const tree = render(
       <ChatHeader
         onOpenDrawer={jest.fn()}
@@ -599,21 +589,48 @@ describe('ChatHeader', () => {
     );
     const root = queryRoot(tree);
 
-    const expect48PointTarget = (label: string, visibleSize: number) => {
-      const hitSlop = findPressable(root, label).props['hitSlop'] as
-        { top: number; bottom: number; left: number; right: number } | undefined;
-      expect(hitSlop).toBeDefined();
-      expect(visibleSize + hitSlop!.top + hitSlop!.bottom).toBeGreaterThanOrEqual(48);
-      expect(visibleSize + hitSlop!.left + hitSlop!.right).toBeGreaterThanOrEqual(48);
-    };
-
-    expect48PointTarget('Open navigation drawer', 24);
-    const editStyle = StyleSheet.flatten(
-      invokeStyle(findPressable(root, 'Edit session title'), false) as never,
-    );
-    expect(editStyle).toMatchObject({ width: 48, height: 48 });
-    expect(findPressable(root, 'Edit session title').props['hitSlop']).toBeUndefined();
-    expect48PointTarget('Open Git', 22);
+    expect(
+      ['Open navigation drawer', 'Edit session title', 'Open Git'].map(
+        (label) => findToolbarButton(root, label).type,
+      ),
+    ).toEqual([CircularToolbarButton, CircularToolbarButton, CircularToolbarButton]);
+    expect(
+      StyleSheet.flatten(
+        requireTestValue(
+          root.findAll((node) => node.props['testID'] === 'chat-header-actions')[0],
+          'chat header actions',
+        ).props['style'] as never,
+      ),
+    ).toMatchObject({
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexShrink: 0,
+    });
+    expect(
+      StyleSheet.flatten(
+        requireTestValue(
+          root.findAll((node) => node.props['testID'] === 'chat-header-row')[0],
+          'chat header row',
+        ).props['style'] as never,
+      ),
+    ).toMatchObject({
+      paddingHorizontal: theme.spacing.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
+    });
+    // The title zone must shrink instead of pushing the agent icon under the trailing
+    // actions, which previously made the rename glyph overlap the agent chip.
+    expect(
+      StyleSheet.flatten(
+        requireTestValue(
+          root.findAll((node) => node.props['testID'] === 'chat-header-title-row')[0],
+          'chat header title row',
+        ).props['style'] as never,
+      ),
+    ).toMatchObject({
+      flexShrink: 1,
+      minWidth: 0,
+    });
     act(() => tree.unmount());
   });
 });

@@ -19,6 +19,7 @@ import { feedback } from '@shared/feedback';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { WorkflowCard } from '../workflow/Workflow';
+import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -31,8 +32,11 @@ type MainScreenStyles = ReturnType<typeof useMainScreenStyles>['styles'];
 // Chips are dense, dynamically-sized labels in a scrollable row (28pt tall); the estimated
 // The selector buttons share the composer's 48pt control height. Horizontal slop remains capped so
 // labels narrower than the representative width cannot steal taps from neighboring buttons.
-const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 48 };
-const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3, minimum: 48 };
+// The selector row sits directly under the header row, so a tall visual box left a dead gap
+// between the two. The box is compact and `computeHitSlop` restores the effective touch target;
+// the vertical cap stops that slop from reaching up into the header buttons above it.
+const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: SESSION_META_CHIP_HEIGHT };
+const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3, maxVertical: 8 };
 
 function handleSessionMetaChipPress(action: () => void | Promise<void>): void {
   void feedback.selection();
@@ -144,6 +148,7 @@ function SessionMetaRow(props: {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.sessionMetaRowContent}
+        testID="session-meta-selectors"
       >
         {modelOptions.length > 0 ? (
           <SessionMetaChip

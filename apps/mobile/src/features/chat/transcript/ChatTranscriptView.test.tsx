@@ -175,36 +175,21 @@ describe('ChatTranscriptView activity event', () => {
 });
 
 describe('ChatTranscriptView edge scrims', () => {
-  it('briefly fades transcript content at both fixed chrome boundaries without blocking touches', () => {
+  it('fades transcript content only into the bottom chrome without blocking touches', () => {
     const tree = render({ topInset: 96, bottomInset: 88 });
-    const topScrim = requireTestValue(
-      tree.root.findAllByProps({ testID: 'transcript-top-scrim' })[0],
-      'top transcript scrim',
-    );
     const bottomScrim = requireTestValue(
       tree.root.findAllByProps({ testID: 'transcript-bottom-scrim' })[0],
       'bottom transcript scrim',
     );
 
-    expect(topScrim.props['pointerEvents']).toBe('none');
+    // A scrim under the glass top chrome muddied the material and made the oldest message read
+    // as clipped, so the top boundary is now handled by the glass plane alone.
+    expect(tree.root.findAllByProps({ testID: 'transcript-top-scrim' })).toHaveLength(0);
     expect(bottomScrim.props['pointerEvents']).toBe('none');
-    expect(topScrim.props['colors']).toEqual([theme.colors.bgMain, theme.colors.transparent]);
-    expect(bottomScrim.props['colors']).toEqual([
-      theme.colors.transparent,
-      theme.colors.bgMain,
-      theme.colors.bgMain,
-    ]);
-    expect(bottomScrim.props['locations']).toEqual([
-      0,
-      theme.spacing.xxl / (88 + theme.spacing.xxl),
-      1,
-    ]);
-    expect(StyleSheet.flatten(topScrim.props['style'] as never)).toMatchObject({
-      position: 'absolute',
-      top: 96,
-      height: theme.spacing.xxl,
-      zIndex: 1,
-    });
+    // A stop that reaches full opacity before the composer would park its glass on flat black,
+    // so the bottom scrim ramps continuously across the whole composer band instead.
+    expect(bottomScrim.props['colors']).toEqual([theme.colors.transparent, theme.colors.bgMain]);
+    expect(bottomScrim.props['locations']).toBeUndefined();
     expect(StyleSheet.flatten(bottomScrim.props['style'] as never)).toMatchObject({
       position: 'absolute',
       bottom: 0,
@@ -987,7 +972,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
-  it('uses platform keyboard and inset behavior', () => {
+  it('uses platform keyboard behavior and inverted-aware insets', () => {
     const originalOS = Platform.OS;
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     const androidTree = render({ bottomInset: 24, topInset: 40 });
@@ -995,7 +980,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(androidList.props['keyboardDismissMode']).toBe('on-drag');
     expect(androidList.props.contentContainerStyle[1]).toEqual({
       paddingTop: 24,
-      paddingBottom: 40,
+      paddingBottom: 40 + theme.spacing.lg,
     });
     act(() => androidTree.unmount());
 
@@ -1003,9 +988,13 @@ describe('ChatTranscriptView continuation', () => {
     const iosTree = render({ bottomInset: 12, topInset: 40 });
     const iosList = getList(iosTree);
     expect(iosList.props['keyboardDismissMode']).toBe('interactive');
+    // The list renders inverted, so the visual top is fed by `paddingBottom`. iOS once mapped
+    // these the other way round, which clipped the oldest message under the floating chrome and
+    // left a chrome-sized gap above the composer.
+    expect(iosList.props['inverted']).toBe(true);
     expect(iosList.props.contentContainerStyle[1]).toEqual({
-      paddingBottom: 12,
-      paddingTop: 40,
+      paddingTop: 12,
+      paddingBottom: 40 + theme.spacing.lg,
     });
     act(() => iosTree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
@@ -1014,15 +1003,15 @@ describe('ChatTranscriptView continuation', () => {
   it('applies a measured top inset after the memoized transcript has mounted', () => {
     const tree = render({ topInset: 24 });
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
-      paddingBottom: 0,
-      paddingTop: 24,
+      paddingTop: 0,
+      paddingBottom: 24 + theme.spacing.lg,
     });
 
     update(tree, { topInset: 64 });
 
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
-      paddingBottom: 0,
-      paddingTop: 64,
+      paddingTop: 0,
+      paddingBottom: 64 + theme.spacing.lg,
     });
     act(() => tree.unmount());
   });

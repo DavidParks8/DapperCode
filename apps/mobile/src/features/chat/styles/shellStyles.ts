@@ -1,5 +1,7 @@
 import type { AppTheme } from '@shared/theme';
 
+import { SESSION_META_CHIP_HEIGHT } from './sessionMetaChip';
+
 export const createMainScreenShellStyles = (theme: AppTheme) =>
   ({
     container: {
@@ -42,14 +44,21 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       paddingBottom: theme.spacing.xs / 2,
     },
     sessionMetaRow: {
-      minHeight: 48,
+      minHeight: SESSION_META_CHIP_HEIGHT,
+      // The header row is 48pt tall because of its circular buttons, which leaves dead space
+      // under the title. Pulling the selector row up into that band tightens the gap above the
+      // chips without eating the breathing room below them.
+      marginTop: -theme.spacing.sm,
+      // Extends the glass plane past the chips rather than moving them, so the material has a
+      // settled edge instead of ending on the chip text.
+      marginBottom: theme.spacing.xs,
     },
     sessionMetaRowContent: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.sm,
-      minHeight: 48,
-      paddingHorizontal: theme.spacing.lg,
+      minHeight: SESSION_META_CHIP_HEIGHT,
+      paddingHorizontal: theme.spacing.md,
     },
     topCardsRow: {
       backgroundColor: theme.colors.bgMain,

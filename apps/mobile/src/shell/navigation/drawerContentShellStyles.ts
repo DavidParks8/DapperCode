@@ -37,16 +37,6 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       marginTop: 3,
       color: theme.colors.textMuted,
     },
-    headerIconButton: {
-      width: theme.touchTarget.minimum,
-      height: theme.touchTarget.minimum,
-      borderRadius: theme.radius.full,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerIconButtonPressed: {
-      backgroundColor: theme.colors.bgCanvasAccent,
-    },
     statusSummary: {
       minHeight: 30,
       flexDirection: 'row',
@@ -185,13 +175,6 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       ...theme.typography.metadata,
       color: theme.colors.userBubbleOnSurface,
       fontWeight: '600',
-    },
-    footerIconButton: {
-      width: theme.touchTarget.minimum,
-      height: theme.touchTarget.minimum,
-      borderRadius: theme.radius.full,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     footerActionPressed: {
       backgroundColor: theme.colors.bgCanvasAccent,

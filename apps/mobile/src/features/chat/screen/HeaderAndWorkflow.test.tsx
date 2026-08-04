@@ -12,6 +12,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
+import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -167,10 +168,14 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       expect(hitSlop).toBeDefined();
       const chipStyle = chip.props['style'] as (state: { pressed: boolean }) => unknown;
       expect(StyleSheet.flatten(chipStyle({ pressed: false }) as never)).toMatchObject({
-        minHeight: 48,
+        minHeight: SESSION_META_CHIP_HEIGHT,
       });
-      expect(hitSlop!.top).toBe(0);
-      expect(hitSlop!.bottom).toBe(0);
+      // The chip box is shorter than a touch target, so the vertical slop makes up the difference
+      // while staying capped so it cannot swallow the header buttons above.
+      const expectedVerticalSlop = Math.min(8, (44 - SESSION_META_CHIP_HEIGHT) / 2);
+      expect(hitSlop!.top).toBe(expectedVerticalSlop);
+      expect(hitSlop!.bottom).toBe(expectedVerticalSlop);
+      expect(SESSION_META_CHIP_HEIGHT + hitSlop!.top + hitSlop!.bottom).toBeGreaterThanOrEqual(44);
     }
     act(() => tree.unmount());
   });
@@ -229,8 +234,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       root.findAll((node) => node.props['testID'] === 'session-meta-glass-surface'),
     ).toHaveLength(0);
     const selectorScrollView = root.findAll(
-      (node) =>
-        node.props['horizontal'] === true && node.props['contentContainerStyle'] !== undefined,
+      (node) => node.props['testID'] === 'session-meta-selectors',
     )[0];
     expect(
       StyleSheet.flatten(
@@ -238,16 +242,45 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
           'contentContainerStyle'
         ] as never,
       ),
-    ).toMatchObject({ minHeight: 48 });
+    ).toMatchObject({ minHeight: SESSION_META_CHIP_HEIGHT });
 
     const modelChip = findPressableByLabelPrefix(root, 'Model,');
     const modelChipStyle = modelChip.props['style'] as (state: { pressed: boolean }) => unknown;
     const flatModelChipStyle = StyleSheet.flatten(modelChipStyle({ pressed: false }) as never);
-    expect(flatModelChipStyle).toMatchObject({ minHeight: 48 });
+    expect(flatModelChipStyle).toMatchObject({ minHeight: SESSION_META_CHIP_HEIGHT });
     expect(flatModelChipStyle).not.toHaveProperty('backgroundColor');
     expect(flatModelChipStyle).not.toHaveProperty('borderRadius');
     expect(flatModelChipStyle).not.toHaveProperty('borderWidth');
     expect(root.findAll((node) => node.props['testID'] === 'session-meta-divider')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('tightens the gap above the selectors without cutting the space below them', () => {
+    const tree = render(baseContext());
+    const root = queryRoot(tree);
+
+    const metaRow = root.findAll((node) => node.props['testID'] === 'session-meta-row')[0];
+    const metaRowStyle = StyleSheet.flatten(
+      requireTestValue(metaRow, 'session meta row').props['style'] as never,
+    ) as { marginTop?: number; marginBottom?: number; paddingBottom?: number };
+
+    // The 48pt circular buttons leave dead space under the title. The selector row reclaims it by
+    // overlapping upward, which must not come out of its own bottom breathing room.
+    expect(metaRowStyle.marginTop).toBeLessThan(0);
+    expect(metaRowStyle.marginBottom ?? 0).toBeGreaterThan(0);
+
+    const headerRow = root.findAll((node) => node.props['testID'] === 'chat-header-row')[0];
+
+    // The header has to stay above the overlapping selector row so the leading button keeps its
+    // full touch target.
+    const headerStyle = StyleSheet.flatten(
+      requireTestValue(headerRow, 'header row').props['style'] as never,
+    ) as {
+      zIndex?: number;
+      minHeight?: number;
+    };
+    expect(headerStyle.minHeight).toBe(48);
+    expect(headerStyle.zIndex).toBeGreaterThan(0);
     act(() => tree.unmount());
   });
 

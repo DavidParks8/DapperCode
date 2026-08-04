@@ -45,7 +45,7 @@ import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkConversationAction } from './useForkConversationAction';
 import { ActivityEvent } from './ActivityEvent';
-import { TranscriptEdgeScrims } from './TranscriptEdgeScrims';
+import { TranscriptEdgeScrim } from './TranscriptEdgeScrim';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
@@ -408,10 +408,15 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, [autoScrollStateRef, chat.id]);
   const messageListContentStyle = useMemo(
     () =>
-      Platform.OS === 'android'
-        ? [styles.messageListContent, { paddingTop: bottomInset, paddingBottom: topInset }]
-        : [styles.messageListContent, { paddingBottom: bottomInset, paddingTop: topInset }],
-    [bottomInset, styles.messageListContent, topInset],
+      // The list is inverted, so its content padding is flipped on screen: `paddingBottom` lands
+      // under the floating top chrome and `paddingTop` lands behind the composer. Feeding these
+      // the other way round left the oldest message permanently clipped by the header. The extra
+      // gutter keeps the oldest message from stopping flush against the chrome.
+      [
+        styles.messageListContent,
+        { paddingTop: bottomInset, paddingBottom: topInset + theme.spacing.lg },
+      ],
+    [bottomInset, styles.messageListContent, theme.spacing.lg, topInset],
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
@@ -538,11 +543,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           removeClippedSubviews={false}
           accessibilityLabel={`${chat.title || 'Chat'} transcript`}
         />
-        <TranscriptEdgeScrims
-          topInset={topInset}
-          bottomInset={bottomInset}
-          edgeStyle={styles.transcriptEdgeScrim}
-        />
+        <TranscriptEdgeScrim bottomInset={bottomInset} edgeStyle={styles.transcriptEdgeScrim} />
         {renderScrollRail({
           activeIndex: rail.state.activeIndex,
           anchors: userMessageAnchors,

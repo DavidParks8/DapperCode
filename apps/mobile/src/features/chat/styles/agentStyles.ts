@@ -1,12 +1,14 @@
 import type { AppTheme } from '@shared/theme';
 
+import { SESSION_META_CHIP_HEIGHT } from './sessionMetaChip';
+
 export const createMainScreenAgentStyles = (theme: AppTheme) => {
   return {
     modelChip: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      minHeight: 48,
+      minHeight: SESSION_META_CHIP_HEIGHT,
       paddingHorizontal: theme.spacing.sm,
       flexShrink: 0,
     },
@@ -14,7 +16,7 @@ export const createMainScreenAgentStyles = (theme: AppTheme) => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      minHeight: 48,
+      minHeight: SESSION_META_CHIP_HEIGHT,
       paddingHorizontal: theme.spacing.sm,
       flexShrink: 0,
     },
@@ -22,7 +24,7 @@ export const createMainScreenAgentStyles = (theme: AppTheme) => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      minHeight: 48,
+      minHeight: SESSION_META_CHIP_HEIGHT,
       paddingHorizontal: theme.spacing.sm,
       flexShrink: 0,
     },

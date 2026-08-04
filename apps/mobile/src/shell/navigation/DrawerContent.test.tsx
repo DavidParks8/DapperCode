@@ -43,6 +43,7 @@ import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { createDrawerContentStyles } from '@shell/navigation/drawerContentStyles';
 import { routes } from '@shell/navigation/routes';
 import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from '@shell/navigation/useDrawerChatCollection';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('react-native-gesture-handler', () =>
@@ -534,6 +535,13 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => withoutClose.unmount());
 
     const tree = await renderDrawer(harness, { onClose });
+    expect(
+      (tree.root as Queryable).findAll(
+        (node) =>
+          node.type === CircularToolbarButton &&
+          node.props['accessibilityLabel'] === 'Close session list',
+      ),
+    ).toHaveLength(1);
     await press(findByLabel(tree.root as Queryable, 'Close session list'));
     expect(onClose).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
@@ -606,6 +614,14 @@ describe('DrawerContent render behavior matrix', () => {
       expect(StyleSheet.flatten(content.props['style'] as never)).toMatchObject({
         backgroundColor: theme.colors.transparent,
       });
+    }
+    for (const label of ['New chat', 'Open settings']) {
+      expect(
+        root.findAll(
+          (node) =>
+            node.type === CircularToolbarButton && node.props['accessibilityLabel'] === label,
+        ),
+      ).toHaveLength(1);
     }
 
     await press(findByLabel(root, 'Running root, alpha, Copilot, Working'));
