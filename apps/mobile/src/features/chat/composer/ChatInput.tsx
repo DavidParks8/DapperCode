@@ -131,40 +131,49 @@ function ChatInputStopButton({
   textPrimaryColor,
 }: ChatInputStopButtonProps) {
   return (
-    <Pressable
-      onPress={onStop}
-      style={({ pressed }) => [styles.actionButtonFrame, pressed && styles.actionButtonPressed]}
-      disabled={isStopping}
-      hitSlop={hitSlop}
-      pressRetentionOffset={pressRetentionOffset}
-      accessibilityRole="button"
-      accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
-      accessibilityHint="Stops the current turn"
-      accessibilityState={controlAccessibilityState({
-        disabled: isStopping,
-        busy: isStopping,
-      })}
-    >
-      <GlassSurface
-        pointerEvents="none"
-        role="capsule"
-        style={styles.actionButtonGlass}
-        testID="composer-stop-glass-surface"
+    <View collapsable={false} style={styles.actionButtonFrame} testID="composer-stop-slot">
+      <Pressable
+        onPress={() => {
+          if (!isStopping) {
+            onStop();
+          }
+        }}
+        style={({ pressed }) => [
+          styles.actionButtonPressable,
+          pressed && !isStopping && styles.actionButtonPressed,
+        ]}
+        hitSlop={hitSlop}
+        pressRetentionOffset={pressRetentionOffset}
+        accessibilityRole="button"
+        accessibilityLabel={isStopping ? 'Stopping agent' : 'Stop agent'}
+        accessibilityHint="Stops the current turn"
+        accessibilityState={controlAccessibilityState({
+          disabled: isStopping,
+          busy: isStopping,
+        })}
       >
-        <View style={styles.stopButtonContent}>
-          {isStopping ? (
-            <ActivityIndicator size="small" color={textMutedColor} />
-          ) : (
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="square"
-              size={10}
-              color={textPrimaryColor}
-            />
-          )}
-        </View>
-      </GlassSurface>
-    </Pressable>
+        <GlassSurface
+          pointerEvents="none"
+          role="capsule"
+          style={styles.actionButtonGlass}
+          testID="composer-stop-glass-surface"
+        >
+          <View pointerEvents="none" style={styles.actionButtonOutline} />
+          <View style={styles.stopButtonContent}>
+            {isStopping ? (
+              <ActivityIndicator size="small" color={textMutedColor} />
+            ) : (
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="square"
+                size={10}
+                color={textPrimaryColor}
+              />
+            )}
+          </View>
+        </GlassSurface>
+      </Pressable>
+    </View>
   );
 }
 
@@ -199,41 +208,43 @@ function ChatInputSendButton({
 }: ChatInputSendButtonProps) {
   const busy = isLoading && !canSend;
   return (
-    <Pressable
-      onPress={canSend ? onSubmit : undefined}
-      style={({ pressed }) => [
-        styles.actionButtonFrame,
-        pressed && canSend && styles.actionButtonPressed,
-      ]}
-      disabled={!canSend}
-      hitSlop={hitSlop}
-      pressRetentionOffset={pressRetentionOffset}
-      accessibilityRole="button"
-      accessibilityLabel={busy ? 'Agent is responding' : label}
-      accessibilityHint={hint}
-      accessibilityState={controlAccessibilityState({ disabled: !canSend, busy })}
-    >
-      <GlassSurface
-        pointerEvents="none"
-        role={submitUsesPrimaryChrome ? 'prominent' : 'capsule'}
-        style={styles.actionButtonGlass}
-        testID="composer-submit-glass-surface"
+    <View collapsable={false} style={styles.actionButtonFrame} testID="composer-submit-slot">
+      <Pressable
+        onPress={onSubmit}
+        style={({ pressed }) => [
+          styles.actionButtonPressable,
+          pressed && canSend && styles.actionButtonPressed,
+        ]}
+        hitSlop={hitSlop}
+        pressRetentionOffset={pressRetentionOffset}
+        accessibilityRole="button"
+        accessibilityLabel={busy ? 'Agent is responding' : label}
+        accessibilityHint={hint}
+        accessibilityState={controlAccessibilityState({ disabled: !canSend, busy })}
       >
-        {busy ? (
-          <ActivityIndicator
-            size="small"
-            color={submitUsesPrimaryChrome ? prominentTextColor : textMutedColor}
-          />
-        ) : (
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="arrow-up"
-            size={16}
-            color={submitUsesPrimaryChrome ? prominentTextColor : textPrimaryColor}
-          />
-        )}
-      </GlassSurface>
-    </Pressable>
+        <GlassSurface
+          pointerEvents="none"
+          role={submitUsesPrimaryChrome ? 'prominent' : 'capsule'}
+          style={styles.actionButtonGlass}
+          testID="composer-submit-glass-surface"
+        >
+          {!canSend ? <View pointerEvents="none" style={styles.actionButtonOutline} /> : null}
+          {busy ? (
+            <ActivityIndicator
+              size="small"
+              color={submitUsesPrimaryChrome ? prominentTextColor : textMutedColor}
+            />
+          ) : (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="arrow-up"
+              size={16}
+              color={submitUsesPrimaryChrome ? prominentTextColor : textPrimaryColor}
+            />
+          )}
+        </GlassSurface>
+      </Pressable>
+    </View>
   );
 }
 

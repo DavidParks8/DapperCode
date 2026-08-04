@@ -90,6 +90,16 @@ export const createChatInputStyles = (theme: AppTheme) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
+    actionButtonPressable: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderRadius: theme.radius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     actionButtonPressed: {
       transform: [{ scale: 0.96 }],
     },
@@ -126,6 +136,16 @@ export const createChatInputStyles = (theme: AppTheme) =>
       borderCurve: 'continuous',
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    actionButtonOutline: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      borderColor: theme.colors.borderHighlight,
+      borderRadius: theme.radius.full,
+      borderWidth: StyleSheet.hairlineWidth,
     },
     stopButtonContent: {
       width: 24,

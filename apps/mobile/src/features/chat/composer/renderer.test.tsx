@@ -195,10 +195,14 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     );
     const send = root(tree).findAll(
       (node) =>
-        node.props['accessibilityLabel'] === 'Send message' && node.props['disabled'] === true,
+        node.props['accessibilityLabel'] === 'Send message' &&
+        (node.props['accessibilityState'] as { disabled?: boolean } | undefined)?.disabled === true,
     );
 
-    expect(send).toHaveLength(1);
+    expect(send).not.toHaveLength(0);
+    expect(
+      root(tree).findAll((node) => node.props['testID'] === 'composer-submit-slot'),
+    ).not.toHaveLength(0);
     act(() => tree.unmount());
   });
 

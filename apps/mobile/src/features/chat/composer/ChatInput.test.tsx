@@ -145,7 +145,10 @@ describe('ChatInput behavior', () => {
     act(() => byLabel(root, 'Stop agent').props.onPress());
     expect(base.onStop).toHaveBeenCalled();
     expect(mockHaptics.impactAsync).toHaveBeenCalledWith('heavy');
-    expect(byLabel(root, 'Agent is responding').props['disabled']).toBe(true);
+    expect(byLabel(root, 'Agent is responding').props['accessibilityState']).toMatchObject({
+      disabled: true,
+      busy: true,
+    });
     act(() =>
       rendered.update(
         wrap(
@@ -161,14 +164,21 @@ describe('ChatInput behavior', () => {
         ),
       ),
     );
-    expect(byLabel(root, 'Stopping agent').props['disabled']).toBe(true);
+    expect(byLabel(root, 'Stopping agent').props['disabled']).toBeUndefined();
+    expect(byLabel(root, 'Stopping agent').props['accessibilityState']).toMatchObject({
+      disabled: true,
+      busy: true,
+    });
     expect(byLabel(root, 'Add attachment').props['disabled']).toBe(true);
     act(() =>
       rendered.update(
         wrap(<ChatInput {...base} value="" isLoading onAttachPress={base.onAttachPress} />),
       ),
     );
-    expect(byLabel(root, 'Agent is responding').props['disabled']).toBe(true);
+    expect(byLabel(root, 'Agent is responding').props['accessibilityState']).toMatchObject({
+      disabled: true,
+      busy: true,
+    });
     act(() => rendered.unmount());
   });
 
@@ -238,7 +248,15 @@ describe('ChatInput behavior', () => {
     });
 
     const sendButton = byLabel((tree as ReactTestRenderer).root as Queryable, 'Send message');
-    expect(sendButton.props['disabled']).toBe(true);
+    expect(sendButton.props['disabled']).toBeUndefined();
+    expect(sendButton.props['accessibilityState']).toMatchObject({ disabled: true });
+    expect(
+      ((tree as ReactTestRenderer).root as Queryable).findAll(
+        (node) => node.props['testID'] === 'composer-submit-slot',
+      ),
+    ).not.toHaveLength(0);
+    act(() => sendButton.props.onPress());
+    expect(base.onSubmit).not.toHaveBeenCalled();
     expect(
       sendButton.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
     ).not.toHaveLength(0);
@@ -400,6 +418,8 @@ describe('ChatInput behavior', () => {
     const stoppingButton = byLabel(root, 'Stopping agent');
     expect(stoppingButton.findAll((node) => node.props['name'] === 'square')).toHaveLength(0);
     expect(stoppingButton.findAllByType(ActivityIndicator)).toHaveLength(1);
+    act(() => stoppingButton.props.onPress());
+    expect(base.onStop).not.toHaveBeenCalled();
     act(() => rendered.unmount());
   });
 
