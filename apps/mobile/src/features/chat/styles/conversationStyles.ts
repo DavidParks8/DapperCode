@@ -64,9 +64,16 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     },
     messageListShell: { flex: 1 },
     messageList: { flex: 1 },
+    transcriptEdgeScrim: {
+      position: 'absolute',
+      right: 0,
+      left: 0,
+      zIndex: 1,
+    },
     jumpToLatestButton: {
       position: 'absolute',
       alignSelf: 'center',
+      zIndex: 2,
     },
     jumpToLatestGlass: {
       alignItems: 'center',

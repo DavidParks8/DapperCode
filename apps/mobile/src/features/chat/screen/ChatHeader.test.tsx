@@ -1,6 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
-import { Platform, ScrollView } from 'react-native';
+import { Platform, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -368,7 +368,7 @@ describe('ChatHeader', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
   });
 
-  it('exposes the rename affordance as a pencil button beside the title', () => {
+  it('exposes rename as a 48pt pencil toolbar button beside the title', () => {
     const tree = render(
       <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
     );
@@ -378,9 +378,27 @@ describe('ChatHeader', () => {
     expect(textContent(editButton)).toBe('pencil');
     expect(editButton.props['accessibilityRole']).toBe('button');
     expect(editButton.props['accessibilityHint']).toBe('Opens the rename form for this session');
+    const editPressable = findPressable(root, 'Edit session title');
+    expect(StyleSheet.flatten(invokeStyle(editPressable, false) as never)).toMatchObject({
+      width: 48,
+      height: 48,
+    });
     // The old chat-options chevron menu is gone; renaming is the only header title action.
     expect(textContent(root)).not.toContain('chevron-down');
     expect(queryHost(root, `${LONG_TITLE}, chat options`)).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('vertically centers the scrollable title in the 48pt header rhythm', () => {
+    const tree = render(
+      <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
+    );
+    const scrollHost = titleScrollHost(queryRoot(tree));
+
+    expect(StyleSheet.flatten(scrollHost.props['contentContainerStyle'] as never)).toMatchObject({
+      minHeight: 48,
+      alignItems: 'center',
+    });
     act(() => tree.unmount());
   });
 
@@ -569,7 +587,7 @@ describe('ChatHeader', () => {
     act(() => tree.unmount());
   });
 
-  it('gives the menu, edit, and right-action buttons an effective touch target without inflating their visible chrome', () => {
+  it('gives every header action a 48pt touch target and makes rename visibly 48pt', () => {
     const tree = render(
       <ChatHeader
         onOpenDrawer={jest.fn()}
@@ -590,7 +608,11 @@ describe('ChatHeader', () => {
     };
 
     expect48PointTarget('Open navigation drawer', 24);
-    expect48PointTarget('Edit session title', 22);
+    const editStyle = StyleSheet.flatten(
+      invokeStyle(findPressable(root, 'Edit session title'), false) as never,
+    );
+    expect(editStyle).toMatchObject({ width: 48, height: 48 });
+    expect(findPressable(root, 'Edit session title').props['hitSlop']).toBeUndefined();
     expect48PointTarget('Open Git', 22);
     act(() => tree.unmount());
   });

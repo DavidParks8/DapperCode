@@ -211,22 +211,23 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     act(() => tree.unmount());
   });
 
-  it('renders selectors as a full-width extension of the header glass', () => {
+  it('renders the header and flat selectors on one full-width glass plane', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
 
     const tree = render(baseContext());
     const glassProps = getRenderedGlassViewProps().find(
-      (props) => props.testID === 'session-meta-glass-surface',
+      (props) => props.testID === 'chat-top-chrome-glass-surface',
     );
 
     expect(glassProps?.glassEffectStyle).toBe(theme.glass.chrome.glassEffectStyle);
     expect(glassProps?.tintColor).toBe(theme.glass.chrome.tintColor);
-    expect(StyleSheet.flatten(glassProps?.style)).toMatchObject({ minHeight: 48 });
     expect(StyleSheet.flatten(glassProps?.style)).not.toHaveProperty('borderRadius');
-    expect(StyleSheet.flatten(glassProps?.style)).not.toHaveProperty('paddingVertical');
 
     const root = queryRoot(tree);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'session-meta-glass-surface'),
+    ).toHaveLength(0);
     const selectorScrollView = root.findAll(
       (node) =>
         node.props['horizontal'] === true && node.props['contentContainerStyle'] !== undefined,
@@ -241,11 +242,12 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
 
     const modelChip = findPressableByLabelPrefix(root, 'Model,');
     const modelChipStyle = modelChip.props['style'] as (state: { pressed: boolean }) => unknown;
-    expect(StyleSheet.flatten(modelChipStyle({ pressed: false }) as never)).toMatchObject({
-      backgroundColor: theme.colors.bgCanvasAccent,
-      borderRadius: theme.radius.full,
-      borderWidth: StyleSheet.hairlineWidth,
-    });
+    const flatModelChipStyle = StyleSheet.flatten(modelChipStyle({ pressed: false }) as never);
+    expect(flatModelChipStyle).toMatchObject({ minHeight: 48 });
+    expect(flatModelChipStyle).not.toHaveProperty('backgroundColor');
+    expect(flatModelChipStyle).not.toHaveProperty('borderRadius');
+    expect(flatModelChipStyle).not.toHaveProperty('borderWidth');
+    expect(root.findAll((node) => node.props['testID'] === 'session-meta-divider')).toHaveLength(0);
     act(() => tree.unmount());
   });
 

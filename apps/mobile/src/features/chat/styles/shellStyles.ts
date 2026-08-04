@@ -1,5 +1,3 @@
-import { StyleSheet } from 'react-native';
-
 import type { AppTheme } from '@shared/theme';
 
 export const createMainScreenShellStyles = (theme: AppTheme) =>
@@ -22,6 +20,9 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       left: 0,
       zIndex: 5,
     },
+    topChromeGlass: {
+      overflow: 'hidden',
+    },
     composerContainer: {
       backgroundColor: theme.colors.transparent,
     },
@@ -42,15 +43,6 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
     },
     sessionMetaRow: {
       minHeight: 48,
-      overflow: 'hidden',
-    },
-    sessionMetaDivider: {
-      position: 'absolute',
-      right: 0,
-      bottom: 0,
-      left: 0,
-      borderBottomColor: theme.colors.borderLight,
-      borderBottomWidth: StyleSheet.hairlineWidth,
     },
     sessionMetaRowContent: {
       flexDirection: 'row',

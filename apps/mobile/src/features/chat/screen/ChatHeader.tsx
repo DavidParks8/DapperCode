@@ -11,7 +11,6 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 
 const MENU_BUTTON_VISIBLE_SIZE = { width: 24, height: 24 };
 const RIGHT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
-const EDIT_BUTTON_VISIBLE_SIZE = { width: 22, height: 22 };
 
 interface ChatHeaderProps {
   onOpenDrawer?: () => void;
@@ -19,6 +18,8 @@ interface ChatHeaderProps {
   agent?: AgentDescriptor | null;
   /** Opens the rename sheet. Rendered as a dedicated button so the title stays draggable. */
   onRenameTitle?: () => void;
+  /** Avoids nesting glass when the header shares a surface with adjacent chrome. */
+  embeddedInGlass?: boolean;
   rightIconName?: keyof typeof Ionicons.glyphMap;
   onRightActionPress?: () => void;
 }
@@ -28,6 +29,7 @@ export function ChatHeader({
   title,
   agent,
   onRenameTitle,
+  embeddedInGlass = false,
   rightIconName,
   onRightActionPress,
 }: ChatHeaderProps) {
@@ -40,83 +42,89 @@ export function ChatHeader({
     () => computeHitSlop(RIGHT_BUTTON_VISIBLE_SIZE, { minimum: 48 }),
     [],
   );
-  const editHitSlop = useMemo(() => computeHitSlop(EDIT_BUTTON_VISIBLE_SIZE, { minimum: 48 }), []);
 
-  return (
-    <GlassSurface role="chrome" style={styles.headerContainer} testID="chat-header-glass-surface">
-      <SafeAreaView edges={['top', 'left', 'right']}>
-        <View style={styles.header}>
-          {onOpenDrawer ? (
-            <Pressable
-              onPress={onOpenDrawer}
-              hitSlop={menuHitSlop}
-              style={styles.menuBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Open navigation drawer"
-            >
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="menu"
-                size={20}
-                color={colors.textPrimary}
-              />
-            </Pressable>
-          ) : null}
-          {/*
+  const header = (
+    <SafeAreaView edges={['top', 'left', 'right']}>
+      <View style={styles.header}>
+        {onOpenDrawer ? (
+          <Pressable
+            onPress={onOpenDrawer}
+            hitSlop={menuHitSlop}
+            style={styles.menuBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Open navigation drawer"
+          >
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="menu"
+              size={20}
+              color={colors.textPrimary}
+            />
+          </Pressable>
+        ) : null}
+        {/*
             The title is a horizontally scrollable surface so a long session name can be read in
             full. It must not sit inside a Pressable: a press wrapper swallows the drag gesture on
             the scroll view and its own press never fires, which made tapping the title a no-op.
             Renaming lives in the dedicated button beside it instead.
           */}
-          <View style={styles.titleRow}>
-            <ScrollableTitle title={titleDisplay} />
-            <AgentIcon agent={agent} size={18} />
-            {onRenameTitle ? (
-              <Pressable
-                onPress={onRenameTitle}
-                hitSlop={editHitSlop}
-                style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Edit session title"
-                accessibilityHint="Opens the rename form for this session"
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="pencil"
-                  size={14}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-          <View style={{ flex: 1 }} />
-          {rightIconName ? (
-            onRightActionPress ? (
-              <Pressable
-                onPress={onRightActionPress}
-                hitSlop={rightHitSlop}
-                style={styles.rightBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Open Git"
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name={rightIconName}
-                  size={18}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-            ) : (
+        <View style={styles.titleRow}>
+          <ScrollableTitle title={titleDisplay} />
+          <AgentIcon agent={agent} size={18} />
+          {onRenameTitle ? (
+            <Pressable
+              onPress={onRenameTitle}
+              style={({ pressed }) => [styles.editBtn, pressed && styles.editBtnPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Edit session title"
+              accessibilityHint="Opens the rename form for this session"
+            >
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="pencil"
+                size={18}
+                color={colors.textMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+        <View style={{ flex: 1 }} />
+        {rightIconName ? (
+          onRightActionPress ? (
+            <Pressable
+              onPress={onRightActionPress}
+              hitSlop={rightHitSlop}
+              style={styles.rightBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Open Git"
+            >
               <Ionicons
                 {...decorativeAccessibilityProps}
                 name={rightIconName}
                 size={18}
                 color={colors.textMuted}
               />
-            )
-          ) : null}
-        </View>
-      </SafeAreaView>
+            </Pressable>
+          ) : (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={rightIconName}
+              size={18}
+              color={colors.textMuted}
+            />
+          )
+        ) : null}
+      </View>
+    </SafeAreaView>
+  );
+
+  if (embeddedInGlass) {
+    return header;
+  }
+
+  return (
+    <GlassSurface role="chrome" style={styles.headerContainer} testID="chat-header-glass-surface">
+      {header}
     </GlassSurface>
   );
 }
@@ -138,6 +146,7 @@ function ScrollableTitle({ title }: { title: string }) {
         bounces={false}
         scrollEnabled
         showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.titleScrollContent}
         accessibilityLabel={title}
       >
         <Text style={styles.modelName}>{title}</Text>
@@ -172,8 +181,11 @@ const createStyles = (theme: AppTheme) =>
     },
     editBtn: {
       flexShrink: 0,
+      width: 48,
+      height: 48,
       borderRadius: theme.radius.sm,
-      padding: 4,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     editBtnPressed: {
       backgroundColor: theme.colors.bgItem,
@@ -184,6 +196,11 @@ const createStyles = (theme: AppTheme) =>
     titleViewport: {
       flexShrink: 1,
       minWidth: 0,
+      height: 48,
       overflow: 'hidden',
+    },
+    titleScrollContent: {
+      minHeight: 48,
+      alignItems: 'center',
     },
   });

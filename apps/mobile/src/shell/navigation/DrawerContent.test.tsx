@@ -600,6 +600,13 @@ describe('DrawerContent render behavior matrix', () => {
     expect(findByLabel(root, 'Failed chat, beta, Codex, Failed')).toBeDefined();
     expect(hasText(root, 'Copilot')).toBe(true);
     expect(hasText(root, 'Codex')).toBe(true);
+    const swipeContents = root.findAll((node) => node.props['testID'] === 'swipe-delete-content');
+    expect(swipeContents.length).toBeGreaterThan(0);
+    for (const content of swipeContents) {
+      expect(StyleSheet.flatten(content.props['style'] as never)).toMatchObject({
+        backgroundColor: theme.colors.transparent,
+      });
+    }
 
     await press(findByLabel(root, 'Running root, alpha, Copilot, Working'));
     await press(findByLabel(root, 'New chat'));

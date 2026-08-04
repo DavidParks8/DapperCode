@@ -139,8 +139,7 @@ function SessionMetaRow(props: {
   } = context;
 
   return (
-    <GlassSurface role="chrome" style={styles.sessionMetaRow} testID="session-meta-glass-surface">
-      <View pointerEvents="none" style={styles.sessionMetaDivider} />
+    <View style={styles.sessionMetaRow} testID="session-meta-row">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -208,7 +207,7 @@ function SessionMetaRow(props: {
             label="Fast mode"
             displayText="Fast"
             iconName={fastModeEnabled ? 'flash' : 'flash-outline'}
-            iconColor={fastModeEnabled ? theme.colors.textPrimary : theme.colors.textMuted}
+            iconColor={fastModeEnabled ? theme.colors.userBubbleOnSurface : theme.colors.textMuted}
             textStyle={fastModeEnabled && styles.fastChipTextEnabled}
             accessibilityRole="switch"
             accessibilityState={{ checked: fastModeEnabled, disabled: fastModeControlDisabled }}
@@ -218,7 +217,7 @@ function SessionMetaRow(props: {
           />
         ) : null}
       </ScrollView>
-    </GlassSurface>
+    </View>
   );
 }
 
@@ -301,22 +300,29 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
 
   return (
     <>
-      <ChatHeader
-        onOpenDrawer={onOpenDrawer}
-        title={headerTitle}
-        agent={activeAgent}
-        onRenameTitle={selectedChat ? openTitleEditor : undefined}
-        rightIconName={selectedChat ? 'git-branch-outline' : undefined}
-        onRightActionPress={selectedChat ? handleOpenGit : undefined}
-      />
-      {showSessionMetaRow ? (
-        <SessionMetaRow
-          context={context}
-          styles={styles}
-          theme={theme}
-          hitSlop={sessionMetaChipHitSlop}
+      <GlassSurface
+        role="chrome"
+        style={styles.topChromeGlass}
+        testID="chat-top-chrome-glass-surface"
+      >
+        <ChatHeader
+          onOpenDrawer={onOpenDrawer}
+          title={headerTitle}
+          agent={activeAgent}
+          onRenameTitle={selectedChat ? openTitleEditor : undefined}
+          embeddedInGlass
+          rightIconName={selectedChat ? 'git-branch-outline' : undefined}
+          onRightActionPress={selectedChat ? handleOpenGit : undefined}
         />
-      ) : null}
+        {showSessionMetaRow ? (
+          <SessionMetaRow
+            context={context}
+            styles={styles}
+            theme={theme}
+            hitSlop={sessionMetaChipHitSlop}
+          />
+        ) : null}
+      </GlassSurface>
       {showTopCardsRow ? (
         <TopCardsRow
           context={context}

@@ -128,6 +128,9 @@ export function SwipeToDeleteRow({
   const contentStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
+  const actionLayerStyle = useAnimatedStyle(() => ({
+    width: Math.max(0, -translateX.value),
+  }));
 
   return (
     <View style={style}>
@@ -139,8 +142,8 @@ export function SwipeToDeleteRow({
         style={[styles.clip, { backgroundColor: contentBackgroundColor ?? theme.colors.bgMain }]}
         testID="swipe-delete-clip"
       >
-        <View
-          style={styles.actionLayer}
+        <Animated.View
+          style={[styles.actionLayer, actionLayerStyle]}
           pointerEvents="box-none"
           testID="swipe-delete-action-layer"
         >
@@ -159,7 +162,7 @@ export function SwipeToDeleteRow({
             />
             <Text style={styles.actionLabel}>{deleteLabel}</Text>
           </Pressable>
-        </View>
+        </Animated.View>
         <GestureDetector gesture={panGesture}>
           <Animated.View
             style={[
@@ -184,11 +187,15 @@ function createSwipeToDeleteRowStyles(theme: AppTheme) {
       overflow: 'hidden',
     },
     actionLayer: {
-      ...StyleSheet.absoluteFill,
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
       zIndex: 0,
       flexDirection: 'row',
       alignItems: 'stretch',
       justifyContent: 'flex-end',
+      overflow: 'hidden',
       backgroundColor: theme.colors.error,
     },
     action: {

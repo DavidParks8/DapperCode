@@ -174,6 +174,47 @@ describe('ChatTranscriptView activity event', () => {
   });
 });
 
+describe('ChatTranscriptView edge scrims', () => {
+  it('briefly fades transcript content at both fixed chrome boundaries without blocking touches', () => {
+    const tree = render({ topInset: 96, bottomInset: 88 });
+    const topScrim = requireTestValue(
+      tree.root.findAllByProps({ testID: 'transcript-top-scrim' })[0],
+      'top transcript scrim',
+    );
+    const bottomScrim = requireTestValue(
+      tree.root.findAllByProps({ testID: 'transcript-bottom-scrim' })[0],
+      'bottom transcript scrim',
+    );
+
+    expect(topScrim.props['pointerEvents']).toBe('none');
+    expect(bottomScrim.props['pointerEvents']).toBe('none');
+    expect(topScrim.props['colors']).toEqual([theme.colors.bgMain, theme.colors.transparent]);
+    expect(bottomScrim.props['colors']).toEqual([
+      theme.colors.transparent,
+      theme.colors.bgMain,
+      theme.colors.bgMain,
+    ]);
+    expect(bottomScrim.props['locations']).toEqual([
+      0,
+      theme.spacing.xxl / (88 + theme.spacing.xxl),
+      1,
+    ]);
+    expect(StyleSheet.flatten(topScrim.props['style'] as never)).toMatchObject({
+      position: 'absolute',
+      top: 96,
+      height: theme.spacing.xxl,
+      zIndex: 1,
+    });
+    expect(StyleSheet.flatten(bottomScrim.props['style'] as never)).toMatchObject({
+      position: 'absolute',
+      bottom: 0,
+      height: 88 + theme.spacing.xxl,
+      zIndex: 1,
+    });
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatTranscriptView conversation fork action', () => {
   it('gates authoritative boundaries and locks duplicate activation until settlement', async () => {
     let resolveFork: (() => void) | undefined;

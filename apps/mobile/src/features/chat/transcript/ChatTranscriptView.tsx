@@ -45,6 +45,7 @@ import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkConversationAction } from './useForkConversationAction';
 import { ActivityEvent } from './ActivityEvent';
+import { TranscriptEdgeScrims } from './TranscriptEdgeScrims';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
@@ -536,6 +537,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           windowSize={listBatchingConfig.windowSize}
           removeClippedSubviews={false}
           accessibilityLabel={`${chat.title || 'Chat'} transcript`}
+        />
+        <TranscriptEdgeScrims
+          topInset={topInset}
+          bottomInset={bottomInset}
+          edgeStyle={styles.transcriptEdgeScrim}
         />
         {renderScrollRail({
           activeIndex: rail.state.activeIndex,

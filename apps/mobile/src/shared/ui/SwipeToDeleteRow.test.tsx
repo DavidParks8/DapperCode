@@ -30,12 +30,19 @@ interface RenderedRow {
   translateX: () => number;
 }
 
-function renderRow(onDelete: () => void | Promise<boolean | void>): RenderedRow {
+function renderRow(
+  onDelete: () => void | Promise<boolean | void>,
+  contentBackgroundColor?: string,
+): RenderedRow {
   let tree!: ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <AppThemeProvider theme={theme}>
-        <SwipeToDeleteRow deleteAccessibilityLabel="Delete Session one" onDelete={onDelete}>
+        <SwipeToDeleteRow
+          deleteAccessibilityLabel="Delete Session one"
+          onDelete={onDelete}
+          contentBackgroundColor={contentBackgroundColor}
+        >
           <Pressable accessibilityLabel="Open Session one">
             <Text>Session one</Text>
           </Pressable>
@@ -85,7 +92,7 @@ describe('SwipeToDeleteRow', () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the destructive layer behind an opaque native clipping surface', () => {
+  it('keeps the destructive layer clipped behind the sliding content', () => {
     const { tree } = renderRow(jest.fn());
     const clip = tree.root.findByProps({ testID: 'swipe-delete-clip' });
     const actionLayer = tree.root.findByProps({ testID: 'swipe-delete-action-layer' });
@@ -105,13 +112,32 @@ describe('SwipeToDeleteRow', () => {
       top: 0,
       right: 0,
       bottom: 0,
-      left: 0,
       zIndex: 0,
       backgroundColor: theme.colors.error,
+      overflow: 'hidden',
+      width: 0,
     });
     expect(contentStyle).toMatchObject({
       zIndex: 1,
       backgroundColor: theme.colors.bgMain,
+    });
+  });
+
+  it('supports transparent resting content without exposing the destructive action', () => {
+    const { tree } = renderRow(jest.fn(), theme.colors.transparent);
+    const clip = tree.root.findByProps({ testID: 'swipe-delete-clip' });
+    const actionLayer = tree.root.findByProps({ testID: 'swipe-delete-action-layer' });
+    const content = tree.root.findByProps({ testID: 'swipe-delete-content' });
+
+    expect(StyleSheet.flatten(clip.props['style'])).toMatchObject({
+      backgroundColor: theme.colors.transparent,
+    });
+    expect(StyleSheet.flatten(content.props['style'])).toMatchObject({
+      backgroundColor: theme.colors.transparent,
+    });
+    expect(StyleSheet.flatten(actionLayer.props['style'])).toMatchObject({
+      width: 0,
+      overflow: 'hidden',
     });
   });
 

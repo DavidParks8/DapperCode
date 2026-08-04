@@ -185,7 +185,7 @@ export function DrawerChatList() {
         const chatTitle = item.chat.title || 'Untitled session';
         return (
           <SwipeToDeleteRow
-            contentBackgroundColor={theme.colors.bgSidebar}
+            contentBackgroundColor={theme.colors.transparent}
             deleteAccessibilityLabel={`Delete ${chatTitle}`}
             onDelete={() => handleDeleteChat(item.chat.id)}
             style={[
