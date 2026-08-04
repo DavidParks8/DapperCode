@@ -333,7 +333,6 @@ export function useMainScreenHeaderActivityViewModel(
     displayedActivity,
     isGenericRunningActivity,
     shouldShowGenericRunningActivityImmediately,
-    activityDetail,
     showActivity,
     headerTitle,
     defaultStartWorkspaceLabel,

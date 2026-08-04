@@ -40,11 +40,6 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       paddingTop: theme.spacing.xs,
       paddingBottom: theme.spacing.xs / 2,
     },
-    activityDock: {
-      paddingTop: theme.spacing.xs,
-      paddingBottom: theme.spacing.xs / 2,
-      zIndex: 3,
-    },
     sessionMetaRow: {
       minHeight: 48,
       overflow: 'hidden',

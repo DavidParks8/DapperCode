@@ -147,7 +147,34 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
   );
 }
 
-describe('ChatTranscriptView conversation fork checkpoint', () => {
+describe('ChatTranscriptView activity event', () => {
+  it('renders the live status at the newest transcript edge and updates through settlement', () => {
+    const tree = render({
+      activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
+    });
+
+    let header = getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
+      detail?: string;
+      title: string;
+      tone: string;
+    }>;
+    expect(header.props).toMatchObject({
+      detail: 'src/main.ts',
+      title: 'Editing file',
+      tone: 'running',
+    });
+
+    update(tree, { activity: { tone: 'complete', title: 'Turn completed' } });
+    header = getList(tree).props['ListHeaderComponent'] as typeof header;
+    expect(header.props).toMatchObject({ title: 'Turn completed', tone: 'complete' });
+
+    update(tree, { activity: null });
+    expect(getList(tree).props['ListHeaderComponent']).toBeNull();
+    act(() => tree.unmount());
+  });
+});
+
+describe('ChatTranscriptView conversation fork action', () => {
   it('gates authoritative boundaries and locks duplicate activation until settlement', async () => {
     let resolveFork: (() => void) | undefined;
     const onForkConversation = jest.fn(
@@ -169,30 +196,30 @@ describe('ChatTranscriptView conversation fork checkpoint', () => {
       onForkConversation,
     });
     const list = getList(tree);
-    const boundary = list.props.data.find(
+    const actionMessage = list.props.data.find(
       (item) =>
         item['kind'] === 'message' &&
-        (item['message'] as { id?: string } | undefined)?.id === 'user-2',
+        (item['message'] as { id?: string } | undefined)?.id === 'assistant-1',
     );
-    if (!boundary) {
-      throw new Error('Expected fork boundary item');
+    if (!actionMessage) {
+      throw new Error('Expected response carrying the fork action');
     }
     const rendered = list.props.renderItem({
-      item: boundary,
+      item: actionMessage,
       index: 0,
       separators: {},
     }) as React.ReactElement<{
-      children: React.ReactElement<{ children: React.ReactElement[] }>[];
+      children: React.ReactElement<{ onForkConversation?: () => void; forkBusy: boolean }>[];
     }>;
-    const checkpoint = rendered.props.children[0]?.props.children[1] as
-      React.ReactElement<{ onPress: () => void }> | undefined;
-    if (!checkpoint) {
-      throw new Error('Expected fork checkpoint');
+    const response = rendered.props.children[0];
+    if (!response?.props.onForkConversation) {
+      throw new Error('Expected fork action beside the response actions');
     }
+    expect(response.props.forkBusy).toBe(false);
 
     act(() => {
-      checkpoint.props.onPress();
-      checkpoint.props.onPress();
+      response.props.onForkConversation?.();
+      response.props.onForkConversation?.();
     });
     expect(onForkConversation).toHaveBeenCalledTimes(1);
     expect(onForkConversation).toHaveBeenCalledWith('user-2');
@@ -204,7 +231,7 @@ describe('ChatTranscriptView conversation fork checkpoint', () => {
     act(() => tree.unmount());
   });
 
-  it('does not render checkpoints when the selected agent lacks fork support', () => {
+  it('does not render fork actions when the selected agent lacks fork support', () => {
     const tree = render({
       chat: makeChat({
         messages: [
@@ -228,12 +255,12 @@ describe('ChatTranscriptView conversation fork checkpoint', () => {
       onForkConversation: jest.fn(),
     });
     expect(
-      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from here' }),
     ).toHaveLength(0);
     act(() => tree.unmount());
   });
 
-  it('does not offer checkpoints on inherited sub-agent history', () => {
+  it('does not offer fork actions on inherited sub-agent history', () => {
     const tree = render({
       chat: makeChat({
         parentThreadId: 'parent',
@@ -258,12 +285,12 @@ describe('ChatTranscriptView conversation fork checkpoint', () => {
       onForkConversation: jest.fn().mockResolvedValue(undefined),
     });
     expect(
-      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from here' }),
     ).toHaveLength(0);
     act(() => tree.unmount());
   });
 
-  it('does not offer checkpoints when complete fork history is unavailable', () => {
+  it('does not offer fork actions when complete fork history is unavailable', () => {
     const tree = render({
       chat: makeChat({
         messages: [
@@ -288,7 +315,7 @@ describe('ChatTranscriptView conversation fork checkpoint', () => {
       onForkConversation: jest.fn().mockResolvedValue(undefined),
     });
     expect(
-      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from this point' }),
+      tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from here' }),
     ).toHaveLength(0);
     act(() => tree.unmount());
   });

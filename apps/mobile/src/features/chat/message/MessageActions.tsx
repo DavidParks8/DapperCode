@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
@@ -21,10 +21,14 @@ const ACTION_BUTTON_VISIBLE_SIZE = { width: 30, height: 30 };
 export function MessageActions({
   text,
   onSelectText,
+  onForkConversation,
+  forkBusy = false,
   testID,
 }: {
   text: string;
   onSelectText?: () => void;
+  onForkConversation?: () => void;
+  forkBusy?: boolean;
   testID?: string;
 }) {
   const theme = useAppTheme();
@@ -98,6 +102,33 @@ export function MessageActions({
             size={16}
             color={theme.colors.textMuted}
           />
+        </Pressable>
+      ) : null}
+      {onForkConversation ? (
+        <Pressable
+          testID={testID ? `${testID}-fork` : undefined}
+          onPress={onForkConversation}
+          disabled={forkBusy}
+          hitSlop={actionHitSlop}
+          style={({ pressed }) => [
+            styles.messageActionButton,
+            pressed && !forkBusy && styles.messageActionButtonPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Fork conversation from here"
+          accessibilityHint="Creates a new conversation containing the requests completed through this response"
+          accessibilityState={{ busy: forkBusy, disabled: forkBusy }}
+        >
+          {forkBusy ? (
+            <ActivityIndicator size="small" color={theme.colors.textMuted} />
+          ) : (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="git-branch-outline"
+              size={16}
+              color={theme.colors.textMuted}
+            />
+          )}
         </Pressable>
       ) : null}
     </View>

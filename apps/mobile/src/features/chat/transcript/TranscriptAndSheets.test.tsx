@@ -23,11 +23,9 @@ jest.mock('../styles/useStyles', () => ({
     styles: {
       bodyContainer: {},
       keyboardAvoiding: {},
-      floatingActivity: {},
     },
   }),
 }));
-jest.mock('../screen/ActivityBar', () => ({ ActivityBar: () => null }));
 jest.mock('@shared/ui/SelectionSheet', () => ({ SelectionSheet: () => null }));
 jest.mock('../screen/Presentation', () => ({
   ComposeView: (props: Record<string, unknown>) => {
@@ -90,9 +88,8 @@ function createContext(overrides: Record<string, unknown> = {}) {
     toggleFastMode: jest.fn(),
     shouldShowComposer: false,
     renderComposer: jest.fn(),
-    showFloatingActivity: false,
+    showTranscriptActivity: false,
     displayedActivity: { tone: 'running', title: 'Working' },
-    activityDetail: undefined,
     attachmentMenuVisible: false,
     attachmentMenuOptions: [],
     attachmentController: { closeMenu: jest.fn() },
@@ -164,6 +161,34 @@ describe('MainScreenTranscriptAndSheets', () => {
 
     expect(renderComposer).toHaveBeenCalledWith(true);
     expect(mockTranscriptProps.at(-1)?.['bottomInset']).toBe(88);
+  });
+
+  it('routes the live status into the transcript instead of the composer overlay', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const store = createStore();
+    const renderComposer = jest.fn(() => null);
+    const displayedActivity = {
+      tone: 'running',
+      title: 'Editing file',
+      detail: 'src/main.ts',
+    };
+    const context = createContext({
+      displayedActivity,
+      renderComposer,
+      shouldShowComposer: true,
+      showTranscriptActivity: true,
+    });
+
+    act(() => {
+      renderer.create(
+        <Provider store={store}>
+          <MainScreenTranscriptAndSheets context={context as never} />
+        </Provider>,
+      );
+    });
+
+    expect(mockTranscriptProps.at(-1)?.['activity']).toBe(displayedActivity);
+    expect(renderComposer).toHaveBeenCalledWith(true);
   });
 
   it('keeps the web composer in flow instead of dropping it during native overlay handling', () => {

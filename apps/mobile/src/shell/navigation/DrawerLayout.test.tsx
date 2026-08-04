@@ -12,7 +12,7 @@ jest.mock('@shell/navigation/DrawerContent', () => ({ DrawerContent: () => null 
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { ResponsiveDrawerLayout } from '../../app/profiles/[profileId]/(drawer)/_layout';
-import { TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
+import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
 
 interface DrawerScreenOptions {
   drawerStyle: { width: number; backgroundColor: string };
@@ -45,16 +45,24 @@ describe('DrawerLayout responsive sizing', () => {
     mockDrawerProps = null;
   });
 
-  it('reveals chat beside a compact drawer, then becomes a push-aside sidebar when unfolded', () => {
-    const tree = renderLayout(430);
+  it.each([320, 390, 430, TABLET_LAYOUT_MIN_WIDTH - 1])(
+    'fills the session list to the compact viewport width (%i px)',
+    (width) => {
+      const tree = renderLayout(width);
 
-    expect(readScreenOptions()).toMatchObject({
-      drawerType: 'front',
-      swipeEnabled: true,
-      drawerStyle: { width: 360, backgroundColor: 'transparent' },
-      overlayColor: 'transparent',
-      sceneStyle: { backgroundColor: '#000000' },
-    });
+      expect(readScreenOptions()).toMatchObject({
+        drawerType: 'front',
+        swipeEnabled: true,
+        drawerStyle: { width },
+        sceneStyle: { backgroundColor: '#000000' },
+      });
+
+      act(() => tree.unmount());
+    },
+  );
+
+  it('becomes a push-aside sidebar when the window reaches tablet width', () => {
+    const tree = renderLayout(430);
 
     act(() => tree.update(<ResponsiveDrawerLayout width={1024} />));
 

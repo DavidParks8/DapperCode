@@ -95,33 +95,6 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       gap: theme.spacing.xl,
     },
     chatMessageBlock: { gap: theme.spacing.sm },
-    forkCheckpoint: {
-      minHeight: 48,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing.sm,
-    },
-    forkCheckpointLine: {
-      height: StyleSheet.hairlineWidth,
-      flex: 1,
-      backgroundColor: theme.colors.border,
-    },
-    forkCheckpointButton: {
-      minHeight: 44,
-      paddingHorizontal: theme.spacing.sm,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: theme.spacing.xs,
-      borderRadius: theme.radius.full,
-    },
-    forkCheckpointButtonPressed: { backgroundColor: theme.colors.bgInput },
-    forkCheckpointIcon: { color: theme.colors.textMuted },
-    forkCheckpointLabel: {
-      ...theme.typography.caption,
-      color: theme.colors.textMuted,
-      fontWeight: '600',
-    },
     inlineChoiceOptions: { marginLeft: theme.spacing.sm, gap: theme.spacing.xs },
     inlineChoiceOptionButton: {
       borderWidth: StyleSheet.hairlineWidth,

@@ -1,5 +1,18 @@
 import type { Chat } from '@bridge/types/types';
 import type { ChatTranscriptViewProps } from './ChatTranscriptView';
+import type { ActivityState } from '../helpers/helpers';
+
+function areActivitiesEquivalent(
+  previous: ActivityState | null | undefined,
+  next: ActivityState | null | undefined,
+): boolean {
+  return (
+    previous === next ||
+    (previous?.tone === next?.tone &&
+      previous?.title === next?.title &&
+      previous?.detail === next?.detail)
+  );
+}
 
 function areTranscriptConnectionPropsEqual(
   previous: ChatTranscriptViewProps,
@@ -39,7 +52,8 @@ function areTranscriptDisplayPropsEqual(
     previous.continuationState === next.continuationState &&
     previous.onLoadEarlier === next.onLoadEarlier &&
     previous.scrollRailEnabled === next.scrollRailEnabled &&
-    previous.supportsConversationFork === next.supportsConversationFork
+    previous.supportsConversationFork === next.supportsConversationFork &&
+    areActivitiesEquivalent(previous.activity, next.activity)
   );
 }
 

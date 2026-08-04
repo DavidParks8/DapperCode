@@ -157,12 +157,12 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
     ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessError>> {
         async move {
             let source_session_id = context.session_id.to_string();
-            let message_id = resolve_opencode_message_id(context, &request).await?;
+            let boundary = resolve_opencode_message_id(context, &request).await?;
             let mut url = session_action_url(context, &source_session_id, "fork")?;
             url.query_pairs_mut()
                 .append_pair("directory", context.cwd.to_string_lossy().as_ref());
             let response = timed_send(context.http.post(url).json(&OpenCodeForkRequest {
-                message_id: Some(message_id),
+                message_id: Some(boundary.message_id),
             }))
             .await?;
             if !response.status().is_success() {
@@ -178,7 +178,7 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
                 .into_iter()
                 .filter(|message| message.info.role == "user")
                 .count();
-            if copied_user_messages != request.user_message_ordinal {
+            if copied_user_messages != boundary.user_message_ordinal {
                 return Err(HarnessError::InvalidResponse(
                     "fork did not preserve the requested exclusive message boundary".to_string(),
                 ));
@@ -215,7 +215,10 @@ fn validate_fork_response(
     if forked.id.is_empty()
         || forked.id.len() > MAX_OPENCODE_SESSION_ID_BYTES
         || forked.id == source_session_id
-        || forked.parent_id.as_deref() != Some(source_session_id)
+        || forked
+            .parent_id
+            .as_deref()
+            .is_some_and(|parent_id| parent_id != source_session_id)
         || Path::new(&forked.directory) != cwd
     {
         return Err(HarnessError::InvalidResponse(
@@ -273,17 +276,34 @@ async fn wait_for_opencode_idle(
 async fn resolve_opencode_message_id(
     context: &SessionContext,
     request: &HarnessForkRequest,
-) -> Result<String, HarnessError> {
+) -> Result<ResolvedOpenCodeForkBoundary, HarnessError> {
     let messages = opencode_messages(context, &context.session_id.to_string()).await?;
     let users = messages
         .iter()
         .filter(|message| message.info.role == "user")
         .collect::<Vec<_>>();
-    let message = users.get(request.user_message_ordinal).ok_or_else(|| {
-        HarnessError::InvalidResponse(
-            "fork boundary is not present in OpenCode history".to_string(),
-        )
-    })?;
+    let (user_message_ordinal, message) =
+        if let Some(raw_message_id_hint) = request.raw_message_id_hint.as_deref() {
+            users
+                .iter()
+                .enumerate()
+                .find(|(_, message)| message.info.id == raw_message_id_hint)
+                .map(|(ordinal, message)| (ordinal, *message))
+                .ok_or_else(|| {
+                    HarnessError::InvalidResponse(
+                        "fork boundary identity is not present in OpenCode history".to_string(),
+                    )
+                })?
+        } else {
+            (
+                request.user_message_ordinal,
+                *users.get(request.user_message_ordinal).ok_or_else(|| {
+                    HarnessError::InvalidResponse(
+                        "fork boundary is not present in OpenCode history".to_string(),
+                    )
+                })?,
+            )
+        };
     let first_text = message
         .parts
         .iter()
@@ -303,16 +323,15 @@ async fn resolve_opencode_message_id(
             "fork boundary does not match OpenCode history".to_string(),
         ));
     }
-    if request
-        .raw_message_id_hint
-        .as_deref()
-        .is_some_and(|hint| hint != message.info.id)
-    {
-        return Err(HarnessError::InvalidResponse(
-            "fork boundary identity does not match OpenCode history".to_string(),
-        ));
-    }
-    Ok(message.info.id.clone())
+    Ok(ResolvedOpenCodeForkBoundary {
+        message_id: message.info.id.clone(),
+        user_message_ordinal,
+    })
+}
+
+struct ResolvedOpenCodeForkBoundary {
+    message_id: String,
+    user_message_ordinal: usize,
 }
 
 fn fork_boundary_text_matches(actual: &str, expected: &str, expected_truncated: bool) -> bool {
@@ -816,14 +835,13 @@ mod tests {
         );
         Json(serde_json::json!({
             "id": "forked",
-            "parentID": "source",
             "directory": state.directory,
             "title": "Forked"
         }))
     }
 
     #[tokio::test]
-    async fn opencode_fork_resolves_and_verifies_the_exclusive_user_boundary() {
+    async fn opencode_fork_resolves_exact_identity_despite_snapshot_ordinal_drift() {
         let directory = std::env::current_dir().expect("current directory");
         let (observed, mut observed_rx) = mpsc::unbounded_channel();
         let app = Router::new()
@@ -854,10 +872,10 @@ mod tests {
             .fork(
                 &context,
                 HarnessForkRequest {
-                    user_message_ordinal: 1,
+                    user_message_ordinal: 0,
                     first_text: "second".to_string(),
                     first_text_truncated: false,
-                    raw_message_id_hint: None,
+                    raw_message_id_hint: Some("raw-user-2".to_string()),
                 },
             )
             .await

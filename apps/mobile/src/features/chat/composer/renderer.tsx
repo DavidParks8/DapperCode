@@ -10,7 +10,6 @@ import { useMemo, type ComponentProps } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
-import { ActivityBar } from '../screen/ActivityBar';
 import { ApprovalBanner } from '../approvals/ApprovalBanner';
 import { BridgeUiBanner } from '../approvals/BridgeUiSurface';
 import { ChatInput } from './ChatInput';
@@ -32,7 +31,6 @@ type BridgeRecoveryBannerButtonHitSlop = NonNullable<ComponentProps<typeof Press
 export function useMainScreenComposerRenderer(context: MainScreenComposerRendererContext) {
   const {
     activeAgentLabel,
-    activityDetail,
     attachmentControlsDisabled,
     bannerBridgeUiSurfaces,
     canCancelQueuedMessage,
@@ -42,7 +40,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     composerOverlayInset,
     composerSafeAreaBottomInset,
     dismissBridgeUiSurface,
-    displayedActivity,
     draft,
     editingQueuedMessage,
     handleBridgeUiAction,
@@ -68,7 +65,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     selectedThreadRuntimeSnapshot,
     setDraft,
     showBridgeRecoveryBanner,
-    showFloatingActivity,
     showQueuedMessageDock,
     showSlashSuggestions,
     showingOptimisticQueuedMessage,
@@ -142,13 +138,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         slashSuggestions={slashSuggestions}
         slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
         setDraft={setDraft}
-        styles={styles}
-      />
-      <FloatingActivityDockView
-        overlay={overlay}
-        showFloatingActivity={showFloatingActivity}
-        displayedActivity={displayedActivity}
-        activityDetail={activityDetail}
         styles={styles}
       />
       <ChatInput
@@ -359,33 +348,5 @@ function SlashSuggestionsView({
         );
       })}
     </Animated.ScrollView>
-  );
-}
-
-function FloatingActivityDockView({
-  overlay,
-  showFloatingActivity,
-  displayedActivity,
-  activityDetail,
-  styles,
-}: {
-  overlay: boolean;
-  showFloatingActivity: boolean;
-  displayedActivity: MainScreenComposerRendererContext['displayedActivity'];
-  activityDetail: MainScreenComposerRendererContext['activityDetail'];
-  styles: MainScreenComposerRendererContext['styles'];
-}) {
-  if (!overlay || !showFloatingActivity) {
-    return null;
-  }
-
-  return (
-    <View pointerEvents="none" style={styles.activityDock} testID="floating-activity-dock">
-      <ActivityBar
-        title={displayedActivity.title}
-        detail={activityDetail}
-        tone={displayedActivity.tone}
-      />
-    </View>
   );
 }

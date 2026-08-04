@@ -22,6 +22,7 @@ import {
 import { useChatScrollRail } from './scrollRail/useChatScrollRail';
 import { useAppTheme } from '@shared/theme';
 import {
+  type ActivityState,
   type AutoScrollState,
   CHAT_AUTO_LOAD_OLDER_TOP_THRESHOLD_PX,
   CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX,
@@ -33,7 +34,7 @@ import {
 import { createStyles } from '../styles/styles';
 import {
   buildTranscriptDisplayItems,
-  eligibleForkMessageIds,
+  forkBoundariesByActionMessageId,
   type TranscriptDisplayItem,
 } from './messages';
 import { projectTranscript } from './controllers/projectionController';
@@ -43,6 +44,7 @@ import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkConversationAction } from './useForkConversationAction';
+import { ActivityEvent } from './ActivityEvent';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
@@ -78,6 +80,7 @@ export interface ChatTranscriptViewProps {
   scrollRailEnabled?: boolean;
   supportsConversationFork?: boolean;
   onForkConversation?: (messageId: string) => Promise<unknown>;
+  activity?: ActivityState | null;
 }
 
 export const ChatTranscriptView = memo(function ChatTranscriptView({
@@ -104,6 +107,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   scrollRailEnabled = true,
   supportsConversationFork = false,
   onForkConversation,
+  activity = null,
 }: ChatTranscriptViewProps) {
   const theme = useAppTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -178,13 +182,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
   );
-  const forkMessageIds = useMemo(
+  const forkBoundaries = useMemo(
     () =>
       supportsConversationFork &&
       !chat.parentThreadId &&
       (continuationState?.unavailableCount ?? 0) === 0
-        ? eligibleForkMessageIds(visibleMessages, chat.status)
-        : new Set<string>(),
+        ? forkBoundariesByActionMessageId(visibleMessages, chat.status)
+        : new Map<string, string>(),
     [
       chat.parentThreadId,
       chat.status,
@@ -419,6 +423,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
+  const activityEvent = activity ? (
+    <ActivityEvent title={activity.title} detail={activity.detail} tone={activity.tone} />
+  ) : null;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
     [],
@@ -434,18 +441,19 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         onInlineOptionSelect,
         onOpenLocalPreview,
         onOpenSubAgentThread,
-        forkEligible:
-          item.kind === 'message' &&
-          forkMessageIds.has(item.message.id) &&
-          Boolean(onForkConversation),
-        forkBusy: item.kind === 'message' && forkingMessageId === item.message.id,
+        forkBoundaryMessageId:
+          item.kind === 'message' && onForkConversation
+            ? forkBoundaries.get(item.message.id)
+            : undefined,
+        forkBusy:
+          item.kind === 'message' && forkBoundaries.get(item.message.id) === forkingMessageId,
         onForkConversation: handleForkConversation,
         threadRunning,
       }),
     [
       bridgeToken,
       bridgeUrl,
-      forkMessageIds,
+      forkBoundaries,
       forkingMessageId,
       handleForkConversation,
       inlineChoiceSet,
@@ -468,6 +476,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           extraData={listExtraData}
           keyExtractor={keyExtractor}
           renderItem={renderMessageItem}
+          ListHeaderComponent={activityEvent}
           ListFooterComponent={historyBoundary}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}

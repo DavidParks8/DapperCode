@@ -102,13 +102,16 @@ describe('MessageActions', () => {
     expect(findPressable(root, 'Copied message')).toBeDefined();
   });
 
-  it('gives the copy and select buttons an effective touch target at or above the 44pt/48dp floor', () => {
-    const tree = render(<MessageActions text="hello" onSelectText={() => {}} />);
+  it('keeps copy, select, and fork together with effective touch targets', () => {
+    const tree = render(
+      <MessageActions text="hello" onSelectText={() => {}} onForkConversation={() => {}} />,
+    );
     const root = queryRoot(tree);
     const copyButton = findPressable(root, 'Copy message');
     const selectButton = findPressable(root, 'Select message text');
+    const forkButton = findPressable(root, 'Fork conversation from here');
 
-    for (const button of [copyButton, selectButton]) {
+    for (const button of [copyButton, selectButton, forkButton]) {
       const hitSlop = button.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
@@ -131,5 +134,22 @@ describe('MessageActions', () => {
     const root = queryRoot(tree);
     invokeProp(findPressable(root, 'Select message text'), 'onPress');
     expect(onSelectText).toHaveBeenCalledTimes(1);
+  });
+
+  it('invokes the fork action and exposes its busy state', () => {
+    const onForkConversation = jest.fn();
+    const tree = render(
+      <MessageActions text="hello" onForkConversation={onForkConversation} forkBusy />,
+    );
+    const forkButton = findPressable(queryRoot(tree), 'Fork conversation from here');
+
+    expect(forkButton.props['disabled']).toBe(true);
+    expect(forkButton.props['accessibilityState']).toEqual({ busy: true, disabled: true });
+
+    act(() => {
+      tree.update(wrap(<MessageActions text="hello" onForkConversation={onForkConversation} />));
+    });
+    invokeProp(findPressable(queryRoot(tree), 'Fork conversation from here'), 'onPress');
+    expect(onForkConversation).toHaveBeenCalledTimes(1);
   });
 });

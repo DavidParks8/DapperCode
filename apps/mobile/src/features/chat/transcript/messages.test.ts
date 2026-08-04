@@ -7,14 +7,14 @@ import {
 } from '@bridge/messages';
 import {
   buildTranscriptDisplayItems,
-  eligibleForkMessageIds,
+  forkBoundariesByActionMessageId,
   getVisibleTranscriptMessages,
   MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP,
   syncVisibleSubAgentStatuses,
   type TranscriptDisplayItem,
 } from './messages';
 
-describe('eligibleForkMessageIds', () => {
+describe('forkBoundariesByActionMessageId', () => {
   const settledConversation = [
     message('user-1', 'user', 'First request'),
     message('assistant-1', 'assistant', 'First response'),
@@ -25,9 +25,9 @@ describe('eligibleForkMessageIds', () => {
   ];
 
   it('offers settled authoritative non-first requests', () => {
-    expect([...eligibleForkMessageIds(settledConversation, 'complete')]).toEqual([
-      'user-2',
-      'user-3',
+    expect([...forkBoundariesByActionMessageId(settledConversation, 'complete')]).toEqual([
+      ['assistant-1', 'user-2'],
+      ['assistant-2', 'user-3'],
     ]);
   });
 
@@ -37,7 +37,7 @@ describe('eligibleForkMessageIds', () => {
       message('msg-optimistic', 'user', 'Optimistic request'),
       { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
     ];
-    expect([...eligibleForkMessageIds(messages, 'running')]).toEqual([]);
+    expect([...forkBoundariesByActionMessageId(messages, 'running')]).toEqual([]);
   });
 });
 

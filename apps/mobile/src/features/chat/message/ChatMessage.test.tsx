@@ -323,6 +323,58 @@ describe('ChatMessage markdown formatting', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps overflowing JSON inside a full-width horizontal scroll viewport', () => {
+    const longLine = JSON.stringify({
+      request: {
+        id: 'req-overflow',
+        payload: 'x'.repeat(240),
+      },
+    });
+    const tree = renderMessage({
+      id: 'msg_overflowing_code',
+      role: 'assistant',
+      content: `\`\`\`json\n${longLine}\n\`\`\``,
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const surface = tree.root.findByProps({ testID: 'chat-code-block' });
+    const scroll = tree.root.findByProps({
+      testID: 'chat-code-block-scroll',
+    }) as QueryableTestInstance;
+    const code = scroll.findAllByType(Text).find((node) => {
+      const style = StyleSheet.flatten(node.props['style'] as never) as {
+        alignSelf?: string;
+        flexShrink?: number;
+      };
+      return style.alignSelf === 'flex-start' && style.flexShrink === 0;
+    });
+
+    expect(StyleSheet.flatten(surface.props['style'] as never)).toMatchObject({
+      width: '100%',
+      maxWidth: '100%',
+      overflow: 'hidden',
+    });
+    expect(scroll.props).toMatchObject({
+      horizontal: true,
+      nestedScrollEnabled: true,
+      directionalLockEnabled: true,
+    });
+    expect(StyleSheet.flatten(scroll.props['style'] as never)).toMatchObject({
+      width: '100%',
+      maxWidth: '100%',
+    });
+    expect(StyleSheet.flatten(scroll.props['contentContainerStyle'] as never)).toMatchObject({
+      minWidth: '100%',
+      alignItems: 'flex-start',
+    });
+    expect(code).toBeDefined();
+    expect(StyleSheet.flatten(code?.props['style'] as never)).toMatchObject({
+      alignSelf: 'flex-start',
+      flexShrink: 0,
+    });
+
+    act(() => tree.unmount());
+  });
+
   it('repaints when only the ordered parts change', () => {
     const base: ApiChatMessage = {
       id: 'msg_parts',

@@ -108,6 +108,8 @@ export interface ChatMessageRenderContext {
   bridgeToken: string | null;
   onOpenLocalPreview?: (url: string) => void;
   onOpenSubAgentThread?: (threadId: string) => void;
+  onForkConversation?: () => void;
+  forkBusy: boolean;
 }
 
 type ChatMessageKind =
@@ -200,6 +202,8 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
       <MessageActions
         text={ctx.copyText}
         onSelectText={ctx.openSelectText}
+        onForkConversation={ctx.onForkConversation}
+        forkBusy={ctx.forkBusy}
         testID={`chat-message-copy-${message.id}`}
       />
       {ctx.selectTextVisible ? (

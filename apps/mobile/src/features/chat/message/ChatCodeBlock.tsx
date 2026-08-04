@@ -96,8 +96,10 @@ export function ChatCodeBlock({
         </Pressable>
       </View>
       <ScrollView
+        testID="chat-code-block-scroll"
         horizontal
         nestedScrollEnabled
+        directionalLockEnabled
         bounces={false}
         showsHorizontalScrollIndicator={false}
         style={styles.scroll}
@@ -114,6 +116,7 @@ export function ChatCodeBlock({
 const createStyles = (theme: AppTheme) =>
   StyleSheet.create({
     surface: {
+      width: '100%',
       maxWidth: '100%',
       marginVertical: theme.spacing.sm,
       overflow: 'hidden',
@@ -154,14 +157,17 @@ const createStyles = (theme: AppTheme) =>
       color: theme.colors.textSecondary,
     },
     copyLabelError: { color: theme.colors.error },
-    scroll: { maxWidth: '100%' },
+    scroll: { width: '100%', maxWidth: '100%' },
     scrollContent: {
+      minWidth: '100%',
+      alignItems: 'flex-start',
       paddingHorizontal: theme.spacing.md,
       paddingVertical: theme.spacing.md,
     },
     code: {
       ...theme.typography.mono,
       color: theme.colors.inlineCodeText,
+      alignSelf: 'flex-start',
       flexShrink: 0,
     },
     syntaxComment: { color: theme.colors.codeSyntaxComment },
