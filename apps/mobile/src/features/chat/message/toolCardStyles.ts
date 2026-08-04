@@ -4,6 +4,7 @@ import type { AppTheme } from '@shared/theme';
 
 export const createToolCardStyles = (theme: AppTheme) =>
   StyleSheet.create({
+    rowLayoutClip: { overflow: 'hidden' },
     row: {
       flexDirection: 'row',
       alignItems: 'center',

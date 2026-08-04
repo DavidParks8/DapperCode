@@ -404,6 +404,35 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
+  it('clips exiting output to the animated row layout', () => {
+    const value = invocation({ id: 'tool-collapse-clip', textLines: ['out'] });
+    const tree = render(value);
+    const layout = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-row-layout' })[0],
+      'tool row layout',
+    );
+    expect(StyleSheet.flatten(layout.props['style'] as object)).toMatchObject({
+      overflow: 'hidden',
+    });
+
+    expand(tree, value.title);
+    const outputPanel = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
+      'tool output panel',
+    );
+    expect(ancestorTestIDs(outputPanel)).toContain('tool-row-layout');
+
+    const row = requireTestValue(tree.root.findAllByProps({ testID: 'tool-row' })[0], 'tool row');
+    expect(StyleSheet.flatten(row.props['style'] as object)).not.toHaveProperty(
+      'overflow',
+      'hidden',
+    );
+
+    expand(tree, value.title);
+    expect(tree.root.findAllByProps({ testID: 'tool-output-panel' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('only highlights the press state while the row can actually expand', () => {
     const open = render(invocation({ id: 'tool-pressable', textLines: ['out'] }));
     const openStyle = requireTestValue(

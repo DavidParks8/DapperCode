@@ -219,8 +219,13 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
 
   return (
     <Animated.View
-      style={[messageStyles.messageWrapper, messageStyles.messageWrapperAssistant]}
+      style={[
+        messageStyles.messageWrapper,
+        messageStyles.messageWrapperAssistant,
+        styles.rowLayoutClip,
+      ]}
       layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+      testID="tool-row-layout"
     >
       <View
         style={[styles.row, invocation.isError && styles.rowError]}
