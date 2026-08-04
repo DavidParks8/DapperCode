@@ -99,6 +99,19 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
     expect(context.selectModel).toHaveBeenCalledWith(model.id);
   });
 
+  it('does not label model rows with the default reasoning effort', () => {
+    const context = createContext({
+      modelOptions: [{ ...model, defaultReasoningEffort: 'max' }],
+    });
+    const result = render(context);
+    const modelOption = result.modelPickerOptions.find((option) => option.key === model.id);
+
+    // The trailing effort label read as a property of the model rather than a setting, so it was
+    // meaningless next to the name and context size.
+    expect(modelOption).toBeDefined();
+    expect(modelOption!.meta).toBeUndefined();
+  });
+
   it('fires a selection haptic and delegates when the server-default model option is pressed', async () => {
     const context = createContext();
     const result = render(context);

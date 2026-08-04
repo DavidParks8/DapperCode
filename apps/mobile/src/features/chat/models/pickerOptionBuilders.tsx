@@ -159,9 +159,6 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
         description: formatModelOptionDescription(model),
         icon: 'hardware-chip-outline' as const,
         badge: model.isDefault ? 'Default' : undefined,
-        meta: model.defaultReasoningEffort
-          ? formatReasoningEffort(model.defaultReasoningEffort)
-          : undefined,
         selected: model.id === effectiveModelId,
         onPress: () => {
           void feedback.selection();
