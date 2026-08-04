@@ -100,6 +100,19 @@ describe('ActivityBar', () => {
     act(() => failed.unmount());
   });
 
+  it('uses an opaque elevated surface for errors instead of translucent glass', () => {
+    const tree = render('error', 'Turn failed', 'agent exited 1');
+    const errorSurface = tree.root.findByProps({ testID: 'activity-error-surface' });
+    const style = StyleSheet.flatten(errorSurface.props['style'] as never) as Props;
+
+    expect(style['backgroundColor']).toBe(theme.colors.bgElevated);
+    expect(style['borderColor']).toBe(theme.colors.errorBorder);
+    expect(
+      (tree.root as Queryable).findAll((node) => node.props['testID'] === 'activity-glass-surface'),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('falls back to the title when there is no detail', () => {
     const tree = render('complete', 'Turn completed', '   ');
     expect(textContent(tree.root as Queryable)).toContain('Turn completed');

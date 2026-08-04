@@ -1,19 +1,25 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
-import { FlatList, Keyboard, Platform, Pressable } from 'react-native';
+import { FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Chat } from '@bridge/types/types';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { ChatScrollRail } from './scrollRail/ChatScrollRail';
+import { JUMP_TO_LATEST_VISIBLE_SIZE } from './viewChrome';
 import {
   CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS,
   CHAT_SCROLL_RAIL_TOUCH_WIDTH,
 } from './scrollRail/geometry';
 import { mockGestureByTestId, resetMockGestures } from '@shared/testing/gestureHandlerMock';
-import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { AppThemeProvider, createAppTheme, resolveMinimumTouchTarget } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
-import { FadeIn, FadeOut, ReduceMotion } from '@shared/testing/reanimatedMock';
+import { ReduceMotion, ZoomIn, ZoomOut } from '@shared/testing/reanimatedMock';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -757,7 +763,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
-  it('gives the jump-to-latest button an effective touch target at or above the 44pt/48dp floor', () => {
+  it('renders the jump-to-latest button as a 48pt circular toolbar target', () => {
     const tree = render({});
     const list = getList(tree);
     scroll(list, 100);
@@ -767,15 +773,38 @@ describe('ChatTranscriptView continuation', () => {
     }) as Queryable;
     const hitSlop = jump.props['hitSlop'] as
       { top: number; bottom: number; left: number; right: number } | undefined;
+    const glassSurface = tree.root.findByProps({ testID: 'jump-to-latest-glass-surface' });
+    const glassStyle = StyleSheet.flatten(glassSurface.props['style'] as never) as Record<
+      string,
+      unknown
+    >;
     expect(hitSlop).toBeDefined();
-    expect(hitSlop!.top).toBeGreaterThan(0);
-    expect(hitSlop!.bottom).toBeGreaterThan(0);
+    expect(JUMP_TO_LATEST_VISIBLE_SIZE).toEqual({ width: 48, height: 48 });
+    expect(glassStyle['width']).toBe(48);
+    expect(glassStyle['height']).toBe(48);
+    expect(JUMP_TO_LATEST_VISIBLE_SIZE.width).toBeGreaterThanOrEqual(resolveMinimumTouchTarget());
+    expect(JUMP_TO_LATEST_VISIBLE_SIZE.height).toBeGreaterThanOrEqual(resolveMinimumTouchTarget());
     act(() => tree.unmount());
   });
 
-  it('wires the jump-to-latest enter/exit transitions to honor system Reduce Motion', () => {
-    const enterSpy = jest.spyOn(FadeIn, 'reduceMotion');
-    const exitSpy = jest.spyOn(FadeOut, 'reduceMotion');
+  it('renders jump-to-latest with interactive Liquid Glass without fading the material', () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+    const tree = render({});
+    scroll(getList(tree), 100);
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'jump-to-latest-glass-surface',
+    );
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(glassProps?.isInteractive).toBe(true);
+
+    act(() => tree.unmount());
+  });
+
+  it('wires transform-only jump-to-latest transitions to honor system Reduce Motion', () => {
+    const enterSpy = jest.spyOn(ZoomIn, 'reduceMotion');
+    const exitSpy = jest.spyOn(ZoomOut, 'reduceMotion');
     const tree = render({});
     const list = getList(tree);
     scroll(list, 100);

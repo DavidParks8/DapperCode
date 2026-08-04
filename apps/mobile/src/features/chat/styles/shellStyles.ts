@@ -1,5 +1,3 @@
-import { StyleSheet } from 'react-native';
-
 import type { AppTheme } from '@shared/theme';
 
 export const createMainScreenShellStyles = (theme: AppTheme) =>
@@ -46,16 +44,19 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       zIndex: 3,
     },
     sessionMetaRow: {
-      backgroundColor: theme.colors.bgMain,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.borderLight,
+      borderCurve: 'continuous',
+      borderRadius: theme.radius.full,
+      marginHorizontal: theme.spacing.md,
+      marginTop: theme.spacing.xs,
+      minHeight: theme.touchTarget.minimum,
+      overflow: 'hidden',
       paddingVertical: theme.spacing.xs + 2,
     },
     sessionMetaRowContent: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: theme.spacing.xs + 2,
-      paddingHorizontal: theme.spacing.lg,
+      gap: theme.spacing.xs,
+      paddingHorizontal: theme.spacing.sm,
     },
     topCardsRow: {
       backgroundColor: theme.colors.bgMain,

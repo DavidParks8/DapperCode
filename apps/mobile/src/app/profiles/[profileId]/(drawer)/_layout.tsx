@@ -30,7 +30,11 @@ export function ResponsiveDrawerLayout({ width }: { width: number }) {
         headerShown: false,
         drawerType: permanent ? 'permanent' : 'front',
         swipeEnabled: !permanent,
-        drawerStyle: { width: permanent ? TABLET_SIDEBAR_WIDTH : width },
+        drawerStyle: {
+          width: permanent ? TABLET_SIDEBAR_WIDTH : width,
+          backgroundColor: theme.colors.transparent,
+        },
+        overlayColor: theme.colors.transparent,
         sceneStyle: { backgroundColor: theme.colors.bgMain },
       }}
     />

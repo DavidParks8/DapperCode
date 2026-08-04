@@ -7,6 +7,7 @@ import { computeHitSlop } from '@shared/ui/touchTarget';
 import { getDrawerFolderPickerLabels } from '@shell/navigation/drawerAttention';
 import { formatCompactCount } from '@shell/navigation/drawerContentHelpers';
 import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionSheet';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
 import { useDrawerContentViewModel } from '@shell/navigation/drawerContentViewContext';
 
@@ -60,7 +61,7 @@ export function DrawerContentView() {
   );
 
   return (
-    <View style={styles.container}>
+    <GlassSurface role="drawer" style={styles.container} testID="drawer-glass-surface">
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.mainContent}>
           <View style={styles.header}>
@@ -280,6 +281,6 @@ export function DrawerContentView() {
         onClose={handleDismissFolderPicker}
         presentation="expanded"
       />
-    </View>
+    </GlassSurface>
   );
 }

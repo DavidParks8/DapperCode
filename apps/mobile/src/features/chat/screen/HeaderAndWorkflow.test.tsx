@@ -4,6 +4,11 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 
 import type { Chat } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -197,6 +202,20 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
 
     expect(mockHaptics.selectionAsync).toHaveBeenCalledTimes(1);
     expect(context.toggleFastMode).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('renders the selector rail with the native capsule material when Liquid Glass is available', () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+
+    const tree = render(baseContext());
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'session-meta-glass-surface',
+    );
+
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
     act(() => tree.unmount());
   });
 

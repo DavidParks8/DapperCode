@@ -45,41 +45,52 @@ export function ActivityBar({ title, detail, tone }: ActivityBarProps) {
   const stacked = hasDetail && tone !== 'running';
   const running = tone === 'running';
   const labelStyle = [styles.titleText, tone === 'error' ? styles.titleTextError : null];
+  const content = (
+    <Animated.View
+      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      style={[styles.row, stacked ? styles.rowStacked : null]}
+    >
+      <View
+        style={[
+          styles.iconWrap,
+          running ? styles.iconWrapRunning : null,
+          stacked ? styles.iconWrapStacked : null,
+        ]}
+      >
+        {running ? (
+          <AtomGlyph color={color} />
+        ) : (
+          <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
+        )}
+      </View>
+      {stacked ? (
+        <View style={styles.textColumn}>
+          <Text style={labelStyle} numberOfLines={1}>
+            {titleText}
+          </Text>
+          <Text style={styles.detailText} numberOfLines={1}>
+            {normalizedDetail}
+          </Text>
+        </View>
+      ) : (
+        <Text style={[...labelStyle, styles.titleTextInline]} numberOfLines={1}>
+          {hasDetail ? normalizedDetail : titleText}
+        </Text>
+      )}
+    </Animated.View>
+  );
+
+  if (tone === 'error') {
+    return (
+      <View style={[styles.surface, styles.errorSurface]} testID="activity-error-surface">
+        {content}
+      </View>
+    );
+  }
 
   return (
     <GlassSurface role="chrome" style={styles.surface} testID="activity-glass-surface">
-      <Animated.View
-        entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-        style={[styles.row, stacked ? styles.rowStacked : null]}
-      >
-        <View
-          style={[
-            styles.iconWrap,
-            running ? styles.iconWrapRunning : null,
-            stacked ? styles.iconWrapStacked : null,
-          ]}
-        >
-          {running ? (
-            <AtomGlyph color={color} />
-          ) : (
-            <Ionicons name={ICON_BY_TONE[tone]} size={12} color={color} />
-          )}
-        </View>
-        {stacked ? (
-          <View style={styles.textColumn}>
-            <Text style={labelStyle} numberOfLines={1}>
-              {titleText}
-            </Text>
-            <Text style={styles.detailText} numberOfLines={1}>
-              {normalizedDetail}
-            </Text>
-          </View>
-        ) : (
-          <Text style={[...labelStyle, styles.titleTextInline]} numberOfLines={1}>
-            {hasDetail ? normalizedDetail : titleText}
-          </Text>
-        )}
-      </Animated.View>
+      {content}
     </GlassSurface>
   );
 }
@@ -91,6 +102,14 @@ const createStyles = (theme: AppTheme) =>
       borderCurve: 'continuous',
       borderRadius: theme.radius.lg,
       marginHorizontal: theme.spacing.lg,
+    },
+    errorSurface: {
+      backgroundColor: theme.colors.bgElevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.errorBorder,
+      boxShadow: theme.isDark
+        ? '0 8px 20px rgba(0, 0, 0, 0.28)'
+        : '0 8px 18px rgba(15, 31, 54, 0.12)',
     },
     row: {
       flexDirection: 'row',

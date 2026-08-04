@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { Dispatch, ReactElement, ReactNode, RefObject, SetStateAction } from 'react';
 import { Pressable, Text, type FlatList } from 'react-native';
-import Animated, { FadeIn, FadeOut, ReduceMotion, type SharedValue } from 'react-native-reanimated';
+import Animated, { ReduceMotion, ZoomIn, ZoomOut, type SharedValue } from 'react-native-reanimated';
 
 import { TABLET_LAYOUT_MIN_WIDTH } from '@shell/boot/appConstants';
 import { ChatScrollRail } from './scrollRail/ChatScrollRail';
@@ -21,8 +21,9 @@ import type { TranscriptContinuationState } from './controllers/continuationCont
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import type { computeHitSlop } from '@shared/ui/touchTarget';
 import { motionDuration } from '@shared/ui/motion';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 
-export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 34, height: 34 };
+export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 48, height: 48 };
 
 export const resolveResetRailActiveIndex = (count: number) => Math.max(-1, count - 1);
 export const resolveRailRestingActiveIndex = (activeIndex: number, count: number) =>
@@ -151,38 +152,45 @@ export function renderJumpToLatestButton(params: {
   }
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+      entering={ZoomIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={ZoomOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
       style={[
         params.styles.jumpToLatestButton,
         { bottom: params.bottomInset + params.theme.spacing.xs },
       ]}
     >
-      <Pressable
-        onPress={() => {
-          params.railJumpControllerRef.current?.cancel();
-          params.autoScrollStateRef.current.shouldStickToBottom = true;
-          params.autoScrollStateRef.current.isUserInteracting = false;
-          params.autoScrollStateRef.current.isMomentumScrolling = false;
-          params.showJumpToLatestRef.current = false;
-          params.setShowJumpToLatest(false);
-          params.onJumpToLatest();
-        }}
-        hitSlop={params.hitSlop}
-        style={({ pressed }) => [
-          params.styles.jumpToLatestButtonInner,
-          pressed && params.styles.jumpToLatestButtonPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Jump to latest message"
+      <GlassSurface
+        isInteractive
+        role="capsule"
+        style={params.styles.jumpToLatestGlass}
+        testID="jump-to-latest-glass-surface"
       >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="arrow-down"
-          size={14}
-          color={params.theme.colors.textPrimary}
-        />
-      </Pressable>
+        <Pressable
+          onPress={() => {
+            params.railJumpControllerRef.current?.cancel();
+            params.autoScrollStateRef.current.shouldStickToBottom = true;
+            params.autoScrollStateRef.current.isUserInteracting = false;
+            params.autoScrollStateRef.current.isMomentumScrolling = false;
+            params.showJumpToLatestRef.current = false;
+            params.setShowJumpToLatest(false);
+            params.onJumpToLatest();
+          }}
+          hitSlop={params.hitSlop}
+          style={({ pressed }) => [
+            params.styles.jumpToLatestButtonInner,
+            pressed && params.styles.jumpToLatestButtonPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Jump to latest message"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="arrow-down"
+            size={18}
+            color={params.theme.colors.textPrimary}
+          />
+        </Pressable>
+      </GlassSurface>
     </Animated.View>
   );
 }

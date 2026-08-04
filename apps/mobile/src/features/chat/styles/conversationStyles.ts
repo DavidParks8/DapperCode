@@ -68,18 +68,21 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       position: 'absolute',
       alignSelf: 'center',
     },
-    jumpToLatestButtonInner: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderHighlight,
-      backgroundColor: theme.colors.bgElevated,
+    jumpToLatestGlass: {
+      borderCurve: 'continuous',
       borderRadius: theme.radius.full,
-      width: 34,
-      height: 34,
+      width: 48,
+      height: 48,
       boxShadow: theme.isDark
         ? '0 12px 24px rgba(0, 0, 0, 0.28)'
         : '0 10px 22px rgba(15, 31, 54, 0.12)',
+    },
+    jumpToLatestButtonInner: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: 48,
+      height: 48,
+      borderRadius: theme.radius.full,
     },
     jumpToLatestButtonPressed: { opacity: 0.84 },
     messageListContent: {

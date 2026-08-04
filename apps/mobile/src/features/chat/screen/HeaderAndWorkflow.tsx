@@ -17,6 +17,7 @@ import { ChatHeader } from './ChatHeader';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
 import { computeHitSlop } from '@shared/ui/touchTarget';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { WorkflowCard } from '../workflow/Workflow';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -139,7 +140,7 @@ function SessionMetaRow(props: {
   } = context;
 
   return (
-    <View style={styles.sessionMetaRow}>
+    <GlassSurface role="capsule" style={styles.sessionMetaRow} testID="session-meta-glass-surface">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -217,7 +218,7 @@ function SessionMetaRow(props: {
           />
         ) : null}
       </ScrollView>
-    </View>
+    </GlassSurface>
   );
 }
 

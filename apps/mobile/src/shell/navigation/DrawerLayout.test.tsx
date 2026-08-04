@@ -15,8 +15,9 @@ import { ResponsiveDrawerLayout } from '../../app/profiles/[profileId]/(drawer)/
 import { TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
 
 interface DrawerScreenOptions {
-  drawerStyle: { width: number };
+  drawerStyle: { width: number; backgroundColor: string };
   drawerType: 'front' | 'permanent';
+  overlayColor: string;
   sceneStyle: { backgroundColor: string };
   swipeEnabled: boolean;
 }
@@ -50,7 +51,8 @@ describe('DrawerLayout responsive sizing', () => {
     expect(readScreenOptions()).toMatchObject({
       drawerType: 'front',
       swipeEnabled: true,
-      drawerStyle: { width: 430 },
+      drawerStyle: { width: 430, backgroundColor: 'transparent' },
+      overlayColor: 'transparent',
       sceneStyle: { backgroundColor: '#000000' },
     });
 
@@ -59,7 +61,8 @@ describe('DrawerLayout responsive sizing', () => {
     expect(readScreenOptions()).toMatchObject({
       drawerType: 'permanent',
       swipeEnabled: false,
-      drawerStyle: { width: TABLET_SIDEBAR_WIDTH },
+      drawerStyle: { width: TABLET_SIDEBAR_WIDTH, backgroundColor: 'transparent' },
+      overlayColor: 'transparent',
     });
 
     act(() => tree.unmount());

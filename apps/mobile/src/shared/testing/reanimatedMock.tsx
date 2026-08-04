@@ -6,14 +6,26 @@ import { Image, ScrollView, Text, View } from 'react-native';
  * an animated component gets this synchronous double. Animations resolve to their target value
  * immediately, which keeps assertions about the settled UI honest.
  */
-const passthroughEntering = {
-  duration: () => passthroughEntering,
-  delay: () => passthroughEntering,
-  easing: () => passthroughEntering,
-  springify: () => passthroughEntering,
-  withInitialValues: () => passthroughEntering,
-  reduceMotion: () => passthroughEntering,
-};
+interface PassthroughAnimation {
+  duration: () => PassthroughAnimation;
+  delay: () => PassthroughAnimation;
+  easing: () => PassthroughAnimation;
+  springify: () => PassthroughAnimation;
+  withInitialValues: () => PassthroughAnimation;
+  reduceMotion: () => PassthroughAnimation;
+}
+
+function createPassthroughAnimation(): PassthroughAnimation {
+  const animation: PassthroughAnimation = {
+    duration: () => animation,
+    delay: () => animation,
+    easing: () => animation,
+    springify: () => animation,
+    withInitialValues: () => animation,
+    reduceMotion: () => animation,
+  };
+  return animation;
+}
 
 export default {
   View,
@@ -43,11 +55,13 @@ export function setMockReducedMotionEnabled(enabled: boolean): void {
   mockReducedMotionEnabled = enabled;
 }
 export const useReducedMotion = () => mockReducedMotionEnabled;
-export const LinearTransition = passthroughEntering;
-export const FadeIn = passthroughEntering;
-export const FadeInUp = passthroughEntering;
-export const FadeInDown = passthroughEntering;
-export const FadeOut = passthroughEntering;
+export const LinearTransition = createPassthroughAnimation();
+export const FadeIn = createPassthroughAnimation();
+export const FadeInUp = createPassthroughAnimation();
+export const FadeInDown = createPassthroughAnimation();
+export const FadeOut = createPassthroughAnimation();
+export const ZoomIn = createPassthroughAnimation();
+export const ZoomOut = createPassthroughAnimation();
 
 export const cancelAnimation = () => {};
 export const clamp = (value: number, min: number, max: number) =>

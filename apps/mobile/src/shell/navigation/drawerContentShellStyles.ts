@@ -5,7 +5,6 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
   return StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.bgSidebar,
     },
     safeArea: {
       flex: 1,

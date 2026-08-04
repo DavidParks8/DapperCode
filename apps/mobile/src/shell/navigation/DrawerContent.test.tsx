@@ -34,6 +34,11 @@ import {
 } from '@shell/session/chatSummaryCache';
 import * as ChatSummaryCache from '@shell/session/chatSummaryCache';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { createDrawerContentStyles } from '@shell/navigation/drawerContentStyles';
 import { routes } from '@shell/navigation/routes';
@@ -328,6 +333,22 @@ async function press(node: Queryable, prop = 'onPress'): Promise<void> {
 function hasText(root: Queryable, value: string): boolean {
   return root.findAll((node) => textContent(node).includes(value)).length > 0;
 }
+
+describe('DrawerContent material', () => {
+  it('renders the drawer with its native Liquid Glass material when available', async () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+    const tree = await renderDrawer(createHarness());
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'drawer-glass-surface',
+    );
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.drawer.glassEffectStyle);
+    expect(glassProps?.tintColor).toBe(theme.glass.drawer.tintColor);
+
+    act(() => tree.unmount());
+  });
+});
 
 function textContent(node: Queryable): string {
   return node.children
