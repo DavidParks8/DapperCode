@@ -96,6 +96,7 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
     jumpToLatestButtonPressed: { transform: [{ scale: 0.96 }] },
     messageListContent: {
       flexGrow: 1,
+      justifyContent: 'flex-end',
       padding: theme.spacing.lg,
       paddingTop: theme.spacing.lg,
       paddingBottom: theme.spacing.xl,

@@ -642,6 +642,19 @@ describe('ChatTranscriptView magical scroll rail', () => {
 });
 
 describe('ChatTranscriptView continuation', () => {
+  it('top-aligns short transcripts in the inverted list', () => {
+    const tree = render();
+    const list = getList(tree);
+
+    expect(list.props['inverted']).toBe(true);
+    expect(StyleSheet.flatten(list.props.contentContainerStyle as never)).toMatchObject({
+      flexGrow: 1,
+      justifyContent: 'flex-end',
+    });
+
+    act(() => tree.unmount());
+  });
+
   it('renders load, loading, retry, exhausted, and unavailable boundary states', () => {
     const onLoadEarlier = jest.fn();
     const tree = render({
