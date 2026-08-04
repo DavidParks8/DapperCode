@@ -29,10 +29,9 @@ type MainScreenTheme = ReturnType<typeof useMainScreenStyles>['theme'];
 type MainScreenStyles = ReturnType<typeof useMainScreenStyles>['styles'];
 
 // Chips are dense, dynamically-sized labels in a scrollable row (28pt tall); the estimated
-// width keeps them visually compact while still resolving to the 44pt/48dp effective touch
-// target, and maxHorizontal caps the added slop so neighboring chips (separated by a ~6px gap)
-// don't steal each other's taps.
-const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 28 };
+// The selector buttons share the composer's 48pt control height. Horizontal slop remains capped so
+// labels narrower than the representative width cannot steal taps from neighboring buttons.
+const SESSION_META_CHIP_VISIBLE_SIZE = { width: 60, height: 48 };
 const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3, minimum: 48 };
 
 function handleSessionMetaChipPress(action: () => void | Promise<void>): void {

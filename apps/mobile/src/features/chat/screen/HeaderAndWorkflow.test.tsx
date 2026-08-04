@@ -149,7 +149,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     jest.restoreAllMocks();
   });
 
-  it('gives the model, thinking, agent mode, agent thread, and fast chips an effective touch target', () => {
+  it('renders model, thinking, agent mode, agent thread, and fast controls at composer height', () => {
     const context = baseContext();
     const tree = render(context);
     const root = queryRoot(tree);
@@ -165,7 +165,12 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       const hitSlop = chip.props['hitSlop'] as
         { top: number; bottom: number; left: number; right: number } | undefined;
       expect(hitSlop).toBeDefined();
-      expect(28 + hitSlop!.top + hitSlop!.bottom).toBeGreaterThanOrEqual(48);
+      const chipStyle = chip.props['style'] as (state: { pressed: boolean }) => unknown;
+      expect(StyleSheet.flatten(chipStyle({ pressed: false }) as never)).toMatchObject({
+        minHeight: 48,
+      });
+      expect(hitSlop!.top).toBe(0);
+      expect(hitSlop!.bottom).toBe(0);
     }
     act(() => tree.unmount());
   });
