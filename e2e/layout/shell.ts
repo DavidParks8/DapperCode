@@ -57,3 +57,45 @@ export async function readShell(page: Page): Promise<Shell> {
 export function isPinnedShell(viewport: Rect): boolean {
   return viewport.width >= TABLET_LAYOUT_MIN_WIDTH;
 }
+
+/**
+ * Asserts the shell the viewport is *intended* to produce.
+ *
+ * `readShell` derives its mode from the app's own breakpoint constant, which makes it track
+ * refactors — but it also means a regression that moved the breakpoint would simply relabel the
+ * shell, and any test that skipped on `mode !== 'pinned'` would quietly stop running. Naming the
+ * expected mode here keeps that failure loud: the breakpoint is a product decision, so a test has
+ * to state it independently rather than read it back from the code under test.
+ */
+export async function expectShellMode(page: Page, expected: ShellMode): Promise<Shell> {
+  const shell = await readShell(page);
+  if (shell.mode !== expected) {
+    throw new Error(
+      `Expected a ${expected} shell at ${String(Math.round(shell.viewport.width))}px wide, but the ` +
+        `app produced a ${shell.mode} shell. The tablet breakpoint ` +
+        `(TABLET_LAYOUT_MIN_WIDTH = ${String(TABLET_LAYOUT_MIN_WIDTH)}) has moved across this ` +
+        `viewport, so the layout contract these tests describe has changed.`,
+    );
+  }
+  return shell;
+}
+
+/**
+ * The shell each Playwright project is declared to exercise.
+ *
+ * Tests skip on this rather than on a measured mode, so the pinned branch cannot disappear behind a
+ * skip just because the app started reporting a different shell.
+ */
+export function expectedShellModeFor(projectName: string): ShellMode {
+  switch (projectName) {
+    case 'phone':
+      return 'overlay';
+    case 'tablet':
+      return 'pinned';
+    default:
+      throw new Error(
+        `No shell mode is declared for the "${projectName}" project. Add it to ` +
+          `expectedShellModeFor in e2e/layout/shell.ts so shell-specific tests know whether to run.`,
+      );
+  }
+}

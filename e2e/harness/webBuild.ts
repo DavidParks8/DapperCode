@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { repoRoot } from './paths.ts';
@@ -41,9 +40,7 @@ export async function ensureWebBuild(options: { forceRebuild?: boolean } = {}): 
   const fingerprint = await computeFingerprint();
   const dir = path.join(BUILD_ROOT, fingerprint);
 
-  if (options.forceRebuild) {
-    await rm(dir, { recursive: true, force: true });
-  } else if (await isCompleteBuild(dir)) {
+  if (!options.forceRebuild && (await isCompleteBuild(dir))) {
     return { dir, fingerprint, reused: true };
   }
 
@@ -55,7 +52,10 @@ export async function ensureWebBuild(options: { forceRebuild?: boolean } = {}): 
   }
 
   try {
-    if (await isCompleteBuild(dir)) {
+    // Re-checked under the lock. A forced rebuild deliberately ignores the existing build, but it
+    // still has to hold the lock first: deleting the shared directory before acquiring it would
+    // pull the bundle out from under a concurrent run that is already serving it.
+    if (!options.forceRebuild && (await isCompleteBuild(dir))) {
       return { dir, fingerprint, reused: true };
     }
     await buildInto(dir);
@@ -67,7 +67,10 @@ export async function ensureWebBuild(options: { forceRebuild?: boolean } = {}): 
 
 async function buildInto(destination: string): Promise<void> {
   await mkdir(BUILD_ROOT, { recursive: true });
-  const staging = await mkdtemp(path.join(tmpdir(), 'dappercode-e2e-web-'));
+  // Staged beside the destination rather than under the OS temp dir: rename() is only atomic
+  // within a filesystem, and on CI the temp dir is frequently a different mount, which would fail
+  // the publish with EXDEV.
+  const staging = await mkdtemp(`${destination}.staging-`);
   const output = path.join(staging, 'web');
 
   try {
@@ -75,14 +78,12 @@ async function buildInto(destination: string): Promise<void> {
     if (!existsSync(path.join(output, 'index.html'))) {
       throw new Error(`Expo web export did not produce an index.html in ${output}`);
     }
+    // The completion marker is written inside staging so it lands in the same atomic rename.
+    // Writing it after the rename leaves a window where the directory is visible but unmarked, and
+    // a parallel run could adopt it as incomplete and rebuild over the top.
+    await writeFile(path.join(output, '.e2e-build-complete'), new Date().toISOString(), 'utf8');
     await rm(destination, { recursive: true, force: true });
     await rename(output, destination);
-    // Written last so a crashed build is never mistaken for a complete one.
-    await writeFile(
-      path.join(destination, '.e2e-build-complete'),
-      new Date().toISOString(),
-      'utf8',
-    );
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
@@ -179,8 +180,15 @@ async function computeFingerprint(): Promise<string> {
   const hash = createHash('sha256');
   hash.update(JSON.stringify(E2E_BUILD_ENV));
 
+  // The bundle depends on the resolved dependency tree and the toolchain that builds it, not just
+  // on app source. Without these, switching branches or Node versions can silently reuse a stale
+  // bundle that happens to share a source hash.
+  hash.update(process.version);
+
   const mobileRoot = path.join(repoRoot, 'apps', 'mobile');
   const files = [
+    path.join(repoRoot, 'package.json'),
+    path.join(repoRoot, 'package-lock.json'),
     path.join(mobileRoot, 'package.json'),
     path.join(mobileRoot, 'app.json'),
     path.join(mobileRoot, 'babel.config.js'),
@@ -192,9 +200,11 @@ async function computeFingerprint(): Promise<string> {
     hash.update(await readFileIfPresent(file));
   }
 
-  for (const file of await collectSourceFiles(path.join(mobileRoot, 'src'))) {
-    hash.update(path.relative(mobileRoot, file));
-    hash.update(await readFile(file));
+  for (const directory of ['src', 'assets']) {
+    for (const file of await collectSourceFiles(path.join(mobileRoot, directory))) {
+      hash.update(path.relative(mobileRoot, file));
+      hash.update(await readFile(file));
+    }
   }
 
   return hash.digest('hex').slice(0, 16);
@@ -209,7 +219,13 @@ async function readFileIfPresent(file: string): Promise<Buffer | string> {
 }
 
 async function collectSourceFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    // An optional directory such as `assets` may not exist in every checkout.
+    return [];
+  }
   const collected = await Promise.all(
     entries
       .filter((entry) => !entry.name.startsWith('.'))

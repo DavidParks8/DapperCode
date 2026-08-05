@@ -1,4 +1,5 @@
 import { FIXED_NOW_MS, PROTOCOL_VERSION, STREAM_ID } from './protocol.ts';
+import { conforms, type WorkspaceListResponse } from './shapes.ts';
 
 /** A message as a test author describes it, before projection into the bridge's raw thread shape. */
 export interface ScenarioMessage {
@@ -21,7 +22,8 @@ export interface ScenarioChat {
 
 export interface ScenarioWorkspace {
   readonly path: string;
-  readonly name: string;
+  /** Mirrors the bridge's `chatCount`; the app renders this, not a workspace display name. */
+  readonly chatCount: number;
 }
 
 export interface Scenario {
@@ -52,8 +54,8 @@ export function createDefaultScenario(overrides: ScenarioOverrides = {}): Scenar
     agentId: overrides.agentId ?? 'local-primary',
     agentDisplayName: overrides.agentDisplayName ?? 'Local Primary',
     workspaces: overrides.workspaces ?? [
-      { path: DEFAULT_WORKSPACE, name: 'dappercode' },
-      { path: '/workspace/sandbox', name: 'sandbox' },
+      { path: DEFAULT_WORKSPACE, chatCount: 3 },
+      { path: '/workspace/sandbox', chatCount: 0 },
     ],
     chats: overrides.chats ?? [
       {
@@ -193,15 +195,15 @@ export function buildCapabilities(scenario: Scenario): Record<string, unknown> {
 }
 
 export function buildWorkspaceList(scenario: Scenario): Record<string, unknown> {
-  return {
+  return conforms<WorkspaceListResponse>({
     bridgeRoot: DEFAULT_WORKSPACE,
     allowOutsideRootCwd: false,
     workspaces: scenario.workspaces.map((workspace) => ({
       path: workspace.path,
-      name: workspace.name,
-      isGitRepository: true,
+      chatCount: workspace.chatCount,
+      updatedAt: new Date(FIXED_NOW_MS).toISOString(),
     })),
-  };
+  });
 }
 
 export function emptyQueueState(threadId: string): Record<string, unknown> {

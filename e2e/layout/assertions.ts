@@ -502,55 +502,96 @@ export async function expectStableLayout(
 /**
  * Asserts an element keeps a stable box *throughout* an interaction, not merely at its end.
  *
- * Before/after comparison misses the failure mode that users actually notice: a surface that jumps
- * mid-interaction and settles back. Sampling while the action runs catches the transient.
+ * Before/after comparison misses the failure mode users actually notice: a surface that jumps
+ * mid-interaction and settles back before anyone measures it.
+ *
+ * The observation runs inside the page and records the box on every animation frame. Driving this
+ * from the test process instead — measure, sleep, measure — samples on a timer that has no relation
+ * to the frames being painted, so a one-frame jump between samples is invisible and a fast action
+ * can finish before the first useful sample. Recording per frame means a transient has to survive
+ * zero frames to escape.
  */
 export async function expectStableDuring(
   target: Locator,
   action: () => Promise<void>,
-  options?: LayoutAssertionOptions & { readonly sampleIntervalMs?: number },
+  options?: LayoutAssertionOptions,
 ): Promise<void> {
   const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
-  const interval = options?.sampleIntervalMs ?? 50;
-  const baseline = await readRect(target);
-  let violation: string | null = null;
-  let sampling = true;
+  const handle = await target.elementHandle();
+  if (!handle) {
+    fail(
+      decorateMessage(
+        'Element is not rendered, so it has no layout box to observe.',
+        options?.message,
+      ),
+    );
+    return;
+  }
 
-  const sampler = (async () => {
-    while (sampling && violation === null) {
-      let current: Rect;
-      try {
-        current = await readRect(target);
-      } catch (error) {
-        violation =
-          `Expected the element to stay laid out for the whole interaction, but measuring it ` +
-          `failed: ${error instanceof Error ? error.message : String(error)}`;
-        return;
-      }
-      if (
-        !within(current.left, baseline.left, tolerance) ||
-        !within(current.top, baseline.top, tolerance) ||
-        !within(current.width, baseline.width, tolerance) ||
-        !within(current.height, baseline.height, tolerance)
-      ) {
-        violation =
-          `Expected the element to hold still for the whole interaction, but it moved mid-flight.\n` +
-          `  baseline: ${describeRect(baseline)}\n` +
-          `  sampled:  ${describeRect(current)}`;
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, interval));
-    }
-  })();
+  const page = target.page();
 
   try {
+    await page.evaluate((element) => {
+      const frames: { left: number; top: number; width: number; height: number }[] = [];
+      const state = { frames, running: true, handle: 0 };
+      const record = () => {
+        if (!state.running) return;
+        const box = element.getBoundingClientRect();
+        frames.push({ left: box.left, top: box.top, width: box.width, height: box.height });
+        state.handle = requestAnimationFrame(record);
+      };
+      record();
+      (window as unknown as Record<string, unknown>)['__dappercodeStability'] = state;
+    }, handle);
+
     await action();
+
+    // One more frame so the action's final paint is included rather than trailing the observer.
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+
+    const frames = await page.evaluate(() => {
+      const state = (window as unknown as Record<string, unknown>)['__dappercodeStability'] as {
+        frames: { left: number; top: number; width: number; height: number }[];
+        running: boolean;
+        handle: number;
+      };
+      state.running = false;
+      cancelAnimationFrame(state.handle);
+      delete (window as unknown as Record<string, unknown>)['__dappercodeStability'];
+      return state.frames;
+    });
+
+    const baseline = frames[0];
+    if (!baseline) {
+      fail(decorateMessage('No frames were observed during the interaction.', options?.message));
+      return;
+    }
+
+    for (const [index, frame] of frames.entries()) {
+      if (
+        !within(frame.left, baseline.left, tolerance) ||
+        !within(frame.top, baseline.top, tolerance) ||
+        !within(frame.width, baseline.width, tolerance) ||
+        !within(frame.height, baseline.height, tolerance)
+      ) {
+        fail(
+          decorateMessage(
+            `Expected the element to hold still for the whole interaction, but it moved on frame ` +
+              `${String(index + 1)} of ${String(frames.length)}.\n` +
+              `  baseline: left=${baseline.left.toFixed(1)} top=${baseline.top.toFixed(1)} ` +
+              `width=${baseline.width.toFixed(1)} height=${baseline.height.toFixed(1)}\n` +
+              `  frame:    left=${frame.left.toFixed(1)} top=${frame.top.toFixed(1)} ` +
+              `width=${frame.width.toFixed(1)} height=${frame.height.toFixed(1)}`,
+            options?.message,
+          ),
+        );
+        return;
+      }
+    }
   } finally {
-    sampling = false;
-  }
-  await sampler;
-  if (violation !== null) {
-    fail(decorateMessage(violation, options?.message));
+    await handle.dispose();
   }
 }
 

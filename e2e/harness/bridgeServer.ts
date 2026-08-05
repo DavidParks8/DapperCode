@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { declaredMethods, declaredNotifications } from './contract.ts';
 import {
   FIXED_NOW_ISO,
   PROTOCOL_VERSION,
@@ -11,6 +12,8 @@ import {
   STREAM_ID,
   isRecord,
   notFound,
+  readRecordParam,
+  readString,
   readStringParam,
   type NotificationFrame,
   type RpcRequestFrame,
@@ -26,6 +29,7 @@ import {
   type ScenarioChat,
   type ScenarioOverrides,
 } from './scenario.ts';
+import { conforms, type BridgeThreadCreateResponse } from './shapes.ts';
 
 export interface RecordedRequest {
   readonly method: string;
@@ -34,6 +38,27 @@ export interface RecordedRequest {
 }
 
 export type RpcHandler = (params: unknown, bridge: HarnessBridge) => unknown | Promise<unknown>;
+
+/**
+ * A call the harness could not answer the way the real bridge would.
+ *
+ * `undeclared` means the app asked for a method the shared contract does not list at all, which is
+ * a contract bug. `unhandled` means the contract lists it but the harness has no handler, which is
+ * harness drift: the real bridge would have answered.
+ */
+export interface ContractDrift {
+  readonly method: string;
+  readonly reason: 'undeclared' | 'unhandled';
+}
+
+function assertDeclaredNotification(method: string): void {
+  if (!declaredNotifications.has(method)) {
+    throw new Error(
+      `The bridge contract declares no notification "${method}". Add it to ` +
+        `contracts/bridge-rpc/v2/manifest.json once the real bridge emits it.`,
+    );
+  }
+}
 
 export interface HarnessBridgeOptions {
   readonly scenario?: Scenario | ScenarioOverrides;
@@ -54,6 +79,10 @@ export interface HarnessBridge {
   readonly scenario: Scenario;
   /** Every RPC the app has issued, in order. Useful for asserting a flow actually hit the wire. */
   readonly requests: readonly RecordedRequest[];
+  /** Calls the harness could not serve faithfully. Asserted empty after every test. */
+  readonly contractDrift: readonly ContractDrift[];
+  /** Every RPC method this harness can answer. */
+  readonly handlerMethods: readonly string[];
 
   /** Replaces or adds a handler for a single method. */
   setHandler(method: string, handler: RpcHandler): void;
@@ -106,7 +135,9 @@ export async function startHarnessBridge(
   const chatOrder = scenario.chats.map((chat) => chat.id);
   const handlers = new Map<string, RpcHandler>();
   const requests: RecordedRequest[] = [];
+  const contractDrift: ContractDrift[] = [];
   const sockets = new Set<WebSocket>();
+  const inFlight = new Set<Promise<void>>();
   const requestWaiters: { method: string; resolve: (value: RecordedRequest) => void }[] = [];
   const connectionWaiters: (() => void)[] = [];
 
@@ -127,7 +158,19 @@ export async function startHarnessBridge(
     token,
     scenario,
     requests,
+    contractDrift,
+    get handlerMethods() {
+      return [...handlers.keys()].sort();
+    },
     setHandler(method, handler) {
+      // A handler for a method the real bridge does not expose would make the harness answer
+      // something production never answers, which is drift the specs could never notice.
+      if (!declaredMethods.has(method)) {
+        throw new Error(
+          `The bridge contract declares no RPC method "${method}". Add it to ` +
+            `contracts/bridge-rpc/v2/manifest.json once the real bridge implements it.`,
+        );
+      }
       handlers.set(method, handler);
     },
     waitForRequest(method, timeoutMs = 10_000) {
@@ -157,6 +200,7 @@ export async function startHarnessBridge(
       });
     },
     emit(method, params) {
+      assertDeclaredNotification(method);
       eventId += 1;
       broadcast({
         method,
@@ -167,6 +211,7 @@ export async function startHarnessBridge(
       });
     },
     emitUnnumbered(method, params) {
+      assertDeclaredNotification(method);
       broadcast({ method, protocolVersion: PROTOCOL_VERSION, streamId: STREAM_ID, params });
     },
     waitForConnection(timeoutMs = 15_000) {
@@ -195,6 +240,9 @@ export async function startHarnessBridge(
       chats.set(chat.id, chat);
     },
     async close() {
+      // Let requests already being handled settle before tearing anything down, so the drift the
+      // fixture is about to read is complete rather than a snapshot of a moving target.
+      await Promise.allSettled([...inFlight]);
       for (const socket of sockets) {
         socket.terminate();
       }
@@ -225,8 +273,10 @@ export async function startHarnessBridge(
   });
 
   for (const [method, handler] of Object.entries(options.handlers ?? {})) {
-    handlers.set(method, handler);
+    bridge.setHandler(method, handler);
   }
+
+  assertHandlersAreDeclared(handlers);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -255,11 +305,18 @@ export async function startHarnessBridge(
       sockets.delete(socket);
     });
     socket.on('message', (data) => {
-      void handleFrame(socket, String(data));
+      // Tracked so close() can await settlement: a request still in flight during teardown would
+      // otherwise record drift after the fixture had already inspected it.
+      const pending = handleFrame(socket, String(data)).finally(() => {
+        inFlight.delete(pending);
+      });
+      inFlight.add(pending);
     });
 
     // The real bridge speaks first. This frame is what teaches the client the stream identity and
-    // protocol version, so it must arrive before anything numbered.
+    // protocol version, so it must arrive before anything numbered. It goes through the same
+    // declaration guard as every other notification rather than bypassing it via send().
+    assertDeclaredNotification('bridge/connection/state');
     send(socket, {
       method: 'bridge/connection/state',
       protocolVersion: PROTOCOL_VERSION,
@@ -296,6 +353,12 @@ export async function startHarnessBridge(
 
     const handler = handlers.get(method);
     if (!handler) {
+      // Recorded rather than ignored: the app calling something the harness does not model is
+      // exactly how the harness silently stops resembling the real bridge.
+      contractDrift.push({
+        method,
+        reason: declaredMethods.has(method) ? 'unhandled' : 'undeclared',
+      });
       socket.send(
         JSON.stringify({
           id,
@@ -344,6 +407,24 @@ interface HandlerContext {
   readonly currentEventId: () => number;
 }
 
+/**
+ * Fails if the harness registered a method the shared bridge contract does not declare.
+ *
+ * The built-in handlers populate the map directly rather than going through `setHandler`, so they
+ * are validated here in one place. A typo or an invented method surfaces the moment any bridge
+ * starts, instead of quietly teaching the specs to rely on behaviour production does not have.
+ */
+function assertHandlersAreDeclared(handlers: ReadonlyMap<string, RpcHandler>): void {
+  const undeclared = [...handlers.keys()].filter((method) => !declaredMethods.has(method)).sort();
+  if (undeclared.length > 0) {
+    throw new Error(
+      `The harness bridge registered ${String(undeclared.length)} RPC method(s) the bridge ` +
+        `contract does not declare: ${undeclared.join(', ')}. Add them to ` +
+        `contracts/bridge-rpc/v2/manifest.json once the real bridge implements them.`,
+    );
+  }
+}
+
 function registerDefaultHandlers(handlers: Map<string, RpcHandler>, context: HandlerContext): void {
   const orderedChats = () =>
     context.chatOrder
@@ -384,6 +465,15 @@ function registerDefaultHandlers(handlers: Map<string, RpcHandler>, context: Han
 
   handlers.set('bridge/thread/list/stream/cancel', () => ({ ok: true }));
 
+  const resolveChat = (ctx: typeof context, params: unknown): ScenarioChat => {
+    const threadId = readStringParam(params, 'threadId');
+    const chat = threadId ? ctx.chats.get(threadId) : undefined;
+    if (!chat) {
+      throw notFound(`Unknown thread ${String(threadId)}`);
+    }
+    return chat;
+  };
+
   handlers.set('thread/read', (params) => {
     const threadId = readStringParam(params, 'threadId');
     const index = threadId ? context.chatOrder.indexOf(threadId) : -1;
@@ -414,8 +504,18 @@ function registerDefaultHandlers(handlers: Map<string, RpcHandler>, context: Han
   );
 
   handlers.set('thread/resume', () => ({ model: 'harness-model', effort: 'medium' }));
-  handlers.set('thread/config/set', () => ({ ok: true }));
-  handlers.set('thread/name/update', () => ({ ok: true }));
+  // The client throws unless these echo the updated thread back, so `{ ok: true }` would be a
+  // shape the real bridge never sends.
+  handlers.set('thread/config/set', (params) => ({
+    thread: toRawThread(resolveChat(context, params), 0),
+  }));
+  handlers.set('thread/name/update', (params) => {
+    const chat = resolveChat(context, params);
+    const title = readStringParam(params, 'title') ?? chat.title;
+    const renamed: ScenarioChat = { ...chat, title };
+    context.chats.set(renamed.id, renamed);
+    return { thread: toRawThread(renamed, 0) };
+  });
   handlers.set('thread/delete', () => ({ ok: true }));
 
   handlers.set('turn/start', () => ({ turn: { id: context.nextTurnId() } }));
@@ -433,11 +533,16 @@ function registerDefaultHandlers(handlers: Map<string, RpcHandler>, context: Han
 
   handlers.set('bridge/thread/create', (params) => {
     const threadId = `thread-${String(context.chatOrder.length + 1)}`;
-    const cwd = readStringParam(params, 'cwd') ?? undefined;
+    // The bridge nests the request under `threadStart` and echoes the submission id back.
+    const threadStart = readRecordParam(params, 'threadStart');
+    const cwd = readString(threadStart?.['cwd']) ?? undefined;
     const chat: ScenarioChat = { id: threadId, title: 'New chat', messages: [], cwd };
     context.chats.set(threadId, chat);
     context.chatOrder.unshift(threadId);
-    return { thread: toRawThread(chat, 0) };
+    return conforms<BridgeThreadCreateResponse>({
+      submissionId: readStringParam(params, 'submissionId') ?? '',
+      thread: toRawThread(chat, 0),
+    });
   });
 
   handlers.set('model/list', () => ({

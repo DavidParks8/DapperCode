@@ -64,7 +64,7 @@
     "duplicates:mobile": "jscpd apps/mobile/src --config .jscpd.mobile.json",
     "duplicates:native": "jscpd apps/desktop/src apps/desktop/macos services/rust-bridge/src --config .jscpd.native.json",
     "duplicates:check": "npm run duplicates:mobile && npm run duplicates:native",
-    "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",
+    "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && node --experimental-strip-types scripts/validate-e2e-harness-contract.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",
     "build": "npm run build -w @dappercode/mobile && cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml && cargo build --locked --release --manifest-path apps/desktop/Cargo.toml",
     "typecheck": "npm run typecheck -w @dappercode/mobile && npm run typecheck:scripts && npm run typecheck:e2e && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
     "lint": "npm run format:check && npm run lint -w @dappercode/mobile && npm run duplicates:check && cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml && cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings && cargo fmt --check --manifest-path apps/desktop/Cargo.toml && cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings",

@@ -19,14 +19,17 @@ npm run typecheck:e2e
 The first run exports the app for web, which takes a minute or two. Later runs reuse that bundle
 until something it depends on changes.
 
+CI runs the suite in the `Mobile E2E` job of `.github/workflows/build-and-test.yml`. It installs the
+pinned Chromium separately, because `npm ci` does not fetch browser binaries.
+
 ## What it is made of
 
-| Path                     | Responsibility                                                     |
-| ------------------------ | ------------------------------------------------------------------ |
-| `e2e/harness/`           | The fake bridge, the static file server, and the web build cache.   |
-| `e2e/fixtures/`          | Playwright fixtures, app-state seeding, and named selectors.        |
-| `e2e/layout/`            | Geometry reading, layout assertions, and shell detection.           |
-| `e2e/specs/`             | The specs themselves.                                              |
+| Path            | Responsibility                                                    |
+| --------------- | ----------------------------------------------------------------- |
+| `e2e/harness/`  | The fake bridge, the static file server, and the web build cache. |
+| `e2e/fixtures/` | Playwright fixtures, app-state seeding, and named selectors.      |
+| `e2e/layout/`   | Geometry reading, layout assertions, and shell detection.         |
+| `e2e/specs/`    | The specs themselves.                                             |
 
 ### The harness bridge
 
@@ -45,6 +48,51 @@ default one is built for layout work:
 - `thread-layout` — a user message and a long, wrapping assistant answer.
 - `thread-short` — a minimal thread.
 - `thread-long-title` — a title far wider than the drawer, for truncation checks.
+
+### Keeping the harness honest
+
+A fake bridge is only useful while it still resembles the real one. The failure is quiet: if the
+harness stops handling a method, it answers `methodNotFound`, the app degrades gracefully, and the
+tests keep passing against a protocol nobody speaks any more.
+
+Three layers close that gap, all anchored to `contracts/bridge-rpc/v2/manifest.json` — the same
+manifest `scripts/validate-rpc-contract-fixtures.mjs` already checks the Rust bridge and the mobile
+client against.
+
+1. **Derived constants.** `e2e/harness/contract.ts` reads the manifest at import, and
+   `e2e/harness/protocol.ts` takes the stream id and every error code from it, so the harness cannot
+   hardcode a value the contract has moved on from. The protocol version is deliberately _not_
+   inherited: `IMPLEMENTED_PROTOCOL_VERSION` is pinned, and the harness refuses to start when the
+   manifest moves past it. Inheriting the number would let the harness advertise support for a
+   protocol nobody had implemented, which is the exact failure this is meant to prevent.
+2. **Runtime guards.** `setHandler` refuses a method the manifest does not declare, and `emit`
+   refuses an undeclared notification, so a typo fails loudly instead of registering a handler the
+   app will never call. Any inbound call the harness does not handle is recorded as contract drift
+   and thrown at fixture teardown, which turns a silently degraded run into a failed test.
+3. **A static gate.** `scripts/validate-e2e-harness-contract.mjs` starts the harness with no browser
+   and checks that every handler is declared, that every method the mobile client can send is either
+   handled or listed in `intentionallyUnmodelled` with a reason, and that no exclusion has gone
+   stale. It reads the client's methods from the TypeScript AST rather than by pattern-matching the
+   source, because a regex silently under-reported — it missed calls the formatter had split across
+   lines, which is how two push methods went unnoticed. Method names that are not string literals
+   are reported as failures, since a computed name makes coverage unprovable. It runs as part of
+   `npm run contract:check`, so CI catches drift without installing Playwright.
+
+Adding a bridge method therefore surfaces here as a build failure with the method name in it. Either
+teach the harness to answer it, or record why the layout suite does not need it.
+
+4. **Shape conformance.** Names alone were not enough, and provably so: the harness had been
+   answering `bridge/workspaces/list` with `{path, name, isGitRepository}` while the bridge sends
+   `{path, chatCount, updatedAt}`, and every name-level check passed. `e2e/harness/shapes.ts` now
+   routes those payloads through `conforms<T>()`, typed against the mobile client's own response
+   interfaces — the types the app is written against, which `contract:check` already holds against
+   the Rust bridge. Because the values are object literals, TypeScript rejects both missing and
+   invented fields, so `typecheck:e2e` fails on a drifted shape.
+
+Coverage is honest about its own limits. `conforms` is applied where the client exports a response
+type; methods whose payloads the client treats as opaque are still only checked by name, and the
+`intentionallyUnmodelled` list records which methods the layout suite deliberately does not model.
+That list is a coverage declaration, not a conformance claim.
 
 ### Seeding
 

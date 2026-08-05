@@ -3,7 +3,12 @@ import { test } from '../fixtures/test.ts';
 import { selectors } from '../fixtures/selectors.ts';
 import { expectNoOverlap, expectVisible, expectWithinViewport } from '../layout/assertions.ts';
 import { readRect } from '../layout/geometry.ts';
-import { readShell, TABLET_SIDEBAR_WIDTH } from '../layout/shell.ts';
+import {
+  expectShellMode,
+  expectedShellModeFor,
+  TABLET_LAYOUT_MIN_WIDTH,
+  TABLET_SIDEBAR_WIDTH,
+} from '../layout/shell.ts';
 
 /**
  * The app switches between two shells at `TABLET_LAYOUT_MIN_WIDTH`. Both branches are exercised
@@ -13,7 +18,9 @@ import { readShell, TABLET_SIDEBAR_WIDTH } from '../layout/shell.ts';
 test.describe('shell layout', () => {
   test('the shell matches the viewport width', async ({ createApp }) => {
     const app = await createApp({ chatId: 'thread-layout' });
-    const shell = await readShell(app.page);
+    // Asserted against the project's declared shell, so a moved breakpoint fails here rather than
+    // quietly rerouting the test to the other branch.
+    const shell = await expectShellMode(app.page, expectedShellModeFor(test.info().project.name));
     const opener = app.page.getByLabel('Open navigation drawer');
 
     if (shell.mode === 'pinned') {
@@ -29,8 +36,11 @@ test.describe('shell layout', () => {
 
   test('a docked drawer and the chat pane tile the viewport', async ({ createApp }) => {
     const app = await createApp({ chatId: 'thread-layout' });
-    const shell = await readShell(app.page);
-    test.skip(shell.mode !== 'pinned', 'Only the wide shell docks the drawer.');
+    test.skip(
+      expectedShellModeFor(test.info().project.name) !== 'pinned',
+      'Only the wide shell docks the drawer.',
+    );
+    const shell = await expectShellMode(app.page, 'pinned');
 
     expect(Math.round(shell.drawer.left)).toBe(Math.round(shell.viewport.left));
     expect(Math.round(shell.drawer.height)).toBe(Math.round(shell.viewport.height));
@@ -52,8 +62,11 @@ test.describe('shell layout', () => {
 
   test('an overlay drawer covers the chat instead of tiling with it', async ({ createApp }) => {
     const app = await createApp({ chatId: 'thread-layout' });
-    const shell = await readShell(app.page);
-    test.skip(shell.mode !== 'overlay', 'Only the narrow shell overlays the drawer.');
+    test.skip(
+      expectedShellModeFor(test.info().project.name) !== 'overlay',
+      'Only the narrow shell overlays the drawer.',
+    );
+    const shell = await expectShellMode(app.page, 'overlay');
 
     expect(Math.round(shell.pane.left)).toBe(Math.round(shell.viewport.left));
     expect(Math.round(shell.pane.width)).toBe(Math.round(shell.viewport.width));
@@ -71,5 +84,27 @@ test.describe('shell layout', () => {
     await app.openDrawer();
     const rows = selectors.drawerChatRows(app.page);
     await expect(rows).toHaveCount(3);
+  });
+
+  /**
+   * The two fixed viewports sit comfortably either side of the breakpoint, so neither would notice
+   * it drifting by a few pixels. This pins the transition itself: one pixel below the breakpoint
+   * must still overlay, and exactly at it must dock. It runs once rather than per project, because
+   * it sets its own viewport.
+   */
+  test('the shell switches exactly at the tablet breakpoint', async ({ createApp }) => {
+    test.skip(
+      expectedShellModeFor(test.info().project.name) !== 'overlay',
+      'The breakpoint itself only needs checking once.',
+    );
+    const app = await createApp({ chatId: 'thread-layout' });
+
+    await app.page.setViewportSize({ width: TABLET_LAYOUT_MIN_WIDTH - 1, height: 900 });
+    await app.settle();
+    await expectShellMode(app.page, 'overlay');
+
+    await app.page.setViewportSize({ width: TABLET_LAYOUT_MIN_WIDTH, height: 900 });
+    await app.settle();
+    await expectShellMode(app.page, 'pinned');
   });
 });

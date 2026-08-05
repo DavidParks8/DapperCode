@@ -59,23 +59,40 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   bridge: async ({}, use) => {
     const bridge = await startHarnessBridge();
     await use(bridge);
+    // Close first: close() drains requests still in flight, so drift read afterwards includes the
+    // last call the page made instead of racing it.
     await bridge.close();
+    const drift = describeContractDrift(bridge);
+    if (drift) {
+      throw new Error(drift);
+    }
   },
 
   createApp: async ({ page, site }, use) => {
     const started: HarnessBridge[] = [];
+    const handles: AppHandle[] = [];
 
     const createApp = async (options: AppOptions = {}): Promise<AppHandle> => {
       const bridge = await startHarnessBridge(options);
       started.push(bridge);
       const handle = await launchApp(page, site, bridge, options);
+      handles.push(handle);
       return handle;
     };
 
     await use(createApp);
 
+    const appFailure = describeAppErrors(handles);
+
     for (const bridge of started) {
       await bridge.close();
+    }
+    const drift = started.map((bridge) => describeContractDrift(bridge)).find(Boolean);
+    if (drift) {
+      throw new Error(drift);
+    }
+    if (appFailure) {
+      throw new Error(appFailure);
     }
   },
 
@@ -83,8 +100,40 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   app: async ({ page, site, bridge }, use) => {
     const handle = await launchApp(page, site, bridge, {});
     await use(handle);
+    const failure = describeAppErrors([handle]);
+    if (failure) {
+      throw new Error(failure);
+    }
   },
 });
+
+/**
+ * Uncaught application errors fail the test even when the geometry checks pass.
+ *
+ * Layout assertions only look at boxes, so a component that threw during render can still leave a
+ * plausibly-positioned shell behind. Without this, the suite would report green on a broken app.
+ */
+function describeAppErrors(handles: readonly AppHandle[]): string | null {
+  const errors = handles.flatMap((handle) => [...handle.errors]);
+  if (errors.length === 0) {
+    return null;
+  }
+  return [
+    `The app reported ${String(errors.length)} console error(s) or uncaught exception(s):`,
+    ...errors.map((error) => `  - ${error}`),
+  ].join('\n');
+}
+
+/**
+ * Pages that have already booted an app.
+ *
+ * Every launch installs an init script and console listeners on the same Playwright page. Init
+ * scripts persist across navigation and run in an unspecified order, so a second launch would leave
+ * two scripts racing to seed the same profile and two listeners recording the same errors, while
+ * both handles silently referred to one page. That is a confusing failure to debug, so it is
+ * refused outright.
+ */
+const launchedPages = new WeakSet<Page>();
 
 async function launchApp(
   page: Page,
@@ -92,6 +141,15 @@ async function launchApp(
   bridge: HarnessBridge,
   options: AppOptions,
 ): Promise<AppHandle> {
+  if (launchedPages.has(page)) {
+    throw new Error(
+      'This page has already booted an app. Each test gets one page, so requesting both the `app` ' +
+        'and `createApp` fixtures, or calling `createApp` twice, would seed the same page twice ' +
+        'and race. Use `createApp` alone for a custom scenario, or `app` alone for the default.',
+    );
+  }
+  launchedPages.add(page);
+
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -173,6 +231,27 @@ async function waitForRestingPosition(target: Locator, timeout = 5_000): Promise
     await target.page().waitForTimeout(50);
   }
   throw new Error('Timed out waiting for the drawer to reach a resting position.');
+}
+
+/**
+ * Turns recorded drift into a failure message.
+ *
+ * The whole value of a harness bridge rests on it behaving like the real one. When the app asks for
+ * something the harness cannot serve, the specs would otherwise keep passing against a bridge that
+ * has quietly stopped resembling production, so it is treated as a test failure.
+ */
+function describeContractDrift(bridge: HarnessBridge): string | null {
+  if (bridge.contractDrift.length === 0) {
+    return null;
+  }
+  const lines = bridge.contractDrift.map(({ method, reason }) =>
+    reason === 'undeclared'
+      ? `  ${method} — not declared in contracts/bridge-rpc/v2/manifest.json at all, so the app ` +
+        `and the shared contract disagree.`
+      : `  ${method} — declared in the bridge contract but the harness has no handler, so the ` +
+        `real bridge would have answered this and the harness did not.`,
+  );
+  return `The harness bridge could not answer every call the app made:\n${lines.join('\n')}`;
 }
 
 export const PROFILE_ID = 'harness-profile';
