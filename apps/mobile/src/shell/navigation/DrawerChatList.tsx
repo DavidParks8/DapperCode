@@ -202,6 +202,7 @@ export function DrawerChatList() {
               accessibilityRole="button"
               accessibilityState={controlAccessibilityState({ selected: isSelected })}
               onPress={() => handleSelectChat(item.chat.id)}
+              testID={`drawer-chat-row-${item.chat.id}`}
             >
               {({ pressed }) => (
                 <View

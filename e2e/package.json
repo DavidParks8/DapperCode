@@ -1,0 +1,7 @@
+{
+  "name": "@dappercode/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright layout and visual end-to-end tests driven by an in-process harness bridge",
+  "type": "module"
+}

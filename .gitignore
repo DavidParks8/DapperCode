@@ -72,6 +72,8 @@ Thumbs.db
 *.sublime-workspace
 
 # Testing
+# Mobile end-to-end runs: per-run artifacts and content-addressed web bundles.
+.e2e/
 coverage/
 .nyc_output/
 .eslintcache

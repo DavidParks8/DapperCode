@@ -21,9 +21,12 @@
     "url": "git+https://github.com/DavidParks8/DapperCode.git"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/ws": "^8.18.1",
     "jscpd": "5.0.12",
     "prettier": "3.9.6",
     "quicktype-core": "23.2.6",
+    "ws": "^8.21.2",
     "zod-to-json-schema": "^3.25.1"
   },
   "overrides": {
@@ -50,6 +53,11 @@
     "payment:check": "node scripts/check-payment-isolation.mjs",
     "docs:check": "node scripts/validate-doc-consistency.mjs",
     "test:scripts": "node --test scripts/__tests__/*.test.mjs",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:phone": "playwright test --config e2e/playwright.config.ts --project=phone",
+    "e2e:tablet": "playwright test --config e2e/playwright.config.ts --project=tablet",
+    "e2e:report": "playwright test --config e2e/playwright.config.ts --reporter=html",
+    "typecheck:e2e": "tsc --noEmit --project e2e/tsconfig.json",
     "test:acp": "cargo test --locked --manifest-path services/rust-bridge/Cargo.toml 'acp::' -- --test-threads=1",
     "agui:generate": "node scripts/generate-agui-bindings.mjs",
     "agui:check": "node scripts/generate-agui-bindings.mjs --check",
@@ -58,7 +66,7 @@
     "duplicates:check": "npm run duplicates:mobile && npm run duplicates:native",
     "contract:check": "npm run agui:check && node scripts/validate-rpc-contract-fixtures.mjs && npm run test:contract -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml contract_fixture_manifest",
     "build": "npm run build -w @dappercode/mobile && cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml && cargo build --locked --release --manifest-path apps/desktop/Cargo.toml",
-    "typecheck": "npm run typecheck -w @dappercode/mobile && npm run typecheck:scripts && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
+    "typecheck": "npm run typecheck -w @dappercode/mobile && npm run typecheck:scripts && npm run typecheck:e2e && cargo check --locked --manifest-path services/rust-bridge/Cargo.toml && cargo check --locked --manifest-path apps/desktop/Cargo.toml",
     "lint": "npm run format:check && npm run lint -w @dappercode/mobile && npm run duplicates:check && cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml && cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings && cargo fmt --check --manifest-path apps/desktop/Cargo.toml && cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings",
     "test": "npm run test:scripts && npm run test -w @dappercode/mobile && cargo test --locked --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1 && npm run desktop:test",
     "coverage:check": "npm run test:coverage -w @dappercode/mobile",
