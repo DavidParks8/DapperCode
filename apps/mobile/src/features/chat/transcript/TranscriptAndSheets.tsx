@@ -8,7 +8,7 @@ import { loadingAgentThreadsAtom } from '../../workspace/state/workspace';
 import { keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import { KeyboardAvoidingView, Platform, View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { ComposeView } from '../screen/Presentation';
@@ -386,11 +386,12 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   return (
     <>
       <View style={styles.bodyContainer}>
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoiding}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          enabled={Platform.OS === 'ios'}
-        >
+        {/* No KeyboardAvoidingView here on purpose. The overlay composer already floats on the
+            measured keyboard inset and `composerReservedInset` feeds that same inset to the
+            transcript, so padding this container would push the messages up by a second keyboard
+            height and shove short transcripts off screen. Keeping the shell at full height makes
+            the keyboard slide the content by exactly one keyboard height, like iMessage. */}
+        <View style={styles.bodyShell}>
           <TranscriptOrComposerContent
             {...contentProps}
             keyboardVisible={Platform.OS === 'android' ? keyboardVisible : false}
@@ -398,7 +399,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
           />
           {Platform.OS === 'ios' && shouldShowComposer ? renderComposer(true) : null}
           {!usesOverlayComposer && shouldShowComposer ? renderComposer(false) : null}
-        </KeyboardAvoidingView>
+        </View>
         {Platform.OS === 'android' && shouldShowComposer ? renderComposer(true) : null}
       </View>
       <MainScreenSelectionSheets
