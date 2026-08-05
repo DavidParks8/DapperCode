@@ -3,6 +3,7 @@ import {
   getMessageText,
   getSubAgentMeta,
   getToolCallDisplayLines,
+  preserveKnownSubAgentThreadLink,
   SUBAGENT_ACTIVITY_TYPE,
 } from '@bridge/messages';
 import type { ChatMessage } from '@bridge/types/types';
@@ -104,6 +105,42 @@ describe('messages', () => {
       },
     });
     expect(malformedMeta).toBeUndefined();
+  });
+
+  it('does not let a later snapshot discard a known sub-agent thread link', () => {
+    const linked = createActivityMessage(
+      'subagent',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: 'Working',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [' child '],
+          agentStatus: 'running',
+        },
+      },
+      'now',
+    );
+    const unlinkedUpdate = createActivityMessage(
+      'subagent',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: 'Still working',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      'later',
+    );
+
+    expect(getSubAgentMeta(preserveKnownSubAgentThreadLink(linked, unlinkedUpdate))).toMatchObject({
+      toolCallId: 'task-1',
+      receiverThreadIds: ['child'],
+      agentStatus: 'running',
+    });
+    expect(preserveKnownSubAgentThreadLink(undefined, unlinkedUpdate)).toBe(unlinkedUpdate);
   });
 
   it('formats assistant tool calls and omits empty arguments', () => {

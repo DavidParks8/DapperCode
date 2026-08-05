@@ -98,6 +98,45 @@ export function getSubAgentMeta(
   return isChatMessageSubAgentMeta(value) ? value : undefined;
 }
 
+export function preserveKnownSubAgentThreadLink(
+  existing: ChatMessage | undefined,
+  incoming: ChatMessage,
+): ChatMessage {
+  if (incoming.role !== 'activity' || incoming.activityType !== SUBAGENT_ACTIVITY_TYPE) {
+    return incoming;
+  }
+  const existingMeta = existing ? getSubAgentMeta(existing) : undefined;
+  const existingIds = (existingMeta?.receiverThreadIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (existingIds.length === 0) {
+    return incoming;
+  }
+  const incomingMeta = getSubAgentMeta(incoming);
+  const incomingIds = (incomingMeta?.receiverThreadIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (
+    incomingIds.length > 0 ||
+    (existingMeta?.toolCallId &&
+      incomingMeta?.toolCallId &&
+      existingMeta.toolCallId !== incomingMeta.toolCallId)
+  ) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    content: {
+      ...incoming.content,
+      subAgent: {
+        ...existingMeta,
+        ...incomingMeta,
+        receiverThreadIds: existingIds,
+      },
+    },
+  };
+}
+
 export function getToolCallDisplayLines(message: Message | ChatMessage): string[] {
   if (message.role !== 'assistant' || !message.toolCalls?.length) {
     return [];

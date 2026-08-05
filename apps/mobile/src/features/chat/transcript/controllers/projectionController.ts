@@ -1,6 +1,6 @@
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import type { AgUiThreadMessageState } from '@bridge/agui/agUiMessages';
-import { getMessageText } from '@bridge/messages';
+import { getMessageText, getSubAgentMeta, preserveKnownSubAgentThreadLink } from '@bridge/messages';
 import { partsMatchMessageContent } from '@bridge/agui/agUiContent';
 import { filterReasoningMessages, normalizeChatMessageMatchContent } from '../../helpers/helpers';
 import { trimInheritedParentMessages } from '../../agents/transcript';
@@ -293,12 +293,16 @@ function mergeLiveMessage(
     liveText,
     liveMessageState,
   );
+  // Discovery can add the child link in a shorter status-only activity. Metadata must not inherit
+  // the text merge's protection against shorter, potentially stale message content.
+  const useLiveSubAgentLink = hasNewLiveSubAgentThreadLink(persistedMessage, liveMessage);
   const useLivePending = shouldAdoptLivePendingState(persistedMessage, liveMessage);
-  if (!useLiveContent && !useLivePending) {
+  if (!useLiveContent && !useLiveSubAgentLink && !useLivePending) {
     return messages;
   }
   return replacePersistedLiveMessage(messages, persistedMessage, liveMessage, liveText, {
     useLiveContent,
+    useLiveSubAgentLink,
     useLivePending,
   });
 }
@@ -360,29 +364,70 @@ function shouldAdoptLivePendingState(
   return liveMessage.pending !== undefined && liveMessage.pending !== persistedMessage.pending;
 }
 
+function hasNewLiveSubAgentThreadLink(
+  persistedMessage: ChatMessage,
+  liveMessage: ChatMessage,
+): boolean {
+  if (persistedMessage.role !== 'activity' || liveMessage.role !== 'activity') {
+    return false;
+  }
+  const persistedMeta = getSubAgentMeta(persistedMessage);
+  const liveMeta = getSubAgentMeta(liveMessage);
+  const persistedIds = new Set(
+    (persistedMeta?.receiverThreadIds ?? []).map((id) => id.trim()).filter(Boolean),
+  );
+  return (liveMeta?.receiverThreadIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .some((id) => !persistedIds.has(id));
+}
+
 function replacePersistedLiveMessage(
   messages: ChatMessage[],
   persistedMessage: ChatMessage,
   liveMessage: ChatMessage,
   liveText: string,
-  { useLiveContent, useLivePending }: { useLiveContent: boolean; useLivePending: boolean },
+  {
+    useLiveContent,
+    useLiveSubAgentLink,
+    useLivePending,
+  }: {
+    useLiveContent: boolean;
+    useLiveSubAgentLink: boolean;
+    useLivePending: boolean;
+  },
 ): ChatMessage[] {
-  return messages.map((message) =>
-    message === persistedMessage
-      ? ({
-          ...message,
-          ...(useLiveContent
-            ? {
-                ...(message.role === 'activity'
-                  ? { content: { ...message.content, text: liveText } }
-                  : { content: liveText }),
-                parts: liveMessage.parts ?? message.parts,
-              }
-            : {}),
-          ...(useLivePending ? { pending: liveMessage.pending } : {}),
-        } as ChatMessage)
-      : message,
-  );
+  return messages.map((message) => {
+    if (message !== persistedMessage) {
+      return message;
+    }
+    if (
+      message.role === 'activity' &&
+      liveMessage.role === 'activity' &&
+      (useLiveContent || useLiveSubAgentLink)
+    ) {
+      return preserveKnownSubAgentThreadLink(message, {
+        ...message,
+        content: {
+          ...message.content,
+          ...liveMessage.content,
+          text: useLiveContent ? liveText : message.content.text,
+        },
+        ...(useLiveContent ? { parts: liveMessage.parts ?? message.parts } : {}),
+        ...(useLivePending ? { pending: liveMessage.pending } : {}),
+      });
+    }
+    return {
+      ...message,
+      ...(useLiveContent
+        ? {
+            content: liveText,
+            parts: liveMessage.parts ?? message.parts,
+          }
+        : {}),
+      ...(useLivePending ? { pending: liveMessage.pending } : {}),
+    } as ChatMessage;
+  });
 }
 
 function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {

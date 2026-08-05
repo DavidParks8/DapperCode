@@ -950,6 +950,79 @@ describe('AG-UI bridge notifications', () => {
     expect(messages(state, 'parent')[0]).toMatchObject({ id: 'subagent:task-1' });
   });
 
+  it('keeps a running subagent openable across later unlinked activity snapshots', () => {
+    const activity = (
+      text: string,
+      receiverThreadIds: string[],
+    ): Extract<AGUIEvent, { type: EventType.ACTIVITY_SNAPSHOT }> => ({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: 'subagent:task-1',
+      activityType: 'dappercode.subagent',
+      replace: true,
+      content: {
+        text,
+        subAgent: {
+          toolCallId: 'task-1',
+          senderThreadId: 'parent',
+          receiverThreadIds,
+          agentStatus: 'running',
+        },
+      },
+    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'parent',
+        runId: 'run',
+        event: activity('• Sub-agent working\n  Status: running', ['child']),
+      },
+    );
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'parent',
+      runId: 'run',
+      event: activity('• Sub-agent working\n  Status: running\n  Latest: Reading files', []),
+    });
+
+    const afterActivity = requireTestValue(
+      messages(state, 'parent')[0],
+      'subagent after activity snapshot',
+    );
+    expect(afterActivity.role).toBe('activity');
+    if (afterActivity.role !== 'activity') {
+      throw new Error('Expected activity message');
+    }
+    expect(afterActivity.content.text).toContain('Latest: Reading files');
+    expect(afterActivity.content.subAgent?.receiverThreadIds).toEqual(['child']);
+
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'parent',
+      runId: 'run',
+      event: {
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [
+          {
+            id: 'subagent:task-1',
+            role: 'activity',
+            activityType: 'dappercode.subagent',
+            content: activity('• Sub-agent working\n  Status: running\n  Latest: Running tests', [])
+              .content,
+          },
+        ],
+      },
+    });
+
+    const afterMessagesSnapshot = requireTestValue(
+      messages(state, 'parent')[0],
+      'subagent after messages snapshot',
+    );
+    expect(afterMessagesSnapshot.role).toBe('activity');
+    if (afterMessagesSnapshot.role !== 'activity') {
+      throw new Error('Expected activity message');
+    }
+    expect(afterMessagesSnapshot.content.text).toContain('Latest: Running tests');
+    expect(afterMessagesSnapshot.content.subAgent?.receiverThreadIds).toEqual(['child']);
+  });
+
   describe('AG-UI validation and fallback behavior', () => {
     it('rejects wrong routing and malformed envelopes and accepts optional source turns', () => {
       const invalid = [

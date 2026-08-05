@@ -1,4 +1,4 @@
-import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import { preserveKnownSubAgentThreadLink, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
 import { partsMatchMessageContent } from '@bridge/agui/agUiContent';
 import {
   applyJsonPatch,
@@ -248,13 +248,14 @@ function buildSnapshotMessages(
       continue;
     }
     const existing = previous.get(message.id);
-    nextMessages.push({
+    const nextMessage: ChatMessage = {
       ...message,
       createdAt: existing?.createdAt ?? timestampIso(timestamp),
       parts: partsMatchMessageContent(existing?.parts, message.content)
         ? existing?.parts
         : undefined,
-    });
+    };
+    nextMessages.push(preserveKnownSubAgentThreadLink(existing, nextMessage));
   }
   return { nextMessages, toolMetaByCallId };
 }

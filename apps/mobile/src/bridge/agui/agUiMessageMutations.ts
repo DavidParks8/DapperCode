@@ -6,7 +6,12 @@ import {
   timestampIso,
   upsertToolCall,
 } from '@bridge/agui/agUiReducerUtilities';
-import { createActivityMessage, getMessageText, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import {
+  createActivityMessage,
+  getMessageText,
+  preserveKnownSubAgentThreadLink,
+  SUBAGENT_ACTIVITY_TYPE,
+} from '@bridge/messages';
 import { findMessage, toolCall } from '@bridge/agui/agUiStructuredAndTerminalReducers';
 import {
   findMessageIndex,
@@ -244,14 +249,15 @@ export function reduceActivitySnapshot(
         },
       }
     : withoutGenericTool;
+  const incoming = createActivityMessage(
+    messageId,
+    activityType,
+    content as { text: string; [key: string]: unknown },
+    timestampIso(timestamp),
+  );
   return upsertMessage(
     withSuppressedTool,
-    createActivityMessage(
-      messageId,
-      activityType,
-      content as { text: string; [key: string]: unknown },
-      timestampIso(timestamp),
-    ),
+    preserveKnownSubAgentThreadLink(findMessage(withSuppressedTool, messageId), incoming),
     runId,
     timestamp,
   );

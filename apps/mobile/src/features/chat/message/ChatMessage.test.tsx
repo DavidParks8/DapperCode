@@ -17,7 +17,8 @@ import {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import type { ChatMessage as ApiChatMessage } from '@bridge/types/types';
+import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
+import type { Chat, ChatMessage as ApiChatMessage } from '@bridge/types/types';
 import {
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
@@ -28,6 +29,7 @@ import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './Chat
 import { resetHuggedTextWidthCache } from './UserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
+import { projectTranscript } from '../transcript/controllers/projectionController';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -1521,6 +1523,75 @@ describe('ChatMessage system timeline matrices', () => {
       'indexed test value',
     );
     expect(control?.props['accessibilityState']).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
+    act(() => tree.unmount());
+  });
+
+  it('opens a running agent after its live child link reaches a persisted card', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const persisted = createActivityMessage(
+      'subagent:task-running',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-running',
+          senderThreadId: 'parent',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      '2026-04-17T00:00:00.000Z',
+    );
+    const live = createActivityMessage(
+      'subagent:task-running',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running',
+        subAgent: {
+          toolCallId: 'task-running',
+          senderThreadId: 'parent',
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+        },
+      },
+      '2026-04-17T00:00:01.000Z',
+    );
+    const parent: Chat = {
+      id: 'parent',
+      title: 'Parent',
+      status: 'running',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      updatedAt: '2026-04-17T00:00:01.000Z',
+      statusUpdatedAt: '2026-04-17T00:00:01.000Z',
+      lastMessagePreview: 'Sub-agent working',
+      messages: [persisted],
+    };
+    const message = requireTestValue(
+      projectTranscript({
+        chat: parent,
+        parentChat: null,
+        showToolCalls: true,
+        threadStatuses: new Map([['child-running', 'running']]),
+        liveMessageState: {
+          ...createAgUiThreadMessageState(),
+          messages: [live],
+        },
+      }).messages.find((candidate) => candidate.id === persisted.id),
+      'projected running sub-agent card',
+    );
+    const tree = renderMessage(message, { onOpenSubAgentThread });
+    const control = requireTestValue(
+      tree.root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Open agent chat' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'open running sub-agent control',
+    );
+
+    expect(control.props['accessibilityState']).toMatchObject({ disabled: false });
     act(() => readOnPress(control.props)());
     expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
     act(() => tree.unmount());

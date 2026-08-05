@@ -89,9 +89,24 @@ describe('transcriptProjectionController', () => {
     );
   });
 
-  it('preserves live subagent metadata for the transcript card', () => {
+  it('adopts a live child link when a persisted running card has none', () => {
+    const persisted = createActivityMessage(
+      'subagent:task-1',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-1',
+          tool: 'spawnAgent',
+          senderThreadId: chat.id,
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      'persisted',
+    );
     const projection = projectTranscript({
-      chat: { ...chat, parentThreadId: undefined },
+      chat: { ...chat, parentThreadId: undefined, messages: [...chat.messages, persisted] },
       parentChat: null,
       showToolCalls: false,
       threadStatuses: new Map([['child-thread', 'running']]),
@@ -100,8 +115,9 @@ describe('transcriptProjectionController', () => {
           'subagent:task-1',
           SUBAGENT_ACTIVITY_TYPE,
           {
-            text: '• Spawning sub-agent\n  Thread: child-thread\n  Status: running',
+            text: '• Sub-agent working\n  Status: running',
             subAgent: {
+              toolCallId: 'task-1',
               tool: 'spawnAgent',
               senderThreadId: chat.id,
               receiverThreadIds: ['child-thread'],
@@ -116,7 +132,51 @@ describe('transcriptProjectionController', () => {
     expect(projection.messages.at(-1)).toMatchObject({
       role: 'activity',
       activityType: SUBAGENT_ACTIVITY_TYPE,
+      content: {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: ['child-thread'],
+          agentStatus: 'running',
+        },
+      },
     });
+  });
+
+  it('ignores malformed live subagent thread metadata', () => {
+    const persisted = createActivityMessage(
+      'subagent:task-1',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      'persisted',
+    );
+    const malformedLive = {
+      id: persisted.id,
+      role: 'activity',
+      activityType: SUBAGENT_ACTIVITY_TYPE,
+      content: {
+        text: '• Sub-agent working',
+        subAgent: { toolCallId: 'task-1', receiverThreadIds: 'child-thread' },
+      },
+      createdAt: 'now',
+    } as unknown as Chat['messages'][number];
+
+    expect(() =>
+      projectTranscript({
+        chat: { ...chat, parentThreadId: undefined, messages: [persisted] },
+        parentChat: null,
+        showToolCalls: false,
+        threadStatuses: new Map(),
+        liveMessageState: liveState([malformedLive]),
+      }),
+    ).not.toThrow();
   });
 
   it('does not append blank or duplicate live assistant text', () => {
