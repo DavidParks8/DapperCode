@@ -8,15 +8,6 @@ import { ScrollableRowText, SelectableMessageText } from '../message/Primitives'
 import type { TimelineEntry } from '../message/types';
 import { toSubAgentVisual } from '../message/timelineHelpers';
 import { createStyles } from '../message/styles';
-import { computeHitSlop } from '@shared/ui/touchTarget';
-
-// The open-hint row hugs its "Open agent chat" label + chevron, so its rendered width is well
-// over the touch-target minimum; only the fixed, dense row height needs vertical hitSlop. The
-// footer sits `marginTop: 4` below the "Latest" detail row (see subAgentOpenHint /
-// subAgentDetailRow in chatMessageStyles.ts), so vertical slop is capped at that same 4px — any
-// more would eat into the scrollable "Latest" row's own touch/scroll area above it.
-const OPEN_HINT_VISIBLE_SIZE = { width: 120, height: 18 };
-const OPEN_HINT_HIT_SLOP_OPTIONS = { maxVertical: 4 };
 
 /** Reads one labelled line out of a sub-agent card body, ignoring its indentation. */
 function findDetailLine(details: string[], label: string): string | undefined {
@@ -59,10 +50,6 @@ export function SubAgentCard({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const canOpen = Boolean(threadId && onOpen);
-  const openHintHitSlop = useMemo(
-    () => computeHitSlop(OPEN_HINT_VISIBLE_SIZE, OPEN_HINT_HIT_SLOP_OPTIONS),
-    [],
-  );
 
   return (
     <View style={styles.subAgentCardStack}>
@@ -74,60 +61,66 @@ export function SubAgentCard({
             testID={`${idPrefix}-subagent-card-${String(index)}`}
             style={[styles.subAgentCard, visual.isError && styles.subAgentCardError]}
           >
-            <View style={styles.subAgentHeader}>
-              <View style={styles.subAgentHeaderIcon}>
-                {running ? (
-                  <ActivityIndicator size="small" color={theme.colors.subAgentAccent} />
-                ) : (
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name={visual.icon}
-                    size={14}
-                    color={visual.isError ? theme.colors.statusError : theme.colors.subAgentAccent}
-                  />
-                )}
-              </View>
-              <Text style={styles.subAgentTitle} numberOfLines={1}>
-                {entry.title}
-              </Text>
-            </View>
-            <View style={styles.subAgentDetailWrap}>
-              <View style={styles.subAgentDetailRow}>
-                <SelectableMessageText style={styles.subAgentDetailLine} numberOfLines={1}>
-                  {summaryLine(entry.details, agentStatus)}
-                </SelectableMessageText>
-              </View>
-              <View style={styles.subAgentDetailRow}>
-                <ScrollableRowText
-                  style={styles.subAgentDetailLine}
-                  backgroundColor={visual.isError ? theme.colors.errorBg : theme.colors.subAgentBg}
-                  numberOfLines={1}
-                  testID="subagent-latest-scroll"
-                >
-                  {findDetailLine(entry.details, 'Latest') ?? 'Latest: —'}
-                </ScrollableRowText>
-              </View>
-            </View>
             <Pressable
               onPress={canOpen ? () => onOpen?.(threadId) : undefined}
               disabled={!canOpen}
-              hitSlop={openHintHitSlop}
               style={({ pressed }) => [
-                styles.subAgentOpenHint,
-                pressed && canOpen && styles.subAgentOpenHintPressed,
+                styles.subAgentCardBody,
+                pressed && canOpen && styles.subAgentCardBodyPressed,
               ]}
               accessibilityRole="button"
               accessibilityLabel="Open agent chat"
               accessibilityHint={canOpen ? 'Opens the sub-agent transcript' : undefined}
               accessibilityState={controlAccessibilityState({ disabled: !canOpen })}
+              testID={`${idPrefix}-subagent-open-${String(index)}`}
             >
-              <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="chevron-forward"
-                size={12}
-                color={theme.colors.subAgentAccent}
-              />
+              <View style={styles.subAgentHeader}>
+                <View style={styles.subAgentHeaderIcon}>
+                  {running ? (
+                    <ActivityIndicator size="small" color={theme.colors.subAgentAccent} />
+                  ) : (
+                    <Ionicons
+                      {...decorativeAccessibilityProps}
+                      name={visual.icon}
+                      size={14}
+                      color={
+                        visual.isError ? theme.colors.statusError : theme.colors.subAgentAccent
+                      }
+                    />
+                  )}
+                </View>
+                <Text style={styles.subAgentTitle} numberOfLines={1}>
+                  {entry.title}
+                </Text>
+              </View>
+              <View style={styles.subAgentDetailWrap}>
+                <View style={styles.subAgentDetailRow}>
+                  <SelectableMessageText style={styles.subAgentDetailLine} numberOfLines={1}>
+                    {summaryLine(entry.details, agentStatus)}
+                  </SelectableMessageText>
+                </View>
+                <View style={styles.subAgentDetailRow}>
+                  <ScrollableRowText
+                    style={styles.subAgentDetailLine}
+                    backgroundColor={
+                      visual.isError ? theme.colors.errorBg : theme.colors.subAgentBg
+                    }
+                    numberOfLines={1}
+                    testID="subagent-latest-scroll"
+                  >
+                    {findDetailLine(entry.details, 'Latest') ?? 'Latest: —'}
+                  </ScrollableRowText>
+                </View>
+              </View>
+              <View style={styles.subAgentOpenHint} {...decorativeAccessibilityProps}>
+                <Text style={styles.subAgentOpenHintText}>Open agent chat</Text>
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="chevron-forward"
+                  size={12}
+                  color={theme.colors.subAgentAccent}
+                />
+              </View>
             </Pressable>
           </View>
         );

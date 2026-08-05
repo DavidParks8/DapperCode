@@ -145,10 +145,9 @@ describe('ChatInput behavior', () => {
     act(() => byLabel(root, 'Stop agent').props.onPress());
     expect(base.onStop).toHaveBeenCalled();
     expect(mockHaptics.impactAsync).toHaveBeenCalledWith('heavy');
-    expect(byLabel(root, 'Agent is responding').props['accessibilityState']).toMatchObject({
-      disabled: true,
-      busy: true,
-    });
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+    ).toHaveLength(0);
     act(() =>
       rendered.update(
         wrap(
@@ -423,7 +422,7 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders trailing composer actions at 48 points and keeps Add embedded', () => {
+  it('uses one 48-point trailing slot and replaces Send with Stop while a turn runs', () => {
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
@@ -431,7 +430,7 @@ describe('ChatInput behavior', () => {
           <ChatInput
             {...base}
             value="hi"
-            isLoading={false}
+            isLoading
             showStopButton
             onAttachPress={base.onAttachPress}
             attachments={[{ id: 'a1', label: 'error.log' }]}
@@ -445,19 +444,25 @@ describe('ChatInput behavior', () => {
     const removeAttachment = byLabel(root, 'error.log, remove attachment');
 
     const glassProps = getRenderedGlassViewProps();
-    const sendStyle = StyleSheet.flatten(
-      glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
-    ) as Record<string, unknown>;
-    expect(sendStyle['width']).toBe(48);
-    expect(sendStyle['height']).toBe(48);
     const stopStyle = StyleSheet.flatten(
       glassProps.find((entry) => entry.testID === 'composer-stop-glass-surface')?.style,
     ) as Record<string, unknown>;
-    const submitStyle = StyleSheet.flatten(
-      glassProps.find((entry) => entry.testID === 'composer-submit-glass-surface')?.style,
-    ) as Record<string, unknown>;
+    expect(stopStyle['width']).toBe(48);
+    expect(stopStyle['height']).toBe(48);
     expect(stopStyle['backgroundColor']).toBe(theme.glass.capsule.fallbackBackgroundColor);
-    expect(submitStyle['backgroundColor']).toBe(theme.glass.prominent.fallbackBackgroundColor);
+    expect(root.findAll((node) => node.props['testID'] === 'composer-stop-slot')).not.toHaveLength(
+      0,
+    );
+    expect(root.findAll((node) => node.props['testID'] === 'composer-submit-slot')).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'composer-stop-glass-surface'),
+    ).not.toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
+    ).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+    ).toHaveLength(0);
     expect(byLabel(root, 'Add attachment').props['hitSlop']).toEqual({
       top: 6,
       right: 6,

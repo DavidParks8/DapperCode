@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
+import { render as renderWithTestingLibrary, userEvent } from '@testing-library/react-native';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { SubAgentCard } from './Card';
@@ -123,33 +124,36 @@ describe('SubAgentCard', () => {
     act(() => tree.unmount());
   });
 
-  it('caps the open-agent-chat hitSlop so it cannot overlap the scrollable Latest row above it', () => {
-    const tree = render(
-      <SubAgentCard
-        idPrefix="sub-1"
-        entries={entries}
-        agentStatus="running"
-        running={false}
-        threadId="thread-1"
-        onOpen={jest.fn()}
-      />,
+  it('opens the agent chat when the user presses the full card target', async () => {
+    const onOpen = jest.fn();
+    const user = userEvent.setup();
+    const { getByRole, getByText } = renderWithTestingLibrary(
+      wrap(
+        <SubAgentCard
+          idPrefix="sub-1"
+          entries={entries}
+          agentStatus="running"
+          running={false}
+          threadId="thread-1"
+          onOpen={onOpen}
+        />,
+      ),
     );
 
-    const openButton = findByAccessibilityLabel(queryRoot(tree), 'Open agent chat');
-    const hitSlop = openButton.props['hitSlop'] as {
-      top: number;
-      bottom: number;
-      left: number;
-      right: number;
-    };
-    // The footer row sits `marginTop: 4` below the "Latest" detail row (see subAgentOpenHint /
-    // subAgentDetailRow in chatMessageStyles.ts). The row is only 18pt tall, so an uncapped
-    // hitSlop would pad ~13-15pt toward the 44pt/48dp minimum and eat well into (56-69% of) that
-    // scrollable row's own touch/scroll area. Capping at 4 keeps the expanded hit area's top edge
-    // flush with — never past — the boundary between the two rows.
-    expect(hitSlop.top).toBe(4);
-    expect(hitSlop.bottom).toBe(4);
-    expect(hitSlop.top).toBeLessThanOrEqual(4);
+    const openButton = getByRole('button', { name: 'Open agent chat' });
+    // The card repaints while its sub-agent works, so a footer-sized target is easy to miss. The
+    // press area has to wrap the card body — title, summary and the open hint alike — rather than
+    // padding a dense 18pt row with hitSlop.
+    expect(openButton.props['testID']).toBe('sub-1-subagent-open-0');
+    expect(openButton.props['hitSlop']).toBeUndefined();
+    const style = StyleSheet.flatten(openButton.props['style'] as never) as { flex?: number };
+    expect(style.flex).toBe(1);
+
+    expect(getByText('Investigate flaky test')).toBeTruthy();
+    expect(getByText('Open agent chat', { includeHiddenElements: true })).toBeTruthy();
+
+    await user.press(openButton);
+    expect(onOpen).toHaveBeenCalledWith('thread-1');
   });
 
   it('disables the open affordance and omits onPress when there is no thread to open', () => {

@@ -12,7 +12,7 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       flex: 1,
       position: 'relative',
     },
-    keyboardAvoiding: {
+    bodyShell: {
       flex: 1,
     },
     topChromeOverlay: {

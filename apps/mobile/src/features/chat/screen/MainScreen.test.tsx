@@ -875,7 +875,7 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('sends selected-thread messages and interrupts a known running turn', async () => {
+    it('preserves a selected-thread draft while interrupting a known running turn', async () => {
       const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
       const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
       const { tree } = await renderMain({
@@ -891,14 +891,15 @@ function MainRouteShell() {
         throw new Error('Missing composer');
       }
       act(() => message.props.onChangeText('Follow up'));
-      await pressLabel(root, 'Send message');
-      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
-        chat.id,
-        expect.objectContaining({ content: 'Follow up', collaborationMode: 'default' }),
-        expect.objectContaining({ submissionId: expect.any(String) }),
-      );
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
+      expect(message.props['value']).toBe('Follow up');
       await pressLabel(root, 'Stop agent');
-      expect(api.interruptTurn).toHaveBeenCalledWith(chat.id, 'turn-2');
+      expect(api.interruptLatestTurn).toHaveBeenCalledWith(chat.id);
+      expect(api.interruptTurn).not.toHaveBeenCalled();
+      expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
+      expect(message.props['value']).toBe('Follow up');
       act(() => tree.unmount());
     });
 
@@ -1536,34 +1537,45 @@ function MainRouteShell() {
     });
 
     it('shows a queued send from the returned disposition and restores a failed queued draft', async () => {
-      const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
       const queuedState = {
         ...emptyQueue,
         items: [
           { id: 'queued-returned', createdAt: '2026-07-20T00:00:03.000Z', content: 'Queue this' },
         ],
       };
-      const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
-      (api.sendOrQueueChatMessage as jest.Mock)
-        .mockResolvedValueOnce({ disposition: 'queued', queue: queuedState })
-        .mockRejectedValueOnce(new Error('queue unavailable'));
-      const { tree } = await renderMain({
-        api,
-        pendingOpenChatId: chat.id,
-        pendingOpenChatSnapshot: runningChat,
+      const queuedApi = createApi();
+      (queuedApi.sendOrQueueChatMessage as jest.Mock).mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: queuedState,
       });
-      const root = tree.root as Queryable;
-      act(() => messageInput(root).props.onChangeText('Queue this'));
+      const queuedHarness = await renderMain({
+        api: queuedApi,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const queuedRoot = queuedHarness.tree.root as Queryable;
+      act(() => messageInput(queuedRoot).props.onChangeText('Queue this'));
 
-      await pressLabel(root, 'Send message');
-      expect(hasText(root, 'Queue this')).toBe(true);
-      expect(messageInput(root).props['value']).toBe('');
+      await pressLabel(queuedRoot, 'Send message');
+      expect(hasText(queuedRoot, 'Queue this')).toBe(true);
+      expect(messageInput(queuedRoot).props['value']).toBe('');
+      act(() => queuedHarness.tree.unmount());
 
-      act(() => messageInput(root).props.onChangeText('Retry this queue'));
-      await pressLabel(root, 'Send message');
-      expect(messageInput(root).props['value']).toBe('Retry this queue');
-      expect(hasText(root, 'queue unavailable')).toBe(true);
-      act(() => tree.unmount());
+      const failedApi = createApi();
+      (failedApi.sendOrQueueChatMessage as jest.Mock).mockRejectedValueOnce(
+        new Error('queue unavailable'),
+      );
+      const failedHarness = await renderMain({
+        api: failedApi,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const failedRoot = failedHarness.tree.root as Queryable;
+      act(() => messageInput(failedRoot).props.onChangeText('Retry this queue'));
+      await pressLabel(failedRoot, 'Send message');
+      expect(messageInput(failedRoot).props['value']).toBe('Retry this queue');
+      expect(hasText(failedRoot, 'queue unavailable')).toBe(true);
+      act(() => failedHarness.tree.unmount());
     });
 
     it('converges reconnect, thread rename, and terminal status events', async () => {
@@ -5728,7 +5740,18 @@ function MainRouteShell() {
       input(root).props.onChangeText(value);
       await flush();
     });
-    await press(labeled(root, 'Send message'));
+    const composer = root.findAll(
+      (node) =>
+        typeof node.props['onSubmit'] === 'function' &&
+        typeof node.props['onChangeText'] === 'function',
+    )[0];
+    if (!composer) {
+      throw new Error('Missing composer submit handler');
+    }
+    await act(async () => {
+      (composer.props['onSubmit'] as () => void)();
+      await flush();
+    });
   }
 
   function agUi(event: Record<string, unknown>, target = threadId, runId = 'run-final') {
@@ -5845,6 +5868,9 @@ function MainRouteShell() {
       expect(
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).not.toHaveLength(0);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
       expect(input(harness.root).props['placeholder']).toBe('Reply...');
 
       latest = {
@@ -5869,6 +5895,9 @@ function MainRouteShell() {
       expect(
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).not.toHaveLength(0);
       expect(input(harness.root).props['placeholder']).toBe('Reply...');
 
       const callsAfterFirstSettledPoll = getChat.mock.calls.length;

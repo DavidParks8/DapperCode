@@ -1,12 +1,17 @@
-import { Platform } from 'react-native';
+import { KeyboardAvoidingView, Platform } from 'react-native';
 import { Provider, createStore } from 'jotai';
 import { createRef } from 'react';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance } from 'react-test-renderer';
 
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessagesState';
-import { topChromeHeightAtom } from '../state/composer';
+import { keyboardInsetAtom, keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { liveAssistantByThreadAtom } from '../state/turn';
 import { MainScreenTranscriptAndSheets } from './TranscriptAndSheets';
+
+type Queryable = ReactTestInstance & {
+  type: unknown;
+  findAll(predicate: (node: Queryable) => boolean): Queryable[];
+};
 
 const mockTranscriptProps: Array<Record<string, unknown>> = [];
 const mockComposeProps: Array<Record<string, unknown>> = [];
@@ -22,7 +27,7 @@ jest.mock('../styles/useStyles', () => ({
   useMainScreenStyles: () => ({
     styles: {
       bodyContainer: {},
-      keyboardAvoiding: {},
+      bodyShell: {},
     },
   }),
 }));
@@ -161,6 +166,38 @@ describe('MainScreenTranscriptAndSheets', () => {
 
     expect(renderComposer).toHaveBeenCalledWith(true);
     expect(mockTranscriptProps.at(-1)?.['bottomInset']).toBe(88);
+  });
+
+  it('never stacks keyboard avoidance on top of the measured composer inset', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const store = createStore();
+    store.set(keyboardVisibleAtom, true);
+    store.set(keyboardInsetAtom, 336);
+    const renderComposer = jest.fn(() => null);
+    // The composer overlay already floats on the keyboard inset and `composerReservedInset` folds
+    // that same inset into the transcript, so a KeyboardAvoidingView here would shrink the shell by
+    // a second keyboard height and shove short transcripts off screen.
+    const context = createContext({
+      composerReservedInset: 432,
+      renderComposer,
+      shouldShowComposer: true,
+    });
+    let tree: ReturnType<typeof renderer.create> | undefined;
+
+    act(() => {
+      tree = renderer.create(
+        <Provider store={store}>
+          <MainScreenTranscriptAndSheets context={context as never} />
+        </Provider>,
+      );
+    });
+
+    const keyboardAvoiders = (tree?.root as Queryable | undefined)?.findAll(
+      (node) => node.type === KeyboardAvoidingView,
+    );
+    expect(keyboardAvoiders).toHaveLength(0);
+    expect(mockTranscriptProps.at(-1)?.['bottomInset']).toBe(432);
+    act(() => tree?.unmount());
   });
 
   it('routes the live status into the transcript instead of the composer overlay', () => {
