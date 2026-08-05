@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useGlobalSearchParams, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type {
@@ -24,6 +24,7 @@ import { activeBridgeProfileAtom, bridgeTokenAtom, bridgeUrlAtom } from '@shell/
 import { useBridgeApi, useBridgeWs } from '@shell/state/bridge/hooks';
 import {
   mainOpeningChatIdAtom,
+  newChatRoutePendingAtom,
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
   selectedChatIdAtom,
@@ -76,8 +77,10 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
   const drawerCommands = useAtomValue(drawerCommandsAtom);
   const pendingOpenChatId = useAtomValue(pendingMainChatIdAtom);
   const selectedChatId = useAtomValue(selectedChatIdAtom);
+  const newChatRoutePending = useAtomValue(newChatRoutePendingAtom);
   const setPendingChatId = useSetAtom(pendingMainChatIdAtom);
   const setPendingChatSnapshot = useSetAtom(pendingMainChatSnapshotAtom);
+  const setNewChatRoutePending = useSetAtom(newChatRoutePendingAtom);
 
   const onOpenDrawer = drawerCommands?.toggleNavigation;
 
@@ -97,6 +100,17 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
 
   const routeChatId =
     routeParams.chatId && routeParams.chatId !== 'new' ? routeParams.chatId : null;
+  const resolvedPendingOpenChatId = newChatRoutePending
+    ? null
+    : routeChatId && routeChatId !== selectedChatId
+      ? routeChatId
+      : pendingOpenChatId;
+
+  useEffect(() => {
+    if (routeParams.chatId === 'new' && newChatRoutePending) {
+      setNewChatRoutePending(false);
+    }
+  }, [newChatRoutePending, routeParams.chatId, setNewChatRoutePending]);
 
   return {
     store: useStore(),
@@ -118,8 +132,7 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
     onLastUsedThreadSettingsChange: useSetAtom(rememberThreadSettingsAtom),
     onChatContextChange: useSetAtom(chatContextChangedAtom),
     onChatOpeningStateChange: useSetAtom(mainOpeningChatIdAtom),
-    pendingOpenChatId:
-      routeChatId && routeChatId !== selectedChatId ? routeChatId : pendingOpenChatId,
+    pendingOpenChatId: resolvedPendingOpenChatId,
     pendingOpenChatSnapshot: useAtomValue(pendingMainChatSnapshotAtom),
     onPendingOpenChatHandled,
     agentDetailThreadId: threadId ?? null,

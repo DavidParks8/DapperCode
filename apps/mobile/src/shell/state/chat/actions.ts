@@ -7,6 +7,7 @@ import {
   chatSnapshotCacheAtom,
   gitChatAtom,
   mainOpeningChatIdAtom,
+  newChatRoutePendingAtom,
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
   selectedChatIdAtom,
@@ -19,11 +20,13 @@ export const resetChatSessionStateAtom = atom(null, (get, set): void => {
   set(mainOpeningChatIdAtom, null);
   set(pendingMainChatIdAtom, null);
   set(pendingMainChatSnapshotAtom, null);
+  set(newChatRoutePendingAtom, false);
   set(chatSnapshotCacheAtom, null);
 });
 
 export const cancelChatTransitionAtom = atom(null, (_get, set): void => {
   set(mainOpeningChatIdAtom, null);
+  set(newChatRoutePendingAtom, false);
 });
 
 export const openChatWithTransitionAtom = atom(
@@ -34,6 +37,7 @@ export const openChatWithTransitionAtom = atom(
       snapshot && snapshot.id === id ? snapshot : (api?.peekChatShell(id) ?? null);
     const hasHydratedSnapshot = Boolean(nextSnapshot && nextSnapshot.messages.length > 0);
 
+    set(newChatRoutePendingAtom, false);
     set(mainOpeningChatIdAtom, hasHydratedSnapshot ? null : id);
 
     set(selectedChatIdAtom, id);
@@ -48,6 +52,7 @@ export const openChatWithTransitionAtom = atom(
 );
 
 export const applyRestoredChatSnapshotAtom = atom(null, (get, set, snapshot: Chat | null): void => {
+  set(newChatRoutePendingAtom, false);
   set(selectedChatIdAtom, snapshot?.id ?? null);
   set(activeChatAtom, snapshot);
   set(pendingMainChatIdAtom, snapshot?.id ?? null);
