@@ -146,13 +146,7 @@ function main(): void {
     let count = 0;
 
     for (const row of rows) {
-      const key = [
-        row.left,
-        row.top,
-        row.width,
-        row.height,
-        row.label,
-      ].join(':');
+      const key = [row.left, row.top, row.width, row.height, row.label].join(':');
       if (seen.has(key)) {
         continue;
       }

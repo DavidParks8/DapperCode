@@ -29,14 +29,28 @@ pub(super) fn resolve(manifest: &ResolvedAgentManifest) -> Option<Arc<dyn Harnes
 }
 
 fn is_verified_opencode_acp(manifest: &ResolvedAgentManifest) -> bool {
-    let executable = manifest
-        .executable
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
     manifest.agent_id == "opencode"
         && manifest.argv == ["acp"]
-        && matches!(executable, "opencode" | "opencode.exe")
+        && is_opencode_executable(&manifest.executable)
+}
+
+fn is_opencode_executable(executable: &Path) -> bool {
+    if matches!(
+        executable.file_name().and_then(|name| name.to_str()),
+        Some("opencode" | "opencode.exe")
+    ) {
+        return true;
+    }
+
+    executable
+        .ancestors()
+        .skip(1)
+        .take(4)
+        .filter_map(|parent| parent.file_name()?.to_str())
+        .any(|name| {
+            let name = name.to_ascii_lowercase();
+            name == "opencode" || name == "opencode-ai" || name.starts_with("opencode-")
+        })
 }
 
 struct OpenCodeHarnessAdapter;
@@ -577,8 +591,18 @@ mod tests {
             "opencode",
             &["acp"]
         )));
+        assert!(is_verified_opencode_acp(&manifest(
+            "/opt/homebrew/lib/node_modules/opencode-ai/dist/cli.js",
+            "opencode",
+            &["acp"]
+        )));
         assert!(!is_verified_opencode_acp(&manifest(
             "/usr/local/bin/other",
+            "opencode",
+            &["acp"]
+        )));
+        assert!(!is_verified_opencode_acp(&manifest(
+            "/opt/homebrew/lib/node_modules/unrelated-package/dist/cli.js",
             "opencode",
             &["acp"]
         )));

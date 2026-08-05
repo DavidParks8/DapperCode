@@ -3396,6 +3396,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manager_projects_fork_support_for_a_canonicalized_opencode_launcher() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let connection = connection_with_capabilities(
+            "opencode",
+            AgentCapabilities::new().load_session(true),
+            observed_tx,
+        )
+        .await;
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable =
+            PathBuf::from("/opt/homebrew/lib/node_modules/opencode-ai/dist/cli.js");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager = AgentManager::from_start_results(
+            "opencode".to_string(),
+            vec![(opencode, Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        manager
+            .agents
+            .get_mut("opencode")
+            .expect("OpenCode runtime")
+            .http_base = Some("http://127.0.0.1:4096".to_string());
+
+        let capabilities = manager
+            .list_agents()
+            .into_iter()
+            .find(|agent| agent.agent_id == "opencode")
+            .and_then(|agent| agent.capabilities)
+            .expect("OpenCode capabilities");
+        assert!(capabilities.session_fork);
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn manager_rejects_native_forks_that_reuse_source_or_existing_ids() {
         let connection = native_extension_connection("native-agent").await;
         let session = connection
