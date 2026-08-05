@@ -108,7 +108,7 @@ function SessionMetaChip(props: {
         {...decorativeAccessibilityProps}
         name={iconName}
         size={12}
-        color={iconColor ?? theme.colors.textMuted}
+        color={iconColor ?? theme.colors.textPrimary}
       />
       <Text style={[styles.modelChipText, textStyle]} numberOfLines={1}>
         {displayText}
@@ -212,7 +212,7 @@ function SessionMetaRow(props: {
             label="Fast mode"
             displayText="Fast"
             iconName={fastModeEnabled ? 'flash' : 'flash-outline'}
-            iconColor={fastModeEnabled ? theme.colors.userBubbleOnSurface : theme.colors.textMuted}
+            iconColor={theme.colors.textPrimary}
             textStyle={fastModeEnabled && styles.fastChipTextEnabled}
             accessibilityRole="switch"
             accessibilityState={{ checked: fastModeEnabled, disabled: fastModeControlDisabled }}

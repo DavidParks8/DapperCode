@@ -18,7 +18,13 @@ import {
 } from '@shared/testing/glassEffectMock';
 import { ChatInput } from './ChatInput';
 
-jest.mock('@expo/vector-icons', () => ({ Ionicons: ({ name }: { name: string }) => name }));
+jest.mock('@expo/vector-icons', () => {
+  const mockReact = jest.requireActual('react');
+  return {
+    Ionicons: ({ name, color }: { name: string; color: string }) =>
+      mockReact.createElement('ionicon', { name, color }),
+  };
+});
 
 jest.mock('expo-haptics', () => ({
   __esModule: true,
@@ -34,6 +40,7 @@ import * as Haptics from 'expo-haptics';
 const mockHaptics = Haptics as unknown as { impactAsync: jest.Mock };
 
 type Queryable = ReactTestInstance & {
+  type: unknown;
   children: unknown[];
   parent: Queryable | null;
   props: Record<string, unknown> & {
@@ -210,11 +217,15 @@ describe('ChatInput behavior', () => {
     );
     expect(inputSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
     expect(inputSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
-    expect(submitSurface?.glassEffectStyle).toBe(theme.glass.prominent.glassEffectStyle);
-    expect(submitSurface?.tintColor).toBe(theme.glass.prominent.tintColor);
+    expect(submitSurface?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(submitSurface?.tintColor).toBe(theme.glass.capsule.tintColor);
     const root = (tree as ReactTestRenderer).root as Queryable;
     const addButton = byLabel(root, 'Add attachment');
     const sendButton = byLabel(root, 'Send message');
+    const sendGlyph = sendButton.findAll(
+      (node) => node.type === 'ionicon' && node.props['name'] === 'arrow-up',
+    )[0];
+    expect(sendGlyph?.props['color']).toBe(theme.colors.textPrimary);
     const inputGlass = root.findAll(
       (node) => node.props['testID'] === 'composer-input-glass-surface',
     )[0];
@@ -394,7 +405,9 @@ describe('ChatInput behavior', () => {
 
     // Not stopping yet: only the square glyph renders, no spinner underneath it.
     const stopButton = byLabel(root, 'Stop agent');
-    expect(stopButton.findAll((node) => node.props['name'] === 'square')).toHaveLength(1);
+    expect(
+      stopButton.findAll((node) => node.type === 'ionicon' && node.props['name'] === 'square'),
+    ).toHaveLength(1);
     expect(stopButton.findAllByType(ActivityIndicator)).toHaveLength(0);
 
     act(() =>
@@ -415,7 +428,9 @@ describe('ChatInput behavior', () => {
     // Stopping: only the spinner renders, the square glyph is gone (regression guard for the
     // overlap bug where both were shown simultaneously).
     const stoppingButton = byLabel(root, 'Stopping agent');
-    expect(stoppingButton.findAll((node) => node.props['name'] === 'square')).toHaveLength(0);
+    expect(
+      stoppingButton.findAll((node) => node.type === 'ionicon' && node.props['name'] === 'square'),
+    ).toHaveLength(0);
     expect(stoppingButton.findAllByType(ActivityIndicator)).toHaveLength(1);
     act(() => stoppingButton.props.onPress());
     expect(base.onStop).not.toHaveBeenCalled();

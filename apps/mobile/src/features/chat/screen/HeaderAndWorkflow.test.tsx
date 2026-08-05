@@ -19,7 +19,13 @@ import type {
 } from './panelCollapseCoordinator';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
-jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('@expo/vector-icons', () => {
+  const mockReact = jest.requireActual('react');
+  return {
+    Ionicons: ({ name, color }: { name: string; color: string }) =>
+      mockReact.createElement('ionicon', { name, color }),
+  };
+});
 
 jest.mock('expo-haptics', () => ({
   __esModule: true,
@@ -213,6 +219,21 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
 
     expect(mockHaptics.selectionAsync).toHaveBeenCalledTimes(1);
     expect(context.toggleFastMode).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('uses primary text color for the top session selector controls', () => {
+    const context = baseContext({ fastModeEnabled: true });
+    const tree = render(context);
+    const root = queryRoot(tree);
+    const fastChip = findPressableByLabelPrefix(root, 'Fast mode');
+    const fastText = fastChip.findAll((node) => node.children.includes('Fast'))[0];
+    const fastIcon = fastChip.findAll((node) => node.type === 'ionicon')[0];
+
+    expect(StyleSheet.flatten(fastText?.props['style'] as never)).toMatchObject({
+      color: theme.colors.textPrimary,
+    });
+    expect(fastIcon?.props['color']).toBe(theme.colors.textPrimary);
     act(() => tree.unmount());
   });
 

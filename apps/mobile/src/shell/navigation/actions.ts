@@ -9,6 +9,7 @@ import {
   activeChatAtom,
   gitChatAtom,
   mainOpeningChatIdAtom,
+  newChatRoutePendingAtom,
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
   selectedChatIdAtom,
@@ -71,6 +72,7 @@ export const selectChatAtom = atom(null, (get, set, id: string): void => {
 export const startNewChatAtom = atom(null, (get, set): void => {
   const profileId = activeProfileId(get);
   set(cancelChatTransitionAtom);
+  set(newChatRoutePendingAtom, Boolean(profileId));
   set(pendingMainChatIdAtom, null);
   set(pendingMainChatSnapshotAtom, null);
   set(selectedChatIdAtom, null);

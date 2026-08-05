@@ -33,7 +33,13 @@ import { GitCheckoutScreen } from '../../workspace/checkout/Screen';
 import { WorkspacePickerScreen } from '../../workspace/picker/Screen';
 import { mainScreenCommandsAtom, type MainScreenCommands } from '@shell/state/commands';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
-import { gitChatAtom, mainOpeningChatIdAtom, pendingMainChatIdAtom } from '@shell/state/chat/atoms';
+import {
+  gitChatAtom,
+  mainOpeningChatIdAtom,
+  newChatRoutePendingAtom,
+  pendingMainChatIdAtom,
+} from '@shell/state/chat/atoms';
+import { startNewChatAtom } from '@shell/navigation/actions';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { selectedChatAtom } from '../state/session';
@@ -528,6 +534,41 @@ function MainRouteShell() {
       expect(
         root.findAllByType(TextInput).some((node) => node.props['placeholder'] === 'Reply...'),
       ).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('shows the new chat screen while navigation away from the previous route settles', async () => {
+      router.navigate(routes.chat('profile-1', chat.id));
+      const api = createApi({ cachedChat: chat });
+      const { tree, store } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      expect(hasText(root, 'Real thread')).toBe(true);
+
+      (router.navigate as jest.Mock).mockImplementationOnce(() => undefined);
+      await act(async () => {
+        store.set(startNewChatAtom);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(router.navigate).toHaveBeenLastCalledWith(routes.newChat('profile-1'));
+      expect(store.get(newChatRoutePendingAtom)).toBe(true);
+      expect(hasText(root, 'Real thread')).toBe(false);
+      expect(messageInput(root).props['placeholder']).toBe('Message Codex...');
+
+      await act(async () => {
+        router.replace(routes.newChat('profile-1'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(store.get(newChatRoutePendingAtom)).toBe(false);
+      expect(hasText(root, 'Real thread')).toBe(false);
+      expect(messageInput(root).props['placeholder']).toBe('Message Codex...');
       act(() => tree.unmount());
     });
 

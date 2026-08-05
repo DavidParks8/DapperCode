@@ -17,7 +17,8 @@ jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
   const { Text: MockText } = jest.requireActual('react-native');
   return {
-    Ionicons: ({ name }: { name: string }) => mockReact.createElement(MockText, null, name),
+    Ionicons: ({ name, color }: { name: string; color: string }) =>
+      mockReact.createElement(MockText, { color }, name),
   };
 });
 
@@ -376,6 +377,28 @@ describe('ChatHeader', () => {
     // The old chat-options chevron menu is gone; renaming is the only header title action.
     expect(textContent(root)).not.toContain('chevron-down');
     expect(queryHost(root, `${LONG_TITLE}, chat options`)).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('uses primary text color for every header toolbar icon', () => {
+    const tree = render(
+      <ChatHeader
+        onOpenDrawer={jest.fn()}
+        title="Session"
+        onRenameTitle={jest.fn()}
+        rightIconName="git-branch-outline"
+        onRightActionPress={jest.fn()}
+      />,
+    );
+    const root = queryRoot(tree);
+
+    for (const label of ['Open navigation drawer', 'Edit session title', 'Open Git']) {
+      const icon = findToolbarButton(root, label).findAll(
+        (node) => node.props['color'] !== undefined,
+      )[0];
+      expect(icon?.props['color']).toBe(theme.colors.textPrimary);
+    }
+
     act(() => tree.unmount());
   });
 

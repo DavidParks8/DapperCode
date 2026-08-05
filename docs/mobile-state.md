@@ -44,6 +44,8 @@ Expo Router is the only source of truth for navigation. Every screen has a profi
 `/profiles/[profileId]`; chats and sub-agent transcripts use dynamic path parameters. Use the typed
 builders in `shell/navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
 use `router.push` for hierarchical drill-in screens, and use `router.back` for one-level dismissal.
+The one-shot new-chat handoff guard only prevents a superseded chat URL from rehydrating while `/new`
+settles; it clears as soon as that route arrives and never determines the active route itself.
 
 Do not put route names, path parameters, current-screen selectors, back-stack state, or drawer
 visibility in Jotai. Ephemeral data needed by a destination may remain in atoms when it is not safe

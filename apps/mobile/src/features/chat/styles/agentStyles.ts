@@ -36,9 +36,9 @@ export const createMainScreenAgentStyles = (theme: AppTheme) => {
     sessionMetaChipDisabled: { opacity: 0.5 },
     modelChipText: {
       ...theme.typography.metadata,
-      color: theme.colors.textSecondary,
+      color: theme.colors.textPrimary,
       fontWeight: '600',
     },
-    fastChipTextEnabled: { color: theme.colors.userBubbleOnSurface },
+    fastChipTextEnabled: { color: theme.colors.textPrimary },
   } as const;
 };
