@@ -74,7 +74,7 @@ export function ChatHeader({
                   {...decorativeAccessibilityProps}
                   name="pencil"
                   size={18}
-                  color={colors.textMuted}
+                  color={colors.textPrimary}
                 />
               </CircularToolbarButton>
             ) : null}
@@ -85,7 +85,7 @@ export function ChatHeader({
                     {...decorativeAccessibilityProps}
                     name={rightIconName}
                     size={18}
-                    color={colors.textMuted}
+                    color={colors.textPrimary}
                   />
                 </CircularToolbarButton>
               ) : (
@@ -94,7 +94,7 @@ export function ChatHeader({
                     {...decorativeAccessibilityProps}
                     name={rightIconName}
                     size={18}
-                    color={colors.textMuted}
+                    color={colors.textPrimary}
                   />
                 </View>
               )

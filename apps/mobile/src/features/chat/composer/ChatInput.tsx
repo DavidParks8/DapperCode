@@ -118,13 +118,11 @@ interface ChatInputActionButtonProps {
   canStop: boolean;
   isLoading: boolean;
   isStopping: boolean;
-  submitUsesPrimaryChrome: boolean;
   hitSlop: ReturnType<typeof computeHitSlop>;
   pressRetentionOffset: number;
   styles: ReturnType<typeof createChatInputStyles>;
   textMutedColor: string;
   textPrimaryColor: string;
-  prominentTextColor: string;
   label: string;
   hint: string;
 }
@@ -137,7 +135,6 @@ interface ChatInputActionState {
   kind: 'send' | 'stop';
   slotTestID: string;
   surfaceTestID: string;
-  usesPrimaryChrome: boolean;
 }
 
 function resolveChatInputActionState({
@@ -147,10 +144,9 @@ function resolveChatInputActionState({
   isStopping,
   label,
   hint,
-  submitUsesPrimaryChrome,
 }: Pick<
   ChatInputActionButtonProps,
-  'canSend' | 'canStop' | 'isLoading' | 'isStopping' | 'label' | 'hint' | 'submitUsesPrimaryChrome'
+  'canSend' | 'canStop' | 'isLoading' | 'isStopping' | 'label' | 'hint'
 >): ChatInputActionState {
   if (canStop) {
     return {
@@ -161,7 +157,6 @@ function resolveChatInputActionState({
       kind: 'stop',
       slotTestID: 'composer-stop-slot',
       surfaceTestID: 'composer-stop-glass-surface',
-      usesPrimaryChrome: false,
     };
   }
 
@@ -174,30 +169,22 @@ function resolveChatInputActionState({
     kind: 'send',
     slotTestID: 'composer-submit-slot',
     surfaceTestID: 'composer-submit-glass-surface',
-    usesPrimaryChrome: submitUsesPrimaryChrome,
   };
 }
 
 function ChatInputActionGlyph({
   action,
-  prominentTextColor,
   styles,
   textMutedColor,
   textPrimaryColor,
 }: {
   action: ChatInputActionState;
-  prominentTextColor: string;
   styles: ReturnType<typeof createChatInputStyles>;
   textMutedColor: string;
   textPrimaryColor: string;
 }) {
   if (action.busy) {
-    return (
-      <ActivityIndicator
-        size="small"
-        color={action.usesPrimaryChrome ? prominentTextColor : textMutedColor}
-      />
-    );
+    return <ActivityIndicator size="small" color={textMutedColor} />;
   }
   if (action.kind === 'stop') {
     return (
@@ -216,7 +203,7 @@ function ChatInputActionGlyph({
       {...decorativeAccessibilityProps}
       name="arrow-up"
       size={16}
-      color={action.usesPrimaryChrome ? prominentTextColor : textPrimaryColor}
+      color={textPrimaryColor}
     />
   );
 }
@@ -228,13 +215,11 @@ function ChatInputActionButton({
   canStop,
   isLoading,
   isStopping,
-  submitUsesPrimaryChrome,
   hitSlop,
   pressRetentionOffset,
   styles,
   textMutedColor,
   textPrimaryColor,
-  prominentTextColor,
   label,
   hint,
 }: ChatInputActionButtonProps) {
@@ -245,7 +230,6 @@ function ChatInputActionButton({
     isStopping,
     label,
     hint,
-    submitUsesPrimaryChrome,
   });
   return (
     <View collapsable={false} style={styles.actionButtonFrame} testID={action.slotTestID}>
@@ -276,16 +260,13 @@ function ChatInputActionButton({
       >
         <GlassSurface
           pointerEvents="none"
-          role={action.usesPrimaryChrome ? 'prominent' : 'capsule'}
+          role="capsule"
           style={styles.actionButtonGlass}
           testID={action.surfaceTestID}
         >
-          {!action.usesPrimaryChrome ? (
-            <View pointerEvents="none" style={styles.actionButtonOutline} />
-          ) : null}
+          <View pointerEvents="none" style={styles.actionButtonOutline} />
           <ChatInputActionGlyph
             action={action}
-            prominentTextColor={prominentTextColor}
             styles={styles}
             textMutedColor={textMutedColor}
             textPrimaryColor={textPrimaryColor}
@@ -403,7 +384,6 @@ export function ChatInput(props: ChatInputProps) {
   const canSend = value.trim().length > 0 && !submitDisabled;
   const canStop = Boolean(showStopButton && onStop);
   const inputScrollEnabled = inputHeight >= INPUT_TEXT_MAX_HEIGHT;
-  const submitUsesPrimaryChrome = canSend;
   const composerBottomSpacing = resolveComposerBottomSpacing(
     Platform.OS,
     safeAreaBottomInset,
@@ -538,13 +518,11 @@ export function ChatInput(props: ChatInputProps) {
             canStop={canStop}
             isLoading={isLoading}
             isStopping={isStopping}
-            submitUsesPrimaryChrome={submitUsesPrimaryChrome}
             hitSlop={actionButtonHitSlop}
             pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
             styles={styles}
             textMutedColor={colors.textMuted}
             textPrimaryColor={colors.textPrimary}
-            prominentTextColor={colors.userBubbleText}
             label={submitLabel}
             hint={submitHint}
           />
