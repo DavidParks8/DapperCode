@@ -1,13 +1,17 @@
 import type { Page } from '@playwright/test';
 
-import {
-  TABLET_LAYOUT_MIN_WIDTH,
-  TABLET_SIDEBAR_WIDTH,
-} from '../../apps/mobile/src/shell/boot/appConstants.ts';
 import { readRect, readViewportRect, type Rect } from './geometry.ts';
 import { selectors } from '../fixtures/selectors.ts';
 
-export { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH };
+/**
+ * Product-level layout expectations, deliberately independent from the implementation constants.
+ *
+ * Importing the app's values here made the assertions adapt to a breakpoint regression. It also
+ * crossed the mobile package's CommonJS boundary, which Node 22 cannot load as named ESM exports.
+ * The boundary test below these helpers proves the app still implements these intended values.
+ */
+export const TABLET_LAYOUT_MIN_WIDTH = 700;
+export const TABLET_SIDEBAR_WIDTH = 312;
 
 /**
  * The app runs two different shells, and most layout expectations only make sense relative to one
@@ -16,8 +20,8 @@ export { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH };
  * - `overlay` (narrow): the drawer is translated off-screen and slides over the chat.
  * - `pinned` (wide): the drawer is permanently docked and the chat occupies the remaining width.
  *
- * The breakpoint is imported from the app rather than duplicated, so changing the app's contract
- * moves these tests with it instead of silently invalidating them.
+ * The mode is measured from the rendered pane rather than inferred from the expected breakpoint.
+ * That distinction is what lets the breakpoint test detect an implementation regression.
  */
 export type ShellMode = 'overlay' | 'pinned';
 
@@ -31,12 +35,12 @@ export interface Shell {
 
 export async function readShell(page: Page): Promise<Shell> {
   const viewport = await readViewportRect(page);
-  const mode: ShellMode = viewport.width >= TABLET_LAYOUT_MIN_WIDTH ? 'pinned' : 'overlay';
   const [drawer, chrome, composer] = await Promise.all([
     readRect(selectors.drawer(page)),
     readRect(selectors.topChrome(page)),
     readRect(selectors.composer(page)),
   ]);
+  const mode: ShellMode = chrome.left > viewport.left + 1 ? 'pinned' : 'overlay';
 
   const pane: Rect = {
     x: chrome.left,
@@ -54,18 +58,11 @@ export async function readShell(page: Page): Promise<Shell> {
   return { mode, viewport, drawer, pane };
 }
 
-export function isPinnedShell(viewport: Rect): boolean {
-  return viewport.width >= TABLET_LAYOUT_MIN_WIDTH;
-}
-
 /**
  * Asserts the shell the viewport is *intended* to produce.
  *
- * `readShell` derives its mode from the app's own breakpoint constant, which makes it track
- * refactors — but it also means a regression that moved the breakpoint would simply relabel the
- * shell, and any test that skipped on `mode !== 'pinned'` would quietly stop running. Naming the
- * expected mode here keeps that failure loud: the breakpoint is a product decision, so a test has
- * to state it independently rather than read it back from the code under test.
+ * `readShell` measures the rendered pane, while the caller supplies the expected mode. A regression
+ * that moves the breakpoint therefore fails instead of simply relabelling the shell.
  */
 export async function expectShellMode(page: Page, expected: ShellMode): Promise<Shell> {
   const shell = await readShell(page);

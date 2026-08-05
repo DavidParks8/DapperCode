@@ -14,8 +14,8 @@ import { readRect } from '../layout/geometry.ts';
 
 /**
  * A streaming turn is when the chat layout is most likely to break: text arrives in deltas, the
- * transcript grows, and the composer gains a stop control. These specs assert that the furniture
- * around the transcript holds still while its contents change.
+ * transcript grows, and the composer action changes from send to stop. These specs assert that the
+ * furniture around the transcript holds still while its contents change.
  */
 test.describe('streaming layout', () => {
   test('the composer stays anchored for the whole of a streaming turn', async ({ createApp }) => {
@@ -40,7 +40,7 @@ test.describe('streaming layout', () => {
     await expectNoOverlap(selectors.transcript(app.page), composer);
   });
 
-  test('the stop control appears beside send without moving it', async ({ createApp }) => {
+  test('the stop control replaces send without moving its slot', async ({ createApp }) => {
     const app = await createApp({ chatId: 'thread-layout' });
     const controls = selectors.composerControls(app.page);
     const submit = selectors.composerSubmitSlot(app.page);
@@ -62,30 +62,29 @@ test.describe('streaming layout', () => {
       whileRunning: async () => {
         const stop = selectors.composerStopSlot(app.page);
         await expectVisible(stop);
+        await expect(submit).toHaveCount(0);
 
-        const [controlsRunning, submitRunning, inputRunning, stopRect] = await Promise.all([
+        const [controlsRunning, inputRunning, stopRect] = await Promise.all([
           readRect(controls),
-          readRect(submit),
           readRect(input),
           readRect(stop),
         ]);
 
-        // The control group is a fixed width, so the stop button has to come out of the input's
-        // width rather than pushing send past the trailing inset or growing the composer.
+        // Send and stop are two states of one action slot. Switching state must not resize the
+        // input, move the action, or grow the composer.
         expect(Math.round(controlsRunning.width)).toBe(Math.round(controlsIdle.width));
         expect(Math.round(controlsRunning.height)).toBe(Math.round(controlsIdle.height));
-        expect(Math.round(submitRunning.left)).toBe(Math.round(submitIdle.left));
-        expect(Math.round(submitRunning.right)).toBe(Math.round(submitIdle.right));
         expect(Math.round(inputRunning.left)).toBe(Math.round(inputIdle.left));
+        expect(Math.round(inputRunning.width)).toBe(Math.round(inputIdle.width));
         expect(Math.round(inputRunning.height)).toBe(Math.round(inputIdle.height));
-        expect(inputRunning.width).toBeLessThan(inputIdle.width);
 
+        expect(Math.round(stopRect.left)).toBe(Math.round(submitIdle.left));
+        expect(Math.round(stopRect.right)).toBe(Math.round(submitIdle.right));
         expect(Math.round(stopRect.width)).toBe(Math.round(submitIdle.width));
         expect(Math.round(stopRect.height)).toBe(Math.round(submitIdle.height));
         await expectTouchTarget(stop);
-        await expectRowOrder([input, stop, submit]);
+        await expectRowOrder([input, stop]);
         await expectNoOverlap(input, stop);
-        await expectNoOverlap(stop, submit);
         await expectContainedWithin(stop, controls);
       },
     });
