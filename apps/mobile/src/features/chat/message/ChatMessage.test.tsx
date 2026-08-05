@@ -1448,7 +1448,11 @@ describe('ChatMessage system timeline matrices', () => {
       )[0],
       'indexed test value',
     );
-    expect(control.findAllByProps({ testID: 'subagent-latest-scroll' })).toHaveLength(0);
+    // The whole card is the press target, so the scrollable "Latest" row sits inside it. The row
+    // is a nested scroll surface rather than an overlapping sibling, so it keeps owning its own
+    // pan while the card keeps a full-size tap area that a repaint cannot make you miss.
+    expect(control.findAllByProps({ testID: 'subagent-latest-scroll' })).toHaveLength(3);
+    expect(control.props['hitSlop']).toBeUndefined();
     act(() => {
       latestScroll?.props.onLayout({ nativeEvent: { layout: { width: 120 } } });
       latestScroll?.props.onContentSizeChange(480);

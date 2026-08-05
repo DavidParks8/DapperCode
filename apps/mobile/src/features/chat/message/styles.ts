@@ -283,6 +283,11 @@ export const createStyles = (theme: AppTheme) =>
       // opens the sub-agent.
       height: SUBAGENT_CARD_HEIGHT,
     },
+    // The whole card opens the sub-agent. A footer-sized target is easy to miss on a card that
+    // repaints while the sub-agent works, so the press area spans everything except the
+    // horizontally scrollable "Latest" row, which owns its own touches.
+    subAgentCardBody: { flex: 1 },
+    subAgentCardBodyPressed: { opacity: 0.6 },
     subAgentCardError: {
       borderColor: theme.colors.statusError,
       backgroundColor: theme.colors.errorBg,
@@ -325,7 +330,6 @@ export const createStyles = (theme: AppTheme) =>
       marginTop: 4,
       height: SUBAGENT_CARD_FOOTER_HEIGHT,
     },
-    subAgentOpenHintPressed: { opacity: 0.6 },
     subAgentOpenHintText: {
       ...theme.typography.caption,
       color: theme.colors.subAgentAccent,
