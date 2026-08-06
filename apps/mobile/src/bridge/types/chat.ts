@@ -78,6 +78,7 @@ export interface ChatToolMeta {
 interface ChatMessageMetadata {
   parts?: ChatMessagePart[];
   createdAt: string;
+  completedAt?: string;
   pending?: boolean;
   toolMeta?: ChatToolMeta;
 }

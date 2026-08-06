@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
+import { isValidElement } from 'react';
 import { FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -19,7 +20,13 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
-import { ReduceMotion, ZoomIn, ZoomOut } from '@shared/testing/reanimatedMock';
+import {
+  mockSharedValues,
+  ReduceMotion,
+  resetMockSharedValues,
+  ZoomIn,
+  ZoomOut,
+} from '@shared/testing/reanimatedMock';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -277,9 +284,17 @@ describe('ChatTranscriptView conversation fork action', () => {
       index: 0,
       separators: {},
     }) as React.ReactElement<{
-      children: React.ReactElement<{ onForkConversation?: () => void; forkBusy: boolean }>[];
+      children: React.ReactNode[];
     }>;
-    const response = rendered.props.children[0];
+    const reveal = rendered.props.children[0];
+    if (
+      !isValidElement<{
+        children: React.ReactElement<{ onForkConversation?: () => void; forkBusy: boolean }>;
+      }>(reveal)
+    ) {
+      throw new Error('Expected timestamp reveal around the response');
+    }
+    const response = reveal.props.children;
     if (!response?.props.onForkConversation) {
       throw new Error('Expected fork action beside the response actions');
     }
@@ -385,6 +400,79 @@ describe('ChatTranscriptView conversation fork action', () => {
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Fork conversation from here' }),
     ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+});
+
+describe('ChatTranscriptView message timestamp reveal', () => {
+  beforeEach(() => {
+    resetMockGestures();
+    resetMockSharedValues();
+  });
+
+  it('reveals timestamps only for user messages and settled assistant responses', () => {
+    const tree = render({
+      chat: makeChat({
+        messages: [
+          {
+            id: 'user',
+            role: 'user',
+            content: 'Question',
+            createdAt: '2026-07-20T19:42:00.000Z',
+          },
+          {
+            id: 'assistant',
+            role: 'assistant',
+            content: 'Answer',
+            createdAt: '2026-07-20T19:42:01.000Z',
+            completedAt: '2026-07-20T19:42:08.000Z',
+          },
+          {
+            id: 'pending',
+            role: 'assistant',
+            content: 'Still printing',
+            createdAt: '2026-07-20T19:42:09.000Z',
+            pending: true,
+          },
+          {
+            id: 'reasoning',
+            role: 'reasoning',
+            content: 'Thinking',
+            createdAt: '2026-07-20T19:42:10.000Z',
+          },
+          {
+            id: 'tool',
+            role: 'tool',
+            toolCallId: 'tool',
+            content: 'Tool output',
+            createdAt: '2026-07-20T19:42:11.000Z',
+          },
+        ],
+      }),
+    });
+
+    expect(
+      tree.root.findAllByProps({ testID: 'message-timestamp-reveal-user' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      tree.root.findAllByProps({ testID: 'message-timestamp-reveal-assistant' }).length,
+    ).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-pending' })).toHaveLength(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-reasoning' })).toHaveLength(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-tool' })).toHaveLength(0);
+
+    const gesture = mockGestureByTestId('message-timestamp-reveal-pan');
+    expect(gesture.config['activeOffsetX']).toBe(-10);
+    expect(gesture.config['failOffsetY']).toEqual([-12, 12]);
+    act(() => gesture.onUpdate?.({ translationX: -200 }));
+    expect(mockSharedValues.some((value) => value.value === -72)).toBe(true);
+    act(() => gesture.onFinalize?.({ translationX: -200 }));
+    expect(mockSharedValues.every((value) => value.value !== -72)).toBe(true);
+
     act(() => tree.unmount());
   });
 });

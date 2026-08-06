@@ -35,6 +35,7 @@ import { createStyles } from '../styles/styles';
 import {
   buildTranscriptDisplayItems,
   forkBoundariesByActionMessageId,
+  transcriptDisplayItemKey,
   type TranscriptDisplayItem,
 } from './messages';
 import { projectTranscript } from './controllers/projectionController';
@@ -57,6 +58,7 @@ import {
   resolveResetRailActiveIndex,
 } from './viewChrome';
 import { useActivityElapsedMs } from './activityDuration';
+import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -393,6 +395,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onInteractionEnd: handleRailInteractionEnd,
     onReachStart: handleRailReachStart,
   });
+  const timestampReveal = useMessageTimestampReveal(rail.gesture);
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -434,10 +437,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const activityEvent = activity ? (
     <ActivityEvent {...activity} elapsedMs={activityElapsedMs} />
   ) : null;
-  const keyExtractor = useCallback(
-    (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
-    [],
-  );
   const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
     ({ item }) =>
       renderChatTranscriptItem({
@@ -456,6 +455,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         forkBusy:
           item.kind === 'message' && forkBoundaries.get(item.message.id) === forkingMessageId,
         onForkConversation: handleForkConversation,
+        timestampRevealTranslationX: timestampReveal.translationX,
         threadRunning,
       }),
     [
@@ -470,19 +470,20 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onOpenSubAgentThread,
       onForkConversation,
       styles,
+      timestampReveal.translationX,
       threadRunning,
     ],
   );
 
   return (
-    <GestureDetector gesture={rail.gesture}>
+    <GestureDetector gesture={timestampReveal.gesture}>
       <View style={styles.messageListShell}>
         <FlatList
           key={chat.id}
           ref={scrollRef}
           data={displayMessages}
           extraData={listExtraData}
-          keyExtractor={keyExtractor}
+          keyExtractor={transcriptDisplayItemKey}
           renderItem={renderMessageItem}
           ListHeaderComponent={activityEvent}
           ListFooterComponent={historyBoundary}

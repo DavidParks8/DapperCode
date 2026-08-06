@@ -61,7 +61,7 @@ export function textMessage(
       return { ...base, role: 'user' };
     case 'assistant':
     default:
-      return { ...base, role: 'assistant' };
+      return { ...base, role: 'assistant', pending: true };
   }
 }
 
@@ -148,7 +148,11 @@ export function appendText(
       : appendOrderedPart(existingParts, { type: 'text', text: delta });
     const content = onlyTextParts ? appendedContent : renderOrderedParts(parts);
     const message = existing
-      ? ({ ...withText(existing, content), parts } as ChatMessage)
+      ? ({
+          ...withText(existing, content),
+          parts,
+          ...(existing.role === 'assistant' ? { pending: true } : {}),
+        } as ChatMessage)
       : ({
           ...textMessage(messageId, defaultRole, content),
           parts,

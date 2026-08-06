@@ -228,6 +228,43 @@ describe('transcriptProjectionController', () => {
     ]);
   });
 
+  it('carries a live assistant completion time through matching persisted text', () => {
+    const persistedAssistant = {
+      id: 'answer',
+      role: 'assistant' as const,
+      content: 'Finished',
+      createdAt: '2026-07-20T19:42:01.000Z',
+    };
+    const projection = projectTranscript({
+      chat: {
+        ...chat,
+        parentThreadId: undefined,
+        messages: [persistedAssistant],
+      },
+      parentChat: null,
+      showToolCalls: true,
+      threadStatuses: new Map(),
+      liveMessageState: liveState(
+        [
+          {
+            ...persistedAssistant,
+            pending: false,
+            completedAt: '2026-07-20T19:42:08.000Z',
+          },
+        ],
+        { terminal: ['answer'] },
+      ),
+    });
+
+    expect(projection.messages).toEqual([
+      expect.objectContaining({
+        id: 'answer',
+        pending: false,
+        completedAt: '2026-07-20T19:42:08.000Z',
+      }),
+    ]);
+  });
+
   it('collapses optimistic, live, and persisted copies across user and reasoning rows', () => {
     const projection = projectTranscript({
       chat: {

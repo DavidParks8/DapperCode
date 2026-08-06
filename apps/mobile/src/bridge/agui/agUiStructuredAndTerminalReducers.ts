@@ -260,8 +260,14 @@ function withoutSubagentMessages(messages: ChatMessage[], toolCallId: string): C
 export function markTerminal(
   current: AgUiThreadMessageState,
   messageId: string,
+  completedAt?: string,
 ): AgUiThreadMessageState {
-  const messages = settleReasoningMessages(current.messages, new Set([messageId]));
+  const idSet = new Set([messageId]);
+  const messages = setMessageCompletionTime(
+    settleReasoningMessages(current.messages, idSet),
+    idSet,
+    completedAt,
+  );
   if (current.terminalMessageIds.includes(messageId) && messages === current.messages) {
     return current;
   }
@@ -277,6 +283,7 @@ export function markTerminal(
 export function markRunTerminal(
   current: AgUiThreadMessageState,
   runId: string,
+  completedAt?: string,
 ): AgUiThreadMessageState {
   const ids = Object.entries(current.runByMessageId)
     .filter(([, messageRunId]) => messageRunId === runId)
@@ -287,9 +294,36 @@ export function markRunTerminal(
   const idSet = new Set(ids);
   return {
     ...current,
-    messages: settleReasoningMessages(current.messages, idSet),
+    messages: setMessageCompletionTime(
+      settleReasoningMessages(current.messages, idSet),
+      idSet,
+      completedAt,
+    ),
     terminalMessageIds: Array.from(new Set([...current.terminalMessageIds, ...ids])),
   };
+}
+
+function setMessageCompletionTime(
+  messages: ChatMessage[],
+  messageIds: ReadonlySet<string>,
+  completedAt: string | undefined,
+): ChatMessage[] {
+  if (!completedAt) {
+    return messages;
+  }
+  let changed = false;
+  const nextMessages = messages.map((message) => {
+    if (
+      message.role !== 'assistant' ||
+      !messageIds.has(message.id) ||
+      (message.completedAt !== undefined && message.pending === false)
+    ) {
+      return message;
+    }
+    changed = true;
+    return { ...message, completedAt: message.completedAt ?? completedAt, pending: false };
+  });
+  return changed ? nextMessages : messages;
 }
 
 function settleReasoningMessages(

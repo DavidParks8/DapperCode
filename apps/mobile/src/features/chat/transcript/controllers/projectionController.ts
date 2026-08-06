@@ -297,13 +297,17 @@ function mergeLiveMessage(
   // the text merge's protection against shorter, potentially stale message content.
   const useLiveSubAgentLink = hasNewLiveSubAgentThreadLink(persistedMessage, liveMessage);
   const useLivePending = shouldAdoptLivePendingState(persistedMessage, liveMessage);
-  if (!useLiveContent && !useLiveSubAgentLink && !useLivePending) {
+  const useLiveCompletion =
+    liveMessage.completedAt !== undefined &&
+    liveMessage.completedAt !== persistedMessage.completedAt;
+  if (!useLiveContent && !useLiveSubAgentLink && !useLivePending && !useLiveCompletion) {
     return messages;
   }
   return replacePersistedLiveMessage(messages, persistedMessage, liveMessage, liveText, {
     useLiveContent,
     useLiveSubAgentLink,
     useLivePending,
+    useLiveCompletion,
   });
 }
 
@@ -391,10 +395,12 @@ function replacePersistedLiveMessage(
     useLiveContent,
     useLiveSubAgentLink,
     useLivePending,
+    useLiveCompletion,
   }: {
     useLiveContent: boolean;
     useLiveSubAgentLink: boolean;
     useLivePending: boolean;
+    useLiveCompletion: boolean;
   },
 ): ChatMessage[] {
   return messages.map((message) => {
@@ -415,6 +421,7 @@ function replacePersistedLiveMessage(
         },
         ...(useLiveContent ? { parts: liveMessage.parts ?? message.parts } : {}),
         ...(useLivePending ? { pending: liveMessage.pending } : {}),
+        ...(useLiveCompletion ? { completedAt: liveMessage.completedAt } : {}),
       });
     }
     return {
@@ -426,6 +433,7 @@ function replacePersistedLiveMessage(
           }
         : {}),
       ...(useLivePending ? { pending: liveMessage.pending } : {}),
+      ...(useLiveCompletion ? { completedAt: liveMessage.completedAt } : {}),
     } as ChatMessage;
   });
 }

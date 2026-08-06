@@ -32,6 +32,10 @@ export type TranscriptDisplayItem =
   | ToolTranscriptGroup
   | ToolTranscriptInvocation;
 
+export function transcriptDisplayItemKey(item: TranscriptDisplayItem): string {
+  return item.kind === 'message' ? item.renderKey : item.id;
+}
+
 /** Keeps a computer-use trace bounded so very long runs don’t dominate the transcript. */
 export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
