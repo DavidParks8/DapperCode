@@ -148,13 +148,31 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
 }
 
 describe('ChatTranscriptView activity event', () => {
-  it('renders the live status at the newest transcript edge and updates through settlement', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T12:00:05.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('advances the live duration without resetting on status copy and freezes on settlement', () => {
+    const runningChat = makeChat({
+      status: 'running',
+      statusUpdatedAt: '2026-08-05T12:00:00.000Z',
+      messages: [
+        { id: 'user', role: 'user', content: 'work', createdAt: '2026-08-05T12:00:00.000Z' },
+      ],
+    });
     const tree = render({
+      chat: runningChat,
       activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
     });
 
     let header = getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
       detail?: string;
+      elapsedMs?: number;
       title: string;
       tone: string;
     }>;
@@ -162,11 +180,35 @@ describe('ChatTranscriptView activity event', () => {
       detail: 'src/main.ts',
       title: 'Editing file',
       tone: 'running',
+      elapsedMs: 0,
     });
 
-    update(tree, { activity: { tone: 'complete', title: 'Turn completed' } });
+    act(() => jest.advanceTimersByTime(5_000));
+    update(tree, {
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Running tests' },
+    });
     header = getList(tree).props['ListHeaderComponent'] as typeof header;
-    expect(header.props).toMatchObject({ title: 'Turn completed', tone: 'complete' });
+    expect(header.props).toMatchObject({ title: 'Running tests', elapsedMs: 5_000 });
+
+    update(tree, {
+      chat: {
+        ...runningChat,
+        status: 'complete',
+        statusUpdatedAt: '2026-08-05T12:00:12.000Z',
+      },
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+    header = getList(tree).props['ListHeaderComponent'] as typeof header;
+    expect(header.props).toMatchObject({
+      title: 'Turn completed',
+      tone: 'complete',
+      elapsedMs: 5_000,
+    });
+
+    act(() => jest.advanceTimersByTime(5_000));
+    header = getList(tree).props['ListHeaderComponent'] as typeof header;
+    expect(header.props.elapsedMs).toBe(5_000);
 
     update(tree, { activity: null });
     expect(getList(tree).props['ListHeaderComponent']).toBeNull();

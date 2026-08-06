@@ -56,6 +56,7 @@ import {
   resolveRailRestingActiveIndex,
   resolveResetRailActiveIndex,
 } from './viewChrome';
+import { useActivityElapsedMs } from './activityDuration';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -425,12 +426,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     [displayMessages.length, isLargeChat],
   );
   const threadRunning = chat.status === 'running';
+  const activityElapsedMs = useActivityElapsedMs(chat, activity);
   const listExtraData = useMemo(
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
   const activityEvent = activity ? (
-    <ActivityEvent title={activity.title} detail={activity.detail} tone={activity.tone} />
+    <ActivityEvent {...activity} elapsedMs={activityElapsedMs} />
   ) : null;
   const keyExtractor = useCallback(
     (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),

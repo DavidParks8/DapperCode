@@ -19,12 +19,17 @@ type Queryable = ReactTestInstance & {
 
 const theme = createAppTheme('dark');
 
-function render(tone: ActivityTone, title: string, detail?: string | null): ReactTestRenderer {
+function render(
+  tone: ActivityTone,
+  title: string,
+  detail?: string | null,
+  elapsedMs?: number | null,
+): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
       <AppThemeProvider theme={theme}>
-        <ActivityEvent tone={tone} title={title} detail={detail} />
+        <ActivityEvent tone={tone} title={title} detail={detail} elapsedMs={elapsedMs} />
       </AppThemeProvider>,
     );
   });
@@ -85,6 +90,18 @@ describe('ActivityEvent', () => {
       );
       act(() => tree.unmount());
     }
+  });
+
+  it('shows compact elapsed metadata and exposes a spoken duration', () => {
+    const tree = render('running', 'Editing file', 'src/main.ts', 65_000);
+    expect(textContent(tree.root as Queryable)).toContain('1m 5s');
+    expect(tree.root.findByProps({ testID: 'activity-elapsed-time' })).toBeTruthy();
+    expect(
+      tree.root.findByProps({
+        accessibilityLabel: 'Editing file, src/main.ts, Elapsed 1 minute 5 seconds',
+      }),
+    ).toBeTruthy();
+    act(() => tree.unmount());
   });
 
   it('uses an opaque elevated surface for errors instead of translucent glass', () => {

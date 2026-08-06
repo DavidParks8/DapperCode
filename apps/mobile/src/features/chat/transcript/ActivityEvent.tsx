@@ -7,6 +7,10 @@ import { AtomGlyph } from '../screen/AtomGlyph';
 import { motionDuration } from '@shared/ui/motion';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import type { ActivityTone } from '../state/runtime';
+import {
+  formatActivityElapsedAccessibilityLabel,
+  formatActivityElapsedTime,
+} from './activityDuration';
 
 export type { ActivityTone } from '../state/runtime';
 
@@ -14,6 +18,7 @@ interface ActivityEventProps {
   title: string;
   detail?: string | null;
   tone: ActivityTone;
+  elapsedMs?: number | null;
 }
 
 const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
@@ -27,7 +32,7 @@ const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
  * The current activity rendered as the newest event in the transcript rather than floating above
  * the composer.
  */
-export function ActivityEvent({ title, detail, tone }: ActivityEventProps) {
+export function ActivityEvent({ title, detail, tone, elapsedMs = null }: ActivityEventProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const colorByTone: Record<ActivityTone, string> = {
@@ -43,12 +48,22 @@ export function ActivityEvent({ title, detail, tone }: ActivityEventProps) {
   const titleText = normalizedTitle || title;
   const running = tone === 'running';
   const error = tone === 'error';
+  const elapsedText = elapsedMs == null ? null : formatActivityElapsedTime(elapsedMs);
+  const accessibilityLabel = [
+    titleText,
+    hasDetail ? normalizedDetail : null,
+    elapsedMs == null ? null : `Elapsed ${formatActivityElapsedAccessibilityLabel(elapsedMs)}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <Animated.View
       entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
       style={[styles.row, error && styles.errorSurface]}
       testID={error ? 'activity-error-surface' : 'transcript-activity-event'}
+      accessible
+      accessibilityLabel={accessibilityLabel}
     >
       <View style={styles.rule} />
       <View style={styles.iconWrap}>
@@ -62,6 +77,11 @@ export function ActivityEvent({ title, detail, tone }: ActivityEventProps) {
         {titleText}
         {hasDetail ? <Text style={styles.detailText}>{` · ${normalizedDetail}`}</Text> : null}
       </Text>
+      {elapsedText ? (
+        <Text style={styles.elapsedText} testID="activity-elapsed-time">
+          {elapsedText}
+        </Text>
+      ) : null}
     </Animated.View>
   );
 }
@@ -103,5 +123,11 @@ const createStyles = (theme: AppTheme) =>
     detailText: {
       color: theme.colors.textPrimary,
       fontWeight: '400',
+    },
+    elapsedText: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+      fontVariant: ['tabular-nums'],
+      textAlign: 'right',
     },
   });

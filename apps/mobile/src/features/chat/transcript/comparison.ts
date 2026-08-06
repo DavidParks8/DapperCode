@@ -83,6 +83,10 @@ function areChatsEquivalentForTranscript(previous: Chat | null, next: Chat | nul
     previous.parentThreadId === next.parentThreadId &&
     previous.agentId === next.agentId &&
     previous.status === next.status &&
+    previous.statusUpdatedAt === next.statusUpdatedAt &&
+    previous.lastRunStartedAt === next.lastRunStartedAt &&
+    previous.lastRunFinishedAt === next.lastRunFinishedAt &&
+    previous.lastRunDurationMs === next.lastRunDurationMs &&
     previous.messages === next.messages
   );
 }
