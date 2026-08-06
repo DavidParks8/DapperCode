@@ -69,8 +69,26 @@ pub struct SnapshotMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserMessageBoundary {
+pub struct ForkBoundary {
+    /// Number of complete user turns the fork keeps.
     pub ordinal: usize,
+    pub kind: ForkBoundaryKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForkBoundaryKind {
+    /// The fork must stop before this user request.
+    BeforeRequest(ForkBoundaryMessage),
+    /// The boundary is the end of the conversation, so the fork keeps every recorded turn. The
+    /// newest request travels with it so a harness can confirm the source has not gained a turn
+    /// since the snapshot was read by identity rather than by counting messages, which a harness
+    /// is free to split differently from the canonical transcript.
+    EndOfHistory { newest_request: ForkBoundaryMessage },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkBoundaryMessage {
+    pub message_id: String,
     pub first_text: String,
     pub first_text_truncated: bool,
     pub raw_message_id_hint: Option<String>,
@@ -287,8 +305,42 @@ fn raw_opencode_message_id(message_id: &str) -> Option<&str> {
     candidate.starts_with("msg_").then_some(candidate)
 }
 
+fn message_matches_id(message: &SnapshotMessage, message_id: &str) -> bool {
+    let target_raw_id = raw_opencode_message_id(message_id);
+    let message_raw_id = raw_opencode_message_id(&message.id);
+    message.id == message_id || target_raw_id.is_some_and(|target| Some(target) == message_raw_id)
+}
+
+fn describe_user_message(message: &SnapshotMessage) -> ForkBoundaryMessage {
+    let first_text = message
+        .parts
+        .iter()
+        .find_map(|part| {
+            (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                .then(|| part.get("text").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    ForkBoundaryMessage {
+        message_id: message.id.clone(),
+        first_text,
+        first_text_truncated: message.truncated,
+        raw_message_id_hint: raw_opencode_message_id(&message.id).map(str::to_string),
+    }
+}
+
 impl SessionSnapshot {
-    pub fn complete_user_message_boundary(&self, message_id: &str) -> Option<UserMessageBoundary> {
+    /// Resolves the exclusive fork boundary named by `message_id`.
+    ///
+    /// The identifier may name either the user request that the fork must stop before, or a
+    /// response that the fork must keep along with the rest of its turn. Naming a response is what
+    /// lets the newest response in a conversation be forked: it resolves to the end of history,
+    /// where no later user request exists to act as the exclusive boundary. This is
+    /// transport-neutral - every harness receives the same "keep this many complete user turns"
+    /// instruction plus the identity of the request that bounds them.
+    pub fn complete_fork_boundary(&self, message_id: &str) -> Option<ForkBoundary> {
         if self.unavailable_count != 0
             || self
                 .history
@@ -297,44 +349,38 @@ impl SessionSnapshot {
         {
             return None;
         }
-        let mut ordinal = 0;
-        for entry in &self.history {
-            if entry.kind != SnapshotTimelineKind::Message {
-                continue;
+        let messages = self
+            .history
+            .iter()
+            .filter(|entry| entry.kind == SnapshotTimelineKind::Message)
+            .filter_map(|entry| entry.message.as_ref())
+            .collect::<Vec<_>>();
+        let target = messages
+            .iter()
+            .position(|message| message_matches_id(message, message_id))?;
+        // Complete user turns kept by the fork. The target itself is excluded when it is the
+        // request, and included when it is a response, which is exactly this count either way.
+        let ordinal = messages[..target]
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count();
+        let kind = if messages[target].role == MessageRole::User {
+            ForkBoundaryKind::BeforeRequest(describe_user_message(messages[target]))
+        } else if let Some(next_request) = messages[target + 1..]
+            .iter()
+            .find(|message| message.role == MessageRole::User)
+        {
+            ForkBoundaryKind::BeforeRequest(describe_user_message(next_request))
+        } else {
+            // A response with no request before it belongs to no turn, so there is nothing to fork.
+            let newest_request = messages[..target]
+                .iter()
+                .rfind(|message| message.role == MessageRole::User)?;
+            ForkBoundaryKind::EndOfHistory {
+                newest_request: describe_user_message(newest_request),
             }
-            let Some(message) = entry.message.as_ref() else {
-                continue;
-            };
-            if message.role != MessageRole::User {
-                continue;
-            }
-            let target_raw_id = raw_opencode_message_id(message_id);
-            let message_raw_id = raw_opencode_message_id(&message.id);
-            if message.id == message_id
-                || target_raw_id.is_some_and(|target| Some(target) == message_raw_id)
-            {
-                let first_text = message
-                    .parts
-                    .iter()
-                    .find_map(|part| {
-                        (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
-                            .then(|| part.get("text").and_then(serde_json::Value::as_str))
-                            .flatten()
-                    })
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                let raw_message_id_hint = message_raw_id.map(str::to_string);
-                return Some(UserMessageBoundary {
-                    ordinal,
-                    first_text,
-                    first_text_truncated: message.truncated,
-                    raw_message_id_hint,
-                });
-            }
-            ordinal += 1;
-        }
-        None
+        };
+        Some(ForkBoundary { ordinal, kind })
     }
 
     /// Restores the transcript recorded before a reload while keeping the session
@@ -3486,12 +3532,15 @@ mod tests {
             .iter()
             .all(|message| message.id != "message-0"));
         assert_eq!(
-            snapshot.complete_user_message_boundary("message-126"),
-            Some(UserMessageBoundary {
+            snapshot.complete_fork_boundary("message-126"),
+            Some(ForkBoundary {
                 ordinal: 63,
-                first_text: "content-126".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: None,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "message-126".to_string(),
+                    first_text: "content-126".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
             })
         );
     }
@@ -3513,12 +3562,12 @@ mod tests {
         let mut unavailable = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         unavailable.apply(&message("user", MessageRole::User));
         unavailable.unavailable_count = 1;
-        assert!(unavailable.complete_user_message_boundary("user").is_none());
+        assert!(unavailable.complete_fork_boundary("user").is_none());
 
         let mut shifted = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         shifted.apply(&message("user", MessageRole::User));
         shifted.history.front_mut().expect("history entry").sequence = 1;
-        assert!(shifted.complete_user_message_boundary("user").is_none());
+        assert!(shifted.complete_fork_boundary("user").is_none());
 
         let mut mixed = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         mixed.apply(&tool("tool", None, ToolCallStatus::Completed));
@@ -3531,12 +3580,100 @@ mod tests {
             .expect("agent history")
             .message = None;
         assert_eq!(
-            mixed.complete_user_message_boundary("user-message"),
-            Some(UserMessageBoundary {
+            mixed.complete_fork_boundary("user-message"),
+            Some(ForkBoundary {
                 ordinal: 0,
-                first_text: "user-message".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: None,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-message".to_string(),
+                    first_text: "user-message".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        assert!(mixed.complete_fork_boundary("missing-message").is_none());
+    }
+
+    #[test]
+    fn fork_boundary_named_by_a_response_keeps_that_turn() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("user-1", MessageRole::User));
+        snapshot.apply(&message("agent-1", MessageRole::Agent));
+        snapshot.apply(&message("user-2", MessageRole::User));
+        snapshot.apply(&message("agent-2", MessageRole::Agent));
+
+        // An earlier response resolves to the request that follows it, which is the same boundary
+        // the older "name the next request" clients send.
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-1"),
+            Some(ForkBoundary {
+                ordinal: 1,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-2".to_string(),
+                    first_text: "user-2".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        // The newest response has no later request, so the boundary is the end of the conversation
+        // and every recorded turn is kept.
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-2"),
+            Some(ForkBoundary {
+                ordinal: 2,
+                kind: ForkBoundaryKind::EndOfHistory {
+                    newest_request: ForkBoundaryMessage {
+                        message_id: "user-2".to_string(),
+                        first_text: "user-2".to_string(),
+                        first_text_truncated: false,
+                        raw_message_id_hint: None,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn fork_boundary_rejects_a_response_that_precedes_every_request() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("agent-greeting", MessageRole::Agent));
+        snapshot.apply(&message("user-1", MessageRole::User));
+
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-greeting"),
+            Some(ForkBoundary {
+                ordinal: 0,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-1".to_string(),
+                    first_text: "user-1".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
             })
         );
     }
@@ -3559,12 +3696,15 @@ mod tests {
         }
 
         assert_eq!(
-            snapshot.complete_user_message_boundary("thread::item::msg_boundary"),
-            Some(UserMessageBoundary {
+            snapshot.complete_fork_boundary("thread::item::msg_boundary"),
+            Some(ForkBoundary {
                 ordinal: 1,
-                first_text: "second".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: Some("msg_boundary".to_string()),
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "msg_boundary".to_string(),
+                    first_text: "second".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: Some("msg_boundary".to_string()),
+                }),
             })
         );
     }

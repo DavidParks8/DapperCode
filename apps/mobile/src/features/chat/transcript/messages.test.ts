@@ -31,6 +31,39 @@ describe('forkBoundariesByActionMessageId', () => {
     ]);
   });
 
+  it('names every settled response, including the newest, when the bridge resolves responses', () => {
+    expect([
+      ...forkBoundariesByActionMessageId(settledConversation, 'complete', { fromResponse: true }),
+    ]).toEqual([
+      ['assistant-1', 'assistant-1'],
+      ['assistant-2', 'assistant-2'],
+      ['assistant-3', 'assistant-3'],
+    ]);
+  });
+
+  it('names only the last settled response of a multi-response turn', () => {
+    const messages = [
+      message('user-1', 'user', 'First request'),
+      message('assistant-1a', 'assistant', 'Partial response'),
+      message('assistant-1b', 'assistant', 'Final response'),
+    ];
+    expect([
+      ...forkBoundariesByActionMessageId(messages, 'complete', { fromResponse: true }),
+    ]).toEqual([['assistant-1b', 'assistant-1b']]);
+  });
+
+  it('skips pending and locally minted responses the bridge has never seen', () => {
+    const messages = [
+      message('user-1', 'user', 'First request'),
+      message('msg-optimistic', 'assistant', 'Optimistic response'),
+      message('user-2', 'user', 'Second request'),
+      { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
+    ];
+    expect([
+      ...forkBoundariesByActionMessageId(messages, 'complete', { fromResponse: true }),
+    ]).toEqual([]);
+  });
+
   it('suppresses every boundary while the conversation is running', () => {
     const messages = [
       ...settledConversation.slice(0, 4),
@@ -38,6 +71,9 @@ describe('forkBoundariesByActionMessageId', () => {
       { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
     ];
     expect([...forkBoundariesByActionMessageId(messages, 'running')]).toEqual([]);
+    expect([
+      ...forkBoundariesByActionMessageId(messages, 'running', { fromResponse: true }),
+    ]).toEqual([]);
   });
 });
 

@@ -132,14 +132,53 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
+/**
+ * Maps the message that carries the fork action to the boundary the bridge is asked to fork at.
+ *
+ * When the bridge can resolve a boundary named by a response, every completed turn - including the
+ * newest one - offers the action on its last settled response and names that response. Older
+ * bridges only accept the request that follows a response, which leaves the newest response with
+ * nothing to name, so no action is offered there.
+ */
 export function forkBoundariesByActionMessageId(
   messages: ChatMessage[],
   chatStatus: ChatStatus,
+  options: { fromResponse: boolean } = { fromResponse: false },
 ): ReadonlyMap<string, string> {
-  const boundaries = new Map<string, string>();
   if (chatStatus === 'running') {
-    return boundaries;
+    return new Map<string, string>();
   }
+  return options.fromResponse
+    ? forkBoundariesAtResponses(messages)
+    : forkBoundariesAtFollowingRequest(messages);
+}
+
+function forkBoundariesAtResponses(messages: ChatMessage[]): ReadonlyMap<string, string> {
+  const boundaries = new Map<string, string>();
+  let requestSeen = false;
+  let turnResponseId: string | null = null;
+  const closeTurn = () => {
+    if (requestSeen && turnResponseId) {
+      boundaries.set(turnResponseId, turnResponseId);
+    }
+    turnResponseId = null;
+  };
+  for (const message of messages) {
+    if (message.role === 'user') {
+      closeTurn();
+      requestSeen = true;
+      continue;
+    }
+    if (message.role === 'assistant' && !message.pending && !isLocallyMintedMessageId(message.id)) {
+      turnResponseId = message.id;
+    }
+  }
+  closeTurn();
+  return boundaries;
+}
+
+function forkBoundariesAtFollowingRequest(messages: ChatMessage[]): ReadonlyMap<string, string> {
+  const boundaries = new Map<string, string>();
   let userOrdinal = 0;
   let precedingResponseId: string | null = null;
   for (let index = 0; index < messages.length; index += 1) {
@@ -152,12 +191,7 @@ export function forkBoundariesByActionMessageId(
       continue;
     }
     userOrdinal += 1;
-    if (
-      userOrdinal === 1 ||
-      !precedingResponseId ||
-      message.id.startsWith('msg-') ||
-      message.id.startsWith('local-user-')
-    ) {
+    if (userOrdinal === 1 || !precedingResponseId || isLocallyMintedMessageId(message.id)) {
       precedingResponseId = null;
       continue;
     }
@@ -174,6 +208,11 @@ export function forkBoundariesByActionMessageId(
     precedingResponseId = null;
   }
   return boundaries;
+}
+
+/** Optimistic ids the bridge has never seen, so they cannot name a fork boundary. */
+function isLocallyMintedMessageId(messageId: string): boolean {
+  return messageId.startsWith('msg-') || messageId.startsWith('local-user-');
 }
 
 function isComputerUseTrace(invocations: ToolInvocation[]): boolean {

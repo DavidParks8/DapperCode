@@ -158,6 +158,11 @@ export interface BridgeCapabilitySupport {
   agentList?: boolean;
   turnSteer: boolean;
   threadFork?: boolean;
+  /**
+   * The bridge can resolve a fork boundary named by a response, so the newest response in a
+   * conversation is forkable. Older bridges only accept the request that follows a response.
+   */
+  threadForkFromResponse?: boolean;
   threadDelete?: boolean;
   commandOutputDelta: boolean;
   fastMode?: boolean;

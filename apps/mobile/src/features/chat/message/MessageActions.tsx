@@ -58,32 +58,35 @@ export function MessageActions({
     }, COPIED_RESET_MS);
   }, [text]);
 
-  if (!text.trim()) {
+  const hasText = Boolean(text.trim());
+  if (!hasText && !onForkConversation) {
     return null;
   }
 
   return (
     <View style={styles.messageActionRow}>
-      <Pressable
-        testID={testID}
-        onPress={handleCopy}
-        hitSlop={actionHitSlop}
-        style={({ pressed }) => [
-          styles.messageActionButton,
-          pressed && styles.messageActionButtonPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={copied ? 'Copied message' : 'Copy message'}
-        accessibilityHint="Copies this response to the clipboard"
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name={copied ? 'checkmark-outline' : 'copy-outline'}
-          size={16}
-          color={copied ? theme.colors.success : theme.colors.textMuted}
-        />
-      </Pressable>
-      {onSelectText ? (
+      {hasText ? (
+        <Pressable
+          testID={testID}
+          onPress={handleCopy}
+          hitSlop={actionHitSlop}
+          style={({ pressed }) => [
+            styles.messageActionButton,
+            pressed && styles.messageActionButtonPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={copied ? 'Copied message' : 'Copy message'}
+          accessibilityHint="Copies this response to the clipboard"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name={copied ? 'checkmark-outline' : 'copy-outline'}
+            size={16}
+            color={copied ? theme.colors.success : theme.colors.textMuted}
+          />
+        </Pressable>
+      ) : null}
+      {hasText && onSelectText ? (
         <Pressable
           testID={testID ? `${testID}-select` : undefined}
           onPress={onSelectText}

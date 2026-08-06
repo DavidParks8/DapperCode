@@ -48,7 +48,23 @@ pub struct HarnessSteerRequest {
 
 #[derive(Debug, Clone)]
 pub struct HarnessForkRequest {
+    /// Number of complete user turns the fork must keep, as counted in the canonical transcript.
     pub user_message_ordinal: usize,
+    pub boundary: HarnessForkBoundary,
+}
+
+#[derive(Debug, Clone)]
+pub enum HarnessForkBoundary {
+    /// The fork must stop before this user request.
+    BeforeRequest(HarnessForkBoundaryMessage),
+    /// The fork keeps every recorded turn. The carried request is the newest one, so a harness can
+    /// confirm the conversation has not grown since the snapshot was read without assuming its own
+    /// message count matches the canonical transcript's.
+    EndOfHistory(HarnessForkBoundaryMessage),
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessForkBoundaryMessage {
     pub first_text: String,
     pub first_text_truncated: bool,
     pub raw_message_id_hint: Option<String>,

@@ -53,6 +53,7 @@ function areTranscriptDisplayPropsEqual(
     previous.onLoadEarlier === next.onLoadEarlier &&
     previous.scrollRailEnabled === next.scrollRailEnabled &&
     previous.supportsConversationFork === next.supportsConversationFork &&
+    previous.supportsForkFromResponse === next.supportsForkFromResponse &&
     areActivitiesEquivalent(previous.activity, next.activity)
   );
 }

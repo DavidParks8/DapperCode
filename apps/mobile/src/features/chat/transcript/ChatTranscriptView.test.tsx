@@ -314,6 +314,53 @@ describe('ChatTranscriptView conversation fork action', () => {
     act(() => tree.unmount());
   });
 
+  it('offers the newest response its own boundary when the bridge resolves responses', async () => {
+    const onForkConversation = jest.fn().mockResolvedValue(undefined);
+    const messages: Chat['messages'] = [
+      { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'assistant-1', role: 'assistant', content: 'Done', createdAt: '2026-08-01T00:00:01Z' },
+    ];
+    const tree = render({
+      chat: makeChat({ messages }),
+      supportsConversationFork: true,
+      supportsForkFromResponse: true,
+      onForkConversation,
+    });
+    const list = getList(tree);
+    const actionMessage = list.props.data.find(
+      (item) =>
+        item['kind'] === 'message' &&
+        (item['message'] as { id?: string } | undefined)?.id === 'assistant-1',
+    );
+    if (!actionMessage) {
+      throw new Error('Expected the newest response to carry the fork action');
+    }
+    const rendered = list.props.renderItem({
+      item: actionMessage,
+      index: 0,
+      separators: {},
+    }) as React.ReactElement<{ children: React.ReactNode[] }>;
+    const reveal = rendered.props.children[0];
+    if (
+      !isValidElement<{
+        children: React.ReactElement<{ onForkConversation?: () => void }>;
+      }>(reveal)
+    ) {
+      throw new Error('Expected timestamp reveal around the response');
+    }
+    const response = reveal.props.children;
+    if (!response?.props.onForkConversation) {
+      throw new Error('Expected the newest response to expose the fork action');
+    }
+
+    await act(async () => {
+      response.props.onForkConversation?.();
+      await Promise.resolve();
+    });
+    expect(onForkConversation).toHaveBeenCalledWith('assistant-1');
+    act(() => tree.unmount());
+  });
+
   it('does not render fork actions when the selected agent lacks fork support', () => {
     const tree = render({
       chat: makeChat({
