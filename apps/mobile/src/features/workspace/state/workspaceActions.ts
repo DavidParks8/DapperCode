@@ -470,7 +470,7 @@ export const closeWorkspacePickerAtom = atom(null, (get, set): void => {
     router.back();
     return;
   }
-  returnToChat(get);
+  returnToChat();
 });
 
 export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): void => {
@@ -485,7 +485,7 @@ export const selectWorkspaceAtom = atom(null, (get, set, cwd: string | null): vo
   }
 
   set(defaultStartCwdAtom, normalizedPath);
-  returnToChat(get);
+  returnToChat();
 });
 
 export const openGitCheckoutAtom = atom(

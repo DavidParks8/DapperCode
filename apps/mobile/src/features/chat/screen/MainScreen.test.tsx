@@ -2787,6 +2787,86 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps the selected model when changing workspace before the first message', async () => {
+      const api = createApi({
+        filesystem: [
+          {
+            bridgeRoot: '/workspace',
+            path: '/workspace',
+            parentPath: null,
+            truncated: false,
+            entries: [
+              {
+                name: 'mobile',
+                path: '/workspace/mobile',
+                isDirectory: true,
+                isGitRepo: true,
+              },
+            ],
+          },
+          {
+            bridgeRoot: '/workspace',
+            path: '/workspace/mobile',
+            parentPath: '/workspace',
+            truncated: false,
+            entries: [],
+          },
+        ],
+      });
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'server/default',
+          displayName: 'Server Default',
+          isDefault: true,
+        },
+        {
+          id: 'selected/model',
+          displayName: 'Selected Model',
+        },
+      ]);
+      const { tree, store } = await renderShell({ api, defaultStartCwd: '/workspace' });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await press(byLabel(root, 'Selected Model'));
+      expect(byLabel(root, 'Model, Selected Model')).toBeTruthy();
+
+      await press(byLabelPrefix(root, 'Workspace, '));
+      await press(byLabel(root, 'Open folder mobile'));
+      await press(byLabel(root, 'Use mobile workspace'));
+      expect(store.get(defaultStartCwdAtom)).toBe('/workspace/mobile');
+      expect(router.back).toHaveBeenCalledTimes(1);
+      expect(router.dismissTo).not.toHaveBeenCalled();
+      expect(byLabel(root, 'Model, Selected Model')).toBeTruthy();
+
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Use the selected model');
+        await flush();
+      });
+      await press(byLabel(root, 'Send message'));
+
+      expect(api.createChatIdempotent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/workspace/mobile',
+          model: 'selected/model',
+        }),
+        expect.any(String),
+      );
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({
+          model: 'selected/model',
+        }),
+        expect.any(String),
+        expect.any(Object),
+      );
+      act(() => tree.unmount());
+    });
+
     it('validates cloning, chooses a destination, and handles clone error and success', async () => {
       const api = createApi({
         filesystem: [

@@ -557,7 +557,8 @@ describe('workspace actions', () => {
     expect(store.get(workspacePickerPurposeAtom)).toBe('default-start');
 
     store.set(closeWorkspacePickerAtom);
-    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(router.dismissTo).not.toHaveBeenCalled();
   });
 
   it('returns to git checkout after choosing a destination', async () => {
@@ -590,7 +591,8 @@ describe('workspace actions', () => {
 
     store.set(selectWorkspaceAtom, '/workspace/app');
     expect(store.get(defaultStartCwdAtom)).toBe('/workspace/app');
-    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(router.dismissTo).not.toHaveBeenCalled();
   });
 
   it('keeps the checkout open while a clone is running', () => {
