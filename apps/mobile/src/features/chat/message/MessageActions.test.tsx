@@ -87,6 +87,16 @@ describe('MessageActions', () => {
     expect((tree as unknown as { toJSON(): unknown }).toJSON()).toBeNull();
   });
 
+  it('still offers the fork action for a response that has no copyable text', () => {
+    const tree = render(
+      <MessageActions text="   " onSelectText={() => {}} onForkConversation={() => {}} />,
+    );
+    const root = queryRoot(tree);
+    expect(findPressable(root, 'Fork conversation from here')).toBeDefined();
+    expect(() => findPressable(root, 'Copy message')).toThrow();
+    expect(() => findPressable(root, 'Select message text')).toThrow();
+  });
+
   it('copies the message, fires a success haptic, and shows a copied state', async () => {
     const tree = render(<MessageActions text="hello world" />);
     const root = queryRoot(tree);

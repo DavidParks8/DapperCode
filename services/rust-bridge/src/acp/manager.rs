@@ -28,7 +28,8 @@ use super::events::{
 };
 use super::harness::{
     harness_for_manifest, HarnessAdapter, HarnessContext, HarnessDeleteRequest, HarnessError,
-    HarnessForkRequest, HarnessSteerRequest, SessionContext,
+    HarnessForkBoundary, HarnessForkBoundaryMessage, HarnessForkRequest, HarnessSteerRequest,
+    SessionContext,
 };
 use super::identity::AgentSessionId;
 use super::interactions::{PendingElicitationSummary, PendingPermissionSummary};
@@ -36,7 +37,7 @@ use super::runtime::{
     AcpConnection, AcpRuntimeError, ForkRequest, NegotiatedInitialize, PromptAdmission,
     RequestCancellation, SteerRequest,
 };
-use super::snapshot::{SessionSnapshot, SnapshotPage};
+use super::snapshot::{ForkBoundaryKind, ForkBoundaryMessage, SessionSnapshot, SnapshotPage};
 
 const MAX_AGENTS: usize = 128;
 const MAX_SESSIONS: usize = 2_048;
@@ -1275,13 +1276,11 @@ impl AgentManager {
         if snapshot.active_run_id.is_some() {
             return Err(AcpRuntimeError::SessionBusy.into());
         }
-        let boundary = snapshot
-            .complete_user_message_boundary(message_id)
-            .ok_or_else(|| {
-                AgentManagerError::Fork(
-                    "fork boundary is unavailable or the session history is incomplete".to_string(),
-                )
-            })?;
+        let boundary = snapshot.complete_fork_boundary(message_id).ok_or_else(|| {
+            AgentManagerError::Fork(
+                "fork boundary is unavailable or the session history is incomplete".to_string(),
+            )
+        })?;
         if boundary.ordinal == 0 {
             return Err(AgentManagerError::Fork(
                 "the first user request has no earlier conversation to fork".to_string(),
@@ -1306,10 +1305,15 @@ impl AgentManager {
             let response = connection
                 .fork_session_extension(ForkRequest {
                     session_id: source_session_id.clone(),
-                    message_id: boundary
-                        .raw_message_id_hint
-                        .clone()
-                        .or_else(|| Some(message_id.to_string())),
+                    message_id: match &boundary.kind {
+                        ForkBoundaryKind::BeforeRequest(request) => Some(
+                            request
+                                .raw_message_id_hint
+                                .clone()
+                                .unwrap_or_else(|| request.message_id.clone()),
+                        ),
+                        ForkBoundaryKind::EndOfHistory { .. } => None,
+                    },
                     user_message_ordinal: u64::try_from(boundary.ordinal).map_err(|_| {
                         AgentManagerError::Fork("fork boundary ordinal is invalid".to_string())
                     })?,
@@ -1336,9 +1340,18 @@ impl AgentManager {
                     &context,
                     HarnessForkRequest {
                         user_message_ordinal: boundary.ordinal,
-                        first_text: boundary.first_text,
-                        first_text_truncated: boundary.first_text_truncated,
-                        raw_message_id_hint: boundary.raw_message_id_hint,
+                        boundary: match boundary.kind {
+                            ForkBoundaryKind::BeforeRequest(request) => {
+                                HarnessForkBoundary::BeforeRequest(harness_fork_boundary_message(
+                                    request,
+                                ))
+                            }
+                            ForkBoundaryKind::EndOfHistory { newest_request } => {
+                                HarnessForkBoundary::EndOfHistory(harness_fork_boundary_message(
+                                    newest_request,
+                                ))
+                            }
+                        },
                     },
                 )
                 .await?;
@@ -3245,6 +3258,14 @@ async fn forward_session_events(
     }
     let mut tracked = tracked_sessions.lock().await;
     remove_session_event_registration(&mut tracked, &thread_id, instance_id);
+}
+
+fn harness_fork_boundary_message(message: ForkBoundaryMessage) -> HarnessForkBoundaryMessage {
+    HarnessForkBoundaryMessage {
+        first_text: message.first_text,
+        first_text_truncated: message.first_text_truncated,
+        raw_message_id_hint: message.raw_message_id_hint,
+    }
 }
 
 fn harness_capabilities(runtime: &AgentRuntime) -> super::harness::HarnessCapabilities {
@@ -5548,12 +5569,31 @@ mod tests {
                 })
                 .await;
         }
+        session
+            .emit(CanonicalEvent::MessageChunk {
+                agent_id: "plain-agent".to_string(),
+                thread_id: thread_id.clone(),
+                run_id: None,
+                source_turn_id: None,
+                generation: None,
+                role: MessageRole::Agent,
+                message_id: "agent-2".to_string(),
+                content: "answer".to_string(),
+                content_block: None,
+            })
+            .await;
         assert!(matches!(
             manager.fork_session(&thread_id, "user-1").await,
             Err(AgentManagerError::Fork(_))
         ));
         assert!(matches!(
             manager.fork_session(&thread_id, "user-2").await,
+            Err(AgentManagerError::SessionIndex(_))
+        ));
+        // The newest response names the end of history, so it resolves the same way any request
+        // does and only fails later, on the missing index entry.
+        assert!(matches!(
+            manager.fork_session(&thread_id, "agent-2").await,
             Err(AgentManagerError::SessionIndex(_))
         ));
 

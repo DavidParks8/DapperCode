@@ -34,7 +34,6 @@ import {
 import { createStyles } from '../styles/styles';
 import {
   buildTranscriptDisplayItems,
-  forkBoundariesByActionMessageId,
   transcriptDisplayItemKey,
   type TranscriptDisplayItem,
 } from './messages';
@@ -44,7 +43,7 @@ import type { TranscriptContinuationState } from './controllers/continuationCont
 import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { useForkConversationAction } from './useForkConversationAction';
+import { useForkBoundaries, useForkConversationAction } from './useForkConversationAction';
 import { ActivityEvent } from './ActivityEvent';
 import { TranscriptEdgeScrim } from './TranscriptEdgeScrim';
 import {
@@ -186,21 +185,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
   );
-  const forkBoundaries = useMemo(
-    () =>
-      supportsConversationFork &&
-      !chat.parentThreadId &&
-      (continuationState?.unavailableCount ?? 0) === 0
-        ? forkBoundariesByActionMessageId(visibleMessages, chat.status)
-        : new Map<string, string>(),
-    [
-      chat.parentThreadId,
-      chat.status,
-      continuationState?.unavailableCount,
-      supportsConversationFork,
-      visibleMessages,
-    ],
-  );
+  const forkBoundaries = useForkBoundaries({
+    messages: visibleMessages,
+    chatStatus: chat.status,
+    parentThreadId: chat.parentThreadId,
+    unavailableCount: continuationState?.unavailableCount,
+    supportsConversationFork,
+  });
   const userMessageAnchorCount = userMessageAnchors.length;
   useEffect(() => {
     visibleMessageCountRef.current = visibleMessages.length;

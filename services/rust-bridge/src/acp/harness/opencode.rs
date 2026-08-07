@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     HarnessAdapter, HarnessCapabilities, HarnessContext, HarnessDeleteRequest, HarnessError,
-    HarnessForkRequest, HarnessForkedSession, HarnessLaunchConfig, HarnessSteerRequest,
-    SessionContext,
+    HarnessForkBoundary, HarnessForkBoundaryMessage, HarnessForkRequest, HarnessForkedSession,
+    HarnessLaunchConfig, HarnessSteerRequest, SessionContext,
 };
 use crate::acp::config::ResolvedAgentManifest;
 
@@ -176,7 +176,7 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
             url.query_pairs_mut()
                 .append_pair("directory", context.cwd.to_string_lossy().as_ref());
             let response = timed_send(context.http.post(url).json(&OpenCodeForkRequest {
-                message_id: Some(boundary.message_id),
+                message_id: boundary.message_id,
             }))
             .await?;
             if !response.status().is_success() {
@@ -296,8 +296,29 @@ async fn resolve_opencode_message_id(
         .iter()
         .filter(|message| message.info.role == "user")
         .collect::<Vec<_>>();
+    let boundary = match &request.boundary {
+        HarnessForkBoundary::BeforeRequest(boundary) => boundary,
+        HarnessForkBoundary::EndOfHistory(newest_request) => {
+            // The boundary is the end of the conversation, so OpenCode is asked to copy the whole
+            // session. Requiring its newest request to still be the one the snapshot recorded keeps
+            // this fail-closed when the session gained a turn, and unlike a count comparison it
+            // survives OpenCode splitting one request into several canonical transcript messages.
+            let newest = users.last().ok_or_else(|| {
+                HarnessError::InvalidResponse("OpenCode history has no request to fork".to_string())
+            })?;
+            if !opencode_message_matches_boundary(newest, newest_request) {
+                return Err(HarnessError::InvalidResponse(
+                    "fork boundary is no longer at the end of OpenCode history".to_string(),
+                ));
+            }
+            return Ok(ResolvedOpenCodeForkBoundary {
+                message_id: None,
+                user_message_ordinal: users.len(),
+            });
+        }
+    };
     let (user_message_ordinal, message) =
-        if let Some(raw_message_id_hint) = request.raw_message_id_hint.as_deref() {
+        if let Some(raw_message_id_hint) = boundary.raw_message_id_hint.as_deref() {
             users
                 .iter()
                 .enumerate()
@@ -318,7 +339,23 @@ async fn resolve_opencode_message_id(
                 })?,
             )
         };
-    let first_text = message
+    if !fork_boundary_text_matches(
+        opencode_first_text(message),
+        &boundary.first_text,
+        boundary.first_text_truncated,
+    ) {
+        return Err(HarnessError::InvalidResponse(
+            "fork boundary does not match OpenCode history".to_string(),
+        ));
+    }
+    Ok(ResolvedOpenCodeForkBoundary {
+        message_id: Some(message.info.id.clone()),
+        user_message_ordinal,
+    })
+}
+
+fn opencode_first_text(message: &OpenCodeMessage) -> &str {
+    message
         .parts
         .iter()
         .find_map(|part| {
@@ -327,24 +364,27 @@ async fn resolve_opencode_message_id(
                 .flatten()
         })
         .unwrap_or_default()
-        .trim();
-    if !fork_boundary_text_matches(
-        first_text,
-        &request.first_text,
-        request.first_text_truncated,
-    ) {
-        return Err(HarnessError::InvalidResponse(
-            "fork boundary does not match OpenCode history".to_string(),
-        ));
+        .trim()
+}
+
+fn opencode_message_matches_boundary(
+    message: &OpenCodeMessage,
+    boundary: &HarnessForkBoundaryMessage,
+) -> bool {
+    match boundary.raw_message_id_hint.as_deref() {
+        Some(raw_message_id_hint) => message.info.id == raw_message_id_hint,
+        None => fork_boundary_text_matches(
+            opencode_first_text(message),
+            &boundary.first_text,
+            boundary.first_text_truncated,
+        ),
     }
-    Ok(ResolvedOpenCodeForkBoundary {
-        message_id: message.info.id.clone(),
-        user_message_ordinal,
-    })
 }
 
 struct ResolvedOpenCodeForkBoundary {
-    message_id: String,
+    /// `None` asks OpenCode to copy every message, which is how the end of the conversation is
+    /// expressed through an API that otherwise names an excluded message.
+    message_id: Option<String>,
     user_message_ordinal: usize,
 }
 
@@ -847,6 +887,15 @@ mod tests {
         }
     }
 
+    async fn opencode_tail_messages_fixture() -> Json<serde_json::Value> {
+        Json(serde_json::json!([
+            {"info": {"id": "raw-user-1", "role": "user"}, "parts": [{"type": "text", "text": "first"}]},
+            {"info": {"id": "raw-agent-1", "role": "assistant"}, "parts": [{"type": "text", "text": "answer"}]},
+            {"info": {"id": "raw-user-2", "role": "user"}, "parts": [{"type": "text", "text": "second"}]},
+            {"info": {"id": "raw-agent-2", "role": "assistant"}, "parts": [{"type": "text", "text": "answer"}]}
+        ]))
+    }
+
     async fn opencode_fork_fixture(
         State(state): State<ForkServerState>,
         Json(body): Json<serde_json::Value>,
@@ -897,9 +946,11 @@ mod tests {
                 &context,
                 HarnessForkRequest {
                     user_message_ordinal: 0,
-                    first_text: "second".to_string(),
-                    first_text_truncated: false,
-                    raw_message_id_hint: Some("raw-user-2".to_string()),
+                    boundary: HarnessForkBoundary::BeforeRequest(HarnessForkBoundaryMessage {
+                        first_text: "second".to_string(),
+                        first_text_truncated: false,
+                        raw_message_id_hint: Some("raw-user-2".to_string()),
+                    }),
                 },
             )
             .await
@@ -912,12 +963,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn opencode_fork_at_the_end_of_history_copies_every_turn() {
+        let directory = std::env::current_dir().expect("current directory");
+        let (observed, mut observed_rx) = mpsc::unbounded_channel();
+        let app = Router::new()
+            .route(
+                "/session/{session_id}/message",
+                get(opencode_tail_messages_fixture),
+            )
+            .route("/session/source/fork", post(opencode_fork_fixture))
+            .with_state(ForkServerState {
+                directory: directory.to_string_lossy().to_string(),
+                observed,
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("test server");
+        });
+        let context = SessionContext {
+            http: Client::new(),
+            http_base: format!("http://{address}/"),
+            session_id: SessionId::new("source"),
+            cwd: directory.clone(),
+        };
+
+        let anchor = |first_text: &str, raw_message_id_hint: &str| {
+            HarnessForkBoundary::EndOfHistory(HarnessForkBoundaryMessage {
+                first_text: first_text.to_string(),
+                first_text_truncated: false,
+                raw_message_id_hint: Some(raw_message_id_hint.to_string()),
+            })
+        };
+        let forked = OpenCodeHarnessAdapter
+            .fork(
+                &context,
+                HarnessForkRequest {
+                    user_message_ordinal: 2,
+                    boundary: anchor("second", "raw-user-2"),
+                },
+            )
+            .await
+            .expect("tail fork succeeds");
+        assert_eq!(forked.session_id, "forked");
+        // No excluded message is named, which is how OpenCode is asked to copy the whole session.
+        assert_eq!(observed_rx.recv().await.as_deref(), Some(""));
+
+        // OpenCode may split one request across several canonical transcript messages, so the tail
+        // check anchors on the newest request's identity instead of comparing message counts.
+        OpenCodeHarnessAdapter
+            .fork(
+                &context,
+                HarnessForkRequest {
+                    user_message_ordinal: 5,
+                    boundary: anchor("second", "raw-user-2"),
+                },
+            )
+            .await
+            .expect("tail fork tolerates a differently split transcript");
+        assert_eq!(observed_rx.recv().await.as_deref(), Some(""));
+
+        // A conversation that gained a turn since the snapshot was read must fail closed instead of
+        // silently forking a longer conversation than the caller asked for.
+        assert!(matches!(
+            OpenCodeHarnessAdapter
+                .fork(
+                    &context,
+                    HarnessForkRequest {
+                        user_message_ordinal: 1,
+                        boundary: anchor("first", "raw-user-1"),
+                    },
+                )
+                .await,
+            Err(HarnessError::InvalidResponse(_))
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn opencode_fork_and_message_validation_fail_closed() {
         let request = |first_text: &str, raw_message_id_hint: Option<&str>| HarnessForkRequest {
             user_message_ordinal: 1,
-            first_text: first_text.to_string(),
-            first_text_truncated: false,
-            raw_message_id_hint: raw_message_id_hint.map(str::to_string),
+            boundary: HarnessForkBoundary::BeforeRequest(HarnessForkBoundaryMessage {
+                first_text: first_text.to_string(),
+                first_text_truncated: false,
+                raw_message_id_hint: raw_message_id_hint.map(str::to_string),
+            }),
         };
 
         let app = Router::new()
@@ -963,9 +1096,11 @@ mod tests {
                     &context,
                     HarnessForkRequest {
                         user_message_ordinal: 1,
-                        first_text: "second".to_string(),
-                        first_text_truncated: false,
-                        raw_message_id_hint: None,
+                        boundary: HarnessForkBoundary::BeforeRequest(HarnessForkBoundaryMessage {
+                            first_text: "second".to_string(),
+                            first_text_truncated: false,
+                            raw_message_id_hint: None,
+                        },),
                     },
                 )
                 .await,
@@ -1089,10 +1224,10 @@ mod tests {
     #[tokio::test]
     async fn opencode_status_polling_accepts_absence_only_after_confirmation_and_surfaces_failures()
     {
-        for mode in [
-            StatusFixtureMode::BusyThenAbsent,
-            StatusFixtureMode::Absent,
-            StatusFixtureMode::Idle,
+        for (mode, minimum_calls) in [
+            (StatusFixtureMode::BusyThenAbsent, 3),
+            (StatusFixtureMode::Absent, 2),
+            (StatusFixtureMode::Idle, 2),
         ] {
             let (context, calls, server) = status_fixture_context(mode).await;
             wait_for_opencode_idle(
@@ -1103,7 +1238,7 @@ mod tests {
             )
             .await
             .expect("absence confirms idle");
-            assert!(calls.load(Ordering::SeqCst) >= 3);
+            assert!(calls.load(Ordering::SeqCst) >= minimum_calls);
             server.abort();
         }
 

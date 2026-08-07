@@ -1,4 +1,35 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+
+import type { ChatMessage, ChatStatus } from '@bridge/types/types';
+import { forkBoundariesByActionMessageId } from './messages';
+
+const NO_FORK_BOUNDARIES: ReadonlyMap<string, string> = new Map<string, string>();
+
+/**
+ * Maps each message that should carry the fork action to the boundary the bridge is asked to fork
+ * at, or nothing at all when this conversation cannot be forked.
+ *
+ * Inherited sub-agent history and transcripts with unreachable earlier turns cannot be forked
+ * because the bridge could not reconstruct the conversation the caller can see.
+ */
+export function useForkBoundaries({
+  messages,
+  chatStatus,
+  parentThreadId,
+  unavailableCount,
+  supportsConversationFork,
+}: {
+  messages: ChatMessage[];
+  chatStatus: ChatStatus;
+  parentThreadId: string | undefined;
+  unavailableCount: number | undefined;
+  supportsConversationFork: boolean;
+}): ReadonlyMap<string, string> {
+  return useMemo(() => {
+    const enabled = supportsConversationFork && !parentThreadId && (unavailableCount ?? 0) === 0;
+    return enabled ? forkBoundariesByActionMessageId(messages, chatStatus) : NO_FORK_BOUNDARIES;
+  }, [chatStatus, messages, parentThreadId, supportsConversationFork, unavailableCount]);
+}
 
 export function useForkConversationAction(
   onForkConversation?: (messageId: string) => Promise<unknown>,

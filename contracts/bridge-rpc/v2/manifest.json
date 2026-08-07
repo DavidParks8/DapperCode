@@ -77,9 +77,17 @@
         }
       ],
       "agUiEvents": true,
-      "supports": { "turnSteer": true, "threadFork": true, "threadDelete": true },
+      "supports": {
+        "turnSteer": true,
+        "threadFork": true,
+        "threadDelete": true
+      },
       "supportsByAgent": {
-        "local-primary": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+        "local-primary": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": true
+        }
       }
     },
     "capabilityCases": [
@@ -87,19 +95,35 @@
         "name": "partialSupport",
         "agentId": "agent-partial",
         "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": false },
-        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": false }
+        "supportsByAgent": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": false
+        }
       },
       {
         "name": "fullSupport",
         "agentId": "agent-full",
         "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": true },
-        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+        "supportsByAgent": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": true
+        }
       },
       {
         "name": "unsupportedOperations",
         "agentId": "agent-unsupported",
-        "agentCapabilities": { "sessionSteer": false, "sessionFork": false, "sessionDelete": false },
-        "supportsByAgent": { "turnSteer": false, "threadFork": false, "threadDelete": false }
+        "agentCapabilities": {
+          "sessionSteer": false,
+          "sessionFork": false,
+          "sessionDelete": false
+        },
+        "supportsByAgent": {
+          "turnSteer": false,
+          "threadFork": false,
+          "threadDelete": false
+        }
       }
     ],
     "operationalStatus": {

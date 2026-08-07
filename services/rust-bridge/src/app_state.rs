@@ -87,17 +87,18 @@ impl AppState {
 impl BridgeCapabilitySupport {
     pub(super) fn from_agent(agent: &crate::acp::manager::AgentDescriptor) -> Self {
         let ready = agent.lifecycle == crate::acp::manager::AgentLifecycle::Ready;
+        let thread_fork = ready
+            && agent
+                .capabilities
+                .as_ref()
+                .is_some_and(|capabilities| capabilities.session_fork);
         Self {
             turn_steer: ready
                 && agent
                     .capabilities
                     .as_ref()
                     .is_some_and(|capabilities| capabilities.session_steer),
-            thread_fork: ready
-                && agent
-                    .capabilities
-                    .as_ref()
-                    .is_some_and(|capabilities| capabilities.session_fork),
+            thread_fork,
             thread_delete: ready
                 && agent
                     .capabilities

@@ -132,48 +132,49 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
+/**
+ * Maps the message that carries the fork action to the boundary the bridge is asked to fork at.
+ *
+ * Every completed turn - including the newest one - offers the action on its last settled response
+ * and names that response. The bridge resolves the response to the end of its complete turn.
+ */
 export function forkBoundariesByActionMessageId(
   messages: ChatMessage[],
   chatStatus: ChatStatus,
 ): ReadonlyMap<string, string> {
-  const boundaries = new Map<string, string>();
   if (chatStatus === 'running') {
-    return boundaries;
+    return new Map<string, string>();
   }
-  let userOrdinal = 0;
-  let precedingResponseId: string | null = null;
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message?.role === 'assistant' && !message.pending) {
-      precedingResponseId = message.id;
+  return forkBoundariesAtResponses(messages);
+}
+
+function forkBoundariesAtResponses(messages: ChatMessage[]): ReadonlyMap<string, string> {
+  const boundaries = new Map<string, string>();
+  let requestSeen = false;
+  let turnResponseId: string | null = null;
+  const closeTurn = () => {
+    if (requestSeen && turnResponseId) {
+      boundaries.set(turnResponseId, turnResponseId);
+    }
+    turnResponseId = null;
+  };
+  for (const message of messages) {
+    if (message.role === 'user') {
+      closeTurn();
+      requestSeen = true;
       continue;
     }
-    if (message?.role !== 'user') {
-      continue;
+    if (message.role === 'assistant' && !message.pending && !isLocallyMintedMessageId(message.id)) {
+      turnResponseId = message.id;
     }
-    userOrdinal += 1;
-    if (
-      userOrdinal === 1 ||
-      !precedingResponseId ||
-      message.id.startsWith('msg-') ||
-      message.id.startsWith('local-user-')
-    ) {
-      precedingResponseId = null;
-      continue;
-    }
-    const remainder = messages.slice(index + 1);
-    const nextUserIndex = remainder.findIndex((candidate) => candidate.role === 'user');
-    const turnMessages = nextUserIndex >= 0 ? remainder.slice(0, nextUserIndex) : remainder;
-    const hasSettledResponse = turnMessages.some(
-      (candidate) =>
-        (candidate.role === 'assistant' || candidate.role === 'reasoning') && !candidate.pending,
-    );
-    if (hasSettledResponse) {
-      boundaries.set(precedingResponseId, message.id);
-    }
-    precedingResponseId = null;
   }
+  closeTurn();
   return boundaries;
+}
+
+/** Optimistic ids the bridge has never seen, so they cannot name a fork boundary. */
+function isLocallyMintedMessageId(messageId: string): boolean {
+  return messageId.startsWith('msg-') || messageId.startsWith('local-user-');
 }
 
 function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
