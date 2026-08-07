@@ -162,6 +162,54 @@ npm run bridge:ui:demo
 
 That sends a sample workflow card to the latest chat. Use `npm run bridge:ui:demo -- --modal` or `npm run bridge:ui:demo -- --banner` to test the other presentations. Use `npm run bridge:ui:demo -- --thread <thread-id>` when the latest chat is not the one visible on the device.
 
+## Implemented Session Token Totals Example
+
+ACP returns an optional per-turn `usage` object on `PromptResponse`, carrying `inputTokens`,
+`outputTokens`, `thoughtTokens`, `cachedReadTokens`, `cachedWriteTokens`, and `totalTokens`. It is
+gated behind the `unstable_end_turn_token_usage` cargo feature, which the bridge enables
+unconditionally: support is detected at runtime from the data itself, never from a build flag or an
+agent name.
+
+Two properties of the upstream data drive the design:
+
+- **The values are per-turn, not cumulative.** The ACP field documentation says "across session", but
+  agents populate it from the latest assistant message only, so the bridge accumulates the totals
+  itself in the session snapshot.
+- **Absent is not zero.** Agents omit `thoughtTokens`, `cachedReadTokens`, and `cachedWriteTokens`
+  entirely when they are zero, so those three stay `null` in the totals unless some turn actually
+  reported them. Mobile omits a row rather than printing a misleading `0`.
+
+`runtime.rs` emits a `CanonicalEvent::TurnTokenUsage` alongside the existing `RunFinished` whenever a
+prompt response carries usage. The projector emits the running totals as a `CUSTOM` event named
+`dappercode.dev/tokenTotals`:
+
+```json
+{
+  "type": "CUSTOM",
+  "threadId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x",
+  "runId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x::turn::7",
+  "name": "dappercode.dev/tokenTotals",
+  "value": {
+    "turns": 14,
+    "inputTokens": 48200,
+    "outputTokens": 12400,
+    "reasoningTokens": 8900,
+    "cachedReadTokens": 386000,
+    "cachedWriteTokens": 52300,
+    "totalTokens": 507800
+  }
+}
+```
+
+The same object is exposed on the thread snapshot as `tokenTotals`, and is `null` until a turn
+reports usage. That null is the capability signal: mobile renders the session-meta usage chip and its
+ledger sheet only when the field is present, so agents that never report usage show no affordance at
+all.
+
+This is distinct from `dappercode.dev/usage`, which carries context-window pressure
+(`used`, `size`, `cost`) from the ACP `usage_update` session update. The two are independent, and
+neither substitutes for the other.
+
 ## Rules For Future Integrations
 
 - Add provider-specific parsing in the bridge adapter, not in mobile UI.

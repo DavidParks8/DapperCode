@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import type { BridgeUiSurface, BridgeThreadQueueState } from '@bridge/types/types';
 import {
   type ActivePlanState,
+  type SessionTokenTotals,
   type ThreadContextUsage,
   mergeThreadContextUsage,
   upsertBridgeUiSurfaceList,
@@ -144,6 +145,18 @@ export function useMainScreenThreadRuntimeMutations(
     [threadRuntimeSnapshotsRef, upsertThreadRuntimeSnapshot],
   );
 
+  const cacheThreadSessionTokenTotals = useCallback(
+    (threadId: string, tokenTotals: SessionTokenTotals | null) => {
+      if (!tokenTotals) {
+        return;
+      }
+
+      upsertThreadRuntimeSnapshot(threadId, () => ({ tokenTotals }));
+      bumpAgentRuntimeRevision();
+    },
+    [bumpAgentRuntimeRevision, upsertThreadRuntimeSnapshot],
+  );
+
   const cacheThreadPlan = useCallback(
     (
       threadId: string,
@@ -184,6 +197,7 @@ export function useMainScreenThreadRuntimeMutations(
     cacheThreadQueueState,
     cacheThreadTurnState,
     cacheThreadContextUsage,
+    cacheThreadSessionTokenTotals,
     cacheThreadPlan,
     clearPendingPlanImplementationPrompt,
   };

@@ -29,6 +29,7 @@ type ThreadStateEventMethod =
   | 'thread/name/updated'
   | 'thread/deleted'
   | 'thread/tokenUsage/updated'
+  | 'thread/tokenTotals/updated'
   | 'item/started';
 
 const THREAD_STATE_RUNNING_ITEM_TYPES = new Set([
@@ -68,6 +69,7 @@ const THREAD_STATE_EVENT_HANDLERS: Record<ThreadStateEventMethod, ThreadStateEve
   'thread/name/updated': handleThreadNameUpdatedEvent,
   'thread/deleted': handleThreadDeletedEvent,
   'thread/tokenUsage/updated': handleThreadTokenUsageUpdatedEvent,
+  'thread/tokenTotals/updated': handleThreadTokenTotalsUpdatedEvent,
   'item/started': handleItemStartedEvent,
 };
 
@@ -167,6 +169,20 @@ function handleThreadTokenUsageUpdatedEvent(
   }
 
   context.cacheThreadContextUsage(threadId, contextUsage);
+}
+
+function handleThreadTokenTotalsUpdatedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+): void {
+  const params = toRecord(event.params);
+  const threadId = readString(params?.['threadId']) ?? readString(params?.['thread_id']);
+  const tokenTotals = context.readThreadSessionTokenTotals(params);
+  if (!threadId || !tokenTotals) {
+    return;
+  }
+
+  context.cacheThreadSessionTokenTotals(threadId, tokenTotals);
 }
 
 function handleItemStartedEvent(

@@ -11,7 +11,7 @@ import {
   setMockGlassEffectAPIAvailable,
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
-import { MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
+import { formatCompactTokenCount, MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -318,5 +318,85 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
       ),
     ).toHaveLength(0);
     act(() => tree.unmount());
+  });
+
+  it('keeps token usage unavailable when the connected agent has not reported totals', () => {
+    const tree = render(baseContext());
+    const root = queryRoot(tree);
+
+    expect(
+      root.findAll(
+        (node) => node.props['accessibilityLabel'] === 'Token usage, 507,800 tokens this session',
+      ),
+    ).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Session tokens'),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('renders the token chip and opens a ledger that omits unreported categories', () => {
+    const tokenTotals = {
+      turns: 14,
+      inputTokens: 48200,
+      outputTokens: 12400,
+      reasoningTokens: null,
+      cachedReadTokens: 386000,
+      cachedWriteTokens: null,
+      totalTokens: 507800,
+    };
+    const tree = render(
+      baseContext({
+        selectedChat: {
+          ...chat,
+          tokenTotals,
+          acpUsage: { used: null, size: null, cost: '$4.20' },
+        },
+      }),
+    );
+    const root = queryRoot(tree);
+    const chip = findPressableByLabelPrefix(root, 'Token usage,');
+
+    expect(chip.props['accessibilityLabel']).toBe('Token usage, 507,800 tokens this session');
+    expect(chip.findAll((node) => node.children.includes('508k'))).toHaveLength(1);
+    act(() => {
+      invokeProp(chip, 'onPress');
+    });
+
+    expect(root.findAll((node) => node.children.includes('Session tokens'))).toHaveLength(1);
+    expect(
+      root.findAll((node) => node.children.includes('Prompt, context and cache traffic')),
+    ).toHaveLength(1);
+    expect(
+      root.findAll((node) => node.children.includes('Everything the model generated')),
+    ).toHaveLength(1);
+    expect(
+      root
+        .findAll((node) => node.props['testID'] === 'token-sent-subtotal')[0]
+        ?.findAll((node) => node.children.includes('434,200')),
+    ).toHaveLength(1);
+    expect(
+      root
+        .findAll((node) => node.props['testID'] === 'token-received-subtotal')[0]
+        ?.findAll((node) => node.children.includes('12,400')),
+    ).toHaveLength(1);
+    expect(root.findAll((node) => node.children.includes('Cache read'))).toHaveLength(1);
+    expect(root.findAll((node) => node.children.includes('Cache write'))).toHaveLength(0);
+    expect(root.findAll((node) => node.children.includes('Reasoning'))).toHaveLength(0);
+    expect(root.findAll((node) => node.children.includes('Session cost '))).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+});
+
+describe('formatCompactTokenCount', () => {
+  it.each([
+    [9_400, '9,400'],
+    [99_999, '99,999'],
+    [100_000, '100k'],
+    [507_800, '508k'],
+    [1_200_000, '1.2M'],
+    [12_000_000, '12M'],
+  ])('formats %i as %s', (value, expected) => {
+    expect(formatCompactTokenCount(value)).toBe(expected);
   });
 });

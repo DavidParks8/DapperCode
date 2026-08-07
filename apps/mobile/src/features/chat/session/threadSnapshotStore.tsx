@@ -3,6 +3,7 @@ import type { BridgeUiSurface } from '@bridge/types/types';
 import { readNonNegativeIntegerLike, toRecord } from '@shared/runtimeValidation';
 import {
   type ActivePlanState,
+  type SessionTokenTotals,
   type ThreadContextUsage,
   RUN_WATCHDOG_MS,
   type ChatModelPreference,
@@ -110,6 +111,58 @@ function parseThreadContextUsage(value: unknown): ThreadContextUsage | null {
     lastTokens,
     modelContextWindow,
     updatedAtMs: Date.now(),
+  };
+}
+
+export function parseThreadSessionTokenTotals(value: unknown): SessionTokenTotals | null {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const totalsRecord = firstRecord([
+    toRecord(record['tokenTotals']),
+    toRecord(record['token_totals']),
+    record,
+  ]);
+  if (!totalsRecord) {
+    return null;
+  }
+
+  const turns = readFirstNonNegativeIntegerLike([totalsRecord['turns']]);
+  const inputTokens = readFirstNonNegativeIntegerLike([
+    totalsRecord['inputTokens'],
+    totalsRecord['input_tokens'],
+  ]);
+  const outputTokens = readFirstNonNegativeIntegerLike([
+    totalsRecord['outputTokens'],
+    totalsRecord['output_tokens'],
+  ]);
+  const totalTokens = readFirstNonNegativeIntegerLike([
+    totalsRecord['totalTokens'],
+    totalsRecord['total_tokens'],
+  ]);
+  if (turns === null || inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null;
+  }
+
+  return {
+    turns,
+    inputTokens,
+    outputTokens,
+    reasoningTokens: readFirstNonNegativeIntegerLike([
+      totalsRecord['reasoningTokens'],
+      totalsRecord['reasoning_tokens'],
+    ]),
+    cachedReadTokens: readFirstNonNegativeIntegerLike([
+      totalsRecord['cachedReadTokens'],
+      totalsRecord['cached_read_tokens'],
+    ]),
+    cachedWriteTokens: readFirstNonNegativeIntegerLike([
+      totalsRecord['cachedWriteTokens'],
+      totalsRecord['cached_write_tokens'],
+    ]),
+    totalTokens,
   };
 }
 
@@ -228,6 +281,9 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
   const readThreadContextUsage = useCallback((value: unknown): ThreadContextUsage | null => {
     return parseThreadContextUsage(value);
   }, []);
+  const readThreadSessionTokenTotals = useCallback((value: unknown): SessionTokenTotals | null => {
+    return parseThreadSessionTokenTotals(value);
+  }, []);
 
   const saveChatModelPreferences = useCallback(
     (nextPreferences: Record<string, ChatModelPreference>) =>
@@ -267,6 +323,7 @@ export function useMainScreenThreadSnapshotStore(context: MainScreenThreadSnapsh
     bumpRunWatchdog,
     clearRunWatchdog,
     readThreadContextUsage,
+    readThreadSessionTokenTotals,
     saveChatModelPreferences,
     saveChatPlanSnapshots,
     saveBridgeUiSurfaceSnapshots,

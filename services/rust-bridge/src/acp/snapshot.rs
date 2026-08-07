@@ -57,6 +57,7 @@ pub struct SessionSnapshot {
     pub usage_used: Option<u64>,
     pub usage_size: Option<u64>,
     pub usage_cost: Option<String>,
+    pub token_totals: Option<BridgeTokenTotalsSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -201,6 +202,7 @@ pub struct BridgeThreadSnapshot {
     pub continuation: SnapshotContinuation,
     pub plan: Vec<PlanEntry>,
     pub usage: BridgeUsageSnapshot,
+    pub token_totals: Option<BridgeTokenTotalsSnapshot>,
     pub mode: Option<String>,
     pub config: Vec<ConfigEntry>,
     pub commands: Vec<CommandEntry>,
@@ -214,6 +216,44 @@ pub struct BridgeUsageSnapshot {
     pub used: Option<u64>,
     pub size: Option<u64>,
     pub cost: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTokenTotalsSnapshot {
+    pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
+    pub total_tokens: u64,
+}
+
+impl BridgeTokenTotalsSnapshot {
+    pub(crate) fn add_turn(
+        &mut self,
+        input_tokens: u64,
+        output_tokens: u64,
+        reasoning_tokens: Option<u64>,
+        cached_read_tokens: Option<u64>,
+        cached_write_tokens: Option<u64>,
+        total_tokens: u64,
+    ) {
+        self.turns = self.turns.saturating_add(1);
+        self.input_tokens = self.input_tokens.saturating_add(input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(output_tokens);
+        add_reported_tokens(&mut self.reasoning_tokens, reasoning_tokens);
+        add_reported_tokens(&mut self.cached_read_tokens, cached_read_tokens);
+        add_reported_tokens(&mut self.cached_write_tokens, cached_write_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(total_tokens);
+    }
+}
+
+fn add_reported_tokens(total: &mut Option<u64>, reported: Option<u64>) {
+    if let Some(reported) = reported {
+        *total = Some(total.unwrap_or_default().saturating_add(reported));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,6 +303,7 @@ impl From<SessionSnapshot> for BridgeThreadSnapshot {
                 size: snapshot.usage_size,
                 cost: snapshot.usage_cost,
             },
+            token_totals: snapshot.token_totals,
             mode: snapshot.mode_id,
             config: snapshot.config,
             commands: snapshot.commands,
@@ -572,6 +613,24 @@ impl SessionSnapshot {
                 self.usage_used = Some(*used);
                 self.usage_size = Some(*size);
                 self.usage_cost = cost.clone().map(|value| bound(value, MAX_TEXT_BYTES));
+            }
+            CanonicalEvent::TurnTokenUsage {
+                input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                cached_read_tokens,
+                cached_write_tokens,
+                total_tokens,
+                ..
+            } => {
+                self.token_totals.get_or_insert_default().add_turn(
+                    *input_tokens,
+                    *output_tokens,
+                    *reasoning_tokens,
+                    *cached_read_tokens,
+                    *cached_write_tokens,
+                    *total_tokens,
+                );
             }
             CanonicalEvent::RunFinished { .. }
             | CanonicalEvent::RunFailed { .. }
@@ -2892,6 +2951,15 @@ mod tests {
         snapshot.usage_used = Some(120);
         snapshot.usage_size = Some(4096);
         snapshot.usage_cost = Some("$0.01".to_string());
+        snapshot.token_totals = Some(BridgeTokenTotalsSnapshot {
+            turns: 14,
+            input_tokens: 48_200,
+            output_tokens: 12_400,
+            reasoning_tokens: Some(8_900),
+            cached_read_tokens: Some(386_000),
+            cached_write_tokens: Some(52_300),
+            total_tokens: 507_800,
+        });
         snapshot.mode_id = Some("plan".to_string());
         snapshot.config = vec![ConfigEntry {
             id: "model".to_string(),
@@ -3503,6 +3571,71 @@ mod tests {
         assert_eq!(
             snapshot.usage_cost.as_deref().unwrap().len(),
             MAX_TEXT_BYTES
+        );
+    }
+
+    #[test]
+    fn snapshot_without_turn_usage_exposes_null_token_totals() {
+        let snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["tokenTotals"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn snapshot_accumulates_turn_usage_and_preserves_unreported_optional_fields() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        let usage = |input_tokens,
+                     output_tokens,
+                     reasoning_tokens,
+                     cached_read_tokens,
+                     cached_write_tokens,
+                     total_tokens| CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            cached_read_tokens,
+            cached_write_tokens,
+            total_tokens,
+        };
+
+        snapshot.apply(&usage(10, 5, None, None, None, 15));
+        let first = snapshot.token_totals.as_ref().unwrap();
+        assert_eq!(first.reasoning_tokens, None);
+        assert_eq!(first.cached_read_tokens, None);
+        assert_eq!(first.cached_write_tokens, None);
+
+        snapshot.apply(&usage(20, 7, Some(3), Some(11), Some(2), 43));
+        snapshot.apply(&usage(4, 1, None, None, None, 5));
+
+        let totals = snapshot.token_totals.as_ref().unwrap();
+        assert_eq!(
+            totals,
+            &BridgeTokenTotalsSnapshot {
+                turns: 3,
+                input_tokens: 34,
+                output_tokens: 13,
+                reasoning_tokens: Some(3),
+                cached_read_tokens: Some(11),
+                cached_write_tokens: Some(2),
+                total_tokens: 63,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["tokenTotals"],
+            serde_json::json!({
+                "turns": 3,
+                "inputTokens": 34,
+                "outputTokens": 13,
+                "reasoningTokens": 3,
+                "cachedReadTokens": 11,
+                "cachedWriteTokens": 2,
+                "totalTokens": 63,
+            })
         );
     }
 

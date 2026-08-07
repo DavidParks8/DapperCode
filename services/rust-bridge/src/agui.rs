@@ -1,7 +1,8 @@
 use crate::acp::events::{CanonicalEvent, FieldUpdate, MessageRole};
 use crate::acp::identity::AgentSessionId;
 use crate::acp::snapshot::{
-    is_subagent_task_tool, SessionSnapshot, SnapshotMessage, SnapshotTimelineKind, SnapshotTool,
+    is_subagent_task_tool, BridgeTokenTotalsSnapshot, SessionSnapshot, SnapshotMessage,
+    SnapshotTimelineKind, SnapshotTool,
 };
 use crate::agui_generated::{
     AgUiEvent, AgUiEventContent, AgUiEventRole, AgUiEventType, Delta, Function, Message,
@@ -118,6 +119,7 @@ pub(super) struct AgUiProjector {
     closed_threads: HashSet<String>,
     subagent_links: HashMap<String, SubagentActivityLink>,
     observed_runs: VecDeque<String>,
+    token_totals: HashMap<String, BridgeTokenTotalsSnapshot>,
 }
 
 #[derive(Debug, Default)]
@@ -986,6 +988,34 @@ impl AgUiProjector {
                 json!({ "used": used, "size": size, "cost": cost.as_deref().map(|value| bounded(value, 256)) }),
                 timestamp,
             ),
+            CanonicalEvent::TurnTokenUsage {
+                thread_id,
+                input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                cached_read_tokens,
+                cached_write_tokens,
+                total_tokens,
+                ..
+            } => {
+                let totals = self.token_totals.entry(thread_id.clone()).or_default();
+                totals.add_turn(
+                    *input_tokens,
+                    *output_tokens,
+                    *reasoning_tokens,
+                    *cached_read_tokens,
+                    *cached_write_tokens,
+                    *total_tokens,
+                );
+                push_custom(
+                    &mut projection.events,
+                    &self.runs,
+                    thread_id,
+                    "dappercode.dev/tokenTotals",
+                    serde_json::to_value(totals).expect("token totals serialize"),
+                    timestamp,
+                );
+            }
             CanonicalEvent::Mode { thread_id, id, .. } => push_custom(
                 &mut projection.events,
                 &self.runs,
@@ -1135,6 +1165,7 @@ impl AgUiProjector {
     }
 
     fn mark_thread_closed(&mut self, thread_id: &str) {
+        self.token_totals.remove(thread_id);
         if !self.closed_threads.contains(thread_id)
             && self.closed_threads.len() >= CLOSED_THREAD_CAPACITY
         {
@@ -5284,6 +5315,104 @@ mod tests {
         assert_eq!(
             elicitation_resolved.controls[0].0,
             "bridge/userInput.resolved"
+        );
+    }
+
+    #[test]
+    fn turn_token_usage_projects_cumulative_totals() {
+        let mut projector = AgUiProjector::default();
+        let thread_id = "v1.YWxwaGEtYWdlbnQ.c2Vzc2lvbg".to_string();
+        projector.project_canonical(&canonical_run_started());
+        let usage = |input_tokens,
+                     output_tokens,
+                     reasoning_tokens,
+                     cached_read_tokens,
+                     cached_write_tokens,
+                     total_tokens| CanonicalEvent::TurnTokenUsage {
+            agent_id: "alpha-agent".into(),
+            thread_id: thread_id.clone(),
+            input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            cached_read_tokens,
+            cached_write_tokens,
+            total_tokens,
+        };
+
+        let first = projector.project_canonical(&usage(10, 4, Some(2), None, Some(1), 17));
+        let first = serde_json::to_value(&first.events[0]).unwrap();
+        assert_eq!(first["event"]["name"], "dappercode.dev/tokenTotals");
+        assert_eq!(
+            first["event"]["value"],
+            json!({
+                "turns": 1,
+                "inputTokens": 10,
+                "outputTokens": 4,
+                "reasoningTokens": 2,
+                "cachedReadTokens": null,
+                "cachedWriteTokens": 1,
+                "totalTokens": 17,
+            })
+        );
+
+        let second = projector.project_canonical(&usage(8, 3, None, Some(6), None, 17));
+        let second = serde_json::to_value(&second.events[0]).unwrap();
+        assert_eq!(second["event"]["name"], "dappercode.dev/tokenTotals");
+        assert_eq!(
+            second["event"]["value"],
+            json!({
+                "turns": 2,
+                "inputTokens": 18,
+                "outputTokens": 7,
+                "reasoningTokens": 2,
+                "cachedReadTokens": 6,
+                "cachedWriteTokens": 1,
+                "totalTokens": 34,
+            })
+        );
+    }
+
+    #[test]
+    fn turn_token_usage_restarts_after_thread_closes() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&turn_run_started(1));
+        projector.project_canonical(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "alpha-agent".into(),
+            thread_id: TEST_THREAD.into(),
+            input_tokens: 10,
+            output_tokens: 4,
+            reasoning_tokens: Some(2),
+            cached_read_tokens: None,
+            cached_write_tokens: Some(1),
+            total_tokens: 17,
+        });
+        projector.project_canonical(&turn_run_finished(1));
+
+        projector.project_canonical(&turn_run_started(2));
+        let resumed = projector.project_canonical(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "alpha-agent".into(),
+            thread_id: TEST_THREAD.into(),
+            input_tokens: 3,
+            output_tokens: 2,
+            reasoning_tokens: None,
+            cached_read_tokens: Some(7),
+            cached_write_tokens: None,
+            total_tokens: 12,
+        });
+        let resumed = serde_json::to_value(&resumed.events[0]).unwrap();
+
+        assert_eq!(resumed["event"]["name"], "dappercode.dev/tokenTotals");
+        assert_eq!(
+            resumed["event"]["value"],
+            json!({
+                "turns": 1,
+                "inputTokens": 3,
+                "outputTokens": 2,
+                "reasoningTokens": null,
+                "cachedReadTokens": 7,
+                "cachedWriteTokens": null,
+                "totalTokens": 12,
+            })
         );
     }
 

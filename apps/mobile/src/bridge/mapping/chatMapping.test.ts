@@ -41,6 +41,27 @@ function malformedItems(items: unknown[]): RawThreadItem[] {
 }
 
 describe('chatMapping', () => {
+  it('projects cumulative session token totals independently from context usage', () => {
+    const tokenTotals = {
+      turns: 14,
+      inputTokens: 48200,
+      outputTokens: 12400,
+      reasoningTokens: 8900,
+      cachedReadTokens: 386000,
+      cachedWriteTokens: 52300,
+      totalTokens: 507800,
+    };
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-token-totals',
+        acpSnapshot: makeSnapshot({ tokenTotals }),
+      }),
+    );
+
+    expect(chat.tokenTotals).toEqual(tokenTotals);
+    expect(chat.acpUsage).toEqual({ used: null, size: null, cost: null });
+  });
+
   it('uses bridge session titles and ISO activity timestamps for drawer summaries', () => {
     const summary = mapChatSummary(
       toRawThread({

@@ -7,6 +7,7 @@ import type { ActivityState } from '../state/runtime';
 export type {
   ActivePlanState,
   ActivityState,
+  SessionTokenTotals,
   ThreadContextUsage,
   ThreadRuntimeSnapshot,
 } from '../state/runtime';

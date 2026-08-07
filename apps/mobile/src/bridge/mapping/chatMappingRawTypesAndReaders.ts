@@ -1,3 +1,4 @@
+import type { SessionTokenTotals } from '@bridge/types/chat';
 import { readCoercedFiniteNumber, readString, toRecord } from '@shared/runtimeValidation';
 
 export type RawThreadStatus = { type?: string } | string | null | undefined;
@@ -90,6 +91,7 @@ export interface RawAcpSnapshot {
   continuation?: RawSnapshotContinuation;
   plan: Array<{ content: string; priority: string; status: string }>;
   usage: { used?: number | null; size?: number | null; cost?: string | null };
+  tokenTotals?: SessionTokenTotals | null;
   mode?: string | null;
   config: Array<{
     id: string;

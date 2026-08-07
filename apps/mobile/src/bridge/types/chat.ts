@@ -128,6 +128,16 @@ export interface ChatPlanSnapshot {
   steps: TurnPlanStep[];
 }
 
+export interface SessionTokenTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number | null;
+  cachedReadTokens: number | null;
+  cachedWriteTokens: number | null;
+  totalTokens: number;
+}
+
 export interface Chat extends ChatSummary {
   messages: ChatMessage[];
   acpSnapshot?: RawAcpSnapshot;
@@ -136,6 +146,7 @@ export interface Chat extends ChatSummary {
   latestTurnStatus?: string | null;
   activeTurnId?: string | null;
   acpUsage?: { used: number | null; size: number | null; cost: string | null } | null;
+  tokenTotals?: SessionTokenTotals | null;
   acpMode?: string | null;
   acpConfig?: AcpConfigOption[];
   acpCommands?: Array<{ name: string; description: string }>;

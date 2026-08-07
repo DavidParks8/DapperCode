@@ -43,6 +43,7 @@ export function processAgUiRunEvents(
     registerTurnStarted,
     bumpRunWatchdog,
     cacheThreadTurnState,
+    cacheThreadSessionTokenTotals,
     cacheThreadActivity,
     stopRequestedRef,
     threadReasoningBuffersRef,
@@ -57,6 +58,7 @@ export function processAgUiRunEvents(
     clearPendingPlanImplementationPrompt,
     loadChat,
     store,
+    readThreadSessionTokenTotals,
   } = context;
   const setError = screenSetter(store, errorAtom);
   const setPendingUserInputRequest = screenSetter(store, pendingUserInputRequestAtom);
@@ -81,6 +83,13 @@ export function processAgUiRunEvents(
 
   const handlers: Partial<Record<AgUiEventEnvelope['event']['type'], () => void>> = {
     CUSTOM: () => {
+      if (isTokenTotalsCustomEvent(agUiEnvelope)) {
+        const tokenTotals = readThreadSessionTokenTotals(agUiEnvelope.event.value);
+        if (tokenTotals) {
+          cacheThreadSessionTokenTotals(agUiEnvelope.threadId, tokenTotals);
+        }
+        return;
+      }
       if (!isSubagentCustomEvent(agUiEnvelope)) {
         return;
       }
@@ -127,6 +136,13 @@ export function processAgUiRunEvents(
     if (envelope.threadId === currentId) {
       schedulePinnedScrollToBottom(true);
     }
+  }
+
+  function isTokenTotalsCustomEvent(envelope: AgUiEventEnvelope): boolean {
+    return (
+      envelope.event.type === EventType.CUSTOM &&
+      envelope.event.name === 'dappercode.dev/tokenTotals'
+    );
   }
 
   function handleRunTerminalState(envelope: AgUiEventEnvelope, failed: boolean) {

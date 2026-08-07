@@ -10,11 +10,12 @@ import {
 } from '@bridge/mapping/chatMappingChatProjection';
 import {
   readCoercedFiniteNumber,
+  readNonNegativeIntegerLike,
   readString,
   readTrimmedStringArray,
   toRecord,
 } from '@shared/runtimeValidation';
-import type { ChatSummary } from '@bridge/types/types';
+import type { ChatSummary, SessionTokenTotals } from '@bridge/types/types';
 import {
   type RawAcpSnapshot,
   type RawSnapshotCollectionMetadata,
@@ -133,6 +134,52 @@ function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
   };
 }
 
+function readFirstNonNegativeInteger(values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = readNonNegativeIntegerLike(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseSnapshotTokenTotals(value: unknown): SessionTokenTotals | null {
+  const totals = toRecord(value);
+  if (!totals) {
+    return null;
+  }
+  const turns = readNonNegativeIntegerLike(totals['turns']);
+  const inputTokens = readFirstNonNegativeInteger([totals['inputTokens'], totals['input_tokens']]);
+  const outputTokens = readFirstNonNegativeInteger([
+    totals['outputTokens'],
+    totals['output_tokens'],
+  ]);
+  const totalTokens = readFirstNonNegativeInteger([totals['totalTokens'], totals['total_tokens']]);
+  if (turns === null || inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null;
+  }
+
+  return {
+    turns,
+    inputTokens,
+    outputTokens,
+    reasoningTokens: readFirstNonNegativeInteger([
+      totals['reasoningTokens'],
+      totals['reasoning_tokens'],
+    ]),
+    cachedReadTokens: readFirstNonNegativeInteger([
+      totals['cachedReadTokens'],
+      totals['cached_read_tokens'],
+    ]),
+    cachedWriteTokens: readFirstNonNegativeInteger([
+      totals['cachedWriteTokens'],
+      totals['cached_write_tokens'],
+    ]),
+    totalTokens,
+  };
+}
+
 function readSnapshotCollectionMetadata(value: unknown): RawSnapshotCollectionMetadata | undefined {
   const collection = toRecord(value);
   const revision = readCoercedFiniteNumber(collection?.['revision']);
@@ -207,6 +254,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     continuation: parseSnapshotContinuation(snapshot['continuation']),
     plan: parseSnapshotPlan(snapshot),
     usage: parseSnapshotUsage(snapshot['usage']),
+    tokenTotals: parseSnapshotTokenTotals(snapshot['tokenTotals'] ?? snapshot['token_totals']),
     mode: readString(snapshot['mode']),
     config: parseSnapshotConfig(snapshot),
     commands: parseSnapshotCommands(snapshot),

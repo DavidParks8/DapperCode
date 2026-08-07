@@ -182,6 +182,16 @@ pub enum CanonicalEvent {
         size: u64,
         cost: Option<String>,
     },
+    TurnTokenUsage {
+        agent_id: String,
+        thread_id: String,
+        input_tokens: u64,
+        output_tokens: u64,
+        reasoning_tokens: Option<u64>,
+        cached_read_tokens: Option<u64>,
+        cached_write_tokens: Option<u64>,
+        total_tokens: u64,
+    },
     Mode {
         agent_id: String,
         thread_id: String,
@@ -238,6 +248,7 @@ impl CanonicalEvent {
             | Self::Tool { thread_id, .. }
             | Self::Plan { thread_id, .. }
             | Self::Usage { thread_id, .. }
+            | Self::TurnTokenUsage { thread_id, .. }
             | Self::Mode { thread_id, .. }
             | Self::Config { thread_id, .. }
             | Self::SessionInfo { thread_id, .. }

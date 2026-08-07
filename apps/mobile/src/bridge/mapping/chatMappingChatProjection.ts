@@ -119,6 +119,7 @@ function mapAcpSnapshotFields(snapshot: RawThread['acpSnapshot']) {
   if (!snapshot) {
     return {
       acpUsage: null,
+      tokenTotals: null,
       acpMode: null,
       acpConfig: [],
       acpCommands: [],
@@ -131,6 +132,7 @@ function mapAcpSnapshotFields(snapshot: RawThread['acpSnapshot']) {
       size: snapshot.usage.size ?? null,
       cost: snapshot.usage.cost ?? null,
     },
+    tokenTotals: snapshot.tokenTotals ?? null,
     acpMode: snapshot.mode ?? null,
     acpConfig: snapshot.config ?? [],
     acpCommands: snapshot.commands ?? [],

@@ -1110,14 +1110,30 @@ impl Command {
                     move |result| async move {
                         let snapshot = callback_session.snapshot().await;
                         let event = match result {
-                            Ok(prompt) => CanonicalEvent::RunFinished {
-                                agent_id: snapshot.agent_id,
-                                thread_id: snapshot.thread_id,
-                                run_id: callback_admission.run_id,
-                                source_turn_id: callback_admission.source_turn_id,
-                                generation: callback_admission.generation,
-                                stop_reason: prompt.stop_reason,
-                            },
+                            Ok(prompt) => {
+                                if let Some(usage) = prompt.usage.as_ref() {
+                                    callback_session
+                                        .emit(CanonicalEvent::TurnTokenUsage {
+                                            agent_id: snapshot.agent_id.clone(),
+                                            thread_id: snapshot.thread_id.clone(),
+                                            input_tokens: usage.input_tokens,
+                                            output_tokens: usage.output_tokens,
+                                            reasoning_tokens: usage.thought_tokens,
+                                            cached_read_tokens: usage.cached_read_tokens,
+                                            cached_write_tokens: usage.cached_write_tokens,
+                                            total_tokens: usage.total_tokens,
+                                        })
+                                        .await;
+                                }
+                                CanonicalEvent::RunFinished {
+                                    agent_id: snapshot.agent_id,
+                                    thread_id: snapshot.thread_id,
+                                    run_id: callback_admission.run_id,
+                                    source_turn_id: callback_admission.source_turn_id,
+                                    generation: callback_admission.generation,
+                                    stop_reason: prompt.stop_reason,
+                                }
+                            }
                             Err(error) => CanonicalEvent::RunFailed {
                                 agent_id: snapshot.agent_id,
                                 thread_id: snapshot.thread_id,
@@ -1580,6 +1596,104 @@ mod tests {
 
     fn initialized(capabilities: AgentCapabilities) -> InitializeResponse {
         InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(capabilities)
+    }
+
+    #[tokio::test]
+    async fn prompt_response_usage_emits_before_finish_and_updates_snapshot() {
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new()))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_request: NewSessionRequest, responder, _| {
+                    responder.respond(NewSessionResponse::new("usage-session"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_request: PromptRequest, responder, _| {
+                    let response: PromptResponse = serde_json::from_value(serde_json::json!({
+                        "stopReason": "end_turn",
+                        "usage": {
+                            "totalTokens": 42,
+                            "inputTokens": 20,
+                            "outputTokens": 10,
+                            "thoughtTokens": 5,
+                            "cachedReadTokens": 6,
+                            "cachedWriteTokens": 1
+                        }
+                    }))
+                    .expect("prompt usage fixture");
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("usage-agent".into(), agent, Duration::from_secs(1))
+                .await
+                .expect("agent starts");
+        let created = connection
+            .new_session(NewSessionRequest::new("/workspace"))
+            .await
+            .expect("session created");
+        let session = connection.session(&created.session_id).await.unwrap();
+        let mut events = session.take_events().await.expect("session event receiver");
+
+        connection
+            .prompt(
+                PromptRequest::new(created.session_id, vec!["count tokens".into()]),
+                "usage-run".into(),
+                "usage-turn".into(),
+            )
+            .await
+            .expect("prompt admitted");
+
+        let mut usage_seen = false;
+        loop {
+            match events.recv().await.expect("prompt event") {
+                CanonicalEvent::TurnTokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    reasoning_tokens,
+                    cached_read_tokens,
+                    cached_write_tokens,
+                    total_tokens,
+                    ..
+                } => {
+                    assert!(!usage_seen);
+                    usage_seen = true;
+                    assert_eq!(input_tokens, 20);
+                    assert_eq!(output_tokens, 10);
+                    assert_eq!(reasoning_tokens, Some(5));
+                    assert_eq!(cached_read_tokens, Some(6));
+                    assert_eq!(cached_write_tokens, Some(1));
+                    assert_eq!(total_tokens, 42);
+                }
+                CanonicalEvent::RunFinished { .. } => {
+                    assert!(usage_seen, "usage must settle before the run finishes");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            session.snapshot().await.token_totals,
+            Some(crate::acp::snapshot::BridgeTokenTotalsSnapshot {
+                turns: 1,
+                input_tokens: 20,
+                output_tokens: 10,
+                reasoning_tokens: Some(5),
+                cached_read_tokens: Some(6),
+                cached_write_tokens: Some(1),
+                total_tokens: 42,
+            })
+        );
+        connection.shutdown().await.expect("shutdown");
     }
 
     fn steer_meta() -> agent_client_protocol::schema::v1::Meta {
@@ -4243,7 +4357,9 @@ mod tests {
                 break;
             }
         }
-        assert!(session.snapshot().await.active_generation.is_none());
+        let settled = session.snapshot().await;
+        assert!(settled.active_generation.is_none());
+        assert_eq!(settled.token_totals, None);
         connection.shutdown().await.expect("connection shuts down");
     }
 

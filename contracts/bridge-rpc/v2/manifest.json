@@ -419,6 +419,15 @@
         },
         "plan": [{ "content": "Inspect state", "priority": "high", "status": "completed" }],
         "usage": { "used": 120, "size": 4096, "cost": "$0.01" },
+        "tokenTotals": {
+          "turns": 14,
+          "inputTokens": 48200,
+          "outputTokens": 12400,
+          "reasoningTokens": 8900,
+          "cachedReadTokens": 386000,
+          "cachedWriteTokens": 52300,
+          "totalTokens": 507800
+        },
         "mode": "plan",
         "config": [
           {

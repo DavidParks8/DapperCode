@@ -537,6 +537,81 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('restores session token totals after replay so the usage chip survives reconnect', async () => {
+      const tokenTotals = {
+        turns: 2,
+        inputTokens: 48200,
+        outputTokens: 12400,
+        reasoningTokens: null,
+        cachedReadTokens: 386000,
+        cachedWriteTokens: null,
+        totalTokens: 446600,
+      };
+      const chatWithTokenTotals = { ...chat, tokenTotals };
+      const api = createApi({ loadedChat: chatWithTokenTotals, cachedChat: chatWithTokenTotals });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chatWithTokenTotals,
+      });
+      const root = tree.root as Queryable;
+      const label = 'Token usage, 446,600 tokens this session';
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 44 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    });
+
+    it('shows token usage after a generic AG-UI token totals event', async () => {
+      const { tree } = await renderMain({
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const label = 'Token usage, 507,800 tokens this session';
+
+      expect(root.findAll((node) => node.props['accessibilityLabel'] === label)).toHaveLength(0);
+      await emitWs({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: chat.id,
+          runId: 'run-token-totals',
+          event: {
+            type: 'CUSTOM',
+            name: 'dappercode.dev/tokenTotals',
+            value: {
+              turns: 14,
+              inputTokens: 48200,
+              outputTokens: 12400,
+              reasoningTokens: 8900,
+              cachedReadTokens: 386000,
+              cachedWriteTokens: 52300,
+              totalTokens: 507800,
+            },
+          },
+        },
+      });
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    });
+
     it('shows the new chat screen while navigation away from the previous route settles', async () => {
       router.navigate(routes.chat('profile-1', chat.id));
       const api = createApi({ cachedChat: chat });
