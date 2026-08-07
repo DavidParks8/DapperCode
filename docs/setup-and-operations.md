@@ -80,7 +80,9 @@ Bridge ports are allocated per workspace rather than defaulted, so several bridg
 - Passing an explicit `--port` that another workspace owns fails and names that workspace.
 
 `dappercode list` reports every configured profile with its state and port. `dappercode stop --all`
-tears down every bridge this app owns, which is what the desktop app runs when you quit it.
+tears down every bridge this app owns, which is what the desktop app runs when you quit it. The
+macOS app restores only the selected workspace on launch. Other profiles start when selected, and a
+non-selected bridge is suspended after five minutes with no connected device.
 
 ## Agent Integrity
 
@@ -124,8 +126,9 @@ npm run operator -- forget --workspace /path/to/repository
 - `--agent-args '<space-separated arguments>'`
 
 `start` and `restart` accept `--owner-pid <pid>`; the bridge exits when that process does. `list`
-returns one snapshot per configured workspace. `stop --all` stops every bridge this app owns while
-preserving the remembered running state for the next macOS app launch.
+returns one snapshot per configured workspace. `suspend` stops one bridge without clearing its
+remembered state. `stop --all` stops every bridge this app owns while preserving which profiles may
+be restored when selected on a future macOS app launch.
 `forget` removes a workspace's profile, token, and profile directory once its bridge is stopped.
 
 ## Process Ownership

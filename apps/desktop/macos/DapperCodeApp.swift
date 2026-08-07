@@ -108,6 +108,8 @@ private final class BridgeModel: ObservableObject {
     @Published var agentExecutable = ""
     @Published var agentArguments = "acp"
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    private var idleSinceByProfile: [String: Date] = [:]
+    private let inactiveBridgeGracePeriod: TimeInterval = 5 * 60
 
     var workspace: String {
         get {
@@ -144,7 +146,7 @@ private final class BridgeModel: ObservableObject {
         Task {
             await discoverDefaultAgent()
             await refresh()
-            await autostartRememberedBridges()
+            await autostartSelectedBridge()
             await poll()
         }
     }
@@ -242,7 +244,10 @@ private final class BridgeModel: ObservableObject {
         panel.directoryURL = URL(fileURLWithPath: workspace)
         if panel.runModal() == .OK, let url = panel.url {
             workspace = url.path
-            Task { await refresh() }
+            Task {
+                await refresh()
+                await autostartSelectedBridge()
+            }
         }
     }
 
@@ -305,34 +310,88 @@ private final class BridgeModel: ObservableObject {
             try? await Task.sleep(for: .seconds(5))
             if !isBusy {
                 await refresh()
+                await suspendInactiveBridges()
             }
         }
     }
 
-    private func autostartRememberedBridges() async {
-        let rememberedBridges = bridges.filter {
-            BridgeLaunchPolicy.shouldStart(
+    private func autostartSelectedBridge() async {
+        guard let bridge = bridges.first(where: {
+            BridgeLaunchPolicy.shouldRestore(
                 autoStart: $0.autoStart,
                 isRunning: $0.isRunning,
-                state: $0.state
+                state: $0.state,
+                isSelected: $0.profileId == snapshot.profileId
             )
-        }
-        guard !rememberedBridges.isEmpty else { return }
+        }) else { return }
 
         isBusy = true
         defer { isBusy = false }
-        for bridge in rememberedBridges {
+        do {
+            _ = try await invoke(
+                ["start", "--workspace", bridge.workspace],
+                as: BridgeSnapshot.self,
+                includeWorkspace: false
+            )
+        } catch {
+            errorMessage = "Could not start \(bridge.workspaceName): \(error.localizedDescription)"
+        }
+        await refresh()
+    }
+
+    private func suspendInactiveBridges(now: Date = Date()) async {
+        let selectedProfileId = snapshot.profileId
+        let knownProfileIds = Set(bridges.map(\.profileId))
+        idleSinceByProfile = idleSinceByProfile.filter { knownProfileIds.contains($0.key) }
+        var bridgesToSuspend: [BridgeSnapshot] = []
+
+        for bridge in bridges {
+            let isSelected = bridge.profileId == selectedProfileId
+            guard BridgeLaunchPolicy.isIdleCandidate(
+                isSelected: isSelected,
+                isRunning: bridge.isRunning,
+                managedProcess: bridge.managedProcess,
+                connectedClients: bridge.connectedClients
+            ) else {
+                idleSinceByProfile.removeValue(forKey: bridge.profileId)
+                continue
+            }
+
+            let idleSince = idleSinceByProfile[bridge.profileId] ?? now
+            idleSinceByProfile[bridge.profileId] = idleSince
+            let idleFor = max(0, now.timeIntervalSince(idleSince))
+            if BridgeLaunchPolicy.shouldSuspend(
+                isSelected: isSelected,
+                isRunning: bridge.isRunning,
+                managedProcess: bridge.managedProcess,
+                connectedClients: bridge.connectedClients,
+                idleFor: idleFor,
+                gracePeriod: inactiveBridgeGracePeriod
+            ) {
+                bridgesToSuspend.append(bridge)
+            }
+        }
+
+        guard !bridgesToSuspend.isEmpty else { return }
+        isBusy = true
+        defer { isBusy = false }
+        var suspendedAnyBridge = false
+        for bridge in bridgesToSuspend {
             do {
                 _ = try await invoke(
-                    ["start", "--workspace", bridge.workspace],
+                    ["suspend", "--workspace", bridge.workspace],
                     as: BridgeSnapshot.self,
                     includeWorkspace: false
                 )
+                suspendedAnyBridge = true
             } catch {
-                errorMessage = "Could not start \(bridge.workspaceName): \(error.localizedDescription)"
+                errorMessage = "Could not suspend \(bridge.workspaceName): \(error.localizedDescription)"
             }
+            idleSinceByProfile.removeValue(forKey: bridge.profileId)
         }
-        await refresh()
+        if suspendedAnyBridge {
+            await refresh()
+        }
     }
 
     private func discoverDefaultAgent() async {
@@ -473,7 +532,7 @@ private struct DashboardView: View {
                 } header: {
                     Text("Bridges")
                 } footer: {
-                    Text("Each workspace gets its own port and token, so worktrees can run at the same time. Quitting DapperCode stops every bridge and restores bridges that were running when it closed.")
+                    Text("Each workspace keeps its own port and token. DapperCode restores only the selected workspace and suspends non-selected bridges after five minutes without a connected device.")
                 }
             }
 

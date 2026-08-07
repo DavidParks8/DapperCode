@@ -136,7 +136,7 @@ fn run_workspace_command(
                 None => emit(unconfigured_snapshot(&workspace, paths)?, human),
             }
         }
-        "start" | "stop" | "restart" => {
+        "start" | "stop" | "restart" | "suspend" => {
             let owner_pid = owner_pid_arg(&mut args)?;
             ensure_no_args(&args)?;
             let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, owner_pid)? else {
@@ -144,12 +144,18 @@ fn run_workspace_command(
             };
             let snapshot = match command {
                 "start" => supervisor.start()?,
-                "stop" => supervisor.stop()?,
-                _ => supervisor.restart()?,
+                "stop" | "suspend" => supervisor.stop()?,
+                "restart" => supervisor.restart()?,
+                _ => unreachable!("lifecycle command matched above"),
             };
-            set_profile_auto_start(paths, &workspace, command != "stop")?;
+            let auto_start = persist_lifecycle_auto_start(
+                paths,
+                &workspace,
+                command,
+                supervisor.profile().auto_start,
+            )?;
             let mut response = operator_snapshot(&supervisor, snapshot, paths);
-            response.auto_start = command != "stop";
+            response.auto_start = auto_start;
             emit(response, human)
         }
         "setup" => run_setup(workspace, args, human, paths, secrets),
@@ -362,6 +368,28 @@ fn set_profile_auto_start(paths: &AppPaths, workspace: &Path, enabled: bool) -> 
     })
 }
 
+fn lifecycle_auto_start_update(command: &str) -> Option<bool> {
+    match command {
+        "start" | "restart" => Some(true),
+        "stop" => Some(false),
+        "suspend" => None,
+        _ => None,
+    }
+}
+
+fn persist_lifecycle_auto_start(
+    paths: &AppPaths,
+    workspace: &Path,
+    command: &str,
+    current: bool,
+) -> Result<bool> {
+    let Some(auto_start) = lifecycle_auto_start_update(command) else {
+        return Ok(current);
+    };
+    set_profile_auto_start(paths, workspace, auto_start)?;
+    Ok(auto_start)
+}
+
 fn supervisor(
     workspace: PathBuf,
     paths: &AppPaths,
@@ -555,6 +583,7 @@ Commands:\n\
   start [--owner-pid PID]\n\
   stop [--all]\n\
   restart [--owner-pid PID]\n\
+  suspend\n\
   setup --host HOST [--network local|tailscale] [--port 8787]\n\
         [--agent-id opencode] [--agent-executable PATH] [--agent-args 'acp']\n\
   forget\n\
@@ -636,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn remembers_start_and_stop_transitions_for_a_workspace() {
+    fn remembers_start_stop_and_suspend_transitions_for_a_workspace() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let paths = AppPaths::for_tests(data.path().to_path_buf());
@@ -648,7 +677,16 @@ mod tests {
             })
             .unwrap();
 
-        set_profile_auto_start(&paths, workspace.path(), true).unwrap();
+        assert!(persist_lifecycle_auto_start(&paths, workspace.path(), "start", false).unwrap());
+        assert!(
+            paths
+                .load_config()
+                .unwrap()
+                .find(&profile_id)
+                .unwrap()
+                .auto_start
+        );
+        assert!(persist_lifecycle_auto_start(&paths, workspace.path(), "suspend", true).unwrap());
         assert!(
             paths
                 .load_config()
@@ -658,7 +696,7 @@ mod tests {
                 .auto_start
         );
 
-        set_profile_auto_start(&paths, workspace.path(), false).unwrap();
+        assert!(!persist_lifecycle_auto_start(&paths, workspace.path(), "stop", true).unwrap());
         assert!(
             !paths
                 .load_config()
@@ -667,5 +705,9 @@ mod tests {
                 .unwrap()
                 .auto_start
         );
+        assert_eq!(lifecycle_auto_start_update("start"), Some(true));
+        assert_eq!(lifecycle_auto_start_update("restart"), Some(true));
+        assert_eq!(lifecycle_auto_start_update("stop"), Some(false));
+        assert_eq!(lifecycle_auto_start_update("suspend"), None);
     }
 }

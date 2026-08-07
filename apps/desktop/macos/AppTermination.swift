@@ -85,7 +85,40 @@ enum ApplicationTermination {
 }
 
 enum BridgeLaunchPolicy {
-    static func shouldStart(autoStart: Bool, isRunning: Bool, state: String) -> Bool {
-        autoStart && !isRunning && state != "needsSetup"
+    static func shouldRestore(
+        autoStart: Bool,
+        isRunning: Bool,
+        state: String,
+        isSelected: Bool
+    ) -> Bool {
+        isSelected && autoStart && !isRunning && state == "stopped"
+    }
+
+    static func isIdleCandidate(
+        isSelected: Bool,
+        isRunning: Bool,
+        managedProcess: Bool,
+        connectedClients: Int
+    ) -> Bool {
+        !isSelected
+            && isRunning
+            && managedProcess
+            && connectedClients == 0
+    }
+
+    static func shouldSuspend(
+        isSelected: Bool,
+        isRunning: Bool,
+        managedProcess: Bool,
+        connectedClients: Int,
+        idleFor: TimeInterval,
+        gracePeriod: TimeInterval
+    ) -> Bool {
+        isIdleCandidate(
+            isSelected: isSelected,
+            isRunning: isRunning,
+            managedProcess: managedProcess,
+            connectedClients: connectedClients
+        ) && idleFor >= gracePeriod
     }
 }
