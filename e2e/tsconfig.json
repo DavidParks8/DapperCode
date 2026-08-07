@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023", "dom"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@bridge/*": ["../apps/mobile/src/bridge/*"],
+      "@shared/*": ["../apps/mobile/src/shared/*"],
+      "@shell/*": ["../apps/mobile/src/shell/*"]
+    }
+  },
+  "include": ["**/*.ts"]
+}

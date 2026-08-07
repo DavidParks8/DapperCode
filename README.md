@@ -116,6 +116,7 @@ protected workflow. There is no npm publication workflow for the bridge.
 
 - [Setup and operations](docs/setup-and-operations.md)
 - [Troubleshooting](docs/troubleshooting.md)
+- [Mobile end-to-end layout tests](docs/mobile-e2e-tests.md)
 - [Realtime streaming limitations](docs/realtime-streaming-limitations.md)
 - [Push notifications](docs/push-notifications.md)
 - [Browser preview limitations](docs/browser-preview-limitations.md)

@@ -407,7 +407,7 @@ export function ChatInput(props: ChatInputProps) {
   };
 
   return (
-    <View style={styles.shell}>
+    <View style={styles.shell} testID="chat-composer">
       <View
         style={[
           styles.container,

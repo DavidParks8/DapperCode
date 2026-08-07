@@ -536,6 +536,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           windowSize={listBatchingConfig.windowSize}
           removeClippedSubviews={false}
           accessibilityLabel={`${chat.title || 'Chat'} transcript`}
+          testID="chat-transcript"
         />
         <TranscriptEdgeScrim bottomInset={bottomInset} edgeStyle={styles.transcriptEdgeScrim} />
         {renderScrollRail({
