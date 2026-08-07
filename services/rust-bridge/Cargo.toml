@@ -11,7 +11,6 @@ publish = false
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 
 [dependencies]
-async-process = "2.5"
 axum = { version = "0.8", features = ["ws", "http1", "tokio", "multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }

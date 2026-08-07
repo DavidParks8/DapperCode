@@ -10,12 +10,12 @@ use agent_client_protocol::schema::v1::{
     LoadSessionRequest, NewSessionRequest, PromptRequest, ResumeSessionRequest,
     SessionConfigOptionValue, SessionId, SetSessionConfigOptionRequest,
 };
-use async_process::Command as AsyncCommand;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command as AsyncCommand;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -919,14 +919,18 @@ impl AgentManager {
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         for name in ["PATH", "HOME", "TMPDIR", "LANG", "XDG_CONFIG_HOME"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
         }
+        let Ok(child) = command.spawn() else {
+            return Vec::new();
+        };
         let Ok(Ok(output)) =
-            tokio::time::timeout(OPENCODE_MODEL_CATALOG_TIMEOUT, command.output()).await
+            tokio::time::timeout(OPENCODE_MODEL_CATALOG_TIMEOUT, child.wait_with_output()).await
         else {
             return Vec::new();
         };
@@ -2376,14 +2380,18 @@ impl AgentManager {
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         for name in ["PATH", "HOME", "TMPDIR", "LANG", "XDG_CONFIG_HOME"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
         }
+        let Ok(child) = command.spawn() else {
+            return HashMap::new();
+        };
         let Ok(Ok(output)) =
-            tokio::time::timeout(OPENCODE_SESSION_CATALOG_TIMEOUT, command.output()).await
+            tokio::time::timeout(OPENCODE_SESSION_CATALOG_TIMEOUT, child.wait_with_output()).await
         else {
             return HashMap::new();
         };
@@ -2581,13 +2589,18 @@ impl AgentManager {
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         for name in ["PATH", "HOME", "TMPDIR", "LANG", "XDG_CONFIG_HOME"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
         }
-        let Ok(Ok(output)) = tokio::time::timeout(OPENCODE_EXPORT_TIMEOUT, command.output()).await
+        let Ok(child) = command.spawn() else {
+            return None;
+        };
+        let Ok(Ok(output)) =
+            tokio::time::timeout(OPENCODE_EXPORT_TIMEOUT, child.wait_with_output()).await
         else {
             return None;
         };

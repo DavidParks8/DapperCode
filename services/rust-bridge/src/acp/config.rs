@@ -8,9 +8,9 @@ use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use agent_client_protocol::{Client, ConnectTo, Lines};
-use futures_util::{AsyncBufReadExt, AsyncWriteExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 const MAX_ARGS: usize = 64;
 const MAX_ARG_BYTES: usize = 16 * 1024;
@@ -209,6 +209,8 @@ impl ResolvedAgentManifest {
             executable,
             argv: self.argv.iter().chain(extra_argv.iter()).cloned().collect(),
             environment,
+            #[cfg(test)]
+            stdout_poll_count: None,
         })
     }
 }
@@ -217,11 +219,13 @@ pub struct IsolatedAcpAgent {
     executable: PathBuf,
     argv: Vec<String>,
     environment: BTreeMap<String, String>,
+    #[cfg(test)]
+    stdout_poll_count: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
 }
 
 impl IsolatedAcpAgent {
-    fn spawn_process(&self) -> std::io::Result<async_process::Child> {
-        let mut command = async_process::Command::new(&self.executable);
+    fn spawn_process(&self) -> std::io::Result<tokio::process::Child> {
+        let mut command = tokio::process::Command::new(&self.executable);
         command
             .args(&self.argv)
             .env_clear()
@@ -229,7 +233,28 @@ impl IsolatedAcpAgent {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
+            .kill_on_drop(true)
             .spawn()
+    }
+}
+
+#[cfg(test)]
+struct DiagnosticReader<R> {
+    inner: R,
+    poll_count: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+#[cfg(test)]
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for DiagnosticReader<R> {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+        buffer: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if let Some(poll_count) = &self.poll_count {
+            poll_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        std::pin::Pin::new(&mut self.inner).poll_read(context, buffer)
     }
 }
 
@@ -247,7 +272,18 @@ impl ConnectTo<Client> for IsolatedAcpAgent {
         let stdout = child.stdout.take().ok_or_else(|| {
             agent_client_protocol::util::internal_error("failed to open ACP stdout")
         })?;
-        let incoming = futures_util::io::BufReader::new(stdout).lines();
+        #[cfg(test)]
+        let stdout = DiagnosticReader {
+            inner: stdout,
+            poll_count: self.stdout_poll_count,
+        };
+        let incoming = futures_util::stream::try_unfold(
+            tokio::io::BufReader::new(stdout).lines(),
+            |mut lines| async move {
+                let line = lines.next_line().await?;
+                Ok::<_, std::io::Error>(line.map(|line| (line, lines)))
+            },
+        );
         let outgoing = futures_util::sink::unfold(stdin, async move |mut writer, line: String| {
             writer.write_all(line.as_bytes()).await?;
             writer.write_all(b"\n").await?;
@@ -258,31 +294,34 @@ impl ConnectTo<Client> for IsolatedAcpAgent {
             client,
         );
         futures_util::pin_mut!(protocol);
-        let status = async move {
-            struct ChildGuard(async_process::Child);
-
-            impl Drop for ChildGuard {
-                fn drop(&mut self) {
-                    let _ = self.0.kill();
+        let (status_tx, status_rx) = tokio::sync::oneshot::channel();
+        let status_task = tokio::spawn(async move {
+            let _ = status_tx.send(child.wait().await);
+        });
+        match futures_util::future::select(protocol, status_rx).await {
+            futures_util::future::Either::Left((result, _)) => {
+                status_task.abort();
+                let _ = status_task.await;
+                result
+            }
+            futures_util::future::Either::Right((status, _)) => {
+                if let Err(error) = status_task.await {
+                    return Err(agent_client_protocol::util::internal_error(format!(
+                        "ACP process wait task failed: {error}"
+                    )));
                 }
-            }
-
-            let mut guard = ChildGuard(child);
-            guard.0.status().await
-        };
-        futures_util::pin_mut!(status);
-        match futures_util::future::select(protocol, status).await {
-            futures_util::future::Either::Left((result, _)) => result,
-            futures_util::future::Either::Right((Ok(status), _)) if status.success() => Ok(()),
-            futures_util::future::Either::Right((Ok(status), _)) => {
-                Err(agent_client_protocol::util::internal_error(format!(
-                    "ACP process exited with {status}"
-                )))
-            }
-            futures_util::future::Either::Right((Err(error), _)) => {
-                Err(agent_client_protocol::util::internal_error(format!(
-                    "failed to wait for ACP process: {error}"
-                )))
+                match status {
+                    Ok(Ok(status)) if status.success() => Ok(()),
+                    Ok(Ok(status)) => Err(agent_client_protocol::util::internal_error(format!(
+                        "ACP process exited with {status}"
+                    ))),
+                    Ok(Err(error)) => Err(agent_client_protocol::util::internal_error(format!(
+                        "failed to wait for ACP process: {error}"
+                    ))),
+                    Err(error) => Err(agent_client_protocol::util::internal_error(format!(
+                        "ACP process wait task ended without status: {error}"
+                    ))),
+                }
             }
         }
     }
@@ -613,9 +652,69 @@ mod tests {
     use super::*;
 
     use serde::Deserialize;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     static TEST_TREE_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn unrelated_child_exits_do_not_poll_idle_acp_stdout() {
+        use crate::acp::runtime::AcpConnection;
+
+        const IDLE_AGENT: &str = r#"
+IFS= read -r request || exit 1
+id=$(printf '%s\n' "$request" | /usr/bin/sed -E 's/.*"id":"([^"]+)".*/\1/')
+printf '{"jsonrpc":"2.0","id":"%s","result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+while IFS= read -r _; do :; done
+"#;
+
+        let poll_count = Arc::new(AtomicUsize::new(0));
+        let agent = IsolatedAcpAgent {
+            executable: PathBuf::from("/bin/sh"),
+            argv: vec!["-c".to_string(), IDLE_AGENT.to_string()],
+            environment: BTreeMap::new(),
+            stdout_poll_count: Some(Arc::clone(&poll_count)),
+        };
+
+        let (connection, _) = AcpConnection::start_transport(
+            "idle-agent".to_string(),
+            agent,
+            std::time::Duration::from_secs(2),
+        )
+        .await
+        .expect("idle ACP agent starts");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        poll_count.store(0, Ordering::Relaxed);
+        tokio::task::spawn_blocking(|| {
+            for _ in 0..32 {
+                assert!(std::process::Command::new("/usr/bin/true")
+                    .status()
+                    .expect("spawn unrelated child")
+                    .success());
+            }
+        })
+        .await
+        .expect("unrelated child task");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let idle_polls = poll_count.load(Ordering::Relaxed);
+        connection.shutdown().await.expect("idle ACP agent stops");
+
+        assert_eq!(
+            idle_polls, 0,
+            "unrelated child exits polled idle ACP stdout"
+        );
+    }
+
+    #[test]
+    fn bridge_does_not_directly_depend_on_async_process() {
+        assert!(
+            !include_str!("../../Cargo.toml")
+                .lines()
+                .any(|line| line.trim_start().starts_with("async-process =")),
+            "async-process wakes idle ACP transports in optimized bridge builds"
+        );
+    }
 
     #[derive(Deserialize)]
     #[serde(tag = "type", rename_all = "lowercase")]
@@ -757,7 +856,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn isolated_agent_process_receives_only_baseline_and_manifest_environment() {
-        use futures_util::io::AsyncReadExt;
+        use tokio::io::AsyncReadExt;
 
         let root = test_tree("isolated-environment");
         let executable = root.join("report-environment.sh");
@@ -796,7 +895,7 @@ mod tests {
             .read_to_string(&mut output)
             .await
             .expect("read fixture environment");
-        assert!(child.status().await.expect("wait for fixture").success());
+        assert!(child.wait().await.expect("wait for fixture").success());
         assert!(output.contains("AGENT_MODE=fixture\n"));
         assert!(output.contains("HOME=/tmp/fixture-home\n"));
         assert!(output.contains("LANG=C\n"));

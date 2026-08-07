@@ -392,7 +392,6 @@ name = "dappercode-bridge"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
- "async-process",
  "axum",
  "base64",
  "chrono",
