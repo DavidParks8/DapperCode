@@ -212,24 +212,6 @@ describe('conversation fork affordance end to end', () => {
     act(() => tree.unmount());
   });
 
-  it('falls back to request boundaries against a bridge without response forking', () => {
-    const capabilities = contractCapabilities();
-    const agentId = capabilities.activeAgentId;
-    if (!agentId) {
-      throw new Error('Expected the contract fixture to name an active agent');
-    }
-    const supports = { ...capabilities.supportsByAgent[agentId] };
-    delete supports.threadForkFromResponse;
-    const tree = renderScreen({
-      activeAgentSupports: supports,
-      forkConversation: jest.fn(async () => undefined),
-    });
-
-    // Only the response followed by another request can name a boundary on an older bridge.
-    expect([...forkButtonsByMessageId(tree).keys()]).toEqual(['assistant-1']);
-    act(() => tree.unmount());
-  });
-
   it('offers nothing when the agent cannot fork at all', () => {
     const unsupported = contractCapabilityCase('unsupportedOperations');
     const tree = renderScreen({

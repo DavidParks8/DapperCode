@@ -135,22 +135,17 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
 /**
  * Maps the message that carries the fork action to the boundary the bridge is asked to fork at.
  *
- * When the bridge can resolve a boundary named by a response, every completed turn - including the
- * newest one - offers the action on its last settled response and names that response. Older
- * bridges only accept the request that follows a response, which leaves the newest response with
- * nothing to name, so no action is offered there.
+ * Every completed turn - including the newest one - offers the action on its last settled response
+ * and names that response. The bridge resolves the response to the end of its complete turn.
  */
 export function forkBoundariesByActionMessageId(
   messages: ChatMessage[],
   chatStatus: ChatStatus,
-  options: { fromResponse: boolean } = { fromResponse: false },
 ): ReadonlyMap<string, string> {
   if (chatStatus === 'running') {
     return new Map<string, string>();
   }
-  return options.fromResponse
-    ? forkBoundariesAtResponses(messages)
-    : forkBoundariesAtFollowingRequest(messages);
+  return forkBoundariesAtResponses(messages);
 }
 
 function forkBoundariesAtResponses(messages: ChatMessage[]): ReadonlyMap<string, string> {
@@ -174,39 +169,6 @@ function forkBoundariesAtResponses(messages: ChatMessage[]): ReadonlyMap<string,
     }
   }
   closeTurn();
-  return boundaries;
-}
-
-function forkBoundariesAtFollowingRequest(messages: ChatMessage[]): ReadonlyMap<string, string> {
-  const boundaries = new Map<string, string>();
-  let userOrdinal = 0;
-  let precedingResponseId: string | null = null;
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message?.role === 'assistant' && !message.pending) {
-      precedingResponseId = message.id;
-      continue;
-    }
-    if (message?.role !== 'user') {
-      continue;
-    }
-    userOrdinal += 1;
-    if (userOrdinal === 1 || !precedingResponseId || isLocallyMintedMessageId(message.id)) {
-      precedingResponseId = null;
-      continue;
-    }
-    const remainder = messages.slice(index + 1);
-    const nextUserIndex = remainder.findIndex((candidate) => candidate.role === 'user');
-    const turnMessages = nextUserIndex >= 0 ? remainder.slice(0, nextUserIndex) : remainder;
-    const hasSettledResponse = turnMessages.some(
-      (candidate) =>
-        (candidate.role === 'assistant' || candidate.role === 'reasoning') && !candidate.pending,
-    );
-    if (hasSettledResponse) {
-      boundaries.set(precedingResponseId, message.id);
-    }
-    precedingResponseId = null;
-  }
   return boundaries;
 }
 

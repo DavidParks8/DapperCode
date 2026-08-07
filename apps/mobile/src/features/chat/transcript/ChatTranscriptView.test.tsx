@@ -305,7 +305,7 @@ describe('ChatTranscriptView conversation fork action', () => {
       response.props.onForkConversation?.();
     });
     expect(onForkConversation).toHaveBeenCalledTimes(1);
-    expect(onForkConversation).toHaveBeenCalledWith('user-2');
+    expect(onForkConversation).toHaveBeenCalledWith('assistant-1');
 
     await act(async () => {
       resolveFork?.();
@@ -323,7 +323,6 @@ describe('ChatTranscriptView conversation fork action', () => {
     const tree = render({
       chat: makeChat({ messages }),
       supportsConversationFork: true,
-      supportsForkFromResponse: true,
       onForkConversation,
     });
     const list = getList(tree);

@@ -82,7 +82,6 @@ export interface ChatTranscriptViewProps {
   onLoadEarlier?: () => void;
   scrollRailEnabled?: boolean;
   supportsConversationFork?: boolean;
-  supportsForkFromResponse?: boolean;
   onForkConversation?: (messageId: string) => Promise<unknown>;
   activity?: ActivityState | null;
 }
@@ -110,7 +109,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   onLoadEarlier,
   scrollRailEnabled = true,
   supportsConversationFork = false,
-  supportsForkFromResponse = false,
   onForkConversation,
   activity = null,
 }: ChatTranscriptViewProps) {
@@ -193,7 +191,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     parentThreadId: chat.parentThreadId,
     unavailableCount: continuationState?.unavailableCount,
     supportsConversationFork,
-    supportsForkFromResponse,
   });
   const userMessageAnchorCount = userMessageAnchors.length;
   useEffect(() => {

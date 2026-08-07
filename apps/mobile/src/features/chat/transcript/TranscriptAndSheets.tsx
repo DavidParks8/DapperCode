@@ -170,7 +170,6 @@ function TranscriptOrComposerContent({
         continuationState={transcriptContinuationState}
         onLoadEarlier={handleLoadEarlierPress}
         supportsConversationFork={activeAgentSupports?.threadFork === true}
-        supportsForkFromResponse={activeAgentSupports?.threadForkFromResponse === true}
         onForkConversation={forkConversation}
         activity={activity}
       />

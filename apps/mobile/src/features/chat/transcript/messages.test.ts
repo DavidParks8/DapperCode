@@ -24,17 +24,8 @@ describe('forkBoundariesByActionMessageId', () => {
     message('assistant-3', 'assistant', 'Third response'),
   ];
 
-  it('offers settled authoritative non-first requests', () => {
+  it('names every settled response, including the newest', () => {
     expect([...forkBoundariesByActionMessageId(settledConversation, 'complete')]).toEqual([
-      ['assistant-1', 'user-2'],
-      ['assistant-2', 'user-3'],
-    ]);
-  });
-
-  it('names every settled response, including the newest, when the bridge resolves responses', () => {
-    expect([
-      ...forkBoundariesByActionMessageId(settledConversation, 'complete', { fromResponse: true }),
-    ]).toEqual([
       ['assistant-1', 'assistant-1'],
       ['assistant-2', 'assistant-2'],
       ['assistant-3', 'assistant-3'],
@@ -47,9 +38,9 @@ describe('forkBoundariesByActionMessageId', () => {
       message('assistant-1a', 'assistant', 'Partial response'),
       message('assistant-1b', 'assistant', 'Final response'),
     ];
-    expect([
-      ...forkBoundariesByActionMessageId(messages, 'complete', { fromResponse: true }),
-    ]).toEqual([['assistant-1b', 'assistant-1b']]);
+    expect([...forkBoundariesByActionMessageId(messages, 'complete')]).toEqual([
+      ['assistant-1b', 'assistant-1b'],
+    ]);
   });
 
   it('skips pending and locally minted responses the bridge has never seen', () => {
@@ -59,9 +50,7 @@ describe('forkBoundariesByActionMessageId', () => {
       message('user-2', 'user', 'Second request'),
       { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
     ];
-    expect([
-      ...forkBoundariesByActionMessageId(messages, 'complete', { fromResponse: true }),
-    ]).toEqual([]);
+    expect([...forkBoundariesByActionMessageId(messages, 'complete')]).toEqual([]);
   });
 
   it('suppresses every boundary while the conversation is running', () => {
@@ -71,9 +60,6 @@ describe('forkBoundariesByActionMessageId', () => {
       { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
     ];
     expect([...forkBoundariesByActionMessageId(messages, 'running')]).toEqual([]);
-    expect([
-      ...forkBoundariesByActionMessageId(messages, 'running', { fromResponse: true }),
-    ]).toEqual([]);
   });
 });
 

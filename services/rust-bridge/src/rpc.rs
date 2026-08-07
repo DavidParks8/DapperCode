@@ -172,10 +172,6 @@ mod tests {
                 case["agentCapabilities"]["sessionFork"]
             );
             assert_eq!(
-                case["supportsByAgent"]["threadForkFromResponse"],
-                case["agentCapabilities"]["sessionFork"]
-            );
-            assert_eq!(
                 case["supportsByAgent"]["threadDelete"],
                 case["agentCapabilities"]["sessionDelete"]
             );

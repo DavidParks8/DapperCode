@@ -48,7 +48,6 @@ pub(super) struct BridgeCapabilitySupport {
     pub(super) agent_list: bool,
     pub(super) turn_steer: bool,
     pub(super) thread_fork: bool,
-    pub(super) thread_fork_from_response: bool,
     pub(super) thread_delete: bool,
     pub(super) command_output_delta: bool,
     pub(super) fast_mode: bool,
@@ -100,10 +99,6 @@ impl BridgeCapabilitySupport {
                     .as_ref()
                     .is_some_and(|capabilities| capabilities.session_steer),
             thread_fork,
-            // The bridge resolves a fork boundary named by a response, including the newest one,
-            // for every harness. Clients use this to decide whether they may name a response
-            // instead of the request that follows it.
-            thread_fork_from_response: thread_fork,
             thread_delete: ready
                 && agent
                     .capabilities
@@ -254,12 +249,6 @@ mod tests {
             assert_eq!(
                 supports.thread_fork,
                 case["supportsByAgent"]["threadFork"]
-                    .as_bool()
-                    .unwrap_or(false)
-            );
-            assert_eq!(
-                supports.thread_fork_from_response,
-                case["supportsByAgent"]["threadForkFromResponse"]
                     .as_bool()
                     .unwrap_or(false)
             );

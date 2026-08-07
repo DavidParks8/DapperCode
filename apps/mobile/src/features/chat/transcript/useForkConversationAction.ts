@@ -18,30 +18,17 @@ export function useForkBoundaries({
   parentThreadId,
   unavailableCount,
   supportsConversationFork,
-  supportsForkFromResponse,
 }: {
   messages: ChatMessage[];
   chatStatus: ChatStatus;
   parentThreadId: string | undefined;
   unavailableCount: number | undefined;
   supportsConversationFork: boolean;
-  supportsForkFromResponse: boolean;
 }): ReadonlyMap<string, string> {
   return useMemo(() => {
     const enabled = supportsConversationFork && !parentThreadId && (unavailableCount ?? 0) === 0;
-    return enabled
-      ? forkBoundariesByActionMessageId(messages, chatStatus, {
-          fromResponse: supportsForkFromResponse,
-        })
-      : NO_FORK_BOUNDARIES;
-  }, [
-    chatStatus,
-    messages,
-    parentThreadId,
-    supportsConversationFork,
-    supportsForkFromResponse,
-    unavailableCount,
-  ]);
+    return enabled ? forkBoundariesByActionMessageId(messages, chatStatus) : NO_FORK_BOUNDARIES;
+  }, [chatStatus, messages, parentThreadId, supportsConversationFork, unavailableCount]);
 }
 
 export function useForkConversationAction(

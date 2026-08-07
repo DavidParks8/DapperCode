@@ -80,14 +80,12 @@
       "supports": {
         "turnSteer": true,
         "threadFork": true,
-        "threadForkFromResponse": true,
         "threadDelete": true
       },
       "supportsByAgent": {
         "local-primary": {
           "turnSteer": true,
           "threadFork": true,
-          "threadForkFromResponse": true,
           "threadDelete": true
         }
       }
@@ -100,7 +98,6 @@
         "supportsByAgent": {
           "turnSteer": true,
           "threadFork": true,
-          "threadForkFromResponse": true,
           "threadDelete": false
         }
       },
@@ -111,7 +108,6 @@
         "supportsByAgent": {
           "turnSteer": true,
           "threadFork": true,
-          "threadForkFromResponse": true,
           "threadDelete": true
         }
       },
@@ -126,7 +122,6 @@
         "supportsByAgent": {
           "turnSteer": false,
           "threadFork": false,
-          "threadForkFromResponse": false,
           "threadDelete": false
         }
       }
