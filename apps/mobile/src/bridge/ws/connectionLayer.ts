@@ -231,6 +231,13 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     if (this.connected && this.socket?.readyState === 1) {
       return;
     }
+    if (this.shouldReconnect) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.startConnect();
+    }
     if (this.connectPromise) {
       await this.connectPromise;
     }

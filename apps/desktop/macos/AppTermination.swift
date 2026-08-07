@@ -88,37 +88,8 @@ enum BridgeLaunchPolicy {
     static func shouldRestore(
         autoStart: Bool,
         isRunning: Bool,
-        state: String,
-        isSelected: Bool
+        state: String
     ) -> Bool {
-        isSelected && autoStart && !isRunning && state == "stopped"
-    }
-
-    static func isIdleCandidate(
-        isSelected: Bool,
-        isRunning: Bool,
-        managedProcess: Bool,
-        connectedClients: Int
-    ) -> Bool {
-        !isSelected
-            && isRunning
-            && managedProcess
-            && connectedClients == 0
-    }
-
-    static func shouldSuspend(
-        isSelected: Bool,
-        isRunning: Bool,
-        managedProcess: Bool,
-        connectedClients: Int,
-        idleFor: TimeInterval,
-        gracePeriod: TimeInterval
-    ) -> Bool {
-        isIdleCandidate(
-            isSelected: isSelected,
-            isRunning: isRunning,
-            managedProcess: managedProcess,
-            connectedClients: connectedClients
-        ) && idleFor >= gracePeriod
+        autoStart && !isRunning && state == "stopped"
     }
 }

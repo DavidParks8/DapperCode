@@ -51,11 +51,9 @@ Rust operator hashes that executable and stores the resulting configuration cent
 bearer token is kept in the macOS keychain. It does not invoke npm, npx, Node.js, shell setup
 scripts, or floating package resolution.
 
-Each workspace gets its own profile, port pair, and token, so bridges for several worktrees can run
-at the same time. The macOS app restores only the selected workspace, starts another profile when
-you select it, and suspends non-selected bridges after five minutes without a connected device.
-Quitting DapperCode stops every bridge, and each bridge also exits if the app is force-quit or
-crashes.
+Each workspace gets its own profile, port pair, and token, so bridges for several worktrees run at
+the same time and remain reachable when the mobile app reconnects. Quitting DapperCode stops all of
+them, and each bridge also exits on its own if the app is force-quit or crashes.
 
 ## Rust Operator
 

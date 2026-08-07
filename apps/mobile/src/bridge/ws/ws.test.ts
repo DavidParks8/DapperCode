@@ -369,6 +369,55 @@ describe('HostBridgeWsClient', () => {
     }
   });
 
+  it('request() wakes a disconnected bridge connection without waiting for backoff', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    let request: Promise<{ disposition: string }> | null = null;
+    try {
+      client.connect();
+      const firstSocket = latestMockSocket();
+      firstSocket.simulateOpen();
+      firstSocket.simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(jest.getTimerCount()).toBe(1);
+
+      request = client.request<{ disposition: string }>('bridge/thread/queue/send', {
+        threadId: 'thread',
+        content: 'wake up',
+      });
+      await Promise.resolve();
+
+      expect(jest.getTimerCount()).toBe(0);
+      expect(mockInstances).toHaveLength(2);
+      const wakeSocket = latestMockSocket();
+      wakeSocket.simulateOpen();
+      for (let index = 0; index < 6 && wakeSocket.send.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+
+      const sentPayload = JSON.parse(String(wakeSocket.send.mock.calls[0][0])) as {
+        id: string;
+        method: string;
+      };
+      expect(sentPayload.method).toBe('bridge/thread/queue/send');
+      wakeSocket.simulateMessage(
+        JSON.stringify({
+          id: sentPayload.id,
+          result: { disposition: 'sent' },
+        }),
+      );
+
+      await expect(request).resolves.toEqual({ disposition: 'sent' });
+    } finally {
+      client.disconnect();
+      await request?.catch(() => undefined);
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it('ignores stale socket callbacks after a new connection owns the transport', () => {
     const client = new HostBridgeWsClient('http://localhost:8787');
     const listener = jest.fn();
@@ -1150,10 +1199,16 @@ describe('HostBridgeWsClient', () => {
     expect(status).not.toHaveBeenCalled();
   });
 
-  it('rejects requests when disconnected and times out unanswered requests', async () => {
-    const disconnected = new HostBridgeWsClient('http://localhost:8787');
-    await expect(disconnected.request('no/connect')).rejects.toThrow('Unable to connect');
+  it('does not reconnect requests after an explicit disconnect', async () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    client.connect();
+    client.disconnect();
 
+    await expect(client.request('no/connect')).rejects.toThrow('Unable to connect');
+    expect(mockInstances).toHaveLength(1);
+  });
+
+  it('times out unanswered requests', async () => {
     jest.useFakeTimers();
     try {
       const client = new HostBridgeWsClient('http://localhost:8787', { requestTimeoutMs: 25 });

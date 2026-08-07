@@ -75,26 +75,15 @@ private struct AppTerminationTests {
             BridgeLaunchPolicy.shouldRestore(
                 autoStart: true,
                 isRunning: false,
-                state: "stopped",
-                isSelected: true
+                state: "stopped"
             ),
-            "the selected remembered bridge should be restored"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
-                isRunning: false,
-                state: "stopped",
-                isSelected: false
-            ),
-            "an unselected remembered bridge should stay stopped"
+            "a remembered stopped bridge should be restored"
         )
         try require(
             !BridgeLaunchPolicy.shouldRestore(
                 autoStart: false,
                 isRunning: false,
-                state: "stopped",
-                isSelected: true
+                state: "stopped"
             ),
             "an unremembered bridge should stay stopped"
         )
@@ -102,8 +91,7 @@ private struct AppTerminationTests {
             !BridgeLaunchPolicy.shouldRestore(
                 autoStart: true,
                 isRunning: true,
-                state: "running",
-                isSelected: true
+                state: "running"
             ),
             "a running bridge should not be started twice"
         )
@@ -111,8 +99,7 @@ private struct AppTerminationTests {
             !BridgeLaunchPolicy.shouldRestore(
                 autoStart: true,
                 isRunning: false,
-                state: "needsSetup",
-                isSelected: true
+                state: "needsSetup"
             ),
             "an unconfigured bridge should not be autostarted"
         )
@@ -120,72 +107,9 @@ private struct AppTerminationTests {
             !BridgeLaunchPolicy.shouldRestore(
                 autoStart: true,
                 isRunning: false,
-                state: "error",
-                isSelected: true
+                state: "error"
             ),
             "a stale workspace profile should not be autostarted"
-        )
-
-        let idleArguments = (
-            isSelected: false,
-            isRunning: true,
-            managedProcess: true,
-            connectedClients: 0
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldSuspend(
-                isSelected: idleArguments.isSelected,
-                isRunning: idleArguments.isRunning,
-                managedProcess: idleArguments.managedProcess,
-                connectedClients: idleArguments.connectedClients,
-                idleFor: 299,
-                gracePeriod: 300
-            ),
-            "an inactive bridge should receive the full grace period"
-        )
-        try require(
-            BridgeLaunchPolicy.shouldSuspend(
-                isSelected: idleArguments.isSelected,
-                isRunning: idleArguments.isRunning,
-                managedProcess: idleArguments.managedProcess,
-                connectedClients: idleArguments.connectedClients,
-                idleFor: 300,
-                gracePeriod: 300
-            ),
-            "an inactive bridge should suspend after the grace period"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldSuspend(
-                isSelected: true,
-                isRunning: true,
-                managedProcess: true,
-                connectedClients: 0,
-                idleFor: 300,
-                gracePeriod: 300
-            ),
-            "the selected workspace should remain available"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldSuspend(
-                isSelected: false,
-                isRunning: true,
-                managedProcess: true,
-                connectedClients: 1,
-                idleFor: 300,
-                gracePeriod: 300
-            ),
-            "a connected bridge should remain available"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldSuspend(
-                isSelected: false,
-                isRunning: true,
-                managedProcess: false,
-                connectedClients: 0,
-                idleFor: 300,
-                gracePeriod: 300
-            ),
-            "the app should not stop a bridge it does not own"
         )
     }
 }
