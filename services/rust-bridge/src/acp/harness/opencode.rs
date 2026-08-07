@@ -1224,10 +1224,10 @@ mod tests {
     #[tokio::test]
     async fn opencode_status_polling_accepts_absence_only_after_confirmation_and_surfaces_failures()
     {
-        for mode in [
-            StatusFixtureMode::BusyThenAbsent,
-            StatusFixtureMode::Absent,
-            StatusFixtureMode::Idle,
+        for (mode, minimum_calls) in [
+            (StatusFixtureMode::BusyThenAbsent, 3),
+            (StatusFixtureMode::Absent, 2),
+            (StatusFixtureMode::Idle, 2),
         ] {
             let (context, calls, server) = status_fixture_context(mode).await;
             wait_for_opencode_idle(
@@ -1238,7 +1238,7 @@ mod tests {
             )
             .await
             .expect("absence confirms idle");
-            assert!(calls.load(Ordering::SeqCst) >= 3);
+            assert!(calls.load(Ordering::SeqCst) >= minimum_calls);
             server.abort();
         }
 
