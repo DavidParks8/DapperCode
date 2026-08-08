@@ -839,6 +839,42 @@ mod tests {
             ),
             BrokerStartupWait::Healthy
         );
+
+        let mut at_timeout = || Duration::from_secs(2);
+        let mut never_healthy = || false;
+        let mut exited_at_boundary = || false;
+        let mut no_sleep = |_| {};
+        assert_eq!(
+            wait_for_broker_start(
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+                &mut at_timeout,
+                &mut never_healthy,
+                &mut exited_at_boundary,
+                &mut no_sleep,
+            ),
+            BrokerStartupWait::Exited
+        );
+
+        let final_health_probes = std::cell::Cell::new(0_u8);
+        let mut at_timeout = || Duration::from_secs(2);
+        let mut healthy_after_boundary_identity_miss = || {
+            final_health_probes.set(final_health_probes.get() + 1);
+            final_health_probes.get() == 2
+        };
+        let mut exited_at_boundary = || false;
+        let mut no_sleep = |_| {};
+        assert_eq!(
+            wait_for_broker_start(
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+                &mut at_timeout,
+                &mut healthy_after_boundary_identity_miss,
+                &mut exited_at_boundary,
+                &mut no_sleep,
+            ),
+            BrokerStartupWait::Healthy
+        );
     }
 
     #[test]
