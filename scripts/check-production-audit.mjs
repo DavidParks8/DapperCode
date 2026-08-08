@@ -4,14 +4,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const lockfile = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const reviewedAdvisories = new Map([
-  // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
-  [1121797, 'linkify-it'],
-  [1124012, 'linkify-it'],
+  // npm 10 omits these transitive production advisories while npm 11 reports them. Permit absence
+  // only for the exact reviewed lockfile version; any dependency change requires a fresh review.
+  [1121797, { name: 'linkify-it', optionalForLockedVersions: ['2.2.0'] }],
+  [1124012, { name: 'linkify-it', optionalForLockedVersions: ['2.2.0'] }],
   // image-size is pulled through Metro build tooling and is absent from the native app bundle.
   // npm offers only a breaking Expo change, so there is no compatible production-runtime fix.
-  [1138808, 'image-size'],
-  [1138809, 'image-size'],
+  [1138808, { name: 'image-size' }],
+  [1138809, { name: 'image-size' }],
 ]);
 
 // npm reports `fixAvailable` as `true` when a compatible release exists, or as the package a
@@ -57,8 +59,12 @@ for (const vulnerability of Object.values(vulnerabilities)) {
   }
 }
 
-const unexpected = [...found].filter(([id, name]) => reviewedAdvisories.get(id) !== name);
-const stale = [...reviewedAdvisories].filter(([id, name]) => found.get(id) !== name);
+const unexpected = [...found].filter(([id, name]) => reviewedAdvisories.get(id)?.name !== name);
+const stale = [...reviewedAdvisories].filter(([id, review]) => {
+  if (found.get(id) === review.name) return false;
+  const lockedVersion = lockfile.packages?.[`node_modules/${review.name}`]?.version;
+  return !review.optionalForLockedVersions?.includes(lockedVersion);
+});
 const fixable = [...new Set(found.values())].filter((name) =>
   hasCompatibleFix(vulnerabilities[name]?.fixAvailable),
 );
@@ -72,7 +78,7 @@ if (critical.length > 0 || unexpected.length > 0 || stale.length > 0 || fixable.
       ? `unexpected: ${unexpected.map(([id, name]) => `${name}#${id}`).join(', ')}`
       : null,
     stale.length > 0
-      ? `stale exceptions: ${stale.map(([id, name]) => `${name}#${id}`).join(', ')}`
+      ? `stale exceptions: ${stale.map(([id, review]) => `${review.name}#${id}`).join(', ')}`
       : null,
     fixable.length > 0 ? `fix now available: ${fixable.join(', ')}` : null,
   ].filter(Boolean);

@@ -41,6 +41,10 @@ test('production audit accepts only the reviewed high-severity advisories', () =
   const result = runChecker(reviewed);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /4 reviewed high-severity advisories/);
+
+  const npm10Result = runChecker({ 'image-size': reviewed['image-size'] });
+  assert.equal(npm10Result.status, 0, npm10Result.stderr);
+  assert.match(npm10Result.stdout, /2 reviewed high-severity advisories/);
 });
 
 test('production audit rejects new, stale, or newly fixable advisories', () => {
@@ -56,10 +60,7 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(
-    stale.stderr,
-    /stale exceptions: linkify-it#1121797, linkify-it#1124012, image-size#1138808, image-size#1138809/,
-  );
+  assert.match(stale.stderr, /stale exceptions: image-size#1138808, image-size#1138809/);
 
   const fixable = runChecker({
     ...reviewed,
