@@ -515,4 +515,46 @@ mod tests {
         write_ownership(&path, &record).unwrap();
         assert_eq!(read_ownership(&path).unwrap(), Some(record));
     }
+
+    #[test]
+    fn broker_ownership_validation_and_pluralization_cover_invalid_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("process.json");
+        assert_eq!(read_ownership(&path).unwrap(), None);
+        fs::write(&path, b"{").unwrap();
+        assert!(read_ownership(&path).is_err());
+
+        let valid = BrokerOwnershipRecord {
+            version: OWNERSHIP_VERSION,
+            pid: 123,
+            started_at_epoch_sec: 1,
+            executable: PathBuf::from("/tmp/dappercode"),
+            data_dir: temp.path().to_path_buf(),
+            config_sha256: format!("sha256:{}", "a".repeat(64)),
+            owner_pid: None,
+        };
+        for invalid in [
+            BrokerOwnershipRecord {
+                version: OWNERSHIP_VERSION + 1,
+                ..valid.clone()
+            },
+            BrokerOwnershipRecord {
+                pid: 0,
+                ..valid.clone()
+            },
+            BrokerOwnershipRecord {
+                config_sha256: "short".to_string(),
+                ..valid.clone()
+            },
+            BrokerOwnershipRecord {
+                config_sha256: format!("md5:{}", "a".repeat(67)),
+                ..valid
+            },
+        ] {
+            fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert!(read_ownership(&path).is_err());
+        }
+        assert_eq!(plural(1), "");
+        assert_eq!(plural(0), "s");
+    }
 }

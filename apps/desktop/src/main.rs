@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
+// LLVM 21 crashes while exporting this Axum module's coverage instantiation groups. Its behavioral
+// tests still run in coverage jobs; only the broken compiler mapping is disabled.
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod broker;
 mod broker_supervisor;
 mod config;

@@ -381,7 +381,7 @@ impl BridgeQueueService {
                 Self::snapshot_for_thread(&normalized_thread_id, Some(runtime))
             };
             match self
-                .reserve_submission(&submission_id, &normalized_thread_id)
+                .reserve_submission(&submission_id, &normalized_thread_id, false)
                 .await
             {
                 Ok(Some(result)) => {
@@ -412,7 +412,7 @@ impl BridgeQueueService {
         }
 
         if let Some(result) = self
-            .reserve_submission(&submission_id, &normalized_thread_id)
+            .reserve_submission(&submission_id, &normalized_thread_id, true)
             .await?
         {
             return Ok(result);
@@ -452,10 +452,13 @@ impl BridgeQueueService {
                 Ok(result)
             }
             Err(error) => {
-                let mut threads = self.threads.write().await;
-                if let Some(runtime) = threads.get_mut(&normalized_thread_id) {
-                    runtime.turn_start_in_flight = false;
+                {
+                    let mut threads = self.threads.write().await;
+                    if let Some(runtime) = threads.get_mut(&normalized_thread_id) {
+                        runtime.turn_start_in_flight = false;
+                    }
                 }
+                self.release_submission(&submission_id).await?;
                 Err(error)
             }
         }
@@ -503,6 +506,7 @@ impl BridgeQueueService {
         &self,
         submission_id: &str,
         thread_id: &str,
+        persist_pending: bool,
     ) -> Result<Option<BridgeThreadQueueSendResponse>, String> {
         let persist_guard = self.submission_persist.lock().await;
         if let Some(result) = self
@@ -537,12 +541,29 @@ impl BridgeQueueService {
             }
             pending.insert(submission_id.to_string(), thread_id.to_string());
         }
-        if let Err(error) = self.persist_submission_store_locked().await {
-            self.submission_pending.lock().await.remove(submission_id);
-            let _ = self.persist_submission_store_locked().await;
-            return Err(error);
+        if persist_pending {
+            if let Err(error) = self.persist_submission_store_locked().await {
+                self.submission_pending.lock().await.remove(submission_id);
+                let _ = self.persist_submission_store_locked().await;
+                return Err(error);
+            }
         }
         Ok(None)
+    }
+
+    async fn release_submission(&self, submission_id: &str) -> Result<(), String> {
+        let _persist = self.submission_persist.lock().await;
+        if self
+            .submission_pending
+            .lock()
+            .await
+            .remove(submission_id)
+            .is_none()
+        {
+            return Ok(());
+        }
+        self.persist_submission_store_locked().await?;
+        Ok(())
     }
 
     async fn submission_response(
@@ -563,7 +584,6 @@ impl BridgeQueueService {
     ) -> Result<(), String> {
         let _persist = self.submission_persist.lock().await;
         let submission_id = result.submission_id.clone();
-        let sent = matches!(&result.disposition, BridgeThreadQueueDisposition::Sent);
         let receipt = BridgeQueueSubmissionReceipt {
             submission_id: submission_id.clone(),
             thread_id: result.queue.thread_id,
@@ -582,9 +602,7 @@ impl BridgeQueueService {
         }
         drop(order);
         drop(results);
-        if sent {
-            self.submission_pending.lock().await.remove(&submission_id);
-        }
+        self.submission_pending.lock().await.remove(&submission_id);
         self.persist_submission_store_locked().await
     }
 
@@ -2619,6 +2637,36 @@ mod tests {
                 .unwrap()
                 .turn_start_in_flight
         );
+        assert!(!failed_service
+            .submission_pending
+            .lock()
+            .await
+            .contains_key("failed"));
+        let retried = tokio::spawn({
+            let service = failed_service.clone();
+            async move {
+                service
+                    .send_message(send_request("failure", "failed", "retry"))
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("retried turn call")
+            .response
+            .send(Ok("turn-retry".to_string()))
+            .expect("retry response");
+        assert_eq!(
+            retried
+                .await
+                .expect("retry task")
+                .expect("same submission retries after definitive failure")
+                .turn_id
+                .as_deref(),
+            Some("turn-retry")
+        );
     }
 
     #[tokio::test]
@@ -3835,6 +3883,10 @@ mod tests {
             Some(path.clone()),
             DurableQueueSubmissions::default(),
         );
+        service.release_submission("missing").await.unwrap();
+        service.submission_dirty.store(true, Ordering::Release);
+        let _ = service.status().await;
+        assert!(!service.submission_dirty.load(Ordering::Acquire));
         service
             .submission_pending
             .lock()
@@ -3872,7 +3924,7 @@ mod tests {
         );
         assert!(!restored.results.contains_key("submission-queued"));
         assert_eq!(restored.pending["submission-indeterminate"], "thread");
-        assert_eq!(restored.pending["submission-queued"], "thread");
+        assert!(!restored.pending.contains_key("submission-queued"));
         assert_eq!(restored.order, VecDeque::from(["submission-1".to_string()]));
         let (backend, _) = fake_dispatcher();
         let restarted = BridgeQueueService::with_submission_store(
@@ -3882,6 +3934,142 @@ mod tests {
             restored,
         );
         assert_eq!(restarted.status().await.other_live_work, 0);
+        let retried = restarted
+            .send_message(send_request(
+                "thread",
+                "submission-queued",
+                "queued content",
+            ))
+            .await
+            .expect("lost in-memory queue item is safely retryable after restart");
+        assert!(matches!(
+            retried.disposition,
+            BridgeThreadQueueDisposition::Queued
+        ));
+        let queue = restarted.read_queue("thread").await;
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0].content, "queued content");
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn queue_submission_store_rejects_invalid_files_and_bounds_pending_state() {
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-queue-bounds-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("queue.json");
+
+        assert!(BridgeQueueService::load_submission_store(&path)
+            .await
+            .unwrap()
+            .pending
+            .is_empty());
+        std::fs::write(&path, b"{").unwrap();
+        let error = match BridgeQueueService::load_submission_store(&path).await {
+            Ok(_) => panic!("malformed store should fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("invalid"));
+        std::fs::write(&path, vec![b'x'; QUEUE_RECEIPT_STORE_MAX_BYTES + 1]).unwrap();
+        let error = match BridgeQueueService::load_submission_store(&path).await {
+            Ok(_) => panic!("oversized store should fail"),
+            Err(error) => error,
+        };
+        assert!(error.contains("exceeds"));
+
+        let mut pending = HashMap::new();
+        for index in 0..=SUBMISSION_DEDUPE_LIMIT {
+            pending.insert(format!("submission-{index:05}"), "thread".to_string());
+        }
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&DurableQueueReceiptFile {
+                pending,
+                ..DurableQueueReceiptFile::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let bounded = BridgeQueueService::load_submission_store(&path)
+            .await
+            .unwrap();
+        assert_eq!(bounded.pending.len(), SUBMISSION_DEDUPE_LIMIT);
+
+        let receipts = (0..=SUBMISSION_DEDUPE_LIMIT)
+            .map(|index| {
+                (
+                    format!("receipt-{index:05}"),
+                    DurableQueueReceipt {
+                        thread_id: "thread".to_string(),
+                        turn_id: format!("turn-{index}"),
+                    },
+                )
+            })
+            .collect();
+        let order = (0..=SUBMISSION_DEDUPE_LIMIT)
+            .map(|index| format!("receipt-{index:05}"))
+            .collect();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&DurableQueueReceiptFile {
+                receipts,
+                order,
+                pending: HashMap::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let bounded = BridgeQueueService::load_submission_store(&path)
+            .await
+            .unwrap();
+        assert_eq!(bounded.results.len(), SUBMISSION_DEDUPE_LIMIT);
+        assert!(!bounded.results.contains_key("receipt-00000"));
+
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            Some(path.clone()),
+            DurableQueueSubmissions::default(),
+        );
+        {
+            let mut results = service.submission_results.lock().await;
+            let mut order = service.submission_order.lock().await;
+            for index in 0..300 {
+                let id = format!("large-{index:03}");
+                results.insert(
+                    id.clone(),
+                    BridgeQueueSubmissionReceipt {
+                        submission_id: id.clone(),
+                        thread_id: "x".repeat(QUEUE_IDENTIFIER_MAX_BYTES),
+                        disposition: BridgeThreadQueueDisposition::Sent,
+                        turn_id: Some(format!("turn-{index}")),
+                    },
+                );
+                order.push_back(id);
+            }
+        }
+        service.persist_submission_store().await.unwrap();
+        assert!(
+            BridgeQueueService::load_submission_store(&path)
+                .await
+                .unwrap()
+                .results
+                .len()
+                < 300
+        );
+
+        service.submission_results.lock().await.clear();
+        service.submission_order.lock().await.clear();
+        service.submission_pending.lock().await.insert(
+            "oversized".to_string(),
+            "x".repeat(QUEUE_RECEIPT_STORE_MAX_BYTES),
+        );
+        assert!(service
+            .persist_submission_store()
+            .await
+            .unwrap_err()
+            .contains("byte budget"));
         let _ = std::fs::remove_dir_all(directory);
     }
 

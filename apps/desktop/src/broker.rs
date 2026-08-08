@@ -54,6 +54,7 @@ const CLIENT_TYPE_HEADER: &str = "x-dappercode-client-type";
 const CLIENT_NAME_HEADER: &str = "x-dappercode-client-name";
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+const ACTIVITY_FAILURE_LIMIT: u32 = 3;
 const MAX_CREDENTIAL_BYTES: usize = 4096;
 const MAX_WEBSOCKET_BYTES: usize = 32 * 1024 * 1024;
 
@@ -183,12 +184,12 @@ impl BrokerServer {
 
         sweep_task.abort();
         let _ = sweep_task.await;
-        pool.shutdown().await;
         for task in legacy_tasks {
             task.await
                 .context("legacy broker listener task failed to join")?
                 .context("legacy broker listener failed")?;
         }
+        pool.shutdown().await;
         serve_result.context("broker server failed")?;
         Ok(())
     }
@@ -832,6 +833,7 @@ struct WorkerRuntimeActivity {
 }
 
 impl WorkerRuntimeActivity {
+    #[cfg(test)]
     fn busy() -> Self {
         Self {
             other_live_work: 1,
@@ -1057,6 +1059,7 @@ struct WorkerRecord {
     last_idle_at: Instant,
     last_used: u64,
     known_busy: bool,
+    activity_failures: u32,
     retiring: bool,
 }
 
@@ -1255,6 +1258,7 @@ impl WorkerPool {
                 }
                 record.clients += 1;
                 record.known_busy = true;
+                record.activity_failures = 0;
                 record.last_used = self.usage_counter.fetch_add(1, Ordering::Relaxed);
                 return Ok(WorkerClientSession {
                     profile_id,
@@ -1282,6 +1286,7 @@ impl WorkerPool {
                     last_idle_at: Instant::now(),
                     last_used: self.usage_counter.fetch_add(1, Ordering::Relaxed),
                     known_busy: true,
+                    activity_failures: 0,
                     retiring: false,
                 },
             );
@@ -1327,10 +1332,7 @@ impl WorkerPool {
                 self.state.lock().await.workers.remove(&profile_id);
                 continue;
             }
-            let activity = worker
-                .activity()
-                .await
-                .unwrap_or_else(|_| WorkerRuntimeActivity::busy());
+            let activity = worker.activity().await;
             let mut state = self.state.lock().await;
             let Some(record) = state.workers.get_mut(&profile_id) else {
                 continue;
@@ -1338,15 +1340,55 @@ impl WorkerPool {
             if record.clients > 0 || record.retiring {
                 continue;
             }
-            if activity.can_retire {
-                if record.known_busy {
+            match activity {
+                Ok(activity) if activity.can_retire => {
+                    record.activity_failures = 0;
+                    if record.known_busy {
+                        record.last_idle_at = Instant::now();
+                    }
+                    record.known_busy = false;
+                }
+                Ok(_) => {
+                    record.activity_failures = 0;
+                    record.known_busy = true;
                     record.last_idle_at = Instant::now();
                 }
-                record.known_busy = false;
-            } else {
-                record.known_busy = true;
-                record.last_idle_at = Instant::now();
+                Err(_) => {
+                    record.activity_failures = record.activity_failures.saturating_add(1);
+                    record.known_busy = true;
+                    if record.activity_failures == 1 {
+                        record.last_idle_at = Instant::now();
+                    }
+                }
             }
+        }
+
+        let unreachable = {
+            let mut state = self.state.lock().await;
+            state
+                .workers
+                .iter_mut()
+                .filter_map(|(profile_id, record)| {
+                    if record.clients == 0
+                        && !record.retiring
+                        && record.activity_failures >= ACTIVITY_FAILURE_LIMIT
+                    {
+                        record.retiring = true;
+                        Some((profile_id.clone(), record.worker.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for (profile_id, worker) in unreachable {
+            if let Err(error) = worker.stop().await {
+                if let Some(record) = self.state.lock().await.workers.get_mut(&profile_id) {
+                    record.retiring = false;
+                }
+                return Err(error);
+            }
+            self.state.lock().await.workers.remove(&profile_id);
         }
 
         let now = Instant::now();
@@ -1554,6 +1596,7 @@ mod tests {
         target: WorkerTarget,
         running: AtomicBool,
         busy: AtomicBool,
+        activity_failures_remaining: AtomicUsize,
         stops: AtomicUsize,
     }
 
@@ -1567,6 +1610,7 @@ mod tests {
                 },
                 running: AtomicBool::new(true),
                 busy: AtomicBool::new(false),
+                activity_failures_remaining: AtomicUsize::new(0),
                 stops: AtomicUsize::new(0),
             }
         }
@@ -1579,6 +1623,15 @@ mod tests {
         }
 
         async fn activity(&self) -> Result<WorkerRuntimeActivity> {
+            if self
+                .activity_failures_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                bail!("worker status unavailable");
+            }
             Ok(if self.busy.load(Ordering::SeqCst) {
                 WorkerRuntimeActivity::busy()
             } else {
@@ -1785,6 +1838,50 @@ mod tests {
         assert!(pool.contains("third").await);
         assert!(pool.contains("second").await);
         assert_eq!(busy.stops.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn sustained_activity_failures_evict_a_wedged_worker_but_transient_failures_do_not() {
+        let launcher = Arc::new(FakeLauncher::default());
+        let pool = Arc::new(WorkerPool::new(
+            launcher.clone(),
+            1,
+            1,
+            Duration::from_secs(60),
+        ));
+        let first_dir = tempdir().unwrap();
+        let first = pool
+            .acquire_client(access("first", first_dir.path().to_path_buf()))
+            .await
+            .unwrap();
+        first.release().await;
+        let first_worker = launcher.workers.lock().await.get("first").cloned().unwrap();
+
+        first_worker
+            .activity_failures_remaining
+            .store(2, Ordering::SeqCst);
+        pool.sweep(false).await.unwrap();
+        pool.sweep(false).await.unwrap();
+        assert!(pool.contains("first").await);
+        assert_eq!(first_worker.stops.load(Ordering::SeqCst), 0);
+
+        pool.sweep(false).await.unwrap();
+        assert!(pool.contains("first").await);
+        first_worker
+            .activity_failures_remaining
+            .store(ACTIVITY_FAILURE_LIMIT as usize, Ordering::SeqCst);
+        for _ in 0..ACTIVITY_FAILURE_LIMIT {
+            pool.sweep(false).await.unwrap();
+        }
+        assert!(!pool.contains("first").await);
+        assert_eq!(first_worker.stops.load(Ordering::SeqCst), 1);
+
+        let replacement_dir = tempdir().unwrap();
+        let replacement = pool
+            .acquire_client(access("replacement", replacement_dir.path().to_path_buf()))
+            .await
+            .expect("wedged worker eviction releases capacity");
+        replacement.release().await;
     }
 
     #[tokio::test]

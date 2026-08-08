@@ -28,12 +28,19 @@ const reviewed = {
     ],
     fixAvailable: false,
   },
+  'image-size': {
+    via: [
+      { source: 1138808, name: 'image-size', severity: 'high' },
+      { source: 1138809, name: 'image-size', severity: 'high' },
+    ],
+    fixAvailable: { name: 'expo', version: '53.0.27', isSemVerMajor: true },
+  },
 };
 
 test('production audit accepts only the reviewed high-severity advisories', () => {
   const result = runChecker(reviewed);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /2 reviewed high-severity advisories/);
+  assert.match(result.stdout, /4 reviewed high-severity advisories/);
 });
 
 test('production audit rejects new, stale, or newly fixable advisories', () => {
@@ -49,7 +56,10 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(stale.stderr, /stale exceptions: linkify-it#1121797, linkify-it#1124012/);
+  assert.match(
+    stale.stderr,
+    /stale exceptions: linkify-it#1121797, linkify-it#1124012, image-size#1138808, image-size#1138809/,
+  );
 
   const fixable = runChecker({
     ...reviewed,

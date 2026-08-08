@@ -215,7 +215,7 @@ async fn main() {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "DapperCode".to_string());
     let push = PushService::load(&config.state_dir, project_label, metrics.clone()).await;
-    push.spawn_event_loop_with_queue(&hub, backend.clone(), Some(queue.clone()));
+    let _push_event_loop = push.spawn_event_loop_with_queue(&hub, Some(queue.clone()));
     let operation_dedupe_path = config.state_dir.join("operation-idempotency.json");
     let operation_dedupe = match load_operation_dedupe(&operation_dedupe_path).await {
         Ok(state) => state,

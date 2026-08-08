@@ -532,7 +532,7 @@ pub(super) async fn handle_bridge_method(
                 Err(error) => {
                     let _ = state
                         .update_operation_dedupe(|dedupe| {
-                            dedupe.thread_create_pending.remove(&submission_id);
+                            dedupe.release_thread_create(&submission_id);
                         })
                         .await;
                     return Err(error);
@@ -551,7 +551,14 @@ pub(super) async fn handle_bridge_method(
                 .await
             {
                 Ok(started) => started,
-                Err(error) => return Err(BridgeError::server(&error)),
+                Err(error) => {
+                    state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.release_thread_create(&submission_id);
+                        })
+                        .await?;
+                    return Err(BridgeError::server(&error));
+                }
             };
             let response = BridgeThreadCreateResponse {
                 submission_id: request.submission_id.clone(),
@@ -573,7 +580,7 @@ pub(super) async fn handle_bridge_method(
                             dedupe.thread_create_results.remove(&oldest);
                         }
                     }
-                    dedupe.thread_create_pending.remove(&response.submission_id);
+                    dedupe.release_thread_create(&response.submission_id);
                 })
                 .await?;
             serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
@@ -667,7 +674,7 @@ pub(super) async fn handle_bridge_method(
                 Err(error) => {
                     let _ = state
                         .update_operation_dedupe(|dedupe| {
-                            dedupe.thread_fork_pending.remove(&submission_id);
+                            dedupe.release_thread_fork(&submission_id);
                         })
                         .await;
                     return Err(error);
@@ -693,7 +700,14 @@ pub(super) async fn handle_bridge_method(
                 .await
             {
                 Ok(forked) => forked,
-                Err(error) => return Err(BridgeError::server(&error)),
+                Err(error) => {
+                    state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.release_thread_fork(&submission_id);
+                        })
+                        .await?;
+                    return Err(BridgeError::server(&error));
+                }
             };
             let response = BridgeThreadForkResponse {
                 submission_id: request.submission_id.clone(),
@@ -720,7 +734,7 @@ pub(super) async fn handle_bridge_method(
                             dedupe.thread_fork_results.remove(&oldest);
                         }
                     }
-                    dedupe.thread_fork_pending.remove(&response.submission_id);
+                    dedupe.release_thread_fork(&response.submission_id);
                 })
                 .await?;
             serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
@@ -1151,7 +1165,7 @@ pub(super) async fn handle_bridge_method(
                 Err(error) => {
                     let _ = state
                         .update_operation_dedupe(|dedupe| {
-                            dedupe.approval_resolution_pending.remove(&resolution_id);
+                            dedupe.release_approval_resolution(&resolution_id);
                         })
                         .await;
                     return Err(error);
@@ -1170,15 +1184,20 @@ pub(super) async fn handle_bridge_method(
                 .await
             {
                 Ok(resolved) => resolved,
-                Err(error) => return Err(BridgeError::server(&error)),
+                Err(error) => {
+                    state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.release_approval_resolution(&resolution_id);
+                        })
+                        .await?;
+                    return Err(BridgeError::server(&error));
+                }
             };
 
             let Some(approval) = resolved else {
                 state
                     .update_operation_dedupe(|dedupe| {
-                        dedupe
-                            .approval_resolution_pending
-                            .remove(&request.resolution_id);
+                        dedupe.release_approval_resolution(&request.resolution_id);
                     })
                     .await?;
                 return Err(BridgeError {
@@ -1209,9 +1228,7 @@ pub(super) async fn handle_bridge_method(
                             dedupe.approval_resolution_results.remove(&oldest);
                         }
                     }
-                    dedupe
-                        .approval_resolution_pending
-                        .remove(&completed_resolution_id);
+                    dedupe.release_approval_resolution(&completed_resolution_id);
                 })
                 .await?;
             Ok(result)

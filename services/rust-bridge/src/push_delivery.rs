@@ -63,16 +63,15 @@ impl PushService {
     pub(super) fn spawn_event_loop_with_queue(
         self: &Arc<Self>,
         hub: &Arc<ClientHub>,
-        _backend: Arc<RuntimeBackend>,
         queue: Option<Arc<BridgeQueueService>>,
-    ) {
+    ) -> tokio::task::JoinHandle<()> {
         let this = Arc::clone(self);
         let mut receiver = hub.subscribe_canonical_events();
         tokio::spawn(async move {
             while let Some(event) = receiver.recv().await {
                 this.handle_canonical_event(event, queue.as_deref()).await;
             }
-        });
+        })
     }
 
     pub(super) async fn handle_canonical_event(
@@ -96,7 +95,7 @@ impl PushService {
                 if queue
                     .wait_for_completion_disposition(received.event_id)
                     .await
-                    != Some(QueueCompletionDisposition::Final)
+                    .is_none_or(|disposition| !completion_is_final(disposition))
                 {
                     return;
                 }
@@ -127,9 +126,12 @@ impl PushService {
         }
         let mut replies = self.recent_replies.write().await;
         if !replies.contains_key(thread_id) && replies.len() >= PUSH_PREVIEW_MAX_THREADS {
-            if let Some(oldest_key) = replies.keys().next().cloned() {
-                replies.remove(&oldest_key);
-            }
+            let oldest_key = replies
+                .keys()
+                .next()
+                .cloned()
+                .expect("a full preview cache has an entry");
+            replies.remove(&oldest_key);
         }
         let entry = replies.entry(thread_id.to_string()).or_default();
         if entry.len() < PUSH_PREVIEW_ACCUMULATE_CAP {
@@ -141,6 +143,24 @@ impl PushService {
 
     async fn send_canonical_push(
         self: &Arc<Self>,
+        event: PushEvent,
+        thread_id: Option<String>,
+        approval_id: Option<String>,
+        reply_preview: Option<String>,
+    ) {
+        self.send_canonical_push_to_endpoint(
+            EXPO_PUSH_SEND_ENDPOINT,
+            event,
+            thread_id,
+            approval_id,
+            reply_preview,
+        )
+        .await;
+    }
+
+    async fn send_canonical_push_to_endpoint(
+        self: &Arc<Self>,
+        endpoint: &str,
         event: PushEvent,
         thread_id: Option<String>,
         approval_id: Option<String>,
@@ -189,7 +209,8 @@ impl PushService {
             "approvalId": approval_id,
         });
         let category_id = matches!(event, PushEvent::ApprovalRequested).then_some("approval");
-        self.send(&title, &body, &data, category_id, targets).await;
+        self.send_to_endpoint(endpoint, &title, &body, &data, category_id, targets)
+            .await;
     }
 
     pub(super) async fn register(
@@ -247,8 +268,9 @@ impl PushService {
         Some(truncate_chars(&collapsed, PUSH_PREVIEW_MAX_CHARS))
     }
 
-    pub(super) async fn send(
+    async fn send_to_endpoint(
         self: &Arc<Self>,
+        endpoint: &str,
         title: &str,
         body: &str,
         data: &Value,
@@ -281,7 +303,7 @@ impl PushService {
                 .collect();
 
             let Some(payload) = self
-                .post_with_retry(EXPO_PUSH_SEND_ENDPOINT, &Value::Array(messages))
+                .post_with_retry(endpoint, &Value::Array(messages))
                 .await
             else {
                 self.metrics.push_transport_failure(chunk.len());
@@ -405,12 +427,14 @@ impl PushService {
     }
 
     pub(super) async fn check_receipts(&self, receipts: Vec<(String, String)>) {
+        self.check_receipts_from_endpoint(EXPO_PUSH_RECEIPTS_ENDPOINT, receipts)
+            .await;
+    }
+
+    async fn check_receipts_from_endpoint(&self, endpoint: &str, receipts: Vec<(String, String)>) {
         for chunk in receipts.chunks(EXPO_RECEIPT_BATCH_SIZE) {
             let ids: Vec<&str> = chunk.iter().map(|(id, _)| id.as_str()).collect();
-            let Some(payload) = self
-                .post_with_retry(EXPO_PUSH_RECEIPTS_ENDPOINT, &json!({ "ids": ids }))
-                .await
-            else {
+            let Some(payload) = self.post_with_retry(endpoint, &json!({ "ids": ids })).await else {
                 continue;
             };
             let Some(map) = payload.get("data").and_then(Value::as_object) else {
@@ -438,6 +462,10 @@ impl PushService {
     }
 }
 
+fn completion_is_final(disposition: QueueCompletionDisposition) -> bool {
+    disposition == QueueCompletionDisposition::Final
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum PushEvent {
     TurnCompleted,
@@ -457,6 +485,86 @@ impl PushEvent {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::acp::events::{CanonicalEvent, MessageRole};
+    use agent_client_protocol::schema::v1::{ContentBlock, StopReason};
+    use axum::{
+        extract::State,
+        http::StatusCode,
+        response::{IntoResponse, Response},
+        routing::post,
+        Json, Router,
+    };
+    use futures_util::future::BoxFuture;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct UnusedQueueDispatcher;
+
+    impl QueueRuntimeDispatcher for UnusedQueueDispatcher {
+        fn read_snapshot<'a>(
+            &'a self,
+            _thread_id: &'a str,
+        ) -> BoxFuture<'a, Result<QueueRuntimeSnapshot, String>> {
+            Box::pin(async { Err("unused".to_string()) })
+        }
+
+        fn supports_steer(&self, _thread_id: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+
+        fn prepare_steer<'a>(&'a self, _thread_id: &'a str) -> BoxFuture<'a, Result<u64, String>> {
+            Box::pin(async { Err("unused".to_string()) })
+        }
+
+        fn verify_steer_epoch<'a>(
+            &'a self,
+            _thread_id: &'a str,
+            _epoch: u64,
+        ) -> BoxFuture<'a, Result<bool, String>> {
+            Box::pin(async { Err("unused".to_string()) })
+        }
+
+        fn steer<'a>(
+            &'a self,
+            _thread_id: &'a str,
+            _expected_run_id: String,
+            _expected_source_turn_id: String,
+            _prompt_generation: u64,
+            _interaction_epoch: u64,
+            _prompt: Vec<ContentBlock>,
+        ) -> BoxFuture<'a, Result<(), String>> {
+            Box::pin(async { Err("unused".to_string()) })
+        }
+
+        fn turn_start<'a>(
+            &'a self,
+            _thread_id: &'a str,
+            _turn_start: &'a Value,
+        ) -> BoxFuture<'a, Result<String, String>> {
+            Box::pin(async { Err("unused".to_string()) })
+        }
+    }
+
+    async fn retrying_push_fixture(State(attempts): State<Arc<AtomicUsize>>) -> Response {
+        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("retry-after", "0")],
+                Json(json!({"error": "retry"})),
+            )
+                .into_response();
+        }
+        Json(json!({"data": [{"status": "ok"}]})).into_response()
+    }
+
+    async fn rate_limited_push_fixture(State(attempts): State<Arc<AtomicUsize>>) -> Response {
+        attempts.fetch_add(1, Ordering::SeqCst);
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            [("retry-after", "0")],
+            Json(json!({"error": "limited"})),
+        )
+            .into_response()
+    }
 
     #[tokio::test]
     async fn delayed_receipt_checks_keep_the_worker_non_retireable() {
@@ -474,6 +582,435 @@ mod tests {
         assert_eq!(service.pending_receipt_check_count(), 0);
         service.spawn_receipt_check(vec![("receipt".to_string(), "token".to_string())]);
         assert_eq!(service.pending_receipt_check_count(), 1);
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn completion_pushes_only_follow_the_final_queue_disposition() {
+        assert!(completion_is_final(QueueCompletionDisposition::Final));
+        assert!(!completion_is_final(QueueCompletionDisposition::Continued));
+    }
+
+    #[tokio::test]
+    async fn canonical_reply_previews_are_bounded_and_terminal_events_consume_them() {
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-preview-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+
+        service.accumulate_canonical_reply("empty", "").await;
+        assert!(!service.recent_replies.read().await.contains_key("empty"));
+        {
+            let mut replies = service.recent_replies.write().await;
+            for index in 0..PUSH_PREVIEW_MAX_THREADS.saturating_sub(1) {
+                replies.insert(format!("old-{index}"), "old".to_string());
+            }
+            replies.insert("full".to_string(), "x".repeat(PUSH_PREVIEW_ACCUMULATE_CAP));
+        }
+        service
+            .accumulate_canonical_reply("new", "first\n final   answer ")
+            .await;
+        service.accumulate_canonical_reply("full", "ignored").await;
+        assert_eq!(
+            service.recent_replies.read().await["full"].len(),
+            PUSH_PREVIEW_ACCUMULATE_CAP
+        );
+        assert_eq!(
+            service.take_reply_preview("new").await.as_deref(),
+            Some("final answer")
+        );
+        assert!(service.take_reply_preview("missing").await.is_none());
+        service.accumulate_canonical_reply("blank", " \n\t ").await;
+        assert!(service.take_reply_preview("blank").await.is_none());
+        service
+            .send_canonical_push_to_endpoint(
+                "http://127.0.0.1:1/not-used",
+                PushEvent::TurnCompleted,
+                None,
+                None,
+                None,
+            )
+            .await;
+
+        let hub = Arc::new(ClientHub::new());
+        let event_loop = service.spawn_event_loop_with_queue(&hub, None);
+        hub.broadcast_canonical_event(&CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "loop-thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "loop-message".to_string(),
+            content: "loop reply".to_string(),
+            content_block: None,
+        })
+        .await;
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if service
+                    .recent_replies
+                    .read()
+                    .await
+                    .contains_key("loop-thread")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(hub);
+        tokio::time::timeout(std::time::Duration::from_secs(1), event_loop)
+            .await
+            .expect("push event loop should close with the hub")
+            .unwrap();
+
+        service
+            .handle_canonical_event(
+                CanonicalHubEvent {
+                    event_id: 1,
+                    event: CanonicalEvent::MessageChunk {
+                        agent_id: "agent".to_string(),
+                        thread_id: "thread".to_string(),
+                        run_id: Some("run".to_string()),
+                        source_turn_id: Some("turn".to_string()),
+                        generation: Some(1),
+                        role: MessageRole::Agent,
+                        message_id: "message".to_string(),
+                        content: "completed".to_string(),
+                        content_block: None,
+                    },
+                },
+                None,
+            )
+            .await;
+        assert!(service.recent_replies.read().await.contains_key("thread"));
+        service
+            .handle_canonical_event(
+                CanonicalHubEvent {
+                    event_id: 2,
+                    event: CanonicalEvent::RunFinished {
+                        agent_id: "agent".to_string(),
+                        thread_id: "thread".to_string(),
+                        run_id: "run".to_string(),
+                        source_turn_id: "turn".to_string(),
+                        generation: 1,
+                        stop_reason: StopReason::EndTurn,
+                    },
+                },
+                None,
+            )
+            .await;
+        assert!(!service.recent_replies.read().await.contains_key("thread"));
+
+        let queue =
+            BridgeQueueService::new(Arc::new(UnusedQueueDispatcher), Arc::new(ClientHub::new()));
+        for (event_id, disposition) in [
+            (3, QueueCompletionDisposition::Continued),
+            (4, QueueCompletionDisposition::Final),
+        ] {
+            service
+                .accumulate_canonical_reply("settled", "answer")
+                .await;
+            queue
+                .record_completion_disposition(event_id, disposition)
+                .await;
+            service
+                .handle_canonical_event(
+                    CanonicalHubEvent {
+                        event_id,
+                        event: CanonicalEvent::RunFinished {
+                            agent_id: "agent".to_string(),
+                            thread_id: "settled".to_string(),
+                            run_id: "run".to_string(),
+                            source_turn_id: "turn".to_string(),
+                            generation: 1,
+                            stop_reason: StopReason::EndTurn,
+                        },
+                    },
+                    Some(&queue),
+                )
+                .await;
+        }
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn push_transport_handles_ticket_outcomes_retries_and_malformed_responses() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let app = Router::new()
+            .route(
+                "/tickets",
+                post(|| async {
+                    Json(json!({
+                        "data": [
+                            {"status": "ok", "id": "receipt"},
+                            {
+                                "status": "error",
+                                "details": {"error": "DeviceNotRegistered"}
+                            },
+                            {"status": "error", "details": {"error": "Other"}},
+                            {"status": "unknown"}
+                        ]
+                    }))
+                }),
+            )
+            .route(
+                "/partial",
+                post(|| async { Json(json!({"data": [{"status": "ok"}]})) }),
+            )
+            .route("/nodata", post(|| async { Json(json!({"ok": true})) }))
+            .route(
+                "/extra",
+                post(|| async {
+                    Json(json!({
+                        "data": [{"status": "ok"}, {"status": "ok"}]
+                    }))
+                }),
+            )
+            .route(
+                "/receipts",
+                post(|| async {
+                    Json(json!({
+                        "data": {
+                            "receipt-ok": {"status": "ok"},
+                            "receipt-stale": {
+                                "status": "error",
+                                "details": {"error": "DeviceNotRegistered"}
+                            },
+                            "receipt-other": {
+                                "status": "error",
+                                "details": {"error": "Other"}
+                            },
+                            "receipt-missing": {
+                                "status": "error",
+                                "details": {"error": "DeviceNotRegistered"}
+                            }
+                        }
+                    }))
+                }),
+            )
+            .route(
+                "/receipt-nodata",
+                post(|| async { Json(json!({"data": []})) }),
+            )
+            .route("/invalid", post(|| async { "not json" }))
+            .route("/retry", post(retrying_push_fixture))
+            .route("/limited", post(rate_limited_push_fixture))
+            .with_state(attempts.clone());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-http-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+        service
+            .register(
+                "profile".to_string(),
+                "turn-registration".to_string(),
+                "turn-token".to_string(),
+                "ios".to_string(),
+                "Phone".to_string(),
+                PushEventPreferences {
+                    turn_completed: true,
+                    approval_requested: false,
+                },
+            )
+            .await
+            .unwrap();
+        service
+            .register(
+                "profile".to_string(),
+                "approval-registration".to_string(),
+                "approval-token".to_string(),
+                "ios".to_string(),
+                "Phone".to_string(),
+                PushEventPreferences {
+                    turn_completed: false,
+                    approval_requested: true,
+                },
+            )
+            .await
+            .unwrap();
+        let targets = (0..4)
+            .map(|index| {
+                (
+                    format!("token-{index}"),
+                    "profile".to_string(),
+                    format!("registration-{index}"),
+                )
+            })
+            .collect();
+        service
+            .send_to_endpoint(
+                &format!("{base}/tickets"),
+                "title",
+                "body",
+                &json!({"kind": "test"}),
+                Some("approval"),
+                targets,
+            )
+            .await;
+        service
+            .send_canonical_push_to_endpoint(
+                &format!("{base}/partial"),
+                PushEvent::TurnCompleted,
+                Some("thread".to_string()),
+                None,
+                Some("reply".to_string()),
+            )
+            .await;
+        service
+            .send_canonical_push_to_endpoint(
+                &format!("{base}/partial"),
+                PushEvent::TurnCompleted,
+                Some("thread".to_string()),
+                None,
+                None,
+            )
+            .await;
+        service
+            .send_canonical_push_to_endpoint(
+                &format!("{base}/partial"),
+                PushEvent::ApprovalRequested,
+                Some("thread".to_string()),
+                Some("approval".to_string()),
+                None,
+            )
+            .await;
+        service
+            .send_to_endpoint(
+                &format!("{base}/nodata"),
+                "title",
+                "body",
+                &json!({}),
+                None,
+                vec![(
+                    "nodata".to_string(),
+                    "profile".to_string(),
+                    "nodata".to_string(),
+                )],
+            )
+            .await;
+        service
+            .send_to_endpoint(
+                &format!("{base}/extra"),
+                "title",
+                "body",
+                &json!({}),
+                None,
+                vec![(
+                    "extra".to_string(),
+                    "profile".to_string(),
+                    "extra".to_string(),
+                )],
+            )
+            .await;
+        assert_eq!(service.pending_receipt_check_count(), 1);
+
+        service
+            .send_to_endpoint(
+                &format!("{base}/partial"),
+                "title",
+                "body",
+                &json!({}),
+                None,
+                vec![
+                    ("one".to_string(), "profile".to_string(), "one".to_string()),
+                    ("two".to_string(), "profile".to_string(), "two".to_string()),
+                ],
+            )
+            .await;
+        service
+            .send_to_endpoint(
+                &format!("{base}/invalid"),
+                "title",
+                "body",
+                &json!({}),
+                None,
+                vec![(
+                    "invalid".to_string(),
+                    "profile".to_string(),
+                    "invalid".to_string(),
+                )],
+            )
+            .await;
+
+        attempts.store(0, Ordering::SeqCst);
+        assert!(service
+            .post_with_retry(&format!("{base}/retry"), &json!({}))
+            .await
+            .is_some());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        attempts.store(0, Ordering::SeqCst);
+        assert!(service
+            .post_with_retry(&format!("{base}/limited"), &json!({}))
+            .await
+            .is_none());
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            PUSH_SEND_MAX_ATTEMPTS as usize
+        );
+        assert!(service
+            .post_with_retry("http://127.0.0.1:1/unreachable", &json!({}))
+            .await
+            .is_none());
+        service
+            .check_receipts_from_endpoint(
+                &format!("{base}/receipts"),
+                vec![
+                    ("receipt-ok".to_string(), "ok".to_string()),
+                    ("receipt-stale".to_string(), "stale".to_string()),
+                    ("receipt-other".to_string(), "other".to_string()),
+                ],
+            )
+            .await;
+        service
+            .check_receipts_from_endpoint(
+                &format!("{base}/receipt-nodata"),
+                vec![("receipt".to_string(), "token".to_string())],
+            )
+            .await;
+        service
+            .check_receipts_from_endpoint(
+                "http://127.0.0.1:1/unreachable",
+                vec![("receipt".to_string(), "token".to_string())],
+            )
+            .await;
+
+        let authenticated = Arc::new(PushService {
+            registry: PushRegistryStore::load(&directory).await,
+            project_label: "project".to_string(),
+            http: reqwest::Client::new(),
+            access_token: Some("access".to_string()),
+            recent_replies: RwLock::new(HashMap::new()),
+            metrics: Arc::new(OperationalMetrics::new()),
+            pending_receipt_checks: AtomicU64::new(0),
+        });
+        assert!(authenticated
+            .post_with_retry(&format!("{base}/partial"), &json!({}))
+            .await
+            .is_some());
+
+        server.abort();
+        let _ = server.await;
         let _ = std::fs::remove_dir_all(directory);
     }
 }

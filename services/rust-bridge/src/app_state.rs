@@ -45,6 +45,20 @@ pub(super) struct DurableOperationDedupe {
     pub(super) approval_resolution_pending: HashMap<String, PendingApprovalOperation>,
 }
 
+impl DurableOperationDedupe {
+    pub(super) fn release_thread_create(&mut self, submission_id: &str) {
+        self.thread_create_pending.remove(submission_id);
+    }
+
+    pub(super) fn release_thread_fork(&mut self, submission_id: &str) {
+        self.thread_fork_pending.remove(submission_id);
+    }
+
+    pub(super) fn release_approval_resolution(&mut self, resolution_id: &str) {
+        self.approval_resolution_pending.remove(resolution_id);
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct PendingForkOperation {
@@ -499,6 +513,196 @@ mod tests {
         assert!(restored
             .thread_create_pending
             .contains("submission-indeterminate"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn definitive_operation_failures_release_their_idempotency_keys() {
+        let mut state = DurableOperationDedupe::default();
+        state.thread_create_pending.insert("create".to_string());
+        state.thread_fork_pending.insert(
+            "fork".to_string(),
+            PendingForkOperation {
+                source_thread_id: "source".to_string(),
+                message_id: "message".to_string(),
+            },
+        );
+        state.approval_resolution_pending.insert(
+            "approval".to_string(),
+            PendingApprovalOperation {
+                request_id: "request".to_string(),
+                decision: "accept".to_string(),
+            },
+        );
+
+        state.release_thread_create("create");
+        state.release_thread_fork("fork");
+        state.release_approval_resolution("approval");
+
+        assert!(state.thread_create_pending.is_empty());
+        assert!(state.thread_fork_pending.is_empty());
+        assert!(state.approval_resolution_pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn operation_idempotency_load_rejects_invalid_files_and_bounds_pending_state() {
+        let directory = std::env::temp_dir().join(format!(
+            "dappercode-operation-dedupe-bounds-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("operations.json");
+
+        assert!(load_operation_dedupe(&path)
+            .await
+            .unwrap()
+            .thread_create_pending
+            .is_empty());
+        assert!(load_operation_dedupe(&directory)
+            .await
+            .unwrap_err()
+            .contains("failed to read"));
+        std::fs::write(&path, b"{").unwrap();
+        assert!(load_operation_dedupe(&path)
+            .await
+            .unwrap_err()
+            .contains("invalid"));
+        std::fs::write(&path, vec![b'x'; OPERATION_DEDUPE_MAX_BYTES + 1]).unwrap();
+        assert!(load_operation_dedupe(&path)
+            .await
+            .unwrap_err()
+            .contains("exceeds"));
+
+        let mut state = DurableOperationDedupe::default();
+        for index in 0..=SUBMISSION_DEDUPE_LIMIT {
+            state
+                .thread_create_pending
+                .insert(format!("create-{index:05}"));
+            state.thread_fork_pending.insert(
+                format!("fork-{index:05}"),
+                PendingForkOperation {
+                    source_thread_id: "source".to_string(),
+                    message_id: "message".to_string(),
+                },
+            );
+            state.approval_resolution_pending.insert(
+                format!("approval-{index:05}"),
+                PendingApprovalOperation {
+                    request_id: "request".to_string(),
+                    decision: "accept".to_string(),
+                },
+            );
+        }
+        std::fs::write(&path, serde_json::to_vec(&state).unwrap()).unwrap();
+        let bounded = load_operation_dedupe(&path).await.unwrap();
+        assert_eq!(bounded.thread_create_pending.len(), SUBMISSION_DEDUPE_LIMIT);
+        assert_eq!(bounded.thread_fork_pending.len(), SUBMISSION_DEDUPE_LIMIT);
+        assert_eq!(
+            bounded.approval_resolution_pending.len(),
+            APPROVAL_RESOLUTION_DEDUPE_LIMIT
+        );
+
+        state.thread_create_pending.clear();
+        state.thread_fork_pending.clear();
+        state.approval_resolution_pending.clear();
+        state.thread_fork_pending.insert(
+            "oversized".to_string(),
+            PendingForkOperation {
+                source_thread_id: "source".to_string(),
+                message_id: "x".repeat(OPERATION_DEDUPE_MAX_BYTES),
+            },
+        );
+        assert!(persist_operation_dedupe(&path, &state)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn client_metadata_sanitization_handles_missing_control_only_and_bounded_values() {
+        assert_eq!(sanitize_client_metadata(None, "fallback", 8), "fallback");
+        assert_eq!(
+            sanitize_client_metadata(Some("\0\n"), "fallback", 8),
+            "fallback"
+        );
+        assert_eq!(
+            sanitize_client_metadata(Some("  device-name  "), "fallback", 6),
+            "device"
+        );
+    }
+
+    #[tokio::test]
+    async fn operation_idempotency_compacts_each_completed_result_class() {
+        let directory = std::env::temp_dir().join(format!(
+            "dappercode-operation-dedupe-compact-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("operations.json");
+        let payload = "x".repeat(9 * 1024 * 1024);
+        let mut state = DurableOperationDedupe::default();
+        state.thread_create_results.insert(
+            "create".to_string(),
+            BridgeThreadCreateResponse {
+                submission_id: "create".to_string(),
+                thread: json!(payload),
+            },
+        );
+        state.thread_create_order.push_back("create".to_string());
+        state.thread_fork_results.insert(
+            "fork".to_string(),
+            BridgeThreadForkCacheEntry {
+                source_thread_id: "source".to_string(),
+                message_id: "message".to_string(),
+                response: BridgeThreadForkResponse {
+                    submission_id: "fork".to_string(),
+                    thread: json!("x".repeat(9 * 1024 * 1024)),
+                },
+            },
+        );
+        state.thread_fork_order.push_back("fork".to_string());
+        state
+            .approval_resolution_results
+            .insert("approval".to_string(), json!("x".repeat(9 * 1024 * 1024)));
+        state
+            .approval_resolution_order
+            .push_back("approval".to_string());
+        persist_operation_dedupe(&path, &state).await.unwrap();
+        let compacted = load_operation_dedupe(&path).await.unwrap();
+        assert!(compacted.thread_create_results.is_empty());
+        assert!(compacted.thread_fork_results.is_empty());
+        assert!(compacted
+            .approval_resolution_results
+            .contains_key("approval"));
+
+        let mut approval_only = DurableOperationDedupe::default();
+        approval_only.approval_resolution_results.insert(
+            "approval".to_string(),
+            json!("x".repeat(OPERATION_DEDUPE_MAX_BYTES)),
+        );
+        approval_only
+            .approval_resolution_order
+            .push_back("approval".to_string());
+        persist_operation_dedupe(&path, &approval_only)
+            .await
+            .unwrap();
+        assert!(load_operation_dedupe(&path)
+            .await
+            .unwrap()
+            .approval_resolution_results
+            .is_empty());
+
+        let mut results = HashMap::from([
+            ("first".to_string(), 1),
+            ("second".to_string(), 2),
+            ("orphan".to_string(), 3),
+        ]);
+        let mut order = VecDeque::from(["first".to_string(), "second".to_string()]);
+        trim_dedupe(&mut results, &mut order, 1);
+        assert_eq!(order, VecDeque::from(["second".to_string()]));
+        assert_eq!(results, HashMap::from([("second".to_string(), 2)]));
         let _ = std::fs::remove_dir_all(directory);
     }
 }

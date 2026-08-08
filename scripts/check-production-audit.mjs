@@ -8,6 +8,10 @@ const reviewedAdvisories = new Map([
   // npm reports both IDs for the same scanner; MarkdownIt's linkify option stays disabled here.
   [1121797, 'linkify-it'],
   [1124012, 'linkify-it'],
+  // image-size is pulled through Metro build tooling and is absent from the native app bundle.
+  // npm offers only a breaking Expo change, so there is no compatible production-runtime fix.
+  [1138808, 'image-size'],
+  [1138809, 'image-size'],
 ]);
 
 // npm reports `fixAvailable` as `true` when a compatible release exists, or as the package a

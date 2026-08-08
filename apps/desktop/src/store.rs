@@ -852,6 +852,106 @@ mod tests {
     }
 
     #[test]
+    fn broker_settings_validate_all_resource_and_endpoint_boundaries() {
+        let valid = BrokerSettings::new(
+            "local".to_string(),
+            "127.0.0.1".to_string(),
+            8787,
+            8788,
+            "http://127.0.0.1:8787".to_string(),
+            "http://127.0.0.1:8788".to_string(),
+        )
+        .unwrap();
+
+        let mut invalid = valid.clone();
+        invalid.bridge_port = 0;
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.preview_port = 0;
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.preview_port = invalid.bridge_port;
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = valid.clone();
+        invalid.host = " ".to_string();
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.connect_url = " ".to_string();
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.preview_connect_url = " ".to_string();
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = valid.clone();
+        invalid.legacy_bridge_endpoints = vec![BrokerEndpoint {
+            host: " ".to_string(),
+            port: 8789,
+        }];
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.legacy_bridge_endpoints = vec![BrokerEndpoint {
+            host: "127.0.0.1".to_string(),
+            port: 0,
+        }];
+        assert!(invalid.validate().is_err());
+
+        let mut invalid = valid.clone();
+        invalid.max_workers = 0;
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.max_idle_workers = invalid.max_workers + 1;
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.worker_idle_grace_ms = 0;
+        assert!(invalid.validate().is_err());
+        let mut invalid = valid.clone();
+        invalid.worker_start_timeout_ms = 0;
+        assert!(invalid.validate().is_err());
+
+        let mut ipv6 = valid;
+        ipv6.host = "::1".to_string();
+        ipv6.connect_url = "http://[::1]:8787".to_string();
+        let mut profile = sample_profile("ipv6-000000000003", 9797);
+        ipv6.apply_endpoint(&mut profile);
+        assert_eq!(profile.bridge_host, "::1");
+        assert_eq!(profile.bridge_port, 8787);
+        assert_eq!(profile.preview_connect_url, "http://[::1]:9798");
+
+        ipv6.host = "[::1]".to_string();
+        ipv6.apply_endpoint(&mut profile);
+        assert_eq!(profile.preview_connect_url, "http://[::1]:9798");
+    }
+
+    #[test]
+    fn app_config_requires_broker_settings_and_tracks_profile_lifecycle() {
+        let mut wrong_version = AppConfig::empty();
+        wrong_version.version = CONFIG_VERSION + 1;
+        assert!(wrong_version.validate().is_err());
+
+        let mut missing_broker = AppConfig::empty();
+        missing_broker
+            .profiles
+            .push(sample_profile("alpha-000000000001", 8787));
+        assert!(missing_broker.validate().is_err());
+
+        let mut config = AppConfig::empty();
+        assert!(config.validate().is_ok());
+        let mut alpha = sample_profile("alpha-000000000001", 8787);
+        config.upsert(alpha.clone());
+        assert!(config.broker.is_some());
+        alpha.updated_at = "updated".to_string();
+        config.upsert(alpha);
+        config.upsert(sample_profile("beta-000000000002", 8787));
+        assert_eq!(config.profiles.len(), 2);
+        assert!(config.remove("alpha-000000000001"));
+        assert!(config.broker.is_some());
+        assert!(!config.remove("missing"));
+        assert!(config.remove("beta-000000000002"));
+        assert!(config.broker.is_none());
+    }
+
+    #[test]
     fn prepares_every_profile_directory_privately() {
         let temp = tempdir().unwrap();
         let paths = AppPaths {
