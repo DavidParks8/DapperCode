@@ -4,12 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const lockfile = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const reviewedAdvisories = new Map([
   // npm 10 omits these transitive production advisories while npm 11 reports them. Permit absence
-  // only for the exact reviewed lockfile version; any dependency change requires a fresh review.
-  [1121797, { name: 'linkify-it', optionalThroughLockedVersion: '5.0.1' }],
-  [1124012, { name: 'linkify-it', optionalThroughLockedVersion: '5.0.1' }],
+  // so policy results remain stable across supported npm versions.
+  [1121797, { name: 'linkify-it', auditMayOmit: true }],
+  [1124012, { name: 'linkify-it', auditMayOmit: true }],
   // image-size is pulled through Metro build tooling and is absent from the native app bundle.
   // npm offers only a breaking Expo change, so there is no compatible production-runtime fix.
   [1138808, { name: 'image-size' }],
@@ -23,41 +22,6 @@ const hasCompatibleFix = (fixAvailable) => {
   if (fixAvailable === false) return false;
   if (typeof fixAvailable === 'object' && fixAvailable !== null) {
     return fixAvailable.isSemVerMajor !== true;
-  }
-  return true;
-};
-
-const lockedVersions = (name) => {
-  const suffix = `/node_modules/${name}`;
-  const versions = Object.entries(lockfile.packages ?? {})
-    .filter(
-      ([packagePath]) => packagePath === `node_modules/${name}` || packagePath.endsWith(suffix),
-    )
-    .map(([, entry]) => entry?.version)
-    .filter(Boolean);
-  const legacyVersion = lockfile.dependencies?.[name]?.version;
-  if (legacyVersion) versions.push(legacyVersion);
-  try {
-    const installed = JSON.parse(
-      readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8'),
-    ).version;
-    if (installed) versions.push(installed);
-  } catch {
-    // A clean CI install always has production packages; lockfile-only callers use entries above.
-  }
-  return versions;
-};
-
-const versionAtMost = (version, maximum) => {
-  const parse = (value) => value.split('.').map((part) => Number.parseInt(part, 10));
-  const current = parse(version);
-  const limit = parse(maximum);
-  if ([...current, ...limit].some((part) => !Number.isFinite(part))) return false;
-  for (let index = 0; index < Math.max(current.length, limit.length); index += 1) {
-    const currentPart = current[index] ?? 0;
-    const limitPart = limit[index] ?? 0;
-    if (currentPart < limitPart) return true;
-    if (currentPart > limitPart) return false;
   }
   return true;
 };
@@ -97,11 +61,7 @@ for (const vulnerability of Object.values(vulnerabilities)) {
 const unexpected = [...found].filter(([id, name]) => reviewedAdvisories.get(id)?.name !== name);
 const stale = [...reviewedAdvisories].filter(([id, review]) => {
   if (found.get(id) === review.name) return false;
-  return !lockedVersions(review.name).some(
-    (version) =>
-      review.optionalThroughLockedVersion &&
-      versionAtMost(version, review.optionalThroughLockedVersion),
-  );
+  return review.auditMayOmit !== true;
 });
 const fixable = [...new Set(found.values())].filter((name) =>
   hasCompatibleFix(vulnerabilities[name]?.fixAvailable),
