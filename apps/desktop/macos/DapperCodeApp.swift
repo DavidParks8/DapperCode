@@ -45,6 +45,48 @@ private struct BridgeSnapshot: Decodable, Identifiable {
         ["running", "degraded", "unhealthy", "inaccessible"].contains(state)
     }
 
+    func applying(_ health: BridgeObservedHealth) -> Self {
+        let readyAgents = health.agents.filter { $0.lifecycle == "ready" }.count
+        let projectedState: String
+        let projectedHeadline: String
+        switch health.status {
+        case "ok":
+            projectedState = "running"
+            projectedHeadline = "Bridge running"
+        case "degraded":
+            projectedState = "degraded"
+            projectedHeadline = "Bridge degraded"
+        case "unhealthy":
+            projectedState = "unhealthy"
+            projectedHeadline = "Bridge unhealthy"
+        default:
+            projectedState = "error"
+            projectedHeadline = "Unknown bridge status"
+        }
+        let deviceSuffix = health.connectedClients == 1 ? "" : "s"
+        let agentSuffix = health.agents.count == 1 ? "" : "s"
+        return Self(
+            state: projectedState,
+            headline: projectedHeadline,
+            detail: "\(health.connectedClients) connected device\(deviceSuffix) · \(readyAgents)/\(health.agents.count) agent\(agentSuffix) ready",
+            bridgeUrl: bridgeUrl,
+            uptimeSec: health.uptimeSec,
+            connectedClients: health.connectedClients,
+            readyAgents: readyAgents,
+            totalAgents: health.agents.count,
+            recentErrorCount: health.operational.recentErrors.count,
+            managedProcess: managedProcess,
+            autoStart: autoStart,
+            workspace: workspace,
+            profileId: profileId,
+            bridgePort: bridgePort,
+            pairingPayload: pairingPayload,
+            logPath: logPath,
+            configPath: configPath,
+            secretBackend: secretBackend
+        )
+    }
+
     static let loading = BridgeSnapshot(
         state: "loading",
         headline: "Checking bridge",
@@ -108,6 +150,10 @@ private final class BridgeModel: ObservableObject {
     @Published var agentExecutable = ""
     @Published var agentArguments = "acp"
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    private var statusObserver: BridgeStatusObserver?
+    private var isRefreshing = false
+    private var refreshAgain = false
+    private var lastReconciledAt: Date?
 
     var workspace: String {
         get {
@@ -141,21 +187,46 @@ private final class BridgeModel: ObservableObject {
     var primaryTitle: String { isRunning || snapshot.managedProcess ? "Stop Bridge" : "Start Bridge" }
 
     init() {
+        statusObserver = BridgeStatusObserver(
+            onHealth: { [weak self] profileId, health in
+                self?.applyObservedHealth(health, to: profileId)
+            },
+            onDisconnect: { [weak self] profileId in
+                Task { await self?.reconcileAfterDisconnect(profileId) }
+            }
+        )
         Task {
             await discoverDefaultAgent()
             await refresh()
             await autostartRememberedBridges()
-            await poll()
         }
     }
 
     func refresh() async {
-        do {
-            snapshot = try await invoke("status", as: BridgeSnapshot.self)
-            bridges = try await invoke(["list"], as: [BridgeSnapshot].self, includeWorkspace: false)
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isRefreshing else {
+            refreshAgain = true
+            return
         }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        repeat {
+            refreshAgain = false
+            do {
+                snapshot = try await invoke("status", as: BridgeSnapshot.self)
+                bridges = try await invoke(["list"], as: [BridgeSnapshot].self, includeWorkspace: false)
+                lastReconciledAt = Date()
+                synchronizeStatusObservers()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        } while refreshAgain
+    }
+
+    func refreshIfStale() async {
+        if let lastReconciledAt, Date().timeIntervalSince(lastReconciledAt) < 15 {
+            return
+        }
+        await refresh()
     }
 
     func perform(_ command: String, on bridge: BridgeSnapshot) async {
@@ -227,6 +298,7 @@ private final class BridgeModel: ObservableObject {
             }
             _ = try await invoke(arguments, as: SetupResult.self)
             snapshot = try await invoke("start", as: BridgeSnapshot.self)
+            await refresh()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -294,18 +366,10 @@ private final class BridgeModel: ObservableObject {
         defer { isBusy = false }
         do {
             snapshot = try await invoke(command, as: BridgeSnapshot.self)
+            await refresh()
         } catch {
             errorMessage = error.localizedDescription
             await refresh()
-        }
-    }
-
-    private func poll() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
-            if !isBusy {
-                await refresh()
-            }
         }
     }
 
@@ -331,6 +395,33 @@ private final class BridgeModel: ObservableObject {
             } catch {
                 errorMessage = "Could not start \(bridge.workspaceName): \(error.localizedDescription)"
             }
+        }
+        await refresh()
+    }
+
+    private func synchronizeStatusObservers() {
+        let targets = bridges.compactMap { bridge -> BridgeObservationTarget? in
+            guard bridge.isRunning, let pairingPayload = bridge.pairingPayload else { return nil }
+            return BridgeObservationTarget(
+                profileId: bridge.profileId,
+                pairingPayload: pairingPayload
+            )
+        }
+        statusObserver?.synchronize(targets)
+    }
+
+    private func applyObservedHealth(_ health: BridgeObservedHealth, to profileId: String) {
+        bridges = bridges.map { bridge in
+            bridge.profileId == profileId ? bridge.applying(health) : bridge
+        }
+        if snapshot.profileId == profileId {
+            snapshot = snapshot.applying(health)
+        }
+    }
+
+    private func reconcileAfterDisconnect(_ profileId: String) async {
+        guard bridges.contains(where: { $0.profileId == profileId && $0.isRunning }) else {
+            return
         }
         await refresh()
     }
@@ -602,6 +693,9 @@ private struct MainView: View {
                 .disabled(model.isBusy)
             }
         }
+        .onAppear {
+            Task { await model.refreshIfStale() }
+        }
     }
 }
 
@@ -639,6 +733,9 @@ private struct TrayMenu: View {
             DispatchQueue.main.async {
                 NSApplication.shared.terminate(nil)
             }
+        }
+        .onAppear {
+            Task { await model.refreshIfStale() }
         }
     }
 }

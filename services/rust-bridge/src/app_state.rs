@@ -71,7 +71,7 @@ impl AppState {
     }
 
     pub(super) async fn bridge_status(&self) -> BridgeStatus {
-        let devices = self.hub.client_connections().await;
+        let devices = crate::health::user_device_connections(self.hub.client_connections().await);
         let agents = self.backend.capabilities(self.hub.stream_id()).agents;
         let operational = BridgeOperationalStatus {
             requests: self.metrics.request_snapshot(),

@@ -156,6 +156,12 @@ uses a `kqueue` `NOTE_EXIT` watch, which cannot be fooled by a recycled process 
 poll every two seconds. A bridge started without an owner (the `npm run bridge` development flow)
 keeps running as before. The desktop operator remembers successful `start`/`restart` and `stop`
 actions per workspace; the macOS shell starts remembered profiles after its initial status refresh.
+While a bridge is running, the desktop shell keeps one authenticated WebSocket observer open. Bridge
+traffic triggers throttled health updates over that connection, with a low-frequency heartbeat and
+response deadline for quiet or half-open connections. A bridge crash or external kill closes the
+socket and triggers immediate process reconciliation. Reconnects use bounded backoff, while full
+operator reconciliation runs only on launch, foreground presentation, explicit actions, or disconnect
+instead of continuously spawning `status` and `list` processes.
 
 ## Runtime Configuration
 

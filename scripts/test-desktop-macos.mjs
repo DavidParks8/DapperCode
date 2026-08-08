@@ -22,6 +22,7 @@ try {
       'swiftc',
       '-parse-as-library',
       'apps/desktop/macos/AppTermination.swift',
+      'apps/desktop/macos/BridgeStatusObserver.swift',
       'apps/desktop/macos/tests/AppTerminationTests.swift',
       '-o',
       testExecutable,

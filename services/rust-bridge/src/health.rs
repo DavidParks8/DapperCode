@@ -19,6 +19,15 @@ pub(crate) struct BridgeDeviceConnection {
     pub(crate) last_seen_at: String,
 }
 
+pub(crate) fn user_device_connections(
+    devices: Vec<BridgeDeviceConnection>,
+) -> Vec<BridgeDeviceConnection> {
+    devices
+        .into_iter()
+        .filter(|device| device.client_type != "desktop-monitor")
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BridgeStatus {
@@ -148,6 +157,30 @@ mod tests {
         assert_eq!(status.status, "ok");
         assert_eq!(status.connected_clients, 1);
         assert_eq!(status.devices[0].client_id, 1);
+    }
+
+    #[test]
+    fn desktop_status_monitors_are_not_reported_as_connected_devices() {
+        let devices = vec![
+            BridgeDeviceConnection {
+                client_id: 1,
+                client_type: "mobile".to_string(),
+                client_name: "phone".to_string(),
+                connected_at: "then".to_string(),
+                last_seen_at: "now".to_string(),
+            },
+            BridgeDeviceConnection {
+                client_id: 2,
+                client_type: "desktop-monitor".to_string(),
+                client_name: "DapperCode".to_string(),
+                connected_at: "then".to_string(),
+                last_seen_at: "now".to_string(),
+            },
+        ];
+
+        let visible = user_device_connections(devices);
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].client_type, "mobile");
     }
 
     #[tokio::test]

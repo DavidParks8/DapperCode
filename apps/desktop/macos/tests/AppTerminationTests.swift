@@ -17,8 +17,47 @@ private func sleepingProcess() -> Process {
     return process
 }
 
+@MainActor
+private final class FakeBridgeStatusConnection: BridgeStatusConnection {
+    private let onHealth: (BridgeObservedHealth) -> Void
+    private let onDisconnect: () -> Void
+    private(set) var startCount = 0
+    private(set) var cancelCount = 0
+
+    init(
+        onHealth: @escaping (BridgeObservedHealth) -> Void,
+        onDisconnect: @escaping () -> Void
+    ) {
+        self.onHealth = onHealth
+        self.onDisconnect = onDisconnect
+    }
+
+    func start() {
+        startCount += 1
+    }
+
+    func cancel() {
+        cancelCount += 1
+    }
+
+    func sendHealth() {
+        onHealth(BridgeObservedHealth(
+            status: "ok",
+            uptimeSec: 12,
+            connectedClients: 1,
+            agents: [.init(lifecycle: "ready")],
+            operational: .init(recentErrors: [])
+        ))
+    }
+
+    func disconnect() {
+        onDisconnect()
+    }
+}
+
 @main
 private struct AppTerminationTests {
+    @MainActor
     static func main() throws {
         let registry = OperatorProcessRegistry()
         let inFlight = sleepingProcess()
@@ -110,6 +149,55 @@ private struct AppTerminationTests {
                 state: "error"
             ),
             "a stale workspace profile should not be autostarted"
+        )
+
+        var connections: [FakeBridgeStatusConnection] = []
+        var observedHealth: [(String, BridgeObservedHealth)] = []
+        var disconnectedProfiles: [String] = []
+        let observer = BridgeStatusObserver(
+            connectionFactory: { _, onHealth, onDisconnect in
+                let connection = FakeBridgeStatusConnection(
+                    onHealth: onHealth,
+                    onDisconnect: onDisconnect
+                )
+                connections.append(connection)
+                return connection
+            },
+            onHealth: { observedHealth.append(($0, $1)) },
+            onDisconnect: { disconnectedProfiles.append($0) }
+        )
+        let target = BridgeObservationTarget(
+            profileId: "profile",
+            pairingPayload: #"{"type":"dappercode-bridge-pair","bridgeUrl":"http://127.0.0.1:8787","bridgeToken":"token"}"#
+        )
+
+        observer.synchronize([target])
+        observer.synchronize([target])
+        try require(connections.count == 1, "a healthy bridge should have one persistent observer")
+        try require(connections[0].startCount == 1, "the observer connection should start once")
+
+        connections[0].sendHealth()
+        try require(observedHealth.count == 1, "health events should update the bridge snapshot")
+        connections[0].disconnect()
+        try require(
+            disconnectedProfiles == ["profile"],
+            "an externally closed bridge connection should trigger reconciliation"
+        )
+
+        let changedTarget = BridgeObservationTarget(
+            profileId: "profile",
+            pairingPayload: #"{"type":"dappercode-bridge-pair","bridgeUrl":"http://127.0.0.1:9797","bridgeToken":"new-token"}"#
+        )
+        observer.synchronize([changedTarget])
+        try require(
+            connections.count == 2 && connections[1].startCount == 1,
+            "a changed bridge target should replace a pending reconnect immediately"
+        )
+
+        observer.synchronize([])
+        try require(
+            connections[0].cancelCount == 1 && connections[1].cancelCount == 1,
+            "stopping a bridge should cancel its persistent observer"
         )
     }
 }

@@ -162,6 +162,7 @@ run('xcrun', [
   '-target',
   `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`,
   'apps/desktop/macos/AppTermination.swift',
+  'apps/desktop/macos/BridgeStatusObserver.swift',
   'apps/desktop/macos/DapperCodeApp.swift',
   '-o',
   nativeExecutable,
