@@ -32,7 +32,7 @@ use super::harness::{
     SessionContext,
 };
 use super::identity::AgentSessionId;
-use super::interactions::{PendingElicitationSummary, PendingPermissionSummary};
+use super::interactions::{InteractionError, PendingElicitationSummary, PendingPermissionSummary};
 use super::runtime::{
     AcpConnection, AcpRuntimeError, ForkRequest, NegotiatedInitialize, PromptAdmission,
     RequestCancellation, SteerRequest,
@@ -87,6 +87,63 @@ pub enum AgentManagerError {
     Harness(#[from] HarnessError),
     #[error(transparent)]
     Runtime(#[from] AcpRuntimeError),
+}
+
+#[derive(Debug)]
+pub struct AgentOperationFailure {
+    error: AgentManagerError,
+    indeterminate: bool,
+}
+
+impl AgentOperationFailure {
+    fn definitive(error: AgentManagerError) -> Self {
+        Self {
+            error,
+            indeterminate: false,
+        }
+    }
+
+    fn indeterminate(error: AgentManagerError) -> Self {
+        Self {
+            error,
+            indeterminate: true,
+        }
+    }
+
+    pub fn is_indeterminate(&self) -> bool {
+        self.indeterminate
+    }
+
+    #[cfg(test)]
+    pub fn into_error(self) -> AgentManagerError {
+        self.error
+    }
+}
+
+impl std::fmt::Display for AgentOperationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for AgentOperationFailure {}
+
+fn classify_runtime_operation_failure(error: AcpRuntimeError) -> AgentOperationFailure {
+    let indeterminate = matches!(
+        &error,
+        AcpRuntimeError::Connection(_)
+            | AcpRuntimeError::ConnectionTaskEnded
+            | AcpRuntimeError::CommandResponseDropped
+            | AcpRuntimeError::RequestTimeout
+            | AcpRuntimeError::RequestCancelled
+            | AcpRuntimeError::Interaction(InteractionError::Response(_))
+    );
+    let error = AgentManagerError::Runtime(error);
+    if indeterminate {
+        AgentOperationFailure::indeterminate(error)
+    } else {
+        AgentOperationFailure::definitive(error)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -954,28 +1011,50 @@ impl AgentManager {
             .await
     }
 
+    #[cfg(test)]
     pub async fn new_session_with_cancellation(
+        &self,
+        agent_id: &str,
+        request: NewSessionRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<ManagedSession, AgentManagerError> {
+        self.new_session_with_cancellation_outcome(agent_id, request, cancellation)
+            .await
+            .map_err(AgentOperationFailure::into_error)
+    }
+
+    pub async fn new_session_with_cancellation_outcome(
         &self,
         agent_id: &str,
         mut request: NewSessionRequest,
         cancellation: RequestCancellation,
-    ) -> Result<ManagedSession, AgentManagerError> {
-        let cwd = self.validate_cwd(&request.cwd)?;
+    ) -> Result<ManagedSession, AgentOperationFailure> {
+        let cwd = self
+            .validate_cwd(&request.cwd)
+            .map_err(AgentOperationFailure::definitive)?;
         request.cwd = cwd.clone();
-        let connection = self.connection(agent_id)?;
+        let connection = self
+            .connection(agent_id)
+            .map_err(AgentOperationFailure::definitive)?;
         let response = connection
             .new_session_with_cancellation(request, cancellation)
-            .await?;
+            .await
+            .map_err(classify_runtime_operation_failure)?;
         let session_id = response.session_id.clone();
         self.track_session(
-            AgentSessionId::new(agent_id, session_id.to_string())
-                .map_err(|_| AgentManagerError::InvalidThreadId)?,
+            AgentSessionId::new(agent_id, session_id.to_string()).map_err(|_| {
+                AgentOperationFailure::indeterminate(AgentManagerError::InvalidThreadId)
+            })?,
             cwd,
         )
-        .await?;
+        .await
+        .map_err(AgentOperationFailure::indeterminate)?;
         self.apply_config_options(connection, &session_id, response.config_options)
-            .await?;
-        self.read_known_session(agent_id, &session_id).await
+            .await
+            .map_err(AgentOperationFailure::indeterminate)?;
+        self.read_known_session(agent_id, &session_id)
+            .await
+            .map_err(AgentOperationFailure::indeterminate)
     }
 
     #[cfg(test)]
@@ -1265,30 +1344,51 @@ impl AgentManager {
         self.read_session(thread_id).await
     }
 
+    #[cfg(test)]
     pub async fn fork_session(
         &self,
         thread_id: &str,
         message_id: &str,
     ) -> Result<ManagedSession, AgentManagerError> {
-        self.flush_pending_durable_sessions().await?;
-        let (source, source_session_id, connection) = self.route_thread(thread_id)?;
+        self.fork_session_with_outcome(thread_id, message_id)
+            .await
+            .map_err(AgentOperationFailure::into_error)
+    }
+
+    pub async fn fork_session_with_outcome(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+    ) -> Result<ManagedSession, AgentOperationFailure> {
+        self.flush_pending_durable_sessions()
+            .await
+            .map_err(AgentOperationFailure::definitive)?;
+        let (source, source_session_id, connection) = self
+            .route_thread(thread_id)
+            .map_err(AgentOperationFailure::definitive)?;
         let source_session = connection
             .session(&source_session_id)
             .await
-            .ok_or_else(|| AcpRuntimeError::UnknownSession(source_session_id.to_string()))?;
+            .ok_or_else(|| {
+                AgentOperationFailure::definitive(AgentManagerError::Runtime(
+                    AcpRuntimeError::UnknownSession(source_session_id.to_string()),
+                ))
+            })?;
         let snapshot = source_session.snapshot().await;
         if snapshot.active_run_id.is_some() {
-            return Err(AcpRuntimeError::SessionBusy.into());
+            return Err(AgentOperationFailure::definitive(
+                AgentManagerError::Runtime(AcpRuntimeError::SessionBusy),
+            ));
         }
         let boundary = snapshot.complete_fork_boundary(message_id).ok_or_else(|| {
-            AgentManagerError::Fork(
+            AgentOperationFailure::definitive(AgentManagerError::Fork(
                 "fork boundary is unavailable or the session history is incomplete".to_string(),
-            )
+            ))
         })?;
         if boundary.ordinal == 0 {
-            return Err(AgentManagerError::Fork(
+            return Err(AgentOperationFailure::definitive(AgentManagerError::Fork(
                 "the first user request has no earlier conversation to fork".to_string(),
-            ));
+            )));
         }
         let source_entry = self
             .session_index
@@ -1301,11 +1401,18 @@ impl AgentManager {
             })
             .cloned()
             .ok_or_else(|| {
-                AgentManagerError::SessionIndex("source session is not durably indexed".to_string())
+                AgentOperationFailure::definitive(AgentManagerError::SessionIndex(
+                    "source session is not durably indexed".to_string(),
+                ))
             })?;
 
         let native_fork = connection.negotiated().supports_session_fork();
         let (forked_session_id, title, directory) = if native_fork {
+            let user_message_ordinal = u64::try_from(boundary.ordinal).map_err(|_| {
+                AgentOperationFailure::definitive(AgentManagerError::Fork(
+                    "fork boundary ordinal is invalid".to_string(),
+                ))
+            })?;
             let response = connection
                 .fork_session_extension(ForkRequest {
                     session_id: source_session_id.clone(),
@@ -1318,29 +1425,32 @@ impl AgentManager {
                         ),
                         ForkBoundaryKind::EndOfHistory { .. } => None,
                     },
-                    user_message_ordinal: u64::try_from(boundary.ordinal).map_err(|_| {
-                        AgentManagerError::Fork("fork boundary ordinal is invalid".to_string())
-                    })?,
+                    user_message_ordinal,
                 })
-                .await?;
+                .await
+                .map_err(classify_runtime_operation_failure)?;
             (
                 response.session_id.to_string(),
                 response.title,
                 source_entry.cwd.clone(),
             )
         } else {
-            let runtime = self
-                .agents
-                .get(&source.agent_id)
-                .ok_or_else(|| AgentManagerError::UnknownAgent(source.agent_id.clone()))?;
+            let runtime = self.agents.get(&source.agent_id).ok_or_else(|| {
+                AgentOperationFailure::definitive(AgentManagerError::UnknownAgent(
+                    source.agent_id.clone(),
+                ))
+            })?;
             if !harness_capabilities(runtime).session_fork {
-                return Err(AcpRuntimeError::Unsupported("session/fork").into());
+                return Err(AgentOperationFailure::definitive(
+                    AgentManagerError::Runtime(AcpRuntimeError::Unsupported("session/fork")),
+                ));
             }
             let (harness, context) = self
                 .harness_session_context(&source, source_session_id.clone())
-                .await?;
+                .await
+                .map_err(AgentOperationFailure::definitive)?;
             let forked = harness
-                .fork(
+                .fork_with_outcome(
                     &context,
                     HarnessForkRequest {
                         user_message_ordinal: boundary.ordinal,
@@ -1358,19 +1468,33 @@ impl AgentManager {
                         },
                     },
                 )
-                .await?;
+                .await
+                .map_err(|failure| {
+                    let indeterminate = failure.is_indeterminate();
+                    let error = AgentManagerError::Harness(failure.into_error());
+                    if indeterminate {
+                        AgentOperationFailure::indeterminate(error)
+                    } else {
+                        AgentOperationFailure::definitive(error)
+                    }
+                })?;
             (
                 forked.session_id,
                 forked.title,
-                self.validate_cwd(&forked.directory)?,
+                self.validate_cwd(&forked.directory)
+                    .map_err(AgentOperationFailure::indeterminate)?,
             )
         };
 
-        let forked_identity = AgentSessionId::new(&source.agent_id, &forked_session_id)
-            .map_err(|_| AgentManagerError::Fork("invalid forked session ID".to_string()))?;
+        let forked_identity =
+            AgentSessionId::new(&source.agent_id, &forked_session_id).map_err(|_| {
+                AgentOperationFailure::indeterminate(AgentManagerError::Fork(
+                    "invalid forked session ID".to_string(),
+                ))
+            })?;
         if forked_identity.acp_session_id == source.acp_session_id {
-            return Err(AgentManagerError::Fork(
-                "fork returned the source session ID".to_string(),
+            return Err(AgentOperationFailure::indeterminate(
+                AgentManagerError::Fork("fork returned the source session ID".to_string()),
             ));
         }
         {
@@ -1379,8 +1503,8 @@ impl AgentManager {
                 entry.agent_id == forked_identity.agent_id
                     && entry.acp_session_id == forked_identity.acp_session_id
             }) {
-                return Err(AgentManagerError::Fork(
-                    "fork returned an existing session ID".to_string(),
+                return Err(AgentOperationFailure::indeterminate(
+                    AgentManagerError::Fork("fork returned an existing session ID".to_string()),
                 ));
             }
             index
@@ -1392,7 +1516,8 @@ impl AgentManager {
                     parent_acp_session_id: None,
                     forked_from_acp_session_id: Some(source.acp_session_id.clone()),
                 }])
-                .await?;
+                .await
+                .map_err(AgentOperationFailure::indeterminate)?;
         }
         let forked_thread_id = forked_identity.encode();
         match self.read_session(&forked_thread_id).await {
@@ -1418,10 +1543,12 @@ impl AgentManager {
                     .await
                     .remove(&forked_thread_id);
                 match rollback_error {
-                    Some(rollback_error) => Err(AgentManagerError::Fork(format!(
-                        "{error}; durable rollback also failed: {rollback_error}"
-                    ))),
-                    None => Err(error),
+                    Some(rollback_error) => Err(AgentOperationFailure::indeterminate(
+                        AgentManagerError::Fork(format!(
+                            "{error}; durable rollback also failed: {rollback_error}"
+                        )),
+                    )),
+                    None => Err(AgentOperationFailure::indeterminate(error)),
                 }
             }
         }
@@ -1947,6 +2074,7 @@ impl AgentManager {
         Ok(child.encode())
     }
 
+    #[cfg(test)]
     pub async fn prompt(
         &self,
         thread_id: &str,
@@ -1954,14 +2082,29 @@ impl AgentManager {
         run_id: String,
         source_turn_id: String,
     ) -> Result<PromptAdmission, AgentManagerError> {
-        let (_, session_id, connection) = self.route_thread(thread_id)?;
-        Ok(connection
+        self.prompt_with_outcome(thread_id, prompt, run_id, source_turn_id)
+            .await
+            .map_err(AgentOperationFailure::into_error)
+    }
+
+    pub async fn prompt_with_outcome(
+        &self,
+        thread_id: &str,
+        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        run_id: String,
+        source_turn_id: String,
+    ) -> Result<PromptAdmission, AgentOperationFailure> {
+        let (_, session_id, connection) = self
+            .route_thread(thread_id)
+            .map_err(AgentOperationFailure::definitive)?;
+        connection
             .prompt(
                 PromptRequest::new(session_id, prompt),
                 run_id,
                 source_turn_id,
             )
-            .await?)
+            .await
+            .map_err(classify_runtime_operation_failure)
     }
 
     pub async fn cancel_turn(
@@ -2124,26 +2267,34 @@ impl AgentManager {
         Ok(())
     }
 
-    pub async fn resolve_permission(
+    pub async fn resolve_permission_with_outcome(
         &self,
         thread_id: &str,
         request_id: &str,
         option_id: &str,
-    ) -> Result<(), AgentManagerError> {
-        let (_, _, connection) = self.route_thread(thread_id)?;
+    ) -> Result<(), AgentOperationFailure> {
+        let (_, _, connection) = self
+            .route_thread(thread_id)
+            .map_err(AgentOperationFailure::definitive)?;
         connection
             .resolve_permission(thread_id, request_id, option_id)
-            .await?;
+            .await
+            .map_err(classify_runtime_operation_failure)?;
         Ok(())
     }
 
-    pub async fn cancel_permission(
+    pub async fn cancel_permission_with_outcome(
         &self,
         thread_id: &str,
         request_id: &str,
-    ) -> Result<(), AgentManagerError> {
-        let (_, _, connection) = self.route_thread(thread_id)?;
-        connection.cancel_permission(thread_id, request_id).await?;
+    ) -> Result<(), AgentOperationFailure> {
+        let (_, _, connection) = self
+            .route_thread(thread_id)
+            .map_err(AgentOperationFailure::definitive)?;
+        connection
+            .cancel_permission(thread_id, request_id)
+            .await
+            .map_err(classify_runtime_operation_failure)?;
         Ok(())
     }
 
@@ -3356,6 +3507,14 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::sync::atomic::AtomicUsize;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn unavailable_connection_before_dispatch_is_a_definitive_failure() {
+        let failure = classify_runtime_operation_failure(AcpRuntimeError::ConnectionUnavailable(
+            "already closed".to_string(),
+        ));
+        assert!(!failure.is_indeterminate());
+    }
 
     fn echo_digest() -> String {
         let bytes = std::fs::read("/bin/echo").expect("read /bin/echo");
@@ -5543,6 +5702,19 @@ mod tests {
         .expect("manager");
         let identity = AgentSessionId::new("plain-agent", "fork-source").unwrap();
         let thread_id = identity.encode();
+        let unknown_agent = manager
+            .new_session_with_cancellation_outcome(
+                "missing-agent",
+                NewSessionRequest::new("."),
+                RequestCancellation::default(),
+            )
+            .await
+            .expect_err("unknown agent is rejected before session creation");
+        assert!(!unknown_agent.is_indeterminate());
+        assert!(matches!(
+            unknown_agent.into_error(),
+            AgentManagerError::UnknownAgent(_)
+        ));
 
         let (generation, _) = session
             .admit_prompt("run".to_string(), "turn".to_string())
@@ -5562,9 +5734,14 @@ mod tests {
                 stop_reason: StopReason::EndTurn,
             })
             .await;
+        let missing_boundary = manager
+            .fork_session_with_outcome(&thread_id, "missing")
+            .await
+            .expect_err("missing boundary is rejected before forking");
+        assert!(!missing_boundary.is_indeterminate());
         assert!(matches!(
-            manager.fork_session(&thread_id, "missing").await,
-            Err(AgentManagerError::Fork(_))
+            missing_boundary.into_error(),
+            AgentManagerError::Fork(_)
         ));
 
         for (id, content) in [("user-1", "first"), ("user-2", "second")] {

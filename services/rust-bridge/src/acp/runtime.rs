@@ -113,6 +113,8 @@ pub enum AcpRuntimeError {
     InitializeTimeout,
     #[error("ACP connection closed: {0}")]
     Connection(String),
+    #[error("ACP connection is already unavailable: {0}")]
+    ConnectionUnavailable(String),
     #[error("ACP connection task ended unexpectedly")]
     ConnectionTaskEnded,
     #[error("ACP command queue is closed")]
@@ -791,7 +793,7 @@ impl AcpConnection {
         make: impl FnOnce(oneshot::Sender<Result<T, AcpRuntimeError>>) -> Command,
     ) -> Result<T, AcpRuntimeError> {
         if let Some(message) = self.failure.borrow().clone() {
-            return Err(AcpRuntimeError::Connection(message));
+            return Err(AcpRuntimeError::ConnectionUnavailable(message));
         }
         let (response_tx, mut response_rx) = oneshot::channel();
         self.commands
@@ -1731,7 +1733,10 @@ mod tests {
     }
 
     fn assert_connection_failure<T>(result: Result<T, AcpRuntimeError>) {
-        assert!(matches!(result, Err(AcpRuntimeError::Connection(_))));
+        assert!(matches!(
+            result,
+            Err(AcpRuntimeError::Connection(_)) | Err(AcpRuntimeError::ConnectionUnavailable(_))
+        ));
     }
 
     #[test]

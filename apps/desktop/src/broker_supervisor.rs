@@ -34,6 +34,13 @@ pub struct BrokerSupervisor {
     owner_pid: Option<u32>,
 }
 
+#[derive(Clone, Copy)]
+pub enum BrokerLifecycleAction {
+    Start,
+    Stop,
+    Restart,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrokerHealth {
@@ -137,8 +144,7 @@ impl BrokerSupervisor {
         }
     }
 
-    pub fn start(&self) -> Result<BridgeSnapshot> {
-        let _lease = self.acquire_transition_lease()?;
+    fn start_locked(&self) -> Result<BridgeSnapshot> {
         if self.fetch_health().is_ok() {
             if self.owns_running_process() {
                 return Ok(self.snapshot());
@@ -216,6 +222,10 @@ impl BrokerSupervisor {
 
     pub fn stop(&self) -> Result<BridgeSnapshot> {
         let _lease = self.acquire_transition_lease()?;
+        self.stop_locked()
+    }
+
+    fn stop_locked(&self) -> Result<BridgeSnapshot> {
         let Some(ownership) = read_ownership(&self.paths.broker_ownership_path())? else {
             if self.fetch_health().is_ok() {
                 bail!("a broker is running but is not owned by this desktop app");
@@ -230,8 +240,7 @@ impl BrokerSupervisor {
         Ok(self.snapshot())
     }
 
-    pub fn restart(&self) -> Result<BridgeSnapshot> {
-        let _lease = self.acquire_transition_lease()?;
+    fn restart_locked(&self) -> Result<BridgeSnapshot> {
         if let Some(ownership) = read_ownership(&self.paths.broker_ownership_path())? {
             if process_matches(&ownership) {
                 stop_owned_process(&ownership, &self.paths.broker_ownership_path())?;
@@ -239,8 +248,52 @@ impl BrokerSupervisor {
                 remove_file_if_exists(&self.paths.broker_ownership_path())?;
             }
         }
-        drop(_lease);
-        self.start()
+        self.start_locked()
+    }
+
+    pub fn transition_and_remember(
+        &self,
+        action: BrokerLifecycleAction,
+    ) -> Result<(BridgeSnapshot, bool)> {
+        let _lease = self.acquire_transition_lease()?;
+        let was_running = self.owns_running_process();
+        let snapshot = match action {
+            BrokerLifecycleAction::Start => self.start_locked()?,
+            BrokerLifecycleAction::Stop => self.stop_locked()?,
+            BrokerLifecycleAction::Restart => self.restart_locked()?,
+        };
+        let auto_start = !matches!(action, BrokerLifecycleAction::Stop);
+        let profile_id = self.profile.profile_id.clone();
+        let snapshot = Self::persist_transition_or_restore(
+            snapshot,
+            was_running,
+            || {
+                self.paths.update_config(|config| {
+                    config.find(&profile_id).with_context(|| {
+                        format!("profile {profile_id} disappeared during broker transition")
+                    })?;
+                    let broker = config
+                        .broker
+                        .as_mut()
+                        .context("broker settings disappeared during broker transition")?;
+                    broker.auto_start = auto_start;
+                    for profile in &mut config.profiles {
+                        profile.auto_start = auto_start;
+                    }
+                    Ok(())
+                })
+            },
+            |should_be_running| self.restore_process_state_locked(should_be_running),
+        )?;
+        Ok((snapshot, auto_start))
+    }
+
+    fn restore_process_state_locked(&self, should_be_running: bool) -> Result<()> {
+        match (should_be_running, self.owns_running_process()) {
+            (true, false) => self.start_locked().map(|_| ()),
+            (false, true) => self.stop_locked().map(|_| ()),
+            _ => Ok(()),
+        }
     }
 
     pub fn owns_running_process(&self) -> bool {
@@ -248,6 +301,23 @@ impl BrokerSupervisor {
             .ok()
             .flatten()
             .is_some_and(|record| process_matches(&record))
+    }
+
+    fn persist_transition_or_restore<T>(
+        outcome: T,
+        was_running: bool,
+        persist: impl FnOnce() -> Result<()>,
+        restore: impl FnOnce(bool) -> Result<()>,
+    ) -> Result<T> {
+        match persist() {
+            Ok(()) => Ok(outcome),
+            Err(error) => match restore(was_running) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(anyhow!(
+                    "{error:#}; restoring the prior broker process state also failed: {rollback:#}"
+                )),
+            },
+        }
     }
 
     fn fetch_health(&self) -> Result<BrokerHealth> {
@@ -479,6 +549,131 @@ fn detach_process(_command: &mut Command) {}
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    fn test_supervisor(
+        paths: &AppPaths,
+        bridge_port: u16,
+        owner_pid: Option<u32>,
+    ) -> BrokerSupervisor {
+        let preview_port = if bridge_port == u16::MAX {
+            bridge_port - 1
+        } else {
+            bridge_port + 1
+        };
+        let settings = BrokerSettings::new(
+            "local".to_string(),
+            "127.0.0.1".to_string(),
+            bridge_port,
+            preview_port,
+            format!("http://127.0.0.1:{bridge_port}"),
+            format!("http://127.0.0.1:{preview_port}"),
+        )
+        .unwrap();
+        let profile = Profile {
+            profile_id: "workspace-a".to_string(),
+            workspace: paths.base_dir().to_path_buf(),
+            network_mode: "local".to_string(),
+            bridge_host: "127.0.0.1".to_string(),
+            bridge_port,
+            preview_port,
+            connect_url: settings.connect_url.clone(),
+            preview_connect_url: settings.preview_connect_url.clone(),
+            auto_start: false,
+            allow_query_token_auth: true,
+            acp_initialize_timeout_ms: 15_000,
+            agent: crate::store::ProfileAgent {
+                agent_id: "agent".to_string(),
+                display_name: "Agent".to_string(),
+                executable: std::env::current_exe().unwrap(),
+                argv: Vec::new(),
+                resolved_version: "test".to_string(),
+                verified_digest: format!("sha256:{}", "a".repeat(64)),
+            },
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        BrokerSupervisor::new(
+            profile,
+            settings,
+            paths.clone(),
+            SecretStore::file_backend_for_tests(),
+            owner_pid,
+        )
+    }
+
+    fn closed_port() -> u16 {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
+
+    fn health_server(body: &'static str, requests: usize) -> (u16, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            for _ in 0..requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        });
+        (port, server)
+    }
+
+    fn delayed_health_server(
+        port: u16,
+        body: &'static str,
+        requests: usize,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+            for _ in 0..requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        })
+    }
+
+    fn spawn_owned_fixture(
+        cwd: &Path,
+        config_sha256: &str,
+    ) -> (std::process::Child, BrokerOwnershipRecord) {
+        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let child = Command::new(&executable)
+            .arg("__broker")
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let record = process_identity(child.id(), &executable, cwd, config_sha256, None).unwrap();
+        (child, record)
+    }
+
+    #[test]
+    fn __broker_child_stays_alive_for_process_lifecycle_fixtures() {
+        if std::env::args().any(|argument| argument == "__broker") {
+            thread::sleep(Duration::from_millis(800));
+        }
+    }
 
     #[test]
     fn settings_digest_is_stable_and_contains_no_workspace_credential() {
@@ -556,5 +751,412 @@ mod tests {
         }
         assert_eq!(plural(1), "");
         assert_eq!(plural(0), "s");
+    }
+
+    #[test]
+    fn snapshots_distinguish_healthy_owned_unreachable_and_stopped_brokers() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":7,"configuredWorkspaces":2,"runningWorkers":3,"connectedClients":1,"busyWorkers":1}"#;
+        let (port, server) = health_server(health, 1);
+        let running = test_supervisor(&paths, port, None).snapshot();
+        server.join().unwrap();
+        assert_eq!(running.state, BridgeState::Running);
+        assert_eq!(running.ready_agents, 2);
+        assert!(!running.managed_process);
+
+        let supervisor = test_supervisor(&paths, closed_port(), None);
+        let (mut child, ownership) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        let inaccessible = supervisor.snapshot();
+        assert_eq!(inaccessible.state, BridgeState::Inaccessible);
+        assert!(inaccessible.managed_process);
+        let _ = child.kill();
+        let _ = child.wait();
+        remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+
+        assert_eq!(supervisor.snapshot().state, BridgeState::Stopped);
+    }
+
+    #[test]
+    fn health_validation_and_start_detect_owned_and_unowned_listeners() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let (bad_port, bad_server) = health_server(
+            r#"{"status":"degraded","uptimeSec":1,"configuredWorkspaces":0,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#,
+            1,
+        );
+        let bad = test_supervisor(&paths, bad_port, None);
+        assert!(bad
+            .fetch_health()
+            .unwrap_err()
+            .to_string()
+            .contains("degraded"));
+        bad_server.join().unwrap();
+
+        let health = r#"{"status":"ok","uptimeSec":1,"configuredWorkspaces":1,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (unowned_port, unowned_server) = health_server(health, 1);
+        let unowned = test_supervisor(&paths, unowned_port, None);
+        assert!(unowned
+            .start_locked()
+            .unwrap_err()
+            .to_string()
+            .contains("not owned"));
+        unowned_server.join().unwrap();
+
+        let (owned_port, owned_server) = health_server(health, 2);
+        let owned = test_supervisor(&paths, owned_port, None);
+        let current = process_identity(
+            std::process::id(),
+            &std::env::current_exe().unwrap(),
+            &std::env::current_dir().unwrap(),
+            &settings_digest(&owned.settings),
+            None,
+        )
+        .unwrap();
+        write_ownership(&paths.broker_ownership_path(), &current).unwrap();
+        assert_eq!(owned.start_locked().unwrap().state, BridgeState::Running);
+        owned_server.join().unwrap();
+        remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+    }
+
+    #[test]
+    fn start_detects_owned_unhealthy_and_child_exit_paths() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let owned = test_supervisor(&paths, closed_port(), None);
+        let (mut child, ownership) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&owned.settings));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        assert!(owned
+            .start_locked()
+            .unwrap_err()
+            .to_string()
+            .contains("health endpoint"));
+        let _ = child.kill();
+        let _ = child.wait();
+        remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+
+        let launched = test_supervisor(&paths, closed_port(), None);
+        assert!(launched
+            .start_locked()
+            .unwrap_err()
+            .to_string()
+            .contains("exited before becoming healthy"));
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[test]
+    fn start_covers_owner_arguments_ownership_write_failure_and_delayed_health() {
+        let owner_data = tempfile::tempdir().unwrap();
+        let owner_paths = AppPaths::for_tests(owner_data.path().to_path_buf());
+        let with_owner = test_supervisor(&owner_paths, closed_port(), Some(std::process::id()));
+        assert!(with_owner.start_locked().is_err());
+
+        let write_data = tempfile::tempdir().unwrap();
+        let write_paths = AppPaths::for_tests(write_data.path().to_path_buf());
+        fs::create_dir_all(write_paths.broker_ownership_path()).unwrap();
+        let write_failure = test_supervisor(&write_paths, closed_port(), None);
+        assert!(write_failure.start_locked().is_err());
+        fs::remove_dir_all(write_paths.broker_ownership_path()).unwrap();
+
+        let healthy_data = tempfile::tempdir().unwrap();
+        let healthy_paths = AppPaths::for_tests(healthy_data.path().to_path_buf());
+        let port = closed_port();
+        let health = r#"{"status":"ok","uptimeSec":1,"configuredWorkspaces":1,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let server = delayed_health_server(port, health, 2);
+        let healthy = test_supervisor(&healthy_paths, port, None);
+        assert_eq!(healthy.start_locked().unwrap().state, BridgeState::Running);
+        server.join().unwrap();
+        assert_eq!(healthy.stop().unwrap().state, BridgeState::Stopped);
+    }
+
+    #[test]
+    fn restart_handles_missing_stale_and_live_ownership_records() {
+        let missing_data = tempfile::tempdir().unwrap();
+        let missing_paths = AppPaths::for_tests(missing_data.path().to_path_buf());
+        let missing = test_supervisor(&missing_paths, closed_port(), None);
+        assert!(missing.restart_locked().is_err());
+
+        let stale_data = tempfile::tempdir().unwrap();
+        let stale_paths = AppPaths::for_tests(stale_data.path().to_path_buf());
+        let stale = test_supervisor(&stale_paths, closed_port(), None);
+        write_ownership(
+            &stale_paths.broker_ownership_path(),
+            &BrokerOwnershipRecord {
+                version: OWNERSHIP_VERSION,
+                pid: u32::MAX,
+                started_at_epoch_sec: 1,
+                executable: PathBuf::from("/missing"),
+                data_dir: stale_paths.base_dir().to_path_buf(),
+                config_sha256: settings_digest(&stale.settings),
+                owner_pid: None,
+            },
+        )
+        .unwrap();
+        assert!(stale.restart_locked().is_err());
+
+        let live_data = tempfile::tempdir().unwrap();
+        let live_paths = AppPaths::for_tests(live_data.path().to_path_buf());
+        let live = test_supervisor(&live_paths, closed_port(), None);
+        let (child, ownership) =
+            spawn_owned_fixture(live_paths.base_dir(), &settings_digest(&live.settings));
+        write_ownership(&live_paths.broker_ownership_path(), &ownership).unwrap();
+        let reaper = thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+        assert!(live.restart_locked().is_err());
+        reaper.join().unwrap();
+    }
+
+    #[test]
+    fn stop_handles_unowned_stale_and_live_owned_processes() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":1,"configuredWorkspaces":1,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (port, server) = health_server(health, 1);
+        let unowned = test_supervisor(&paths, port, None);
+        assert!(unowned
+            .stop()
+            .unwrap_err()
+            .to_string()
+            .contains("not owned"));
+        server.join().unwrap();
+
+        let stopped = test_supervisor(&paths, closed_port(), None);
+        let stale = BrokerOwnershipRecord {
+            version: OWNERSHIP_VERSION,
+            pid: u32::MAX,
+            started_at_epoch_sec: 1,
+            executable: PathBuf::from("/missing"),
+            data_dir: paths.base_dir().to_path_buf(),
+            config_sha256: settings_digest(&stopped.settings),
+            owner_pid: None,
+        };
+        write_ownership(&paths.broker_ownership_path(), &stale).unwrap();
+        assert_eq!(stopped.stop().unwrap().state, BridgeState::Stopped);
+        assert!(!paths.broker_ownership_path().exists());
+
+        let (child, ownership) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&stopped.settings));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        let reaper = thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+        assert_eq!(stopped.stop().unwrap().state, BridgeState::Stopped);
+        reaper.join().unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[test]
+    fn process_identity_matching_and_stale_cleanup_fail_closed() {
+        let current_executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let current_directory = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let current = process_identity(
+            std::process::id(),
+            &current_executable,
+            &current_directory,
+            &format!("sha256:{}", "b".repeat(64)),
+            Some(42),
+        )
+        .unwrap();
+        assert!(process_matches(&current));
+        assert!(process_identity(
+            std::process::id(),
+            Path::new("/bin/echo"),
+            &current_directory,
+            &current.config_sha256,
+            None,
+        )
+        .is_err());
+        let other_directory = tempfile::tempdir().unwrap();
+        assert!(process_identity(
+            std::process::id(),
+            &current_executable,
+            other_directory.path(),
+            &current.config_sha256,
+            None,
+        )
+        .is_err());
+        let mut wrong_start = current.clone();
+        wrong_start.started_at_epoch_sec = wrong_start.started_at_epoch_sec.saturating_add(1);
+        assert!(!process_matches(&wrong_start));
+        let mut wrong_executable = current.clone();
+        wrong_executable.executable = PathBuf::from("/bin/echo");
+        assert!(!process_matches(&wrong_executable));
+        assert!(signal_process(u32::MAX, Signal::Term).is_err());
+        let stale_record = BrokerOwnershipRecord {
+            version: OWNERSHIP_VERSION,
+            pid: u32::MAX,
+            started_at_epoch_sec: 1,
+            executable: PathBuf::from("/missing"),
+            data_dir: current_directory.clone(),
+            config_sha256: current.config_sha256.clone(),
+            owner_pid: None,
+        };
+        assert!(stop_owned_process(&stale_record, Path::new("/tmp/missing-owner")).is_err());
+
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let supervisor = test_supervisor(&paths, closed_port(), None);
+        assert!(supervisor.clean_stale_ownership().is_ok());
+        write_ownership(&paths.broker_ownership_path(), &stale_record).unwrap();
+        assert!(supervisor.clean_stale_ownership().is_ok());
+        assert!(!paths.broker_ownership_path().exists());
+        let (mut child, mut ownership) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        assert!(supervisor.clean_stale_ownership().is_ok());
+        ownership.config_sha256 = format!("sha256:{}", "c".repeat(64));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        assert!(supervisor.clean_stale_ownership().is_err());
+        let _ = child.kill();
+        let _ = child.wait();
+        remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+
+        let executable_drift_data = tempfile::tempdir().unwrap();
+        let executable_drift_paths =
+            AppPaths::for_tests(executable_drift_data.path().to_path_buf());
+        let executable_drift = test_supervisor(&executable_drift_paths, closed_port(), None);
+        let mut sleep = Command::new("/bin/sleep")
+            .arg("2")
+            .current_dir(executable_drift_paths.base_dir())
+            .spawn()
+            .unwrap();
+        let sleep_record = process_identity(
+            sleep.id(),
+            Path::new("/bin/sleep"),
+            executable_drift_paths.base_dir(),
+            &settings_digest(&executable_drift.settings),
+            None,
+        )
+        .unwrap();
+        write_ownership(
+            &executable_drift_paths.broker_ownership_path(),
+            &sleep_record,
+        )
+        .unwrap();
+        assert!(executable_drift.clean_stale_ownership().is_err());
+        let _ = sleep.kill();
+        let _ = sleep.wait();
+
+        let source_data = tempfile::tempdir().unwrap();
+        let different_data = tempfile::tempdir().unwrap();
+        let different_paths = AppPaths::for_tests(different_data.path().to_path_buf());
+        let different = test_supervisor(&different_paths, closed_port(), None);
+        let (mut different_child, different_record) =
+            spawn_owned_fixture(source_data.path(), &settings_digest(&different.settings));
+        write_ownership(&different_paths.broker_ownership_path(), &different_record).unwrap();
+        assert!(different.clean_stale_ownership().is_err());
+        let _ = different_child.kill();
+        let _ = different_child.wait();
+        remove_file_if_exists(&different_paths.broker_ownership_path()).unwrap();
+
+        fs::create_dir_all(different_paths.broker_ownership_path()).unwrap();
+        assert!(read_ownership(&different_paths.broker_ownership_path()).is_err());
+        fs::remove_dir_all(different_paths.broker_ownership_path()).unwrap();
+    }
+
+    #[test]
+    fn stop_transition_persists_broker_and_profile_autostart_under_production_path() {
+        let workspace = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let bridge_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let preview_port = if bridge_port == u16::MAX {
+            bridge_port - 1
+        } else {
+            bridge_port + 1
+        };
+        let settings = BrokerSettings::new(
+            "local".to_string(),
+            "127.0.0.1".to_string(),
+            bridge_port,
+            preview_port,
+            format!("http://127.0.0.1:{bridge_port}"),
+            format!("http://127.0.0.1:{preview_port}"),
+        )
+        .unwrap();
+        let profile = Profile {
+            profile_id: "workspace-a".to_string(),
+            workspace: workspace.path().to_path_buf(),
+            network_mode: "local".to_string(),
+            bridge_host: "127.0.0.1".to_string(),
+            bridge_port,
+            preview_port,
+            connect_url: settings.connect_url.clone(),
+            preview_connect_url: settings.preview_connect_url.clone(),
+            auto_start: true,
+            allow_query_token_auth: true,
+            acp_initialize_timeout_ms: 15_000,
+            agent: crate::store::ProfileAgent {
+                agent_id: "agent".to_string(),
+                display_name: "Agent".to_string(),
+                executable: std::env::current_exe().unwrap(),
+                argv: Vec::new(),
+                resolved_version: "test".to_string(),
+                verified_digest: format!("sha256:{}", "a".repeat(64)),
+            },
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let mut saved_settings = settings.clone();
+        saved_settings.auto_start = true;
+        paths
+            .update_config(|config| {
+                config.broker = Some(saved_settings);
+                config.upsert(profile.clone());
+                Ok(())
+            })
+            .unwrap();
+        let supervisor = BrokerSupervisor::new(
+            profile,
+            settings,
+            paths.clone(),
+            SecretStore::file_backend_for_tests(),
+            None,
+        );
+
+        let (_, auto_start) = supervisor
+            .transition_and_remember(BrokerLifecycleAction::Stop)
+            .unwrap();
+
+        assert!(!auto_start);
+        let config = paths.load_config().unwrap();
+        assert!(!config.broker.unwrap().auto_start);
+        assert!(config.profiles.iter().all(|profile| !profile.auto_start));
+    }
+
+    #[test]
+    fn failed_autostart_persistence_restores_the_prior_process_state() {
+        let running = std::cell::Cell::new(false);
+        let error = BrokerSupervisor::persist_transition_or_restore(
+            (),
+            true,
+            || Err(anyhow!("config write failed")),
+            |should_be_running| {
+                running.set(should_be_running);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "config write failed");
+        assert!(running.get());
+
+        let rollback_error = BrokerSupervisor::persist_transition_or_restore(
+            (),
+            false,
+            || Err(anyhow!("config write failed")),
+            |_| Err(anyhow!("process rollback failed")),
+        )
+        .unwrap_err();
+        assert!(rollback_error
+            .to_string()
+            .contains("restoring the prior broker process state also failed"));
     }
 }

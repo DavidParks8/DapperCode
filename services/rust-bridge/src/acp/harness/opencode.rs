@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     HarnessAdapter, HarnessCapabilities, HarnessContext, HarnessDeleteRequest, HarnessError,
     HarnessForkBoundary, HarnessForkBoundaryMessage, HarnessForkRequest, HarnessForkedSession,
-    HarnessLaunchConfig, HarnessSteerRequest, SessionContext,
+    HarnessLaunchConfig, HarnessOperationFailure, HarnessSteerRequest, SessionContext,
 };
 use crate::acp::config::ResolvedAgentManifest;
 
@@ -54,6 +54,61 @@ fn is_opencode_executable(executable: &Path) -> bool {
 }
 
 struct OpenCodeHarnessAdapter;
+
+fn opencode_fork_with_outcome<'a>(
+    context: &'a SessionContext,
+    request: HarnessForkRequest,
+) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessOperationFailure>> {
+    async move {
+        let source_session_id = context.session_id.to_string();
+        let boundary = resolve_opencode_message_id(context, &request)
+            .await
+            .map_err(HarnessOperationFailure::definitive)?;
+        let mut url = session_action_url(context, &source_session_id, "fork")
+            .map_err(HarnessOperationFailure::definitive)?;
+        url.query_pairs_mut()
+            .append_pair("directory", context.cwd.to_string_lossy().as_ref());
+        let response = timed_send(context.http.post(url).json(&OpenCodeForkRequest {
+            message_id: boundary.message_id,
+        }))
+        .await
+        .map_err(HarnessOperationFailure::indeterminate)?;
+        if !response.status().is_success() {
+            return Err(HarnessOperationFailure::indeterminate(HarnessError::Http(
+                response.status(),
+            )));
+        }
+        let bytes = bounded_body(response)
+            .await
+            .map_err(HarnessOperationFailure::indeterminate)?;
+        let forked = serde_json::from_slice::<OpenCodeForkResponse>(&bytes)
+            .map_err(|error| HarnessError::InvalidResponse(error.to_string()))
+            .map_err(HarnessOperationFailure::indeterminate)?;
+        validate_fork_response(&forked, &source_session_id, &context.cwd)
+            .map_err(HarnessOperationFailure::indeterminate)?;
+        let forked_session_id = forked.id.clone();
+        let copied_user_messages = opencode_messages(context, &forked_session_id)
+            .await
+            .map_err(HarnessOperationFailure::indeterminate)?
+            .into_iter()
+            .filter(|message| message.info.role == "user")
+            .count();
+        if copied_user_messages != boundary.user_message_ordinal {
+            return Err(HarnessOperationFailure::indeterminate(
+                HarnessError::InvalidResponse(
+                    "fork did not preserve the requested exclusive message boundary".to_string(),
+                ),
+            ));
+        }
+        Ok(HarnessForkedSession {
+            session_id: forked.id,
+            parent_session_id: source_session_id,
+            directory: PathBuf::from(forked.directory),
+            title: forked.title,
+        })
+    }
+    .boxed()
+}
 
 fn allocate_loopback_port() -> Option<u16> {
     std::net::TcpListener::bind(("127.0.0.1", 0))
@@ -164,47 +219,26 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
         .boxed()
     }
 
+    #[cfg(test)]
     fn fork<'a>(
         &'a self,
         context: &'a SessionContext,
         request: HarnessForkRequest,
     ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessError>> {
         async move {
-            let source_session_id = context.session_id.to_string();
-            let boundary = resolve_opencode_message_id(context, &request).await?;
-            let mut url = session_action_url(context, &source_session_id, "fork")?;
-            url.query_pairs_mut()
-                .append_pair("directory", context.cwd.to_string_lossy().as_ref());
-            let response = timed_send(context.http.post(url).json(&OpenCodeForkRequest {
-                message_id: boundary.message_id,
-            }))
-            .await?;
-            if !response.status().is_success() {
-                return Err(HarnessError::Http(response.status()));
-            }
-            let bytes = bounded_body(response).await?;
-            let forked = serde_json::from_slice::<OpenCodeForkResponse>(&bytes)
-                .map_err(|error| HarnessError::InvalidResponse(error.to_string()))?;
-            validate_fork_response(&forked, &source_session_id, &context.cwd)?;
-            let forked_session_id = forked.id.clone();
-            let copied_user_messages = opencode_messages(context, &forked_session_id)
-                .await?
-                .into_iter()
-                .filter(|message| message.info.role == "user")
-                .count();
-            if copied_user_messages != boundary.user_message_ordinal {
-                return Err(HarnessError::InvalidResponse(
-                    "fork did not preserve the requested exclusive message boundary".to_string(),
-                ));
-            }
-            Ok(HarnessForkedSession {
-                session_id: forked.id,
-                parent_session_id: source_session_id,
-                directory: PathBuf::from(forked.directory),
-                title: forked.title,
-            })
+            opencode_fork_with_outcome(context, request)
+                .await
+                .map_err(HarnessOperationFailure::into_error)
         }
         .boxed()
+    }
+
+    fn fork_with_outcome<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessForkRequest,
+    ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessOperationFailure>> {
+        opencode_fork_with_outcome(context, request)
     }
 
     fn wait_until_idle<'a>(
@@ -1063,6 +1097,11 @@ mod tests {
                 post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
             );
         let (context, server) = fixture_context(app, "source").await;
+        let preflight = OpenCodeHarnessAdapter
+            .fork_with_outcome(&context, request("not-present", None))
+            .await
+            .expect_err("stale boundary is rejected before the fork request");
+        assert!(!preflight.is_indeterminate());
         assert!(matches!(
             OpenCodeHarnessAdapter
                 .fork(&context, request("second", None))

@@ -190,7 +190,7 @@ private struct AppTerminationTests {
         )
         let target = BridgeObservationTarget(
             profileId: "profile",
-            pairingPayload: #"{"type":"dappercode-broker-pair","bridgeUrl":"http://127.0.0.1:8787","bridgeToken":"token","workspaceId":"profile"}"#
+            pairingPayload: #"{"type":"dappercode-bridge-pair","bridgeUrl":"http://127.0.0.1:8787","bridgeToken":"token","workspaceId":"profile"}"#
         )
 
         observer.synchronize([target])

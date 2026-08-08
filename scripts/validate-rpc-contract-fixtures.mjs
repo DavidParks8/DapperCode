@@ -129,7 +129,7 @@ if (
 )
   fail('runtime activity fixture');
 if (
-  fixtures.brokerPairing.type !== 'dappercode-broker-pair' ||
+  fixtures.brokerPairing.type !== 'dappercode-bridge-pair' ||
   fixtures.brokerPairing.brokerProtocolVersion !== 1 ||
   !fixtures.brokerPairing.workspaceId ||
   !fixtures.brokerPairing.bridgeToken

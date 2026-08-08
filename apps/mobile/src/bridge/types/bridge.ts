@@ -146,7 +146,7 @@ export interface BridgeRuntimeActivity {
 }
 
 export interface BrokerPairingPayload {
-  type: 'dappercode-broker-pair';
+  type: 'dappercode-bridge-pair' | 'dappercode-broker-pair';
   brokerProtocolVersion: 1;
   workspaceId: string;
   bridgeUrl: string;

@@ -18,12 +18,12 @@ mod store;
 #[allow(dead_code)]
 mod supervisor;
 
-use broker_supervisor::BrokerSupervisor;
+use broker_supervisor::{BrokerLifecycleAction, BrokerSupervisor};
 use config::{validate_workspace, RuntimePaths};
 use platform_setup::NetworkMode;
 use secrets::SecretStore;
 use setup::{discover_agent_executable, setup_profile, SetupRequest};
-use store::{profile_id_for, AppPaths, Profile};
+use store::{profile_id_for, AppPaths, FileLease, Profile};
 use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor as LegacyBridgeSupervisor};
 
 #[derive(Serialize)]
@@ -166,14 +166,14 @@ fn run_workspace_command(
                 bail!("this workspace is not set up yet; run 'dappercode setup' first");
             };
             stop_legacy_bridges(paths, secrets)?;
-            let snapshot = match command {
-                "start" => supervisor.start()?,
-                "stop" => supervisor.stop()?,
-                _ => supervisor.restart()?,
+            let action = match command {
+                "start" => BrokerLifecycleAction::Start,
+                "stop" => BrokerLifecycleAction::Stop,
+                _ => BrokerLifecycleAction::Restart,
             };
-            set_profile_auto_start(paths, &workspace, command != "stop")?;
+            let (snapshot, auto_start) = supervisor.transition_and_remember(action)?;
             let mut response = operator_snapshot(&supervisor, snapshot, paths);
-            response.auto_start = command != "stop";
+            response.auto_start = auto_start;
             emit(response, human)
         }
         "setup" => run_setup(workspace, args, human, paths, secrets),
@@ -259,6 +259,7 @@ fn forget_profile(
     let workspace = validate_workspace(&workspace)?;
     let profile_id = profile_id_for(&workspace);
     stop_legacy_bridges(paths, secrets)?;
+    let _transition_lease = FileLease::acquire(&paths.broker_transition_lock_path())?;
     let config = paths.load_config()?;
     if let (Some(profile), Some(settings)) =
         (config.find(&profile_id).cloned(), config.broker.clone())
@@ -268,13 +269,28 @@ fn forget_profile(
             bail!("stop the desktop broker before forgetting a workspace");
         }
     }
-    let existed = paths.update_config(|config| Ok(config.remove(&profile_id)))?;
-    secrets.delete(paths, &profile_id)?;
     let profile_dir = paths.profile_dir(&profile_id);
-    if profile_dir.exists() {
-        std::fs::remove_dir_all(&profile_dir)
-            .with_context(|| format!("failed to remove {}", profile_dir.display()))?;
-    }
+    let existed = paths.update_config_then(
+        |config| Ok(config.remove(&profile_id)),
+        || {
+            let mut failures = Vec::new();
+            if let Err(error) = secrets.delete(paths, &profile_id) {
+                failures.push(format!("credential: {error:#}"));
+            }
+            if profile_dir.exists() {
+                if let Err(error) = std::fs::remove_dir_all(&profile_dir)
+                    .with_context(|| format!("failed to remove {}", profile_dir.display()))
+                {
+                    failures.push(format!("profile data: {error:#}"));
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                bail!("{}", failures.join("; "))
+            }
+        },
+    )?;
 
     Ok(serde_json::json!({
         "workspace": workspace,
@@ -384,25 +400,6 @@ fn stop_legacy_bridges(paths: &AppPaths, secrets: &SecretStore) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn set_profile_auto_start(paths: &AppPaths, workspace: &Path, enabled: bool) -> Result<()> {
-    let workspace = validate_workspace(workspace)?;
-    let profile_id = profile_id_for(&workspace);
-    paths.update_config(|config| {
-        config.find(&profile_id).with_context(|| {
-            format!("profile {profile_id} disappeared during bridge transition")
-        })?;
-        let broker = config
-            .broker
-            .as_mut()
-            .context("broker settings disappeared during bridge transition")?;
-        broker.auto_start = enabled;
-        for profile in &mut config.profiles {
-            profile.auto_start = enabled;
-        }
-        Ok(())
-    })
 }
 
 fn supervisor(
@@ -618,33 +615,6 @@ Bridge ports are allocated per workspace so several worktrees can run at once.\n
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::store::ProfileAgent;
-    use tempfile::tempdir;
-
-    fn test_profile(workspace: &Path) -> Profile {
-        Profile {
-            profile_id: profile_id_for(&workspace.canonicalize().unwrap()),
-            workspace: workspace.to_path_buf(),
-            network_mode: "local".to_string(),
-            bridge_host: "127.0.0.1".to_string(),
-            bridge_port: 8787,
-            preview_port: 8788,
-            connect_url: "http://127.0.0.1:8787".to_string(),
-            preview_connect_url: "http://127.0.0.1:8788".to_string(),
-            auto_start: false,
-            allow_query_token_auth: true,
-            acp_initialize_timeout_ms: 15_000,
-            agent: ProfileAgent {
-                agent_id: "opencode".to_string(),
-                display_name: "OpenCode".to_string(),
-                executable: PathBuf::from("/bin/echo"),
-                argv: vec!["acp".to_string()],
-                resolved_version: "local".to_string(),
-                verified_digest: "sha256:abc".to_string(),
-            },
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-        }
-    }
 
     #[test]
     fn parses_options_and_default_agent_args() {
@@ -682,38 +652,5 @@ mod tests {
         );
         assert!(args.is_empty());
         assert!(!take_flag(&mut Vec::new(), "--all"));
-    }
-
-    #[test]
-    fn remembers_start_and_stop_transitions_for_a_workspace() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let paths = AppPaths::for_tests(data.path().to_path_buf());
-        let profile_id = profile_id_for(&workspace.path().canonicalize().unwrap());
-        paths
-            .update_config(|config| {
-                config.upsert(test_profile(workspace.path()));
-                Ok(())
-            })
-            .unwrap();
-
-        set_profile_auto_start(&paths, workspace.path(), true).unwrap();
-        assert!(
-            paths
-                .load_config()
-                .unwrap()
-                .find(&profile_id)
-                .unwrap()
-                .auto_start
-        );
-        set_profile_auto_start(&paths, workspace.path(), false).unwrap();
-        assert!(
-            !paths
-                .load_config()
-                .unwrap()
-                .find(&profile_id)
-                .unwrap()
-                .auto_start
-        );
     }
 }

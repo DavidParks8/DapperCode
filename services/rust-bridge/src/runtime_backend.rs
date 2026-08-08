@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex as StdMutex,
     },
 };
@@ -14,10 +14,25 @@ use futures_util::future::BoxFuture;
 
 use crate::acp::interactions::ElicitationFieldKind;
 use crate::acp::manager::{
-    AgentLifecycle, AgentManager, HarnessChildSession, LocalAgentManifestSet, ManagedSession,
+    AgentLifecycle, AgentManager, AgentOperationFailure, HarnessChildSession,
+    LocalAgentManifestSet, ManagedSession,
 };
 use crate::acp::runtime::RequestCancellation;
 use crate::*;
+
+pub(super) const INDETERMINATE_OPERATION_PREFIX: &str = "indeterminate operation outcome: ";
+
+fn indeterminate_operation_error(error: impl std::fmt::Display) -> String {
+    format!("{INDETERMINATE_OPERATION_PREFIX}{error}")
+}
+
+fn classified_operation_error(error: AgentOperationFailure) -> String {
+    if error.is_indeterminate() {
+        indeterminate_operation_error(error)
+    } else {
+        error.to_string()
+    }
+}
 
 pub(super) struct RuntimeBackend {
     manager: Arc<AgentManager>,
@@ -382,14 +397,31 @@ impl ClientRequestTracker {
             requests: self.registry.clone(),
         };
         let future = make(cancellation.clone());
+        if cancellation.is_cancelled() {
+            drop(request_guard);
+            return Err("client disconnected");
+        }
         tokio::pin!(future);
-        let result = tokio::select! {
-            result = &mut future => Some(result),
-            _ = cancellation.cancelled() => None,
+        let started = Arc::new(AtomicBool::new(false));
+        let observed_started = Arc::clone(&started);
+        let result = {
+            let tracked_future = std::future::poll_fn(move |context| {
+                observed_started.store(true, Ordering::Release);
+                future.as_mut().poll(context)
+            });
+            tokio::pin!(tracked_future);
+            tokio::select! {
+                result = &mut tracked_future => Some(result),
+                _ = cancellation.cancelled() => None,
+            }
         };
         drop(request_guard);
         if cancellation.is_cancelled() || result.is_none() {
-            return Err("client request cancelled");
+            return Err(if started.load(Ordering::Acquire) {
+                "client request cancelled"
+            } else {
+                "client disconnected"
+            });
         }
         Ok(result.expect("completed client request result"))
     }
@@ -873,10 +905,13 @@ impl RuntimeBackend {
                 let message_id = required_string(&params, "messageId")?;
                 let session = self
                     .manager
-                    .fork_session(&thread_id, &message_id)
+                    .fork_session_with_outcome(&thread_id, &message_id)
                     .await
-                    .map_err(|error| error.to_string())?;
-                Ok(json!({ "thread": session_to_thread_value(session)? }))
+                    .map_err(classified_operation_error)?;
+                Ok(json!({
+                    "thread": session_to_thread_value(session)
+                        .map_err(indeterminate_operation_error)?
+                }))
             }
             "thread/delete" => {
                 let thread_id = required_string(&params, "threadId")?;
@@ -943,9 +978,9 @@ impl RuntimeBackend {
                 let run_id = format!("{thread_id}::turn::{source_turn_id}");
                 let admission = self
                     .manager
-                    .prompt(&thread_id, prompt, run_id, source_turn_id)
+                    .prompt_with_outcome(&thread_id, prompt, run_id, source_turn_id)
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(classified_operation_error)?;
                 Ok(json!({
                     "turn": { "id": admission.source_turn_id, "status": "inProgress" }
                 }))
@@ -986,9 +1021,13 @@ impl RuntimeBackend {
         });
         let mut session = self
             .manager
-            .new_session_with_cancellation(&agent_id, NewSessionRequest::new(cwd), cancellation)
+            .new_session_with_cancellation_outcome(
+                &agent_id,
+                NewSessionRequest::new(cwd),
+                cancellation,
+            )
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(classified_operation_error)?;
         for (category, value) in [("model", model), ("thought_level", effort), ("mode", mode)] {
             let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
                 continue;
@@ -1005,7 +1044,7 @@ impl RuntimeBackend {
                 && !option.options.iter().any(|choice| choice.value == value)
             {
                 return Err(format!(
-                    "{category} option is not advertised by this ACP agent"
+                    "{INDETERMINATE_OPERATION_PREFIX}{category} option is not advertised by this ACP agent"
                 ));
             }
             session = self
@@ -1016,9 +1055,11 @@ impl RuntimeBackend {
                     SessionConfigOptionValue::value_id(value),
                 )
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(indeterminate_operation_error)?;
         }
-        Ok(json!({ "thread": session_to_thread_value(session)? }))
+        Ok(json!({
+            "thread": session_to_thread_value(session).map_err(indeterminate_operation_error)?
+        }))
     }
 
     pub(super) async fn request_for_client(
@@ -1100,14 +1141,14 @@ impl RuntimeBackend {
         };
         if decision == "cancel" {
             self.manager
-                .cancel_permission(&pending.thread_id, approval_id)
+                .cancel_permission_with_outcome(&pending.thread_id, approval_id)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(classified_operation_error)?;
         } else {
             self.manager
-                .resolve_permission(&pending.thread_id, approval_id, decision)
+                .resolve_permission_with_outcome(&pending.thread_id, approval_id, decision)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(classified_operation_error)?;
         }
         Ok(Some(pending.into()))
     }
@@ -1641,6 +1682,23 @@ mod client_request_tests {
         );
         assert_eq!(tracker.request_count(), 0);
         assert_eq!(tracker.run(7, async {}).await, Err("client disconnected"));
+    }
+
+    #[tokio::test]
+    async fn disconnect_before_the_operation_is_polled_is_definitive() {
+        let tracker = Arc::new(ClientRequestTracker::default());
+        tracker.register_client(8);
+        let cancelling_tracker = Arc::clone(&tracker);
+
+        let result = tracker
+            .run_with(8, move |_| {
+                cancelling_tracker.cancel_client(8);
+                std::future::pending::<()>()
+            })
+            .await;
+
+        assert_eq!(result, Err("client disconnected"));
+        assert_eq!(tracker.request_count(), 0);
     }
 
     #[tokio::test]

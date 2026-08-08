@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
         assert_eq!(
             manifest["fixtures"]["brokerPairing"]["type"],
-            "dappercode-broker-pair"
+            "dappercode-bridge-pair"
         );
         assert_eq!(
             manifest["fixtures"]["brokerPairing"]["brokerProtocolVersion"],

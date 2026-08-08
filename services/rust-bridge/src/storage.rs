@@ -106,8 +106,13 @@ where
         before_publish(&temporary_path)?;
         temporary_file.sync_all()?;
         renameat(&parent_file, &temporary_name, &parent_file, file_name)?;
-        before_parent_sync(parent)?;
-        parent_file.sync_all()
+        if let Err(error) = before_parent_sync(parent).and_then(|_| parent_file.sync_all()) {
+            eprintln!(
+                "warning: {} was replaced, but its directory metadata could not be synced: {error}",
+                parent.join(file_name).display()
+            );
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = unlinkat(&parent_file, &temporary_name, AtFlags::empty());
@@ -143,8 +148,15 @@ where
         before_publish(&temporary)?;
         file.sync_all()?;
         std::fs::rename(&temporary, parent.join(file_name))?;
-        before_parent_sync(parent)?;
-        std::fs::File::open(parent)?.sync_all()
+        if let Err(error) =
+            before_parent_sync(parent).and_then(|_| std::fs::File::open(parent)?.sync_all())
+        {
+            eprintln!(
+                "warning: {} was replaced, but its directory metadata could not be synced: {error}",
+                parent.join(file_name).display()
+            );
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
@@ -204,13 +216,22 @@ mod tests {
         assert!(atomic_write_private(&missing_parent, b"value")
             .await
             .is_err());
+        atomic_write_private_with(
+            &path,
+            b"unpublished",
+            |_| Err(std::io::Error::other("injected pre-publish failure")),
+            |_| Ok(()),
+        )
+        .await
+        .expect_err("pre-publish failure is definitive");
+        assert_eq!(fs::read(&path).unwrap(), b"x");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn atomic_write_secures_before_publish_and_propagates_parent_sync_failure() {
+    async fn atomic_write_secures_before_publish_and_treats_rename_as_commit() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir =
@@ -228,7 +249,7 @@ mod tests {
             |_| Err(std::io::Error::other("injected parent sync failure")),
         )
         .await
-        .expect_err("parent sync failure must propagate");
+        .expect("post-rename parent sync failure does not roll back the committed write");
         assert_eq!(fs::read(&path).expect("reopen replacement"), b"new");
         assert_eq!(
             fs::read_dir(&dir)

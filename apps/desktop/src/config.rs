@@ -238,7 +238,7 @@ impl BridgeRuntimeConfig {
 
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
-            "type": "dappercode-broker-pair",
+            "type": "dappercode-bridge-pair",
             "brokerProtocolVersion": 1,
             "workspaceId": workspace_id,
             "bridgeUrl": self.connect_url,
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
             serde_json::from_str(&config.pairing_payload("workspace-1").unwrap()).unwrap();
-        assert_eq!(payload["type"], "dappercode-broker-pair");
+        assert_eq!(payload["type"], "dappercode-bridge-pair");
         assert_eq!(payload["workspaceId"], "workspace-1");
         assert_eq!(payload["brokerProtocolVersion"], 1);
         assert_eq!(payload["bridgeToken"], "secret");

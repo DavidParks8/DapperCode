@@ -115,7 +115,7 @@ describe('HostBridgeWsClient', () => {
       canRetire: false,
     });
     expect(manifest.fixtures.brokerPairing).toMatchObject({
-      type: 'dappercode-broker-pair',
+      type: 'dappercode-bridge-pair',
       brokerProtocolVersion: 1,
       workspaceId: 'workspace-alpha-000000000001',
     });

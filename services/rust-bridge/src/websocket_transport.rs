@@ -1,5 +1,9 @@
 use crate::*;
 
+fn failure_is_definitive(error: &str) -> bool {
+    !error.starts_with(INDETERMINATE_OPERATION_PREFIX) && error != "client request cancelled"
+}
+
 const RPC_IDENTIFIER_MAX_BYTES: usize = 4096;
 
 pub(super) fn protected_request_error(
@@ -518,32 +522,18 @@ pub(super) async fn handle_bridge_method(
                         BridgeError::invalid_params("threadStart payload is required")
                     })?;
             let submission_id = request.submission_id.clone();
-            let pending_inserted = match state
+            if let Err(error) = state
                 .update_operation_dedupe(|dedupe| {
-                    if dedupe.thread_create_pending.len() >= SUBMISSION_DEDUPE_LIMIT {
-                        return false;
-                    }
-                    dedupe.thread_create_pending.insert(submission_id.clone());
-                    true
+                    dedupe.reserve_thread_create(submission_id.clone());
                 })
                 .await
             {
-                Ok(inserted) => inserted,
-                Err(error) => {
-                    let _ = state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_thread_create(&submission_id);
-                        })
-                        .await;
-                    return Err(error);
-                }
-            };
-            if !pending_inserted {
-                return Err(BridgeError::resource_limit(
-                    "pending_thread_creations",
-                    SUBMISSION_DEDUPE_LIMIT,
-                    SUBMISSION_DEDUPE_LIMIT + 1,
-                ));
+                let _ = state
+                    .update_operation_dedupe(|dedupe| {
+                        dedupe.release_thread_create(&submission_id);
+                    })
+                    .await;
+                return Err(error);
             }
             let started = match state
                 .backend
@@ -552,11 +542,13 @@ pub(super) async fn handle_bridge_method(
             {
                 Ok(started) => started,
                 Err(error) => {
-                    state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_thread_create(&submission_id);
-                        })
-                        .await?;
+                    if failure_is_definitive(&error) {
+                        state
+                            .update_operation_dedupe(|dedupe| {
+                                dedupe.release_thread_create(&submission_id);
+                            })
+                            .await?;
+                    }
                     return Err(BridgeError::server(&error));
                 }
             };
@@ -654,38 +646,24 @@ pub(super) async fn handle_bridge_method(
                 ));
             }
             let submission_id = request.submission_id.clone();
-            let pending_inserted = match state
+            if let Err(error) = state
                 .update_operation_dedupe(|dedupe| {
-                    if dedupe.thread_fork_pending.len() >= SUBMISSION_DEDUPE_LIMIT {
-                        return false;
-                    }
-                    dedupe.thread_fork_pending.insert(
+                    dedupe.reserve_thread_fork(
                         submission_id.clone(),
                         PendingForkOperation {
                             source_thread_id: request.thread_id.clone(),
                             message_id: request.message_id.clone(),
                         },
                     );
-                    true
                 })
                 .await
             {
-                Ok(inserted) => inserted,
-                Err(error) => {
-                    let _ = state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_thread_fork(&submission_id);
-                        })
-                        .await;
-                    return Err(error);
-                }
-            };
-            if !pending_inserted {
-                return Err(BridgeError::resource_limit(
-                    "pending_thread_forks",
-                    SUBMISSION_DEDUPE_LIMIT,
-                    SUBMISSION_DEDUPE_LIMIT + 1,
-                ));
+                let _ = state
+                    .update_operation_dedupe(|dedupe| {
+                        dedupe.release_thread_fork(&submission_id);
+                    })
+                    .await;
+                return Err(error);
             }
             let forked = match state
                 .backend
@@ -701,11 +679,13 @@ pub(super) async fn handle_bridge_method(
             {
                 Ok(forked) => forked,
                 Err(error) => {
-                    state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_thread_fork(&submission_id);
-                        })
-                        .await?;
+                    if failure_is_definitive(&error) {
+                        state
+                            .update_operation_dedupe(|dedupe| {
+                                dedupe.release_thread_fork(&submission_id);
+                            })
+                            .await?;
+                    }
                     return Err(BridgeError::server(&error));
                 }
             };
@@ -1144,39 +1124,24 @@ pub(super) async fn handle_bridge_method(
                 ));
             }
             let resolution_id = request.resolution_id.clone();
-            let pending_inserted = match state
+            if let Err(error) = state
                 .update_operation_dedupe(|dedupe| {
-                    if dedupe.approval_resolution_pending.len() >= APPROVAL_RESOLUTION_DEDUPE_LIMIT
-                    {
-                        return false;
-                    }
-                    dedupe.approval_resolution_pending.insert(
+                    dedupe.reserve_approval_resolution(
                         resolution_id.clone(),
                         PendingApprovalOperation {
                             request_id: request.id.clone(),
                             decision: request.decision.clone(),
                         },
                     );
-                    true
                 })
                 .await
             {
-                Ok(inserted) => inserted,
-                Err(error) => {
-                    let _ = state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_approval_resolution(&resolution_id);
-                        })
-                        .await;
-                    return Err(error);
-                }
-            };
-            if !pending_inserted {
-                return Err(BridgeError::resource_limit(
-                    "pending_approval_resolutions",
-                    APPROVAL_RESOLUTION_DEDUPE_LIMIT,
-                    APPROVAL_RESOLUTION_DEDUPE_LIMIT + 1,
-                ));
+                let _ = state
+                    .update_operation_dedupe(|dedupe| {
+                        dedupe.release_approval_resolution(&resolution_id);
+                    })
+                    .await;
+                return Err(error);
             }
             let resolved = match state
                 .backend
@@ -1185,11 +1150,13 @@ pub(super) async fn handle_bridge_method(
             {
                 Ok(resolved) => resolved,
                 Err(error) => {
-                    state
-                        .update_operation_dedupe(|dedupe| {
-                            dedupe.release_approval_resolution(&resolution_id);
-                        })
-                        .await?;
+                    if failure_is_definitive(&error) {
+                        state
+                            .update_operation_dedupe(|dedupe| {
+                                dedupe.release_approval_resolution(&resolution_id);
+                            })
+                            .await?;
+                    }
                     return Err(BridgeError::server(&error));
                 }
             };
@@ -1632,6 +1599,16 @@ mod tests {
         WebSocketResourceLimits, DEFAULT_WS_GLOBAL_IN_FLIGHT, DEFAULT_WS_MAX_FRAME_BYTES,
         DEFAULT_WS_MAX_MESSAGE_BYTES, DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
     };
+
+    #[test]
+    fn only_definitive_operation_failures_release_idempotency_keys() {
+        assert!(failure_is_definitive("invalid option"));
+        assert!(!failure_is_definitive(&format!(
+            "{INDETERMINATE_OPERATION_PREFIX}connection lost"
+        )));
+        assert!(!failure_is_definitive("client request cancelled"));
+        assert!(failure_is_definitive("client disconnected"));
+    }
 
     fn protected_request_config() -> BridgeConfig {
         BridgeConfig {

@@ -12,9 +12,10 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     config::{allocate_port_pair, allocate_preview_port, format_host, validate_workspace},
-    secrets::SecretStore,
+    secrets::{BridgeSecret, SecretStore},
     store::{
-        atomic_private_write, profile_id_for, AppPaths, BrokerSettings, Profile, ProfileAgent,
+        atomic_private_write, profile_id_for, remove_file_if_exists, AppPaths, BrokerSettings,
+        ConfigSideEffects, FileLease, Profile, ProfileAgent,
     },
 };
 
@@ -72,6 +73,65 @@ struct AgentManifest {
 #[derive(Serialize)]
 struct ExecutableIntegrity {
     kind: &'static str,
+}
+
+struct SetupSideEffects<'a> {
+    paths: &'a AppPaths,
+    secrets: &'a SecretStore,
+    profile_id: &'a str,
+    manifest: Vec<u8>,
+    previous_manifest: Option<Option<Vec<u8>>>,
+    secret_existed: Option<bool>,
+}
+
+impl ConfigSideEffects for SetupSideEffects<'_> {
+    type Output = BridgeSecret;
+
+    fn apply(&mut self) -> Result<Self::Output> {
+        let manifest_path = self.paths.manifest_path(self.profile_id);
+        let previous_manifest = match fs::read(&manifest_path) {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", manifest_path.display()))
+            }
+        };
+        self.previous_manifest = Some(previous_manifest);
+
+        let existing_secret = self.secrets.get(self.paths, self.profile_id)?;
+        self.secret_existed = Some(existing_secret.is_some());
+        let secret = match existing_secret {
+            Some(secret) => secret,
+            None => self.secrets.get_or_create(self.paths, self.profile_id)?,
+        };
+        atomic_private_write(&manifest_path, &self.manifest)?;
+        Ok(secret)
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        let mut failures = Vec::new();
+        if let Some(previous_manifest) = self.previous_manifest.take() {
+            let path = self.paths.manifest_path(self.profile_id);
+            let result = match previous_manifest {
+                Some(contents) => atomic_private_write(&path, &contents),
+                None => remove_file_if_exists(&path),
+            };
+            if let Err(error) = result {
+                failures.push(format!("manifest: {error:#}"));
+            }
+        }
+        if self.secret_existed.take() == Some(false) {
+            if let Err(error) = self.secrets.delete(self.paths, self.profile_id) {
+                failures.push(format!("credential: {error:#}"));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", failures.join("; "))
+        }
+    }
 }
 
 /// Registers a workspace with the central store.
@@ -137,14 +197,17 @@ pub fn setup_profile(
             integrity: ExecutableIntegrity { kind: "executable" },
         }],
     };
-    atomic_private_write(
-        &paths.manifest_path(&profile_id),
-        &serde_json::to_vec_pretty(&manifest)?,
-    )?;
-
-    let secret = secrets.get_or_create(paths, &profile_id)?;
-
-    let profile = paths.update_config(|config| {
+    let mut side_effects = SetupSideEffects {
+        paths,
+        secrets,
+        profile_id: &profile_id,
+        manifest: serde_json::to_vec_pretty(&manifest)?,
+        previous_manifest: None,
+        secret_existed: None,
+    };
+    let _transition_lease = FileLease::acquire(&paths.broker_transition_lock_path())?;
+    let (profile, secret) = paths.update_config_with_side_effects(
+        |config| {
         let broker = match config.broker.clone() {
             Some(mut broker) => {
                 let endpoint_changed = request
@@ -263,7 +326,9 @@ pub fn setup_profile(
         };
         config.upsert(profile.clone());
         Ok(profile)
-    })?;
+    },
+        &mut side_effects,
+    )?;
 
     Ok(SetupResult {
         workspace,
@@ -637,6 +702,74 @@ mod tests {
 
         assert!(error.to_string().contains("pass --replace-broker-endpoint"));
         assert_eq!(paths.load_config().unwrap().profiles.len(), 1);
+        let mut host_change = request(alpha.path(), Some(18847));
+        host_change.bridge_host = "127.0.0.1".to_string();
+        assert!(setup_profile(host_change, &paths, &secrets)
+            .unwrap_err()
+            .to_string()
+            .contains("pass --replace-broker-endpoint"));
+
+        let profile_id = profile_id_for(&alpha.path().canonicalize().unwrap());
+        let manifest_path = paths.manifest_path(&profile_id);
+        let manifest_before = fs::read(&manifest_path).unwrap();
+        let mut rejected = request(alpha.path(), Some(18849));
+        rejected.agent_id = "replacement-agent".to_string();
+        rejected.display_name = "Replacement Agent".to_string();
+        rejected.argv = vec!["replacement".to_string()];
+        assert!(setup_profile(rejected, &paths, &secrets).is_err());
+        assert_eq!(fs::read(manifest_path).unwrap(), manifest_before);
+    }
+
+    #[test]
+    fn setup_side_effect_rollback_restores_manifest_and_removes_new_credential() {
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        let profile_id = "rollback-profile";
+        paths.prepare_profile(profile_id).unwrap();
+        let manifest_path = paths.manifest_path(profile_id);
+        fs::write(&manifest_path, b"previous manifest\n").unwrap();
+        let mut side_effects = SetupSideEffects {
+            paths: &paths,
+            secrets: &secrets,
+            profile_id,
+            manifest: b"replacement manifest".to_vec(),
+            previous_manifest: None,
+            secret_existed: None,
+        };
+
+        side_effects.apply().unwrap();
+        assert_eq!(fs::read(&manifest_path).unwrap(), b"replacement manifest\n");
+        assert!(secrets.get(&paths, profile_id).unwrap().is_some());
+
+        side_effects.rollback().unwrap();
+        assert_eq!(fs::read(&manifest_path).unwrap(), b"previous manifest\n");
+        assert!(secrets.get(&paths, profile_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn setup_serializes_endpoint_changes_with_broker_transitions() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let transition = FileLease::acquire(&paths.broker_transition_lock_path()).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_paths = paths.clone();
+        let workspace_path = workspace.path().to_path_buf();
+        let setup = std::thread::spawn(move || {
+            let result = setup_profile(request(&workspace_path, None), &worker_paths, &store());
+            done_tx.send(result).unwrap();
+        });
+
+        assert!(done_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+        drop(transition);
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        setup.join().unwrap();
     }
 
     #[test]
@@ -650,6 +783,14 @@ mod tests {
         let mut replacement = request(workspace.path(), Some(18857));
         replacement.bridge_host = "127.0.0.1".to_string();
         replacement.replace_broker_endpoint = true;
+        let ownership_path = paths.broker_ownership_path();
+        fs::create_dir_all(ownership_path.parent().unwrap()).unwrap();
+        fs::write(&ownership_path, b"owned").unwrap();
+        assert!(setup_profile(replacement.clone(), &paths, &secrets)
+            .unwrap_err()
+            .to_string()
+            .contains("stop the desktop broker"));
+        fs::remove_file(ownership_path).unwrap();
         let result = setup_profile(replacement, &paths, &secrets).unwrap();
         let config = paths.load_config().unwrap();
         let broker = config.broker.unwrap();

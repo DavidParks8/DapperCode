@@ -35,6 +35,7 @@ pub(super) struct PushService {
     // so a turn/completed push can include a short preview of what the agent said.
     pub(super) recent_replies: RwLock<HashMap<String, String>>,
     pub(super) metrics: Arc<OperationalMetrics>,
+    pub(super) active_deliveries: AtomicU64,
     pub(super) pending_receipt_checks: AtomicU64,
 }
 
@@ -56,6 +57,7 @@ impl PushService {
             access_token,
             recent_replies: RwLock::new(HashMap::new()),
             metrics,
+            active_deliveries: AtomicU64::new(0),
             pending_receipt_checks: AtomicU64::new(0),
         })
     }
@@ -277,6 +279,8 @@ impl PushService {
         category_id: Option<&str>,
         targets: Vec<(String, String, String)>,
     ) {
+        self.active_deliveries.fetch_add(1, Ordering::AcqRel);
+        let _delivery = PushDeliveryGuard(&self.active_deliveries);
         for chunk in targets.chunks(EXPO_PUSH_BATCH_SIZE) {
             self.metrics.push_attempted(chunk.len());
             let messages: Vec<Value> = chunk
@@ -361,7 +365,11 @@ impl PushService {
     pub(super) async fn post_with_retry(&self, url: &str, body: &Value) -> Option<Value> {
         let mut delay_ms: u64 = 500;
         for attempt in 1..=PUSH_SEND_MAX_ATTEMPTS {
-            let mut request = self.http.post(url).json(body);
+            let mut request = self
+                .http
+                .post(url)
+                .timeout(std::time::Duration::from_secs(15))
+                .json(body);
             if let Some(token) = &self.access_token {
                 request = request.bearer_auth(token);
             }
@@ -381,6 +389,7 @@ impl PushService {
                             .and_then(|value| value.to_str().ok())
                             .and_then(|value| value.parse::<u64>().ok())
                             .map(|secs| secs.saturating_mul(1000))
+                            .map(|milliseconds| milliseconds.min(8000))
                             .unwrap_or(delay_ms);
                         tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
                         delay_ms = (delay_ms * 2).min(8000);
@@ -426,6 +435,12 @@ impl PushService {
         usize::try_from(self.pending_receipt_checks.load(Ordering::Acquire)).unwrap_or(usize::MAX)
     }
 
+    pub(super) fn pending_delivery_count(&self) -> usize {
+        let active =
+            usize::try_from(self.active_deliveries.load(Ordering::Acquire)).unwrap_or(usize::MAX);
+        active.saturating_add(self.pending_receipt_check_count())
+    }
+
     pub(super) async fn check_receipts(&self, receipts: Vec<(String, String)>) {
         self.check_receipts_from_endpoint(EXPO_PUSH_RECEIPTS_ENDPOINT, receipts)
             .await;
@@ -459,6 +474,14 @@ impl PushService {
                 self.unregister_stale_token(&token).await;
             }
         }
+    }
+}
+
+struct PushDeliveryGuard<'a>(&'a AtomicU64);
+
+impl Drop for PushDeliveryGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -746,7 +769,23 @@ mod tests {
     #[tokio::test]
     async fn push_transport_handles_ticket_outcomes_retries_and_malformed_responses() {
         let attempts = Arc::new(AtomicUsize::new(0));
+        let blocked_entered = Arc::new(tokio::sync::Notify::new());
+        let blocked_release = Arc::new(tokio::sync::Notify::new());
+        let entered_handler = blocked_entered.clone();
+        let release_handler = blocked_release.clone();
         let app = Router::new()
+            .route(
+                "/blocked",
+                post(move || {
+                    let entered = entered_handler.clone();
+                    let release = release_handler.clone();
+                    async move {
+                        entered.notify_one();
+                        release.notified().await;
+                        Json(json!({"data": [{"status": "ok"}]}))
+                    }
+                }),
+            )
             .route(
                 "/tickets",
                 post(|| async {
@@ -849,6 +888,31 @@ mod tests {
             )
             .await
             .unwrap();
+        let blocked_send = tokio::spawn({
+            let service = service.clone();
+            let endpoint = format!("{base}/blocked");
+            async move {
+                service
+                    .send_to_endpoint(
+                        &endpoint,
+                        "title",
+                        "body",
+                        &json!({}),
+                        None,
+                        vec![(
+                            "blocked".to_string(),
+                            "profile".to_string(),
+                            "blocked".to_string(),
+                        )],
+                    )
+                    .await;
+            }
+        });
+        blocked_entered.notified().await;
+        assert_eq!(service.pending_delivery_count(), 1);
+        blocked_release.notify_one();
+        blocked_send.await.unwrap();
+        assert_eq!(service.pending_delivery_count(), 0);
         let targets = (0..4)
             .map(|index| {
                 (
@@ -1002,6 +1066,7 @@ mod tests {
             access_token: Some("access".to_string()),
             recent_replies: RwLock::new(HashMap::new()),
             metrics: Arc::new(OperationalMetrics::new()),
+            active_deliveries: AtomicU64::new(0),
             pending_receipt_checks: AtomicU64::new(0),
         });
         assert!(authenticated

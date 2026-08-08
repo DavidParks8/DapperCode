@@ -5,7 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -26,6 +26,13 @@ const DEFAULT_WORKER_START_TIMEOUT_MS: u64 = 60_000;
 #[derive(Clone, Debug)]
 pub struct AppPaths {
     base: PathBuf,
+}
+
+pub(crate) trait ConfigSideEffects {
+    type Output;
+
+    fn apply(&mut self) -> Result<Self::Output>;
+    fn rollback(&mut self) -> Result<()>;
 }
 
 impl AppPaths {
@@ -130,6 +137,10 @@ impl AppPaths {
         read_config(&self.config_path())
     }
 
+    pub fn load_config_with_revision(&self) -> Result<(AppConfig, Option<[u8; 32]>)> {
+        read_config_with_revision(&self.config_path())
+    }
+
     /// Upgrades the previous per-workspace-listener layout before strict config reads run.
     ///
     /// Version 1 assigned every profile its own public ports. Version 2 deterministically chooses
@@ -175,8 +186,60 @@ impl AppPaths {
         Ok(outcome)
     }
 
+    pub fn update_config_with_side_effects<T, S>(
+        &self,
+        mutate: impl FnOnce(&mut AppConfig) -> Result<T>,
+        side_effects: &mut S,
+    ) -> Result<(T, S::Output)>
+    where
+        S: ConfigSideEffects,
+    {
+        let _lease = self.acquire_config_lease()?;
+        let mut config = read_config(&self.config_path())?;
+        let outcome = mutate(&mut config)?;
+        config
+            .profiles
+            .sort_by(|a, b| a.profile_id.cmp(&b.profile_id));
+        config.validate()?;
+        let bytes = serde_json::to_vec_pretty(&config)?;
+        let side_effect_outcome = match side_effects.apply() {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return Err(Self::with_rollback_error(error, side_effects.rollback()));
+            }
+        };
+        if let Err(error) = atomic_private_write(&self.config_path(), &bytes) {
+            return Err(Self::with_rollback_error(error, side_effects.rollback()));
+        }
+        Ok((outcome, side_effect_outcome))
+    }
+
+    pub fn update_config_then<T>(
+        &self,
+        mutate: impl FnOnce(&mut AppConfig) -> Result<T>,
+        after_commit: impl FnOnce() -> Result<()>,
+    ) -> Result<T> {
+        let _lease = self.acquire_config_lease()?;
+        let mut config = read_config(&self.config_path())?;
+        let outcome = mutate(&mut config)?;
+        config
+            .profiles
+            .sort_by(|a, b| a.profile_id.cmp(&b.profile_id));
+        config.validate()?;
+        atomic_private_write(&self.config_path(), &serde_json::to_vec_pretty(&config)?)?;
+        after_commit()?;
+        Ok(outcome)
+    }
+
     pub fn acquire_config_lease(&self) -> Result<FileLease> {
         FileLease::acquire(&self.config_lock_path())
+    }
+
+    fn with_rollback_error(primary: anyhow::Error, rollback: Result<()>) -> anyhow::Error {
+        match rollback {
+            Ok(()) => primary,
+            Err(rollback) => anyhow!("{primary:#}; side-effect rollback also failed: {rollback:#}"),
+        }
     }
 }
 
@@ -541,13 +604,20 @@ fn sanitize_slug(value: &str) -> String {
 }
 
 fn read_config(path: &Path) -> Result<AppConfig> {
+    read_config_with_revision(path).map(|(config, _)| config)
+}
+
+fn read_config_with_revision(path: &Path) -> Result<(AppConfig, Option<[u8; 32]>)> {
     let contents = match fs::read(path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(AppConfig::empty()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((AppConfig::empty(), None))
+        }
         Err(error) => {
             return Err(error).with_context(|| format!("failed to read {}", path.display()))
         }
     };
+    let revision = Some(Sha256::digest(&contents).into());
     let config: AppConfig = serde_json::from_slice(&contents)
         .with_context(|| format!("invalid DapperCode configuration at {}", path.display()))?;
     if config.version != CONFIG_VERSION {
@@ -558,7 +628,7 @@ fn read_config(path: &Path) -> Result<AppConfig> {
         );
     }
     config.validate()?;
-    Ok(config)
+    Ok((config, revision))
 }
 
 pub struct FileLease {
@@ -638,7 +708,12 @@ pub fn atomic_private_write(path: &Path, contents: &[u8]) -> Result<()> {
         file.sync_all()?;
         fs::rename(&temporary, path)?;
         #[cfg(unix)]
-        File::open(parent)?.sync_all()?;
+        if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
+            eprintln!(
+                "warning: {} was replaced, but its directory metadata could not be synced: {error}",
+                path.display()
+            );
+        }
         Ok(())
     })();
     if result.is_err() {
@@ -660,6 +735,32 @@ pub fn remove_file_if_exists(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    struct FailingCommitSideEffects {
+        marker: PathBuf,
+        config_path: PathBuf,
+        original_config: Vec<u8>,
+        rolled_back: bool,
+    }
+
+    impl ConfigSideEffects for FailingCommitSideEffects {
+        type Output = ();
+
+        fn apply(&mut self) -> Result<Self::Output> {
+            fs::write(&self.marker, b"applied")?;
+            fs::remove_file(&self.config_path)?;
+            fs::create_dir(&self.config_path)?;
+            Ok(())
+        }
+
+        fn rollback(&mut self) -> Result<()> {
+            fs::remove_dir(&self.config_path)?;
+            atomic_private_write(&self.config_path, &self.original_config)?;
+            remove_file_if_exists(&self.marker)?;
+            self.rolled_back = true;
+            Ok(())
+        }
+    }
 
     fn sample_profile(profile_id: &str, port: u16) -> Profile {
         Profile {
@@ -1140,6 +1241,94 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.to_string(), "mutation refused");
         assert!(!paths.config_path().exists());
+    }
+
+    #[test]
+    fn migration_is_a_noop_for_absent_and_current_empty_configuration() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+
+        assert!(!paths.migrate_config().unwrap());
+        paths.update_config(|_| Ok(())).unwrap();
+        assert!(!paths.migrate_config().unwrap());
+        AppConfig::empty().validate().unwrap();
+        fs::remove_file(paths.config_path()).unwrap();
+        fs::create_dir(paths.config_path()).unwrap();
+        assert!(paths.migrate_config().is_err());
+    }
+
+    #[test]
+    fn configuration_commit_failure_rolls_back_staged_side_effects() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        paths
+            .update_config(|config| {
+                config.upsert(sample_profile("existing", 18_787));
+                Ok(())
+            })
+            .unwrap();
+        let original_config = fs::read(paths.config_path()).unwrap();
+        let marker = temp.path().join("side-effect");
+        let mut side_effects = FailingCommitSideEffects {
+            marker: marker.clone(),
+            config_path: paths.config_path(),
+            original_config: original_config.clone(),
+            rolled_back: false,
+        };
+
+        let error = paths
+            .update_config_with_side_effects(
+                |config| {
+                    config.upsert(sample_profile("new", 18_797));
+                    Ok(())
+                },
+                &mut side_effects,
+            )
+            .unwrap_err();
+
+        assert!(!error.to_string().is_empty());
+        assert!(side_effects.rolled_back);
+        assert!(!marker.exists());
+        assert_eq!(fs::read(paths.config_path()).unwrap(), original_config);
+    }
+
+    #[test]
+    fn post_commit_side_effects_keep_setup_from_racing_past_forget() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let (side_effect_entered_tx, side_effect_entered_rx) = std::sync::mpsc::channel();
+        let (release_side_effect_tx, release_side_effect_rx) = std::sync::mpsc::channel();
+        let first_paths = paths.clone();
+        let first = std::thread::spawn(move || {
+            first_paths
+                .update_config_then(
+                    |_| Ok(()),
+                    || {
+                        side_effect_entered_tx.send(()).unwrap();
+                        release_side_effect_rx.recv().unwrap();
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        });
+        side_effect_entered_rx.recv().unwrap();
+
+        let (second_done_tx, second_done_rx) = std::sync::mpsc::channel();
+        let second_paths = paths.clone();
+        let second = std::thread::spawn(move || {
+            second_paths.update_config(|_| Ok(())).unwrap();
+            second_done_tx.send(()).unwrap();
+        });
+        assert!(second_done_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+
+        release_side_effect_tx.send(()).unwrap();
+        first.join().unwrap();
+        second_done_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        second.join().unwrap();
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Weak,
     },
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -53,6 +53,7 @@ const WORKSPACE_HEADER: &str = "x-dappercode-workspace";
 const CLIENT_TYPE_HEADER: &str = "x-dappercode-client-type";
 const CLIENT_NAME_HEADER: &str = "x-dappercode-client-name";
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const WORKER_WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_FAILURE_LIMIT: u32 = 3;
 const MAX_CREDENTIAL_BYTES: usize = 4096;
@@ -351,8 +352,13 @@ async fn proxy_workspace_socket(
             return;
         }
     };
-    let upstream_result =
-        connect_worker_socket(&session.worker.target(), client_type, client_name).await;
+    let upstream_result = timeout(
+        WORKER_WEBSOCKET_CONNECT_TIMEOUT,
+        connect_worker_socket(&session.worker.target(), client_type, client_name),
+    )
+    .await
+    .map_err(|_| anyhow!("workspace worker websocket handshake timed out"))
+    .and_then(|result| result);
     let mut downstream = downstream;
     match upstream_result {
         Ok(upstream) => pump_websockets(&mut downstream, upstream).await,
@@ -478,17 +484,16 @@ async fn broker_http(State(state): State<Arc<BrokerState>>, request: Request) ->
         Ok(session) => session,
         Err(error) => return service_unavailable(&format!("{error:#}")),
     };
-    let response = proxy_http_request(
+    proxy_http_request(
         &state.http,
         request,
         &session.worker.target().http_base,
         &session.worker.target().internal_token,
         None,
         &["token", "brokerToken", "workspace"],
+        session,
     )
-    .await;
-    session.release().await;
-    response
+    .await
 }
 
 async fn proxy_http_request(
@@ -498,6 +503,7 @@ async fn proxy_http_request(
     internal_token: &str,
     path_override: Option<&str>,
     stripped_query_keys: &[&str],
+    session: WorkerClientSession,
 ) -> Response {
     let (parts, body) = request.into_parts();
     let upstream_url = match upstream_url(
@@ -543,8 +549,22 @@ async fn proxy_http_request(
         }
         response = response.header(name, value);
     }
+    let leased_stream = futures_util::stream::unfold(
+        (upstream.bytes_stream(), Some(session)),
+        |(mut stream, session)| async move {
+            match stream.next().await {
+                Some(item) => Some((item, (stream, session))),
+                None => {
+                    if let Some(session) = session {
+                        session.release().await;
+                    }
+                    None
+                }
+            }
+        },
+    );
     response
-        .body(Body::from_stream(upstream.bytes_stream()))
+        .body(Body::from_stream(leased_stream))
         .unwrap_or_else(|error| service_unavailable(&format!("worker response failed: {error}")))
 }
 
@@ -620,7 +640,7 @@ struct WorkspaceAccess {
 struct RegistryCache {
     by_token_digest: HashMap<String, Option<WorkspaceAccess>>,
     by_profile_id: HashMap<String, WorkspaceAccess>,
-    config_modified: Option<SystemTime>,
+    config_revision: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -653,17 +673,17 @@ impl WorkspaceRegistry {
     }
 
     async fn refresh_if_changed(&self) -> Result<()> {
-        let modified = config_modified(&self.paths);
+        let revision = config_revision(&self.paths);
         {
             let cache = self.cache.read().await;
-            if cache.config_modified == modified {
+            if cache.config_revision == revision {
                 return Ok(());
             }
         }
         let _refresh = self.refresh_lock.lock().await;
         {
             let cache = self.cache.read().await;
-            if cache.config_modified == modified {
+            if cache.config_revision == revision {
                 return Ok(());
             }
         }
@@ -682,7 +702,11 @@ impl WorkspaceRegistry {
                 "workspace registry unavailable: {error:#}"
             )));
         }
-        let token = extract_bearer(headers).or(query.token.as_deref());
+        let bearer = extract_bearer(headers);
+        let (token, query_credential) = match bearer {
+            Some(token) => (Some(token), false),
+            None => (query.token.as_deref(), true),
+        };
         let Some(token) = token.map(str::trim).filter(|token| !token.is_empty()) else {
             return Err(unauthorized("workspace credential required"));
         };
@@ -694,6 +718,11 @@ impl WorkspaceRegistry {
         let Some(Some(access)) = cache.by_token_digest.get(&digest) else {
             return Err(unauthorized("workspace credential is invalid"));
         };
+        if query_credential && !access.profile.allow_query_token_auth {
+            return Err(unauthorized(
+                "query-token authentication is disabled for this workspace",
+            ));
+        }
         let claimed_workspace = headers
             .get(WORKSPACE_HEADER)
             .and_then(|value| value.to_str().ok())
@@ -722,7 +751,7 @@ impl WorkspaceRegistry {
 
 async fn load_registry_cache(paths: AppPaths, secrets: SecretStore) -> Result<RegistryCache> {
     tokio::task::spawn_blocking(move || {
-        let config = paths.load_config()?;
+        let (config, revision) = paths.load_config_with_revision()?;
         let mut by_token_digest: HashMap<String, Option<WorkspaceAccess>> = HashMap::new();
         let mut by_profile_id = HashMap::new();
         for profile in config.profiles {
@@ -746,17 +775,17 @@ async fn load_registry_cache(paths: AppPaths, secrets: SecretStore) -> Result<Re
         Ok(RegistryCache {
             by_token_digest,
             by_profile_id,
-            config_modified: config_modified(&paths),
+            config_revision: revision,
         })
     })
     .await
     .context("workspace registry refresh task failed")?
 }
 
-fn config_modified(paths: &AppPaths) -> Option<SystemTime> {
-    std::fs::metadata(paths.config_path())
-        .and_then(|metadata| metadata.modified())
+fn config_revision(paths: &AppPaths) -> Option<[u8; 32]> {
+    std::fs::read(paths.config_path())
         .ok()
+        .map(|contents| Sha256::digest(contents).into())
 }
 
 fn token_digest(token: &str) -> String {
@@ -1364,16 +1393,15 @@ impl WorkerPool {
         }
 
         let unreachable = {
-            let mut state = self.state.lock().await;
+            let state = self.state.lock().await;
             state
                 .workers
-                .iter_mut()
+                .iter()
                 .filter_map(|(profile_id, record)| {
                     if record.clients == 0
                         && !record.retiring
                         && record.activity_failures >= ACTIVITY_FAILURE_LIMIT
                     {
-                        record.retiring = true;
                         Some((profile_id.clone(), record.worker.clone()))
                     } else {
                         None
@@ -1382,6 +1410,20 @@ impl WorkerPool {
                 .collect::<Vec<_>>()
         };
         for (profile_id, worker) in unreachable {
+            {
+                let mut state = self.state.lock().await;
+                let Some(record) = state.workers.get_mut(&profile_id) else {
+                    continue;
+                };
+                if record.clients > 0
+                    || record.retiring
+                    || record.activity_failures < ACTIVITY_FAILURE_LIMIT
+                    || !Arc::ptr_eq(&record.worker, &worker)
+                {
+                    continue;
+                }
+                record.retiring = true;
+            }
             if let Err(error) = worker.stop().await {
                 if let Some(record) = self.state.lock().await.workers.get_mut(&profile_id) {
                     record.retiring = false;
@@ -2047,7 +2089,8 @@ mod tests {
         let secrets = SecretStore::file_backend_for_tests();
         let workspace = root.path().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let configured = profile("profile-a", workspace);
+        let mut configured = profile("profile-a", workspace);
+        configured.allow_query_token_auth = false;
         paths
             .update_config(|config| {
                 config.upsert(configured.clone());
@@ -2073,6 +2116,33 @@ mod tests {
         assert_eq!(mismatch.unwrap_err().status(), StatusCode::FORBIDDEN);
         assert_eq!(pool.snapshot().await.running_workers, 0);
         assert_eq!(launcher.launches.load(Ordering::SeqCst), 0);
+
+        let query_auth = registry
+            .authenticate(
+                &HeaderMap::new(),
+                &BrokerQuery {
+                    token: Some("token-a".to_string()),
+                    workspace: Some("profile-a".to_string()),
+                },
+            )
+            .await;
+        assert_eq!(query_auth.unwrap_err().status(), StatusCode::UNAUTHORIZED);
+        let mut authorized_headers = HeaderMap::new();
+        authorized_headers.insert(AUTHORIZATION, bearer_header("token-a").unwrap());
+        authorized_headers.insert(
+            HeaderName::from_static(WORKSPACE_HEADER),
+            HeaderValue::from_static("profile-a"),
+        );
+        assert!(registry
+            .authenticate(
+                &authorized_headers,
+                &BrokerQuery {
+                    token: None,
+                    workspace: None,
+                },
+            )
+            .await
+            .is_ok());
     }
 
     #[test]
@@ -2094,5 +2164,17 @@ mod tests {
         .unwrap();
         assert_eq!(malicious.host_str(), Some("127.0.0.1"));
         assert_eq!(malicious.path(), "/http://169.254.169.254/latest/meta-data");
+    }
+
+    #[test]
+    fn registry_revision_hash_changes_even_for_same_size_rewrites() {
+        let root = tempdir().unwrap();
+        let paths = AppPaths::for_tests(root.path().to_path_buf());
+        assert_eq!(config_revision(&paths), None);
+        std::fs::write(paths.config_path(), b"revision-a").unwrap();
+        let first = config_revision(&paths).unwrap();
+        std::fs::write(paths.config_path(), b"revision-b").unwrap();
+        let second = config_revision(&paths).unwrap();
+        assert_ne!(first, second);
     }
 }

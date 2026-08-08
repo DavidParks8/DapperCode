@@ -98,6 +98,44 @@ pub enum HarnessError {
     StatusTimeout,
 }
 
+#[derive(Debug)]
+pub struct HarnessOperationFailure {
+    error: HarnessError,
+    indeterminate: bool,
+}
+
+impl HarnessOperationFailure {
+    pub fn definitive(error: HarnessError) -> Self {
+        Self {
+            error,
+            indeterminate: false,
+        }
+    }
+
+    pub fn indeterminate(error: HarnessError) -> Self {
+        Self {
+            error,
+            indeterminate: true,
+        }
+    }
+
+    pub fn is_indeterminate(&self) -> bool {
+        self.indeterminate
+    }
+
+    pub fn into_error(self) -> HarnessError {
+        self.error
+    }
+}
+
+impl std::fmt::Display for HarnessOperationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for HarnessOperationFailure {}
+
 pub trait HarnessAdapter: Send + Sync {
     fn capabilities(&self, context: &HarnessContext<'_>) -> HarnessCapabilities;
 
@@ -115,11 +153,18 @@ pub trait HarnessAdapter: Send + Sync {
         request: HarnessSteerRequest,
     ) -> BoxFuture<'a, Result<(), HarnessError>>;
 
+    #[cfg(test)]
     fn fork<'a>(
         &'a self,
         context: &'a SessionContext,
         request: HarnessForkRequest,
     ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessError>>;
+
+    fn fork_with_outcome<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessForkRequest,
+    ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessOperationFailure>>;
 
     fn wait_until_idle<'a>(
         &'a self,
