@@ -657,7 +657,7 @@ struct WorkspaceRegistry {
 
 impl WorkspaceRegistry {
     async fn load(paths: AppPaths, secrets: SecretStore) -> Result<Self> {
-        let cache = load_registry_cache(paths.clone(), secrets.clone()).await?;
+        let cache = load_registry_cache(paths.clone(), secrets.clone(), true).await?;
         Ok(Self {
             paths,
             secrets,
@@ -687,8 +687,15 @@ impl WorkspaceRegistry {
                 return Ok(());
             }
         }
-        let refreshed = load_registry_cache(self.paths.clone(), self.secrets.clone()).await?;
-        *self.cache.write().await = refreshed;
+        match load_registry_cache(self.paths.clone(), self.secrets.clone(), false).await {
+            Ok(refreshed) => *self.cache.write().await = refreshed,
+            Err(error) => {
+                eprintln!(
+                    "workspace registry refresh failed; retaining the last authenticated cache: {error:#}"
+                );
+                self.cache.write().await.config_revision = revision;
+            }
+        }
         Ok(())
     }
 
@@ -749,13 +756,27 @@ impl WorkspaceRegistry {
     }
 }
 
-async fn load_registry_cache(paths: AppPaths, secrets: SecretStore) -> Result<RegistryCache> {
+async fn load_registry_cache(
+    paths: AppPaths,
+    secrets: SecretStore,
+    ensure_profile_tokens: bool,
+) -> Result<RegistryCache> {
     tokio::task::spawn_blocking(move || {
         let (config, revision) = paths.load_config_with_revision()?;
+        if ensure_profile_tokens {
+            let profile_ids = config
+                .profiles
+                .iter()
+                .map(|profile| profile.profile_id.clone())
+                .collect::<Vec<_>>();
+            secrets.ensure_profiles(&paths, &profile_ids)?;
+        } else {
+            secrets.refresh(&paths)?;
+        }
         let mut by_token_digest: HashMap<String, Option<WorkspaceAccess>> = HashMap::new();
         let mut by_profile_id = HashMap::new();
         for profile in config.profiles {
-            let Some(secret) = secrets.get(&paths, &profile.profile_id)? else {
+            let Some(secret) = secrets.get_vault(&paths, &profile.profile_id)? else {
                 continue;
             };
             let access = WorkspaceAccess {
@@ -2143,6 +2164,52 @@ mod tests {
             )
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn registry_refresh_failure_keeps_existing_workspace_authentication_available() {
+        let root = tempdir().unwrap();
+        let paths = AppPaths::for_tests(root.path().to_path_buf());
+        let secrets = SecretStore::file_backend_for_tests();
+        let workspace_a = root.path().join("workspace-a");
+        let workspace_b = root.path().join("workspace-b");
+        std::fs::create_dir_all(&workspace_a).unwrap();
+        std::fs::create_dir_all(&workspace_b).unwrap();
+        paths
+            .update_config(|config| {
+                config.upsert(profile("profile-a", workspace_a));
+                Ok(())
+            })
+            .unwrap();
+        secrets.set(&paths, "profile-a", "token-a").unwrap();
+        let registry = WorkspaceRegistry::load(paths.clone(), secrets)
+            .await
+            .unwrap();
+        std::fs::write(paths.secret_vault_file_path(), b"{").unwrap();
+        paths
+            .update_config(|config| {
+                config.upsert(profile("profile-b", workspace_b));
+                Ok(())
+            })
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, bearer_header("token-a").unwrap());
+        headers.insert(
+            HeaderName::from_static(WORKSPACE_HEADER),
+            HeaderValue::from_static("profile-a"),
+        );
+
+        assert!(registry
+            .authenticate(
+                &headers,
+                &BrokerQuery {
+                    token: None,
+                    workspace: None,
+                },
+            )
+            .await
+            .is_ok());
+        assert_eq!(registry.snapshot().await.workspace_count, 1);
     }
 
     #[test]

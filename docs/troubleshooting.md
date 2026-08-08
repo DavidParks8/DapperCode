@@ -95,9 +95,9 @@ The Expo script reads the bridge host from the central `config.json`, falling ba
 ## macOS Asks for Keychain Access After a Rebuild
 
 The app is ad-hoc code-signed, so `npm run desktop:build:macos` produces a new code signature and
-macOS treats it as a different application. Approve the prompt, or set
-`DAPPERCODE_SECRETS_BACKEND=file` to keep tokens in a `0600` file under `secrets/` in the data
-directory instead. The desktop app shows which backend is in use.
+macOS treats it as a different application. Approve the single shared-vault prompt, or set
+`DAPPERCODE_SECRETS_BACKEND=file` to keep the credential vault in a `0600` file under `secrets/` in
+the data directory instead. The desktop app shows which backend is in use.
 
 ## A Port Is Already Taken
 

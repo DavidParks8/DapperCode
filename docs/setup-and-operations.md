@@ -45,7 +45,8 @@ live in a central per-user data directory:
   runtime/config.lock          guards concurrent config.json updates
   runtime/broker/              broker ownership record and transition lock
   broker.log                   stable broker log
-  secrets/<profileId>.json     only when the keychain is unavailable
+  secrets/bridge-auth-vault.json  private fallback when the keychain is unavailable
+  secrets/<profileId>.json     unused legacy credential files
   profiles/<profileId>/
     agents.json                typed ACP manifest with digest
     bridge.log
@@ -58,16 +59,18 @@ Each workspace gets a profile keyed by a hash of its canonical path, so separate
 same repository are independent. Every file is written through restrictive-mode temporary files and
 atomic rename.
 
-The bridge bearer token is **not** in `config.json`. It is stored in the operating system keychain
-under service `dev.dappercode.desktop`, account `bridge-auth-token:<profileId>`. When no keychain is
-available (headless Linux, CI) the token falls back to a `0600` file under `secrets/`, and the app
-reports which backend is in use. Set `DAPPERCODE_SECRETS_BACKEND=file` to force the fallback.
+Bridge bearer tokens are **not** in `config.json`. Distinct workspace tokens are stored together in
+one operating-system keychain item under service `dev.dappercode.desktop`, account
+`bridge-auth-vault:v1`. When no keychain is available (headless Linux, CI), the vault falls back to a
+`0600` file under `secrets/`, and the app reports which backend is in use. Set
+`DAPPERCODE_SECRETS_BACKEND=file` to force the fallback.
 
 Because the macOS app is ad-hoc code-signed, every rebuild produces a new code signature and macOS
-asks for keychain access again. That is expected until the app is signed with a stable identity.
+asks for keychain access again. The shared vault limits that to one item instead of one prompt per
+workspace. This remains expected until the app is signed with a stable identity.
 
 Setup registers an existing executable; it does not download or execute package-manager code. A
-previous workspace token and the broker endpoint are preserved when setup is rerun.
+vault-backed workspace token and the broker endpoint are preserved when setup is rerun.
 
 For OpenCode, the default ACP argument is `acp`. Other agents may require a different argument list.
 
@@ -105,11 +108,11 @@ down the one broker, which in turn stops all workers.
 ### Version 1 migration
 
 On first launch, the operator atomically upgrades the old per-workspace-listener config. It chooses
-the lexicographically first profile ID as the canonical broker endpoint, keeps every profile ID,
-keychain token, manifest, state directory, and attachment directory, and rewrites future pairing
-payloads to the canonical endpoint. The broker also listens on the previous bridge ports as
-credential-gated compatibility aliases, so already-paired phones reach the same broker without
-starting legacy per-workspace processes.
+the lexicographically first profile ID as the canonical broker endpoint and keeps every profile ID,
+manifest, state directory, and attachment directory. The shared credential vault intentionally
+rotates legacy per-workspace keychain tokens; re-pair each phone once after upgrading. Legacy
+keychain items are left untouched but are no longer read. The broker also listens on previous bridge
+ports as compatibility aliases while clients move to the canonical endpoint.
 
 ## Agent Integrity
 

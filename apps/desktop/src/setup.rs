@@ -81,7 +81,7 @@ struct SetupSideEffects<'a> {
     profile_id: &'a str,
     manifest: Vec<u8>,
     previous_manifest: Option<Option<Vec<u8>>>,
-    secret_existed: Option<bool>,
+    secret_created: Option<bool>,
 }
 
 impl ConfigSideEffects for SetupSideEffects<'_> {
@@ -99,12 +99,10 @@ impl ConfigSideEffects for SetupSideEffects<'_> {
         };
         self.previous_manifest = Some(previous_manifest);
 
-        let existing_secret = self.secrets.get(self.paths, self.profile_id)?;
-        self.secret_existed = Some(existing_secret.is_some());
-        let secret = match existing_secret {
-            Some(secret) => secret,
-            None => self.secrets.get_or_create(self.paths, self.profile_id)?,
-        };
+        let (secret, created) = self
+            .secrets
+            .get_or_create_with_status(self.paths, self.profile_id)?;
+        self.secret_created = Some(created);
         atomic_private_write(&manifest_path, &self.manifest)?;
         Ok(secret)
     }
@@ -121,7 +119,7 @@ impl ConfigSideEffects for SetupSideEffects<'_> {
                 failures.push(format!("manifest: {error:#}"));
             }
         }
-        if self.secret_existed.take() == Some(false) {
+        if self.secret_created.take() == Some(true) {
             if let Err(error) = self.secrets.delete(self.paths, self.profile_id) {
                 failures.push(format!("credential: {error:#}"));
             }
@@ -203,7 +201,7 @@ pub fn setup_profile(
         profile_id: &profile_id,
         manifest: serde_json::to_vec_pretty(&manifest)?,
         previous_manifest: None,
-        secret_existed: None,
+        secret_created: None,
     };
     let _transition_lease = FileLease::acquire(&paths.broker_transition_lock_path())?;
     let (profile, secret) = paths.update_config_with_side_effects(
@@ -735,7 +733,7 @@ mod tests {
             profile_id,
             manifest: b"replacement manifest".to_vec(),
             previous_manifest: None,
-            secret_existed: None,
+            secret_created: None,
         };
 
         side_effects.apply().unwrap();

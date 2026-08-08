@@ -47,11 +47,11 @@ styling come from Windows itself.
 
 First-time setup registers an ACP executable already installed on the Mac, such as OpenCode. The
 Rust operator hashes that executable and stores the resulting configuration centrally, in
-`~/Library/Application Support/dev.dappercode.desktop`, never inside your repositories. The bridge
-bearer token is kept in the macOS keychain. It does not invoke npm, npx, Node.js, shell setup
+`~/Library/Application Support/dev.dappercode.desktop`, never inside your repositories. Distinct
+workspace bearer tokens are kept together in one macOS keychain vault. It does not invoke npm, npx, Node.js, shell setup
 scripts, or floating package resolution.
 
-Every workspace keeps an isolated profile, token, manifest, state directory, and attachment root.
+Every workspace keeps an isolated profile, vault entry, manifest, state directory, and attachment root.
 One authenticated desktop broker owns the stable mobile RPC endpoint. A workspace bridge and ACP
 child start only after that workspace's credential has authenticated and a request needs the
 runtime. Active browser previews keep per-workspace origins rather than sharing broker cookies.

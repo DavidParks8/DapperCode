@@ -132,7 +132,7 @@ impl BrokerSupervisor {
         let secret = self
             .secrets
             .get(&self.paths, &self.profile.profile_id)?
-            .context("no stored workspace credential; run setup again")?;
+            .context("no stored workspace credential; start the broker or run setup again")?;
         BridgeRuntimeConfig::from_profile(&self.profile, &secret.token, secret.backend, &self.paths)
     }
 
