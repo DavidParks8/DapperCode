@@ -29,7 +29,9 @@
   "overrides": {
     "@expo/metro-config": {
       "postcss": "8.5.23"
-    }
+    },
+    "markdown-it": "^14.2.0",
+    "linkify-it": "^5.0.2"
   },
   "workspaces": [
     "apps/mobile"
