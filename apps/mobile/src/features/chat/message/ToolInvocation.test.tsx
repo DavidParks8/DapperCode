@@ -7,11 +7,7 @@ import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation } from './toolInvocationModel';
-import {
-  LinearTransition,
-  ReduceMotion,
-  setMockReducedMotionEnabled,
-} from '@shared/testing/reanimatedMock';
+import { LinearTransition, setMockReducedMotionEnabled } from '@shared/testing/reanimatedMock';
 import { compositeOverlayColor } from './useHorizontalOverflow';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -53,6 +49,30 @@ function invocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
   };
 }
 
+function wrap(
+  value: ToolInvocation,
+  bridgeUrl: string | null = null,
+  threadRunning = true,
+): React.ReactElement {
+  return (
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 59, right: 0, bottom: 34, left: 0 },
+      }}
+    >
+      <AppThemeProvider theme={theme}>
+        <ToolInvocationRow
+          invocation={value}
+          bridgeUrl={bridgeUrl}
+          bridgeToken={null}
+          threadRunning={threadRunning}
+        />
+      </AppThemeProvider>
+    </SafeAreaProvider>
+  );
+}
+
 function render(
   value: ToolInvocation,
   bridgeUrl: string | null = null,
@@ -60,23 +80,7 @@ function render(
 ): QueryableRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
-    tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 59, right: 0, bottom: 34, left: 0 },
-        }}
-      >
-        <AppThemeProvider theme={theme}>
-          <ToolInvocationRow
-            invocation={value}
-            bridgeUrl={bridgeUrl}
-            bridgeToken={null}
-            threadRunning={threadRunning}
-          />
-        </AppThemeProvider>
-      </SafeAreaProvider>,
-    );
+    tree = renderer.create(wrap(value, bridgeUrl, threadRunning));
   });
   if (!tree) {
     throw new Error('Expected a rendered row');
@@ -380,11 +384,40 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
-  it('wires the layout transition to honor the system Reduce Motion setting', () => {
+  it('never attaches a layout transition to the row, so a lagging animated frame cannot paint over the activity row below it', () => {
     const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
-    const tree = render(invocation({ id: 'tool-reduce-motion', textLines: ['out'] }));
+    const running = invocation({
+      id: 'tool-no-layout-transition',
+      status: 'in_progress',
+      title: 'Reading a file',
+      textLines: [],
+    });
+    const tree = render(running);
+    const layoutRoot = () =>
+      requireTestValue(
+        tree.root.findAllByProps({ testID: 'tool-row-layout' })[0],
+        'tool row layout',
+      );
 
-    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+    expect(layoutRoot().props['layout']).toBeUndefined();
+
+    // Settling the row is what used to resize it mid-flight: Reanimated held the old frame while
+    // the inverted cell already had the new one, so the row painted over its neighbour for 280ms.
+    act(() => {
+      tree.update(
+        wrap(
+          invocation({
+            id: 'tool-no-layout-transition',
+            status: 'completed',
+            title: 'Read a file with a much longer settled title that wraps the row',
+            textLines: ['out'],
+          }),
+        ),
+      );
+    });
+
+    expect(layoutRoot().props['layout']).toBeUndefined();
+    expect(reduceMotionSpy).not.toHaveBeenCalled();
 
     reduceMotionSpy.mockRestore();
     act(() => tree.unmount());
@@ -404,7 +437,7 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
-  it('clips exiting output to the animated row layout', () => {
+  it('clips exiting output to the row bounds', () => {
     const value = invocation({ id: 'tool-collapse-clip', textLines: ['out'] });
     const tree = render(value);
     const layout = requireTestValue(

@@ -28,7 +28,7 @@ import { createAppTheme, AppThemeProvider } from '@shared/theme';
 import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
 import { resetHuggedTextWidthCache } from './UserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
-import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
+import { LinearTransition } from '@shared/testing/reanimatedMock';
 import { projectTranscript } from '../transcript/controllers/projectionController';
 
 type QueryableTestInstance = ReactTestInstance & {
@@ -1435,7 +1435,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
-  it('wires the reasoning and tool timeline layout transitions to honor system Reduce Motion', () => {
+  it('keeps reasoning and tool timeline rows out of Reanimated layout transitions, so a lagging frame cannot paint over the neighbouring transcript row', () => {
     const reduceMotionSpy = jest.spyOn(LinearTransition, 'reduceMotion');
 
     const reasoningTree = renderMessage({
@@ -1453,7 +1453,7 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
 
-    expect(reduceMotionSpy).toHaveBeenCalledWith(ReduceMotion.System);
+    expect(reduceMotionSpy).not.toHaveBeenCalled();
 
     reduceMotionSpy.mockRestore();
     act(() => reasoningTree.unmount());

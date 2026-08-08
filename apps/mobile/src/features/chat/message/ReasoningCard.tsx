@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Pressable, Text, View, type TextLayoutEvent } from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
@@ -165,10 +165,11 @@ export function ReasoningEntryCard({
     );
   };
 
+  // See `ToolInvocation.tsx`: transcript rows must not carry a Reanimated `layout` transition,
+  // because the inverted list's `scaleY: -1` cells make a lagging animated frame paint over the
+  // neighbouring row.
   return (
-    <Animated.View
-      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
-    >
+    <Animated.View testID="reasoning-card-layout">
       <Pressable
         disabled={!canToggle}
         onPress={() => setExpanded((previous) => !previous)}
