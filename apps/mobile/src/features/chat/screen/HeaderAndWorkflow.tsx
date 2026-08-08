@@ -74,15 +74,21 @@ function computeWorkflowCardScrollMaxHeight(
   return Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360));
 }
 
+function formatScaledTokenValue(scaled: number): string {
+  if (scaled >= 100) {
+    return `${Math.round(scaled)}`;
+  }
+  return `${Number(scaled.toFixed(1))}`;
+}
+
 export function formatCompactTokenCount(tokenCount: number): string {
   if (tokenCount >= 1_000_000) {
-    const millions = tokenCount / 1_000_000;
-    return `${millions >= 10 ? Math.round(millions) : Number(millions.toFixed(1))}M`;
+    return `${formatScaledTokenValue(tokenCount / 1_000_000)}m tk`;
   }
-  if (tokenCount >= 100_000) {
-    return `${Math.round(tokenCount / 1_000)}k`;
+  if (tokenCount >= 1_000) {
+    return `${formatScaledTokenValue(tokenCount / 1_000)}k tk`;
   }
-  return tokenCount.toLocaleString();
+  return `${tokenCount.toLocaleString()} tk`;
 }
 
 function SessionMetaChip(props: {
