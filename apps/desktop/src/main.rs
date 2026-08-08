@@ -5,19 +5,23 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
+mod broker;
+mod broker_supervisor;
 mod config;
 mod platform_setup;
 mod secrets;
 mod setup;
 mod store;
+#[allow(dead_code)]
 mod supervisor;
 
+use broker_supervisor::BrokerSupervisor;
 use config::{validate_workspace, RuntimePaths};
 use platform_setup::NetworkMode;
 use secrets::SecretStore;
 use setup::{discover_agent_executable, setup_profile, SetupRequest};
 use store::{profile_id_for, AppPaths, Profile};
-use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor};
+use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor as LegacyBridgeSupervisor};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +102,22 @@ fn run() -> Result<()> {
 
     let paths = AppPaths::discover()?;
     let secrets = SecretStore::discover();
+    paths.migrate_config()?;
+
+    if command == "__broker" {
+        let owner_pid = owner_pid_arg(&mut args)?;
+        ensure_no_args(&args)?;
+        let settings = paths
+            .load_config()?
+            .broker
+            .context("the desktop broker is not configured; run setup first")?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .context("failed to create broker runtime")?;
+        runtime.block_on(broker::BrokerServer::new(paths, secrets, settings, owner_pid).serve())?;
+        return Ok(());
+    }
 
     match command.as_str() {
         "list" => {
@@ -142,6 +162,7 @@ fn run_workspace_command(
             let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, owner_pid)? else {
                 bail!("this workspace is not set up yet; run 'dappercode setup' first");
             };
+            stop_legacy_bridges(paths, secrets)?;
             let snapshot = match command {
                 "start" => supervisor.start()?,
                 "stop" => supervisor.stop()?,
@@ -195,6 +216,7 @@ fn run_setup(
                 .context("--port must be a valid TCP port")
         })
         .transpose()?;
+    let replace_broker_endpoint = take_flag(&mut args, "--replace-broker-endpoint");
     let agent_id = option(&mut args, "--agent-id").unwrap_or_else(|| "opencode".into());
     let display_name = option(&mut args, "--display-name").unwrap_or_else(|| agent_id.clone());
     let executable = option(&mut args, "--agent-executable")
@@ -212,6 +234,7 @@ fn run_setup(
             network_mode,
             bridge_host: host,
             bridge_port,
+            replace_broker_endpoint,
             agent_id,
             display_name,
             executable,
@@ -232,12 +255,16 @@ fn forget_profile(
 ) -> Result<serde_json::Value> {
     let workspace = validate_workspace(&workspace)?;
     let profile_id = profile_id_for(&workspace);
-    if let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, None)? {
-        if supervisor.owns_running_process() {
-            bail!("stop this workspace's bridge before forgetting it");
+    stop_legacy_bridges(paths, secrets)?;
+    let config = paths.load_config()?;
+    if let (Some(profile), Some(settings)) =
+        (config.find(&profile_id).cloned(), config.broker.clone())
+    {
+        let broker = BrokerSupervisor::new(profile, settings, paths.clone(), secrets.clone(), None);
+        if broker.owns_running_process() {
+            bail!("stop the desktop broker before forgetting a workspace");
         }
     }
-
     let existed = paths.update_config(|config| Ok(config.remove(&profile_id)))?;
     secrets.delete(paths, &profile_id)?;
     let profile_dir = paths.profile_dir(&profile_id);
@@ -259,28 +286,43 @@ fn list_profiles(
     secrets: &SecretStore,
     owner_pid: Option<u32>,
 ) -> Result<Vec<OperatorSnapshot>> {
-    let runtime = RuntimePaths::discover().ok();
+    let config = paths.load_config()?;
+    let settings = config.broker.clone();
+    let shared_snapshot = config.profiles.first().and_then(|profile| {
+        settings.clone().map(|settings| {
+            BrokerSupervisor::new(
+                profile.clone(),
+                settings,
+                paths.clone(),
+                secrets.clone(),
+                owner_pid,
+            )
+            .snapshot()
+        })
+    });
     let mut snapshots = Vec::new();
-    for profile in paths.load_config()?.profiles {
-        let Some(runtime) = runtime.clone() else {
+    for profile in config.profiles {
+        let Some(settings) = settings.clone() else {
             snapshots.push(profile_snapshot(
                 &profile,
-                BridgeSnapshot::error("DapperCode runtime resources were not found."),
+                BridgeSnapshot::error("DapperCode broker settings were not found."),
                 paths,
                 None,
                 None,
             ));
             continue;
         };
-        let supervisor = BridgeSupervisor::new(
+        let supervisor = BrokerSupervisor::new(
             profile.clone(),
+            settings,
             paths.clone(),
             secrets.clone(),
-            runtime,
             owner_pid,
         );
-        let snapshot = supervisor.snapshot();
-        snapshots.push(operator_snapshot(&supervisor, snapshot, paths));
+        let snapshot = shared_snapshot
+            .clone()
+            .unwrap_or_else(|| supervisor.snapshot());
+        snapshots.push(profile_snapshot(&profile, snapshot, paths, None, None));
     }
     Ok(snapshots)
 }
@@ -288,76 +330,74 @@ fn list_profiles(
 /// Stops every bridge this app owns. Used when the desktop app quits, so parallel bridges from
 /// different worktrees are all torn down. One failing profile does not abort the rest.
 fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
-    let runtime = RuntimePaths::discover()?;
-    let profiles = paths.load_config()?.profiles;
-    let running_profile_ids: Vec<String> = profiles
-        .iter()
-        .filter_map(|profile| {
-            let supervisor = BridgeSupervisor::new(
-                profile.clone(),
-                paths.clone(),
-                secrets.clone(),
-                runtime.clone(),
-                None,
-            );
-            supervisor
-                .owns_running_process()
-                .then(|| profile.profile_id.clone())
-        })
-        .collect();
-    if !running_profile_ids.is_empty() {
-        paths.update_config(|config| {
-            for profile_id in &running_profile_ids {
-                if let Some(profile) = config.find_mut(profile_id) {
-                    profile.auto_start = true;
-                }
-            }
-            Ok(())
-        })?;
-    }
-
+    let config = paths.load_config()?;
+    let profiles = config.profiles;
     let mut results = Vec::new();
     let mut stopped = 0;
-    for profile in profiles {
-        let supervisor = BridgeSupervisor::new(
+    if let (Some(profile), Some(settings)) = (profiles.first(), config.broker) {
+        let supervisor = BrokerSupervisor::new(
             profile.clone(),
+            settings,
+            paths.clone(),
+            secrets.clone(),
+            None,
+        );
+        if supervisor.owns_running_process() {
+            match supervisor.stop() {
+                Ok(snapshot) => {
+                    stopped = 1;
+                    results.push(StopOutcome {
+                        profile_id: "broker".to_string(),
+                        workspace: profile.workspace.clone(),
+                        ok: true,
+                        detail: snapshot.headline,
+                    });
+                }
+                Err(error) => results.push(StopOutcome {
+                    profile_id: "broker".to_string(),
+                    workspace: profile.workspace.clone(),
+                    ok: false,
+                    detail: format!("{error:#}"),
+                }),
+            }
+        }
+    }
+    stop_legacy_bridges(paths, secrets)?;
+    Ok(StopAllResult { stopped, results })
+}
+
+fn stop_legacy_bridges(paths: &AppPaths, secrets: &SecretStore) -> Result<()> {
+    let runtime = RuntimePaths::discover()?;
+    for profile in paths.load_config()?.profiles {
+        let supervisor = LegacyBridgeSupervisor::new(
+            profile,
             paths.clone(),
             secrets.clone(),
             runtime.clone(),
             None,
         );
-        if !supervisor.owns_running_process() {
-            continue;
-        }
-        match supervisor.stop() {
-            Ok(snapshot) => {
-                stopped += 1;
-                results.push(StopOutcome {
-                    profile_id: profile.profile_id,
-                    workspace: profile.workspace,
-                    ok: true,
-                    detail: snapshot.headline,
-                });
-            }
-            Err(error) => results.push(StopOutcome {
-                profile_id: profile.profile_id,
-                workspace: profile.workspace,
-                ok: false,
-                detail: format!("{error:#}"),
-            }),
+        if supervisor.owns_running_process() {
+            supervisor.stop()?;
         }
     }
-    Ok(StopAllResult { stopped, results })
+    Ok(())
 }
 
 fn set_profile_auto_start(paths: &AppPaths, workspace: &Path, enabled: bool) -> Result<()> {
     let workspace = validate_workspace(workspace)?;
     let profile_id = profile_id_for(&workspace);
     paths.update_config(|config| {
-        let profile = config.find_mut(&profile_id).with_context(|| {
+        config.find(&profile_id).with_context(|| {
             format!("profile {profile_id} disappeared during bridge transition")
         })?;
-        profile.auto_start = enabled;
+        let broker = config
+            .broker
+            .as_mut()
+            .context("broker settings disappeared during bridge transition")?;
+        broker.auto_start = enabled;
+        for profile in &mut config.profiles {
+            profile.auto_start = enabled;
+        }
         Ok(())
     })
 }
@@ -367,17 +407,21 @@ fn supervisor(
     paths: &AppPaths,
     secrets: &SecretStore,
     owner_pid: Option<u32>,
-) -> Result<Option<BridgeSupervisor>> {
+) -> Result<Option<BrokerSupervisor>> {
     let workspace = validate_workspace(&workspace)?;
     let profile_id = profile_id_for(&workspace);
     let Some(profile) = paths.load_config()?.find(&profile_id).cloned() else {
         return Ok(None);
     };
-    Ok(Some(BridgeSupervisor::new(
+    let settings = paths
+        .load_config()?
+        .broker
+        .context("broker settings are missing; run setup again")?;
+    Ok(Some(BrokerSupervisor::new(
         profile,
+        settings,
         paths.clone(),
         secrets.clone(),
-        RuntimePaths::discover()?,
         owner_pid,
     )))
 }
@@ -409,7 +453,7 @@ fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorS
 }
 
 fn operator_snapshot(
-    supervisor: &BridgeSupervisor,
+    supervisor: &BrokerSupervisor,
     snapshot: BridgeSnapshot,
     paths: &AppPaths,
 ) -> OperatorSnapshot {
@@ -418,9 +462,11 @@ fn operator_snapshot(
         supervisor.profile(),
         snapshot,
         paths,
-        runtime_config
-            .as_ref()
-            .and_then(|config| config.pairing_payload().ok()),
+        runtime_config.as_ref().and_then(|config| {
+            config
+                .pairing_payload(&supervisor.profile().profile_id)
+                .ok()
+        }),
         runtime_config
             .as_ref()
             .map(|config| config.secret_backend.as_str().to_string()),
@@ -555,7 +601,7 @@ Commands:\n\
   start [--owner-pid PID]\n\
   stop [--all]\n\
   restart [--owner-pid PID]\n\
-  setup --host HOST [--network local|tailscale] [--port 8787]\n\
+  setup --host HOST [--network local|tailscale] [--port 8787] [--replace-broker-endpoint]\n\
         [--agent-id opencode] [--agent-executable PATH] [--agent-args 'acp']\n\
   forget\n\
   discover-agent [--agent-id opencode]\n\

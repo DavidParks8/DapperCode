@@ -13,6 +13,9 @@ export const activeBridgeProfileAtom = atom((get) =>
 export const bridgeUrlAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeUrl ?? null);
 
 export const bridgeTokenAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeToken ?? null);
+export const bridgeWorkspaceIdAtom = atom(
+  (get) => get(activeBridgeProfileAtom)?.workspaceId ?? null,
+);
 
 const wsClientOverrideAtom = atom<HostBridgeWsClient | null>(null);
 const apiClientOverrideAtom = atom<HostBridgeApiClient | null>(null);
@@ -33,6 +36,7 @@ export const wsClientAtom = atom(
     }
     return new HostBridgeWsClient(bridgeUrl, {
       authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
+      workspaceId: get(bridgeWorkspaceIdAtom),
       allowQueryTokenAuth: env.allowWsQueryTokenAuth,
     });
   },

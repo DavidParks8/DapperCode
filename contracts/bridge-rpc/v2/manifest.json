@@ -129,9 +129,36 @@
     "operationalStatus": {
       "requests": { "total": 12, "completed": 10, "failed": 2, "timedOut": 1, "pending": 0 },
       "replay": { "entries": 42, "capacity": 2000, "evicted": 0, "clientQueueDrops": 0 },
-      "queue": { "trackedThreads": 2, "depth": 1, "busyThreads": 1 },
+      "queue": {
+        "trackedThreads": 2,
+        "depth": 1,
+        "busyThreads": 1,
+        "activeRuns": 1,
+        "pendingSteers": 0,
+        "pendingApprovals": 0,
+        "pendingUserInputs": 0,
+        "otherLiveWork": 0
+      },
       "push": { "attempted": 4, "accepted": 3, "failed": 1 },
       "recentErrors": [{ "method": "thread/read", "backend": "acp", "kind": "request_timeout" }]
+    },
+    "runtimeActivity": {
+      "activeRuns": 1,
+      "queuedMessages": 1,
+      "pendingSteers": 0,
+      "pendingApprovals": 0,
+      "pendingUserInputs": 0,
+      "activePreviewSessions": 0,
+      "inFlightRequests": 0,
+      "otherLiveWork": 0,
+      "canRetire": false
+    },
+    "brokerPairing": {
+      "type": "dappercode-broker-pair",
+      "brokerProtocolVersion": 1,
+      "workspaceId": "workspace-alpha-000000000001",
+      "bridgeUrl": "http://100.64.0.10:8787",
+      "bridgeToken": "workspace-scoped-token"
     },
     "notification": {
       "method": "bridge/approval.requested",

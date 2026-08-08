@@ -75,7 +75,8 @@ use attachments::{
 };
 use config::BridgeConfig;
 use health::{
-    bridge_status, BridgeDeviceConnection, BridgeOperationalStatus, BridgeStatus, QueueStatus,
+    bridge_status, runtime_activity, BridgeDeviceConnection, BridgeOperationalStatus, BridgeStatus,
+    QueueStatus,
 };
 use observability::OperationalMetrics;
 use path_policy::{PathKind, PathPolicy};
@@ -190,7 +191,22 @@ async fn main() {
         config.preview_connect_url.clone(),
         config.connect_url.clone(),
     ));
-    let queue = BridgeQueueService::new(backend.clone(), hub.clone());
+    let queue_submission_path = config.state_dir.join("queue-idempotency.json");
+    let queue_submissions =
+        match BridgeQueueService::load_submission_store(&queue_submission_path).await {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("{error}");
+                backend.shutdown().await;
+                std::process::exit(1);
+            }
+        };
+    let queue = BridgeQueueService::with_submission_store(
+        backend.clone(),
+        hub.clone(),
+        Some(queue_submission_path),
+        queue_submissions,
+    );
 
     let project_label = config
         .workdir
@@ -200,6 +216,15 @@ async fn main() {
         .unwrap_or_else(|| "DapperCode".to_string());
     let push = PushService::load(&config.state_dir, project_label, metrics.clone()).await;
     push.spawn_event_loop_with_queue(&hub, backend.clone(), Some(queue.clone()));
+    let operation_dedupe_path = config.state_dir.join("operation-idempotency.json");
+    let operation_dedupe = match load_operation_dedupe(&operation_dedupe_path).await {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("{error}");
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
 
     let state = Arc::new(AppState {
         config: config.clone(),
@@ -208,15 +233,12 @@ async fn main() {
         hub,
         backend,
         queue,
-        thread_create_results: Arc::new(Mutex::new(HashMap::new())),
-        thread_create_order: Arc::new(Mutex::new(VecDeque::new())),
+        operation_dedupe: Arc::new(Mutex::new(operation_dedupe)),
         thread_create_actor: Arc::new(Mutex::new(())),
-        thread_fork_results: Arc::new(Mutex::new(HashMap::new())),
-        thread_fork_order: Arc::new(Mutex::new(VecDeque::new())),
         thread_fork_actor: Arc::new(Mutex::new(())),
-        approval_resolution_results: Arc::new(Mutex::new(HashMap::new())),
-        approval_resolution_order: Arc::new(Mutex::new(VecDeque::new())),
         approval_resolution_actor: Arc::new(Mutex::new(())),
+        operation_dedupe_path,
+        operation_dedupe_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         thread_list_streams: Arc::new(Mutex::new(HashMap::new())),
         git,
         preview,

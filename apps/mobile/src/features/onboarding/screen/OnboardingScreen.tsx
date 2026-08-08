@@ -20,6 +20,7 @@ export function OnboardingScreen({
   mode = 'initial',
   initialBridgeUrl,
   initialBridgeToken,
+  initialWorkspaceId,
   allowInsecureRemoteBridge = false,
   allowQueryTokenAuth = false,
   onSave,
@@ -31,6 +32,7 @@ export function OnboardingScreen({
     mode,
     initialBridgeUrl,
     initialBridgeToken,
+    initialWorkspaceId,
     allowInsecureRemoteBridge,
     allowQueryTokenAuth,
     onSave,
@@ -83,7 +85,14 @@ export function OnboardingScreen({
                 styles={styles}
                 theme={theme}
                 mode={mode}
-                onCancel={onCancel}
+                onCancel={
+                  onCancel
+                    ? () => {
+                        controller.cancelPendingProbe();
+                        onCancel();
+                      }
+                    : undefined
+                }
                 showOnboardingDock={controller.showOnboardingDock}
                 currentSetupStage={controller.currentSetupStage}
                 continueLabel={controller.continueLabel}

@@ -5,6 +5,7 @@ export type StatusListener = (connected: boolean) => void;
 
 export interface HostBridgeWsClientOptions {
   authToken?: string | null;
+  workspaceId?: string | null;
   allowQueryTokenAuth?: boolean;
   requestTimeoutMs?: number;
 }

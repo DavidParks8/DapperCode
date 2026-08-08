@@ -24,6 +24,16 @@ interface ContractManifest {
       eventId: number;
       params: { event: { type: string; delta: string } };
     };
+    runtimeActivity: {
+      activeRuns: number;
+      queuedMessages: number;
+      canRetire: boolean;
+    };
+    brokerPairing: {
+      type: string;
+      brokerProtocolVersion: number;
+      workspaceId: string;
+    };
   };
 }
 
@@ -99,6 +109,16 @@ describe('HostBridgeWsClient', () => {
       params: { event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'Hello' } },
     });
     expect(manifest.notifications).toContain(manifest.fixtures.agUiNotification.method);
+    expect(manifest.fixtures.runtimeActivity).toMatchObject({
+      activeRuns: 1,
+      queuedMessages: 1,
+      canRetire: false,
+    });
+    expect(manifest.fixtures.brokerPairing).toMatchObject({
+      type: 'dappercode-broker-pair',
+      brokerProtocolVersion: 1,
+      workspaceId: 'workspace-alpha-000000000001',
+    });
   });
 
   it('connect() builds /rpc websocket URL', () => {
@@ -106,6 +126,20 @@ describe('HostBridgeWsClient', () => {
     client.connect();
 
     expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost:8787/rpc');
+  });
+
+  it('routes a workspace-scoped credential through the stable broker socket', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787', {
+      authToken: 'token-abc',
+      workspaceId: 'workspace-alpha-000000000001',
+    });
+    client.connect();
+
+    expect(global.WebSocket).toHaveBeenCalledWith(
+      'ws://localhost:8787/rpc?workspace=workspace-alpha-000000000001',
+      undefined,
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
   });
 
   it('sends Authorization header on native when auth token is provided', () => {

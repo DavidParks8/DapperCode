@@ -52,6 +52,23 @@ final class OperatorProcessRegistry: @unchecked Sendable {
     }
 }
 
+enum OperatorProcessOutput {
+    static func collect(
+        from process: Process,
+        stdout: Pipe,
+        stderr: Pipe
+    ) async -> (stdout: Data, stderr: Data) {
+        let outputReader = Task.detached(priority: .utility) {
+            stdout.fileHandleForReading.readDataToEndOfFile()
+        }
+        let errorReader = Task.detached(priority: .utility) {
+            stderr.fileHandleForReading.readDataToEndOfFile()
+        }
+        process.waitUntilExit()
+        return await (outputReader.value, errorReader.value)
+    }
+}
+
 enum ApplicationTermination {
     @discardableResult
     static func begin(

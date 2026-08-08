@@ -20,6 +20,9 @@ struct BridgeObservedHealth: Decodable, Equatable {
     let uptimeSec: UInt64
     let connectedClients: Int
     let agents: [Agent]
+    let configuredWorkspaces: Int
+    let runningWorkers: Int
+    let busyWorkers: Int
     let operational: Operational
 }
 
@@ -139,6 +142,7 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
         let type: String
         let bridgeUrl: String
         let bridgeToken: String
+        let workspaceId: String?
     }
 
     private struct HealthEnvelope: Decodable {
@@ -170,7 +174,7 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
     ) -> BridgeStatusConnection? {
         guard let payloadData = target.pairingPayload.data(using: .utf8),
               let payload = try? JSONDecoder().decode(PairingPayload.self, from: payloadData),
-              payload.type == "dappercode-bridge-pair",
+              ["dappercode-broker-pair", "dappercode-bridge-pair"].contains(payload.type),
               var components = URLComponents(string: payload.bridgeUrl) else {
             return nil
         }
@@ -180,11 +184,15 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
         default: return nil
         }
         components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = "/\(components.path.isEmpty ? "" : "\(components.path)/")rpc"
-        components.queryItems = [
+        components.path = "/\(components.path.isEmpty ? "" : "\(components.path)/")broker/rpc"
+        var queryItems = [
             URLQueryItem(name: "clientType", value: "desktop-monitor"),
             URLQueryItem(name: "clientName", value: "DapperCode"),
         ]
+        if let workspaceId = payload.workspaceId {
+            queryItems.append(URLQueryItem(name: "workspace", value: workspaceId))
+        }
+        components.queryItems = queryItems
         guard let url = components.url else { return nil }
 
         var request = URLRequest(url: url)

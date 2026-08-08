@@ -1,5 +1,7 @@
 use crate::*;
 
+const RPC_IDENTIFIER_MAX_BYTES: usize = 4096;
+
 pub(super) fn protected_request_error(
     config: &BridgeConfig,
     headers: &HeaderMap,
@@ -482,32 +484,75 @@ pub(super) async fn handle_bridge_method(
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
                     .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
             request.submission_id = request.submission_id.trim().to_string();
-            if request.submission_id.is_empty() {
+            if request.submission_id.is_empty() || request.submission_id.len() > PUSH_ID_MAX_BYTES {
                 return Err(BridgeError::invalid_params(
-                    "submissionId must not be empty",
+                    "submissionId must be non-empty and at most 128 bytes",
                 ));
             }
             let _create_guard = state.thread_create_actor.lock().await;
-            if let Some(result) = state
-                .thread_create_results
-                .lock()
-                .await
-                .get(&request.submission_id)
-                .cloned()
-            {
+            let (cached, pending) = {
+                let dedupe = state.operation_dedupe.lock().await;
+                (
+                    dedupe
+                        .thread_create_results
+                        .get(&request.submission_id)
+                        .cloned(),
+                    dedupe
+                        .thread_create_pending
+                        .contains(&request.submission_id),
+                )
+            };
+            if let Some(result) = cached {
+                state.persist_operation_dedupe().await?;
                 return serde_json::to_value(result)
                     .map_err(|error| BridgeError::server(&error.to_string()));
+            }
+            if pending {
+                return Err(BridgeError::server(
+                    "thread creation outcome is indeterminate after a worker interruption; refresh the thread list before choosing a new submissionId",
+                ));
             }
             request.thread_start =
                 normalize_forwarded_path_params(Some(request.thread_start), &state.path_policy)?
                     .ok_or_else(|| {
                         BridgeError::invalid_params("threadStart payload is required")
                     })?;
-            let started = state
+            let submission_id = request.submission_id.clone();
+            let pending_inserted = match state
+                .update_operation_dedupe(|dedupe| {
+                    if dedupe.thread_create_pending.len() >= SUBMISSION_DEDUPE_LIMIT {
+                        return false;
+                    }
+                    dedupe.thread_create_pending.insert(submission_id.clone());
+                    true
+                })
+                .await
+            {
+                Ok(inserted) => inserted,
+                Err(error) => {
+                    let _ = state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.thread_create_pending.remove(&submission_id);
+                        })
+                        .await;
+                    return Err(error);
+                }
+            };
+            if !pending_inserted {
+                return Err(BridgeError::resource_limit(
+                    "pending_thread_creations",
+                    SUBMISSION_DEDUPE_LIMIT,
+                    SUBMISSION_DEDUPE_LIMIT + 1,
+                ));
+            }
+            let started = match state
                 .backend
                 .request_for_client(client_id, "thread/start", Some(request.thread_start))
                 .await
-                .map_err(|error| BridgeError::server(&error))?;
+            {
+                Ok(started) => started,
+                Err(error) => return Err(BridgeError::server(&error)),
+            };
             let response = BridgeThreadCreateResponse {
                 submission_id: request.submission_id.clone(),
                 thread: started
@@ -515,15 +560,22 @@ pub(super) async fn handle_bridge_method(
                     .cloned()
                     .ok_or_else(|| BridgeError::server("thread/start did not return thread"))?,
             };
-            let mut results = state.thread_create_results.lock().await;
-            let mut order = state.thread_create_order.lock().await;
-            results.insert(request.submission_id.clone(), response.clone());
-            order.push_back(request.submission_id);
-            while order.len() > SUBMISSION_DEDUPE_LIMIT {
-                if let Some(oldest) = order.pop_front() {
-                    results.remove(&oldest);
-                }
-            }
+            state
+                .update_operation_dedupe(|dedupe| {
+                    dedupe
+                        .thread_create_results
+                        .insert(response.submission_id.clone(), response.clone());
+                    dedupe
+                        .thread_create_order
+                        .push_back(response.submission_id.clone());
+                    while dedupe.thread_create_order.len() > SUBMISSION_DEDUPE_LIMIT {
+                        if let Some(oldest) = dedupe.thread_create_order.pop_front() {
+                            dedupe.thread_create_results.remove(&oldest);
+                        }
+                    }
+                    dedupe.thread_create_pending.remove(&response.submission_id);
+                })
+                .await?;
             serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
         }
         "bridge/thread/fork" => {
@@ -533,25 +585,37 @@ pub(super) async fn handle_bridge_method(
             request.submission_id = request.submission_id.trim().to_string();
             request.thread_id = request.thread_id.trim().to_string();
             request.message_id = request.message_id.trim().to_string();
-            if request.submission_id.is_empty() {
+            if request.submission_id.is_empty() || request.submission_id.len() > PUSH_ID_MAX_BYTES {
                 return Err(BridgeError::invalid_params(
-                    "submissionId must not be empty",
+                    "submissionId must be non-empty and at most 128 bytes",
                 ));
             }
-            if request.thread_id.is_empty() {
-                return Err(BridgeError::invalid_params("threadId must not be empty"));
+            if request.thread_id.is_empty() || request.thread_id.len() > RPC_IDENTIFIER_MAX_BYTES {
+                return Err(BridgeError::invalid_params(
+                    "threadId must be non-empty and at most 4096 bytes",
+                ));
             }
-            if request.message_id.is_empty() {
-                return Err(BridgeError::invalid_params("messageId must not be empty"));
+            if request.message_id.is_empty() || request.message_id.len() > RPC_IDENTIFIER_MAX_BYTES
+            {
+                return Err(BridgeError::invalid_params(
+                    "messageId must be non-empty and at most 4096 bytes",
+                ));
             }
             let _fork_guard = state.thread_fork_actor.lock().await;
-            if let Some(cached) = state
-                .thread_fork_results
-                .lock()
-                .await
-                .get(&request.submission_id)
-                .cloned()
-            {
+            let (cached, pending) = {
+                let dedupe = state.operation_dedupe.lock().await;
+                (
+                    dedupe
+                        .thread_fork_results
+                        .get(&request.submission_id)
+                        .cloned(),
+                    dedupe
+                        .thread_fork_pending
+                        .get(&request.submission_id)
+                        .cloned(),
+                )
+            };
+            if let Some(cached) = cached {
                 if cached.source_thread_id != request.thread_id
                     || cached.message_id != request.message_id
                 {
@@ -559,8 +623,21 @@ pub(super) async fn handle_bridge_method(
                         "submissionId is already bound to another fork request",
                     ));
                 }
+                state.persist_operation_dedupe().await?;
                 return serde_json::to_value(cached.response)
                     .map_err(|error| BridgeError::server(&error.to_string()));
+            }
+            if let Some(pending) = pending {
+                if pending.source_thread_id != request.thread_id
+                    || pending.message_id != request.message_id
+                {
+                    return Err(BridgeError::invalid_params(
+                        "submissionId is already bound to another fork request",
+                    ));
+                }
+                return Err(BridgeError::server(
+                    "thread fork outcome is indeterminate after a worker interruption; refresh the thread list before choosing a new submissionId",
+                ));
             }
             let queue = state.queue.read_queue(&request.thread_id).await;
             if !queue.items.is_empty() || queue.pending_steer_count > 0 || queue.steering_in_flight
@@ -569,7 +646,41 @@ pub(super) async fn handle_bridge_method(
                     "conversation cannot be forked while queued work is pending",
                 ));
             }
-            let forked = state
+            let submission_id = request.submission_id.clone();
+            let pending_inserted = match state
+                .update_operation_dedupe(|dedupe| {
+                    if dedupe.thread_fork_pending.len() >= SUBMISSION_DEDUPE_LIMIT {
+                        return false;
+                    }
+                    dedupe.thread_fork_pending.insert(
+                        submission_id.clone(),
+                        PendingForkOperation {
+                            source_thread_id: request.thread_id.clone(),
+                            message_id: request.message_id.clone(),
+                        },
+                    );
+                    true
+                })
+                .await
+            {
+                Ok(inserted) => inserted,
+                Err(error) => {
+                    let _ = state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.thread_fork_pending.remove(&submission_id);
+                        })
+                        .await;
+                    return Err(error);
+                }
+            };
+            if !pending_inserted {
+                return Err(BridgeError::resource_limit(
+                    "pending_thread_forks",
+                    SUBMISSION_DEDUPE_LIMIT,
+                    SUBMISSION_DEDUPE_LIMIT + 1,
+                ));
+            }
+            let forked = match state
                 .backend
                 .request_for_client(
                     client_id,
@@ -580,7 +691,10 @@ pub(super) async fn handle_bridge_method(
                     })),
                 )
                 .await
-                .map_err(|error| BridgeError::server(&error))?;
+            {
+                Ok(forked) => forked,
+                Err(error) => return Err(BridgeError::server(&error)),
+            };
             let response = BridgeThreadForkResponse {
                 submission_id: request.submission_id.clone(),
                 thread: forked
@@ -588,22 +702,27 @@ pub(super) async fn handle_bridge_method(
                     .cloned()
                     .ok_or_else(|| BridgeError::server("thread/fork did not return thread"))?,
             };
-            let mut results = state.thread_fork_results.lock().await;
-            let mut order = state.thread_fork_order.lock().await;
-            results.insert(
-                request.submission_id.clone(),
-                BridgeThreadForkCacheEntry {
-                    source_thread_id: request.thread_id,
-                    message_id: request.message_id,
-                    response: response.clone(),
-                },
-            );
-            order.push_back(request.submission_id);
-            while order.len() > SUBMISSION_DEDUPE_LIMIT {
-                if let Some(oldest) = order.pop_front() {
-                    results.remove(&oldest);
-                }
-            }
+            state
+                .update_operation_dedupe(|dedupe| {
+                    dedupe.thread_fork_results.insert(
+                        response.submission_id.clone(),
+                        BridgeThreadForkCacheEntry {
+                            source_thread_id: request.thread_id,
+                            message_id: request.message_id,
+                            response: response.clone(),
+                        },
+                    );
+                    dedupe
+                        .thread_fork_order
+                        .push_back(response.submission_id.clone());
+                    while dedupe.thread_fork_order.len() > SUBMISSION_DEDUPE_LIMIT {
+                        if let Some(oldest) = dedupe.thread_fork_order.pop_front() {
+                            dedupe.thread_fork_results.remove(&oldest);
+                        }
+                    }
+                    dedupe.thread_fork_pending.remove(&response.submission_id);
+                })
+                .await?;
             serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
         }
         "bridge/thread/queue/read" => {
@@ -969,13 +1088,20 @@ pub(super) async fn handle_bridge_method(
             }
 
             let _resolution_guard = state.approval_resolution_actor.lock().await;
-            if let Some(result) = state
-                .approval_resolution_results
-                .lock()
-                .await
-                .get(&request.resolution_id)
-                .cloned()
-            {
+            let (cached, pending) = {
+                let dedupe = state.operation_dedupe.lock().await;
+                (
+                    dedupe
+                        .approval_resolution_results
+                        .get(&request.resolution_id)
+                        .cloned(),
+                    dedupe
+                        .approval_resolution_pending
+                        .get(&request.resolution_id)
+                        .cloned(),
+                )
+            };
+            if let Some(result) = cached {
                 if read_string(
                     result
                         .get("approval")
@@ -990,15 +1116,71 @@ pub(super) async fn handle_bridge_method(
                         "resolutionId is already bound to another approval decision",
                     ));
                 }
+                state.persist_operation_dedupe().await?;
                 return Ok(result);
             }
-            let resolved = state
+            if let Some(pending) = pending {
+                if pending.request_id != request.id || pending.decision != request.decision {
+                    return Err(BridgeError::invalid_params(
+                        "resolutionId is already bound to another approval decision",
+                    ));
+                }
+                return Err(BridgeError::server(
+                    "approval resolution outcome is indeterminate after a worker interruption; refresh pending approvals before choosing a new resolutionId",
+                ));
+            }
+            let resolution_id = request.resolution_id.clone();
+            let pending_inserted = match state
+                .update_operation_dedupe(|dedupe| {
+                    if dedupe.approval_resolution_pending.len() >= APPROVAL_RESOLUTION_DEDUPE_LIMIT
+                    {
+                        return false;
+                    }
+                    dedupe.approval_resolution_pending.insert(
+                        resolution_id.clone(),
+                        PendingApprovalOperation {
+                            request_id: request.id.clone(),
+                            decision: request.decision.clone(),
+                        },
+                    );
+                    true
+                })
+                .await
+            {
+                Ok(inserted) => inserted,
+                Err(error) => {
+                    let _ = state
+                        .update_operation_dedupe(|dedupe| {
+                            dedupe.approval_resolution_pending.remove(&resolution_id);
+                        })
+                        .await;
+                    return Err(error);
+                }
+            };
+            if !pending_inserted {
+                return Err(BridgeError::resource_limit(
+                    "pending_approval_resolutions",
+                    APPROVAL_RESOLUTION_DEDUPE_LIMIT,
+                    APPROVAL_RESOLUTION_DEDUPE_LIMIT + 1,
+                ));
+            }
+            let resolved = match state
                 .backend
                 .resolve_approval(&request.id, &request.decision)
                 .await
-                .map_err(|error| BridgeError::server(&error))?;
+            {
+                Ok(resolved) => resolved,
+                Err(error) => return Err(BridgeError::server(&error)),
+            };
 
             let Some(approval) = resolved else {
+                state
+                    .update_operation_dedupe(|dedupe| {
+                        dedupe
+                            .approval_resolution_pending
+                            .remove(&request.resolution_id);
+                    })
+                    .await?;
                 return Err(BridgeError {
                     code: -32004,
                     message: "approval_not_found".to_string(),
@@ -1012,15 +1194,26 @@ pub(super) async fn handle_bridge_method(
                 "decision": request.decision,
                 "resolutionId": request.resolution_id,
             });
-            let mut results = state.approval_resolution_results.lock().await;
-            let mut order = state.approval_resolution_order.lock().await;
-            results.insert(request.resolution_id.clone(), result.clone());
-            order.push_back(request.resolution_id);
-            while order.len() > APPROVAL_RESOLUTION_DEDUPE_LIMIT {
-                if let Some(oldest) = order.pop_front() {
-                    results.remove(&oldest);
-                }
-            }
+            let completed_resolution_id = request.resolution_id.clone();
+            state
+                .update_operation_dedupe(|dedupe| {
+                    dedupe
+                        .approval_resolution_results
+                        .insert(completed_resolution_id.clone(), result.clone());
+                    dedupe
+                        .approval_resolution_order
+                        .push_back(completed_resolution_id.clone());
+                    while dedupe.approval_resolution_order.len() > APPROVAL_RESOLUTION_DEDUPE_LIMIT
+                    {
+                        if let Some(oldest) = dedupe.approval_resolution_order.pop_front() {
+                            dedupe.approval_resolution_results.remove(&oldest);
+                        }
+                    }
+                    dedupe
+                        .approval_resolution_pending
+                        .remove(&completed_resolution_id);
+                })
+                .await?;
             Ok(result)
         }
         "bridge/userInput/resolve" => {

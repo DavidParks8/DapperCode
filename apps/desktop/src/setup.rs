@@ -11,9 +11,11 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::{allocate_port_pair, format_host, validate_workspace},
+    config::{allocate_port_pair, allocate_preview_port, format_host, validate_workspace},
     secrets::SecretStore,
-    store::{atomic_private_write, profile_id_for, AppPaths, Profile, ProfileAgent},
+    store::{
+        atomic_private_write, profile_id_for, AppPaths, BrokerSettings, Profile, ProfileAgent,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -22,6 +24,7 @@ pub struct SetupRequest {
     pub network_mode: String,
     pub bridge_host: String,
     pub bridge_port: Option<u16>,
+    pub replace_broker_endpoint: bool,
     pub agent_id: String,
     pub display_name: String,
     pub executable: PathBuf,
@@ -142,23 +145,105 @@ pub fn setup_profile(
     let secret = secrets.get_or_create(paths, &profile_id)?;
 
     let profile = paths.update_config(|config| {
-        // Reuse the ports this workspace already owns unless the caller asked for a specific port.
-        let requested = request
-            .bridge_port
-            .or_else(|| config.find(&profile_id).map(|profile| profile.bridge_port));
-        let explicit = request.bridge_port.is_some();
-        let (bridge_port, preview_port) =
-            allocate_port_pair(config, &profile_id, &host, requested, explicit)?;
-
-        let authority = format_host(&host);
+        let broker = match config.broker.clone() {
+            Some(mut broker) => {
+                let endpoint_changed = request
+                    .bridge_port
+                    .is_some_and(|port| port != broker.bridge_port)
+                    || host != broker.host
+                    || request.network_mode != broker.network_mode;
+                if endpoint_changed && request.replace_broker_endpoint {
+                    if paths.broker_ownership_path().exists() {
+                        bail!("stop the desktop broker before replacing its endpoint");
+                    }
+                    let (bridge_port, preview_port) = allocate_port_pair(
+                        config,
+                        &profile_id,
+                        &host,
+                        request.bridge_port,
+                        request.bridge_port.is_some(),
+                    )?;
+                    let authority = format_host(&host);
+                    let mut replacement = BrokerSettings::new(
+                        request.network_mode.clone(),
+                        host.clone(),
+                        bridge_port,
+                        preview_port,
+                        format!("http://{authority}:{bridge_port}"),
+                        format!("http://{authority}:{preview_port}"),
+                    )?;
+                    replacement.auto_start = broker.auto_start;
+                    replacement.max_workers = broker.max_workers;
+                    replacement.max_idle_workers = broker.max_idle_workers;
+                    replacement.worker_idle_grace_ms = broker.worker_idle_grace_ms;
+                    replacement.worker_start_timeout_ms = broker.worker_start_timeout_ms;
+                    replacement
+                        .legacy_bridge_endpoints
+                        .append(&mut broker.legacy_bridge_endpoints);
+                    replacement.legacy_bridge_endpoints.push(
+                        crate::store::BrokerEndpoint {
+                            host: broker.host,
+                            port: broker.bridge_port,
+                        },
+                    );
+                    replacement.legacy_bridge_endpoints.sort_by(|left, right| {
+                        left.host
+                            .cmp(&right.host)
+                            .then_with(|| left.port.cmp(&right.port))
+                    });
+                    replacement.legacy_bridge_endpoints.dedup();
+                    for existing in &mut config.profiles {
+                        replacement.apply_endpoint(existing);
+                    }
+                    config.broker = Some(replacement.clone());
+                    replacement
+                } else {
+                    if endpoint_changed {
+                        bail!(
+                            "all workspaces use the desktop broker at {}; pass --replace-broker-endpoint while it is stopped to change it",
+                            broker.connect_url
+                        );
+                    }
+                    broker
+                }
+            }
+            None => {
+                let (bridge_port, preview_port) =
+                    allocate_port_pair(
+                        config,
+                        &profile_id,
+                        &host,
+                        request.bridge_port,
+                        request.bridge_port.is_some(),
+                    )?;
+                let authority = format_host(&host);
+                let broker = BrokerSettings::new(
+                    request.network_mode.clone(),
+                    host.clone(),
+                    bridge_port,
+                    preview_port,
+                    format!("http://{authority}:{bridge_port}"),
+                    format!("http://{authority}:{preview_port}"),
+                )?;
+                config.broker = Some(broker.clone());
+                broker
+            }
+        };
+        let preview_port = allocate_preview_port(
+            config,
+            &profile_id,
+            &broker.host,
+            broker.preview_port,
+        )?;
+        let authority = format_host(&broker.host);
         let profile = Profile {
             profile_id: profile_id.clone(),
             workspace: workspace.clone(),
-            network_mode: request.network_mode.clone(),
-            bridge_host: host.clone(),
-            bridge_port,
+            network_mode: broker.network_mode.clone(),
+            bridge_host: broker.host.clone(),
+            bridge_port: broker.bridge_port,
             preview_port,
-            connect_url: format!("http://{authority}:{bridge_port}"),
+            connect_url: broker.connect_url.clone(),
             preview_connect_url: format!("http://{authority}:{preview_port}"),
             auto_start: config
                 .find(&profile_id)
@@ -322,6 +407,7 @@ mod tests {
             network_mode: "local".to_string(),
             bridge_host: "192.168.1.20".to_string(),
             bridge_port: port,
+            replace_broker_endpoint: false,
             agent_id: "echo-agent".to_string(),
             display_name: "Echo Agent".to_string(),
             executable: PathBuf::from("/bin/echo"),
@@ -384,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn gives_parallel_worktrees_distinct_profiles_and_ports() {
+    fn gives_parallel_worktrees_distinct_profiles_on_one_broker_endpoint() {
         let alpha = tempdir().unwrap();
         let beta = tempdir().unwrap();
         let data = tempdir().unwrap();
@@ -395,9 +481,8 @@ mod tests {
         let second = setup_profile(request(beta.path(), None), &paths, &secrets).unwrap();
 
         assert_ne!(first.profile_id, second.profile_id);
-        assert_ne!(first.bridge_port, second.bridge_port);
-        assert_ne!(first.bridge_port, second.preview_port);
-        assert_ne!(first.preview_port, second.bridge_port);
+        assert_eq!(first.bridge_port, second.bridge_port);
+        assert_ne!(first.preview_port, second.preview_port);
         assert_ne!(
             secrets
                 .get(&paths, &first.profile_id)
@@ -540,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_port_another_workspace_already_owns() {
+    fn refuses_a_second_workspace_that_requests_a_different_broker_port() {
         let alpha = tempdir().unwrap();
         let beta = tempdir().unwrap();
         let data = tempdir().unwrap();
@@ -548,12 +633,38 @@ mod tests {
         let secrets = store();
 
         setup_profile(request(alpha.path(), Some(18847)), &paths, &secrets).unwrap();
-        let error = setup_profile(request(beta.path(), Some(18847)), &paths, &secrets).unwrap_err();
+        let error = setup_profile(request(beta.path(), Some(18849)), &paths, &secrets).unwrap_err();
 
         assert!(error
             .to_string()
-            .contains("already assigned to the workspace"));
+            .contains("all workspaces use the desktop broker on port 18847"));
         assert_eq!(paths.load_config().unwrap().profiles.len(), 1);
+    }
+
+    #[test]
+    fn replaces_a_stopped_broker_endpoint_and_preserves_the_old_alias() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        setup_profile(request(workspace.path(), Some(18847)), &paths, &secrets).unwrap();
+
+        let mut replacement = request(workspace.path(), Some(18857));
+        replacement.bridge_host = "127.0.0.1".to_string();
+        replacement.replace_broker_endpoint = true;
+        let result = setup_profile(replacement, &paths, &secrets).unwrap();
+        let config = paths.load_config().unwrap();
+        let broker = config.broker.unwrap();
+
+        assert_eq!(result.bridge_url, "http://127.0.0.1:18857");
+        assert_eq!(broker.bridge_port, 18857);
+        assert!(broker
+            .legacy_bridge_endpoints
+            .iter()
+            .any(|endpoint| endpoint.host == "192.168.1.20" && endpoint.port == 18847));
+        assert!(config.profiles[0]
+            .preview_connect_url
+            .starts_with("http://127.0.0.1:"));
     }
 
     #[test]

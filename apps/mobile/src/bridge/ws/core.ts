@@ -26,6 +26,7 @@ export abstract class HostBridgeWsClientCore {
   protected readonly recentTurnCompletions = new Map<string, TurnCompletionSnapshot>();
   protected readonly pendingEvents = new Map<number, RpcNotification>();
   protected readonly authToken: string | null;
+  protected readonly workspaceId: string | null;
   protected readonly allowQueryTokenAuth: boolean;
   protected readonly baseUrl: string;
   protected readonly requestTimeoutMs: number;
@@ -41,6 +42,7 @@ export abstract class HostBridgeWsClientCore {
   constructor(baseUrl: string, options: HostBridgeWsClientOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.authToken = options.authToken?.trim() || null;
+    this.workspaceId = options.workspaceId?.trim() || null;
     this.allowQueryTokenAuth = options.allowQueryTokenAuth ?? false;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 180000;
   }

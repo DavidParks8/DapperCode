@@ -46,6 +46,9 @@ private final class FakeBridgeStatusConnection: BridgeStatusConnection {
             uptimeSec: 12,
             connectedClients: 1,
             agents: [.init(lifecycle: "ready")],
+            configuredWorkspaces: 3,
+            runningWorkers: 1,
+            busyWorkers: 1,
             operational: .init(recentErrors: [])
         ))
     }
@@ -58,7 +61,7 @@ private final class FakeBridgeStatusConnection: BridgeStatusConnection {
 @main
 private struct AppTerminationTests {
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         let registry = OperatorProcessRegistry()
         let inFlight = sleepingProcess()
         try registry.run(inFlight)
@@ -151,6 +154,25 @@ private struct AppTerminationTests {
             "a stale workspace profile should not be autostarted"
         )
 
+        let noisy = Process()
+        noisy.executableURL = URL(fileURLWithPath: "/bin/sh")
+        noisy.arguments = [
+            "-c",
+            "head -c 200000 /dev/zero; head -c 200000 /dev/zero >&2",
+        ]
+        let noisyStdout = Pipe()
+        let noisyStderr = Pipe()
+        noisy.standardOutput = noisyStdout
+        noisy.standardError = noisyStderr
+        try noisy.run()
+        let captured = await OperatorProcessOutput.collect(
+            from: noisy,
+            stdout: noisyStdout,
+            stderr: noisyStderr
+        )
+        try require(captured.stdout.count == 200_000, "large stdout should drain without deadlock")
+        try require(captured.stderr.count == 200_000, "large stderr should drain without deadlock")
+
         var connections: [FakeBridgeStatusConnection] = []
         var observedHealth: [(String, BridgeObservedHealth)] = []
         var disconnectedProfiles: [String] = []
@@ -168,7 +190,7 @@ private struct AppTerminationTests {
         )
         let target = BridgeObservationTarget(
             profileId: "profile",
-            pairingPayload: #"{"type":"dappercode-bridge-pair","bridgeUrl":"http://127.0.0.1:8787","bridgeToken":"token"}"#
+            pairingPayload: #"{"type":"dappercode-broker-pair","bridgeUrl":"http://127.0.0.1:8787","bridgeToken":"token","workspaceId":"profile"}"#
         )
 
         observer.synchronize([target])

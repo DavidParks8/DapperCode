@@ -51,9 +51,13 @@ Rust operator hashes that executable and stores the resulting configuration cent
 bearer token is kept in the macOS keychain. It does not invoke npm, npx, Node.js, shell setup
 scripts, or floating package resolution.
 
-Each workspace gets its own profile, port pair, and token, so bridges for several worktrees run at
-the same time and remain reachable when the mobile app reconnects. Quitting DapperCode stops all of
-them, and each bridge also exits on its own if the app is force-quit or crashes.
+Every workspace keeps an isolated profile, token, manifest, state directory, and attachment root.
+One authenticated desktop broker owns the stable mobile RPC endpoint. A workspace bridge and ACP
+child start only after that workspace's credential has authenticated and a request needs the
+runtime. Active browser previews keep per-workspace origins rather than sharing broker cookies.
+Admitted runs survive mobile disconnects; idle workers are retired conservatively after a grace
+period, while queued work, active runs, approvals, user input, steers, previews, and reconnect replay
+keep their worker alive.
 
 ## Rust Operator
 
@@ -75,9 +79,9 @@ The installed app's operator is at:
 DapperCode.app/Contents/Resources/bin/dappercode
 ```
 
-The operator is the only bridge process-control authority. It serializes transitions with a
-workspace lock and verifies PID, process start time, executable, workspace, and config identity
-before signaling a process.
+The operator is the only broker process-control authority. It serializes transitions with a global
+broker lock and verifies PID, process start time, executable, data directory, and config identity
+before signaling the process. The broker owns and reaps isolated workspace workers.
 
 ## Mobile Development
 

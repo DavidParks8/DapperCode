@@ -10,8 +10,13 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const CONFIG_VERSION: u32 = 1;
+const CONFIG_VERSION: u32 = 2;
+const LEGACY_CONFIG_VERSION: u32 = 1;
 const CONFIG_FILE_NAME: &str = "config.json";
+const DEFAULT_MAX_WORKERS: usize = 12;
+const DEFAULT_MAX_IDLE_WORKERS: usize = 2;
+const DEFAULT_WORKER_IDLE_GRACE_MS: u64 = 60_000;
+const DEFAULT_WORKER_START_TIMEOUT_MS: u64 = 60_000;
 
 /// Filesystem layout for the central, app-owned data directory.
 ///
@@ -48,6 +53,10 @@ impl AppPaths {
         self.base.join(CONFIG_FILE_NAME)
     }
 
+    pub fn base_dir(&self) -> &Path {
+        &self.base
+    }
+
     pub fn config_lock_path(&self) -> PathBuf {
         self.base.join("runtime").join("config.lock")
     }
@@ -80,6 +89,22 @@ impl AppPaths {
         self.runtime_dir(profile_id).join("transition.lock")
     }
 
+    pub fn broker_runtime_dir(&self) -> PathBuf {
+        self.base.join("runtime").join("broker")
+    }
+
+    pub fn broker_ownership_path(&self) -> PathBuf {
+        self.broker_runtime_dir().join("process.json")
+    }
+
+    pub fn broker_transition_lock_path(&self) -> PathBuf {
+        self.broker_runtime_dir().join("transition.lock")
+    }
+
+    pub fn broker_log_path(&self) -> PathBuf {
+        self.base.join("broker.log")
+    }
+
     pub fn state_dir(&self, profile_id: &str) -> PathBuf {
         self.profile_dir(profile_id).join("state")
     }
@@ -105,6 +130,37 @@ impl AppPaths {
         read_config(&self.config_path())
     }
 
+    /// Upgrades the previous per-workspace-listener layout before strict config reads run.
+    ///
+    /// Version 1 assigned every profile its own public ports. Version 2 deterministically chooses
+    /// the lexicographically first profile as the canonical broker endpoint, preserves every
+    /// workspace identity/token/state directory, and points all pairing payloads at that endpoint.
+    pub fn migrate_config(&self) -> Result<bool> {
+        let _lease = self.acquire_config_lease()?;
+        let path = self.config_path();
+        let contents = match fs::read(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()))
+            }
+        };
+        let mut config: AppConfig = serde_json::from_slice(&contents)
+            .with_context(|| format!("invalid DapperCode configuration at {}", path.display()))?;
+        match config.version {
+            CONFIG_VERSION => Ok(false),
+            LEGACY_CONFIG_VERSION => {
+                config.upgrade_from_v1()?;
+                atomic_private_write(&path, &serde_json::to_vec_pretty(&config)?)?;
+                Ok(true)
+            }
+            version => bail!(
+                "unsupported DapperCode configuration version {version} at {}",
+                path.display()
+            ),
+        }
+    }
+
     /// Reads, mutates, and writes `config.json` while holding the global lock so that concurrent
     /// operator invocations from different worktrees serialize instead of clobbering each other.
     pub fn update_config<T>(&self, mutate: impl FnOnce(&mut AppConfig) -> Result<T>) -> Result<T> {
@@ -114,6 +170,7 @@ impl AppPaths {
         config
             .profiles
             .sort_by(|a, b| a.profile_id.cmp(&b.profile_id));
+        config.validate()?;
         atomic_private_write(&self.config_path(), &serde_json::to_vec_pretty(&config)?)?;
         Ok(outcome)
     }
@@ -159,6 +216,8 @@ fn home_dir() -> Result<PathBuf> {
 pub struct AppConfig {
     pub version: u32,
     #[serde(default)]
+    pub broker: Option<BrokerSettings>,
+    #[serde(default)]
     pub profiles: Vec<Profile>,
 }
 
@@ -166,8 +225,41 @@ impl AppConfig {
     fn empty() -> Self {
         Self {
             version: CONFIG_VERSION,
+            broker: None,
             profiles: Vec::new(),
         }
+    }
+
+    fn upgrade_from_v1(&mut self) -> Result<()> {
+        self.profiles
+            .sort_by(|left, right| left.profile_id.cmp(&right.profile_id));
+        self.broker = self
+            .profiles
+            .first()
+            .map(|profile| BrokerSettings::from_legacy_profile(profile, &self.profiles));
+        if let Some(broker) = &self.broker {
+            for profile in &mut self.profiles {
+                broker.apply_endpoint(profile);
+            }
+        }
+        self.version = CONFIG_VERSION;
+        self.validate()?;
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.version != CONFIG_VERSION {
+            bail!(
+                "unsupported DapperCode configuration version {}",
+                self.version
+            );
+        }
+        if let Some(broker) = &self.broker {
+            broker.validate()?;
+        } else if !self.profiles.is_empty() {
+            bail!("configured workspaces require broker settings");
+        }
+        Ok(())
     }
 
     pub fn find(&self, profile_id: &str) -> Option<&Profile> {
@@ -176,13 +268,13 @@ impl AppConfig {
             .find(|profile| profile.profile_id == profile_id)
     }
 
-    pub fn find_mut(&mut self, profile_id: &str) -> Option<&mut Profile> {
-        self.profiles
-            .iter_mut()
-            .find(|profile| profile.profile_id == profile_id)
-    }
-
     pub fn upsert(&mut self, profile: Profile) {
+        if self.broker.is_none() {
+            self.broker = Some(BrokerSettings::from_legacy_profile(
+                &profile,
+                std::slice::from_ref(&profile),
+            ));
+        }
         match self
             .profiles
             .iter_mut()
@@ -198,7 +290,11 @@ impl AppConfig {
         let before = self.profiles.len();
         self.profiles
             .retain(|profile| profile.profile_id != profile_id);
-        self.profiles.len() != before
+        let removed = self.profiles.len() != before;
+        if self.profiles.is_empty() {
+            self.broker = None;
+        }
+        removed
     }
 
     /// Ports already claimed by a profile other than `profile_id`.
@@ -214,6 +310,141 @@ impl AppConfig {
             })
             .collect()
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerSettings {
+    pub network_mode: String,
+    pub host: String,
+    pub bridge_port: u16,
+    pub preview_port: u16,
+    pub connect_url: String,
+    pub preview_connect_url: String,
+    #[serde(default)]
+    pub legacy_bridge_endpoints: Vec<BrokerEndpoint>,
+    #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default = "default_max_workers")]
+    pub max_workers: usize,
+    #[serde(default = "default_max_idle_workers")]
+    pub max_idle_workers: usize,
+    #[serde(default = "default_worker_idle_grace_ms")]
+    pub worker_idle_grace_ms: u64,
+    #[serde(default = "default_worker_start_timeout_ms")]
+    pub worker_start_timeout_ms: u64,
+}
+
+impl BrokerSettings {
+    pub fn new(
+        network_mode: String,
+        host: String,
+        bridge_port: u16,
+        preview_port: u16,
+        connect_url: String,
+        preview_connect_url: String,
+    ) -> Result<Self> {
+        let settings = Self {
+            network_mode,
+            host,
+            bridge_port,
+            preview_port,
+            connect_url,
+            preview_connect_url,
+            legacy_bridge_endpoints: Vec::new(),
+            auto_start: false,
+            max_workers: DEFAULT_MAX_WORKERS,
+            max_idle_workers: DEFAULT_MAX_IDLE_WORKERS,
+            worker_idle_grace_ms: DEFAULT_WORKER_IDLE_GRACE_MS,
+            worker_start_timeout_ms: DEFAULT_WORKER_START_TIMEOUT_MS,
+        };
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    fn from_legacy_profile(profile: &Profile, profiles: &[Profile]) -> Self {
+        let mut legacy_bridge_endpoints = profiles
+            .iter()
+            .filter(|candidate| {
+                candidate.bridge_host != profile.bridge_host
+                    || candidate.bridge_port != profile.bridge_port
+            })
+            .map(|candidate| BrokerEndpoint {
+                host: candidate.bridge_host.clone(),
+                port: candidate.bridge_port,
+            })
+            .collect::<Vec<_>>();
+        legacy_bridge_endpoints.sort_by(|left, right| {
+            left.host
+                .cmp(&right.host)
+                .then_with(|| left.port.cmp(&right.port))
+        });
+        legacy_bridge_endpoints.dedup();
+        Self {
+            network_mode: profile.network_mode.clone(),
+            host: profile.bridge_host.clone(),
+            bridge_port: profile.bridge_port,
+            preview_port: profile.preview_port,
+            connect_url: profile.connect_url.clone(),
+            preview_connect_url: profile.preview_connect_url.clone(),
+            legacy_bridge_endpoints,
+            auto_start: profiles.iter().any(|profile| profile.auto_start),
+            max_workers: DEFAULT_MAX_WORKERS,
+            max_idle_workers: DEFAULT_MAX_IDLE_WORKERS,
+            worker_idle_grace_ms: DEFAULT_WORKER_IDLE_GRACE_MS,
+            worker_start_timeout_ms: DEFAULT_WORKER_START_TIMEOUT_MS,
+        }
+    }
+
+    pub fn apply_endpoint(&self, profile: &mut Profile) {
+        profile.network_mode.clone_from(&self.network_mode);
+        profile.bridge_host.clone_from(&self.host);
+        profile.bridge_port = self.bridge_port;
+        profile.connect_url.clone_from(&self.connect_url);
+        let preview_host = if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        profile.preview_connect_url = format!("http://{preview_host}:{}", profile.preview_port);
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.bridge_port == 0 || self.preview_port == 0 || self.bridge_port == self.preview_port
+        {
+            bail!("broker ports must be non-zero and distinct");
+        }
+        if self.host.trim().is_empty()
+            || self.connect_url.trim().is_empty()
+            || self.preview_connect_url.trim().is_empty()
+        {
+            bail!("broker host and connect URLs must not be empty");
+        }
+        if self
+            .legacy_bridge_endpoints
+            .iter()
+            .any(|endpoint| endpoint.host.trim().is_empty() || endpoint.port == 0)
+        {
+            bail!("legacy broker endpoints must have a host and non-zero port");
+        }
+        if self.max_workers == 0 {
+            bail!("broker maxWorkers must be positive");
+        }
+        if self.max_idle_workers > self.max_workers {
+            bail!("broker maxIdleWorkers must not exceed maxWorkers");
+        }
+        if self.worker_idle_grace_ms == 0 || self.worker_start_timeout_ms == 0 {
+            bail!("broker worker timing values must be positive");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokerEndpoint {
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -254,6 +485,22 @@ fn default_true() -> bool {
 
 fn default_initialize_timeout_ms() -> u64 {
     15_000
+}
+
+fn default_max_workers() -> usize {
+    DEFAULT_MAX_WORKERS
+}
+
+fn default_max_idle_workers() -> usize {
+    DEFAULT_MAX_IDLE_WORKERS
+}
+
+fn default_worker_idle_grace_ms() -> u64 {
+    DEFAULT_WORKER_IDLE_GRACE_MS
+}
+
+fn default_worker_start_timeout_ms() -> u64 {
+    DEFAULT_WORKER_START_TIMEOUT_MS
 }
 
 /// Stable, human-recognizable identity for a workspace.
@@ -310,6 +557,7 @@ fn read_config(path: &Path) -> Result<AppConfig> {
             path.display()
         );
     }
+    config.validate()?;
     Ok(config)
 }
 
@@ -544,6 +792,66 @@ mod tests {
     }
 
     #[test]
+    fn migrates_v1_profiles_to_one_deterministic_broker_endpoint() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let mut alpha = sample_profile("alpha-000000000001", 8787);
+        alpha.auto_start = false;
+        let mut beta = sample_profile("beta-000000000002", 9797);
+        beta.auto_start = true;
+        beta.bridge_host = "192.168.1.20".to_string();
+        beta.connect_url = "http://192.168.1.20:9797".to_string();
+        beta.preview_connect_url = "http://192.168.1.20:9798".to_string();
+        fs::write(
+            paths.config_path(),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "version": 1,
+                "profiles": [beta, alpha],
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(paths.migrate_config().unwrap());
+        assert!(!paths.migrate_config().unwrap());
+        let migrated = paths.load_config().unwrap();
+        let broker = migrated.broker.unwrap();
+        assert_eq!(broker.bridge_port, 8787);
+        assert_eq!(broker.preview_port, 8788);
+        assert!(broker.auto_start);
+        assert_eq!(
+            broker.legacy_bridge_endpoints,
+            vec![BrokerEndpoint {
+                host: "192.168.1.20".to_string(),
+                port: 9797,
+            }]
+        );
+        assert_eq!(
+            migrated
+                .profiles
+                .iter()
+                .map(|profile| profile.profile_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha-000000000001", "beta-000000000002"]
+        );
+        assert!(migrated.profiles.iter().all(|profile| {
+            profile.bridge_port == 8787 && profile.connect_url == "http://127.0.0.1:8787"
+        }));
+        assert_eq!(
+            migrated
+                .profiles
+                .iter()
+                .map(|profile| profile.preview_port)
+                .collect::<Vec<_>>(),
+            vec![8788, 9798]
+        );
+        assert!(migrated
+            .profiles
+            .iter()
+            .all(|profile| profile.preview_connect_url.starts_with("http://127.0.0.1:")));
+    }
+
+    #[test]
     fn prepares_every_profile_directory_privately() {
         let temp = tempdir().unwrap();
         let paths = AppPaths {
@@ -692,7 +1000,9 @@ mod tests {
         assert!(!paths
             .update_config(|config| Ok(config.remove("alpha-000000000001")))
             .unwrap());
-        assert!(paths.load_config().unwrap().profiles.is_empty());
+        let empty = paths.load_config().unwrap();
+        assert!(empty.profiles.is_empty());
+        assert!(empty.broker.is_none());
         assert!(paths
             .load_config()
             .unwrap()

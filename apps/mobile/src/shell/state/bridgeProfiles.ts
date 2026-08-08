@@ -5,6 +5,7 @@ export interface BridgeProfile {
   name: string;
   bridgeUrl: string;
   bridgeToken: string;
+  workspaceId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -19,6 +20,7 @@ export interface BridgeProfileDraft {
   name?: string | null;
   bridgeUrl: string;
   bridgeToken: string;
+  workspaceId?: string | null;
   activate?: boolean;
 }
 
@@ -85,6 +87,9 @@ export function upsertBridgeProfile(
     name: resolvedName,
     bridgeUrl: normalizedUrl,
     bridgeToken: normalizedToken,
+    workspaceId: Object.prototype.hasOwnProperty.call(draft, 'workspaceId')
+      ? normalizeWorkspaceId(draft.workspaceId)
+      : (existing?.workspaceId ?? null),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -183,6 +188,7 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
     name?: unknown;
     bridgeUrl?: unknown;
     bridgeToken?: unknown;
+    workspaceId?: unknown;
     createdAt?: unknown;
     updatedAt?: unknown;
   };
@@ -199,6 +205,7 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
     name: deriveBridgeProfileName(normalizeNonEmptyString(record.name), bridgeUrl),
     bridgeUrl,
     bridgeToken,
+    workspaceId: normalizeWorkspaceId(record.workspaceId),
     createdAt: normalizeTimestamp(record.createdAt),
     updatedAt: normalizeTimestamp(record.updatedAt),
   };
@@ -207,6 +214,14 @@ function normalizeBridgeProfile(value: unknown): BridgeProfile | null {
 export function normalizeBridgeToken(value: unknown): string | null {
   const normalized = normalizeNonEmptyString(value);
   return normalized && normalized.length > 0 ? normalized : null;
+}
+
+export function normalizeWorkspaceId(value: unknown): string | null {
+  const normalized = normalizeNonEmptyString(value);
+  if (!normalized || normalized.length > 128 || !/^[A-Za-z0-9._-]+$/.test(normalized)) {
+    return null;
+  }
+  return normalized;
 }
 
 function normalizeNonEmptyString(value: unknown): string | null {

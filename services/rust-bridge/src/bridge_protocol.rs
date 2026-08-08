@@ -750,7 +750,8 @@ pub(super) struct BridgeThreadForkResponse {
     pub(super) thread: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadForkCacheEntry {
     pub(super) source_thread_id: String,
     pub(super) message_id: String,
@@ -812,6 +813,7 @@ pub(super) struct BridgeQueuedMessage {
 #[derive(Debug, Clone)]
 pub(super) struct BridgeQueuedMessageEntry {
     pub(super) id: String,
+    pub(super) submission_id: String,
     pub(super) created_at: String,
     pub(super) content: String,
     pub(super) turn_start: Value,
@@ -852,6 +854,14 @@ pub(super) struct BridgeThreadQueueSendResponse {
     pub(super) submission_id: String,
     pub(super) disposition: BridgeThreadQueueDisposition,
     pub(super) queue: BridgeThreadQueueState,
+    pub(super) turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct BridgeQueueSubmissionReceipt {
+    pub(super) submission_id: String,
+    pub(super) thread_id: String,
+    pub(super) disposition: BridgeThreadQueueDisposition,
     pub(super) turn_id: Option<String>,
 }
 
@@ -905,8 +915,12 @@ pub(super) struct BridgeQueueService {
     pub(super) thread_actors: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
     pub(super) completion_dispositions: Arc<Mutex<HashMap<u64, QueueCompletionDisposition>>>,
     pub(super) completion_disposition_notify: Arc<Notify>,
-    pub(super) submission_results: Arc<Mutex<HashMap<String, BridgeThreadQueueSendResponse>>>,
+    pub(super) submission_results: Arc<Mutex<HashMap<String, BridgeQueueSubmissionReceipt>>>,
     pub(super) submission_order: Arc<Mutex<VecDeque<String>>>,
+    pub(super) submission_pending: Arc<Mutex<HashMap<String, String>>>,
+    pub(super) submission_store_path: Option<std::path::PathBuf>,
+    pub(super) submission_persist: Arc<Mutex<()>>,
+    pub(super) submission_dirty: AtomicBool,
     pub(super) next_queue_item_id: AtomicU64,
 }
 

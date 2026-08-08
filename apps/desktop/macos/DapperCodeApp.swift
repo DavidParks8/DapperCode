@@ -52,28 +52,28 @@ private struct BridgeSnapshot: Decodable, Identifiable {
         switch health.status {
         case "ok":
             projectedState = "running"
-            projectedHeadline = "Bridge running"
+            projectedHeadline = "Broker running"
         case "degraded":
             projectedState = "degraded"
-            projectedHeadline = "Bridge degraded"
+            projectedHeadline = "Broker degraded"
         case "unhealthy":
             projectedState = "unhealthy"
-            projectedHeadline = "Bridge unhealthy"
+            projectedHeadline = "Broker unhealthy"
         default:
             projectedState = "error"
             projectedHeadline = "Unknown bridge status"
         }
-        let deviceSuffix = health.connectedClients == 1 ? "" : "s"
-        let agentSuffix = health.agents.count == 1 ? "" : "s"
+        let workspaceSuffix = health.configuredWorkspaces == 1 ? "" : "s"
+        let workerSuffix = health.runningWorkers == 1 ? "" : "s"
         return Self(
             state: projectedState,
             headline: projectedHeadline,
-            detail: "\(health.connectedClients) connected device\(deviceSuffix) · \(readyAgents)/\(health.agents.count) agent\(agentSuffix) ready",
+            detail: "\(health.configuredWorkspaces) workspace\(workspaceSuffix) configured · \(health.runningWorkers) worker\(workerSuffix) running · \(health.busyWorkers) busy · \(health.connectedClients) connected devices",
             bridgeUrl: bridgeUrl,
             uptimeSec: health.uptimeSec,
             connectedClients: health.connectedClients,
             readyAgents: readyAgents,
-            totalAgents: health.agents.count,
+            totalAgents: health.runningWorkers,
             recentErrorCount: health.operational.recentErrors.count,
             managedProcess: managedProcess,
             autoStart: autoStart,
@@ -172,10 +172,6 @@ private final class BridgeModel: ObservableObject {
 
     var isRunning: Bool { snapshot.isRunning }
 
-    var runningBridgeCount: Int {
-        bridges.filter(\.isRunning).count
-    }
-
     var secretBackendLabel: String {
         switch snapshot.secretBackend {
         case "keychain": return "Keychain"
@@ -184,7 +180,7 @@ private final class BridgeModel: ObservableObject {
         }
     }
 
-    var primaryTitle: String { isRunning || snapshot.managedProcess ? "Stop Bridge" : "Start Bridge" }
+    var primaryTitle: String { isRunning || snapshot.managedProcess ? "Stop Broker" : "Start Broker" }
 
     init() {
         statusObserver = BridgeStatusObserver(
@@ -288,8 +284,7 @@ private final class BridgeModel: ObservableObject {
                 "--agent-executable", agentExecutable,
                 "--agent-args", agentArguments,
             ]
-            // Without an explicit port the operator allocates a free pair, so several worktrees can
-            // run their bridges at the same time.
+            // Without an explicit port the operator allocates the shared broker endpoint.
             if !bridgePort.isEmpty {
                 arguments += ["--port", bridgePort]
             }
@@ -374,53 +369,49 @@ private final class BridgeModel: ObservableObject {
     }
 
     private func autostartRememberedBridges() async {
-        let rememberedBridges = bridges.filter {
+        let rememberedBridge = bridges.first {
             BridgeLaunchPolicy.shouldRestore(
                 autoStart: $0.autoStart,
                 isRunning: $0.isRunning,
                 state: $0.state
             )
         }
-        guard !rememberedBridges.isEmpty else { return }
+        guard let rememberedBridge else { return }
 
         isBusy = true
         defer { isBusy = false }
-        for bridge in rememberedBridges {
-            do {
-                _ = try await invoke(
-                    ["start", "--workspace", bridge.workspace],
-                    as: BridgeSnapshot.self,
-                    includeWorkspace: false
-                )
-            } catch {
-                errorMessage = "Could not start \(bridge.workspaceName): \(error.localizedDescription)"
-            }
+        do {
+            _ = try await invoke(
+                ["start", "--workspace", rememberedBridge.workspace],
+                as: BridgeSnapshot.self,
+                includeWorkspace: false
+            )
+        } catch {
+            errorMessage = "Could not start the broker: \(error.localizedDescription)"
         }
         await refresh()
     }
 
     private func synchronizeStatusObservers() {
-        let targets = bridges.compactMap { bridge -> BridgeObservationTarget? in
-            guard bridge.isRunning, let pairingPayload = bridge.pairingPayload else { return nil }
-            return BridgeObservationTarget(
-                profileId: bridge.profileId,
+        guard snapshot.isRunning, let pairingPayload = snapshot.pairingPayload else {
+            statusObserver?.synchronize([])
+            return
+        }
+        statusObserver?.synchronize([
+            BridgeObservationTarget(
+                profileId: snapshot.profileId,
                 pairingPayload: pairingPayload
-            )
-        }
-        statusObserver?.synchronize(targets)
+            ),
+        ])
     }
 
-    private func applyObservedHealth(_ health: BridgeObservedHealth, to profileId: String) {
-        bridges = bridges.map { bridge in
-            bridge.profileId == profileId ? bridge.applying(health) : bridge
-        }
-        if snapshot.profileId == profileId {
-            snapshot = snapshot.applying(health)
-        }
+    private func applyObservedHealth(_ health: BridgeObservedHealth, to _: String) {
+        bridges = bridges.map { $0.applying(health) }
+        snapshot = snapshot.applying(health)
     }
 
-    private func reconcileAfterDisconnect(_ profileId: String) async {
-        guard bridges.contains(where: { $0.profileId == profileId && $0.isRunning }) else {
+    private func reconcileAfterDisconnect(_ _: String) async {
+        guard snapshot.isRunning else {
             return
         }
         await refresh()
@@ -467,10 +458,13 @@ private final class BridgeModel: ObservableObject {
             process.standardError = stderr
             try OperatorProcessRegistry.shared.run(process)
             defer { OperatorProcessRegistry.shared.unregister(process) }
-            process.waitUntilExit()
-
-            let output = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
+            let captured = await OperatorProcessOutput.collect(
+                from: process,
+                stdout: stdout,
+                stderr: stderr
+            )
+            let output = captured.stdout
+            let errorOutput = captured.stderr
             let decoder = JSONDecoder()
             if process.terminationStatus != 0 {
                 if let failure = try? decoder.decode(OperatorFailure.self, from: errorOutput) {
@@ -562,9 +556,9 @@ private struct DashboardView: View {
                         BridgeRow(model: model, bridge: bridge)
                     }
                 } header: {
-                    Text("Bridges")
+                    Text("Workspaces")
                 } footer: {
-                    Text("Each workspace keeps its own port and token. Remembered bridges remain reachable so the mobile app can reconnect and send work at any time.")
+                    Text("Every workspace uses this broker endpoint with its own credential. Isolated runtimes start only when a phone requests work.")
                 }
             }
 
@@ -607,10 +601,6 @@ private struct BridgeRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(bridge.isRunning ? "Stop" : "Start") {
-                Task { await model.perform(bridge.isRunning ? "stop" : "start", on: bridge) }
-            }
-            .disabled(model.isBusy || bridge.state == "needsSetup")
             Button("Logs", systemImage: "doc.text") { model.openLogs(for: bridge) }
                 .labelStyle(.iconOnly)
         }
@@ -710,8 +700,8 @@ private struct TrayMenu: View {
         }
         Divider()
         Text(model.snapshot.headline)
-        if model.runningBridgeCount > 1 {
-            Text("\(model.runningBridgeCount) bridges running")
+        if model.bridges.count > 1 {
+            Text("\(model.bridges.count) workspaces configured")
         }
         Button(model.primaryTitle, systemImage: model.isRunning ? "stop.fill" : "play.fill") {
             Task { await model.performPrimaryAction() }

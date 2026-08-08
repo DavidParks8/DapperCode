@@ -176,5 +176,14 @@ mod tests {
                 case["agentCapabilities"]["sessionDelete"]
             );
         }
+        assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
+        assert_eq!(
+            manifest["fixtures"]["brokerPairing"]["type"],
+            "dappercode-broker-pair"
+        );
+        assert_eq!(
+            manifest["fixtures"]["brokerPairing"]["brokerProtocolVersion"],
+            1
+        );
     }
 }

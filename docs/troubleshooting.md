@@ -50,7 +50,7 @@ Inspect status and logs:
 
 ```bash
 npm run operator -- status --workspace /path/to/repository --human
-open /path/to/repository/.bridge.log
+open "$HOME/Library/Application Support/dev.dappercode.desktop/broker.log"
 ```
 
 Common causes:
@@ -65,7 +65,7 @@ Rerun setup after moving or upgrading an agent so its canonical path and SHA-256
 ## Stop or Restart After Config Damage
 
 The Rust operator verifies its private ownership record independently of current config. It can stop
-a live owned bridge even when the stored configuration needs repair:
+a live owned broker even when the stored configuration needs repair:
 
 ```bash
 npm run operator -- stop --workspace /path/to/repository
@@ -101,13 +101,14 @@ directory instead. The desktop app shows which backend is in use.
 
 ## A Port Is Already Taken
 
-Setup allocates the next free consecutive port pair, skipping ports owned by other workspaces and
-ports held by unrelated processes. If you passed an explicit `--port` that another workspace owns,
-the error names that workspace; either choose a different port or omit `--port` entirely.
+The first workspace allocates the public broker port; later workspaces share it and receive distinct
+preview ports. If the broker cannot bind after a migration, stop any legacy DapperCode process
+and retry. A compatibility alias that cannot bind is logged in `broker.log`; re-scan that
+workspace's current pairing QR to replace the old URL with the canonical broker URL.
 
 ## Removing a Workspace's Configuration
 
-Stop that workspace's bridge, then:
+Stop the broker, then:
 
 ```bash
 npm run operator -- forget --workspace /path/to/repository

@@ -164,6 +164,12 @@ impl BrowserPreviewService {
         self.secure_cookie
     }
 
+    pub(crate) async fn active_session_count(&self) -> usize {
+        let mut sessions = self.sessions.write().await;
+        prune_expired_preview_sessions(&mut sessions);
+        sessions.len()
+    }
+
     pub(crate) async fn resolve_bootstrap(
         &self,
         session_id: &str,

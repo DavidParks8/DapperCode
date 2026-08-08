@@ -35,6 +35,7 @@ pub(super) struct PushService {
     // so a turn/completed push can include a short preview of what the agent said.
     pub(super) recent_replies: RwLock<HashMap<String, String>>,
     pub(super) metrics: Arc<OperationalMetrics>,
+    pub(super) pending_receipt_checks: AtomicU64,
 }
 
 impl PushService {
@@ -55,6 +56,7 @@ impl PushService {
             access_token,
             recent_replies: RwLock::new(HashMap::new()),
             metrics,
+            pending_receipt_checks: AtomicU64::new(0),
         })
     }
 
@@ -386,11 +388,20 @@ impl PushService {
     /// After Expo's recommended delay, fetch delivery receipts for the given
     /// (receiptId, token) pairs and prune tokens reported DeviceNotRegistered.
     pub(super) fn spawn_receipt_check(self: &Arc<Self>, receipts: Vec<(String, String)>) {
+        if receipts.is_empty() {
+            return;
+        }
+        self.pending_receipt_checks.fetch_add(1, Ordering::AcqRel);
         let this = Arc::clone(self);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(RECEIPT_CHECK_DELAY_SECS)).await;
             this.check_receipts(receipts).await;
+            this.pending_receipt_checks.fetch_sub(1, Ordering::AcqRel);
         });
+    }
+
+    pub(super) fn pending_receipt_check_count(&self) -> usize {
+        usize::try_from(self.pending_receipt_checks.load(Ordering::Acquire)).unwrap_or(usize::MAX)
     }
 
     pub(super) async fn check_receipts(&self, receipts: Vec<(String, String)>) {
@@ -439,5 +450,30 @@ impl PushEvent {
             PushEvent::TurnCompleted => "turn_completed",
             PushEvent::ApprovalRequested => "approval_requested",
         }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn delayed_receipt_checks_keep_the_worker_non_retireable() {
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-receipt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+        assert_eq!(service.pending_receipt_check_count(), 0);
+        service.spawn_receipt_check(Vec::new());
+        assert_eq!(service.pending_receipt_check_count(), 0);
+        service.spawn_receipt_check(vec![("receipt".to_string(), "token".to_string())]);
+        assert_eq!(service.pending_receipt_check_count(), 1);
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -7,4 +7,5 @@ export const BRIDGE_SETUP_URL =
 // it previously said "Verify" even though the step dock only reaches stage 3 once verification
 // has already succeeded, which read as a mismatched, confusing label.
 export const SETUP_STAGES = [{ title: 'Start' }, { title: 'Pair' }, { title: 'Save' }] as const;
-export const CONNECTION_CHECK_TIMEOUT_MS = 7_000;
+// A broker connection may include the first workspace worker and ACP initialization.
+export const CONNECTION_CHECK_TIMEOUT_MS = 70_000;

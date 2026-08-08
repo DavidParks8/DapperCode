@@ -122,6 +122,19 @@ if (
   )
 )
   fail('operational error fixture');
+if (
+  fixtures.runtimeActivity.canRetire ||
+  fixtures.runtimeActivity.activeRuns < 1 ||
+  fixtures.runtimeActivity.queuedMessages < 1
+)
+  fail('runtime activity fixture');
+if (
+  fixtures.brokerPairing.type !== 'dappercode-broker-pair' ||
+  fixtures.brokerPairing.brokerProtocolVersion !== 1 ||
+  !fixtures.brokerPairing.workspaceId ||
+  !fixtures.brokerPairing.bridgeToken
+)
+  fail('broker pairing fixture');
 if (fixtures.notification.protocolVersion !== manifest.protocolVersion)
   fail('notification fixture version');
 if (!manifest.notifications.includes(fixtures.notification.method))

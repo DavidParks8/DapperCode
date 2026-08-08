@@ -302,6 +302,14 @@ impl Drop for ClientRequestGuard {
 }
 
 impl ClientRequestTracker {
+    fn active_request_count(&self) -> usize {
+        self.registry
+            .lock()
+            .expect("client request registry poisoned")
+            .requests
+            .len()
+    }
+
     fn register_client(&self, client_id: u64) {
         self.registry
             .lock()
@@ -671,6 +679,29 @@ impl RuntimeBackend {
             pump.abort();
             let _ = pump.await;
         }
+    }
+
+    pub(super) async fn runtime_activity(&self) -> (usize, usize, usize, usize) {
+        let mut active_runs = 0;
+        let mut other_live_work = self.client_requests.active_request_count();
+        for thread_id in self.manager.loaded_session_ids().await {
+            let Ok(session) = self.manager.read_session(&thread_id).await else {
+                other_live_work += 1;
+                continue;
+            };
+            if session.snapshot.active_run_id.is_some() {
+                active_runs += 1;
+            }
+            if !session.snapshot.active_tool_ids.is_empty() {
+                other_live_work += 1;
+            }
+        }
+        (
+            active_runs,
+            self.manager.pending_permissions().await.len(),
+            self.manager.pending_elicitations().await.len(),
+            other_live_work,
+        )
     }
 
     pub(super) fn register_client(&self, client_id: u64) {

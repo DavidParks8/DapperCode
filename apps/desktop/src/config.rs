@@ -236,9 +236,11 @@ impl BridgeRuntimeConfig {
         format!("http://{}:{}", format_host(host), self.port)
     }
 
-    pub fn pairing_payload(&self) -> Result<String> {
+    pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
-            "type": "dappercode-bridge-pair",
+            "type": "dappercode-broker-pair",
+            "brokerProtocolVersion": 1,
+            "workspaceId": workspace_id,
             "bridgeUrl": self.connect_url,
             "bridgeToken": self.auth_token,
         }))?)
@@ -246,6 +248,7 @@ impl BridgeRuntimeConfig {
 
     /// Stable fingerprint of the configuration a running bridge was started with, excluding the
     /// token so that the digest can be recorded in a plain ownership record.
+    #[allow(dead_code)]
     pub fn fingerprint_source(&self) -> String {
         self.values
             .iter()
@@ -330,6 +333,39 @@ pub fn allocate_port_pair(
         }
     }
     bail!("no free bridge port pair is available on {host} at or above {start}")
+}
+
+pub fn allocate_preview_port(
+    config: &AppConfig,
+    profile_id: &str,
+    host: &str,
+    start: u16,
+) -> Result<u16> {
+    if let Some(existing) = config.find(profile_id) {
+        return Ok(existing.preview_port);
+    }
+    let mut reserved = config
+        .profiles
+        .iter()
+        .flat_map(|profile| [profile.bridge_port, profile.preview_port])
+        .collect::<std::collections::HashSet<_>>();
+    if let Some(broker) = &config.broker {
+        reserved.extend(
+            broker
+                .legacy_bridge_endpoints
+                .iter()
+                .map(|endpoint| endpoint.port),
+        );
+    }
+    let mut candidate = start.max(1);
+    loop {
+        if !reserved.contains(&candidate) && port_is_bindable(host, candidate) {
+            return Ok(candidate);
+        }
+        candidate = candidate
+            .checked_add(1)
+            .context("no free browser preview port is available")?;
+    }
 }
 
 fn pair_is_bindable(host: &str, bridge_port: u16, preview_port: u16) -> bool {
@@ -450,8 +486,10 @@ mod tests {
 
         assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
-            serde_json::from_str(&config.pairing_payload().unwrap()).unwrap();
-        assert_eq!(payload["type"], "dappercode-bridge-pair");
+            serde_json::from_str(&config.pairing_payload("workspace-1").unwrap()).unwrap();
+        assert_eq!(payload["type"], "dappercode-broker-pair");
+        assert_eq!(payload["workspaceId"], "workspace-1");
+        assert_eq!(payload["brokerProtocolVersion"], 1);
         assert_eq!(payload["bridgeToken"], "secret");
     }
 
@@ -459,7 +497,8 @@ mod tests {
     fn allocates_a_free_pair_that_skips_ports_owned_by_other_profiles() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18801));
@@ -479,7 +518,8 @@ mod tests {
     #[test]
     fn reuses_the_requested_pair_when_nothing_else_claims_it() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) = allocate_port_pair(
@@ -497,7 +537,8 @@ mod tests {
     fn rejects_an_explicit_port_that_another_workspace_owns() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18811));
@@ -640,7 +681,8 @@ mod tests {
     #[test]
     fn refuses_to_allocate_when_the_port_range_is_exhausted() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let error = allocate_port_pair(
@@ -668,7 +710,8 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let taken = listener.local_addr().unwrap().port();
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
 
@@ -686,7 +729,8 @@ mod tests {
     #[test]
     fn defaults_to_the_standard_pair_when_no_port_is_requested() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) =
@@ -761,7 +805,8 @@ mod tests {
     fn rejects_an_explicit_port_whose_preview_slot_another_workspace_owns() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18861));
@@ -776,6 +821,36 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("18861"));
+    }
+
+    #[test]
+    fn preview_allocation_skips_migrated_broker_alias_ports() {
+        let alias_port = wildcard_free_port();
+        let mut broker = crate::store::BrokerSettings::new(
+            "local".to_string(),
+            "127.0.0.1".to_string(),
+            8787,
+            8788,
+            "http://127.0.0.1:8787".to_string(),
+            "http://127.0.0.1:8788".to_string(),
+        )
+        .unwrap();
+        broker
+            .legacy_bridge_endpoints
+            .push(crate::store::BrokerEndpoint {
+                host: "127.0.0.1".to_string(),
+                port: alias_port,
+            });
+        let config = AppConfig {
+            version: 2,
+            broker: Some(broker),
+            profiles: Vec::new(),
+        };
+
+        assert_ne!(
+            allocate_preview_port(&config, "new-profile", "127.0.0.1", alias_port).unwrap(),
+            alias_port
+        );
     }
 
     fn wildcard_free_port() -> u16 {
@@ -794,7 +869,8 @@ mod tests {
         assert!(port_is_bindable("192.0.2.1", taken) == wildcard_port_is_bindable(taken));
 
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) = allocate_port_pair(
@@ -815,7 +891,8 @@ mod tests {
         assert!(!port_is_bindable("127.0.0.1", taken));
 
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, _) = allocate_port_pair(

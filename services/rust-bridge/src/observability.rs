@@ -55,6 +55,7 @@ pub(crate) struct RequestTrace {
 
 pub(crate) struct OperationalMetrics {
     requests_total: AtomicU64,
+    requests_active: AtomicU64,
     requests_completed: AtomicU64,
     requests_failed: AtomicU64,
     requests_timed_out: AtomicU64,
@@ -70,6 +71,7 @@ impl OperationalMetrics {
     pub(crate) fn new() -> Self {
         Self {
             requests_total: AtomicU64::new(0),
+            requests_active: AtomicU64::new(0),
             requests_completed: AtomicU64::new(0),
             requests_failed: AtomicU64::new(0),
             requests_timed_out: AtomicU64::new(0),
@@ -84,6 +86,7 @@ impl OperationalMetrics {
 
     pub(crate) fn start_request(&self, method: &str, backend: &str) -> RequestTrace {
         self.requests_total.fetch_add(1, Ordering::Relaxed);
+        self.requests_active.fetch_add(1, Ordering::AcqRel);
         let trace = RequestTrace {
             request_id: Uuid::new_v4().to_string(),
             method: method.to_string(),
@@ -103,6 +106,7 @@ impl OperationalMetrics {
     }
 
     pub(crate) fn finish_request(&self, trace: &RequestTrace, outcome: &str) {
+        self.requests_active.fetch_sub(1, Ordering::AcqRel);
         if outcome == "ok" {
             self.requests_completed.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -161,7 +165,7 @@ impl OperationalMetrics {
             completed,
             failed,
             timed_out: self.requests_timed_out.load(Ordering::Relaxed),
-            pending: total.saturating_sub(completed).saturating_sub(failed),
+            pending: self.requests_active.load(Ordering::Acquire),
         }
     }
 
