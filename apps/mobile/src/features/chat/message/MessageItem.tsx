@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useState } from 'react';
 
 import { getMessageText } from '@bridge/messages';
 import { extractLocalPreviewUrls } from '../../browser/preview';
-import type { ChatMessagePart } from '@bridge/types/types';
+import type { ChatMessagePart, MessageTokenUsage } from '@bridge/types/types';
 import { useAppTheme } from '@shared/theme';
 import { messagePartToBlocks, parseMessageBlocks } from './contentHelpers';
 import { createMarkdownRules } from './markdownRules';
@@ -177,6 +177,31 @@ function isShallowRecordEqual(
   return previousKeys.every((key) => previous[key] === next[key]);
 }
 
+/**
+ * A settled turn reports its cost after the response text has stopped changing, so the comparator
+ * has to notice a usage-only update or the info affordance never appears.
+ */
+function isMessageUsageEqual(
+  previous: MessageTokenUsage | null | undefined,
+  next: MessageTokenUsage | null | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  return (
+    previous.inputTokens === next.inputTokens &&
+    previous.outputTokens === next.outputTokens &&
+    previous.reasoningTokens === next.reasoningTokens &&
+    previous.cachedReadTokens === next.cachedReadTokens &&
+    previous.cachedWriteTokens === next.cachedWriteTokens &&
+    previous.totalTokens === next.totalTokens &&
+    previous.model === next.model
+  );
+}
+
 function areChatMessageActionPropsEqual(
   previous: ChatMessageProps,
   next: ChatMessageProps,
@@ -208,6 +233,7 @@ export function areChatMessagePropsEqual(
     previous.createdAt === next.createdAt &&
     previous.completedAt === next.completedAt &&
     previous.pending === next.pending &&
+    isMessageUsageEqual(previous.usage, next.usage) &&
     // Ordered parts take priority over `content` when rendering, so a parts-only
     // change still has to repaint the bubble.
     arePartsEqual(previous.parts, next.parts) &&

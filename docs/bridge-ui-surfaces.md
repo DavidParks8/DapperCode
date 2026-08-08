@@ -210,6 +210,37 @@ This is distinct from `dappercode.dev/usage`, which carries context-window press
 (`used`, `size`, `cost`) from the ACP `usage_update` session update. The two are independent, and
 neither substitutes for the other.
 
+### Per-Response Usage
+
+The same `TurnTokenUsage` event also attaches the turn's usage to the snapshot message the turn ended
+on, as `messages[].usage`:
+
+```json
+{
+  "id": "message-1",
+  "role": "agent",
+  "usage": {
+    "inputTokens": 4100,
+    "outputTokens": 860,
+    "reasoningTokens": 240,
+    "cachedReadTokens": 31200,
+    "cachedWriteTokens": 1900,
+    "totalTokens": 38300,
+    "model": "Example Model"
+  }
+}
+```
+
+- **It anchors to the last agent message.** A turn that produced no agent response reports nothing,
+  and the field stays `null` on every other message including user and reasoning entries.
+- **`model` is the session's configured model label**, snapshotted when the usage lands, because ACP
+  reports the model as a session config option rather than per turn. It falls back to the raw option
+  value when no matching display name exists, and is `null` when the agent exposes no model option.
+- **No live event carries it.** Mobile reloads the snapshot when a run terminates, so the value
+  arrives with the settled turn. Live projection preserves any usage already persisted.
+- Mobile renders it as the collapsible response-details card under the message action row, and the
+  card is absent entirely when `usage` is `null`.
+
 ## Rules For Future Integrations
 
 - Add provider-specific parsing in the bridge adapter, not in mobile UI.

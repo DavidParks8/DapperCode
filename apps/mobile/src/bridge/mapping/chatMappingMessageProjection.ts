@@ -141,7 +141,7 @@ function mapSnapshotMessageEntry(
     createdAt: new Date(context.baseTs + index * 1000).toISOString(),
   };
   if (message.role === 'agent') {
-    return [{ ...common, role: 'assistant' as const }];
+    return [{ ...common, role: 'assistant' as const, usage: message.usage ?? null }];
   }
   if (message.role === 'user') {
     return [{ ...common, role: 'user' as const }];

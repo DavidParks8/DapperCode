@@ -62,6 +62,91 @@ describe('chatMapping', () => {
     expect(chat.acpUsage).toEqual({ used: null, size: null, cost: null });
   });
 
+  it('carries per-response usage from the snapshot onto the assistant message it belongs to', () => {
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-response-usage',
+        acpSnapshot: makeSnapshot({
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              parts: [{ type: 'text', text: 'question' }],
+              truncated: false,
+              usage: null,
+            },
+            {
+              id: 'agent-1',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'answer' }],
+              truncated: false,
+              usage: {
+                inputTokens: 12_400,
+                outputTokens: 1_280,
+                reasoningTokens: 300,
+                cachedReadTokens: 111_600,
+                cachedWriteTokens: null,
+                totalTokens: 125_580,
+                model: 'GPT-5.6 Sol',
+              },
+            },
+          ] as unknown as RawAcpSnapshot['messages'],
+          timeline: [
+            { sequence: 0, kind: 'message', canonicalId: 'user-1' },
+            { sequence: 1, kind: 'message', canonicalId: 'agent-1' },
+          ],
+        }),
+      }),
+    );
+
+    expect(chat.messages.map((message) => [message.id, message.usage ?? null])).toEqual([
+      ['user-1', null],
+      [
+        'agent-1',
+        {
+          inputTokens: 12_400,
+          outputTokens: 1_280,
+          reasoningTokens: 300,
+          cachedReadTokens: 111_600,
+          cachedWriteTokens: null,
+          totalTokens: 125_580,
+          model: 'GPT-5.6 Sol',
+        },
+      ],
+    ]);
+  });
+
+  it('reports no per-response usage when the bridge omitted or malformed it', () => {
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-response-usage-missing',
+        acpSnapshot: makeSnapshot({
+          messages: [
+            {
+              id: 'agent-1',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'answer' }],
+              truncated: false,
+            },
+            {
+              id: 'agent-2',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'second' }],
+              truncated: false,
+              usage: { outputTokens: 4 },
+            },
+          ] as unknown as RawAcpSnapshot['messages'],
+          timeline: [
+            { sequence: 0, kind: 'message', canonicalId: 'agent-1' },
+            { sequence: 1, kind: 'message', canonicalId: 'agent-2' },
+          ],
+        }),
+      }),
+    );
+
+    expect(chat.messages.map((message) => message.usage ?? null)).toEqual([null, null]);
+  });
+
   it('uses bridge session titles and ISO activity timestamps for drawer summaries', () => {
     const summary = mapChatSummary(
       toRawThread({

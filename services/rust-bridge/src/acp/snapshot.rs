@@ -67,6 +67,23 @@ pub struct SnapshotMessage {
     pub role: MessageRole,
     pub parts: Vec<serde_json::Value>,
     pub truncated: bool,
+    /// What the turn that produced this response cost, attached to the agent message the turn
+    /// ended on so a reloaded transcript can report per-response usage instead of only the
+    /// session-wide totals.
+    pub usage: Option<BridgeTurnUsageSnapshot>,
+}
+
+/// The token cost of a single prompt turn, plus the model that was configured while it ran.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTurnUsageSnapshot {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
+    pub total_tokens: u64,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -631,6 +648,15 @@ impl SessionSnapshot {
                     *cached_write_tokens,
                     *total_tokens,
                 );
+                self.attach_turn_usage(BridgeTurnUsageSnapshot {
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                    reasoning_tokens: *reasoning_tokens,
+                    cached_read_tokens: *cached_read_tokens,
+                    cached_write_tokens: *cached_write_tokens,
+                    total_tokens: *total_tokens,
+                    model: self.configured_model_label(),
+                });
             }
             CanonicalEvent::RunFinished { .. }
             | CanonicalEvent::RunFailed { .. }
@@ -689,9 +715,45 @@ impl SessionSnapshot {
             role,
             parts,
             truncated,
+            usage: None,
         });
         let message = self.messages.back().expect("message was inserted").clone();
         self.attach_history_message(message);
+    }
+
+    /// Records what a finished turn cost on the agent message the turn ended on. The transcript
+    /// renders the affordance under a response, so an assistant message is the only anchor that
+    /// survives a reload; a turn that produced no agent message simply reports nothing.
+    fn attach_turn_usage(&mut self, usage: BridgeTurnUsageSnapshot) {
+        let Some(message) = self
+            .messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.role == MessageRole::Agent)
+        else {
+            return;
+        };
+        message.usage = Some(usage);
+        let message = message.clone();
+        self.update_history_message(&message);
+    }
+
+    /// The display name of the model the session is configured with, preferring the option label
+    /// the agent advertises over the raw identifier it stores.
+    fn configured_model_label(&self) -> Option<String> {
+        let entry = self
+            .config
+            .iter()
+            .find(|entry| entry.category.as_deref() == Some("model"))
+            .or_else(|| self.config.iter().find(|entry| entry.id == "model"))?;
+        let label = entry
+            .options
+            .iter()
+            .find(|option| option.value == entry.value)
+            .map(|option| option.name.clone())
+            .unwrap_or_else(|| entry.value.clone());
+        let label = label.trim();
+        (!label.is_empty()).then(|| bound(label.to_string(), MAX_TEXT_BYTES))
     }
 
     fn apply_tool(&mut self, id: &str, generation: Option<u64>, projection: ToolProjection<'_>) {
@@ -2896,12 +2958,22 @@ mod tests {
                 serde_json::json!({"type":"audio","data":"YXVkaW8=","mimeType":"audio/wav"}),
             ],
             truncated: false,
+            usage: Some(BridgeTurnUsageSnapshot {
+                input_tokens: 4_100,
+                output_tokens: 860,
+                reasoning_tokens: Some(240),
+                cached_read_tokens: Some(31_200),
+                cached_write_tokens: Some(1_900),
+                total_tokens: 38_300,
+                model: Some("Example Model".to_string()),
+            }),
         });
         snapshot.messages.push_back(SnapshotMessage {
             id: "reasoning-1".to_string(),
             role: MessageRole::Thought,
             parts: vec![serde_json::json!({"type":"text","text":"Snapshot reasoning"})],
             truncated: false,
+            usage: None,
         });
         snapshot.timeline = VecDeque::from([
             SnapshotTimelineEntry {
@@ -3162,6 +3234,7 @@ mod tests {
                 role,
                 parts: vec![serde_json::json!({"type":"text","text":"x"})],
                 truncated: false,
+                usage: None,
             });
             snapshot.history_bytes = MAX_HISTORY_BYTES + 1;
             snapshot.enforce_history_bounds();
@@ -3192,6 +3265,7 @@ mod tests {
             role: MessageRole::Agent,
             parts: Vec::new(),
             truncated: false,
+            usage: None,
         });
         absent.attach_or_update_history_tool(SnapshotTool {
             id: "missing-tool".into(),
@@ -3636,6 +3710,226 @@ mod tests {
                 "cachedWriteTokens": 2,
                 "totalTokens": 63,
             })
+        );
+    }
+
+    #[test]
+    fn turn_usage_attaches_to_the_agent_message_the_turn_ended_on() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        let chunk = |role, message_id: &str, content: &str| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: message_id.to_string(),
+            content: content.to_string(),
+            content_block: None,
+        };
+        snapshot.apply(&CanonicalEvent::Config {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            entries: vec![ConfigEntry {
+                id: "model".to_string(),
+                value: "gpt-5.6-sol".to_string(),
+                name: "Model".to_string(),
+                description: None,
+                category: Some("model".to_string()),
+                options: vec![ConfigOptionValue {
+                    value: "gpt-5.6-sol".to_string(),
+                    name: "GPT-5.6 Sol".to_string(),
+                    description: None,
+                }],
+            }],
+        });
+        snapshot.apply(&chunk(MessageRole::User, "user-1", "hi"));
+        snapshot.apply(&chunk(MessageRole::Agent, "agent-1", "first"));
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 120,
+            output_tokens: 40,
+            reasoning_tokens: Some(12),
+            cached_read_tokens: Some(880),
+            cached_write_tokens: None,
+            total_tokens: 1_040,
+        });
+
+        let first = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "agent-1")
+            .unwrap();
+        assert_eq!(
+            first.usage,
+            Some(BridgeTurnUsageSnapshot {
+                input_tokens: 120,
+                output_tokens: 40,
+                reasoning_tokens: Some(12),
+                cached_read_tokens: Some(880),
+                cached_write_tokens: None,
+                total_tokens: 1_040,
+                model: Some("GPT-5.6 Sol".to_string()),
+            })
+        );
+        // A user message never anchors the affordance, and the second turn must not overwrite the
+        // first response's cost.
+        assert!(snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "user-1")
+            .unwrap()
+            .usage
+            .is_none());
+
+        snapshot.apply(&chunk(MessageRole::Agent, "agent-2", "second"));
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 7,
+            output_tokens: 3,
+            reasoning_tokens: None,
+            cached_read_tokens: None,
+            cached_write_tokens: None,
+            total_tokens: 10,
+        });
+
+        let messages = &snapshot.messages;
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "agent-1")
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .input_tokens,
+            120
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "agent-2")
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .input_tokens,
+            7
+        );
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["messages"][2]
+                ["usage"],
+            serde_json::json!({
+                "inputTokens": 7,
+                "outputTokens": 3,
+                "reasoningTokens": null,
+                "cachedReadTokens": null,
+                "cachedWriteTokens": null,
+                "totalTokens": 10,
+                "model": "GPT-5.6 Sol",
+            })
+        );
+    }
+
+    #[test]
+    fn turn_usage_falls_back_to_the_model_identifier_and_tolerates_a_response_less_turn() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Config {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            entries: vec![ConfigEntry {
+                id: "model".to_string(),
+                value: "opaque-model".to_string(),
+                name: "Model".to_string(),
+                description: None,
+                category: None,
+                options: Vec::new(),
+            }],
+        });
+        let usage = CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 5,
+            output_tokens: 2,
+            reasoning_tokens: None,
+            cached_read_tokens: None,
+            cached_write_tokens: None,
+            total_tokens: 7,
+        };
+
+        // No agent message has landed yet, so there is nothing to anchor the report to.
+        snapshot.apply(&usage);
+        assert!(snapshot.messages.is_empty());
+
+        snapshot.apply(&CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "agent-1".to_string(),
+            content: "answer".to_string(),
+            content_block: None,
+        });
+        snapshot.apply(&usage);
+
+        assert_eq!(
+            snapshot
+                .messages
+                .back()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .model,
+            Some("opaque-model".to_string())
+        );
+    }
+
+    #[test]
+    fn turn_usage_reaches_the_paged_history_copy_of_the_response() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "agent-1".to_string(),
+            content: "answer".to_string(),
+            content_block: None,
+        });
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 9,
+            output_tokens: 4,
+            reasoning_tokens: None,
+            cached_read_tokens: Some(1),
+            cached_write_tokens: None,
+            total_tokens: 14,
+        });
+
+        let page = snapshot.page(None, None, MAX_SNAPSHOT_PAGE_SIZE).unwrap();
+        let entry = page
+            .entries
+            .iter()
+            .find(|entry| entry.canonical_id == "agent-1")
+            .unwrap();
+        assert_eq!(
+            entry
+                .message
+                .as_ref()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .total_tokens,
+            14
         );
     }
 

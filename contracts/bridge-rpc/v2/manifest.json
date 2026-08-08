@@ -357,13 +357,23 @@
               },
               { "type": "audio", "data": "YXVkaW8=", "mimeType": "audio/wav" }
             ],
-            "truncated": false
+            "truncated": false,
+            "usage": {
+              "inputTokens": 4100,
+              "outputTokens": 860,
+              "reasoningTokens": 240,
+              "cachedReadTokens": 31200,
+              "cachedWriteTokens": 1900,
+              "totalTokens": 38300,
+              "model": "Example Model"
+            }
           },
           {
             "id": "reasoning-1",
             "role": "thought",
             "parts": [{ "type": "text", "text": "Snapshot reasoning" }],
-            "truncated": false
+            "truncated": false,
+            "usage": null
           }
         ],
         "tools": [

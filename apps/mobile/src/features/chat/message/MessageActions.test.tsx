@@ -53,10 +53,12 @@ function queryRoot(tree: ReactTestRenderer): QueryableInstance {
 }
 
 function findPressable(root: QueryableInstance, label: string): QueryableInstance {
-  const match = root.findAll(
+  const matches = root.findAll(
     (node) =>
       typeof node.props['onPress'] === 'function' && node.props['accessibilityLabel'] === label,
-  )[0];
+  );
+  // Wrappers forward both props, so the deepest match is the host pressable that owns the state.
+  const match = matches[matches.length - 1];
   if (!match) {
     throw new Error(`Missing pressable: ${label}`);
   }
@@ -69,6 +71,16 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
     throw new Error(`Missing callback: ${name}`);
   }
   return callback(...args);
+}
+
+function findByTestId(root: QueryableInstance, testID: string): QueryableInstance | undefined {
+  return root.findAll((node) => node.props['testID'] === testID)[0];
+}
+
+function collectText(node: QueryableInstance): string[] {
+  return node.children.flatMap((child) =>
+    typeof child === 'string' ? [child] : collectText(child),
+  );
 }
 
 describe('MessageActions', () => {
@@ -161,5 +173,78 @@ describe('MessageActions', () => {
     });
     invokeProp(findPressable(queryRoot(tree), 'Fork conversation from here'), 'onPress');
     expect(onForkConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the response details action when the turn reported no usage', () => {
+    const tree = render(<MessageActions text="hello" />);
+    expect(
+      queryRoot(tree).findAll((node) => node.props['accessibilityLabel'] === 'Response details'),
+    ).toHaveLength(0);
+  });
+
+  it('toggles the response details panel and reports model, tokens, and cache share', () => {
+    const tree = render(
+      <MessageActions
+        text="hello"
+        testID="chat-message-copy-m1"
+        usage={{
+          inputTokens: 12_400,
+          outputTokens: 1_280,
+          reasoningTokens: 300,
+          cachedReadTokens: 111_600,
+          cachedWriteTokens: 900,
+          totalTokens: 126_180,
+          model: 'GPT-5.6 Sol',
+        }}
+      />,
+    );
+    const infoButton = findPressable(queryRoot(tree), 'Response details');
+    expect(infoButton.props['accessibilityState']).toMatchObject({ expanded: false });
+    expect(findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card')).toBeUndefined();
+
+    act(() => {
+      invokeProp(infoButton, 'onPress');
+    });
+
+    const card = findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card');
+    expect(card).toBeDefined();
+    expect(collectText(card!)).toEqual([
+      'Model',
+      'GPT-5.6 Sol',
+      'Input',
+      '12,400',
+      'Output',
+      '1,280',
+      'Cached',
+      '90%',
+    ]);
+    expect(
+      findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
+    ).toMatchObject({ expanded: true });
+
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    expect(findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card')).toBeUndefined();
+  });
+
+  it('offers response details for a turn that produced no copyable text', () => {
+    const tree = render(
+      <MessageActions
+        text="   "
+        usage={{
+          inputTokens: 10,
+          outputTokens: 2,
+          reasoningTokens: null,
+          cachedReadTokens: null,
+          cachedWriteTokens: null,
+          totalTokens: 12,
+          model: null,
+        }}
+      />,
+    );
+    const root = queryRoot(tree);
+    expect(findPressable(root, 'Response details')).toBeDefined();
+    expect(() => findPressable(root, 'Copy message')).toThrow();
   });
 });

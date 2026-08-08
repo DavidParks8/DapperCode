@@ -201,6 +201,7 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
       />
       <MessageActions
         text={ctx.copyText}
+        usage={ctx.message.usage ?? null}
         onSelectText={ctx.openSelectText}
         onForkConversation={ctx.onForkConversation}
         forkBusy={ctx.forkBusy}

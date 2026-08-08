@@ -168,6 +168,9 @@ function projectAuthoritativeLiveMessages(
       return {
         ...message,
         createdAt: persisted?.createdAt || message.createdAt || now(),
+        // A live event never reports what the turn cost, so the persisted copy stays the only
+        // source of the per-response usage the transcript reports.
+        usage: message.usage ?? persisted?.usage ?? null,
         // Ordered parts win over `content` when rendering, so drop them when
         // they no longer describe the authoritative snapshot text.
         parts: partsMatchMessageContent(parts, message.content) ? parts : undefined,

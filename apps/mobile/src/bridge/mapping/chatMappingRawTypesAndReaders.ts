@@ -1,4 +1,4 @@
-import type { SessionTokenTotals } from '@bridge/types/chat';
+import type { MessageTokenUsage, SessionTokenTotals } from '@bridge/types/chat';
 import { readCoercedFiniteNumber, readString, toRecord } from '@shared/runtimeValidation';
 
 export type RawThreadStatus = { type?: string } | string | null | undefined;
@@ -67,6 +67,7 @@ export interface RawAcpSnapshot {
     role: string;
     parts: unknown[];
     truncated: boolean;
+    usage?: MessageTokenUsage | null;
   }>;
   timeline?: Array<{
     sequence: number;

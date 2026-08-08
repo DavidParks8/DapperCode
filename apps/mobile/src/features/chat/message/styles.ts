@@ -155,6 +155,33 @@ export const createStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
     },
     messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
+    responseUsageCard: {
+      alignSelf: 'flex-start',
+      marginTop: theme.spacing.xs,
+      paddingVertical: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.md,
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.borderLight,
+      backgroundColor: theme.colors.bgItem,
+      gap: theme.spacing.xs,
+    },
+    responseUsageRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: theme.spacing.md,
+    },
+    responseUsageLabel: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+      // Keeps the values in one column whatever the label reads.
+      width: 52,
+    },
+    responseUsageValue: {
+      ...theme.typography.metadata,
+      color: theme.colors.textPrimary,
+      flexShrink: 1,
+    },
     selectTextRoot: { flex: 1, backgroundColor: theme.colors.bgElevated },
     selectTextHeader: {
       flexDirection: 'row',

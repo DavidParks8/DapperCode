@@ -448,6 +448,77 @@ describe('ChatMessage markdown formatting', () => {
     expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(true);
   });
 
+  it('offers the response info affordance under an assistant message that reported usage', () => {
+    const tree = renderMessage({
+      id: 'msg_usage_render',
+      role: 'assistant',
+      content: 'All set.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      usage: {
+        inputTokens: 8_000,
+        outputTokens: 500,
+        reasoningTokens: null,
+        cachedReadTokens: 24_000,
+        cachedWriteTokens: null,
+        totalTokens: 32_500,
+        model: 'GPT-5.6 Sol',
+      },
+    });
+    const infoButton = tree.root.findAll(
+      (node) => node.props['accessibilityLabel'] === 'Response details',
+    )[0];
+    expect(infoButton).toBeDefined();
+
+    act(() => {
+      (infoButton!.props['onPress'] as () => void)();
+    });
+
+    expect(
+      tree.root.findAll(
+        (node) =>
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          node.props['accessibilityLabel'].startsWith('Response details. Model: GPT-5.6 Sol'),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('repaints a settled response once the turn reports what it cost', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_usage_arrives',
+      role: 'assistant',
+      content: 'Done',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const withUsage: ApiChatMessage = {
+      ...previous,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        reasoningTokens: null,
+        cachedReadTokens: null,
+        cachedWriteTokens: null,
+        totalTokens: 12,
+        model: 'GPT-5.6 Sol',
+      },
+    };
+
+    expect(areChatMessagePropsEqual({ message: previous }, { message: withUsage })).toBe(false);
+    expect(areChatMessagePropsEqual({ message: withUsage }, { message: { ...withUsage } })).toBe(
+      true,
+    );
+    expect(
+      areChatMessagePropsEqual(
+        { message: withUsage },
+        {
+          message: {
+            ...withUsage,
+            usage: { ...withUsage.usage!, model: 'Claude Opus 5' },
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
   it('detects a real change nested inside a resource part', () => {
     const previous: ApiChatMessage = {
       id: 'msg_resource_change',

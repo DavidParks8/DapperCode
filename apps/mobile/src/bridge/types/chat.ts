@@ -81,6 +81,22 @@ interface ChatMessageMetadata {
   completedAt?: string;
   pending?: boolean;
   toolMeta?: ChatToolMeta;
+  /** What the turn that produced this response cost, reported by the bridge once it settles. */
+  usage?: MessageTokenUsage | null;
+}
+
+/**
+ * The token cost of the single turn a response came from, as opposed to `SessionTokenTotals`,
+ * which sums every turn in the thread.
+ */
+export interface MessageTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number | null;
+  cachedReadTokens: number | null;
+  cachedWriteTokens: number | null;
+  totalTokens: number;
+  model: string | null;
 }
 
 export interface ChatActivityContent extends Record<string, unknown> {

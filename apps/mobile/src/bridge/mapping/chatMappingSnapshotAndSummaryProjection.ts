@@ -15,7 +15,7 @@ import {
   readTrimmedStringArray,
   toRecord,
 } from '@shared/runtimeValidation';
-import type { ChatSummary, SessionTokenTotals } from '@bridge/types/types';
+import type { ChatSummary, MessageTokenUsage, SessionTokenTotals } from '@bridge/types/types';
 import {
   type RawAcpSnapshot,
   type RawSnapshotCollectionMetadata,
@@ -35,8 +35,40 @@ function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapsho
       role: readString(entry['role']) ?? '',
       parts: Array.isArray(entry['parts']) ? entry['parts'] : [],
       truncated: entry['truncated'] === true,
+      usage: parseSnapshotMessageUsage(entry['usage']),
     }))
     .filter((entry) => entry.id && entry.role);
+}
+
+function parseSnapshotMessageUsage(value: unknown): MessageTokenUsage | null {
+  const usage = toRecord(value);
+  if (!usage) {
+    return null;
+  }
+  const inputTokens = readFirstNonNegativeInteger([usage['inputTokens'], usage['input_tokens']]);
+  const outputTokens = readFirstNonNegativeInteger([usage['outputTokens'], usage['output_tokens']]);
+  const totalTokens = readFirstNonNegativeInteger([usage['totalTokens'], usage['total_tokens']]);
+  if (inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    reasoningTokens: readFirstNonNegativeInteger([
+      usage['reasoningTokens'],
+      usage['reasoning_tokens'],
+    ]),
+    cachedReadTokens: readFirstNonNegativeInteger([
+      usage['cachedReadTokens'],
+      usage['cached_read_tokens'],
+    ]),
+    cachedWriteTokens: readFirstNonNegativeInteger([
+      usage['cachedWriteTokens'],
+      usage['cached_write_tokens'],
+    ]),
+    totalTokens,
+    model: readString(usage['model'])?.trim() || null,
+  };
 }
 
 function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['tools'] {
