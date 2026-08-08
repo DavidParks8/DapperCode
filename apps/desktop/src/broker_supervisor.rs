@@ -21,7 +21,8 @@ use crate::{
     supervisor::{BridgeSnapshot, BridgeState},
 };
 
-const START_TIMEOUT: Duration = Duration::from_secs(15);
+const START_TIMEOUT: Duration = Duration::from_secs(30);
+const START_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const OWNERSHIP_VERSION: u32 = 1;
 
@@ -39,6 +40,47 @@ pub enum BrokerLifecycleAction {
     Start,
     Stop,
     Restart,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BrokerStartupWait {
+    Healthy,
+    Exited,
+    TimedOut,
+}
+
+fn wait_for_broker_start(
+    timeout: Duration,
+    poll_interval: Duration,
+    elapsed: &mut dyn FnMut() -> Duration,
+    fetch_health: &mut dyn FnMut() -> bool,
+    process_matches: &mut dyn FnMut() -> bool,
+    sleep: &mut dyn FnMut(Duration),
+) -> BrokerStartupWait {
+    while elapsed() < timeout {
+        if fetch_health() {
+            return BrokerStartupWait::Healthy;
+        }
+        if !process_matches() {
+            return if fetch_health() {
+                BrokerStartupWait::Healthy
+            } else {
+                BrokerStartupWait::Exited
+            };
+        }
+        sleep(poll_interval);
+    }
+    if fetch_health() {
+        BrokerStartupWait::Healthy
+    } else if !process_matches() {
+        if fetch_health() {
+            BrokerStartupWait::Healthy
+        } else {
+            BrokerStartupWait::Exited
+        }
+    } else {
+        BrokerStartupWait::TimedOut
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,20 +241,35 @@ impl BrokerSupervisor {
         });
 
         let started = Instant::now();
-        while started.elapsed() < START_TIMEOUT {
-            if self.fetch_health().is_ok() {
-                return Ok(self.snapshot());
-            }
-            if !process_matches(&ownership) {
+        let mut elapsed = || started.elapsed();
+        let mut fetch_health = || self.fetch_health().is_ok();
+        let mut process_alive = || process_matches(&ownership);
+        let mut sleep = thread::sleep;
+        match wait_for_broker_start(
+            START_TIMEOUT,
+            START_POLL_INTERVAL,
+            &mut elapsed,
+            &mut fetch_health,
+            &mut process_alive,
+            &mut sleep,
+        ) {
+            BrokerStartupWait::Healthy => return Ok(self.snapshot()),
+            BrokerStartupWait::Exited => {
                 let _ = remove_file_if_exists(&self.paths.broker_ownership_path());
                 bail!(
                     "broker exited before becoming healthy; inspect {}",
                     log_path.display()
                 );
             }
-            thread::sleep(Duration::from_millis(200));
+            BrokerStartupWait::TimedOut => {}
         }
-        let _ = stop_owned_process(&ownership, &self.paths.broker_ownership_path());
+        if let Err(error) = stop_owned_process(&ownership, &self.paths.broker_ownership_path()) {
+            bail!(
+                "broker did not become healthy within {} seconds and could not be stopped cleanly: {error:#}; inspect {}",
+                START_TIMEOUT.as_secs(),
+                log_path.display()
+            );
+        }
         bail!(
             "broker did not become healthy within {} seconds; inspect {}",
             START_TIMEOUT.as_secs(),
@@ -478,6 +535,10 @@ fn write_ownership(path: &Path, record: &BrokerOwnershipRecord) -> Result<()> {
 
 fn stop_owned_process(record: &BrokerOwnershipRecord, ownership_path: &Path) -> Result<()> {
     if !process_matches(record) {
+        if !process_exists(record.pid) {
+            remove_file_if_exists(ownership_path)?;
+            return Ok(());
+        }
         bail!(
             "refusing to stop PID {} because its process identity changed",
             record.pid
@@ -502,6 +563,13 @@ fn stop_owned_process(record: &BrokerOwnershipRecord, ownership_path: &Path) -> 
         thread::sleep(Duration::from_millis(100));
     }
     bail!("broker process {} did not stop", record.pid)
+}
+
+fn process_exists(pid: u32) -> bool {
+    let mut system = System::new();
+    let pid = Pid::from_u32(pid);
+    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some()
 }
 
 fn signal_process(pid: u32, signal: Signal) -> Result<()> {
@@ -673,6 +741,104 @@ mod tests {
         if std::env::args().any(|argument| argument == "__broker") {
             thread::sleep(Duration::from_millis(800));
         }
+    }
+
+    #[test]
+    fn startup_wait_accepts_late_and_boundary_health_without_false_timeout() {
+        let ready_at = |ready_at: Duration| {
+            let elapsed = std::cell::Cell::new(Duration::ZERO);
+            let mut read_elapsed = || elapsed.get();
+            let mut fetch_health = || elapsed.get() >= ready_at;
+            let mut process_alive = || true;
+            let mut sleep = |duration| elapsed.set(elapsed.get() + duration);
+            wait_for_broker_start(
+                START_TIMEOUT,
+                Duration::from_secs(1),
+                &mut read_elapsed,
+                &mut fetch_health,
+                &mut process_alive,
+                &mut sleep,
+            )
+        };
+
+        assert!(START_TIMEOUT > Duration::from_secs(15));
+        assert_eq!(
+            ready_at(Duration::from_secs(16)),
+            BrokerStartupWait::Healthy
+        );
+        assert_eq!(ready_at(START_TIMEOUT), BrokerStartupWait::Healthy);
+
+        let overshot = std::cell::Cell::new(Duration::ZERO);
+        let mut read_overshot = || overshot.get();
+        let mut fetch_overshot_health =
+            || overshot.get() >= START_TIMEOUT - Duration::from_millis(100);
+        let mut overshot_process_alive = || true;
+        let mut overshooting_sleep =
+            |_| overshot.set(overshot.get() + Duration::from_millis(1_200));
+        assert_eq!(
+            wait_for_broker_start(
+                START_TIMEOUT,
+                START_POLL_INTERVAL,
+                &mut read_overshot,
+                &mut fetch_overshot_health,
+                &mut overshot_process_alive,
+                &mut overshooting_sleep,
+            ),
+            BrokerStartupWait::Healthy
+        );
+        assert!(overshot.get() >= START_TIMEOUT);
+
+        let elapsed = std::cell::Cell::new(Duration::ZERO);
+        let mut read_elapsed = || elapsed.get();
+        let mut never_healthy = || false;
+        let mut process_alive = || true;
+        let mut sleep = |duration| elapsed.set(elapsed.get() + duration);
+        assert_eq!(
+            wait_for_broker_start(
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+                &mut read_elapsed,
+                &mut never_healthy,
+                &mut process_alive,
+                &mut sleep,
+            ),
+            BrokerStartupWait::TimedOut
+        );
+        let mut zero_elapsed = || Duration::ZERO;
+        let mut never_healthy = || false;
+        let mut process_exited = || false;
+        let mut no_sleep = |_| {};
+        assert_eq!(
+            wait_for_broker_start(
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+                &mut zero_elapsed,
+                &mut never_healthy,
+                &mut process_exited,
+                &mut no_sleep,
+            ),
+            BrokerStartupWait::Exited
+        );
+
+        let health_probes = std::cell::Cell::new(0_u8);
+        let mut zero_elapsed = || Duration::ZERO;
+        let mut eventually_healthy = || {
+            health_probes.set(health_probes.get() + 1);
+            health_probes.get() == 2
+        };
+        let mut transient_identity_miss = || false;
+        let mut no_sleep = |_| {};
+        assert_eq!(
+            wait_for_broker_start(
+                Duration::from_secs(2),
+                Duration::from_secs(1),
+                &mut zero_elapsed,
+                &mut eventually_healthy,
+                &mut transient_identity_miss,
+                &mut no_sleep,
+            ),
+            BrokerStartupWait::Healthy
+        );
     }
 
     #[test]
@@ -997,7 +1163,11 @@ mod tests {
             config_sha256: current.config_sha256.clone(),
             owner_pid: None,
         };
-        assert!(stop_owned_process(&stale_record, Path::new("/tmp/missing-owner")).is_err());
+        let stale_owner_dir = tempfile::tempdir().unwrap();
+        let stale_owner = stale_owner_dir.path().join("process.json");
+        write_ownership(&stale_owner, &stale_record).unwrap();
+        stop_owned_process(&stale_record, &stale_owner).unwrap();
+        assert!(!stale_owner.exists());
 
         let data = tempfile::tempdir().unwrap();
         let paths = AppPaths::for_tests(data.path().to_path_buf());
