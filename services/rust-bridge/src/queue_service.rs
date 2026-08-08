@@ -662,6 +662,9 @@ impl BridgeQueueService {
         validate_queue_identifier("itemId", &normalized_item_id)?;
 
         self.ensure_thread_runtime(&normalized_thread_id).await?;
+        if !self.backend.supports_steer(&normalized_thread_id)? {
+            return Err("ACP steering extension is not negotiated for this agent".to_string());
+        }
         if !self
             .threads
             .read()
@@ -678,10 +681,6 @@ impl BridgeQueueService {
         }
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
-
-        if !self.backend.supports_steer(&normalized_thread_id)? {
-            return Err("ACP steering extension is not negotiated for this agent".to_string());
-        }
 
         let snapshot = {
             let mut threads = self.threads.write().await;

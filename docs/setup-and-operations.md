@@ -226,6 +226,7 @@ preferred.
 
 - `GET /health`: unauthenticated broker availability only; never allocates a worker
 - `GET /broker/status`: authenticated workspace routing status; never allocates a worker
+- `GET /broker/rpc`: authenticated desktop status WebSocket; never allocates a worker
 - `GET /rpc`: authenticated WebSocket JSON-RPC
 - `GET /status`: authenticated operational status
 - `GET /local-image`: authenticated descriptor-relative image access beneath the allowed workspace

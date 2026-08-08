@@ -635,9 +635,7 @@ mod tests {
         setup_profile(request(alpha.path(), Some(18847)), &paths, &secrets).unwrap();
         let error = setup_profile(request(beta.path(), Some(18849)), &paths, &secrets).unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("all workspaces use the desktop broker on port 18847"));
+        assert!(error.to_string().contains("pass --replace-broker-endpoint"));
         assert_eq!(paths.load_config().unwrap().profiles.len(), 1);
     }
 
