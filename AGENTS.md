@@ -110,18 +110,18 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 Desktop changes:
 
 ```bash
-cargo fmt --check --manifest-path apps/desktop/Cargo.toml
-cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
-cargo test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
+npm run cargo -- fmt --check --manifest-path apps/desktop/Cargo.toml
+npm run cargo -- clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+npm run cargo -- test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
 npm run desktop:build:macos
 ```
 
 Bridge changes:
 
 ```bash
-cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml
-cargo check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
-cargo test --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
+npm run cargo -- fmt --check --manifest-path services/rust-bridge/Cargo.toml
+npm run cargo -- check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+npm run cargo -- test --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
 ```
 
 Mobile changes:

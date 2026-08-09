@@ -19,10 +19,14 @@ if ! cargo llvm-cov --version >/dev/null 2>&1; then
   exit 1
 fi
 
+cargo_run() {
+  node "$ROOT_DIR/scripts/run-cargo.mjs" "$@"
+}
+
 mkdir -p "$BRIDGE_REPORT_DIR"
 (
   cd "$BRIDGE_DIR"
-  cargo "+${TOOLCHAIN}" llvm-cov test \
+  cargo_run "+${TOOLCHAIN}" llvm-cov test \
     --locked \
     --bin dappercode-bridge \
     --branch \
@@ -31,7 +35,7 @@ mkdir -p "$BRIDGE_REPORT_DIR"
     --output-path "$BRIDGE_REPORT_DIR/coverage.json" \
     -- \
     --test-threads=1
-  cargo "+${TOOLCHAIN}" llvm-cov report \
+  cargo_run "+${TOOLCHAIN}" llvm-cov report \
     --branch \
     --html \
     --output-dir "$BRIDGE_REPORT_DIR/html"
@@ -43,7 +47,7 @@ mkdir -p "$BRIDGE_REPORT_DIR"
 mkdir -p "$DESKTOP_REPORT_DIR"
 (
   cd "$DESKTOP_DIR"
-  DAPPERCODE_SECRETS_BACKEND=file cargo "+${TOOLCHAIN}" llvm-cov test \
+  DAPPERCODE_SECRETS_BACKEND=file cargo_run "+${TOOLCHAIN}" llvm-cov test \
     --locked \
     --bin dappercode \
     --branch \
@@ -52,7 +56,7 @@ mkdir -p "$DESKTOP_REPORT_DIR"
     --output-path "$DESKTOP_REPORT_DIR/coverage.json" \
     -- \
     --test-threads=1
-  cargo "+${TOOLCHAIN}" llvm-cov report \
+  cargo_run "+${TOOLCHAIN}" llvm-cov report \
     --branch \
     --html \
     --output-dir "$DESKTOP_REPORT_DIR/html"

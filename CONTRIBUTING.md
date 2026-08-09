@@ -36,6 +36,13 @@ to the native high-signal threshold.
 
 The repository pins Rust in `rust-toolchain.toml`.
 
+Repository commands run Cargo through `npm run cargo -- <args>`. Local builds use an isolated target
+directory per Git worktree under the operating system cache directory. Each invocation removes
+inactive managed targets whose worktrees are no longer registered, preventing deleted Copilot
+worktrees from leaving Rust build artifacts behind. CI retains its checkout-local targets for
+GitHub Actions caching. Set `DAPPERCODE_MANAGED_CARGO_TARGETS=0` to opt out locally, or
+`DAPPERCODE_CARGO_TARGET_ROOT` to override the cache root.
+
 ## Guidelines
 
 - Keep changes scoped.
