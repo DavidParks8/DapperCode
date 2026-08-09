@@ -107,6 +107,6 @@ enum BridgeLaunchPolicy {
         isRunning: Bool,
         state: String
     ) -> Bool {
-        autoStart && !isRunning && state == "stopped"
+        autoStart && (state == "running" || state == "stopped")
     }
 }
