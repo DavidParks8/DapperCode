@@ -10,10 +10,11 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::{
     config::{BridgeRuntimeConfig, RuntimePaths},
+    platform::{detach_process, process_start_identity, request_process_stop, ProcessStopRequest},
     secrets::SecretStore,
     store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease, Profile},
 };
@@ -541,17 +542,26 @@ impl BridgeSupervisor {
                 ownership.pid
             );
         }
-        signal_process(ownership.pid, Signal::Term)?;
-        let started_at = Instant::now();
-        while started_at.elapsed() < STOP_TIMEOUT {
-            if !process_matches_ownership(ownership) {
-                self.remove_ownership_if_matches(ownership)?;
-                return Ok(());
+        if request_process_stop(
+            ownership.pid,
+            ownership.started_at_epoch_sec,
+            ProcessStopRequest::Graceful,
+        )? {
+            let started_at = Instant::now();
+            while started_at.elapsed() < STOP_TIMEOUT {
+                if !process_matches_ownership(ownership) {
+                    self.remove_ownership_if_matches(ownership)?;
+                    return Ok(());
+                }
+                thread::sleep(Duration::from_millis(200));
             }
-            thread::sleep(Duration::from_millis(200));
         }
         if process_matches_ownership(ownership) {
-            signal_process(ownership.pid, Signal::Kill)?;
+            request_process_stop(
+                ownership.pid,
+                ownership.started_at_epoch_sec,
+                ProcessStopRequest::Force,
+            )?;
         }
         let forced_at = Instant::now();
         while forced_at.elapsed() < Duration::from_secs(3) {
@@ -648,7 +658,7 @@ fn process_identity(
     if process_workspace != workspace {
         bail!("bridge working directory identity did not match the selected workspace");
     }
-    let started_at_epoch_sec = process.start_time();
+    let started_at_epoch_sec = process_start_identity(pid, process.start_time())?;
     if started_at_epoch_sec == 0 {
         bail!("bridge process start time is unavailable");
     }
@@ -692,7 +702,8 @@ fn process_matches_ownership(record: &ProcessOwnershipRecord) -> bool {
     let Some(workspace) = process.cwd().and_then(|path| path.canonicalize().ok()) else {
         return false;
     };
-    process.start_time() == record.started_at_epoch_sec
+    process_start_identity(record.pid, process.start_time()).ok()
+        == Some(record.started_at_epoch_sec)
         && executable == record.executable
         && workspace == record.workspace
 }
@@ -712,44 +723,6 @@ fn valid_sha256_digest(value: &str) -> bool {
         && value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn signal_process(pid: u32, signal: Signal) -> Result<()> {
-    let mut system = System::new();
-    let sysinfo_pid = Pid::from_u32(pid);
-    system.refresh_processes(ProcessesToUpdate::Some(&[sysinfo_pid]), true);
-    let process = system
-        .process(sysinfo_pid)
-        .ok_or_else(|| anyhow!("bridge process {pid} no longer exists"))?;
-    match process.kill_with(signal) {
-        Some(true) => Ok(()),
-        Some(false) => bail!("operating system refused to signal bridge process {pid}"),
-        None => bail!("requested process signal is not supported on this platform"),
-    }
-}
-
-#[cfg(unix)]
-fn detach_process(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(windows)]
-fn detach_process(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const DETACHED_PROCESS: u32 = 0x00000008;
-    command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
-}
-
-#[cfg(not(any(unix, windows)))]
-fn detach_process(_command: &mut Command) {}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -761,6 +734,30 @@ mod tests {
         mpsc, Arc,
     };
     use tempfile::tempdir;
+
+    const LIFECYCLE_CHILD: &str = "__supervisor_lifecycle_child";
+
+    fn test_executable() -> PathBuf {
+        std::env::current_exe().unwrap().canonicalize().unwrap()
+    }
+
+    fn spawn_lifecycle_child(cwd: &Path) -> std::process::Child {
+        Command::new(test_executable())
+            .arg(LIFECYCLE_CHILD)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn lifecycle fixture")
+    }
+
+    #[test]
+    fn __supervisor_lifecycle_child() {
+        if std::env::args().any(|argument| argument == LIFECYCLE_CHILD) {
+            thread::sleep(Duration::from_secs(30));
+        }
+    }
 
     fn profile(workspace: &Path, port: u16) -> Profile {
         Profile {
@@ -778,7 +775,7 @@ mod tests {
             agent: ProfileAgent {
                 agent_id: "echo".to_string(),
                 display_name: "Echo".to_string(),
-                executable: PathBuf::from("/bin/echo"),
+                executable: test_executable(),
                 argv: vec!["acp".to_string()],
                 resolved_version: "local".to_string(),
                 verified_digest: format!("sha256:{}", "a".repeat(64)),
@@ -792,7 +789,7 @@ mod tests {
             version: OWNERSHIP_RECORD_VERSION,
             pid: 42,
             started_at_epoch_sec: 1234,
-            executable: PathBuf::from("/bin/echo"),
+            executable: test_executable(),
             workspace: workspace.to_path_buf(),
             config_sha256: format!("sha256:{}", "a".repeat(64)),
             owner_pid: Some(7),
@@ -836,13 +833,14 @@ mod tests {
     fn rejects_an_ownership_record_written_by_an_older_layout() {
         let temp = tempdir().unwrap();
         let record_path = temp.path().join("process.json");
+        let executable = test_executable();
         fs::write(
             &record_path,
             serde_json::to_vec(&serde_json::json!({
                 "version": 1,
                 "pid": 42,
                 "startedAtEpochSec": 1234,
-                "executable": "/bin/echo",
+                "executable": executable,
                 "workspace": temp.path(),
                 "configSha256": format!("sha256:{}", "a".repeat(64)),
             }))
@@ -859,7 +857,7 @@ mod tests {
     #[test]
     fn ownership_requires_matching_workspace_binary_and_config() {
         let temp = tempdir().unwrap();
-        let binary = PathBuf::from("/bin/echo").canonicalize().unwrap();
+        let binary = test_executable();
         let digest = format!("sha256:{}", "a".repeat(64));
         let mut record = record(&temp.path().canonicalize().unwrap());
         record.executable = binary.clone();
@@ -1093,7 +1091,7 @@ mod tests {
     fn ownership_comparison_rejects_a_different_binary_or_workspace() {
         let temp = tempdir().unwrap();
         let other = tempdir().unwrap();
-        let binary = PathBuf::from("/bin/echo").canonicalize().unwrap();
+        let binary = test_executable();
         let digest = format!("sha256:{}", "a".repeat(64));
         let mut record = record(&temp.path().canonicalize().unwrap());
         record.executable = binary.clone();
@@ -1101,7 +1099,9 @@ mod tests {
         assert!(ownership_matches_expected(&record, &binary, temp.path(), &digest).unwrap());
         assert!(!ownership_matches_expected(&record, &binary, other.path(), &digest).unwrap());
 
-        let different_binary = PathBuf::from("/bin/ls").canonicalize().unwrap();
+        let different_binary = temp.path().join("different-binary");
+        fs::write(&different_binary, b"not the test executable").unwrap();
+        let different_binary = different_binary.canonicalize().unwrap();
         assert!(
             !ownership_matches_expected(&record, &different_binary, temp.path(), &digest).unwrap()
         );
@@ -1121,7 +1121,6 @@ mod tests {
 
         let error = supervisor.stop_owned_process(&stale).unwrap_err();
         assert!(error.to_string().contains("process identity changed"));
-        assert!(signal_process(u32::MAX - 1, Signal::Term).is_err());
     }
 
     #[test]
@@ -1215,7 +1214,7 @@ mod tests {
         let data = tempdir().unwrap();
         let supervisor = supervisor_for(workspace.path(), data.path(), 18621, true);
         let config = supervisor.runtime_config().unwrap();
-        let binary = PathBuf::from("/bin/echo").canonicalize().unwrap();
+        let binary = test_executable();
 
         supervisor.clean_stale_ownership(&binary, &config).unwrap();
 
@@ -1384,6 +1383,66 @@ mod tests {
         assert!(error
             .to_string()
             .contains("process identity does not match this app"));
+        assert!(!supervisor.ownership_path().exists());
+    }
+
+    #[cfg(windows)]
+    fn wait_for_windows_fixture_identity(
+        pid: u32,
+        binary: &Path,
+        workspace: &Path,
+        digest: &str,
+    ) -> ProcessOwnershipRecord {
+        (0..40)
+            .find_map(|_| {
+                let identity =
+                    process_identity(pid, binary, workspace, digest, Some(std::process::id())).ok();
+                if identity.is_none() {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                identity
+            })
+            .expect("process identity should become visible")
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_force_stop_terminates_the_exact_same_user_process() {
+        let workspace = tempdir().unwrap();
+        let mut child = spawn_lifecycle_child(workspace.path());
+        let executable = test_executable();
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let ownership =
+            wait_for_windows_fixture_identity(child.id(), &executable, workspace.path(), &digest);
+
+        request_process_stop(
+            ownership.pid,
+            ownership.started_at_epoch_sec,
+            ProcessStopRequest::Force,
+        )
+        .unwrap();
+        child.wait().unwrap();
+
+        assert!(!process_matches_ownership(&ownership));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_supervisor_stop_clears_live_process_ownership() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let supervisor = supervisor_for(workspace.path(), data.path(), 18649, true);
+        let mut child = spawn_lifecycle_child(workspace.path());
+        let executable = test_executable();
+        let digest = format!("sha256:{}", "b".repeat(64));
+        let ownership =
+            wait_for_windows_fixture_identity(child.id(), &executable, workspace.path(), &digest);
+        write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
+
+        supervisor.stop_owned_process(&ownership).unwrap();
+        child.wait().unwrap();
+
+        assert!(!process_matches_ownership(&ownership));
         assert!(!supervisor.ownership_path().exists());
     }
 

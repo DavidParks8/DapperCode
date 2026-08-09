@@ -161,6 +161,8 @@ async fn secure_directory(path: &Path) -> Result<(), BridgeError> {
                 "failed to secure attachment staging directory: {error}"
             ))
         })?;
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -311,11 +313,12 @@ pub(crate) fn infer_image_content_type_from_path(path: &Path) -> Option<&'static
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(any(unix, windows))]
+    use super::DEFAULT_ATTACHMENTS_DIR_NAME;
     use super::{
         append_bounded_chunk, build_attachment_file_name, infer_extension_from_mime,
         infer_image_content_type_from_path, non_empty, normalize_attachment_kind, private_new_file,
         sanitize_filename, sanitize_path_segment, save_multipart_attachment, secure_directory,
-        DEFAULT_ATTACHMENTS_DIR_NAME,
     };
     use crate::path_policy::PathPolicy;
     use crate::resource_limits::ATTACHMENT_MAX_BYTES;
@@ -344,6 +347,23 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[cfg(windows)]
+    fn create_directory_reparse(target: &std::path::Path, link: &std::path::Path) {
+        if std::os::windows::fs::symlink_dir(target, link).is_ok() {
+            return;
+        }
+        let status = std::process::Command::new("cmd")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .expect("run mklink");
+        assert!(
+            status.success(),
+            "failed to create a directory reparse point"
+        );
     }
 
     async fn multipart(body: Vec<u8>, boundary: &str) -> Multipart {
@@ -611,9 +631,10 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
-    fn attachments_root_rejects_symlink_escape() {
+    fn attachments_root_rejects_link_escape() {
+        #[cfg(unix)]
         use std::os::unix::fs::symlink;
 
         let temp = TestDir::new();
@@ -621,11 +642,17 @@ mod tests {
         let outside = temp.0.join("outside");
         fs::create_dir(&root).expect("create root");
         fs::create_dir(&outside).expect("create outside");
-        symlink(&outside, root.join(DEFAULT_ATTACHMENTS_DIR_NAME))
-            .expect("create attachment symlink");
+        let attachment_link = root.join(DEFAULT_ATTACHMENTS_DIR_NAME);
+        #[cfg(unix)]
+        symlink(&outside, &attachment_link).expect("create attachment symlink");
+        #[cfg(windows)]
+        create_directory_reparse(&outside, &attachment_link);
 
-        let error = PathPolicy::new(root, true).expect_err("reject attachment symlink escape");
+        let error = PathPolicy::new(root, true).expect_err("reject attachment link escape");
+        #[cfg(unix)]
         assert!(error.contains("must not be a symlink"), "{error}");
+        #[cfg(windows)]
+        assert!(!error.is_empty());
         assert!(fs::read_dir(outside)
             .expect("read outside")
             .next()

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package>
+  <metadata>
+    <id>Example.Resource.Payload</id>
+    <version>4.0.0</version>
+    <license type="file">legal\LICENSE.txt</license>
+  </metadata>
+</package>

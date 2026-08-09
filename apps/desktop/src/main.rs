@@ -11,6 +11,7 @@ use serde::Serialize;
 mod broker;
 mod broker_supervisor;
 mod config;
+mod platform;
 mod platform_setup;
 mod secrets;
 mod setup;
@@ -49,6 +50,8 @@ struct OperatorSnapshot {
     auto_start: bool,
     workspace: PathBuf,
     profile_id: String,
+    network_mode: Option<String>,
+    bridge_host: Option<String>,
     bridge_port: Option<u16>,
     pairing_payload: Option<String>,
     log_path: PathBuf,
@@ -430,6 +433,7 @@ fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorS
     let workspace = validate_workspace(workspace)?;
     let profile_id = profile_id_for(&workspace);
     let snapshot = BridgeSnapshot::needs_setup(&workspace);
+    let broker = paths.load_config()?.broker;
     Ok(OperatorSnapshot {
         state: state_name(&snapshot.state).to_string(),
         headline: snapshot.headline,
@@ -444,7 +448,11 @@ fn unconfigured_snapshot(workspace: &Path, paths: &AppPaths) -> Result<OperatorS
         auto_start: false,
         workspace,
         profile_id,
-        bridge_port: None,
+        network_mode: broker
+            .as_ref()
+            .map(|settings| settings.network_mode.clone()),
+        bridge_host: broker.as_ref().map(|settings| settings.host.clone()),
+        bridge_port: broker.as_ref().map(|settings| settings.bridge_port),
         pairing_payload: None,
         log_path: PathBuf::new(),
         config_path: paths.config_path(),
@@ -458,7 +466,7 @@ fn operator_snapshot(
     paths: &AppPaths,
 ) -> OperatorSnapshot {
     let runtime_config = supervisor.runtime_config().ok();
-    profile_snapshot(
+    let snapshot = profile_snapshot(
         supervisor.profile(),
         snapshot,
         paths,
@@ -470,7 +478,13 @@ fn operator_snapshot(
         runtime_config
             .as_ref()
             .map(|config| config.secret_backend.as_str().to_string()),
-    )
+    );
+    with_broker_log_path(snapshot, paths)
+}
+
+fn with_broker_log_path(mut snapshot: OperatorSnapshot, paths: &AppPaths) -> OperatorSnapshot {
+    snapshot.log_path = paths.broker_log_path();
+    snapshot
 }
 
 fn profile_snapshot(
@@ -494,6 +508,8 @@ fn profile_snapshot(
         auto_start: profile.auto_start,
         workspace: profile.workspace.clone(),
         profile_id: profile.profile_id.clone(),
+        network_mode: Some(profile.network_mode.clone()),
+        bridge_host: Some(profile.bridge_host.clone()),
         bridge_port: Some(profile.bridge_port),
         pairing_payload,
         log_path: paths.log_path(&profile.profile_id),
@@ -615,6 +631,7 @@ Bridge ports are allocated per workspace so several worktrees can run at once.\n
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn parses_options_and_default_agent_args() {
@@ -652,5 +669,50 @@ mod tests {
         );
         assert!(args.is_empty());
         assert!(!take_flag(&mut Vec::new(), "--all"));
+    }
+
+    #[test]
+    fn primary_operator_snapshot_opens_the_broker_log() {
+        let data = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let snapshot = unconfigured_snapshot(workspace.path(), &paths).unwrap();
+
+        assert_eq!(
+            with_broker_log_path(snapshot, &paths).log_path,
+            paths.broker_log_path()
+        );
+    }
+
+    #[test]
+    fn unconfigured_workspace_snapshot_exposes_the_shared_endpoint_without_pairing_data() {
+        let data = tempdir().unwrap();
+        let workspace = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        paths
+            .update_config(|config| {
+                config.broker = Some(store::BrokerSettings::new(
+                    "local".to_string(),
+                    "192.168.1.20".to_string(),
+                    18_787,
+                    18_788,
+                    "http://192.168.1.20:18787".to_string(),
+                    "http://192.168.1.20:18788".to_string(),
+                )?);
+                Ok(())
+            })
+            .unwrap();
+
+        let snapshot = unconfigured_snapshot(workspace.path(), &paths).unwrap();
+
+        assert_eq!(snapshot.network_mode.as_deref(), Some("local"));
+        assert_eq!(snapshot.bridge_host.as_deref(), Some("192.168.1.20"));
+        assert_eq!(snapshot.bridge_port, Some(18_787));
+        assert!(snapshot.pairing_payload.is_none());
+        let json = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(json["networkMode"], "local");
+        assert_eq!(json["bridgeHost"], "192.168.1.20");
+        assert_eq!(json["bridgePort"], 18_787);
+        assert!(json["pairingPayload"].is_null());
     }
 }

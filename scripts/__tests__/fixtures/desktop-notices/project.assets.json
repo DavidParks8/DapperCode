@@ -1,0 +1,204 @@
+{
+  "version": 3,
+  "targets": {
+    "net10.0-windows10.0.26100.0": {
+      "Example.RestoreOnly.Package/9.0.0": {
+        "type": "package",
+        "runtime": {
+          "lib/net10.0/Example.RestoreOnly.Package.dll": {}
+        }
+      }
+    },
+    "net10.0-windows10.0.26100.0/win-x64": {
+      "Example.Managed.Package/1.2.3": {
+        "type": "package",
+        "runtime": {
+          "lib/net10.0/Example.Managed.Package.dll": {}
+        }
+      },
+      "Example.ExpressionOnly.Runtime/2.0.0": {
+        "type": "package",
+        "runtimeTargets": {
+          "runtimes/win-x64/lib/net10.0/Example.ExpressionOnly.Runtime.dll": {
+            "assetType": "runtime",
+            "rid": "win-x64"
+          }
+        }
+      },
+      "Example.Native.Payload/3.0.0": {
+        "type": "package",
+        "native": {
+          "runtimes/win-x64/native/Example.Native.Payload.dll": {}
+        }
+      },
+      "Example.Resource.Payload/4.0.0": {
+        "type": "package",
+        "resource": {
+          "lib/net10.0/fr/Example.Resource.Payload.resources.dll": {
+            "locale": "fr"
+          }
+        }
+      },
+      "Microsoft.Windows.SDK.BuildTools/10.0.26100.1": {
+        "type": "package",
+        "build": {
+          "build/Microsoft.Windows.SDK.BuildTools.targets": {}
+        }
+      },
+      "Microsoft.WindowsAppSDK.DWrite/1.8.25122902": {
+        "type": "package",
+        "build": {
+          "buildTransitive/Microsoft.WindowsAppSDK.DWrite.props": {},
+          "buildTransitive/Microsoft.WindowsAppSDK.DWrite.targets": {}
+        }
+      },
+      "Microsoft.WindowsAppSDK.Runtime/1.8.260710003": {
+        "type": "package",
+        "build": {
+          "buildTransitive/Microsoft.WindowsAppSDK.Runtime.props": {},
+          "buildTransitive/Microsoft.WindowsAppSDK.Runtime.targets": {}
+        }
+      },
+      "Example.Ref.Only/5.0.0": {
+        "type": "package",
+        "compile": {
+          "ref/net10.0/Example.Ref.Only.dll": {}
+        }
+      },
+      "DapperCode.Core/1.0.0": {
+        "type": "project",
+        "runtime": {
+          "bin/placeholder/DapperCode.Core.dll": {}
+        }
+      }
+    },
+    "net10.0-windows10.0.26100.0/win-arm64": {
+      "Example.Managed.Package/1.2.3": {
+        "type": "package",
+        "runtime": {
+          "lib/net10.0/Example.Managed.Package.dll": {}
+        }
+      },
+      "Example.ExpressionOnly.Runtime/2.0.0": {
+        "type": "package",
+        "runtimeTargets": {
+          "runtimes/win-arm64/lib/net10.0/Example.ExpressionOnly.Runtime.dll": {
+            "assetType": "runtime",
+            "rid": "win-arm64"
+          }
+        }
+      },
+      "Example.Native.Payload/3.0.0": {
+        "type": "package",
+        "native": {
+          "runtimes/win-arm64/native/Example.Native.Payload.dll": {}
+        }
+      },
+      "Example.Resource.Payload/4.0.0": {
+        "type": "package",
+        "resource": {
+          "lib/net10.0/fr/Example.Resource.Payload.resources.dll": {
+            "locale": "fr"
+          }
+        }
+      },
+      "Microsoft.WindowsAppSDK.DWrite/1.8.25122902": {
+        "type": "package",
+        "build": {
+          "buildTransitive/Microsoft.WindowsAppSDK.DWrite.props": {},
+          "buildTransitive/Microsoft.WindowsAppSDK.DWrite.targets": {}
+        }
+      },
+      "Microsoft.WindowsAppSDK.Runtime/1.8.260710003": {
+        "type": "package",
+        "build": {
+          "buildTransitive/Microsoft.WindowsAppSDK.Runtime.props": {},
+          "buildTransitive/Microsoft.WindowsAppSDK.Runtime.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Example.Managed.Package/1.2.3": {
+      "type": "package",
+      "path": "example.managed.package/1.2.3"
+    },
+    "Example.ExpressionOnly.Runtime/2.0.0": {
+      "type": "package",
+      "path": "example.expressiononly.runtime/2.0.0"
+    },
+    "Example.Native.Payload/3.0.0": {
+      "type": "package",
+      "path": "example.native.payload/3.0.0"
+    },
+    "Example.Resource.Payload/4.0.0": {
+      "type": "package",
+      "path": "example.resource.payload/4.0.0"
+    },
+    "Microsoft.Windows.SDK.BuildTools/10.0.26100.1": {
+      "type": "package",
+      "path": "microsoft.windows.sdk.buildtools/10.0.26100.1"
+    },
+    "Microsoft.WindowsAppSDK.DWrite/1.8.25122902": {
+      "type": "package",
+      "path": "microsoft.windowsappsdk.dwrite/1.8.25122902",
+      "files": [
+        "buildTransitive/Microsoft.WindowsAppSDK.DWrite.props",
+        "buildTransitive/Microsoft.WindowsAppSDK.DWrite.targets",
+        "runtimes-framework/win-x64/native/DWriteCore.dll",
+        "license.txt"
+      ]
+    },
+    "Microsoft.WindowsAppSDK.Runtime/1.8.260710003": {
+      "type": "package",
+      "path": "microsoft.windowsappsdk.runtime/1.8.260710003",
+      "files": [
+        "buildTransitive/Microsoft.WindowsAppSDK.AppXReference.props",
+        "buildTransitive/Microsoft.WindowsAppSDK.Runtime.props",
+        "buildTransitive/Microsoft.WindowsAppSDK.Runtime.targets",
+        "tools/MSIX/win10-x64/Microsoft.WindowsAppRuntime.Main.1.8.msix",
+        "tools/MSIX/win10-x64/Microsoft.WindowsAppRuntime.Singleton.1.8.msix",
+        "license.txt"
+      ]
+    },
+    "Example.Ref.Only/5.0.0": {
+      "type": "package",
+      "path": "example.ref.only/5.0.0"
+    },
+    "Example.RestoreOnly.Package/9.0.0": {
+      "type": "package",
+      "path": "example.restoreonly.package/9.0.0"
+    },
+    "DapperCode.Core/1.0.0": {
+      "type": "project",
+      "path": "../DapperCode.Core/DapperCode.Core.csproj"
+    }
+  },
+  "project": {
+    "frameworks": {
+      "net10.0-windows10.0.26100.0": {
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.NETCore.App.Runtime.win-arm64",
+            "version": "[10.0.9, 10.0.9]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Runtime.win-x64",
+            "version": "[10.0.9, 10.0.9]"
+          },
+          {
+            "name": "Microsoft.WindowsDesktop.App.Ref",
+            "version": "[10.0.9, 10.0.9]"
+          },
+          {
+            "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+            "version": "[10.0.9, 10.0.9]"
+          }
+        ]
+      }
+    }
+  },
+  "packageFolders": {
+    "packages": {}
+  }
+}

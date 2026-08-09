@@ -1,0 +1,26 @@
+{
+  "version": 3,
+  "targets": {
+    "net10.0-windows10.0.26100.0/win-x64": {
+      "Example.Missing.License/1.0.0": {
+        "type": "package",
+        "build": {
+          "buildTransitive/Example.Missing.License.targets": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Example.Missing.License/1.0.0": {
+      "type": "package",
+      "path": "example.missing.license/1.0.0",
+      "files": [
+        "buildTransitive/Example.Missing.License.targets",
+        "tools/MSIX/win10-x64/Example.Missing.License.Main.msix"
+      ]
+    }
+  },
+  "packageFolders": {
+    "packages": {}
+  }
+}

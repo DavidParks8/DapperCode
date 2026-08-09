@@ -10,6 +10,8 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::platform;
+
 const CONFIG_VERSION: u32 = 2;
 const LEGACY_CONFIG_VERSION: u32 = 1;
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -39,7 +41,7 @@ impl AppPaths {
     pub fn discover() -> Result<Self> {
         let base = match std::env::var_os("DAPPERCODE_DATA_DIR") {
             Some(value) if !value.is_empty() => PathBuf::from(value),
-            _ => platform_data_dir()?,
+            _ => platform::data_dir()?,
         };
         if !base.is_absolute() {
             bail!(
@@ -248,37 +250,6 @@ impl AppPaths {
             Ok(()) => primary,
             Err(rollback) => anyhow!("{primary:#}; side-effect rollback also failed: {rollback:#}"),
         }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn platform_data_dir() -> Result<PathBuf> {
-    Ok(home_dir()?
-        .join("Library/Application Support")
-        .join("dev.dappercode.desktop"))
-}
-
-#[cfg(target_os = "windows")]
-fn platform_data_dir() -> Result<PathBuf> {
-    match std::env::var_os("APPDATA") {
-        Some(value) if !value.is_empty() => Ok(PathBuf::from(value).join("DapperCode")),
-        _ => bail!("APPDATA is not set; cannot locate the DapperCode data directory"),
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn platform_data_dir() -> Result<PathBuf> {
-    match std::env::var_os("XDG_DATA_HOME") {
-        Some(value) if !value.is_empty() => Ok(PathBuf::from(value).join("dappercode")),
-        _ => Ok(home_dir()?.join(".local/share/dappercode")),
-    }
-}
-
-#[cfg(unix)]
-fn home_dir() -> Result<PathBuf> {
-    match std::env::var_os("HOME") {
-        Some(value) if !value.is_empty() => Ok(PathBuf::from(value)),
-        _ => bail!("HOME is not set; cannot locate the DapperCode data directory"),
     }
 }
 
@@ -715,8 +686,7 @@ pub fn atomic_private_write(path: &Path, contents: &[u8]) -> Result<()> {
         }
         file.sync_all()?;
         fs::rename(&temporary, path)?;
-        #[cfg(unix)]
-        if let Err(error) = File::open(parent).and_then(|directory| directory.sync_all()) {
+        if let Err(error) = platform::sync_parent_directory(parent) {
             eprintln!(
                 "warning: {} was replaced, but its directory metadata could not be synced: {error}",
                 path.display()
@@ -1125,6 +1095,7 @@ mod tests {
             .contains("failed to remove"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn locates_the_home_directory_or_explains_why_it_cannot() {
         struct Guard(Option<std::ffi::OsString>);
@@ -1139,16 +1110,19 @@ mod tests {
         let _guard = Guard(std::env::var_os("HOME"));
 
         std::env::set_var("HOME", "/tmp/dappercode-home");
-        assert_eq!(home_dir().unwrap(), PathBuf::from("/tmp/dappercode-home"));
+        assert_eq!(
+            platform::home_dir().unwrap(),
+            PathBuf::from("/tmp/dappercode-home")
+        );
 
         std::env::set_var("HOME", "");
-        assert!(home_dir()
+        assert!(platform::home_dir()
             .unwrap_err()
             .to_string()
             .contains("HOME is not set"));
 
         std::env::remove_var("HOME");
-        assert!(home_dir().is_err());
+        assert!(platform::home_dir().is_err());
     }
 
     #[test]
@@ -1189,7 +1163,7 @@ mod tests {
         // An empty override falls through to the platform default. That default is only inspected,
         // never created, so the test does not touch the real user data directory.
         std::env::set_var("DAPPERCODE_DATA_DIR", "");
-        assert!(platform_data_dir().unwrap().is_absolute());
+        assert!(platform::data_dir().unwrap().is_absolute());
     }
 
     #[test]

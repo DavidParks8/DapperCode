@@ -157,7 +157,7 @@ impl GitService {
                             "--no-ext-diff",
                             "--no-index",
                             "--",
-                            "/dev/null",
+                            crate::platform::git_global_config_path(),
                             entry.path.as_str(),
                         ],
                         true,

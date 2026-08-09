@@ -1,0 +1,9 @@
+using DapperCode.Core.Models;
+
+namespace DapperCode.Core.Services;
+
+public sealed class PhysicalFileSystem : IFileSystem
+{
+    public bool FileExists(string path) => File.Exists(path);
+    public bool DirectoryExists(string path) => Directory.Exists(path);
+}

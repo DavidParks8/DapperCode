@@ -1,10 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::Read;
-#[cfg(unix)]
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use agent_client_protocol::{Client, ConnectTo, Lines};
@@ -483,31 +479,6 @@ fn normalize_contained_path(
     Ok(normalized)
 }
 
-#[cfg(unix)]
-fn tree_mode(metadata: &fs::Metadata) -> String {
-    format!("0{:03o}", metadata.permissions().mode() & 0o777)
-}
-
-#[cfg(not(unix))]
-fn tree_mode(_metadata: &fs::Metadata) -> String {
-    "0000".to_string()
-}
-
-#[cfg(unix)]
-fn is_hardlinked(metadata: &fs::Metadata) -> bool {
-    metadata.nlink() != 1
-}
-
-#[cfg(windows)]
-fn is_hardlinked(metadata: &fs::Metadata) -> bool {
-    metadata.number_of_links() != 1
-}
-
-#[cfg(not(any(unix, windows)))]
-fn is_hardlinked(_metadata: &fs::Metadata) -> bool {
-    true
-}
-
 fn collect_tree_entries(
     root: &Path,
     directory: &Path,
@@ -537,7 +508,7 @@ fn collect_tree_entries(
         if metadata.is_dir() {
             entries.push(TreeEntry::Directory {
                 path: relative,
-                mode: tree_mode(&metadata),
+                mode: crate::platform::tree_mode(&metadata),
             });
             collect_tree_entries(root, &path, entries, total_bytes)?;
         } else if metadata.file_type().is_symlink() {
@@ -560,7 +531,9 @@ fn collect_tree_entries(
                 target,
             });
         } else if metadata.is_file() {
-            if is_hardlinked(&metadata) {
+            if crate::platform::file_has_multiple_links(&path, &metadata)
+                .map_err(|_| RuntimeManifestError::InvalidIntegrityRoot)?
+            {
                 return Err(RuntimeManifestError::InvalidIntegrityRoot);
             }
             *total_bytes = total_bytes
@@ -569,7 +542,7 @@ fn collect_tree_entries(
                 .ok_or(RuntimeManifestError::InvalidIntegrityRoot)?;
             entries.push(TreeEntry::File {
                 path: relative,
-                mode: tree_mode(&metadata),
+                mode: crate::platform::tree_mode(&metadata),
                 size: metadata.len(),
                 sha256: executable_sha256(&path)?[7..].to_string(),
             });
@@ -652,8 +625,9 @@ mod tests {
     use super::*;
 
     use serde::Deserialize;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    #[cfg(unix)]
+    use std::sync::{atomic::AtomicUsize, Arc};
 
     static TEST_TREE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -1382,6 +1356,21 @@ while IFS= read -r _; do :; done
 
         symlink("agent", root.join("agent-link")).expect("create final symlink");
         assert!(installation_tree_sha256(&root).is_ok());
+        std::fs::remove_dir_all(root).expect("remove test root");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tree_rejects_windows_hardlinks() {
+        let root = test_tree("tree-windows-hardlink");
+        let file = root.join("agent.exe");
+        std::fs::write(&file, b"agent").expect("write file");
+        std::fs::hard_link(&file, root.join("agent-hardlink.exe")).expect("create hardlink");
+
+        assert_eq!(
+            installation_tree_sha256(&root),
+            Err(RuntimeManifestError::InvalidIntegrityRoot)
+        );
         std::fs::remove_dir_all(root).expect("remove test root");
     }
 }
