@@ -2,7 +2,11 @@ import { activeTurnIdAtom, errorAtom, stoppingTurnAtom } from '../state/turn';
 import { activityAtom } from '../state/composer';
 import { useSetAtom } from 'jotai';
 import { useCallback } from 'react';
-import { mergeStreamingDelta, formatLiveReasoningMessage } from '../helpers/helpers';
+import {
+  mergeStreamingDelta,
+  formatLiveReasoningMessage,
+  isChatLikelyRunning,
+} from '../helpers/helpers';
 import type {
   MainScreenLocalCommandChatContext,
   MainScreenLocalCommandChatResult,
@@ -180,6 +184,41 @@ export function useMainScreenReasoningAndInterrupt(
     ],
   );
 
+  // A thread can advertise `running` while owning no interruptible turn: the worker that was
+  // driving it died before writing a terminal turn status, so no lifecycle event is ever coming.
+  // The composer derives its stop button from that thread status, so it has to be retired here or
+  // the user is left with a stop button whose only possible outcome is this same dead end.
+  const settleThreadWithoutActiveTurn = useCallback(
+    (threadId: string) => {
+      setActiveTurnId(null);
+      setStoppingTurn(false);
+      stopRequestedRef.current = false;
+      setError(null);
+      clearRunWatchdog();
+      setActivity({
+        tone: 'idle',
+        title: 'No active turn found',
+      });
+
+      const nowIso = new Date().toISOString();
+      setSelectedChat((previous) => {
+        if (!previous || previous.id !== threadId || !isChatLikelyRunning(previous)) {
+          return previous;
+        }
+        return { ...previous, status: 'complete', updatedAt: nowIso, statusUpdatedAt: nowIso };
+      });
+    },
+    [
+      clearRunWatchdog,
+      setActiveTurnId,
+      setActivity,
+      setError,
+      setSelectedChat,
+      setStoppingTurn,
+      stopRequestedRef,
+    ],
+  );
+
   const interruptActiveTurn = useCallback(
     async (threadId: string, turnId: string) => {
       try {
@@ -218,12 +257,10 @@ export function useMainScreenReasoningAndInterrupt(
           return;
         }
 
-        setStoppingTurn(false);
-        stopRequestedRef.current = false;
-        setActivity({
-          tone: 'idle',
-          title: 'No active turn found',
-        });
+        // The thread claims to be running but owns no interruptible turn, which is what a worker
+        // that died mid-turn leaves behind. Nothing else will ever retire that status, so without
+        // reconciling it here the composer keeps a stop button that can only repeat this no-op.
+        settleThreadWithoutActiveTurn(threadId);
       } catch (error) {
         const message = (error as Error).message ?? String(error);
         setError(message);
@@ -240,6 +277,7 @@ export function useMainScreenReasoningAndInterrupt(
       setActiveTurnId,
       setActivity,
       setError,
+      settleThreadWithoutActiveTurn,
       setStoppingTurn,
       stopRequestedRef,
       turnExecutionController,

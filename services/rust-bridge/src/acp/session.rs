@@ -485,6 +485,65 @@ impl AcpSession {
             .mark_subagent_tool_terminal(tool_call_id, status, tool_status)
     }
 
+    /// Settle a run that no live generation owns any more, reporting whether anything changed.
+    ///
+    /// `active_run_id` is only cleared by a terminal run event, and [`Self::emit`] deliberately
+    /// drops terminal events whose generation is not the live one. That guard protects live
+    /// interactions from stale reports, but it also means a run whose worker died — the desktop app
+    /// quitting, the machine sleeping, a crash — can never be cleared through the normal path: the
+    /// generation is gone, so the very event that would retire the run is discarded. The snapshot
+    /// then advertises an active run forever and clients render a thread that is permanently
+    /// running yet has no turn left to interrupt.
+    ///
+    /// Applying the terminal event straight to the snapshot keeps the ordinary terminalization —
+    /// dangling tools and unresolved sub-agents settle exactly as on a reported crash — without
+    /// touching generation state or replaying anything to a live consumer.
+    pub async fn retire_abandoned_run(&self, message: String) -> bool {
+        let mut state = self.inner.lock().await;
+        // Every state but `Terminal` still has an owner: `Active` is streaming, `Cancelling` is
+        // mid-interrupt and awaiting its own terminal event, and `Handoff` is a steer that is about
+        // to adopt the run. Settling any of them would cut a live turn short.
+        if !matches!(state.generation_state, GenerationState::Terminal) {
+            return false;
+        }
+        let (Some(run_id), Some(source_turn_id), Some(generation)) = (
+            state.snapshot.active_run_id.clone(),
+            state.snapshot.active_source_turn_id.clone(),
+            state.snapshot.active_generation,
+        ) else {
+            return false;
+        };
+
+        let agent_id = state.snapshot.agent_id.clone();
+        let thread_id = state.snapshot.thread_id.clone();
+        state.snapshot.apply(&CanonicalEvent::RunFailed {
+            agent_id,
+            thread_id,
+            run_id,
+            source_turn_id,
+            generation,
+            message,
+        });
+        true
+    }
+
+    /// Whether a generation is genuinely in flight right now.
+    ///
+    /// Unlike [`Self::active_interaction_generation`] this ignores history reconstruction. A replay
+    /// deliberately hides its generation from callers that drive live interactions, but a caller
+    /// asking whether an `active_run_id` still has an owner must not read that masking as proof the
+    /// run is abandoned.
+    ///
+    /// Test-only: production code lets [`Self::retire_abandoned_run`] make the decision under the
+    /// same lock it acts on, so the answer cannot go stale between the check and the write.
+    #[cfg(test)]
+    pub async fn has_live_generation(&self) -> bool {
+        matches!(
+            self.inner.lock().await.generation_state,
+            GenerationState::Active(_)
+        )
+    }
+
     pub async fn active_interaction_generation(&self) -> Option<u64> {
         let state = self.inner.lock().await;
         match state.generation_state {
