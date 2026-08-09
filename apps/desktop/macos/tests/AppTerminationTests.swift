@@ -130,20 +130,12 @@ private struct AppTerminationTests {
             "an unremembered bridge should stay stopped"
         )
         try require(
-            BridgeLaunchPolicy.shouldRestore(
+            !BridgeLaunchPolicy.shouldRestore(
                 autoStart: true,
                 isRunning: true,
                 state: "running"
             ),
-            "a remembered running broker should reconcile to the installed app build"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
-                isRunning: true,
-                state: "inaccessible"
-            ),
-            "a temporarily inaccessible broker should finish its existing startup"
+            "a running bridge should not be started twice"
         )
         try require(
             !BridgeLaunchPolicy.shouldRestore(
