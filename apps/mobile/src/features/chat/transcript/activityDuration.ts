@@ -107,7 +107,6 @@ export function formatActivityElapsedAccessibilityLabel(elapsedMs: number): stri
 
 export function useActivityElapsedMs(chat: Chat, activity: ActivityState | null): number | null {
   const running = activity?.tone === 'running';
-  const terminal = activity ? isTerminalTurnActivity(chat, activity) : false;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [localTiming, setLocalTiming] = useState({
     chatId: chat.id,
@@ -146,32 +145,29 @@ export function useActivityElapsedMs(chat: Chat, activity: ActivityState | null)
       return () => clearInterval(interval);
     }
 
-    if (terminal) {
-      setLocalTiming((previous) => {
-        if (
-          previous.chatId !== chat.id ||
-          !previous.tracking ||
-          previous.localStartedAtMs == null
-        ) {
-          return previous;
-        }
+    // The turn is over. Freeze whatever this device measured instead of discarding it: the
+    // thread status that promotes the row to "Turn completed" routinely lands a frame or two
+    // after the activity settles, and wiping the timer in that gap left the finished turn with
+    // no duration at all. Only a different chat, or the next run, starts the clock over.
+    setLocalTiming((previous) => {
+      if (previous.chatId !== chat.id) {
         return {
-          ...previous,
+          chatId: chat.id,
           tracking: false,
-          frozenElapsedMs: Math.max(0, Date.now() - previous.localStartedAtMs),
+          localStartedAtMs: null,
+          frozenElapsedMs: null,
         };
-      });
-      return undefined;
-    }
-
-    setLocalTiming({
-      chatId: chat.id,
-      tracking: false,
-      localStartedAtMs: null,
-      frozenElapsedMs: null,
+      }
+      if (!previous.tracking || previous.localStartedAtMs == null) {
+        return previous;
+      }
+      return {
+        ...previous,
+        tracking: false,
+        frozenElapsedMs: Math.max(0, Date.now() - previous.localStartedAtMs),
+      };
     });
     return undefined;
-  }, [chat.id, running, terminal]);
-
+  }, [chat.id, running]);
   return elapsedMs;
 }
