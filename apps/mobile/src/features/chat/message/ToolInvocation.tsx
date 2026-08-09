@@ -189,16 +189,28 @@ function ToolTrailing({
   );
 }
 
+function shouldAnimateToolInvocation(
+  invocation: ToolInvocation,
+  threadRunning: boolean,
+  animationVisible: boolean,
+): boolean {
+  return (
+    animationVisible && threadRunning && invocation.status === 'in_progress' && !invocation.isError
+  );
+}
+
 export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   invocation,
   bridgeUrl = null,
   bridgeToken = null,
   threadRunning = true,
+  animationVisible = true,
 }: {
   invocation: ToolInvocation;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
   threadRunning?: boolean;
+  animationVisible?: boolean;
 }) {
   const theme = useAppTheme();
   const messageStyles = useMemo(() => createStyles(theme), [theme]);
@@ -215,7 +227,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
       setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
     }
   }, [expandable, invocation.id, setExpandedIds]);
-  const running = threadRunning && invocation.status === 'in_progress' && !invocation.isError;
+  const running = shouldAnimateToolInvocation(invocation, threadRunning, animationVisible);
 
   return (
     <Animated.View

@@ -26,6 +26,7 @@ interface RenderChatTranscriptItemOptions {
   onForkConversation?: (messageId: string) => void;
   timestampRevealTranslationX: SharedValue<number>;
   threadRunning: boolean;
+  animationVisible: boolean;
 }
 
 export function renderChatTranscriptItem({
@@ -42,6 +43,7 @@ export function renderChatTranscriptItem({
   onForkConversation,
   timestampRevealTranslationX,
   threadRunning,
+  animationVisible,
 }: RenderChatTranscriptItemOptions) {
   if (item.kind === 'toolGroup') {
     return (
@@ -67,6 +69,7 @@ export function renderChatTranscriptItem({
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           threadRunning={threadRunning}
+          animationVisible={animationVisible}
         />
       </View>
     );

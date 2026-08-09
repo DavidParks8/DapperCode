@@ -25,6 +25,7 @@ interface ActivityEventProps {
   detail?: string | null;
   tone: ActivityTone;
   elapsedMs?: number | null;
+  animationActive?: boolean;
 }
 
 const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
@@ -48,7 +49,13 @@ const VERDICT_FADE_EASING = Easing.bezier(...motionEasing.standard);
  * The current activity rendered as the newest event in the transcript rather than floating above
  * the composer.
  */
-export function ActivityEvent({ title, detail, tone, elapsedMs = null }: ActivityEventProps) {
+export function ActivityEvent({
+  title,
+  detail,
+  tone,
+  elapsedMs = null,
+  animationActive = true,
+}: ActivityEventProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const colorByTone: Record<ActivityTone, string> = {
@@ -107,7 +114,7 @@ export function ActivityEvent({ title, detail, tone, elapsedMs = null }: Activit
       <View style={styles.rule} />
       <Animated.View style={[styles.iconWrap, verdictStyle]} testID="transcript-activity-icon">
         {running ? (
-          <AtomGlyph color={color} />
+          <AtomGlyph color={color} active={animationActive} />
         ) : (
           <Ionicons name={ICON_BY_TONE[tone]} size={14} color={color} />
         )}

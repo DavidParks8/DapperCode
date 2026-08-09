@@ -1,23 +1,21 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
-  cancelAnimation,
-  Easing,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
+import { repeatingProgress, useChatAnimationTime } from '../animation/ChatAnimationClock';
 
 interface AtomGlyphProps {
   /** Single tone for the whole glyph; the atom never introduces a colour of its own. */
   color: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  active?: boolean;
 }
 
 const TAU = Math.PI * 2;
@@ -197,30 +195,15 @@ function CoreBlade({ color, index, phase, testID }: BladeProps) {
  * the way a moon passing in front of a planet would. Under Reduce Motion the atom holds a static
  * frame instead of looping.
  */
-export function AtomGlyph({ color, style, testID = 'atom-glyph' }: AtomGlyphProps) {
+export function AtomGlyph({ color, style, testID = 'atom-glyph', active = true }: AtomGlyphProps) {
   const reduceMotion = useReducedMotion();
-  const phase = useSharedValue(0);
+  const animationTime = useChatAnimationTime(active && !reduceMotion);
+  const phase = useDerivedValue(
+    () => (reduceMotion ? STATIC_PHASE : repeatingProgress(animationTime.value, LOOP_DURATION_MS)),
+    [animationTime, reduceMotion],
+  );
   const blades = useMemo(() => Array.from({ length: BLADE_COUNT }, (_, index) => index), []);
   const particles = useMemo(() => Array.from({ length: PARTICLE_COUNT }, (_, index) => index), []);
-
-  useEffect(() => {
-    if (reduceMotion) {
-      cancelAnimation(phase);
-      phase.value = STATIC_PHASE;
-      return;
-    }
-
-    phase.value = 0;
-    phase.value = withRepeat(
-      withTiming(1, { duration: LOOP_DURATION_MS, easing: Easing.linear }),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(phase);
-    };
-  }, [phase, reduceMotion]);
 
   return (
     <View {...decorativeAccessibilityProps} testID={testID} style={[styles.container, style]}>

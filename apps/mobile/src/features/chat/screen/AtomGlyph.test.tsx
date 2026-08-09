@@ -8,14 +8,19 @@ jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/r
 
 import * as reanimatedMock from '@shared/testing/reanimatedMock';
 
-const { mockSharedValues, resetMockSharedValues, setMockReducedMotionEnabled } = reanimatedMock;
+const {
+  mockFrameCallbacks,
+  mockSharedValues,
+  resetMockFrameCallbacks,
+  resetMockSharedValues,
+  setMockReducedMotionEnabled,
+} = reanimatedMock;
 
 /** Shells and the particles on each, mirroring the component. */
 const SHELL_COUNT = 3;
 const PARTICLES_PER_SHELL = 2;
 const PARTICLE_COUNT = SHELL_COUNT * PARTICLES_PER_SHELL;
-/** Frame parked under Reduce Motion, mirroring `STATIC_PHASE` in the component. */
-const STATIC_PHASE = 0.5;
+const LOOP_DURATION_MS = 2600;
 /** Rectangles whose union is the core, mirroring `BLADE_COUNT` in the component. */
 const BLADE_COUNT = 3;
 const BOX = 20;
@@ -61,7 +66,7 @@ function render(node: React.ReactElement): Harness {
       if (!phase) {
         throw new Error('Component created no shared value');
       }
-      phase.value = value;
+      phase.value = value * LOOP_DURATION_MS;
       refresh();
     },
   };
@@ -159,6 +164,7 @@ function bladesOf(tree: ReactTestRenderer): Blade[] {
 
 describe('AtomGlyph', () => {
   beforeEach(() => {
+    resetMockFrameCallbacks();
     resetMockSharedValues();
     setMockReducedMotionEnabled(false);
   });
@@ -331,12 +337,9 @@ describe('AtomGlyph', () => {
   });
 
   it('returns to its starting frame at the end of the loop so the animation does not jump', () => {
-    // The mock resolves animations to their target immediately, so a running loop settles on the
-    // final frame. That frame has to match the first one or the glyph visibly snaps every cycle.
     const { tree, setPhase } = render(<AtomGlyph color="#fff" />);
-    const [phase] = mockSharedValues;
-    expect(phase?.value).toBe(1);
 
+    setPhase(1);
     const end = placementsOf(tree);
     const endCore = bladeOf(tree, 0);
     setPhase(0);
@@ -375,25 +378,16 @@ describe('AtomGlyph', () => {
     act(() => tree.unmount());
   });
 
-  it('loops continuously and stops the loop on unmount', () => {
-    const cancelSpy = jest.spyOn(reanimatedMock, 'cancelAnimation').mockImplementation(() => {});
-
+  it('uses the screen clock instead of creating an independent frame callback', () => {
     const { tree } = render(<AtomGlyph color="#fff" />);
-    const [phase] = mockSharedValues;
-    expect(phase?.value).toBe(1);
+    expect(mockFrameCallbacks).toHaveLength(0);
 
     act(() => tree.unmount());
-    expect(cancelSpy).toHaveBeenCalledWith(phase);
-    cancelSpy.mockRestore();
   });
 
   it('holds a settled frame while Reduce Motion is enabled', () => {
     setMockReducedMotionEnabled(true);
     const { tree } = render(<AtomGlyph color="#fff" />);
-
-    const [phase] = mockSharedValues;
-    // Parked on the chosen static frame, not advanced: a running loop would have settled at 1.
-    expect(phase?.value).toBe(STATIC_PHASE);
 
     // The resting core is the crisp hexagon, which looks deliberate in a way a half-melted one
     // would not.

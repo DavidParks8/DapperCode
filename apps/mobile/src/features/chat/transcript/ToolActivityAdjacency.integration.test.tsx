@@ -4,6 +4,7 @@ import { FlatList } from 'react-native';
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
+import { ActivityEvent } from './ActivityEvent';
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -105,6 +106,19 @@ describe('tool rows adjacent to the transcript activity row', () => {
     };
 
     expect(list().props['ListHeaderComponent']).toBeDefined();
+    expect(root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
+    act(() => {
+      const item = (list().props['data'] as unknown[])[0];
+      const onViewableItemsChanged = list().props['onViewableItemsChanged'] as (event: {
+        viewableItems: unknown[];
+        changed: unknown[];
+      }) => void;
+      onViewableItemsChanged({
+        viewableItems: [{ item, index: 0, key: 'tool-1', isViewable: true }],
+        changed: [],
+      });
+    });
+    expect(root.findAllByProps({ testID: 'tool-header-shimmer' }).length).toBeGreaterThan(0);
     act(notifyContentSizeChanged);
     expect(onPinnedAutoScroll).not.toHaveBeenCalled();
 
@@ -143,6 +157,18 @@ describe('tool rows adjacent to the transcript activity row', () => {
       notifyContentSizeChanged();
     });
     expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
+
+    act(() => {
+      const onScroll = list().props['onScroll'] as (event: unknown) => void;
+      onScroll({
+        nativeEvent: {
+          contentOffset: { x: 0, y: 100 },
+          contentSize: { width: 370, height: 900 },
+          layoutMeasurement: { width: 370, height: 500 },
+        },
+      });
+    });
+    expect(root.findByType(ActivityEvent).props['animationActive']).toBe(false);
 
     act(() => tree?.unmount());
   });

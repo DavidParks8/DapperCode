@@ -20,6 +20,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
+import { ActivityEvent } from './ActivityEvent';
 import { ACTIVITY_COLLAPSE_DURATION_MS } from './TranscriptActivitySlot';
 import {
   mockSharedValues,
@@ -134,17 +135,17 @@ function getList(tree: ReactTestRenderer): Queryable {
 }
 
 function getActivitySlot(tree: ReactTestRenderer): React.ReactElement<{
+  chat: Chat;
   presentation: {
     activity: { detail?: string; title: string; tone: string };
     collapsing: boolean;
-    elapsedMs: number | null;
   };
 }> | null {
   return getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
+    chat: Chat;
     presentation: {
       activity: { detail?: string; title: string; tone: string };
       collapsing: boolean;
-      elapsedMs: number | null;
     };
   }> | null;
 }
@@ -152,13 +153,16 @@ function getActivitySlot(tree: ReactTestRenderer): React.ReactElement<{
 function getActivityPresentation(tree: ReactTestRenderer): {
   activity: { detail?: string; title: string; tone: string };
   collapsing: boolean;
-  elapsedMs: number | null;
 } {
   const slot = getActivitySlot(tree);
   if (!slot) {
     throw new Error('Expected an activity row');
   }
   return slot.props.presentation;
+}
+
+function getActivityElapsedMs(tree: ReactTestRenderer): number | null {
+  return tree.root.findByType(ActivityEvent).props['elapsedMs'] as number | null;
 }
 
 function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
@@ -206,20 +210,23 @@ describe('ChatTranscriptView activity event', () => {
       activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
     });
 
+    const activityHeader = getActivitySlot(tree);
     expect(getActivityPresentation(tree)).toMatchObject({
       activity: { detail: 'src/main.ts', title: 'Editing file', tone: 'running' },
-      elapsedMs: 0,
     });
+    expect(getActivityElapsedMs(tree)).toBe(0);
 
     act(() => jest.advanceTimersByTime(5_000));
+    expect(getActivitySlot(tree)).toBe(activityHeader);
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
     update(tree, {
       chat: runningChat,
       activity: { tone: 'running', title: 'Running tests' },
     });
     expect(getActivityPresentation(tree)).toMatchObject({
       activity: { title: 'Running tests' },
-      elapsedMs: 5_000,
     });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
 
     update(tree, {
       chat: {
@@ -231,18 +238,18 @@ describe('ChatTranscriptView activity event', () => {
     });
     expect(getActivityPresentation(tree)).toMatchObject({
       activity: { title: 'Turn completed', tone: 'complete' },
-      elapsedMs: 5_000,
     });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
 
     act(() => jest.advanceTimersByTime(5_000));
-    expect(getActivityPresentation(tree).elapsedMs).toBe(5_000);
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
 
     update(tree, { activity: null });
     expect(getActivityPresentation(tree)).toMatchObject({
       activity: { title: 'Turn completed' },
       collapsing: true,
-      elapsedMs: 5_000,
     });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
     act(() => jest.advanceTimersByTime(ACTIVITY_COLLAPSE_DURATION_MS));
     expect(getActivitySlot(tree)).toBeNull();
     act(() => tree.unmount());
@@ -271,7 +278,7 @@ describe('ChatTranscriptView activity event', () => {
       activity: { tone: 'complete', title: 'Turn completed' },
     });
 
-    expect(getActivityPresentation(tree).elapsedMs).toBe(7_000);
+    expect(getActivityElapsedMs(tree)).toBe(7_000);
     act(() => tree.unmount());
   });
 });

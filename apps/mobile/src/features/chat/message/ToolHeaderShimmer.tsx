@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,16 +7,17 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, {
-  cancelAnimation,
   Easing,
-  ReduceMotion,
+  useDerivedValue,
   useAnimatedStyle,
   useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+import {
+  repeatingProgress,
+  reversingProgress,
+  useChatAnimationTime,
+} from '../animation/ChatAnimationClock';
 
 const SHIMMER_SPEED_POINTS_PER_SECOND = 320;
 const REDUCED_MOTION_PULSE_MS = 1200;
@@ -33,6 +34,7 @@ const SHIMMER_PASSES = [
   { width: 24, opacity: 0.34 },
 ];
 const SHIMMER_TRAVEL_WIDTH = Math.max(...SHIMMER_PASSES.map((pass) => pass.width));
+const PULSE_EASING = Easing.inOut(Easing.ease);
 
 interface ShimmerPassProps {
   containerHeight: number;
@@ -113,31 +115,19 @@ export function ToolHeaderShimmer({
   children: ReactNode;
 }) {
   const reduceMotion = useReducedMotion();
-  const progress = useSharedValue(0);
   const [size, setSize] = useState({ width: 0, height: 0 });
-
-  useEffect(() => {
-    if (!active || (!reduceMotion && size.width <= 0)) {
-      cancelAnimation(progress);
-      progress.value = 0;
-      return;
+  const clockActive = active && (reduceMotion || size.width > 0);
+  const animationTime = useChatAnimationTime(clockActive);
+  const progress = useDerivedValue(() => {
+    if (!clockActive) {
+      return 0;
     }
-    const duration = reduceMotion
-      ? REDUCED_MOTION_PULSE_MS
-      : ((size.width + SHIMMER_TRAVEL_WIDTH) / SHIMMER_SPEED_POINTS_PER_SECOND) * 1000;
-    progress.value = withRepeat(
-      withTiming(1, {
-        duration,
-        easing: reduceMotion ? Easing.inOut(Easing.ease) : Easing.linear,
-        reduceMotion: ReduceMotion.Never,
-      }),
-      -1,
-      reduceMotion,
-      undefined,
-      ReduceMotion.Never,
-    );
-    return () => cancelAnimation(progress);
-  }, [active, progress, reduceMotion, size.width]);
+    if (reduceMotion) {
+      return PULSE_EASING(reversingProgress(animationTime.value, REDUCED_MOTION_PULSE_MS));
+    }
+    const duration = ((size.width + SHIMMER_TRAVEL_WIDTH) / SHIMMER_SPEED_POINTS_PER_SECOND) * 1000;
+    return repeatingProgress(animationTime.value, duration);
+  }, [animationTime, clockActive, reduceMotion, size.width]);
 
   const onLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;

@@ -9,9 +9,11 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { motionDuration, motionEasing } from '@shared/ui/motion';
+import type { Chat } from '@bridge/types/types';
 import type { ActivityState } from '../helpers/helpers';
 import type { ActivityTone } from '../state/runtime';
 import { ActivityEvent } from './ActivityEvent';
+import { useActivityElapsedMs } from './activityDuration';
 
 export const ACTIVITY_COLLAPSE_DURATION_MS = motionDuration.layout;
 
@@ -36,7 +38,6 @@ const SETTLE_CONFIG = { duration: 0, reduceMotion: ReduceMotion.System } as cons
 
 export interface CollapsibleActivity {
   activity: ActivityState;
-  elapsedMs: number | null;
   collapsing: boolean;
 }
 
@@ -48,16 +49,13 @@ export interface CollapsibleActivity {
  * handing back the last settled activity, flagged as collapsing, until the animation has had its
  * time; it returns `null` — exactly as before — whenever there is genuinely nothing to render.
  */
-export function useCollapsibleActivity(
-  activity: ActivityState | null,
-  elapsedMs: number | null,
-): CollapsibleActivity | null {
-  const retainedRef = useRef<{ activity: ActivityState; elapsedMs: number | null } | null>(null);
+export function useCollapsibleActivity(activity: ActivityState | null): CollapsibleActivity | null {
+  const retainedRef = useRef<ActivityState | null>(null);
   if (activity) {
-    retainedRef.current = { activity, elapsedMs };
+    retainedRef.current = activity;
   }
   const retained = retainedRef.current;
-  const collapsible = Boolean(retained && COLLAPSIBLE_TONES.has(retained.activity.tone));
+  const collapsible = Boolean(retained && COLLAPSIBLE_TONES.has(retained.tone));
   const [cleared, setCleared] = useState(true);
   const shouldClearImmediately = !activity && !collapsible;
   if (activity && cleared) {
@@ -84,15 +82,24 @@ export function useCollapsibleActivity(
   if (!retained || (!activity && settled)) {
     return null;
   }
-  return { activity: retained.activity, elapsedMs: retained.elapsedMs, collapsing };
+  return { activity: retained, collapsing };
 }
 
 /**
  * Renders the transcript's activity row and runs its measured height and opacity down to zero once
  * the row is on its way out.
  */
-export function TranscriptActivitySlot({ presentation }: { presentation: CollapsibleActivity }) {
-  const { activity, elapsedMs, collapsing } = presentation;
+export function TranscriptActivitySlot({
+  chat,
+  presentation,
+  animationActive,
+}: {
+  chat: Chat;
+  presentation: CollapsibleActivity;
+  animationActive: boolean;
+}) {
+  const { activity, collapsing } = presentation;
+  const elapsedMs = useActivityElapsedMs(chat, activity);
   const [contentHeight, setContentHeight] = useState(0);
   const timing = collapsing ? COLLAPSE_CONFIG : SETTLE_CONFIG;
   const animatedStyle = useAnimatedStyle(() => ({
@@ -119,7 +126,11 @@ export function TranscriptActivitySlot({ presentation }: { presentation: Collaps
       testID="transcript-activity-slot"
     >
       <View onLayout={handleLayout}>
-        <ActivityEvent {...activity} elapsedMs={elapsedMs} />
+        <ActivityEvent
+          {...activity}
+          elapsedMs={elapsedMs}
+          animationActive={animationActive && !collapsing}
+        />
       </View>
     </Animated.View>
   );
