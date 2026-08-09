@@ -676,6 +676,7 @@ describe('DrawerContent render behavior matrix', () => {
   });
 
   it('reacts to websocket connectivity, lifecycle events, and snapshot refresh', async () => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
     const harness = createHarness({
       connected: false,
       chats: [

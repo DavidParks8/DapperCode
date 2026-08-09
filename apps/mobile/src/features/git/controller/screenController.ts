@@ -1,3 +1,4 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, useWindowDimensions } from 'react-native';
 
@@ -106,12 +107,20 @@ export function useGitScreenController({
   const [unstagingAll, setUnstagingAll] = useState(false);
   const [bodyScrollEnabled, setBodyScrollEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [screenFocused, setScreenFocused] = useState(false);
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
   const refreshRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
   const { height: windowHeight } = useWindowDimensions();
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, []),
+  );
 
   useEffect(() => {
     setActiveChat(chat);
@@ -219,6 +228,10 @@ export function useGitScreenController({
   refreshRef.current = refresh;
 
   useEffect(() => {
+    if (!screenFocused) {
+      return;
+    }
+
     let interval: ReturnType<typeof setInterval> | null = null;
     let active = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
 
@@ -261,7 +274,7 @@ export function useGitScreenController({
       stop();
       subscription?.remove();
     };
-  }, []);
+  }, [screenFocused]);
 
   const saveWorkspace = useCallback(async () => {
     const nextWorkspace = workspaceDraft.trim();

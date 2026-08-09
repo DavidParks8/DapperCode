@@ -1,9 +1,13 @@
 import React from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { Chat, GitStatusResponse } from '@bridge/types/types';
 import {
+  GIT_SCREEN_REFRESH_INTERVAL_MS,
   gitErrorMessage,
   type GitScreenController,
   useGitScreenController,
@@ -119,6 +123,53 @@ describe('useGitScreenController committed cwd handling', () => {
   it('normalizes branch-loading rejection values', () => {
     expect(gitErrorMessage(new Error('offline'), 'Could not load branches.')).toBe('offline');
     expect(gitErrorMessage('offline', 'Could not load branches.')).toBe('Could not load branches.');
+  });
+
+  describe('useGitScreenController maintenance polling', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('pauses refreshes in the background and resumes one polling loop in the foreground', async () => {
+      let appStateListener: ((state: AppStateStatus) => void) | null = null;
+      const appStateSpy = jest
+        .spyOn(AppState, 'addEventListener')
+        .mockImplementation((_event, listener) => {
+          appStateListener = listener;
+          return { remove: jest.fn() };
+        });
+      const api = createApi();
+      const harness = makeHarness(api);
+
+      await harness.mount();
+      const initialRefreshCount = (api.gitStatus as jest.Mock).mock.calls.length;
+
+      act(() => {
+        appStateListener?.('background');
+        jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS * 2);
+      });
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount);
+
+      act(() => {
+        appStateListener?.('active');
+      });
+      await harness.flush();
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount + 1);
+
+      act(() => {
+        jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS);
+      });
+      await harness.flush();
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount + 2);
+
+      harness.unmount();
+      appStateSpy.mockRestore();
+    });
   });
 
   it('reads only the committed activeChat.cwd on initial load, ignoring the seeded draft text', async () => {

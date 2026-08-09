@@ -415,6 +415,17 @@ export function useDrawerChatLoading(
     },
     [active, loadChats],
   );
+  const cancelMaintenanceWork = useCallback(() => {
+    if (scheduledLoadChatsRef.current) {
+      clearTimeout(scheduledLoadChatsRef.current);
+      scheduledLoadChatsRef.current = null;
+    }
+    scheduledLoadChatsForceRefreshRef.current = false;
+    cancelChatListStream();
+    queuedLoadChatsRef.current = null;
+    setRefreshing(false);
+    setLoadingOlderChats(false);
+  }, [cancelChatListStream]);
 
   useEffect(() => {
     setWsConnected(ws.isConnected);
@@ -434,6 +445,7 @@ export function useDrawerChatLoading(
 
   const { resetPollTimer } = useDrawerChatLiveSync({
     active,
+    cancelMaintenanceWork,
     onThreadDeleted: handleThreadDeleted,
     scheduleLoadChats,
     setRunIndicators: setRunIndicatorsByThread,
@@ -447,16 +459,8 @@ export function useDrawerChatLoading(
       return;
     }
 
-    if (scheduledLoadChatsRef.current) {
-      clearTimeout(scheduledLoadChatsRef.current);
-      scheduledLoadChatsRef.current = null;
-    }
-    scheduledLoadChatsForceRefreshRef.current = false;
-    cancelChatListStream();
-    queuedLoadChatsRef.current = null;
-    setRefreshing(false);
-    setLoadingOlderChats(false);
-  }, [active, cancelChatListStream]);
+    cancelMaintenanceWork();
+  }, [active, cancelMaintenanceWork]);
 
   useEffect(() => {
     return () => {
