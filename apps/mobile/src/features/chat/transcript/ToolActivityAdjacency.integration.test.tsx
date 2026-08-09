@@ -1,4 +1,5 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
+import { FlatList } from 'react-native';
 
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
@@ -64,54 +65,84 @@ const baseProps: ChatTranscriptViewProps = {
   activity: { tone: 'running', title: 'Chasing the hamster' },
 };
 
-function element(messages: ChatMessage[]) {
+function element(messages: ChatMessage[], onPinnedAutoScroll = baseProps.onPinnedAutoScroll) {
   return (
     <AppThemeProvider theme={theme}>
-      <ChatTranscriptView {...baseProps} chat={makeChat(messages)} />
+      <ChatTranscriptView
+        {...baseProps}
+        chat={makeChat(messages)}
+        onPinnedAutoScroll={onPinnedAutoScroll}
+      />
     </AppThemeProvider>
   );
 }
 
 describe('tool rows adjacent to the transcript activity row', () => {
   /**
-   * Transcript rows live inside an inverted FlatList, whose cells carry `scaleY: -1`. Reanimated
-   * snapshots raw Yoga frames without ancestor transforms, so a row driving its own layout
-   * transition holds a stale frame anchored to the opposite visual edge while its siblings and the
-   * activity header already sit at their committed positions. During a rapid tool burst that made
-   * each new row paint on top of the "Chasing the hamster" row before snapping into place.
+   * Fabric already keeps the visible content position of this inverted list. Asking the parent to
+   * scroll to offset zero again on every content-size update creates a second position adjustment
+   * on the same frames where rapid tool cells mount beside the activity header.
    */
-  it('never lets a tool row drive its own layout transition while the activity row is on screen', () => {
+  it('does not request redundant pinned scrolls while rapid tool rows insert at offset zero', () => {
+    const onPinnedAutoScroll = jest.fn();
     let tree: ReactTestRenderer | undefined;
     act(() => {
-      tree = renderer.create(element([toolCall('tool-1', 'Reading a file', 'in_progress')]));
+      tree = renderer.create(
+        element([toolCall('tool-1', 'Reading a file', 'in_progress')], onPinnedAutoScroll),
+      );
     });
     if (!tree) {
       throw new Error('Expected a transcript tree');
     }
     const root = tree.root as Queryable;
-    const activityRows = () => root.findAllByProps({ testID: 'transcript-activity-event' });
-    const toolRows = () => root.findAllByProps({ testID: 'tool-row-layout' });
-    const animatedRowLayouts = () => toolRows().map((row) => row.props['layout']);
+    const list = () => root.findByType(FlatList) as Queryable;
+    const notifyContentSizeChanged = () => {
+      const handler = list().props['onContentSizeChange'] as (
+        width: number,
+        height: number,
+      ) => void;
+      handler(370, 600);
+    };
 
-    expect(activityRows().length).toBeGreaterThan(0);
-    expect(toolRows().length).toBeGreaterThan(0);
-    expect(animatedRowLayouts().every((layout) => layout === undefined)).toBe(true);
+    expect(list().props['ListHeaderComponent']).toBeDefined();
+    act(notifyContentSizeChanged);
+    expect(onPinnedAutoScroll).not.toHaveBeenCalled();
 
-    // A rapid burst: the first row settles (resizing itself) in the same commit that appends the
-    // next two rows directly beneath the activity header.
+    // The first row settles and two more arrive in one burst; repeated size notifications at the
+    // newest edge must not enqueue scroll retries against native maintain-visible positioning.
     act(() => {
       tree?.update(
-        element([
-          toolCall('tool-1', 'Reading a file', 'completed'),
-          toolCall('tool-2', 'Searching the workspace', 'completed'),
-          toolCall('tool-3', 'Running the test suite', 'in_progress'),
-        ]),
+        element(
+          [
+            toolCall('tool-1', 'Reading a file', 'completed'),
+            toolCall('tool-2', 'Searching the workspace', 'completed'),
+            toolCall('tool-3', 'Running the test suite', 'in_progress'),
+          ],
+          onPinnedAutoScroll,
+        ),
       );
+      notifyContentSizeChanged();
+      notifyContentSizeChanged();
     });
 
-    expect(activityRows().length).toBeGreaterThan(0);
-    expect(toolRows().length).toBeGreaterThan(0);
-    expect(animatedRowLayouts().every((layout) => layout === undefined)).toBe(true);
+    expect(onPinnedAutoScroll).not.toHaveBeenCalled();
+    expect(root.findAllByProps({ testID: 'transcript-activity-event' })).not.toHaveLength(0);
+    expect(root.findAllByProps({ testID: 'tool-row-layout' }).length).toBeGreaterThanOrEqual(3);
+
+    // If the user is merely near the newest edge rather than exactly on it, retain the existing
+    // correction so a growing row can finish pulling the transcript back to offset zero.
+    act(() => {
+      const onScroll = list().props['onScroll'] as (event: unknown) => void;
+      onScroll({
+        nativeEvent: {
+          contentOffset: { x: 0, y: 10 },
+          contentSize: { width: 370, height: 600 },
+          layoutMeasurement: { width: 370, height: 500 },
+        },
+      });
+      notifyContentSizeChanged();
+    });
+    expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
 
     act(() => tree?.unmount());
   });

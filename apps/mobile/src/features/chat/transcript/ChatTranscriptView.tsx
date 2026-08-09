@@ -59,6 +59,8 @@ import {
 import { useActivityElapsedMs } from './activityDuration';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 
+const PINNED_SCROLL_EPSILON_PX = 1;
+
 export interface ChatTranscriptViewProps {
   chat: Chat;
   parentChat: Chat | null;
@@ -528,7 +530,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             contentHeightRef.current = height;
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
-            onPinnedAutoScroll(false);
+            // An inverted list is already at its newest edge at offset zero. Sending another
+            // scrollToOffset(0) for every rapidly inserted tool row races Fabric's native
+            // maintain-visible-position adjustment and can briefly paint the new row over the
+            // activity header before the redundant scroll settles.
+            if (scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX) {
+              onPinnedAutoScroll(false);
+            }
             maybeAutoLoadOlderMessages(true);
           }}
           initialNumToRender={listBatchingConfig.initialNumToRender}

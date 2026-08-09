@@ -713,7 +713,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
     expect(autoScrollStateRef.current.isUserInteracting).toBe(true);
-    expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
+    expect(onPinnedAutoScroll).not.toHaveBeenCalled();
 
     act(() => {
       gesture.onFinalize?.({ y: 164 });
@@ -1184,6 +1184,7 @@ describe('ChatTranscriptView continuation', () => {
     list = getList(tree);
     expect(list.props.data).toHaveLength(140);
 
+    scroll(list, 10, 1000, 200);
     act(() => list.props.onContentSizeChange(320, 1000));
     expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
     scroll(list, 100, 1000, 200);

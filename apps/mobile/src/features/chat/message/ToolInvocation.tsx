@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
@@ -217,12 +217,6 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   }, [expandable, invocation.id, setExpandedIds]);
   const running = threadRunning && invocation.status === 'in_progress' && !invocation.isError;
 
-  // No `layout` transition here on purpose. Transcript rows live inside an inverted FlatList, whose
-  // cells carry a `scaleY: -1` transform. Reanimated snapshots raw Yoga frames and ignores ancestor
-  // transforms, so an animated frame is anchored to the opposite visual edge from the committed
-  // layout: while the row lags behind a size change, it paints over the neighbouring row - which,
-  // for the newest tool, is the live activity strip. The list owns row positions; only the
-  // expandable output below animates.
   return (
     <Animated.View
       style={[
@@ -230,6 +224,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         messageStyles.messageWrapperAssistant,
         styles.rowLayoutClip,
       ]}
+      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
       testID="tool-row-layout"
     >
       <View
