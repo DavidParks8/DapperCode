@@ -1,17 +1,14 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
-  cancelAnimation,
-  Easing,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
+import { repeatingProgress, useChatAnimationTime } from '../animation/ChatAnimationClock';
 
 interface AtomGlyphProps {
   /** Single tone for the whole glyph; the atom never introduces a colour of its own. */
@@ -200,25 +197,13 @@ function CoreBlade({ color, index, phase, testID }: BladeProps) {
  */
 export function AtomGlyph({ color, style, testID = 'atom-glyph', active = true }: AtomGlyphProps) {
   const reduceMotion = useReducedMotion();
-  const phase = useSharedValue(STATIC_PHASE);
+  const animationTime = useChatAnimationTime(active && !reduceMotion);
+  const phase = useDerivedValue(
+    () => (reduceMotion ? STATIC_PHASE : repeatingProgress(animationTime.value, LOOP_DURATION_MS)),
+    [animationTime, reduceMotion],
+  );
   const blades = useMemo(() => Array.from({ length: BLADE_COUNT }, (_, index) => index), []);
   const particles = useMemo(() => Array.from({ length: PARTICLE_COUNT }, (_, index) => index), []);
-
-  useEffect(() => {
-    cancelAnimation(phase);
-    if (reduceMotion || !active) {
-      phase.value = STATIC_PHASE;
-      return undefined;
-    }
-
-    phase.value = 0;
-    phase.value = withRepeat(
-      withTiming(1, { duration: LOOP_DURATION_MS, easing: Easing.linear }),
-      -1,
-      false,
-    );
-    return () => cancelAnimation(phase);
-  }, [active, phase, reduceMotion]);
 
   return (
     <View {...decorativeAccessibilityProps} testID={testID} style={[styles.container, style]}>

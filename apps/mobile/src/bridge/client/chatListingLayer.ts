@@ -95,12 +95,7 @@ export abstract class HostBridgeApiClientChatListingLayer extends HostBridgeApiC
       }
       closed = true;
       unsubscribe();
-      // A closed socket already makes the bridge discard every stream owned by that client.
-      // Issuing a cancel RPC here would wake the reconnecting socket from its backoff, producing a
-      // rapid disconnected/connected loop on the sessions list.
-      if (this.ws.isConnected) {
-        void this.ws.request('bridge/thread/list/stream/cancel', { streamId }).catch(() => {});
-      }
+      void this.ws.request('bridge/thread/list/stream/cancel', { streamId }).catch(() => {});
     };
     try {
       const response = await this.ws.request<ThreadListStreamStartResponse>(

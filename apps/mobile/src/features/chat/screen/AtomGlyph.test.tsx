@@ -20,12 +20,12 @@ const {
 const SHELL_COUNT = 3;
 const PARTICLES_PER_SHELL = 2;
 const PARTICLE_COUNT = SHELL_COUNT * PARTICLES_PER_SHELL;
+const LOOP_DURATION_MS = 2600;
 /** Rectangles whose union is the core, mirroring `BLADE_COUNT` in the component. */
 const BLADE_COUNT = 3;
 const BOX = 20;
 const HALF = BOX / 2;
 const TAU = Math.PI * 2;
-const STATIC_PHASE = 0.5;
 
 type Props = Record<string, unknown>;
 
@@ -36,7 +36,7 @@ type Queryable = ReactTestInstance & {
 
 interface Harness {
   tree: ReactTestRenderer;
-  /** Moves the native animation phase and re-renders, so assertions can walk the whole loop. */
+  /** Moves the animation clock and re-renders, so assertions can walk the whole loop. */
   setPhase(value: number): void;
 }
 
@@ -66,7 +66,7 @@ function render(node: React.ReactElement): Harness {
       if (!phase) {
         throw new Error('Component created no shared value');
       }
-      phase.value = value;
+      phase.value = value * LOOP_DURATION_MS;
       refresh();
     },
   };
@@ -378,20 +378,11 @@ describe('AtomGlyph', () => {
     act(() => tree.unmount());
   });
 
-  it('runs on native timing only while visible and stops the loop on unmount', () => {
-    const cancelSpy = jest.spyOn(reanimatedMock, 'cancelAnimation').mockImplementation(() => {});
-    const node = <AtomGlyph color="#fff" active={false} />;
-    const { tree } = render(node);
-    const [phase] = mockSharedValues;
-    expect(phase?.value).toBe(STATIC_PHASE);
-
-    act(() => tree.update(<AtomGlyph color="#fff" active />));
-    expect(phase?.value).toBe(1);
+  it('uses the screen clock instead of creating an independent frame callback', () => {
+    const { tree } = render(<AtomGlyph color="#fff" />);
     expect(mockFrameCallbacks).toHaveLength(0);
 
     act(() => tree.unmount());
-    expect(cancelSpy).toHaveBeenCalledWith(phase);
-    cancelSpy.mockRestore();
   });
 
   it('holds a settled frame while Reduce Motion is enabled', () => {

@@ -31,14 +31,10 @@ function mockUploadResponse(status: number, body: string) {
 }
 
 function createWsMock() {
-  type WsLike = Pick<
-    HostBridgeWsClient,
-    'isConnected' | 'request' | 'waitForTurnCompletion' | 'onEvent'
-  >;
+  type WsLike = Pick<HostBridgeWsClient, 'request' | 'waitForTurnCompletion' | 'onEvent'>;
   const onEventMock = jest.fn() as jest.MockedFunction<WsLike['onEvent']>;
   onEventMock.mockReturnValue(jest.fn());
   return {
-    isConnected: true,
     request: jest.fn(),
     waitForTurnCompletion: jest.fn().mockResolvedValue(undefined),
     onEvent: onEventMock,
@@ -186,28 +182,6 @@ describe('HostBridgeApiClient', () => {
     expect(ws.request).toHaveBeenLastCalledWith('bridge/thread/list/stream/cancel', {
       streamId: controller.streamId,
     });
-  });
-
-  it('locally closes a session-list stream after disconnect without waking the socket', async () => {
-    const ws = createWsMock();
-    const unsubscribe = jest.fn();
-    ws.onEvent.mockReturnValue(unsubscribe);
-    ws.request.mockImplementation((method, params) =>
-      Promise.resolve(
-        method === 'bridge/thread/list/stream/start'
-          ? { started: true, streamId: (params as { streamId: string }).streamId }
-          : {},
-      ),
-    );
-    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
-    const controller = await client.startChatListStream({}, jest.fn());
-    ws.request.mockClear();
-    (ws as { isConnected: boolean }).isConnected = false;
-
-    controller.cancel();
-
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
-    expect(ws.request).not.toHaveBeenCalled();
   });
 
   it('listAllChats() follows thread/list pagination until nextCursor is empty', async () => {
