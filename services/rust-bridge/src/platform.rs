@@ -115,8 +115,14 @@ pub(crate) trait ProcessStrategy {
 
     fn wait_for_shutdown_signal(&'static self) -> PlatformFuture<&'static str>;
 
+    /// Applies lifecycle behavior before a Git child is spawned.
     fn configure_git_command(&self, command: &mut Command);
 
+    /// Synchronously terminates the Git child and its descendants.
+    ///
+    /// This must not return while a descendant can still retain the command's stdout or stderr
+    /// pipe handles. Callers join their pipe readers after this hook and hold a semaphore permit
+    /// until those readers reach EOF.
     fn kill_git_process_group(&self, child: &Child);
 
     fn git_global_config_path(&self) -> &'static str;
@@ -519,6 +525,28 @@ mod tests {
         assert!(!source.contains("INFINITE"));
         assert!(source.contains("WaitForSingleObject"));
         assert!(source.contains(", 0)"));
+    }
+
+    #[test]
+    fn windows_git_timeout_policy_terminates_descendants_before_joining_readers() {
+        let windows = include_str!("platform/windows/process.rs");
+        assert!(windows.contains("kill_on_drop(true)"));
+        assert!(windows.contains("taskkill.exe"));
+        assert!(windows.contains(r#""/T""#));
+        assert!(windows.contains(r#""/F""#));
+        assert!(windows.contains(".status()"));
+
+        let terminal = include_str!("services/terminal.rs");
+        let terminate = terminal
+            .find("kill_git_process_group(&child)")
+            .expect("Git timeout must invoke platform tree termination");
+        let join_readers = terminal
+            .find("stdout_task.await")
+            .expect("Git execution must join its stdout reader");
+        assert!(
+            terminate < join_readers,
+            "the process tree must be terminated before pipe readers are joined"
+        );
     }
 
     fn collect_rust_sources(directory: &Path, output: &mut Vec<PathBuf>) {

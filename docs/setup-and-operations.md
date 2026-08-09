@@ -375,9 +375,10 @@ Run `npm run desktop:test:windows` on Windows to inspect bundle signatures, iden
 native executable architecture, required payloads, and forbidden runtime content.
 
 To uninstall, first choose **Quit** from the tray menu, then remove DapperCode from **Settings → Apps
-→ Installed apps**. For a complete reset, also remove `%APPDATA%\DapperCode` and every Windows
-Credential Manager entry under service `dev.dappercode.desktop` whose account is
-`bridge-auth-token:v2:*`, plus the `bridge-auth-vault:v2` layout marker and any legacy
-`bridge-auth-vault:v1` entry. Removing that data discards every configured workspace, bridge token,
-session snapshot, attachment, and log; reinstalling or relaunching then requires setup and pairing
-again.
+→ Installed apps**. For a complete reset, remove credentials before deleting
+`%APPDATA%\DapperCode`: in **Credential Manager → Windows Credentials**, remove every Generic
+Credential for service `dev.dappercode.desktop` whose account matches `bridge-auth-token:v2:*`, the
+`bridge-auth-vault:v2` layout marker, any legacy `bridge-auth-vault:v1` shared vault, and any legacy
+`bridge-auth-token:<profile-id>` entry. Only then delete `%APPDATA%\DapperCode`. Removing that data
+discards every configured workspace, bridge token, session snapshot, attachment, and log;
+reinstalling or relaunching then requires setup and pairing again.

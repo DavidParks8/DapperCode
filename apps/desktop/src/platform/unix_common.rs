@@ -1,9 +1,15 @@
-use std::{io, process::Command, time::Duration};
+use std::{
+    fs::{File, OpenOptions},
+    io,
+    path::Path,
+    process::Command,
+    time::Duration,
+};
 
 use anyhow::{anyhow, bail, Context, Result};
 use sysinfo::{Pid, ProcessesToUpdate, Signal, System};
 
-use super::ProcessStopRequest;
+use super::{ensure_private_path_kind, PrivatePathKind, PrivatePathState, ProcessStopRequest};
 
 pub(super) fn process_start_identity(_pid: u32, sysinfo_start_time: u64) -> Result<u64> {
     Ok(sysinfo_start_time)
@@ -29,6 +35,66 @@ pub(super) fn request_process_stop(
         Some(false) => bail!("operating system refused to signal bridge process {pid}"),
         None => bail!("requested process signal is not supported on this platform"),
     }
+}
+
+pub(super) fn configure_private_file_options(options: &mut OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+}
+
+pub(super) fn secure_private_directory(path: &Path) -> Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("failed to open private directory {}", path.display()))?;
+    let metadata = directory
+        .metadata()
+        .with_context(|| format!("failed to inspect private directory {}", path.display()))?;
+    ensure_private_path_kind(
+        path,
+        PrivatePathKind::Directory,
+        PrivatePathState {
+            is_directory: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            is_reparse_point: metadata.file_type().is_symlink(),
+        },
+    )?;
+    let mut permissions = metadata.permissions();
+    if permissions.mode() & 0o777 != 0o700 {
+        permissions.set_mode(0o700);
+        directory
+            .set_permissions(permissions)
+            .with_context(|| format!("failed to restrict {}", path.display()))?;
+    }
+    Ok(())
+}
+
+pub(super) fn secure_private_file(path: &Path, file: &File) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect private file {}", path.display()))?;
+    ensure_private_path_kind(
+        path,
+        PrivatePathKind::File,
+        PrivatePathState {
+            is_directory: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            is_reparse_point: metadata.file_type().is_symlink(),
+        },
+    )?;
+    let mut permissions = metadata.permissions();
+    if permissions.mode() & 0o777 != 0o600 {
+        permissions.set_mode(0o600);
+        file.set_permissions(permissions)
+            .with_context(|| format!("failed to restrict {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub(super) fn detach_process(command: &mut Command) {

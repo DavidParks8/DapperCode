@@ -620,14 +620,12 @@ impl FileLease {
         create_private_dir(parent)?;
         let mut options = OpenOptions::new();
         options.read(true).write(true).create(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        platform::configure_private_file_options(&mut options);
         let file = options
             .open(path)
             .with_context(|| format!("failed to open {}", path.display()))?;
+        platform::secure_private_file(path, &file)
+            .with_context(|| format!("failed to secure {}", path.display()))?;
         file.lock_exclusive()
             .with_context(|| format!("failed to lock {}", path.display()))?;
         Ok(Self { file })
@@ -642,23 +640,30 @@ impl Drop for FileLease {
 
 pub fn create_private_dir(path: &Path) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)?.permissions();
-        if permissions.mode() & 0o077 != 0 {
-            permissions.set_mode(0o700);
-            fs::set_permissions(path, permissions)
-                .with_context(|| format!("failed to restrict {}", path.display()))?;
+    platform::secure_private_directory(path)
+        .with_context(|| format!("failed to secure {}", path.display()))?;
+    Ok(())
+}
+
+fn secure_existing_private_file(path: &Path) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    platform::configure_private_file_options(&mut options);
+    match options.open(path) {
+        Ok(file) => platform::secure_private_file(path, &file)
+            .with_context(|| format!("failed to secure existing {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to open existing {}", path.display()))
         }
     }
-    Ok(())
 }
 
 /// Writes `contents` to `path` atomically with owner-only permissions.
 pub fn atomic_private_write(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path.parent().context("generated file has no parent")?;
     create_private_dir(parent)?;
+    secure_existing_private_file(path)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -674,12 +679,10 @@ pub fn atomic_private_write(path: &Path, contents: &[u8]) -> Result<()> {
     let result = (|| -> Result<()> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        platform::configure_private_file_options(&mut options);
         let mut file = options.open(&temporary)?;
+        platform::secure_private_file(&temporary, &file)
+            .with_context(|| format!("failed to secure {}", temporary.display()))?;
         file.write_all(contents)?;
         if !contents.ends_with(b"\n") {
             file.write_all(b"\n")?;

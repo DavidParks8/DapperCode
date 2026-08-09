@@ -1,4 +1,5 @@
 use std::{
+    fs::{File, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -77,6 +78,18 @@ impl PlatformStrategy for UnixStrategy {
         request: ProcessStopRequest,
     ) -> Result<bool> {
         unix_common::request_process_stop(pid, expected_start_time, request)
+    }
+
+    fn configure_private_file_options(&self, options: &mut OpenOptions) {
+        unix_common::configure_private_file_options(options);
+    }
+
+    fn secure_private_directory(&self, path: &Path) -> Result<()> {
+        unix_common::secure_private_directory(path)
+    }
+
+    fn secure_private_file(&self, path: &Path, file: &File) -> Result<()> {
+        unix_common::secure_private_file(path, file)
     }
 
     fn detach_process(&self, command: &mut Command) {

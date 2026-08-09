@@ -1,4 +1,5 @@
 use std::{
+    fs::{File, OpenOptions},
     io, mem,
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -11,8 +12,8 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, ERROR_BUFFER_OVERFLOW, ERROR_NO_DATA, FILETIME, HANDLE, NO_ERROR,
-        WAIT_OBJECT_0, WAIT_TIMEOUT,
+        CloseHandle, ERROR_BUFFER_OVERFLOW, ERROR_NO_DATA, FILETIME, GENERIC_READ, GENERIC_WRITE,
+        HANDLE, NO_ERROR, WAIT_OBJECT_0, WAIT_TIMEOUT,
     },
     NetworkManagement::{
         IpHelper::{
@@ -23,23 +24,38 @@ use windows_sys::Win32::{
         Ndis::IfOperStatusUp,
     },
     Networking::WinSock::{IpDadStatePreferred, AF_INET, SOCKADDR_IN},
-    Security::{EqualSid, GetTokenInformation, TokenUser, TOKEN_USER},
+    Security::{
+        AddAccessAllowedAceEx,
+        Authorization::{SetSecurityInfo, SE_FILE_OBJECT},
+        CreateWellKnownSid, EqualSid, GetLengthSid, GetTokenInformation, InitializeAcl, IsValidSid,
+        TokenUser, WinLocalSystemSid, ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
+        DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, PROTECTED_DACL_SECURITY_INFORMATION, PSID,
+        SECURITY_MAX_SID_SIZE, TOKEN_QUERY, TOKEN_USER, WELL_KNOWN_SID_TYPE,
+    },
+    Storage::FileSystem::{
+        FileAttributeTagInfo, GetFileInformationByHandleEx, GetFileType, FILE_ALL_ACCESS,
+        FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
+        READ_CONTROL, WRITE_DAC,
+    },
     System::{
         Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT},
         Threading::{
-            GetCurrentProcess, GetProcessTimes, OpenProcess, TerminateProcess, WaitForSingleObject,
-            PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+            GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken, TerminateProcess,
+            WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
         },
     },
 };
 
 use super::{
-    resolve_manual_lan_host, valid_non_loopback_ipv4,
+    ensure_private_path_kind, resolve_manual_lan_host, valid_non_loopback_ipv4,
     windows_support::{
         select_local_ipv4, windows_runtime_candidates, windows_tailscale_install_candidates,
         LocalIpv4Candidate,
     },
-    CredentialLayout, NetworkMode, PlatformStrategy, ProcessStopRequest, SetupPreflightError,
+    CredentialLayout, NetworkMode, PlatformStrategy, PrivateAccessPrincipal, PrivatePathKind,
+    PrivatePathState, ProcessStopRequest, SetupPreflightError, PRIVATE_ACCESS_PRINCIPALS,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -156,6 +172,26 @@ impl PlatformStrategy for WindowsStrategy {
         }
     }
 
+    fn configure_private_file_options(&self, options: &mut OpenOptions) {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        options
+            .access_mode(
+                GENERIC_READ | GENERIC_WRITE | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
+            )
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+
+    fn secure_private_directory(&self, path: &Path) -> Result<()> {
+        let directory = open_private_directory(path)?;
+        apply_private_acl(path, &directory, PrivatePathKind::Directory)
+    }
+
+    fn secure_private_file(&self, path: &Path, file: &File) -> Result<()> {
+        ensure_private_handle_kind(path, file, PrivatePathKind::File)?;
+        apply_private_acl(path, file, PrivatePathKind::File)
+    }
+
     fn detach_process(&self, command: &mut Command) {
         use std::os::windows::process::CommandExt;
 
@@ -179,6 +215,239 @@ impl PlatformStrategy for WindowsStrategy {
     async fn wait_for_shutdown_signal(&self) {
         let _ = tokio::signal::ctrl_c().await;
     }
+}
+
+fn file_handle(file: &File) -> HANDLE {
+    use std::os::windows::io::AsRawHandle;
+
+    file.as_raw_handle()
+}
+
+fn private_path_state(file: &File) -> Result<PrivatePathState> {
+    let mut information = FILE_ATTRIBUTE_TAG_INFO::default();
+    if unsafe {
+        GetFileInformationByHandleEx(
+            file_handle(file),
+            FileAttributeTagInfo,
+            ptr::addr_of_mut!(information).cast(),
+            mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error()).context("failed to inspect private path");
+    }
+    let attributes = information.FileAttributes;
+    let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    Ok(PrivatePathState {
+        is_directory,
+        is_file: !is_directory
+            && attributes & FILE_ATTRIBUTE_DEVICE == 0
+            && unsafe { GetFileType(file_handle(file)) } == FILE_TYPE_DISK,
+        is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+    })
+}
+
+fn ensure_private_handle_kind(path: &Path, file: &File, expected: PrivatePathKind) -> Result<()> {
+    let state = private_path_state(file)
+        .with_context(|| format!("failed to inspect private path {}", path.display()))?;
+    ensure_private_path_kind(path, expected, state)
+}
+
+fn open_private_directory(path: &Path) -> Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let mut options = OpenOptions::new();
+    options
+        .access_mode(FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let directory = options
+        .open(path)
+        .with_context(|| format!("failed to open private directory {}", path.display()))?;
+    ensure_private_handle_kind(path, &directory, PrivatePathKind::Directory)?;
+    Ok(directory)
+}
+
+struct SidBuffer {
+    words: Vec<usize>,
+}
+
+impl SidBuffer {
+    fn copy_from(sid: PSID) -> Result<Self> {
+        if sid.is_null() || unsafe { IsValidSid(sid) } == 0 {
+            bail!("Windows returned an invalid user SID");
+        }
+        let byte_len = unsafe { GetLengthSid(sid) } as usize;
+        if byte_len == 0 {
+            bail!("Windows returned an empty user SID");
+        }
+        let mut words = vec![0_usize; byte_len.div_ceil(mem::size_of::<usize>())];
+        unsafe {
+            ptr::copy_nonoverlapping(sid.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), byte_len);
+        }
+        Ok(Self { words })
+    }
+
+    fn as_ptr(&self) -> PSID {
+        self.words.as_ptr().cast_mut().cast()
+    }
+
+    fn byte_len(&self) -> usize {
+        unsafe { GetLengthSid(self.as_ptr()) as usize }
+    }
+}
+
+fn open_process_token(process: HANDLE) -> Result<WindowsHandle> {
+    let mut token: HANDLE = ptr::null_mut();
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+        return Err(io::Error::last_os_error()).context("failed to open process token");
+    }
+    Ok(WindowsHandle(token))
+}
+
+fn token_user_buffer(token: HANDLE) -> Result<Vec<usize>> {
+    let mut required = 0_u32;
+    unsafe {
+        GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut required);
+    }
+    if required < mem::size_of::<TOKEN_USER>() as u32 {
+        return Err(io::Error::last_os_error()).context("failed to size process user token");
+    }
+    let words = (required as usize).div_ceil(mem::size_of::<usize>());
+    let mut buffer = vec![0_usize; words];
+    if unsafe {
+        GetTokenInformation(
+            token,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            (buffer.len() * mem::size_of::<usize>()) as u32,
+            &mut required,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error()).context("failed to read process user token");
+    }
+    Ok(buffer)
+}
+
+fn process_user_sid(process: HANDLE) -> Result<SidBuffer> {
+    let token = open_process_token(process)?;
+    let user_buffer = token_user_buffer(token.0)?;
+    let user = unsafe { &*user_buffer.as_ptr().cast::<TOKEN_USER>() };
+    SidBuffer::copy_from(user.User.Sid)
+}
+
+fn current_user_sid() -> Result<SidBuffer> {
+    process_user_sid(unsafe { GetCurrentProcess() }).context("failed to read current user SID")
+}
+
+fn well_known_sid(kind: WELL_KNOWN_SID_TYPE) -> Result<SidBuffer> {
+    let byte_len = SECURITY_MAX_SID_SIZE as usize;
+    let mut words = vec![0_usize; byte_len.div_ceil(mem::size_of::<usize>())];
+    let mut written = SECURITY_MAX_SID_SIZE;
+    if unsafe {
+        CreateWellKnownSid(
+            kind,
+            ptr::null_mut(),
+            words.as_mut_ptr().cast(),
+            &mut written,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error()).context("failed to create a well-known SID");
+    }
+    words.truncate((written as usize).div_ceil(mem::size_of::<usize>()));
+    let sid = SidBuffer { words };
+    if unsafe { IsValidSid(sid.as_ptr()) } == 0 {
+        bail!("Windows returned an invalid well-known SID");
+    }
+    Ok(sid)
+}
+
+fn local_system_sid() -> Result<SidBuffer> {
+    well_known_sid(WinLocalSystemSid).context("failed to create the Local System SID")
+}
+
+struct AclBuffer {
+    words: Vec<u32>,
+}
+
+impl AclBuffer {
+    fn as_ptr(&self) -> *const ACL {
+        self.words.as_ptr().cast()
+    }
+}
+
+fn private_acl(kind: PrivatePathKind, user: &SidBuffer, system: &SidBuffer) -> Result<AclBuffer> {
+    let mut trustees = Vec::with_capacity(PRIVATE_ACCESS_PRINCIPALS.len());
+    for principal in PRIVATE_ACCESS_PRINCIPALS {
+        let sid = match principal {
+            PrivateAccessPrincipal::CurrentUser => user,
+            PrivateAccessPrincipal::LocalSystem => system,
+        };
+        if trustees
+            .iter()
+            .all(|existing: &&SidBuffer| unsafe { EqualSid(existing.as_ptr(), sid.as_ptr()) } == 0)
+        {
+            trustees.push(sid);
+        }
+    }
+
+    let acl_bytes = mem::size_of::<ACL>()
+        + trustees
+            .iter()
+            .map(|sid| {
+                mem::size_of::<ACCESS_ALLOWED_ACE>() - mem::size_of::<u32>() + sid.byte_len()
+            })
+            .sum::<usize>();
+    let acl_len = u32::try_from(acl_bytes).context("private ACL is too large")?;
+    let mut acl = AclBuffer {
+        words: vec![0_u32; acl_bytes.div_ceil(mem::size_of::<u32>())],
+    };
+    let acl_ptr = acl.words.as_mut_ptr().cast::<ACL>();
+    if unsafe { InitializeAcl(acl_ptr, acl_len, ACL_REVISION) } == 0 {
+        return Err(io::Error::last_os_error()).context("failed to initialize private ACL");
+    }
+    let flags = match kind {
+        PrivatePathKind::Directory => CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE,
+        PrivatePathKind::File => 0,
+    };
+    for sid in trustees {
+        if unsafe {
+            AddAccessAllowedAceEx(acl_ptr, ACL_REVISION, flags, FILE_ALL_ACCESS, sid.as_ptr())
+        } == 0
+        {
+            return Err(io::Error::last_os_error())
+                .context("failed to add a trustee to the private ACL");
+        }
+    }
+    Ok(acl)
+}
+
+fn apply_private_acl(path: &Path, file: &File, kind: PrivatePathKind) -> Result<()> {
+    let user = current_user_sid()?;
+    let system = local_system_sid()?;
+    let acl = private_acl(kind, &user, &system)?;
+    set_protected_dacl(path, file, &acl)
+}
+
+fn set_protected_dacl(path: &Path, file: &File, acl: &AclBuffer) -> Result<()> {
+    let result = unsafe {
+        SetSecurityInfo(
+            file_handle(file),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            acl.as_ptr(),
+            ptr::null(),
+        )
+    };
+    if result != NO_ERROR {
+        return Err(io::Error::from_raw_os_error(result as i32))
+            .with_context(|| format!("failed to apply private ACL to {}", path.display()));
+    }
+    Ok(())
 }
 
 fn resolve_tailscale_host() -> Result<String, SetupPreflightError> {
@@ -352,53 +621,234 @@ fn process_creation_time(process: HANDLE) -> Result<u64> {
 }
 
 fn ensure_process_has_current_user(process: HANDLE, pid: u32) -> Result<()> {
-    fn open_token(process: HANDLE) -> Result<WindowsHandle> {
-        use windows_sys::Win32::{Security::TOKEN_QUERY, System::Threading::OpenProcessToken};
-
-        let mut token: HANDLE = ptr::null_mut();
-        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
-            return Err(io::Error::last_os_error()).context("failed to open process token");
-        }
-        Ok(WindowsHandle(token))
-    }
-
-    fn token_user_buffer(token: HANDLE) -> Result<Vec<usize>> {
-        let mut required = 0_u32;
-        unsafe {
-            GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut required);
-        }
-        if required < mem::size_of::<TOKEN_USER>() as u32 {
-            return Err(io::Error::last_os_error()).context("failed to size process user token");
-        }
-        let words = (required as usize).div_ceil(mem::size_of::<usize>());
-        let mut buffer = vec![0_usize; words];
-        if unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                buffer.as_mut_ptr().cast(),
-                (buffer.len() * mem::size_of::<usize>()) as u32,
-                &mut required,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error()).context("failed to read process user token");
-        }
-        Ok(buffer)
-    }
-
-    let target_token = open_token(process)
+    let target = process_user_sid(process)
         .with_context(|| format!("failed to verify the user for bridge process {pid}"))?;
-    let current_token =
-        open_token(unsafe { GetCurrentProcess() }).context("failed to read current user token")?;
-    let target_user = token_user_buffer(target_token.0)?;
-    let current_user = token_user_buffer(current_token.0)?;
-    let target = unsafe { &*target_user.as_ptr().cast::<TOKEN_USER>() };
-    let current = unsafe { &*current_user.as_ptr().cast::<TOKEN_USER>() };
-    if unsafe { EqualSid(target.User.Sid, current.User.Sid) } == 0 {
+    let current = current_user_sid()?;
+    if unsafe { EqualSid(target.as_ptr(), current.as_ptr()) } == 0 {
         bail!(
             "refusing to stop bridge process {pid} because it belongs to a different Windows user"
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            AclSizeInformation, Authorization::GetSecurityInfo, GetAce, GetAclInformation,
+            GetSecurityDescriptorControl, WinWorldSid, ACL_SIZE_INFORMATION, INHERITED_ACE,
+            PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+        },
+    };
+
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+
+    struct LocalSecurityDescriptor(PSECURITY_DESCRIPTOR);
+
+    impl Drop for LocalSecurityDescriptor {
+        fn drop(&mut self) {
+            unsafe {
+                LocalFree(self.0);
+            }
+        }
+    }
+
+    struct InspectedAce {
+        sid: SidBuffer,
+        mask: u32,
+        flags: u8,
+        ace_type: u8,
+    }
+
+    struct InspectedAcl {
+        protected: bool,
+        aces: Vec<InspectedAce>,
+    }
+
+    fn open_test_path(path: &Path, kind: PrivatePathKind) -> Result<File> {
+        match kind {
+            PrivatePathKind::Directory => open_private_directory(path),
+            PrivatePathKind::File => {
+                let mut options = OpenOptions::new();
+                options.read(true);
+                STRATEGY.configure_private_file_options(&mut options);
+                let file = options.open(path)?;
+                ensure_private_handle_kind(path, &file, PrivatePathKind::File)?;
+                Ok(file)
+            }
+        }
+    }
+
+    fn inspect_acl(path: &Path, kind: PrivatePathKind) -> Result<InspectedAcl> {
+        let file = open_test_path(path, kind)?;
+        let mut dacl = ptr::null_mut();
+        let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+        let result = unsafe {
+            GetSecurityInfo(
+                file_handle(&file),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut dacl,
+                ptr::null_mut(),
+                &mut descriptor,
+            )
+        };
+        if result != NO_ERROR {
+            return Err(io::Error::from_raw_os_error(result as i32))
+                .context("failed to inspect test ACL");
+        }
+        if descriptor.is_null() || dacl.is_null() {
+            bail!("test path has no DACL");
+        }
+        let _descriptor = LocalSecurityDescriptor(descriptor);
+
+        let mut control = 0_u16;
+        let mut revision = 0_u32;
+        if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0 {
+            return Err(io::Error::last_os_error())
+                .context("failed to inspect test security descriptor control");
+        }
+        let mut size = ACL_SIZE_INFORMATION::default();
+        if unsafe {
+            GetAclInformation(
+                dacl,
+                ptr::addr_of_mut!(size).cast(),
+                mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error()).context("failed to inspect test ACL size");
+        }
+
+        let mut aces = Vec::with_capacity(size.AceCount as usize);
+        for index in 0..size.AceCount {
+            let mut raw_ace = ptr::null_mut();
+            if unsafe { GetAce(dacl, index, &mut raw_ace) } == 0 {
+                return Err(io::Error::last_os_error()).context("failed to inspect test ACL entry");
+            }
+            let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
+            aces.push(InspectedAce {
+                sid: SidBuffer::copy_from(ptr::addr_of!(ace.SidStart).cast_mut().cast())?,
+                mask: ace.Mask,
+                flags: ace.Header.AceFlags,
+                ace_type: ace.Header.AceType,
+            });
+        }
+        Ok(InspectedAcl {
+            protected: control & SE_DACL_PROTECTED != 0,
+            aces,
+        })
+    }
+
+    fn make_permissive(path: &Path, kind: PrivatePathKind) -> Result<()> {
+        let file = open_test_path(path, kind)?;
+        let world = well_known_sid(WinWorldSid)?;
+        let acl = private_acl(kind, &world, &world)?;
+        set_protected_dacl(path, &file, &acl)
+    }
+
+    fn assert_inherits_world(path: &Path, kind: PrivatePathKind) {
+        let world = well_known_sid(WinWorldSid).unwrap();
+        let acl = inspect_acl(path, kind).unwrap();
+        assert!(!acl.protected);
+        assert!(acl.aces.iter().any(|ace| {
+            (unsafe { EqualSid(ace.sid.as_ptr(), world.as_ptr()) }) != 0
+                && u32::from(ace.flags) & INHERITED_ACE != 0
+        }));
+    }
+
+    fn assert_private_acl(path: &Path, kind: PrivatePathKind) {
+        let user = current_user_sid().unwrap();
+        let system = local_system_sid().unwrap();
+        let acl = inspect_acl(path, kind).unwrap();
+        assert!(acl.protected, "{} DACL must be protected", path.display());
+        let expected_len = if unsafe { EqualSid(user.as_ptr(), system.as_ptr()) } != 0 {
+            1
+        } else {
+            2
+        };
+        assert_eq!(acl.aces.len(), expected_len);
+        let expected_flags = match kind {
+            PrivatePathKind::Directory => CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE,
+            PrivatePathKind::File => 0,
+        };
+        let mut found_user = false;
+        let mut found_system = false;
+        for ace in &acl.aces {
+            assert_eq!(ace.ace_type, ACCESS_ALLOWED_ACE_TYPE);
+            assert_eq!(ace.mask, FILE_ALL_ACCESS);
+            assert_eq!(u32::from(ace.flags), expected_flags);
+            let is_user = unsafe { EqualSid(ace.sid.as_ptr(), user.as_ptr()) } != 0;
+            let is_system = unsafe { EqualSid(ace.sid.as_ptr(), system.as_ptr()) } != 0;
+            assert!(
+                is_user || is_system,
+                "{} DACL contains an unexpected trustee",
+                path.display()
+            );
+            found_user |= is_user;
+            found_system |= is_system;
+        }
+        assert!(found_user);
+        assert!(found_system);
+    }
+
+    fn permissive_parent(root: &Path) -> PathBuf {
+        let parent = root.join("permissive");
+        fs::create_dir(&parent).unwrap();
+        make_permissive(&parent, PrivatePathKind::Directory).unwrap();
+        parent
+    }
+
+    #[test]
+    fn hardens_an_existing_directory_in_a_permissive_parent() {
+        let temp = tempdir().unwrap();
+        let parent = permissive_parent(temp.path());
+        let data = parent.join("data");
+        fs::create_dir(&data).unwrap();
+        assert_inherits_world(&data, PrivatePathKind::Directory);
+
+        crate::store::create_private_dir(&data).unwrap();
+        assert_private_acl(&data, PrivatePathKind::Directory);
+
+        crate::store::create_private_dir(&data).unwrap();
+        assert_private_acl(&data, PrivatePathKind::Directory);
+    }
+
+    #[test]
+    fn fallback_vault_parent_and_file_get_private_acls() {
+        let temp = tempdir().unwrap();
+        let parent = permissive_parent(temp.path());
+        let data = parent.join("data");
+        fs::create_dir(&data).unwrap();
+        assert_inherits_world(&data, PrivatePathKind::Directory);
+        crate::store::create_private_dir(&data).unwrap();
+
+        let paths = crate::store::AppPaths::for_tests(data);
+        let store = crate::secrets::SecretStore::file_backend_for_tests();
+        store.get_or_create(&paths, "alpha-000000000001").unwrap();
+
+        let secrets = paths
+            .secret_vault_file_path()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let vault = paths.secret_vault_file_path();
+        assert_private_acl(paths.base_dir(), PrivatePathKind::Directory);
+        assert_private_acl(&secrets, PrivatePathKind::Directory);
+        assert_private_acl(&vault, PrivatePathKind::File);
+
+        make_permissive(&vault, PrivatePathKind::File).unwrap();
+        store
+            .set(&paths, "alpha-000000000001", "replacement-token")
+            .unwrap();
+        assert_private_acl(&vault, PrivatePathKind::File);
+    }
 }

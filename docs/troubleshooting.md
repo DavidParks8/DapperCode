@@ -161,12 +161,24 @@ npm run operator -- forget --workspace /path/to/repository
 ```
 
 That removes the profile from `config.json`, deletes its token, and removes its profile directory.
-Deleting the whole data directory resets every workspace and requires running setup again.
+On macOS and file-backed installations, deleting the whole data directory resets every workspace.
+On Windows Credential Manager installations, use the complete reset sequence below so credentials
+are removed before their profile inventory is lost.
 
 ## Repairing or Uninstalling on Windows
 
 First choose **Quit** from the tray menu. Use **Settings → Apps → Installed apps** to repair, reset,
-or uninstall DapperCode. Reinstalling repairs missing packaged files. A complete manual reset also
-requires deleting `%APPDATA%\DapperCode` and the DapperCode vault entry from Windows Credential
-Manager; this permanently removes workspace configuration, tokens, logs, attachments, and session
-state, so every mobile device must pair again.
+or uninstall DapperCode. Reinstalling repairs missing packaged files.
+
+For a complete manual reset, remove credentials **before** deleting `%APPDATA%\DapperCode`; the
+configuration file is the inventory that identifies which per-workspace credentials exist. In
+**Credential Manager → Windows Credentials**, remove every Generic Credential for service
+`dev.dappercode.desktop` whose account is:
+
+- `bridge-auth-token:v2:<sha256-profile-id>` for every workspace;
+- `bridge-auth-vault:v2`, the current layout marker;
+- `bridge-auth-vault:v1`, the legacy shared vault, if present; or
+- `bridge-auth-token:<profile-id>`, any legacy per-workspace entry.
+
+Only after those entries are gone, delete `%APPDATA%\DapperCode`. This permanently removes workspace
+configuration, tokens, logs, attachments, and session state, so every mobile device must pair again.

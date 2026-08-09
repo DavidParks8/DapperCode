@@ -1,10 +1,11 @@
 use std::{
+    fs::{File, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 
 use crate::{
@@ -47,6 +48,32 @@ pub(crate) enum ProcessStopRequest {
     Graceful,
     Force,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrivatePathKind {
+    Directory,
+    File,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct PrivatePathState {
+    pub(crate) is_directory: bool,
+    pub(crate) is_file: bool,
+    pub(crate) is_reparse_point: bool,
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PrivateAccessPrincipal {
+    CurrentUser,
+    LocalSystem,
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(crate) const PRIVATE_ACCESS_PRINCIPALS: [PrivateAccessPrincipal; 2] = [
+    PrivateAccessPrincipal::CurrentUser,
+    PrivateAccessPrincipal::LocalSystem,
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetworkMode {
@@ -119,6 +146,9 @@ pub(crate) trait PlatformStrategy: Sync {
         expected_start_time: u64,
         request: ProcessStopRequest,
     ) -> Result<bool>;
+    fn configure_private_file_options(&self, options: &mut OpenOptions);
+    fn secure_private_directory(&self, path: &Path) -> Result<()>;
+    fn secure_private_file(&self, path: &Path, file: &File) -> Result<()>;
     fn detach_process(&self, command: &mut Command);
     fn sync_parent_directory(&self, path: &Path) -> std::io::Result<()>;
     async fn stop_child(
@@ -176,6 +206,18 @@ pub(crate) fn request_process_stop(
     current().request_process_stop(pid, expected_start_time, request)
 }
 
+pub(crate) fn configure_private_file_options(options: &mut OpenOptions) {
+    current().configure_private_file_options(options);
+}
+
+pub(crate) fn secure_private_directory(path: &Path) -> Result<()> {
+    current().secure_private_directory(path)
+}
+
+pub(crate) fn secure_private_file(path: &Path, file: &File) -> Result<()> {
+    current().secure_private_file(path, file)
+}
+
 pub(crate) fn detach_process(command: &mut Command) {
     current().detach_process(command);
 }
@@ -214,6 +256,28 @@ pub(crate) fn resolve_manual_lan_host(
                 Err(SetupPreflightError::InvalidLanHost(manual.to_string()))
             }
         })
+}
+
+pub(crate) fn ensure_private_path_kind(
+    path: &Path,
+    expected: PrivatePathKind,
+    state: PrivatePathState,
+) -> Result<()> {
+    let matches_kind = match expected {
+        PrivatePathKind::Directory => state.is_directory && !state.is_file,
+        PrivatePathKind::File => state.is_file && !state.is_directory,
+    };
+    if state.is_reparse_point || !matches_kind {
+        bail!(
+            "refusing unsafe private {} path {}",
+            match expected {
+                PrivatePathKind::Directory => "directory",
+                PrivatePathKind::File => "file",
+            },
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -393,5 +457,70 @@ mod tests {
             windows_runtime_candidates(Path::new("package/bin/dappercode.exe"))[0],
             PathBuf::from("package")
         );
+    }
+
+    #[test]
+    fn private_access_policy_names_only_the_user_and_local_system() {
+        assert_eq!(
+            PRIVATE_ACCESS_PRINCIPALS,
+            [
+                PrivateAccessPrincipal::CurrentUser,
+                PrivateAccessPrincipal::LocalSystem,
+            ]
+        );
+    }
+
+    #[test]
+    fn private_path_policy_rejects_reparse_points_and_wrong_object_kinds() {
+        let path = Path::new("private-target");
+        assert!(ensure_private_path_kind(
+            path,
+            PrivatePathKind::Directory,
+            PrivatePathState {
+                is_directory: true,
+                is_file: false,
+                is_reparse_point: false,
+            },
+        )
+        .is_ok());
+        assert!(ensure_private_path_kind(
+            path,
+            PrivatePathKind::File,
+            PrivatePathState {
+                is_directory: false,
+                is_file: true,
+                is_reparse_point: false,
+            },
+        )
+        .is_ok());
+
+        for (kind, state) in [
+            (
+                PrivatePathKind::Directory,
+                PrivatePathState {
+                    is_directory: true,
+                    is_file: false,
+                    is_reparse_point: true,
+                },
+            ),
+            (
+                PrivatePathKind::Directory,
+                PrivatePathState {
+                    is_directory: false,
+                    is_file: true,
+                    is_reparse_point: false,
+                },
+            ),
+            (
+                PrivatePathKind::File,
+                PrivatePathState {
+                    is_directory: true,
+                    is_file: false,
+                    is_reparse_point: false,
+                },
+            ),
+        ] {
+            assert!(ensure_private_path_kind(path, kind, state).is_err());
+        }
     }
 }
