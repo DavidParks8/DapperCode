@@ -20,6 +20,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
+import { ACTIVITY_COLLAPSE_DURATION_MS } from './TranscriptActivitySlot';
 import {
   mockSharedValues,
   ReduceMotion,
@@ -132,6 +133,34 @@ function getList(tree: ReactTestRenderer): Queryable {
   return tree.root.findByType(FlatList) as Queryable;
 }
 
+function getActivitySlot(tree: ReactTestRenderer): React.ReactElement<{
+  presentation: {
+    activity: { detail?: string; title: string; tone: string };
+    collapsing: boolean;
+    elapsedMs: number | null;
+  };
+}> | null {
+  return getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
+    presentation: {
+      activity: { detail?: string; title: string; tone: string };
+      collapsing: boolean;
+      elapsedMs: number | null;
+    };
+  }> | null;
+}
+
+function getActivityPresentation(tree: ReactTestRenderer): {
+  activity: { detail?: string; title: string; tone: string };
+  collapsing: boolean;
+  elapsedMs: number | null;
+} {
+  const slot = getActivitySlot(tree);
+  if (!slot) {
+    throw new Error('Expected an activity row');
+  }
+  return slot.props.presentation;
+}
+
 function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
   act(() =>
     list.props.onScroll({
@@ -177,16 +206,8 @@ describe('ChatTranscriptView activity event', () => {
       activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
     });
 
-    let header = getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
-      detail?: string;
-      elapsedMs?: number;
-      title: string;
-      tone: string;
-    }>;
-    expect(header.props).toMatchObject({
-      detail: 'src/main.ts',
-      title: 'Editing file',
-      tone: 'running',
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { detail: 'src/main.ts', title: 'Editing file', tone: 'running' },
       elapsedMs: 0,
     });
 
@@ -195,8 +216,10 @@ describe('ChatTranscriptView activity event', () => {
       chat: runningChat,
       activity: { tone: 'running', title: 'Running tests' },
     });
-    header = getList(tree).props['ListHeaderComponent'] as typeof header;
-    expect(header.props).toMatchObject({ title: 'Running tests', elapsedMs: 5_000 });
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Running tests' },
+      elapsedMs: 5_000,
+    });
 
     update(tree, {
       chat: {
@@ -206,19 +229,103 @@ describe('ChatTranscriptView activity event', () => {
       },
       activity: { tone: 'complete', title: 'Turn completed' },
     });
-    header = getList(tree).props['ListHeaderComponent'] as typeof header;
-    expect(header.props).toMatchObject({
-      title: 'Turn completed',
-      tone: 'complete',
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Turn completed', tone: 'complete' },
       elapsedMs: 5_000,
     });
 
     act(() => jest.advanceTimersByTime(5_000));
-    header = getList(tree).props['ListHeaderComponent'] as typeof header;
-    expect(header.props.elapsedMs).toBe(5_000);
+    expect(getActivityPresentation(tree).elapsedMs).toBe(5_000);
 
     update(tree, { activity: null });
-    expect(getList(tree).props['ListHeaderComponent']).toBeNull();
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Turn completed' },
+      collapsing: true,
+      elapsedMs: 5_000,
+    });
+    act(() => jest.advanceTimersByTime(ACTIVITY_COLLAPSE_DURATION_MS));
+    expect(getActivitySlot(tree)).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('keeps the settled duration when the thread status lands after the activity settles', () => {
+    // The bridge reports no run timings, so the duration is measured on device. The status update
+    // that promotes the row to "Turn completed" arrives a beat after the activity stops running,
+    // and wiping the local timer in that gap used to leave the finished turn with no duration.
+    const runningChat = makeChat({
+      status: 'running',
+      statusUpdatedAt: '2026-08-05T12:00:00.000Z',
+      messages: [
+        { id: 'user', role: 'user', content: 'work', createdAt: '2026-08-05T12:00:00.000Z' },
+      ],
+    });
+    const tree = render({
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Editing file' },
+    });
+
+    act(() => jest.advanceTimersByTime(7_000));
+    update(tree, { chat: runningChat, activity: { tone: 'idle', title: 'Ready' } });
+    update(tree, {
+      chat: { ...runningChat, status: 'complete', statusUpdatedAt: '2026-08-05T12:00:12.000Z' },
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+
+    expect(getActivityPresentation(tree).elapsedMs).toBe(7_000);
+    act(() => tree.unmount());
+  });
+});
+
+describe('ChatTranscriptView activity collapse', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('collapses the settled row instead of dropping it in a single frame', () => {
+    const settledChat = makeChat({ status: 'complete' });
+    const tree = render({
+      chat: settledChat,
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).not.toHaveLength(0);
+
+    update(tree, { chat: settledChat, activity: null });
+
+    // The row has to stay mounted while it shrinks, otherwise the transcript snaps up by a whole
+    // line on the frame the activity clears.
+    const collapsingRows = tree.root.findAllByProps({ testID: 'transcript-activity-event' });
+    expect(collapsingRows).not.toHaveLength(0);
+    const slotStyle = StyleSheet.flatten(
+      requireTestValue(
+        tree.root.findAllByProps({ testID: 'transcript-activity-slot' })[0],
+        'activity slot',
+      ).props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(slotStyle['height']).toBe(0);
+    expect(slotStyle['opacity']).toBe(0);
+    expect(slotStyle['overflow']).toBe('hidden');
+
+    act(() => jest.advanceTimersByTime(ACTIVITY_COLLAPSE_DURATION_MS));
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('drops a superseded live row at once rather than holding a stale status', () => {
+    const runningChat = makeChat({ status: 'running' });
+    const tree = render({
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Working' },
+    });
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).not.toHaveLength(0);
+
+    update(tree, { chat: runningChat, activity: null });
+
+    expect(getActivitySlot(tree)).toBeNull();
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).toHaveLength(0);
     act(() => tree.unmount());
   });
 });

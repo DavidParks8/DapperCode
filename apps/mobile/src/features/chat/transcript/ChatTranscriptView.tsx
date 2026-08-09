@@ -44,7 +44,7 @@ import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkBoundaries, useForkConversationAction } from './useForkConversationAction';
-import { ActivityEvent } from './ActivityEvent';
+import { TranscriptActivitySlot, useCollapsibleActivity } from './TranscriptActivitySlot';
 import { TranscriptEdgeScrim } from './TranscriptEdgeScrim';
 import {
   ensureRailJumpController,
@@ -421,12 +421,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   );
   const threadRunning = chat.status === 'running';
   const activityElapsedMs = useActivityElapsedMs(chat, activity);
+  const activityPresentation = useCollapsibleActivity(activity, activityElapsedMs);
   const listExtraData = useMemo(
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
-  const activityEvent = activity ? (
-    <ActivityEvent {...activity} elapsedMs={activityElapsedMs} />
+  const activityEvent = activityPresentation ? (
+    <TranscriptActivitySlot presentation={activityPresentation} />
   ) : null;
   const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
     ({ item }) =>

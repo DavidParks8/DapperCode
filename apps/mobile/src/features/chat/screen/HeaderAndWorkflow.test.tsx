@@ -358,7 +358,7 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     const chip = findPressableByLabelPrefix(root, 'Token usage,');
 
     expect(chip.props['accessibilityLabel']).toBe('Token usage, 507,800 tokens this session');
-    expect(chip.findAll((node) => node.children.includes('508k'))).toHaveLength(1);
+    expect(chip.findAll((node) => node.children.includes('508k tk'))).toHaveLength(1);
     act(() => {
       invokeProp(chip, 'onPress');
     });
@@ -390,12 +390,19 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
 
 describe('formatCompactTokenCount', () => {
   it.each([
-    [9_400, '9,400'],
-    [99_999, '99,999'],
-    [100_000, '100k'],
-    [507_800, '508k'],
-    [1_200_000, '1.2M'],
-    [12_000_000, '12M'],
+    [0, '0 tk'],
+    [940, '940 tk'],
+    [999, '999 tk'],
+    [1_000, '1k tk'],
+    [8_200, '8.2k tk'],
+    [9_400, '9.4k tk'],
+    [99_999, '100k tk'],
+    [100_000, '100k tk'],
+    [507_800, '508k tk'],
+    [1_200_000, '1.2m tk'],
+    [5_400_000, '5.4m tk'],
+    [12_000_000, '12m tk'],
+    [125_000_000, '125m tk'],
   ])('formats %i as %s', (value, expected) => {
     expect(formatCompactTokenCount(value)).toBe(expected);
   });
