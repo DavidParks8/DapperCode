@@ -1,71 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { useAtom } from 'jotai';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react';
+import { ActivityIndicator, Pressable, View, type View as RNView } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import type { MessageTokenUsage } from '@bridge/types/types';
 import { useAppTheme } from '@shared/theme';
 import { feedback } from '@shared/feedback';
-import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { buildResponseUsageStats, buildResponseUsageSummary } from './responseUsage';
+import { responseUsageOverlayAtom } from '../state/modals';
+import { measureAnchor } from './measureAnchor';
 import { createStyles } from './styles';
 
 const COPIED_RESET_MS = 1600;
 const ACTION_BUTTON_VISIBLE_SIZE = { width: 30, height: 30 };
-
-/**
- * What a response cost, floated over the transcript from the info button rather than inserted
- * into it.
- *
- * Expanding in flow pushed every message below it down, so the response the reader was looking at
- * moved out from under their eyes. Anchoring the panel above the action row keeps that response
- * fixed, and because it overlays earlier siblings it needs no z-order juggling. The panel rides
- * the same capsule glass material as the rest of the chat chrome so it reads as floating rather
- * than as an opaque block pasted over the text.
- */
-function ResponseUsageCard({
-  onDismiss,
-  usage,
-  styles,
-  testID,
-}: {
-  onDismiss: () => void;
-  usage: MessageTokenUsage;
-  styles: ReturnType<typeof createStyles>;
-  testID?: string;
-}) {
-  const stats = useMemo(() => buildResponseUsageStats(usage), [usage]);
-  return (
-    <Pressable
-      testID={testID ? `${testID}-panel` : undefined}
-      onPress={onDismiss}
-      style={styles.responseUsagePopover}
-      accessible
-      accessibilityRole="button"
-      accessibilityLabel={`Response details. ${buildResponseUsageSummary(usage)}`}
-      accessibilityHint="Hides these details"
-    >
-      <GlassSurface role="capsule" testID={testID} style={styles.responseUsageCard}>
-        {stats.map((stat) => (
-          <View key={stat.key} style={styles.responseUsageRow} accessibilityElementsHidden>
-            <Text style={styles.responseUsageLabel}>{stat.label}</Text>
-            <Text style={styles.responseUsageValue} numberOfLines={1}>
-              {stat.value}
-            </Text>
-          </View>
-        ))}
-      </GlassSurface>
-    </Pressable>
-  );
-}
 
 /** One icon-only control in the action row, sized and padded identically to its siblings. */
 function ActionButton({
   accessibilityHint,
   accessibilityLabel,
   active = false,
+  anchorRef,
   busy = false,
   color,
   expanded,
@@ -78,6 +34,8 @@ function ActionButton({
   accessibilityHint: string;
   accessibilityLabel: string;
   active?: boolean;
+  /** Set on controls whose position a floating surface has to be anchored to. */
+  anchorRef?: RefObject<RNView | null>;
   busy?: boolean;
   color: string;
   expanded?: boolean;
@@ -89,6 +47,7 @@ function ActionButton({
 }) {
   return (
     <Pressable
+      ref={anchorRef}
       testID={testID}
       onPress={onPress}
       disabled={busy}
@@ -120,6 +79,7 @@ function MessageActionRow({
   copied,
   forkBusy,
   hasText,
+  infoButtonRef,
   onCopy,
   onForkConversation,
   onSelectText,
@@ -132,6 +92,7 @@ function MessageActionRow({
   copied: boolean;
   forkBusy: boolean;
   hasText: boolean;
+  infoButtonRef: RefObject<RNView | null>;
   onCopy: () => void;
   onForkConversation?: () => void;
   onSelectText?: () => void;
@@ -150,6 +111,7 @@ function MessageActionRow({
       {showUsageAction ? (
         <ActionButton
           {...shared}
+          anchorRef={infoButtonRef}
           testID={testID ? `${testID}-info` : undefined}
           onPress={onToggleUsage}
           active={usageVisible}
@@ -223,8 +185,11 @@ export function MessageActions({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [copied, setCopied] = useState(false);
-  const [usageVisible, setUsageVisible] = useState(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const infoButtonRef = useRef<RNView | null>(null);
+  const [overlay, setOverlay] = useAtom(responseUsageOverlayAtom);
+  const overlayId = useId();
+  const usageVisible = overlay?.id === overlayId;
 
   useEffect(
     () => () => {
@@ -249,8 +214,29 @@ export function MessageActions({
 
   const toggleUsage = useCallback(() => {
     void feedback.selection();
-    setUsageVisible((previous) => !previous);
-  }, []);
+    if (usageVisible) {
+      setOverlay(null);
+      return;
+    }
+    if (!usage) {
+      return;
+    }
+    // Opening cannot wait on measurement: the callback lands a frame later, and on some hosts
+    // never at all, which would silently swallow the tap. The panel stays parked off screen until
+    // its anchor arrives.
+    setOverlay({ id: overlayId, anchor: null, usage });
+    measureAnchor(infoButtonRef.current, (anchor) => {
+      setOverlay((current) => (current?.id === overlayId ? { ...current, anchor } : current));
+    });
+  }, [overlayId, setOverlay, usage, usageVisible]);
+
+  useEffect(
+    () => () => {
+      // An unmounting row cannot own a panel: the transcript virtualises rows out of existence.
+      setOverlay((current) => (current?.id === overlayId ? null : current));
+    },
+    [overlayId, setOverlay],
+  );
 
   const hasText = Boolean(text.trim());
   if (!hasText && !onForkConversation && !usage) {
@@ -258,31 +244,19 @@ export function MessageActions({
   }
 
   return (
-    <View
-      testID={testID ? `${testID}-actions` : undefined}
-      style={usageVisible ? styles.messageActionsRootRaised : undefined}
-    >
-      <MessageActionRow
-        copied={copied}
-        forkBusy={forkBusy}
-        hasText={hasText}
-        onCopy={handleCopy}
-        onForkConversation={onForkConversation}
-        onSelectText={onSelectText}
-        onToggleUsage={toggleUsage}
-        showUsageAction={Boolean(usage)}
-        styles={styles}
-        testID={testID}
-        usageVisible={usageVisible}
-      />
-      {usage && usageVisible ? (
-        <ResponseUsageCard
-          onDismiss={toggleUsage}
-          usage={usage}
-          styles={styles}
-          testID={testID ? `${testID}-info-card` : undefined}
-        />
-      ) : null}
-    </View>
+    <MessageActionRow
+      copied={copied}
+      forkBusy={forkBusy}
+      hasText={hasText}
+      infoButtonRef={infoButtonRef}
+      onCopy={handleCopy}
+      onForkConversation={onForkConversation}
+      onSelectText={onSelectText}
+      onToggleUsage={toggleUsage}
+      showUsageAction={Boolean(usage)}
+      styles={styles}
+      testID={testID}
+      usageVisible={usageVisible}
+    />
   );
 }

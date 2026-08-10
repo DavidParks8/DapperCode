@@ -155,19 +155,30 @@ export const createStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
     },
     messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
-    // Lifts the floating usage panel over neighbouring transcript rows on both platforms.
-    messageActionsRootRaised: { zIndex: 2, elevation: 2 },
-    // Anchors the panel above the action row so opening it overlays the transcript instead of
-    // pushing the response it describes off screen.
+    // Covers the whole screen so the panel can overlay the header and composer, not just the
+    // transcript row that owns the info button.
+    responseUsageOverlayRoot: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 10,
+      elevation: 10,
+    },
+    // Catches a tap anywhere outside the panel. It also blocks scrolling, which keeps the
+    // transcript from sliding out from under the anchor the panel was placed against.
+    responseUsageBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    // Positioned against the anchor at runtime; see `resolveResponseUsagePlacement`.
     responseUsagePopover: {
       position: 'absolute',
-      bottom: '100%',
-      left: 0,
-      marginBottom: theme.spacing.xs,
       boxShadow: theme.isDark
         ? '0 12px 24px rgba(0, 0, 0, 0.36)'
         : '0 10px 22px rgba(15, 31, 54, 0.16)',
     },
+    // Parks the first, unmeasured frame off screen. Fading it instead would be fatal: UIKit stops
+    // rendering the glass material once the view or an ancestor hits zero opacity.
+    responseUsagePopoverMeasuring: { left: -9999 },
     // GlassSurface owns the fill and border here, so this style carries layout only.
     responseUsageCard: {
       paddingVertical: theme.spacing.sm,
