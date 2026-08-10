@@ -1,8 +1,23 @@
 import React from 'react';
+import { getDefaultStore } from 'jotai';
+import { BackHandler, StyleSheet, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
+import { responseUsageOverlayAtom } from '../state/modals';
 import { MessageActions } from './MessageActions';
+import { ResponseUsageOverlay } from './ResponseUsageOverlay';
+
+jest.mock('./measureAnchor', () => ({
+  __esModule: true,
+  measureAnchor: jest.fn(),
+}));
 
 jest.mock('expo-clipboard', () => ({
   __esModule: true,
@@ -21,6 +36,7 @@ jest.mock('expo-haptics', () => ({
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 
+const mockMeasureAnchor = jest.requireMock('./measureAnchor').measureAnchor as jest.Mock;
 const mockClipboard = Clipboard as unknown as { setStringAsync: jest.Mock };
 const mockHaptics = Haptics as unknown as { notificationAsync: jest.Mock };
 
@@ -33,8 +49,31 @@ type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll
 
 const theme = createAppTheme('dark');
 
+const sampleUsage = {
+  inputTokens: 12_400,
+  outputTokens: 1_280,
+  reasoningTokens: 300,
+  cachedReadTokens: 111_600,
+  cachedWriteTokens: 900,
+  totalTokens: 126_180,
+  model: 'GPT-5.6 Sol',
+};
+
 function wrap(node: React.ReactNode) {
-  return <AppThemeProvider theme={theme}>{node}</AppThemeProvider>;
+  return (
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 59, right: 0, bottom: 34, left: 0 },
+      }}
+    >
+      <AppThemeProvider theme={theme}>
+        {node}
+        {/* The panel is hosted at screen level, so a row on its own can never show one. */}
+        <ResponseUsageOverlay />
+      </AppThemeProvider>
+    </SafeAreaProvider>
+  );
 }
 
 function render(node: React.ReactNode): ReactTestRenderer {
@@ -77,6 +116,11 @@ function findByTestId(root: QueryableInstance, testID: string): QueryableInstanc
   return root.findAll((node) => node.props['testID'] === testID)[0];
 }
 
+/** Wrappers forward `testID`, so the deepest match is the host view that owns the resolved style. */
+function findHostByTestId(root: QueryableInstance, testID: string): QueryableInstance | undefined {
+  return root.findAll((node) => node.props['testID'] === testID).at(-1);
+}
+
 function collectText(node: QueryableInstance): string[] {
   return node.children.flatMap((child) =>
     typeof child === 'string' ? [child] : collectText(child),
@@ -86,16 +130,26 @@ function collectText(node: QueryableInstance): string[] {
 describe('MessageActions', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    mockMeasureAnchor.mockReset();
   });
 
   afterEach(() => {
     act(() => jest.runOnlyPendingTimers());
     jest.useRealTimers();
     jest.restoreAllMocks();
+    // The overlay atom outlives a render, so a leftover panel would leak into the next test.
+    getDefaultStore().set(responseUsageOverlayAtom, null);
   });
 
   it('renders nothing for blank text', () => {
-    const tree = render(<MessageActions text="   " />);
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <MessageActions text="   " />
+        </AppThemeProvider>,
+      );
+    });
     expect((tree as unknown as { toJSON(): unknown }).toJSON()).toBeNull();
   });
 
@@ -200,13 +254,13 @@ describe('MessageActions', () => {
     );
     const infoButton = findPressable(queryRoot(tree), 'Response details');
     expect(infoButton.props['accessibilityState']).toMatchObject({ expanded: false });
-    expect(findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card')).toBeUndefined();
+    expect(findByTestId(queryRoot(tree), 'response-usage-overlay-card')).toBeUndefined();
 
     act(() => {
       invokeProp(infoButton, 'onPress');
     });
 
-    const card = findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card');
+    const card = findByTestId(queryRoot(tree), 'response-usage-overlay-card');
     expect(card).toBeDefined();
     expect(collectText(card!)).toEqual([
       'Model',
@@ -225,7 +279,7 @@ describe('MessageActions', () => {
     act(() => {
       invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
     });
-    expect(findByTestId(queryRoot(tree), 'chat-message-copy-m1-info-card')).toBeUndefined();
+    expect(findByTestId(queryRoot(tree), 'response-usage-overlay-card')).toBeUndefined();
   });
 
   it('offers response details for a turn that produced no copyable text', () => {
@@ -246,5 +300,246 @@ describe('MessageActions', () => {
     const root = queryRoot(tree);
     expect(findPressable(root, 'Response details')).toBeDefined();
     expect(() => findPressable(root, 'Copy message')).toThrow();
+  });
+
+  it('paints the response details panel with the native capsule glass material', () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'response-usage-overlay-card',
+    );
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
+
+    // An opaque fill would sit in front of the material and defeat the glass.
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['backgroundColor']).toBeUndefined();
+  });
+
+  it('falls back to a solid bordered panel where liquid glass is unavailable', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'response-usage-overlay-card',
+    );
+    expect(glassProps?.glassEffectStyle).toBe('none');
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['backgroundColor']).toBe(theme.glass.capsule.fallbackBackgroundColor);
+    expect(cardStyle['borderColor']).toBe(theme.glass.capsule.fallbackBorderColor);
+    expect(cardStyle['borderWidth']).toBe(StyleSheet.hairlineWidth);
+  });
+
+  it('floats the response details panel over the screen instead of displacing the transcript', () => {
+    const tree = render(
+      <View testID="row-scope">
+        <MessageActions text="hello" testID="usage" usage={sampleUsage} />
+      </View>,
+    );
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    // Laying the panel out in flow pushed every later message down, moving the response the
+    // reader was looking at off screen, so it has to overlay the screen instead.
+    const panelStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-panel')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(panelStyle['position']).toBe('absolute');
+    expect(panelStyle['marginTop']).toBeUndefined();
+
+    // The panel must not live inside the transcript row, or opening it would grow that row and
+    // push every later message down.
+    const row = findByTestId(queryRoot(tree), 'row-scope');
+    expect(
+      row!.findAll((node) => node.props['testID'] === 'response-usage-overlay-panel'),
+    ).toHaveLength(0);
+
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['position']).toBeUndefined();
+    expect(cardStyle['marginTop']).toBeUndefined();
+  });
+
+  it('dismisses the panel when anything outside it is tapped', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    const backdrop = findByTestId(queryRoot(tree), 'response-usage-overlay-backdrop');
+    expect(backdrop).toBeDefined();
+
+    act(() => {
+      invokeProp(backdrop!, 'onPress');
+    });
+
+    expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
+    expect(
+      findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
+    ).toMatchObject({ expanded: false });
+  });
+
+  it('covers the whole screen with the dismissal backdrop', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    // A backdrop confined to the transcript would leave taps on the header and composer landing
+    // on those controls with a stale panel still floating over them.
+    const backdropStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-backdrop')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(backdropStyle).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    });
+
+    const rootStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(rootStyle).toMatchObject({ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 });
+  });
+
+  it('keeps only one panel open across rows', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        wrap(
+          <>
+            <MessageActions text="first" testID="first" usage={sampleUsage} />
+            <MessageActions text="second" testID="second" usage={sampleUsage} />
+          </>,
+        ),
+      );
+    });
+    const root = queryRoot(tree!);
+    // Pressable forwards `testID` to its host view, so the composite owns `onPress`.
+    const infoButton = (testID: string) =>
+      root
+        .findAll(
+          (node) =>
+            node.props['testID'] === `${testID}-info` &&
+            typeof node.props['onPress'] === 'function',
+        )
+        .at(-1)!;
+
+    act(() => {
+      invokeProp(infoButton('first'), 'onPress');
+    });
+    expect(infoButton('first').props['accessibilityState']).toMatchObject({ expanded: true });
+
+    act(() => {
+      invokeProp(infoButton('second'), 'onPress');
+    });
+
+    // One host means a second tap replaces the panel instead of stacking another one over it.
+    expect(
+      root.findAll(
+        (node) =>
+          typeof node.type === 'string' && node.props['testID'] === 'response-usage-overlay-panel',
+      ),
+    ).toHaveLength(1);
+    expect(infoButton('first').props['accessibilityState']).toMatchObject({ expanded: false });
+    expect(infoButton('second').props['accessibilityState']).toMatchObject({ expanded: true });
+  });
+
+  it('dismisses the panel on the Android back button', () => {
+    const handlers: Array<() => boolean> = [];
+    const addEventListener = jest
+      .spyOn(BackHandler, 'addEventListener')
+      .mockImplementation((_event, handler) => {
+        handlers.push(handler as () => boolean);
+        return { remove: jest.fn() };
+      });
+
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    expect(addEventListener).toHaveBeenCalledWith('hardwareBackPress', expect.any(Function));
+
+    let handled: boolean | undefined;
+    act(() => {
+      handled = handlers[handlers.length - 1]?.();
+    });
+
+    // Swallowing the event stops back from also popping the screen out from under the panel.
+    expect(handled).toBe(true);
+    expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
+  });
+
+  it('anchors the panel to the measured position of its info button', () => {
+    mockMeasureAnchor.mockImplementation((_node, onMeasured) => {
+      onMeasured({ x: 24, y: 500, width: 30, height: 30 });
+    });
+
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    act(() => {
+      invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')!, 'onLayout', {
+        nativeEvent: { layout: { x: 0, y: 0, width: 180, height: 96 } },
+      });
+    });
+
+    const panelStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-panel')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(panelStyle['left']).toBe(24);
+    expect(panelStyle['top']).toBe(500 - 8 - 96);
+  });
+
+  it('opens the panel even when the anchor never reports a position', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    // Waiting on measurement to open would silently swallow the tap wherever it never lands, so
+    // the panel opens immediately and waits off screen for its anchor instead.
+    const panelStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'response-usage-overlay-panel')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(panelStyle['left']).toBe(-9999);
+    expect(
+      findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
+    ).toMatchObject({ expanded: true });
+  });
+
+  it('dismisses the floating panel when the panel itself is tapped', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    // Pressable forwards `testID` to its host view, so the composite owns `onPress`.
+    const panel = findByTestId(queryRoot(tree), 'response-usage-overlay-panel');
+    expect(panel).toBeDefined();
+
+    act(() => {
+      invokeProp(panel!, 'onPress');
+    });
+
+    expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
+    expect(
+      findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
+    ).toMatchObject({ expanded: false });
   });
 });

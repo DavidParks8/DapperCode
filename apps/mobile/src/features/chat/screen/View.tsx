@@ -4,6 +4,7 @@ import { MainScreenRenameSheet } from './RenameSheet';
 import { MainScreenAttachmentModals } from '../composer/AttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from '../approvals/BridgePrompts';
 import { MainScreenModelAndEffortSheets } from '../models/ModelAndEffortSheets';
+import { ResponseUsageOverlay } from '../message/ResponseUsageOverlay';
 import { memo, useCallback, type ComponentType } from 'react';
 import { View, type LayoutChangeEvent } from 'react-native';
 import { useSetAtom } from 'jotai';
@@ -192,6 +193,8 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
       <StableRenameSheet context={context} />
       <StableAttachmentModals context={context} />
       <StableApprovalAndBridgePrompts context={context} />
+      {/* Last so the panel a transcript row anchors covers the header and composer too. */}
+      <ResponseUsageOverlay />
     </View>
   );
 }

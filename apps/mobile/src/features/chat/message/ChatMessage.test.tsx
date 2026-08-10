@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ReactElement, ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import { getDefaultStore } from 'jotai';
 import {
   ActivityIndicator,
   Image,
@@ -26,6 +27,8 @@ import {
 } from '@bridge/messages';
 import { createAppTheme, AppThemeProvider } from '@shared/theme';
 import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
+import { ResponseUsageOverlay } from './ResponseUsageOverlay';
+import { responseUsageOverlayAtom } from '../state/modals';
 import { resetHuggedTextWidthCache } from './UserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
@@ -58,6 +61,10 @@ type TestMessageInput = Omit<ApiChatMessage, 'role' | 'content'> & {
 };
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
+
+afterEach(() => {
+  getDefaultStore().set(responseUsageOverlayAtom, null);
+});
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
@@ -1970,6 +1977,7 @@ function renderMessage(
       >
         <AppThemeProvider theme={createAppTheme('dark')}>
           <ChatMessage message={toOfficialMessage(message)} {...props} />
+          <ResponseUsageOverlay />
         </AppThemeProvider>
       </SafeAreaProvider>,
     );
