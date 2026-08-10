@@ -16,40 +16,48 @@ const COPIED_RESET_MS = 1600;
 const ACTION_BUTTON_VISIBLE_SIZE = { width: 30, height: 30 };
 
 /**
- * What a response cost, revealed under the action row rather than in a popover.
+ * What a response cost, floated over the transcript from the info button rather than inserted
+ * into it.
  *
- * A transcript is already a vertical stack the reader scrolls, so expanding in place keeps the
- * response it describes on screen and needs no dismissal gesture, which a floating panel would.
- * The panel rides on the same capsule glass material as the rest of the chat chrome so it reads
- * as a floating detail over the transcript instead of an opaque inline block.
+ * Expanding in flow pushed every message below it down, so the response the reader was looking at
+ * moved out from under their eyes. Anchoring the panel above the action row keeps that response
+ * fixed, and because it overlays earlier siblings it needs no z-order juggling. The panel rides
+ * the same capsule glass material as the rest of the chat chrome so it reads as floating rather
+ * than as an opaque block pasted over the text.
  */
 function ResponseUsageCard({
+  onDismiss,
   usage,
   styles,
   testID,
 }: {
+  onDismiss: () => void;
   usage: MessageTokenUsage;
   styles: ReturnType<typeof createStyles>;
   testID?: string;
 }) {
   const stats = useMemo(() => buildResponseUsageStats(usage), [usage]);
   return (
-    <GlassSurface
-      role="capsule"
-      testID={testID}
-      style={styles.responseUsageCard}
+    <Pressable
+      testID={testID ? `${testID}-panel` : undefined}
+      onPress={onDismiss}
+      style={styles.responseUsagePopover}
       accessible
+      accessibilityRole="button"
       accessibilityLabel={`Response details. ${buildResponseUsageSummary(usage)}`}
+      accessibilityHint="Hides these details"
     >
-      {stats.map((stat) => (
-        <View key={stat.key} style={styles.responseUsageRow} accessibilityElementsHidden>
-          <Text style={styles.responseUsageLabel}>{stat.label}</Text>
-          <Text style={styles.responseUsageValue} numberOfLines={1}>
-            {stat.value}
-          </Text>
-        </View>
-      ))}
-    </GlassSurface>
+      <GlassSurface role="capsule" testID={testID} style={styles.responseUsageCard}>
+        {stats.map((stat) => (
+          <View key={stat.key} style={styles.responseUsageRow} accessibilityElementsHidden>
+            <Text style={styles.responseUsageLabel}>{stat.label}</Text>
+            <Text style={styles.responseUsageValue} numberOfLines={1}>
+              {stat.value}
+            </Text>
+          </View>
+        ))}
+      </GlassSurface>
+    </Pressable>
   );
 }
 
@@ -250,7 +258,10 @@ export function MessageActions({
   }
 
   return (
-    <View>
+    <View
+      testID={testID ? `${testID}-actions` : undefined}
+      style={usageVisible ? styles.messageActionsRootRaised : undefined}
+    >
       <MessageActionRow
         copied={copied}
         forkBusy={forkBusy}
@@ -266,6 +277,7 @@ export function MessageActions({
       />
       {usage && usageVisible ? (
         <ResponseUsageCard
+          onDismiss={toggleUsage}
           usage={usage}
           styles={styles}
           testID={testID ? `${testID}-info-card` : undefined}

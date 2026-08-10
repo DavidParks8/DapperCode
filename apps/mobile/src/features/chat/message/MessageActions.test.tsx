@@ -308,4 +308,63 @@ describe('MessageActions', () => {
     expect(cardStyle['borderColor']).toBe(theme.glass.capsule.fallbackBorderColor);
     expect(cardStyle['borderWidth']).toBe(StyleSheet.hairlineWidth);
   });
+
+  it('floats the response details panel above the action row instead of displacing content', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    // Laying the panel out in flow pushed every later message down, moving the response the
+    // reader was looking at off screen, so it has to overlay the transcript instead.
+    const panelStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-info-card-panel')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(panelStyle['position']).toBe('absolute');
+    expect(panelStyle['bottom']).toBe('100%');
+    expect(panelStyle['marginTop']).toBeUndefined();
+
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-info-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['position']).toBeUndefined();
+    expect(cardStyle['marginTop']).toBeUndefined();
+  });
+
+  it('lifts the action row above neighbouring rows only while the panel is open', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    const collapsed = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-actions')?.props['style'] as never,
+    ) as Record<string, unknown> | undefined;
+    expect(collapsed?.['zIndex']).toBeUndefined();
+
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    const raised = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-actions')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(raised['zIndex']).toBe(2);
+    expect(raised['elevation']).toBe(2);
+  });
+
+  it('dismisses the floating panel when it is tapped', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+    // Pressable forwards `testID` to its host view, so the composite owns `onPress`.
+    const panel = findByTestId(queryRoot(tree), 'usage-info-card-panel');
+    expect(panel).toBeDefined();
+
+    act(() => {
+      invokeProp(panel!, 'onPress');
+    });
+
+    expect(findByTestId(queryRoot(tree), 'usage-info-card-panel')).toBeUndefined();
+    expect(
+      findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
+    ).toMatchObject({ expanded: false });
+  });
 });

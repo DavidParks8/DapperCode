@@ -155,10 +155,21 @@ export const createStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
     },
     messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
+    // Lifts the floating usage panel over neighbouring transcript rows on both platforms.
+    messageActionsRootRaised: { zIndex: 2, elevation: 2 },
+    // Anchors the panel above the action row so opening it overlays the transcript instead of
+    // pushing the response it describes off screen.
+    responseUsagePopover: {
+      position: 'absolute',
+      bottom: '100%',
+      left: 0,
+      marginBottom: theme.spacing.xs,
+      boxShadow: theme.isDark
+        ? '0 12px 24px rgba(0, 0, 0, 0.36)'
+        : '0 10px 22px rgba(15, 31, 54, 0.16)',
+    },
     // GlassSurface owns the fill and border here, so this style carries layout only.
     responseUsageCard: {
-      alignSelf: 'flex-start',
-      marginTop: theme.spacing.xs,
       paddingVertical: theme.spacing.sm,
       paddingHorizontal: theme.spacing.md,
       borderRadius: theme.radius.lg,
