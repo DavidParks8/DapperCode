@@ -635,14 +635,14 @@ fn ensure_process_has_current_user(process: HANDLE, pid: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    use std::{fs, ptr::NonNull};
     use tempfile::tempdir;
     use windows_sys::Win32::{
         Foundation::LocalFree,
         Security::{
             AclSizeInformation, Authorization::GetSecurityInfo, GetAce, GetAclInformation,
-            GetSecurityDescriptorControl, WinWorldSid, ACL_SIZE_INFORMATION, INHERITED_ACE,
-            PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+            GetSecurityDescriptorControl, WinWorldSid, ACE_HEADER, ACL_SIZE_INFORMATION,
+            INHERITED_ACE, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
         },
     };
 
@@ -668,6 +668,72 @@ mod tests {
     struct InspectedAcl {
         protected: bool,
         aces: Vec<InspectedAce>,
+    }
+
+    fn checked_access_allowed_ace(
+        dacl: *const ACL,
+        acl_bytes: u32,
+        raw_ace: *mut core::ffi::c_void,
+    ) -> Result<(NonNull<u8>, ACCESS_ALLOWED_ACE)> {
+        let raw_ace =
+            NonNull::new(raw_ace.cast::<u8>()).context("Windows returned a null ACL entry")?;
+        let acl_start = dacl as usize;
+        let acl_end = acl_start
+            .checked_add(acl_bytes as usize)
+            .context("Windows returned an overflowing ACL size")?;
+        let ace_start = raw_ace.as_ptr() as usize;
+        let header_end = ace_start
+            .checked_add(mem::size_of::<ACE_HEADER>())
+            .context("Windows returned an overflowing ACL entry address")?;
+        if ace_start < acl_start || header_end > acl_end {
+            bail!("Windows returned an ACL entry outside the ACL buffer");
+        }
+
+        let header = unsafe { raw_ace.cast::<ACE_HEADER>().as_ptr().read_unaligned() };
+        let ace_bytes = usize::from(header.AceSize);
+        let ace_end = ace_start
+            .checked_add(ace_bytes)
+            .context("Windows returned an overflowing ACL entry size")?;
+        if ace_bytes < mem::size_of::<ACCESS_ALLOWED_ACE>() || ace_end > acl_end {
+            bail!("Windows returned a truncated ACL entry");
+        }
+        if header.AceType != ACCESS_ALLOWED_ACE_TYPE {
+            bail!("Windows returned an unsupported ACL entry type");
+        }
+
+        let ace = unsafe {
+            raw_ace
+                .cast::<ACCESS_ALLOWED_ACE>()
+                .as_ptr()
+                .read_unaligned()
+        };
+        Ok((raw_ace, ace))
+    }
+
+    fn copy_ace_sid(raw_ace: NonNull<u8>, ace_bytes: usize) -> Result<SidBuffer> {
+        let sid_offset = mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+        let sid_bytes = ace_bytes
+            .checked_sub(sid_offset)
+            .context("Windows returned an ACL entry without a SID")?;
+        let mut words = vec![0_usize; sid_bytes.div_ceil(mem::size_of::<usize>())];
+        unsafe {
+            ptr::copy_nonoverlapping(
+                raw_ace.as_ptr().add(sid_offset),
+                words.as_mut_ptr().cast::<u8>(),
+                sid_bytes,
+            );
+        }
+        let mut sid = SidBuffer { words };
+        if unsafe { IsValidSid(sid.as_ptr()) } == 0 {
+            bail!("Windows returned an invalid ACL entry SID");
+        }
+        let byte_len = unsafe { GetLengthSid(sid.as_ptr()) } as usize;
+        if byte_len == 0 || byte_len > sid_bytes {
+            bail!("Windows returned an ACL entry SID outside the entry");
+        }
+        sid.words
+            .truncate(byte_len.div_ceil(mem::size_of::<usize>()));
+        Ok(sid)
     }
 
     fn open_test_path(path: &Path, kind: PrivatePathKind) -> Result<File> {
@@ -734,9 +800,9 @@ mod tests {
             if unsafe { GetAce(dacl, index, &mut raw_ace) } == 0 {
                 return Err(io::Error::last_os_error()).context("failed to inspect test ACL entry");
             }
-            let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
+            let (raw_ace, ace) = checked_access_allowed_ace(dacl, size.AclBytesInUse, raw_ace)?;
             aces.push(InspectedAce {
-                sid: SidBuffer::copy_from(ptr::addr_of!(ace.SidStart).cast_mut().cast())?,
+                sid: copy_ace_sid(raw_ace, usize::from(ace.Header.AceSize))?,
                 mask: ace.Mask,
                 flags: ace.Header.AceFlags,
                 ace_type: ace.Header.AceType,
@@ -805,6 +871,29 @@ mod tests {
         fs::create_dir(&parent).unwrap();
         make_permissive(&parent, PrivatePathKind::Directory).unwrap();
         parent
+    }
+
+    #[test]
+    fn rejects_invalid_acl_entry_pointers_before_reading_them() {
+        let mut words = [0_u32; 8];
+        let dacl = words.as_mut_ptr().cast::<ACL>();
+        let acl_bytes = mem::size_of_val(&words) as u32;
+
+        assert!(checked_access_allowed_ace(dacl, acl_bytes, ptr::null_mut()).is_err());
+
+        let end = unsafe { words.as_mut_ptr().cast::<u8>().add(acl_bytes as usize) };
+        assert!(checked_access_allowed_ace(dacl, acl_bytes, end.cast()).is_err());
+
+        let ace = unsafe { words.as_mut_ptr().cast::<u8>().add(mem::size_of::<ACL>()) };
+        unsafe {
+            ace.cast::<ACE_HEADER>().write_unaligned(ACE_HEADER {
+                AceType: ACCESS_ALLOWED_ACE_TYPE,
+                AceFlags: 0,
+                AceSize: mem::size_of::<ACCESS_ALLOWED_ACE>() as u16,
+            });
+        }
+        let truncated_bytes = (mem::size_of::<ACL>() + mem::size_of::<ACE_HEADER>()) as u32;
+        assert!(checked_access_allowed_ace(dacl, truncated_bytes, ace.cast()).is_err());
     }
 
     #[test]
