@@ -16,6 +16,8 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
+import { prepareCargoTarget } from './cargo-target-cache.mjs';
+
 const rootDir = path.resolve(import.meta.dirname, '..');
 const desktopDir = path.join(rootDir, 'apps/desktop');
 const distDir = path.join(desktopDir, 'dist');
@@ -140,21 +142,30 @@ if (process.platform !== 'darwin') throw new Error('The macOS app must be built 
 if (!['arm64', 'x64'].includes(process.arch))
   throw new Error(`Unsupported architecture: ${process.arch}`);
 
-run('cargo', [
-  'build',
-  '--locked',
-  '--release',
-  '--manifest-path',
-  'services/rust-bridge/Cargo.toml',
-]);
-run('cargo', ['build', '--locked', '--release', '--manifest-path', 'apps/desktop/Cargo.toml']);
+const cargoTarget = prepareCargoTarget({ cwd: rootDir });
+try {
+  run(
+    'cargo',
+    ['build', '--locked', '--release', '--manifest-path', 'services/rust-bridge/Cargo.toml'],
+    { env: cargoTarget.env },
+  );
+  run('cargo', ['build', '--locked', '--release', '--manifest-path', 'apps/desktop/Cargo.toml'], {
+    env: cargoTarget.env,
+  });
+} finally {
+  cargoTarget.release();
+}
 
 rmSync(distDir, { recursive: true, force: true });
 mkdirSync(macosDir, { recursive: true });
 mkdirSync(binDir, { recursive: true });
 
-const rustOperator = path.join(desktopDir, 'target/release/dappercode');
-const rustBridge = path.join(rootDir, 'services/rust-bridge/target/release/dappercode-bridge');
+const rustOperator = cargoTarget.targetDir
+  ? path.join(cargoTarget.targetDir, 'release/dappercode')
+  : path.join(desktopDir, 'target/release/dappercode');
+const rustBridge = cargoTarget.targetDir
+  ? path.join(cargoTarget.targetDir, 'release/dappercode-bridge')
+  : path.join(rootDir, 'services/rust-bridge/target/release/dappercode-bridge');
 const nativeExecutable = path.join(macosDir, 'DapperCode');
 run('xcrun', [
   'swiftc',

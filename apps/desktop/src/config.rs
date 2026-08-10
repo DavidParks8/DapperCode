@@ -71,6 +71,14 @@ impl RuntimePaths {
                     .join(binary_name),
             );
         }
+        if let (true, Some(target_dir)) = (
+            self.package_root
+                .join("services/rust-bridge/Cargo.toml")
+                .is_file(),
+            std::env::var_os("CARGO_TARGET_DIR"),
+        ) {
+            candidates.push(PathBuf::from(target_dir).join("release").join(binary_name));
+        }
         candidates.push(
             self.package_root
                 .join("services/rust-bridge/target/release")
@@ -747,13 +755,26 @@ mod tests {
 
     #[test]
     fn discovers_runtime_resources_from_an_explicit_package_root() {
-        struct Guard;
+        struct Guard {
+            package_root: Option<std::ffi::OsString>,
+            cargo_target_dir: Option<std::ffi::OsString>,
+        }
         impl Drop for Guard {
             fn drop(&mut self) {
-                std::env::remove_var("DAPPERCODE_PACKAGE_ROOT");
+                match &self.package_root {
+                    Some(value) => std::env::set_var("DAPPERCODE_PACKAGE_ROOT", value),
+                    None => std::env::remove_var("DAPPERCODE_PACKAGE_ROOT"),
+                }
+                match &self.cargo_target_dir {
+                    Some(value) => std::env::set_var("CARGO_TARGET_DIR", value),
+                    None => std::env::remove_var("CARGO_TARGET_DIR"),
+                }
             }
         }
-        let _guard = Guard;
+        let _guard = Guard {
+            package_root: std::env::var_os("DAPPERCODE_PACKAGE_ROOT"),
+            cargo_target_dir: std::env::var_os("CARGO_TARGET_DIR"),
+        };
         let temp = tempdir().unwrap();
 
         // A candidate that holds neither a bundled binary nor a bridge source tree is skipped, and
@@ -773,6 +794,16 @@ mod tests {
             .any(|candidate| candidate
                 .ends_with(Path::new("bin").join(platform::bridge_binary_name()))));
         assert!(runtime_target().is_some(), "this platform should be mapped");
+
+        let managed_target = temp.path().join("managed-target");
+        std::env::set_var("CARGO_TARGET_DIR", &managed_target);
+        let candidates = runtime.bridge_binary_candidates();
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.starts_with(&managed_target)
+                && candidate
+                    .parent()
+                    .is_some_and(|parent| parent.ends_with("release"))));
 
         // A package root that cannot be canonicalized is skipped rather than failing discovery.
         std::env::set_var("DAPPERCODE_PACKAGE_ROOT", temp.path().join("missing"));

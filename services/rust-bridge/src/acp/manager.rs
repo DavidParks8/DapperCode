@@ -1167,7 +1167,7 @@ impl AgentManager {
                 }
             }
             for session in connection.loaded_sessions().await {
-                let mut snapshot = Self::retire_abandoned_run(&session).await;
+                let mut snapshot = session.snapshot().await;
                 if let Some(summary) = sessions.get(&snapshot.thread_id) {
                     if snapshot.title.is_none() {
                         snapshot.title = summary.snapshot.title.clone();
@@ -2593,21 +2593,6 @@ impl AgentManager {
         Ok(())
     }
 
-    /// Retire a run that no live generation owns any more.
-    ///
-    /// A worker that dies mid-run — the desktop app quitting, the machine sleeping, a crash —
-    /// never delivers a terminal run event, so the reconstructed snapshot keeps advertising an
-    /// active run. Clients project that into a permanently "running" thread whose stop button can
-    /// never resolve: there is no live turn left to interrupt, so every press is a no-op.
-    async fn retire_abandoned_run(session: &super::session::AcpSession) -> SessionSnapshot {
-        session
-            .retire_abandoned_run(
-                "The agent stopped running before this turn finished.".to_string(),
-            )
-            .await;
-        session.snapshot().await
-    }
-
     async fn read_known_session_from(
         &self,
         connection: &AcpConnection,
@@ -2617,7 +2602,7 @@ impl AgentManager {
             .session(session_id)
             .await
             .ok_or_else(|| AcpRuntimeError::UnknownSession(session_id.to_string()))?;
-        let mut snapshot = Self::retire_abandoned_run(&session).await;
+        let mut snapshot = session.snapshot().await;
         let identity = AgentSessionId::decode(&snapshot.thread_id)
             .map_err(|_| AgentManagerError::InvalidThreadId)?;
         let entry = self
@@ -6626,188 +6611,5 @@ mod tests {
                 .get(&created.thread_id),
             Some(&replacement_instance_id)
         );
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod abandoned_run_tests {
-    use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
-
-    use super::*;
-    use crate::acp::events::FieldUpdate;
-    use crate::acp::session::AcpSession;
-
-    fn session_with_started_run() -> (AcpSession, String) {
-        let identity = AgentSessionId::new("opencode", "abandoned-session").unwrap();
-        let thread_id = identity.encode();
-        (
-            AcpSession::new("opencode".to_string(), thread_id.clone()),
-            thread_id,
-        )
-    }
-
-    async fn start_run_with_pending_tool(session: &AcpSession, thread_id: &str) {
-        session
-            .emit(CanonicalEvent::RunStarted {
-                agent_id: "opencode".to_string(),
-                thread_id: thread_id.to_string(),
-                run_id: "run-1".to_string(),
-                source_turn_id: "turn-1".to_string(),
-                generation: 1,
-            })
-            .await;
-        session
-            .emit(CanonicalEvent::Tool {
-                agent_id: "opencode".to_string(),
-                thread_id: thread_id.to_string(),
-                run_id: Some("run-1".to_string()),
-                source_turn_id: Some("turn-1".to_string()),
-                generation: Some(1),
-                tool_call_id: "tool-1".to_string(),
-                kind: ToolKind::Execute,
-                status: ToolCallStatus::InProgress,
-                title: "npm test".to_string(),
-                content: FieldUpdate::Set("running".to_string()),
-                structured_content: FieldUpdate::Unchanged,
-                locations: FieldUpdate::Unchanged,
-            })
-            .await;
-    }
-
-    /// A worker that dies mid-run never delivers `RunFinished`, so the reconstructed snapshot keeps
-    /// advertising an active run. Clients read that as a permanently running thread whose stop
-    /// button can never resolve, because no live turn is left to interrupt.
-    #[tokio::test]
-    async fn retires_a_run_that_no_live_generation_owns() {
-        let (session, thread_id) = session_with_started_run();
-        start_run_with_pending_tool(&session, &thread_id).await;
-
-        let before = session.snapshot().await;
-        assert_eq!(before.active_run_id.as_deref(), Some("run-1"));
-        assert!(!session.has_live_generation().await);
-
-        let after = AgentManager::retire_abandoned_run(&session).await;
-
-        assert_eq!(after.active_run_id, None);
-        assert_eq!(after.active_source_turn_id, None);
-        assert_eq!(after.active_generation, None);
-        assert!(after.active_tool_ids.is_empty());
-    }
-
-    /// The production trigger, end to end.
-    ///
-    /// A session interrupted by a crash, a sleeping Mac, or a force quit leaves exported history
-    /// whose `RunStarted` never got a terminal event. `seed_history` replays that history straight
-    /// into the snapshot without touching `generation_state`, so the reloaded session advertises an
-    /// active run that no generation owns. `emit` then refuses to apply any terminal event whose
-    /// generation is not live, which makes the orphan permanently unclearable through the normal
-    /// path — the thread projects as running forever and its stop button never resolves.
-    #[tokio::test]
-    async fn clears_an_orphan_replayed_from_history_that_emit_cannot_settle() {
-        let (session, thread_id) = session_with_started_run();
-        let seeded = session
-            .seed_history(vec![CanonicalEvent::RunStarted {
-                agent_id: "opencode".to_string(),
-                thread_id: thread_id.clone(),
-                run_id: "run-orphan".to_string(),
-                source_turn_id: "turn-orphan".to_string(),
-                generation: 7,
-            }])
-            .await;
-        assert!(seeded, "history should seed into an empty transcript");
-
-        // The bug as the client sees it: a run is advertised with nothing alive behind it.
-        let reloaded = session.snapshot().await;
-        assert_eq!(reloaded.active_run_id.as_deref(), Some("run-orphan"));
-        assert!(!session.has_live_generation().await);
-
-        // Why a naive fix cannot work: `emit` drops terminal events for a dead generation, so the
-        // orphan survives the very event that is supposed to settle it.
-        session
-            .emit(CanonicalEvent::RunFailed {
-                agent_id: "opencode".to_string(),
-                thread_id: thread_id.clone(),
-                run_id: "run-orphan".to_string(),
-                source_turn_id: "turn-orphan".to_string(),
-                generation: 7,
-                message: "worker exited".to_string(),
-            })
-            .await;
-        assert_eq!(
-            session.snapshot().await.active_run_id.as_deref(),
-            Some("run-orphan"),
-            "emit must be shown to leave the orphan in place, or this fix is unnecessary"
-        );
-
-        let after = AgentManager::retire_abandoned_run(&session).await;
-
-        assert_eq!(after.active_run_id, None);
-        assert_eq!(after.active_generation, None);
-        assert_eq!(after.active_source_turn_id, None);
-    }
-
-    /// The guard that matters most: a prompt genuinely in flight must never be settled behind the
-    /// agent's back, or a live turn would lose its stop button and its streaming output.
-    #[tokio::test]
-    async fn never_retires_a_run_a_live_generation_still_owns() {
-        let (session, thread_id) = session_with_started_run();
-        let (generation, started) = session
-            .admit_prompt("run-live".to_string(), "turn-live".to_string())
-            .await
-            .expect("prompt should be admitted");
-        session.emit(started).await;
-        assert!(session.has_live_generation().await);
-
-        let after = AgentManager::retire_abandoned_run(&session).await;
-
-        assert_eq!(after.active_run_id.as_deref(), Some("run-live"));
-        assert_eq!(after.active_generation, Some(generation));
-        assert!(session.has_live_generation().await);
-        let _ = thread_id;
-    }
-
-    /// Pressing stop moves the run to `Cancelling`, where it waits for the agent's own terminal
-    /// event. That run still has an owner, so retirement must keep its hands off until the cancel
-    /// resolves — otherwise a normal interrupt would race the reconciler for the same snapshot.
-    #[tokio::test]
-    async fn never_retires_a_run_that_is_still_cancelling() {
-        let (session, thread_id) = session_with_started_run();
-        let (_, started) = session
-            .admit_prompt("run-cancelling".to_string(), "turn-cancelling".to_string())
-            .await
-            .expect("prompt should be admitted");
-        session.emit(started).await;
-        assert!(
-            session.mark_cancelling().await.is_some(),
-            "stop should move the live run into cancelling"
-        );
-
-        let after = AgentManager::retire_abandoned_run(&session).await;
-
-        assert_eq!(after.active_run_id.as_deref(), Some("run-cancelling"));
-        let _ = thread_id;
-    }
-
-    #[tokio::test]
-    async fn leaves_an_already_settled_snapshot_untouched() {
-        let (session, thread_id) = session_with_started_run();
-        start_run_with_pending_tool(&session, &thread_id).await;
-        session
-            .emit(CanonicalEvent::RunFinished {
-                agent_id: "opencode".to_string(),
-                thread_id: thread_id.clone(),
-                run_id: "run-1".to_string(),
-                source_turn_id: "turn-1".to_string(),
-                generation: 1,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
-            })
-            .await;
-
-        let settled = session.snapshot().await;
-        let after = AgentManager::retire_abandoned_run(&session).await;
-
-        assert_eq!(after.active_run_id, None);
-        assert_eq!(after.timeline.len(), settled.timeline.len());
     }
 }
