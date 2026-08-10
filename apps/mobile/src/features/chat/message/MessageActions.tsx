@@ -7,6 +7,7 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared
 import type { MessageTokenUsage } from '@bridge/types/types';
 import { useAppTheme } from '@shared/theme';
 import { feedback } from '@shared/feedback';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { buildResponseUsageStats, buildResponseUsageSummary } from './responseUsage';
 import { createStyles } from './styles';
@@ -19,6 +20,8 @@ const ACTION_BUTTON_VISIBLE_SIZE = { width: 30, height: 30 };
  *
  * A transcript is already a vertical stack the reader scrolls, so expanding in place keeps the
  * response it describes on screen and needs no dismissal gesture, which a floating panel would.
+ * The panel rides on the same capsule glass material as the rest of the chat chrome so it reads
+ * as a floating detail over the transcript instead of an opaque inline block.
  */
 function ResponseUsageCard({
   usage,
@@ -31,7 +34,8 @@ function ResponseUsageCard({
 }) {
   const stats = useMemo(() => buildResponseUsageStats(usage), [usage]);
   return (
-    <View
+    <GlassSurface
+      role="capsule"
       testID={testID}
       style={styles.responseUsageCard}
       accessible
@@ -45,7 +49,7 @@ function ResponseUsageCard({
           </Text>
         </View>
       ))}
-    </View>
+    </GlassSurface>
   );
 }
 

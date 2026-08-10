@@ -155,15 +155,16 @@ export const createStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
     },
     messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
+    // GlassSurface owns the fill and border here, so this style carries layout only.
     responseUsageCard: {
       alignSelf: 'flex-start',
       marginTop: theme.spacing.xs,
       paddingVertical: theme.spacing.sm,
       paddingHorizontal: theme.spacing.md,
       borderRadius: theme.radius.lg,
+      borderCurve: 'continuous',
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.borderLight,
-      backgroundColor: theme.colors.bgItem,
+      overflow: 'hidden',
       gap: theme.spacing.xs,
     },
     responseUsageRow: {

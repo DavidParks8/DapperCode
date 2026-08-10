@@ -1,7 +1,13 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { MessageActions } from './MessageActions';
 
 jest.mock('expo-clipboard', () => ({
@@ -32,6 +38,16 @@ type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll
 };
 
 const theme = createAppTheme('dark');
+
+const sampleUsage = {
+  inputTokens: 12_400,
+  outputTokens: 1_280,
+  reasoningTokens: 300,
+  cachedReadTokens: 111_600,
+  cachedWriteTokens: 900,
+  totalTokens: 126_180,
+  model: 'GPT-5.6 Sol',
+};
 
 function wrap(node: React.ReactNode) {
   return <AppThemeProvider theme={theme}>{node}</AppThemeProvider>;
@@ -75,6 +91,11 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
 
 function findByTestId(root: QueryableInstance, testID: string): QueryableInstance | undefined {
   return root.findAll((node) => node.props['testID'] === testID)[0];
+}
+
+/** Wrappers forward `testID`, so the deepest match is the host view that owns the resolved style. */
+function findHostByTestId(root: QueryableInstance, testID: string): QueryableInstance | undefined {
+  return root.findAll((node) => node.props['testID'] === testID).at(-1);
 }
 
 function collectText(node: QueryableInstance): string[] {
@@ -246,5 +267,45 @@ describe('MessageActions', () => {
     const root = queryRoot(tree);
     expect(findPressable(root, 'Response details')).toBeDefined();
     expect(() => findPressable(root, 'Copy message')).toThrow();
+  });
+
+  it('paints the response details panel with the native capsule glass material', () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'usage-info-card',
+    );
+    expect(glassProps?.glassEffectStyle).toBe(theme.glass.capsule.glassEffectStyle);
+    expect(glassProps?.tintColor).toBe(theme.glass.capsule.tintColor);
+
+    // An opaque fill would sit in front of the material and defeat the glass.
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-info-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['backgroundColor']).toBeUndefined();
+  });
+
+  it('falls back to a solid bordered panel where liquid glass is unavailable', () => {
+    const tree = render(<MessageActions text="hello" testID="usage" usage={sampleUsage} />);
+    act(() => {
+      invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+    });
+
+    const glassProps = getRenderedGlassViewProps().find(
+      (props) => props.testID === 'usage-info-card',
+    );
+    expect(glassProps?.glassEffectStyle).toBe('none');
+    const cardStyle = StyleSheet.flatten(
+      findHostByTestId(queryRoot(tree), 'usage-info-card')?.props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(cardStyle['backgroundColor']).toBe(theme.glass.capsule.fallbackBackgroundColor);
+    expect(cardStyle['borderColor']).toBe(theme.glass.capsule.fallbackBorderColor);
+    expect(cardStyle['borderWidth']).toBe(StyleSheet.hairlineWidth);
   });
 });
