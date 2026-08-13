@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using DapperCode.Windows.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
+using WinRT;
 
 namespace DapperCode.Windows;
 
@@ -17,7 +19,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        WinRT.ComWrappersSupport.InitializeComWrappers();
+        ComWrappersSupport.InitializeComWrappers();
         if (RedirectToPrimaryInstance())
         {
             return 0;
@@ -63,7 +65,7 @@ public static class Program
         var completed = NativeMethods.CreateEventW(IntPtr.Zero, true, false, null);
         if (completed == IntPtr.Zero)
         {
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
         Exception? redirectError = null;

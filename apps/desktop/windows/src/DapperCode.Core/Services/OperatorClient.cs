@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using DapperCode.Core.Models;
@@ -93,7 +95,7 @@ public sealed class OperatorClient(
 
         if (options.BridgePort is { } port)
         {
-            arguments.AddRange(["--port", port.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            arguments.AddRange(["--port", port.ToString(CultureInfo.InvariantCulture)]);
         }
 
         if (options.ReplaceBrokerEndpoint)
@@ -135,7 +137,7 @@ public sealed class OperatorClient(
         }
         catch (Exception error) when (
             error is OperationCanceledException or OperatorException or
-            System.ComponentModel.Win32Exception)
+            Win32Exception)
         {
             return false;
         }
@@ -153,7 +155,7 @@ public sealed class OperatorClient(
         if (attachOwner)
         {
             arguments.AddRange(["--owner-pid", _processId().ToString(
-                System.Globalization.CultureInfo.InvariantCulture)]);
+                CultureInfo.InvariantCulture)]);
         }
 
         if (!string.IsNullOrWhiteSpace(workspace))

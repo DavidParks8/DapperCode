@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -67,7 +68,7 @@ public sealed class OperatorProcessRegistry : IDisposable
         catch (InvalidOperationException)
         {
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (Win32Exception)
         {
         }
     }

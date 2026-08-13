@@ -11,7 +11,7 @@ using Windows.System;
 namespace DapperCode.Windows.Services;
 
 internal sealed class DispatcherQueueService(
-    Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue) : IUiDispatcher
+    DispatcherQueue dispatcherQueue) : IUiDispatcher
 {
     public void Post(Action action)
     {

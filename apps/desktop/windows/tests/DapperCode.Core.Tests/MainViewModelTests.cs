@@ -1,3 +1,4 @@
+using System.Globalization;
 using DapperCode.Core.Models;
 using DapperCode.Core.Services;
 using DapperCode.Core.ViewModels;
@@ -205,7 +206,7 @@ public sealed class MainViewModelTests
             : NetworkMode.Local;
         var expectedPort = ushort.Parse(
             bridgePort,
-            System.Globalization.CultureInfo.InvariantCulture);
+            CultureInfo.InvariantCulture);
 
         await model.SetupAndStartAsync();
 

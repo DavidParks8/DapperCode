@@ -1,3 +1,4 @@
+using Microsoft.UI;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -49,7 +50,7 @@ internal sealed class MicaBackdropService : IDisposable
             return;
         }
 
-        _root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _root.Background = new SolidColorBrush(Colors.Transparent);
         _window.SystemBackdrop = _mica;
     }
 }

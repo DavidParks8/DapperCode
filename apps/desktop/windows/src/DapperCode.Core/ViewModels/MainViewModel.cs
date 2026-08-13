@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DapperCode.Core.Models;
 using DapperCode.Core.Services;
+using QRCoder.Exceptions;
 
 namespace DapperCode.Core.ViewModels;
 
@@ -628,10 +631,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         var host = Host.Trim();
         if (host.Length > 0 &&
-            (!System.Net.IPAddress.TryParse(host, out var address) ||
-             address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
-             System.Net.IPAddress.IsLoopback(address) ||
-             address.Equals(System.Net.IPAddress.Any) ||
+            (!IPAddress.TryParse(host, out var address) ||
+             address.AddressFamily != AddressFamily.InterNetwork ||
+             IPAddress.IsLoopback(address) ||
+             address.Equals(IPAddress.Any) ||
              address.GetAddressBytes() is [169, 254, _, _]))
         {
             throw new OperatorException(
@@ -781,7 +784,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         catch (Exception error) when (
             error is ArgumentException or ArgumentOutOfRangeException or
-            QRCoder.Exceptions.DataTooLongException)
+            DataTooLongException)
         {
             PairingQrPng = null;
             NoticeOccurred?.Invoke(

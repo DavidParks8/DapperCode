@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using DapperCode.Core.Models;
 using DapperCode.Core.ViewModels;
 using DapperCode.Windows.Services;
+using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -15,6 +16,7 @@ using Windows.Graphics;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using Windows.System;
+using WinRT.Interop;
 
 namespace DapperCode.Windows;
 
@@ -70,7 +72,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Show();
         Activate();
         _isVisible = true;
-        _ = NativeMethods.SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        _ = NativeMethods.SetForegroundWindow(WindowNative.GetWindowHandle(this));
         _ = ViewModel.RefreshIfStaleAsync();
         if (_pendingError is not null && _contentReady)
         {
@@ -114,7 +116,7 @@ public sealed partial class MainWindow : Window
         content.Children.Add(new TextBlock
         {
             Text = $"Version {version.Major}.{version.Minor}.{version.Build}.{version.Revision}",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontWeight = FontWeights.SemiBold,
         });
         content.Children.Add(new TextBlock
         {
