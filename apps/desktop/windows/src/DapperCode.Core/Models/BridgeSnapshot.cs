@@ -34,9 +34,6 @@ public sealed record BridgeSnapshot
     [JsonPropertyName("managedProcess")]
     public bool ManagedProcess { get; init; }
 
-    [JsonPropertyName("autoStart")]
-    public bool AutoStart { get; init; }
-
     [JsonPropertyName("workspace")]
     public string Workspace { get; init; } = string.Empty;
 

@@ -57,17 +57,6 @@ public sealed class OperatorClient(
             DapperCodeJsonContext.Default.OperatorEnvelopeBridgeSnapshot,
             cancellationToken);
 
-    public Task<BridgeSnapshot> RestartAsync(
-        string workspace,
-        CancellationToken cancellationToken) =>
-        InvokeAsync<BridgeSnapshot>(
-            ["restart"],
-            workspace,
-            attachOwner: true,
-            allowDuringShutdown: false,
-            DapperCodeJsonContext.Default.OperatorEnvelopeBridgeSnapshot,
-            cancellationToken);
-
     public Task<SetupResult> SetupAsync(
         SetupOptions options,
         CancellationToken cancellationToken)

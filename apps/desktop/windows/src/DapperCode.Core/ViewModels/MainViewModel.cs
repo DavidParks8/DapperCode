@@ -71,14 +71,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _healthObserver.Disconnected += OnHealthDisconnected;
 
         RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy);
-        PrimaryActionCommand = new AsyncRelayCommand(
-            PerformPrimaryActionAsync,
-            CanPerformPrimaryAction);
-        RestartCommand = new AsyncRelayCommand(
-            RestartAsync,
-            () => !IsBusy && Snapshot.ManagedProcess);
-        SetupAndStartCommand = new AsyncRelayCommand(
-            SetupAndStartAsync,
+        SetupCommand = new AsyncRelayCommand(
+            SetupAsync,
             () => !IsBusy && !string.IsNullOrWhiteSpace(AgentExecutable));
         ChooseWorkspaceCommand = new AsyncRelayCommand(
             ChooseWorkspaceAsync,
@@ -113,9 +107,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public ObservableCollection<BridgeSnapshot> Bridges { get; } = [];
 
     public AsyncRelayCommand RefreshCommand { get; }
-    public AsyncRelayCommand PrimaryActionCommand { get; }
-    public AsyncRelayCommand RestartCommand { get; }
-    public AsyncRelayCommand SetupAndStartCommand { get; }
+    public AsyncRelayCommand SetupCommand { get; }
     public AsyncRelayCommand ChooseWorkspaceCommand { get; }
     public AsyncRelayCommand ChooseAgentCommand { get; }
     public AsyncRelayCommand CopyBridgeUrlCommand { get; }
@@ -137,7 +129,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             UpdateQrCode();
             OnPropertyChanged(nameof(IsConfigured));
             OnPropertyChanged(nameof(IsRunning));
-            OnPropertyChanged(nameof(PrimaryActionTitle));
             OnPropertyChanged(nameof(SecretBackendLabel));
             OnPropertyChanged(nameof(UptimeLabel));
             OnPropertyChanged(nameof(HasPairingData));
@@ -227,7 +218,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (SetProperty(ref _agentExecutable, value))
             {
-                SetupAndStartCommand.NotifyCanExecuteChanged();
+                SetupCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -268,8 +259,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsRunning => Snapshot.IsRunning;
     public bool HasPairingData => Snapshot.PairingPayload is not null;
-    public string PrimaryActionTitle =>
-        IsRunning || Snapshot.ManagedProcess ? "Stop broker" : "Start broker";
 
     public string SecretBackendLabel => Snapshot.SecretBackend switch
     {
@@ -308,7 +297,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ApplyStartupStatus(startup);
             await DiscoverDefaultAgentAsync(cancellationToken).ConfigureAwait(true);
             await InitializeRefreshCoreAsync(cancellationToken).ConfigureAwait(true);
-            await RestoreRememberedBrokerAsync(cancellationToken).ConfigureAwait(true);
+            await EnsureBrokerRunningAsync(cancellationToken).ConfigureAwait(true);
         }).ConfigureAwait(true);
     }
 
@@ -325,24 +314,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await RefreshAsync().ConfigureAwait(true);
     }
 
-    public Task PerformPrimaryActionAsync() =>
-        ExecuteBusyAsync(async cancellationToken =>
-        {
-            Snapshot = IsRunning || Snapshot.ManagedProcess
-                ? await _operatorClient.StopAsync(Workspace, cancellationToken).ConfigureAwait(true)
-                : await _operatorClient.StartAsync(Workspace, cancellationToken).ConfigureAwait(true);
-            await RefreshCoreAsync(cancellationToken).ConfigureAwait(true);
-        });
-
-    public Task RestartAsync() =>
-        ExecuteBusyAsync(async cancellationToken =>
-        {
-            Snapshot = await _operatorClient.RestartAsync(Workspace, cancellationToken)
-                .ConfigureAwait(true);
-            await RefreshCoreAsync(cancellationToken).ConfigureAwait(true);
-        });
-
-    public Task SetupAndStartAsync() =>
+    public Task SetupAsync() =>
         ExecuteBusyAsync(async cancellationToken =>
         {
             var options = ValidateSetup();
@@ -389,6 +361,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
             Workspace = selected;
             await RefreshCoreAsync(cancellationToken).ConfigureAwait(true);
+            await EnsureBrokerRunningAsync(cancellationToken).ConfigureAwait(true);
         });
 
     public Task ChooseAgentAsync() =>
@@ -632,17 +605,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         string.Equals(left.Host.Trim(), right.Host.Trim(), StringComparison.OrdinalIgnoreCase) &&
         left.BridgePort == right.BridgePort;
 
-    private async Task RestoreRememberedBrokerAsync(CancellationToken cancellationToken)
+    private async Task EnsureBrokerRunningAsync(CancellationToken cancellationToken)
     {
-        var remembered = Bridges.FirstOrDefault(BridgeLaunchPolicy.ShouldRestore);
-        if (remembered is null)
+        var configured = Bridges.FirstOrDefault(BridgeLaunchPolicy.ShouldStart);
+        if (configured is null)
         {
             return;
         }
 
         try
         {
-            _ = await _operatorClient.StartAsync(remembered.Workspace, cancellationToken)
+            _ = await _operatorClient.StartAsync(configured.Workspace, cancellationToken)
                 .ConfigureAwait(true);
             if (Snapshot.State == "needsSetup")
             {
@@ -656,7 +629,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new OperatorException(
-                $"Could not restore the broker: {error.Message}",
+                $"Could not start the broker: {error.Message}",
                 error);
         }
     }
@@ -892,19 +865,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        _dispatcher.Post(() => _ = RefreshAsync());
+        _dispatcher.Post(() => _ = ReconcileAfterDisconnectAsync());
     }
 
-    private bool CanPerformPrimaryAction() =>
-        !IsBusy &&
-        (Snapshot.ManagedProcess || Snapshot.State != "needsSetup");
+    private Task ReconcileAfterDisconnectAsync() =>
+        ExecuteBusyAsync(async cancellationToken =>
+        {
+            await RefreshCoreAsync(cancellationToken).ConfigureAwait(true);
+            await EnsureBrokerRunningAsync(cancellationToken).ConfigureAwait(true);
+        });
 
     private void RaiseCommandStates()
     {
         RefreshCommand.NotifyCanExecuteChanged();
-        PrimaryActionCommand.NotifyCanExecuteChanged();
-        RestartCommand.NotifyCanExecuteChanged();
-        SetupAndStartCommand.NotifyCanExecuteChanged();
+        SetupCommand.NotifyCanExecuteChanged();
         ChooseWorkspaceCommand.NotifyCanExecuteChanged();
         ChooseAgentCommand.NotifyCanExecuteChanged();
         CopyBridgeUrlCommand.NotifyCanExecuteChanged();

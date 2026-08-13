@@ -40,7 +40,6 @@ public sealed class OperatorClientTests
         var (runner, arguments) = CreateRunner(
             Success(Snapshot("running")),
             Success(Snapshot("stopped")),
-            Success(Snapshot("running")),
             Success(new List<BridgeSnapshot>()));
         var client = new OperatorClient(
             CreatePathProvider(),
@@ -49,10 +48,9 @@ public sealed class OperatorClientTests
 
         _ = await client.StartAsync(@"C:\work\one", CancellationToken.None);
         _ = await client.StopAsync(@"C:\work\one", CancellationToken.None);
-        _ = await client.RestartAsync(@"C:\work\one", CancellationToken.None);
         _ = await client.ListAsync(CancellationToken.None);
 
-        _ = runner.Received(4).RunAsync(
+        _ = runner.Received(3).RunAsync(
             @"C:\Program Files\DapperCode\bin\dappercode.exe",
             Arg.Any<IReadOnlyList<string>>(),
             false,
@@ -64,11 +62,8 @@ public sealed class OperatorClientTests
             new[] { "stop", "--workspace", @"C:\work\one" },
             arguments[1]);
         CollectionAssert.AreEqual(
-            new[] { "restart", "--owner-pid", "4242", "--workspace", @"C:\work\one" },
-            arguments[2]);
-        CollectionAssert.AreEqual(
             new[] { "list", "--owner-pid", "4242" },
-            arguments[3]);
+            arguments[2]);
     }
 
     [TestMethod]

@@ -193,6 +193,59 @@ public sealed class ManifestPolicyTests
     }
 
     [TestMethod]
+    public void WindowsShellOwnsBrokerLifecycleWithoutManualControls()
+    {
+        var viewModel = File.ReadAllText(Path.Combine(
+            CoreProject,
+            "ViewModels",
+            "MainViewModel.cs"));
+        var snapshot = File.ReadAllText(Path.Combine(
+            CoreProject,
+            "Models",
+            "BridgeSnapshot.cs"));
+        var app = File.ReadAllText(Path.Combine(AppProject, "App.xaml.cs"));
+        var window = File.ReadAllText(Path.Combine(AppProject, "MainWindow.xaml"));
+        var tray = File.ReadAllText(Path.Combine(
+            AppProject,
+            "Services",
+            "TrayIconService.cs"));
+
+        StringAssert.Contains(viewModel, "EnsureBrokerRunningAsync", StringComparison.Ordinal);
+        StringAssert.Contains(
+            viewModel,
+            "ReconcileAfterDisconnectAsync",
+            StringComparison.Ordinal);
+        StringAssert.Contains(window, "Set up DapperCode", StringComparison.Ordinal);
+        StringAssert.Contains(
+            window,
+            "The broker runs while DapperCode is open and stops when it quits.",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            tray,
+            "Broker follows DapperCode's lifetime",
+            StringComparison.Ordinal);
+        Assert.IsFalse(snapshot.Contains("AutoStart", StringComparison.Ordinal));
+        foreach (var prohibited in new[]
+                 {
+                     "PrimaryActionCommand",
+                     "PerformPrimaryActionAsync",
+                     "RestartCommand",
+                     "RestartRequested",
+                     "S&top broker",
+                     "S&tart broker",
+                     "&Restart broker",
+                 })
+        {
+            Assert.IsFalse(
+                viewModel.Contains(prohibited, StringComparison.Ordinal) ||
+                app.Contains(prohibited, StringComparison.Ordinal) ||
+                window.Contains(prohibited, StringComparison.Ordinal) ||
+                tray.Contains(prohibited, StringComparison.Ordinal),
+                $"Windows shell contains manual broker control '{prohibited}'.");
+        }
+    }
+
+    [TestMethod]
     public void CommunityToolkitOwnsMvvmInfrastructure()
     {
         foreach (var fileName in new[]

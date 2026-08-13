@@ -13,8 +13,6 @@ public sealed class TrayIconService : IDisposable
     private readonly Func<TrayMenuState> _stateProvider;
     private readonly MenuFlyout _menu = new();
     private readonly RelayCommand _openCommand;
-    private readonly RelayCommand _primaryCommand;
-    private readonly RelayCommand _restartCommand;
     private readonly RelayCommand _openLogsCommand;
     private readonly RelayCommand _launchAtLoginCommand;
     private readonly RelayCommand _aboutCommand;
@@ -27,12 +25,6 @@ public sealed class TrayIconService : IDisposable
     {
         _stateProvider = stateProvider;
         _openCommand = new RelayCommand(() => OpenRequested?.Invoke());
-        _primaryCommand = new RelayCommand(
-            () => PrimaryActionRequested?.Invoke(),
-            CanPerformPrimaryAction);
-        _restartCommand = new RelayCommand(
-            () => RestartRequested?.Invoke(),
-            CanRestart);
         _openLogsCommand = new RelayCommand(
             () => OpenLogsRequested?.Invoke(),
             () => _stateProvider().CanOpenLogs);
@@ -56,8 +48,6 @@ public sealed class TrayIconService : IDisposable
     }
 
     public event Action? OpenRequested;
-    public event Action? PrimaryActionRequested;
-    public event Action? RestartRequested;
     public event Action? OpenLogsRequested;
     public event Action<bool>? LaunchAtLoginRequested;
     public event Action? AboutRequested;
@@ -104,18 +94,6 @@ public sealed class TrayIconService : IDisposable
         _taskbarIcon.Dispose();
     }
 
-    private bool CanPerformPrimaryAction()
-    {
-        var state = _stateProvider();
-        return !state.IsBusy && state.CanPerformPrimary;
-    }
-
-    private bool CanRestart()
-    {
-        var state = _stateProvider();
-        return !state.IsBusy && state.ManagedProcess;
-    }
-
     private bool CanToggleLaunchAtLogin()
     {
         var state = _stateProvider();
@@ -130,8 +108,6 @@ public sealed class TrayIconService : IDisposable
 
     private void NotifyCommandStates()
     {
-        _primaryCommand.NotifyCanExecuteChanged();
-        _restartCommand.NotifyCanExecuteChanged();
         _openLogsCommand.NotifyCanExecuteChanged();
         _launchAtLoginCommand.NotifyCanExecuteChanged();
     }
@@ -158,19 +134,14 @@ public sealed class TrayIconService : IDisposable
                 Text = $"{state.WorkspaceCount} workspaces configured",
             });
         }
-
-        _menu.Items.Add(new MenuFlyoutItem
+        if (state.IsConfigured)
         {
-            Command = _primaryCommand,
-            IsEnabled = !state.IsBusy && state.CanPerformPrimary,
-            Text = state.IsRunning ? "S&top broker" : "S&tart broker",
-        });
-        _menu.Items.Add(new MenuFlyoutItem
-        {
-            Command = _restartCommand,
-            IsEnabled = !state.IsBusy && state.ManagedProcess,
-            Text = "&Restart broker",
-        });
+            _menu.Items.Add(new MenuFlyoutItem
+            {
+                IsEnabled = false,
+                Text = "Broker follows DapperCode's lifetime",
+            });
+        }
         _menu.Items.Add(new MenuFlyoutItem
         {
             Command = _openLogsCommand,

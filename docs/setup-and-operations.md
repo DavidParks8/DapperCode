@@ -3,7 +3,7 @@
 DapperCode's desktop app owns bridge setup and lifecycle. The bridge is not distributed through npm.
 The macOS app uses a native SwiftUI/AppKit shell. The Windows app uses a native C# WinUI 3 shell.
 Both packages contain the Rust `dappercode` operator and Rust bridge and expose the same setup,
-pairing, workspace, status, logs, and lifecycle capabilities.
+pairing, workspace, status, logs, and automatic app-owned lifecycle.
 
 ## macOS Setup
 
@@ -21,11 +21,12 @@ In the app:
 2. Choose an installed ACP executable. OpenCode is discovered automatically in standard paths.
 3. Select Tailscale or local-network access.
 4. Confirm the host and bridge port.
-5. Select **Set Up and Start**.
+5. Select **Set Up DapperCode**.
 6. Scan the pairing QR from the mobile app.
 
 The app uses native file panels, forms, buttons, menus, pickers, alerts, and launch-at-login APIs.
-Styling and materials come from AppKit/SwiftUI on the installed macOS release.
+Styling and materials come from AppKit/SwiftUI on the installed macOS release. The broker starts
+with the menu-bar app and stops when it quits; the shell does not expose manual state controls.
 
 Tailscale mode requires the Tailscale app to be installed and connected. Local mode detects common
 macOS interfaces; a concrete LAN IP can also be entered manually.
@@ -108,13 +109,15 @@ Launch DapperCode from Start and complete the same in-app setup used on macOS:
 1. Choose the workspace the bridge may access.
 2. Choose an installed ACP executable.
 3. Select Tailscale or local-network access and confirm the endpoint.
-4. Select **Set Up and Start**, then pair the mobile app.
+4. Select **Set up DapperCode**, then pair the mobile app.
 
-Closing the main window leaves DapperCode in the notification area. Use its tray menu to show the
-window or quit; quitting stops the broker and its workspace workers. **Launch at login** controls the
-packaged `DapperCodeStartup` task, which is disabled on install and never enables itself without the
-user opting in. When enabled, sign-in starts the app quietly in the tray. Windows may disable the
-task through **Settings > Apps > Startup**, and the app reflects that operating-system state.
+Closing the main window leaves DapperCode in the notification area. The broker starts automatically
+for configured workspaces while the tray app is running; the Windows shell does not expose manual
+start, stop, or restart controls. Use the tray menu to show the window or quit; quitting stops the
+broker and its workspace workers. **Launch at login** controls the packaged `DapperCodeStartup` task,
+which is disabled on install and never enables itself without the user opting in. When enabled,
+sign-in starts the app quietly in the tray. Windows may disable the task through
+**Settings > Apps > Startup**, and the app reflects that operating-system state.
 
 WinUI owns the controls, keyboard behavior, accessibility semantics, Fluent resources, system theme,
 and Mica backdrop where supported. DapperCode does not draw a substitute theme, so Windows 11

@@ -59,13 +59,12 @@ public sealed class MainViewModelTests
     }
 
     [TestMethod]
-    public async Task MissingSavedWorkspaceStillRestoresAnotherRememberedBroker()
+    public async Task MissingSavedWorkspaceStillStartsAnotherConfiguredBroker()
     {
         var remembered = Snapshot("stopped", managed: false) with
         {
             Workspace = @"C:\work\valid",
             ProfileId = "profile-valid",
-            AutoStart = true,
         };
         var environment = new ViewModelEnvironment
         {
@@ -159,7 +158,7 @@ public sealed class MainViewModelTests
         await model.InitializeAsync();
         environment.Operator.ClearReceivedCalls();
 
-        await model.SetupAndStartAsync();
+        await model.SetupAsync();
 
         _ = environment.Operator.Received(1).SetupAsync(
             Arg.Is<SetupOptions>(options => !options.ReplaceBrokerEndpoint),
@@ -208,7 +207,7 @@ public sealed class MainViewModelTests
             bridgePort,
             CultureInfo.InvariantCulture);
 
-        await model.SetupAndStartAsync();
+        await model.SetupAsync();
 
         _ = environment.Confirmation.Received(1).ConfirmReplacementAsync(
             Arg.Is<BrokerEndpointConfiguration>(
@@ -254,7 +253,7 @@ public sealed class MainViewModelTests
         model.Host = "192.168.1.20";
         model.BridgePort = "18787";
 
-        await model.SetupAndStartAsync();
+        await model.SetupAsync();
 
         _ = environment.Operator.Received(1).SetupAsync(
             Arg.Is<SetupOptions>(options =>
@@ -300,7 +299,7 @@ public sealed class MainViewModelTests
         environment.Operator.ClearReceivedCalls();
         model.Host = "100.100.10.21";
 
-        await model.SetupAndStartAsync();
+        await model.SetupAsync();
 
         _ = environment.Operator.Received(1).StopAsync(
             runningWorkspace.Workspace,
@@ -319,7 +318,7 @@ public sealed class MainViewModelTests
     }
 
     [TestMethod]
-    public async Task SetupRunsSetupThenStartAndSettlesEveryDerivedControl()
+    public async Task SetupRunsSetupThenStartsTheAppOwnedBroker()
     {
         var environment = new ViewModelEnvironment
         {
@@ -328,13 +327,11 @@ public sealed class MainViewModelTests
         await using var model = environment.Create();
         await model.InitializeAsync();
 
-        await model.SetupAndStartCommand.ExecuteAsync(null);
+        await model.SetupCommand.ExecuteAsync(null);
 
         Assert.IsTrue(model.IsConfigured);
         Assert.IsTrue(model.IsRunning);
         Assert.IsFalse(model.IsBusy);
-        Assert.AreEqual("Stop broker", model.PrimaryActionTitle);
-        Assert.IsTrue(model.RestartCommand.CanExecute(null));
         Assert.IsFalse(model.PairingQrPng.IsEmpty);
         Received.InOrder(() =>
         {
@@ -360,9 +357,9 @@ public sealed class MainViewModelTests
     }
 
     [TestMethod]
-    public async Task RememberedAutoStartBrokerIsRestoredOnHiddenStartupInitialization()
+    public async Task ConfiguredStoppedBrokerStartsOnHiddenStartupInitialization()
     {
-        var stopped = Snapshot("stopped", managed: false) with { AutoStart = true };
+        var stopped = Snapshot("stopped", managed: false);
         var environment = new ViewModelEnvironment
         {
             Current = stopped,
@@ -376,6 +373,86 @@ public sealed class MainViewModelTests
         _ = environment.Operator.Received(1).StartAsync(
             @"C:\work\repo",
             Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public async Task SelectingAConfiguredWorkspaceStartsItsBrokerAutomatically()
+    {
+        var environment = new ViewModelEnvironment();
+        await using var model = environment.Create();
+        await model.InitializeAsync();
+        environment.Operator.ClearReceivedCalls();
+        var selected = Snapshot("stopped", managed: false) with
+        {
+            Workspace = @"C:\work\selected",
+            ProfileId = "profile-selected",
+        };
+        environment.Picker.PickWorkspaceAsync(Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                environment.Current = selected;
+                environment.Listed = [selected];
+                return Task.FromResult<string?>(selected.Workspace);
+            });
+
+        await model.ChooseWorkspaceAsync();
+
+        _ = environment.Operator.Received(1).StartAsync(
+            selected.Workspace,
+            Arg.Any<CancellationToken>());
+        Assert.IsTrue(model.IsRunning);
+    }
+
+    [TestMethod]
+    public async Task UnexpectedDisconnectRestartsTheAppOwnedBroker()
+    {
+        var running = Snapshot("running", managed: true);
+        var stopped = running with
+        {
+            State = "stopped",
+            Headline = "stopped",
+            ManagedProcess = false,
+        };
+        var environment = new ViewModelEnvironment
+        {
+            Current = running,
+            Listed = [running],
+        };
+        await using var model = environment.Create();
+        await model.InitializeAsync();
+        environment.Operator.ClearReceivedCalls();
+        environment.Current = stopped;
+        environment.Listed = [stopped];
+        var restarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        environment.Operator.StartAsync(
+                running.Workspace,
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                restarted.TrySetResult();
+                environment.Current = running;
+                environment.Listed = [running];
+                return Task.FromResult(running);
+            });
+
+        environment.Observer.Disconnected +=
+            Raise.Event<EventHandler<BridgeDisconnectedEventArgs>>(
+                environment.Observer,
+                new BridgeDisconnectedEventArgs(running.ProfileId));
+        await restarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        _ = environment.Operator.Received(1).StartAsync(
+            running.Workspace,
+            Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public void BridgeLaunchPolicyStartsOnlyConfiguredStoppedBrokers()
+    {
+        Assert.IsTrue(BridgeLaunchPolicy.ShouldStart(Snapshot("stopped", managed: false)));
+        Assert.IsFalse(BridgeLaunchPolicy.ShouldStart(Snapshot("running", managed: true)));
+        Assert.IsFalse(BridgeLaunchPolicy.ShouldStart(Snapshot("needsSetup", managed: false)));
     }
 
     [TestMethod]
@@ -498,7 +575,7 @@ public sealed class MainViewModelTests
         model.ErrorOccurred += (_, arguments) => error = arguments.Message;
         model.BridgePort = "443";
 
-        await model.SetupAndStartAsync();
+        await model.SetupAsync();
 
         Assert.AreEqual("Bridge port must be between 1024 and 65535.", error);
         _ = environment.Operator.DidNotReceive().SetupAsync(
@@ -521,10 +598,10 @@ public sealed class MainViewModelTests
         await model.InitializeAsync();
 
         model.AgentExecutable = string.Empty;
-        Assert.IsFalse(model.SetupAndStartCommand.CanExecute(null));
+        Assert.IsFalse(model.SetupCommand.CanExecute(null));
 
         model.AgentExecutable = @"C:\Tools\opencode.exe";
-        Assert.IsTrue(model.SetupAndStartCommand.CanExecute(null));
+        Assert.IsTrue(model.SetupCommand.CanExecute(null));
     }
 
     [TestMethod]
@@ -608,15 +685,38 @@ public sealed class MainViewModelTests
             Operator.ListAsync(Arg.Any<CancellationToken>())
                 .Returns(_ => Task.FromResult(Listed ?? [Current]));
             Operator.StartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(_ =>
+                .Returns(call =>
                 {
-                    Current = Snapshot("running", true);
-                    Listed = [Current];
-                    return Task.FromResult(Current);
+                    var workspace = call.Arg<string>();
+                    var bridges = (Listed ?? [Current]).ToList();
+                    var index = bridges.FindIndex(bridge => bridge.Workspace == workspace);
+                    var source = index >= 0 ? bridges[index] : Current;
+                    var started = source with
+                    {
+                        State = "running",
+                        Headline = "running",
+                        Detail = "running",
+                        ManagedProcess = true,
+                        BridgeUrl = source.BridgeUrl ?? "http://100.100.10.20:8787",
+                        PairingPayload = source.PairingPayload ??
+                            """{"type":"dappercode-broker-pair","bridgeUrl":"http://100.100.10.20:8787","bridgeToken":"secret","workspaceId":"profile-a"}""",
+                    };
+                    if (index >= 0)
+                    {
+                        bridges[index] = started;
+                    }
+                    else
+                    {
+                        bridges.Add(started);
+                    }
+                    Listed = bridges;
+                    if (Current.Workspace == workspace)
+                    {
+                        Current = started;
+                    }
+                    return Task.FromResult(started);
                 });
             Operator.StopAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(_ => Task.FromResult(Current));
-            Operator.RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(_ => Task.FromResult(Current));
             Operator.SetupAsync(Arg.Any<SetupOptions>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult(new SetupResult

@@ -37,8 +37,9 @@ npm run desktop:build:macos
 open apps/desktop/dist/DapperCode.app
 ```
 
-The app provides native menu-bar lifecycle, first-time setup, bridge start/stop/restart,
-authenticated status, pairing QR, logs, workspace selection, and launch-at-login.
+The app provides native menu-bar lifecycle, first-time setup, authenticated status, pairing QR,
+logs, workspace selection, and launch-at-login. The broker starts with the tray app and stops when
+the app quits; users do not manually start, stop, or restart it from the desktop shell.
 
 The shell uses standard SwiftUI and AppKit controls, menus, forms, materials, panels, and SF
 Symbols. It does not draw or freeze a custom theme. Appearance is inherited from the installed
@@ -47,10 +48,11 @@ macOS version, so changes such as Liquid Glass are supplied by the OS without a 
 ## Windows App
 
 The Windows 11 app is a packaged C# WinUI 3 tray-first app with full setup, pairing, workspace,
-status, logs, and bridge lifecycle parity. The release artifact is one MSIX bundle containing x64
-and ARM64 packages. Its shell uses native WinUI controls, Fluent system resources, and Mica where
-Windows supports it, so accessibility, theme, and future platform styling remain owned by Windows
-rather than a frozen custom theme.
+status, logs, and automatic bridge lifecycle parity. The broker starts with the tray app and stops
+when it quits, without manual state controls. The release artifact is one MSIX bundle containing
+x64 and ARM64 packages. Its shell uses native WinUI controls, Fluent system resources, and Mica
+where Windows supports it, so accessibility, theme, and future platform styling remain owned by
+Windows rather than a frozen custom theme.
 
 It runs as the signed-in user and does not install a Windows service, request elevation, create a
 scheduled task, or require administrator rights at runtime. Production-signed installation is also

@@ -223,14 +223,14 @@
                         <Button
                             AccessKey="S"
                             HorizontalAlignment="Left"
-                            Command="{x:Bind ViewModel.SetupAndStartCommand}"
-                            Content="Set up and start"
+                            Command="{x:Bind ViewModel.SetupCommand}"
+                            Content="Set up DapperCode"
                             Style="{ThemeResource AccentButtonStyle}" />
                         <TextBlock
                             MaxWidth="700"
                             HorizontalAlignment="Left"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="DapperCode stores settings in its Windows app-data folder, never in your repository. The broker credential is protected by the Windows credential vault when available."
+                            Text="After setup, the broker runs while DapperCode is open and stops when it quits. DapperCode stores settings in its Windows app-data folder, never in your repository. The broker credential is protected by the Windows credential vault when available."
                             TextWrapping="Wrap" />
                     </StackPanel>
                 </StackPanel>
@@ -448,19 +448,6 @@
                                     </StackPanel>
                                 </Button>
                             </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                                <Button
-                                    Command="{x:Bind ViewModel.RestartCommand}">
-                                    <StackPanel Orientation="Horizontal" Spacing="7">
-                                        <SymbolIcon Symbol="Refresh" />
-                                        <TextBlock Text="Restart" />
-                                    </StackPanel>
-                                </Button>
-                                <Button
-                                    Command="{x:Bind ViewModel.PrimaryActionCommand}"
-                                    Content="{x:Bind ViewModel.PrimaryActionTitle, Mode=OneWay}"
-                                    Style="{ThemeResource AccentButtonStyle}" />
-                            </StackPanel>
                             <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -470,6 +457,10 @@
                                     <TextBlock
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Text="{x:Bind ViewModel.SecretBackendLabel, Mode=OneWay}" />
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="The broker runs while DapperCode is open and stops when it quits."
+                                        TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="StartupMessageText"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"

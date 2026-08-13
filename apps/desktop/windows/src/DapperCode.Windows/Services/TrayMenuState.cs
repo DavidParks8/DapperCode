@@ -5,8 +5,7 @@ public sealed record TrayMenuState(
     int WorkspaceCount,
     bool IsRunning,
     bool IsBusy,
-    bool ManagedProcess,
-    bool CanPerformPrimary,
+    bool IsConfigured,
     bool CanOpenLogs,
     bool LaunchAtLogin,
     bool CanChangeLaunchAtLogin);

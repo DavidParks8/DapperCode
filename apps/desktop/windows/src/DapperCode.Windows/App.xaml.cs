@@ -140,8 +140,7 @@ public sealed partial class App : Application
                 0,
                 IsRunning: false,
                 IsBusy: true,
-                ManagedProcess: false,
-                CanPerformPrimary: false,
+                IsConfigured: false,
                 CanOpenLogs: false,
                 LaunchAtLogin: false,
                 CanChangeLaunchAtLogin: false);
@@ -152,8 +151,7 @@ public sealed partial class App : Application
             model.Bridges.Count,
             model.IsRunning,
             model.IsBusy,
-            model.Snapshot.ManagedProcess,
-            model.PrimaryActionCommand.CanExecute(null),
+            model.IsConfigured,
             !string.IsNullOrWhiteSpace(model.Snapshot.LogPath),
             model.LaunchAtLogin,
             model.LaunchAtLoginCanChange);
@@ -162,20 +160,6 @@ public sealed partial class App : Application
     private void WireTrayEvents(TrayIconService tray)
     {
         tray.OpenRequested += () => _window?.ShowManagementWindow();
-        tray.PrimaryActionRequested += () =>
-        {
-            if (_viewModel?.PrimaryActionCommand.CanExecute(null) == true)
-            {
-                _viewModel.PrimaryActionCommand.Execute(null);
-            }
-        };
-        tray.RestartRequested += () =>
-        {
-            if (_viewModel?.RestartCommand.CanExecute(null) == true)
-            {
-                _viewModel.RestartCommand.Execute(null);
-            }
-        };
         tray.OpenLogsRequested += () =>
         {
             if (_viewModel?.OpenLogsCommand.CanExecute(null) == true)
