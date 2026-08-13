@@ -594,22 +594,12 @@ private struct BridgeRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(bridge.workspaceName)
-                Text(portLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(bridge.workspaceName)
             Spacer()
             Button("Logs", systemImage: "doc.text") { model.openLogs(for: bridge) }
                 .labelStyle(.iconOnly)
         }
-        .accessibilityLabel("\(bridge.workspaceName): \(bridge.headline)")
-    }
-
-    private var portLabel: String {
-        guard let port = bridge.bridgePort else { return bridge.headline }
-        return "\(bridge.headline) · port \(port)"
+        .accessibilityLabel(bridge.workspaceName)
     }
 }
 
