@@ -75,10 +75,10 @@ public sealed class ManifestPolicyTests
     }
 
     [TestMethod]
-    public void DllImportsAreCentralizedInNativeMethods()
+    public void NativeImportsAreCentralizedInNativeMethods()
     {
-        var dllImport = new Regex(
-            @"\[\s*(?:System\.Runtime\.InteropServices\.)?DllImport(?:Attribute)?\s*\(");
+        var nativeImport = new Regex(
+            @"\[\s*(?:System\.Runtime\.InteropServices\.)?(?:DllImport|LibraryImport)(?:Attribute)?\s*\(");
         var nativeMethodsPath = Path.Combine(
             AppProject,
             "Services",
@@ -88,16 +88,16 @@ public sealed class ManifestPolicyTests
             .Where(path =>
                 !path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                     .Any(component => component is "bin" or "obj"))
-            .SelectMany(path => dllImport
+            .SelectMany(path => nativeImport
                 .Matches(File.ReadAllText(path))
                 .Select(_ => path))
             .ToArray();
 
-        Assert.IsTrue(imports.Length > 0, "No DllImport attributes were found.");
+        Assert.IsTrue(imports.Length > 0, "No native import attributes were found.");
         Assert.IsTrue(
             imports.All(path =>
                 string.Equals(path, nativeMethodsPath, StringComparison.OrdinalIgnoreCase)),
-            $"DllImport attributes outside NativeMethods.cs:{Environment.NewLine}" +
+            $"Native import attributes outside NativeMethods.cs:{Environment.NewLine}" +
             string.Join(
                 Environment.NewLine,
                 imports
@@ -107,6 +107,40 @@ public sealed class ManifestPolicyTests
                         StringComparison.OrdinalIgnoreCase))
                     .Select(path => Path.GetRelativePath(WindowsRoot, path))
                     .Distinct()));
+    }
+
+    [TestMethod]
+    public void NativeInteropIsSourceGeneratedAndUsesWin32Widths()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            AppProject,
+            "Services",
+            "NativeMethods.cs"));
+
+        StringAssert.Contains(source, "[Library" + "Import(", StringComparison.Ordinal);
+        StringAssert.Contains(source, "SafeWaitHandle CreateEventW(", StringComparison.Ordinal);
+        StringAssert.Contains(source, "uint handleCount", StringComparison.Ordinal);
+        Assert.IsFalse(source.Contains("[Dll" + "Import(", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("ulong handleCount", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void WinRtOperationsForwardCancellationTokens()
+    {
+        foreach (var relativePath in new[]
+                 {
+                     "Services/WindowsFilePickerService.cs",
+                     "Services/WindowsStartupService.cs",
+                     "Services/WindowsSystemActions.cs",
+                     "Services/BrokerEndpointReplacementConfirmationService.cs",
+                 })
+        {
+            var source = File.ReadAllText(Path.Combine(
+                AppProject,
+                relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+            StringAssert.Contains(source, ".AsTask(cancellationToken)", StringComparison.Ordinal);
+        }
     }
 
     [TestMethod]
@@ -138,13 +172,21 @@ public sealed class ManifestPolicyTests
     {
         var source = File.ReadAllText(Path.Combine(AppProject, "App.xaml.cs"));
 
-        StringAssert.Contains(source, "new ServiceCollection()");
-        StringAssert.Contains(source, "ValidateOnBuild = true");
-        StringAssert.Contains(source, "GetRequiredService<MainViewModel>()");
-        StringAssert.Contains(source, "AddSingleton<IOperatorClient, OperatorClient>()");
+        StringAssert.Contains(source, "new ServiceCollection()", StringComparison.Ordinal);
+        StringAssert.Contains(source, "ValidateOnBuild = true", StringComparison.Ordinal);
         StringAssert.Contains(
             source,
-            "AddSingleton<IBridgeHealthObserver, BridgeHealthObserver>()");
+            "GetRequiredService<MainViewModel>()",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            source,
+            "AddSingleton<IOperatorClient, OperatorClient>()",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            source,
+            "AddSingleton<IBridgeHealthObserver, BridgeHealthObserver>()",
+            StringComparison.Ordinal);
+        StringAssert.Contains(source, "AddSingleton<TrayIconService>()", StringComparison.Ordinal);
         Assert.IsFalse(source.Contains("new MainViewModel(", StringComparison.Ordinal));
         Assert.IsFalse(source.Contains("new OperatorClient(", StringComparison.Ordinal));
         Assert.IsFalse(source.Contains("new BridgeHealthObserver(", StringComparison.Ordinal));
@@ -170,11 +212,20 @@ public sealed class ManifestPolicyTests
             CoreProject,
             "ViewModels",
             "MainViewModel.cs"));
-        StringAssert.Contains(source, "using CommunityToolkit.Mvvm.ComponentModel;");
-        StringAssert.Contains(source, "using CommunityToolkit.Mvvm.Input;");
-        StringAssert.Contains(source, "public sealed class MainViewModel : ObservableObject");
-        StringAssert.Contains(source, "AsyncRelayCommand");
-        StringAssert.Contains(source, "RelayCommand<BridgeSnapshot>");
+        StringAssert.Contains(
+            source,
+            "using CommunityToolkit.Mvvm.ComponentModel;",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            source,
+            "using CommunityToolkit.Mvvm.Input;",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            source,
+            "public sealed class MainViewModel : ObservableObject",
+            StringComparison.Ordinal);
+        StringAssert.Contains(source, "AsyncRelayCommand", StringComparison.Ordinal);
+        StringAssert.Contains(source, "RelayCommand<BridgeSnapshot>", StringComparison.Ordinal);
         Assert.IsFalse(source.Contains("RaiseCanExecuteChanged", StringComparison.Ordinal));
     }
 
@@ -185,12 +236,12 @@ public sealed class ManifestPolicyTests
             AppProject,
             "Services",
             "TrayIconService.cs"));
-        StringAssert.Contains(traySource, "using H.NotifyIcon;");
-        StringAssert.Contains(traySource, "new TaskbarIcon");
-        StringAssert.Contains(traySource, "MenuFlyout");
-        StringAssert.Contains(traySource, "ContextFlyout = _menu");
-        StringAssert.Contains(traySource, "ForceCreate");
-        StringAssert.Contains(traySource, "_taskbarIcon.Dispose()");
+        StringAssert.Contains(traySource, "using H.NotifyIcon;", StringComparison.Ordinal);
+        StringAssert.Contains(traySource, "new TaskbarIcon", StringComparison.Ordinal);
+        StringAssert.Contains(traySource, "MenuFlyout", StringComparison.Ordinal);
+        StringAssert.Contains(traySource, "ContextFlyout = _menu", StringComparison.Ordinal);
+        StringAssert.Contains(traySource, "ForceCreate", StringComparison.Ordinal);
+        StringAssert.Contains(traySource, "_taskbarIcon.Dispose()", StringComparison.Ordinal);
         Assert.IsFalse(traySource.Contains("DllImport", StringComparison.Ordinal));
         Assert.IsFalse(traySource.Contains("NifGuid", StringComparison.OrdinalIgnoreCase));
         Assert.IsFalse(traySource.Contains("NIF_GUID", StringComparison.OrdinalIgnoreCase));
@@ -201,7 +252,8 @@ public sealed class ManifestPolicyTests
             StringComparison.Ordinal));
         StringAssert.Contains(
             appSource,
-            "AppDomain.CurrentDomain.ProcessExit += OnProcessExit;");
+            "AppDomain.CurrentDomain.ProcessExit += OnProcessExit;",
+            StringComparison.Ordinal);
 
         foreach (var fileName in new[]
                  {
@@ -331,8 +383,11 @@ public sealed class ManifestPolicyTests
             "WindowsStartupService.cs"));
 
         source = source.Replace("\r\n", "\n", StringComparison.Ordinal);
-        StringAssert.Contains(source, "StartupTaskState.EnabledByPolicy => new(");
-        StringAssert.Contains(source, "true,\n            false,");
+        StringAssert.Contains(
+            source,
+            "StartupTaskState.EnabledByPolicy => new(",
+            StringComparison.Ordinal);
+        StringAssert.Contains(source, "true,\n            false,", StringComparison.Ordinal);
     }
 
     private static void AssertPackageVersion(

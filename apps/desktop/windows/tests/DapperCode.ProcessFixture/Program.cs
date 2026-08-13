@@ -1,6 +1,6 @@
 namespace DapperCode.ProcessFixture;
 
-public static class Program
+internal static class Program
 {
     public static async Task<int> Main(string[] arguments)
     {
@@ -13,17 +13,19 @@ public static class Program
         {
             for (var index = 0; index < 256; index++)
             {
-                await Console.Out.WriteLineAsync($"stdout-{index:D3}-{new string('o', 256)}");
+                await Console.Out.WriteLineAsync($"stdout-{index:D3}-{new string('o', 256)}")
+                    .ConfigureAwait(false);
             }
         });
         var error = Task.Run(async () =>
         {
             for (var index = 0; index < 256; index++)
             {
-                await Console.Error.WriteLineAsync($"stderr-{index:D3}-{new string('e', 256)}");
+                await Console.Error.WriteLineAsync($"stderr-{index:D3}-{new string('e', 256)}")
+                    .ConfigureAwait(false);
             }
         });
-        await Task.WhenAll(output, error);
+        await Task.WhenAll(output, error).ConfigureAwait(false);
         return 0;
     }
 }

@@ -2,6 +2,10 @@ namespace DapperCode.Core.Services;
 
 public sealed class OperatorException : Exception
 {
+    public OperatorException()
+    {
+    }
+
     public OperatorException(string message)
         : base(message)
     {

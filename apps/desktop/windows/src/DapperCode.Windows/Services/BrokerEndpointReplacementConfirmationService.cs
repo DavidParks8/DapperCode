@@ -35,7 +35,7 @@ public sealed class BrokerEndpointReplacementConfirmationService(
             DefaultButton = ContentDialogButton.Close,
         };
 
-        var result = await dialog.ShowAsync();
+        var result = await dialog.ShowAsync().AsTask(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         return result == ContentDialogResult.Primary;
     }

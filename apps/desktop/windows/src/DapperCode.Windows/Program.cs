@@ -62,8 +62,8 @@ public static class Program
         AppActivationArguments arguments,
         AppInstance primary)
     {
-        var completed = NativeMethods.CreateEventW(IntPtr.Zero, true, false, null);
-        if (completed == IntPtr.Zero)
+        using var completed = NativeMethods.CreateEventW(IntPtr.Zero, true, false, null);
+        if (completed.IsInvalid)
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
@@ -85,24 +85,17 @@ public static class Program
             }
         });
 
-        try
+        const uint redirectTimeoutMilliseconds = 30_000;
+        var handles = new[] { completed.DangerousGetHandle() };
+        var result = NativeMethods.CoWaitForMultipleObjects(
+            0,
+            redirectTimeoutMilliseconds,
+            1,
+            handles,
+            out _);
+        if (result != 0)
         {
-            const uint infinite = 0xFFFFFFFF;
-            var handles = new[] { completed };
-            var result = NativeMethods.CoWaitForMultipleObjects(
-                0,
-                infinite,
-                1,
-                handles,
-                out _);
-            if (result != 0)
-            {
-                Marshal.ThrowExceptionForHR(unchecked((int)result));
-            }
-        }
-        finally
-        {
-            _ = NativeMethods.CloseHandle(completed);
+            Marshal.ThrowExceptionForHR(unchecked((int)result));
         }
 
         if (redirectError is not null)

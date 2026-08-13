@@ -1,7 +1,4 @@
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using DapperCode.Core.Models;
 
@@ -11,34 +8,58 @@ public sealed class BridgeHealthObserver(
     IBridgeHealthConnectionFactory connectionFactory,
     IAsyncDelay? delay = null) : IBridgeHealthObserver
 {
-    private sealed record Entry(
-        BridgeObservationTarget Target,
-        CancellationTokenSource Cancellation,
-        Task Worker);
+    private sealed class Entry : IDisposable
+    {
+        public Entry(BridgeHealthObserver owner, BridgeObservationTarget target)
+        {
+            Target = target;
+            Cancellation = new CancellationTokenSource();
+            Worker = ObserveAfterYieldAsync(owner, target, Cancellation.Token);
+        }
+
+        public BridgeObservationTarget Target { get; }
+        public CancellationTokenSource Cancellation { get; }
+        public Task Worker { get; }
+
+        public void Dispose() => Cancellation.Dispose();
+
+        private static async Task ObserveAfterYieldAsync(
+            BridgeHealthObserver owner,
+            BridgeObservationTarget target,
+            CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            await owner.ObserveAsync(target, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Entry> _entries = [];
     private readonly IAsyncDelay _delay = delay ?? new SystemAsyncDelay();
     private bool _disposed;
 
-    public event Action<string, BridgeObservedHealth>? HealthUpdated;
-    public event Action<string>? Disconnected;
+    public event EventHandler<BridgeHealthUpdatedEventArgs>? HealthUpdated;
+    public event EventHandler<BridgeDisconnectedEventArgs>? Disconnected;
 
     public void Synchronize(IReadOnlyCollection<BridgeObservationTarget> targets)
     {
+        ArgumentNullException.ThrowIfNull(targets);
         var next = targets.ToDictionary(target => target.ProfileId, StringComparer.Ordinal);
         List<Entry> removed = [];
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            foreach (var current in _entries.ToArray())
+            foreach (var current in _entries.Values)
             {
-                if (!next.TryGetValue(current.Key, out var desired) ||
-                    current.Value.Target != desired)
+                if (!next.TryGetValue(current.Target.ProfileId, out var desired) ||
+                    current.Target != desired)
                 {
-                    _entries.Remove(current.Key);
-                    removed.Add(current.Value);
+                    removed.Add(current);
                 }
+            }
+            foreach (var entry in removed)
+            {
+                _entries.Remove(entry.Target.ProfileId);
             }
 
             foreach (var target in targets)
@@ -48,9 +69,7 @@ public sealed class BridgeHealthObserver(
                     continue;
                 }
 
-                var cancellation = new CancellationTokenSource();
-                var worker = ObserveAsync(target, cancellation.Token);
-                _entries[target.ProfileId] = new Entry(target, cancellation, worker);
+                _entries[target.ProfileId] = new Entry(this, target);
             }
         }
 
@@ -61,9 +80,9 @@ public sealed class BridgeHealthObserver(
                 static (worker, state) =>
                 {
                     _ = worker.Exception;
-                    ((CancellationTokenSource)state!).Dispose();
+                    ((Entry)state!).Dispose();
                 },
-                entry.Cancellation,
+                entry,
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
@@ -85,15 +104,21 @@ public sealed class BridgeHealthObserver(
             _entries.Clear();
         }
 
-        foreach (var entry in entries)
+        try
         {
-            entry.Cancellation.Cancel();
-        }
+            foreach (var entry in entries)
+            {
+                await entry.Cancellation.CancelAsync().ConfigureAwait(false);
+            }
 
-        await Task.WhenAll(entries.Select(entry => entry.Worker)).ConfigureAwait(false);
-        foreach (var entry in entries)
+            await Task.WhenAll(entries.Select(entry => entry.Worker)).ConfigureAwait(false);
+        }
+        finally
         {
-            entry.Cancellation.Dispose();
+            foreach (var entry in entries)
+            {
+                entry.Dispose();
+            }
         }
     }
 
@@ -106,15 +131,20 @@ public sealed class BridgeHealthObserver(
         {
             try
             {
-                await using var connection = connectionFactory.Create();
-                await connection.RunAsync(
-                    target,
-                    health =>
-                    {
-                        failures = 0;
-                        HealthUpdated?.Invoke(target.ProfileId, health);
-                    },
-                    cancellationToken).ConfigureAwait(false);
+                var connection = connectionFactory.Create();
+                await using (connection.ConfigureAwait(false))
+                {
+                    await connection.RunAsync(
+                        target,
+                        health =>
+                        {
+                            failures = 0;
+                            HealthUpdated?.Invoke(
+                                this,
+                                new BridgeHealthUpdatedEventArgs(target.ProfileId, health));
+                        },
+                        cancellationToken).ConfigureAwait(false);
+                }
                 throw new IOException("The broker health connection closed.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -126,7 +156,7 @@ public sealed class BridgeHealthObserver(
                 JsonException or OperatorException or OperationCanceledException)
             {
                 failures = Math.Min(failures + 1, 6);
-                Disconnected?.Invoke(target.ProfileId);
+                Disconnected?.Invoke(this, new BridgeDisconnectedEventArgs(target.ProfileId));
                 try
                 {
                     await _delay.DelayAsync(

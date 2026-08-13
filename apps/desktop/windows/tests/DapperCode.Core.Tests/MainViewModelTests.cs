@@ -48,14 +48,14 @@ public sealed class MainViewModelTests
             .Returns<Task<BridgeSnapshot>>(_ =>
                 throw new OperatorException("workspace does not exist"));
         string? error = null;
-        model.ErrorOccurred += message => error = message;
+        model.ErrorOccurred += (_, arguments) => error = arguments.Message;
 
         await model.InitializeAsync();
 
         Assert.IsFalse(model.IsConfigured);
         Assert.IsTrue(model.ChooseWorkspaceCommand.CanExecute(null));
         Assert.IsFalse(model.IsBusy);
-        StringAssert.Contains(error, "workspace does not exist");
+        StringAssert.Contains(error, "workspace does not exist", StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -335,7 +335,7 @@ public sealed class MainViewModelTests
         Assert.IsFalse(model.IsBusy);
         Assert.AreEqual("Stop broker", model.PrimaryActionTitle);
         Assert.IsTrue(model.RestartCommand.CanExecute(null));
-        Assert.IsNotNull(model.PairingQrPng);
+        Assert.IsFalse(model.PairingQrPng.IsEmpty);
         Received.InOrder(() =>
         {
             _ = environment.Operator.DiscoverAgentAsync(
@@ -381,33 +381,44 @@ public sealed class MainViewModelTests
     [TestMethod]
     public async Task LiveHealthUpdatesAllDashboardStateWithoutOperatorPolling()
     {
+        var current = Snapshot("running", managed: true);
+        var other = Snapshot("running", managed: true) with
+        {
+            ProfileId = "profile-b",
+            Workspace = @"C:\work\other",
+            Headline = "Other broker",
+        };
         var environment = new ViewModelEnvironment
         {
-            Current = Snapshot("running", managed: true),
+            Current = current,
+            Listed = [current, other],
         };
         await using var model = environment.Create();
         await model.InitializeAsync();
 
-        environment.Observer.HealthUpdated += Raise.Event<Action<string, BridgeObservedHealth>>(
-            "profile-a",
-            new BridgeObservedHealth
-            {
-                Status = "degraded",
-                UptimeSec = 7_500,
-                ConnectedClients = 3,
-                ConfiguredWorkspaces = 2,
-                RunningWorkers = 4,
-                BusyWorkers = 1,
-                Agents =
-                [
-                    new ObservedAgent { Lifecycle = "ready" },
-                    new ObservedAgent { Lifecycle = "starting" },
-                ],
-                Operational = new ObservedOperationalState
-                {
-                    RecentErrors = [new ObservedRecentError()],
-                },
-            });
+        environment.Observer.HealthUpdated +=
+            Raise.Event<EventHandler<BridgeHealthUpdatedEventArgs>>(
+                environment.Observer,
+                new BridgeHealthUpdatedEventArgs(
+                    "profile-a",
+                    new BridgeObservedHealth
+                    {
+                        Status = "degraded",
+                        UptimeSec = 7_500,
+                        ConnectedClients = 3,
+                        ConfiguredWorkspaces = 2,
+                        RunningWorkers = 4,
+                        BusyWorkers = 1,
+                        Agents =
+                        [
+                            new ObservedAgent { Lifecycle = "ready" },
+                            new ObservedAgent { Lifecycle = "starting" },
+                        ],
+                        Operational = new ObservedOperationalState
+                        {
+                            RecentErrors = [new ObservedRecentError()],
+                        },
+                    }));
 
         Assert.AreEqual("degraded", model.Snapshot.State);
         Assert.AreEqual(3, model.Snapshot.ConnectedClients);
@@ -415,6 +426,62 @@ public sealed class MainViewModelTests
         Assert.AreEqual(4, model.Snapshot.TotalAgents);
         Assert.AreEqual(1, model.Snapshot.RecentErrorCount);
         Assert.AreEqual("2h 5m", model.UptimeLabel);
+        Assert.AreEqual("degraded", model.Bridges.Single(
+            bridge => bridge.ProfileId == "profile-a").State);
+        var unchanged = model.Bridges.Single(bridge => bridge.ProfileId == "profile-b");
+        Assert.AreEqual("running", unchanged.State);
+        Assert.AreEqual("Other broker", unchanged.Headline);
+    }
+
+    [TestMethod]
+    public async Task UnchangedRefreshDoesNotResetTheWorkspaceCollection()
+    {
+        var current = Snapshot("running", managed: true);
+        var other = current with
+        {
+            ProfileId = "profile-b",
+            Workspace = @"C:\work\other",
+        };
+        var environment = new ViewModelEnvironment
+        {
+            Current = current,
+            Listed = [current, other],
+        };
+        await using var model = environment.Create();
+        await model.InitializeAsync();
+        var collectionChanges = 0;
+        model.Bridges.CollectionChanged += (_, _) => collectionChanges++;
+
+        await model.RefreshAsync();
+
+        Assert.AreEqual(0, collectionChanges);
+        Assert.AreEqual(2, model.Bridges.Count);
+    }
+
+    [TestMethod]
+    public async Task DisposalRemainsBoundedWhenAnOperationDoesNotCancel()
+    {
+        var environment = new ViewModelEnvironment();
+        var model = environment.Create();
+        var pickerStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePicker = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        environment.Picker.PickWorkspaceAsync(Arg.Any<CancellationToken>())
+            .Returns(async _ =>
+            {
+                pickerStarted.TrySetResult();
+                await releasePicker.Task;
+                return null;
+            });
+        var operation = model.ChooseWorkspaceAsync();
+        await pickerStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        var disposal = model.DisposeAsync().AsTask();
+        await disposal.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.IsFalse(operation.IsCompleted);
+        releasePicker.TrySetResult();
+        await operation;
     }
 
     [TestMethod]
@@ -428,7 +495,7 @@ public sealed class MainViewModelTests
         await model.InitializeAsync();
         environment.Operator.ClearReceivedCalls();
         string? error = null;
-        model.ErrorOccurred += message => error = message;
+        model.ErrorOccurred += (_, arguments) => error = arguments.Message;
         model.BridgePort = "443";
 
         await model.SetupAndStartAsync();
@@ -471,13 +538,13 @@ public sealed class MainViewModelTests
         environment.QrCode.RenderPng(Arg.Any<string>())
             .Returns(_ => throw new ArgumentException("Payload is too large."));
         string? notice = null;
-        model.NoticeOccurred += message => notice = message;
+        model.NoticeOccurred += (_, arguments) => notice = arguments.Message;
 
         await model.InitializeAsync();
 
-        Assert.IsNull(model.PairingQrPng);
+        Assert.IsTrue(model.PairingQrPng.IsEmpty);
         Assert.IsTrue(model.CopyPairingDataCommand.CanExecute(null));
-        StringAssert.Contains(notice, "Copy pairing data");
+        StringAssert.Contains(notice, "Copy pairing data", StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -497,7 +564,7 @@ public sealed class MainViewModelTests
 
         Assert.IsTrue(model.LaunchAtLogin);
         Assert.IsFalse(model.LaunchAtLoginCanChange);
-        StringAssert.Contains(model.StartupMessage, "organization");
+        StringAssert.Contains(model.StartupMessage, "organization", StringComparison.Ordinal);
     }
 
     private static BridgeSnapshot Snapshot(string state, bool managed) => new()
@@ -576,9 +643,9 @@ public sealed class MainViewModelTests
                     StartupStatus = new StartupStatus(call.Arg<bool>(), true);
                     return Task.FromResult(StartupStatus);
                 });
-            Picker.PickWorkspaceAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            Picker.PickWorkspaceAsync(Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<string?>(null));
-            Picker.PickExecutableAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            Picker.PickExecutableAsync(Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<string?>(null));
             SystemActions.CopyTextAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Task.CompletedTask);

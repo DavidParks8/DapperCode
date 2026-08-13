@@ -1,3 +1,3 @@
 namespace DapperCode.ProcessFixture;
 
-public sealed class Marker;
+internal sealed class Marker;

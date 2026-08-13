@@ -4,8 +4,8 @@ namespace DapperCode.Core.Services;
 
 public interface IBridgeHealthObserver : IAsyncDisposable
 {
-    event Action<string, BridgeObservedHealth>? HealthUpdated;
-    event Action<string>? Disconnected;
+    event EventHandler<BridgeHealthUpdatedEventArgs>? HealthUpdated;
+    event EventHandler<BridgeDisconnectedEventArgs>? Disconnected;
 
     void Synchronize(IReadOnlyCollection<BridgeObservationTarget> targets);
 }

@@ -1,7 +1,7 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using DapperCode.Core.Models;
 using DapperCode.Core.Serialization;
@@ -17,16 +17,56 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
     private static readonly TimeSpan EventRefreshInterval = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<BridgeObservedHealth>>
         _pending = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _disposeCancellation = new();
+    private readonly Lock _lifecycleGate = new();
     private readonly SemaphoreSlim _sendGate = new(1, 1);
-    private ClientWebSocket? _socket;
-    private CancellationTokenSource? _lifetime;
-    private Action<BridgeObservedHealth>? _onHealth;
+    private TaskCompletionSource? _runCompletion;
     private Task? _eventRefresh;
+    private Task? _disposeTask;
     private long _lastHealthRequest;
     private int _requestId;
     private int _eventRefreshScheduled;
+    private bool _disposed;
+    private bool _hasRun;
 
     public async Task RunAsync(
+        BridgeObservationTarget target,
+        Action<BridgeObservedHealth> onHealth,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(onHealth);
+        var runCompletion = BeginRun();
+        try
+        {
+            await RunCoreAsync(target, onHealth, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_lifecycleGate)
+            {
+                _runCompletion = null;
+            }
+
+            runCompletion.TrySetResult();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        lock (_lifecycleGate)
+        {
+            if (_disposeTask is null)
+            {
+                _disposed = true;
+                _disposeTask = DisposeCoreAsync(_runCompletion?.Task);
+            }
+
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task RunCoreAsync(
         BridgeObservationTarget target,
         Action<BridgeObservedHealth> onHealth,
         CancellationToken cancellationToken)
@@ -40,71 +80,99 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
             socket.Options.SetRequestHeader("X-DapperCode-Workspace", workspaceId);
         }
 
-        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        using var connectCancellation =
-            CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        connectCancellation.CancelAfter(ConnectTimeout);
-        try
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _disposeCancellation.Token);
+        using (var connectCancellation =
+               CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
         {
-            await socket.ConnectAsync(endpoint.SocketUri, connectCancellation.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException("The broker health connection timed out.");
+            connectCancellation.CancelAfter(ConnectTimeout);
+            try
+            {
+                await socket.ConnectAsync(endpoint.SocketUri, connectCancellation.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("The broker health connection timed out.");
+            }
         }
 
-        _socket = socket;
-        _lifetime = lifetime;
-        _onHealth = onHealth;
-        var receive = ReceiveLoopAsync(socket, lifetime.Token);
+        Task? receive = null;
         Task? heartbeat = null;
         try
         {
+            receive = ReceiveLoopAsync(socket, lifetime, onHealth);
             onHealth(await RequestHealthAsync(socket, lifetime.Token).ConfigureAwait(false));
-            heartbeat = HeartbeatLoopAsync(socket, lifetime.Token);
+            heartbeat = HeartbeatLoopAsync(socket, onHealth, lifetime.Token);
             var completed = await Task.WhenAny(receive, heartbeat).ConfigureAwait(false);
             await completed.ConfigureAwait(false);
             throw new IOException("The broker health connection closed.");
         }
         finally
         {
-            lifetime.Cancel();
+            await lifetime.CancelAsync().ConfigureAwait(false);
             socket.Abort();
             CancelPending(lifetime.Token);
-            await IgnoreCancellationAsync(receive).ConfigureAwait(false);
+            if (receive is not null)
+            {
+                await IgnoreCancellationAsync(receive).ConfigureAwait(false);
+            }
             if (heartbeat is not null)
             {
                 await IgnoreCancellationAsync(heartbeat).ConfigureAwait(false);
             }
 
-            if (_eventRefresh is not null)
+            var eventRefresh = _eventRefresh;
+            if (eventRefresh is not null)
             {
-                await IgnoreCancellationAsync(_eventRefresh).ConfigureAwait(false);
+                await IgnoreCancellationAsync(eventRefresh).ConfigureAwait(false);
             }
 
-            _socket = null;
-            _lifetime = null;
-            _onHealth = null;
+            _eventRefresh = null;
         }
     }
 
-    public ValueTask DisposeAsync()
+    private TaskCompletionSource BeginRun()
     {
-        _lifetime?.Cancel();
-        _socket?.Abort();
-        return ValueTask.CompletedTask;
+        lock (_lifecycleGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_hasRun)
+            {
+                throw new InvalidOperationException(
+                    "A broker health connection can only be run once.");
+            }
+
+            _hasRun = true;
+            _runCompletion = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            return _runCompletion;
+        }
+    }
+
+    private async Task DisposeCoreAsync(Task? runCompletion)
+    {
+        await _disposeCancellation.CancelAsync().ConfigureAwait(false);
+        if (runCompletion is not null)
+        {
+            await runCompletion.ConfigureAwait(false);
+        }
+
+        _sendGate.Dispose();
+        _disposeCancellation.Dispose();
     }
 
     private async Task HeartbeatLoopAsync(
         ClientWebSocket socket,
+        Action<BridgeObservedHealth> onHealth,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             await Task.Delay(HeartbeatInterval, cancellationToken).ConfigureAwait(false);
             var health = await RequestHealthAsync(socket, cancellationToken).ConfigureAwait(false);
-            _onHealth?.Invoke(health);
+            onHealth(health);
         }
     }
 
@@ -152,21 +220,26 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
 
     private async Task ReceiveLoopAsync(
         ClientWebSocket socket,
-        CancellationToken cancellationToken)
+        CancellationTokenSource lifetime,
+        Action<BridgeObservedHealth> onHealth)
     {
         while (socket.State == WebSocketState.Open)
         {
-            var message = await ReadMessageAsync(socket, cancellationToken).ConfigureAwait(false);
-            if (message is null)
+            var message = await ReadMessageAsync(socket, lifetime.Token).ConfigureAwait(false);
+            if (message is not { } payload)
             {
                 return;
             }
 
-            HandleMessage(message);
+            HandleMessage(payload, socket, lifetime, onHealth);
         }
     }
 
-    private void HandleMessage(byte[] message)
+    private void HandleMessage(
+        ReadOnlyMemory<byte> message,
+        ClientWebSocket socket,
+        CancellationTokenSource lifetime,
+        Action<BridgeObservedHealth> onHealth)
     {
         using var document = JsonDocument.Parse(message);
         var root = document.RootElement;
@@ -189,7 +262,7 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
             }
             else
             {
-                _onHealth?.Invoke(health);
+                onHealth(health);
             }
 
             return;
@@ -204,73 +277,78 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
             return;
         }
 
-        ScheduleEventRefresh();
+        ScheduleEventRefresh(socket, lifetime, onHealth);
     }
 
-    private void ScheduleEventRefresh()
+    private void ScheduleEventRefresh(
+        ClientWebSocket socket,
+        CancellationTokenSource lifetime,
+        Action<BridgeObservedHealth> onHealth)
     {
-        if (_socket is null ||
-            _lifetime is null ||
-            Interlocked.CompareExchange(ref _eventRefreshScheduled, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref _eventRefreshScheduled, 1, 0) != 0)
         {
             return;
         }
 
-        _eventRefresh = Task.Run(async () =>
-        {
-            try
-            {
-                var elapsed = Stopwatch.GetElapsedTime(
-                    Interlocked.Read(ref _lastHealthRequest));
-                var remaining = EventRefreshInterval - elapsed;
-                if (remaining > TimeSpan.Zero)
-                {
-                    await Task.Delay(remaining, _lifetime.Token).ConfigureAwait(false);
-                }
-
-                var health = await RequestHealthAsync(_socket, _lifetime.Token)
-                    .ConfigureAwait(false);
-                _onHealth?.Invoke(health);
-            }
-            catch
-            {
-                _lifetime.Cancel();
-                throw;
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _eventRefreshScheduled, 0);
-            }
-        }, _lifetime.Token);
+        _eventRefresh = RefreshAfterEventAsync(socket, lifetime, onHealth);
     }
 
-    private static async Task<byte[]?> ReadMessageAsync(
+    private async Task RefreshAfterEventAsync(
+        ClientWebSocket socket,
+        CancellationTokenSource lifetime,
+        Action<BridgeObservedHealth> onHealth)
+    {
+        try
+        {
+            var elapsed = Stopwatch.GetElapsedTime(
+                Interlocked.Read(ref _lastHealthRequest));
+            var remaining = EventRefreshInterval - elapsed;
+            if (remaining > TimeSpan.Zero)
+            {
+                await Task.Delay(remaining, lifetime.Token).ConfigureAwait(false);
+            }
+
+            var health = await RequestHealthAsync(socket, lifetime.Token).ConfigureAwait(false);
+            onHealth(health);
+        }
+        catch
+        {
+            await lifetime.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _eventRefreshScheduled, 0);
+        }
+    }
+
+    private static async Task<ReadOnlyMemory<byte>?> ReadMessageAsync(
         ClientWebSocket socket,
         CancellationToken cancellationToken)
     {
-        var buffer = new byte[16 * 1024];
-        using var message = new MemoryStream();
+        var message = new ArrayBufferWriter<byte>(16 * 1024);
         while (true)
         {
+            var available = MaximumMessageBytes - message.WrittenCount;
+            if (available == 0)
+            {
+                throw new IOException("The broker health message exceeded the size limit.");
+            }
+
+            var receiveSize = Math.Min(16 * 1024, available);
+            var buffer = message.GetMemory(receiveSize)[..receiveSize];
             var result = await socket.ReceiveAsync(
-                new ArraySegment<byte>(buffer),
+                buffer,
                 cancellationToken).ConfigureAwait(false);
             if (result.MessageType == WebSocketMessageType.Close)
             {
                 return null;
             }
 
-            if (message.Length + result.Count > MaximumMessageBytes)
-            {
-                throw new IOException("The broker health message exceeded the size limit.");
-            }
-
-            await message.WriteAsync(
-                buffer.AsMemory(0, result.Count),
-                cancellationToken).ConfigureAwait(false);
+            message.Advance(result.Count);
             if (result.EndOfMessage)
             {
-                return message.ToArray();
+                return message.WrittenMemory;
             }
         }
     }

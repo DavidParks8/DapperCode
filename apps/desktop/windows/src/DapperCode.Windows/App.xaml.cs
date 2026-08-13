@@ -36,14 +36,14 @@ public sealed partial class App : Application
         try
         {
             MainWindow? window = null;
-            _services = BuildServiceProvider(dispatcher, () => window);
+            _services = BuildServiceProvider(dispatcher, () => window, GetTrayMenuState);
             _processRegistry = _services.GetRequiredService<OperatorProcessRegistry>();
             _viewModel = _services.GetRequiredService<MainViewModel>();
             window = _services.GetRequiredService<MainWindow>();
             _window = window;
             _shutdownCoordinator = _services.GetRequiredService<AppShutdownCoordinator>();
 
-            _trayIcon = new TrayIconService(GetTrayMenuState);
+            _trayIcon = _services.GetRequiredService<TrayIconService>();
             WireTrayEvents(_trayIcon);
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.Bridges.CollectionChanged += OnBridgesChanged;
@@ -91,7 +91,8 @@ public sealed partial class App : Application
 
     private static ServiceProvider BuildServiceProvider(
         DispatcherQueue dispatcher,
-        Func<MainWindow?> window)
+        Func<MainWindow?> window,
+        Func<TrayMenuState> trayMenuState)
     {
         var services = new ServiceCollection();
         services.AddSingleton(dispatcher);
@@ -99,6 +100,7 @@ public sealed partial class App : Application
             window()?.AppWindow ?? throw new InvalidOperationException(
                 "The DapperCode window is not ready for file selection."));
         services.AddSingleton<Func<XamlRoot?>>(() => window()?.Content.XamlRoot);
+        services.AddSingleton(trayMenuState);
         services.AddSingleton<OperatorProcessRegistry>();
         services.AddSingleton<IOperatorProcessRunner, OperatorProcessRunner>();
         services.AddSingleton<IOperatorPathProvider, PackagedOperatorPathProvider>();
@@ -118,6 +120,7 @@ public sealed partial class App : Application
         services.AddSingleton<IUiDispatcher, DispatcherQueueService>();
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
+        services.AddSingleton<TrayIconService>();
         services.AddSingleton<AppShutdownCoordinator>();
 
         return services.BuildServiceProvider(new ServiceProviderOptions

@@ -1,6 +1,6 @@
 namespace DapperCode.Windows.Services;
 
-internal sealed record TrayMenuState(
+public sealed record TrayMenuState(
     string Status,
     int WorkspaceCount,
     bool IsRunning,

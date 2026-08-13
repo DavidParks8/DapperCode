@@ -1,12 +1,5 @@
-using System.Diagnostics;
 using DapperCode.Core.Services;
-using Microsoft.UI.Dispatching;
-using Microsoft.UI.Windowing;
-using Microsoft.Windows.Storage.Pickers;
 using Windows.ApplicationModel;
-using Windows.ApplicationModel.DataTransfer;
-using Windows.Storage;
-using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
@@ -17,7 +10,7 @@ public sealed class WindowsStartupService : IStartupService
     public async Task<StartupStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var task = await StartupTask.GetAsync(StartupTaskId);
+        var task = await StartupTask.GetAsync(StartupTaskId).AsTask(cancellationToken);
         return ToStatus(task.State);
     }
 
@@ -26,7 +19,7 @@ public sealed class WindowsStartupService : IStartupService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var task = await StartupTask.GetAsync(StartupTaskId);
+        var task = await StartupTask.GetAsync(StartupTaskId).AsTask(cancellationToken);
         if (!enabled)
         {
             task.Disable();
@@ -35,7 +28,7 @@ public sealed class WindowsStartupService : IStartupService
 
         if (task.State == StartupTaskState.Disabled)
         {
-            _ = await task.RequestEnableAsync();
+            _ = await task.RequestEnableAsync().AsTask(cancellationToken);
         }
 
         return ToStatus(task.State);

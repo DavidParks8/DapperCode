@@ -30,8 +30,8 @@ public sealed class OperatorClientTests
             CancellationToken.None);
 
         Assert.AreEqual(0, result.ExitCode);
-        StringAssert.Contains(result.StandardOutput, "stdout-255-");
-        StringAssert.Contains(result.StandardError, "stderr-255-");
+        StringAssert.Contains(result.StandardOutput, "stdout-255-", StringComparison.Ordinal);
+        StringAssert.Contains(result.StandardError, "stderr-255-", StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -193,7 +193,7 @@ public sealed class OperatorClientTests
         var error = await Assert.ThrowsAsync<OperatorException>(() =>
             client.GetStatusAsync(@"C:\work\repo", CancellationToken.None));
 
-        StringAssert.Contains(error.Message, "invalid response");
+        StringAssert.Contains(error.Message, "invalid response", StringComparison.Ordinal);
     }
 
     private static IOperatorPathProvider CreatePathProvider()

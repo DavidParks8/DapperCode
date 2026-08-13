@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -37,8 +38,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private bool _launchAtLoginCanChange;
     private BrokerEndpointConfiguration? _configuredBrokerEndpoint;
     private string? _startupMessage;
-    private byte[]? _pairingQrPng;
+    private ReadOnlyMemory<byte> _pairingQrPng;
     private DateTimeOffset _lastRefresh = DateTimeOffset.MinValue;
+    private Task? _deferredResourceDisposal;
     private int _initialized;
     private int _disposed;
 
@@ -105,8 +107,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             bridge => bridge is not null && !string.IsNullOrWhiteSpace(bridge.LogPath));
     }
 
-    public event Action<string>? ErrorOccurred;
-    public event Action<string>? NoticeOccurred;
+    public event EventHandler<MessageEventArgs>? ErrorOccurred;
+    public event EventHandler<MessageEventArgs>? NoticeOccurred;
 
     public ObservableCollection<BridgeSnapshot> Bridges { get; } = [];
 
@@ -254,7 +256,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _launchAtLoginCanChange, value);
     }
 
-    public byte[]? PairingQrPng
+    public ReadOnlyMemory<byte> PairingQrPng
     {
         get => _pairingQrPng;
         private set => SetProperty(ref _pairingQrPng, value);
@@ -378,7 +380,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public Task ChooseWorkspaceAsync() =>
         ExecuteBusyAsync(async cancellationToken =>
         {
-            var selected = await _filePicker.PickWorkspaceAsync(Workspace, cancellationToken)
+            var selected = await _filePicker.PickWorkspaceAsync(cancellationToken)
                 .ConfigureAwait(true);
             if (selected is null)
             {
@@ -392,9 +394,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public Task ChooseAgentAsync() =>
         ExecuteBusyAsync(async cancellationToken =>
         {
-            var selected = await _filePicker.PickExecutableAsync(
-                string.IsNullOrWhiteSpace(AgentExecutable) ? null : AgentExecutable,
-                cancellationToken).ConfigureAwait(true);
+            var selected = await _filePicker.PickExecutableAsync(cancellationToken)
+                .ConfigureAwait(true);
             if (selected is null)
             {
                 return;
@@ -416,13 +417,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             ApplyStartupStatus(status);
             if (status.IsEnabled != enabled && status.Message is { } message)
             {
-                NoticeOccurred?.Invoke(message);
+                NoticeOccurred?.Invoke(this, new MessageEventArgs(message));
             }
         }).ConfigureAwait(true);
     }
 
     public async Task OpenLogsAsync(BridgeSnapshot bridge)
     {
+        ArgumentNullException.ThrowIfNull(bridge);
         try
         {
             await _systemActions.OpenLogAsync(bridge.LogPath, _lifetime.Token)
@@ -441,16 +443,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        _lifetime.Cancel();
+        await _lifetime.CancelAsync().ConfigureAwait(true);
         _healthObserver.HealthUpdated -= OnHealthUpdated;
         _healthObserver.Disconnected -= OnHealthDisconnected;
-        await _healthObserver.DisposeAsync().ConfigureAwait(true);
-        if (await _operationGate.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(true))
+        try
         {
-            _operationGate.Release();
-            _operationGate.Dispose();
-            _lifetime.Dispose();
+            await _healthObserver.DisposeAsync().ConfigureAwait(true);
         }
+        finally
+        {
+            if (await _operationGate.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(true))
+            {
+                DisposeResources();
+            }
+            else
+            {
+                _deferredResourceDisposal = DisposeResourcesWhenIdleAsync();
+            }
+        }
+    }
+
+    private async Task DisposeResourcesWhenIdleAsync()
+    {
+        await _operationGate.WaitAsync().ConfigureAwait(false);
+        DisposeResources();
+    }
+
+    private void DisposeResources()
+    {
+        _operationGate.Release();
+        _operationGate.Dispose();
+        _lifetime.Dispose();
     }
 
     private async Task RefreshCoreAsync(CancellationToken cancellationToken)
@@ -495,15 +518,47 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             SynchronizeBrokerEndpoint(snapshot, bridges);
             Snapshot = snapshot;
-            Bridges.Clear();
-            foreach (var bridge in bridges)
-            {
-                Bridges.Add(bridge);
-            }
-
+            SynchronizeBridges(bridges);
             _lastRefresh = DateTimeOffset.UtcNow;
             SynchronizeHealthObserver();
         });
+    }
+
+    private void SynchronizeBridges(IReadOnlyList<BridgeSnapshot> bridges)
+    {
+        for (var desiredIndex = 0; desiredIndex < bridges.Count; desiredIndex++)
+        {
+            var desired = bridges[desiredIndex];
+            var currentIndex = -1;
+            for (var index = desiredIndex; index < Bridges.Count; index++)
+            {
+                if (Bridges[index].ProfileId == desired.ProfileId)
+                {
+                    currentIndex = index;
+                    break;
+                }
+            }
+
+            if (currentIndex < 0)
+            {
+                Bridges.Insert(desiredIndex, desired);
+                continue;
+            }
+
+            if (currentIndex != desiredIndex)
+            {
+                Bridges.Move(currentIndex, desiredIndex);
+            }
+            if (Bridges[desiredIndex] != desired)
+            {
+                Bridges[desiredIndex] = desired;
+            }
+        }
+
+        while (Bridges.Count > bridges.Count)
+        {
+            Bridges.RemoveAt(Bridges.Count - 1);
+        }
     }
 
     private void SynchronizeBrokerEndpoint(
@@ -715,7 +770,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         try
         {
             await _systemActions.CopyTextAsync(value, _lifetime.Token).ConfigureAwait(true);
-            NoticeOccurred?.Invoke(confirmation);
+            NoticeOccurred?.Invoke(this, new MessageEventArgs(confirmation));
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -736,6 +791,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "This command boundary reports unexpected failures to the UI and restores busy state.")]
     private async Task ExecuteBusyAsync(Func<CancellationToken, Task> operation)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -780,15 +839,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             PairingQrPng = Snapshot.PairingPayload is { } payload
                 ? _qrCodeService.RenderPng(payload)
-                : null;
+                : ReadOnlyMemory<byte>.Empty;
         }
         catch (Exception error) when (
             error is ArgumentException or ArgumentOutOfRangeException or
             DataTooLongException)
         {
-            PairingQrPng = null;
+            PairingQrPng = ReadOnlyMemory<byte>.Empty;
             NoticeOccurred?.Invoke(
-                "The pairing QR code could not be generated. Use Copy pairing data instead.");
+                this,
+                new MessageEventArgs(
+                    "The pairing QR code could not be generated. Use Copy pairing data instead."));
         }
     }
 
@@ -805,25 +866,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void OnHealthUpdated(string profileId, BridgeObservedHealth health)
+    private void OnHealthUpdated(object? sender, BridgeHealthUpdatedEventArgs arguments)
     {
         _dispatcher.Post(() =>
         {
-            if (Snapshot.ProfileId == profileId)
+            if (Snapshot.ProfileId == arguments.ProfileId)
             {
-                Snapshot = Snapshot.Apply(health);
+                Snapshot = Snapshot.Apply(arguments.Health);
             }
 
             for (var index = 0; index < Bridges.Count; index++)
             {
-                Bridges[index] = Bridges[index].Apply(health);
+                if (Bridges[index].ProfileId == arguments.ProfileId)
+                {
+                    Bridges[index] = Bridges[index].Apply(arguments.Health);
+                }
             }
         });
     }
 
-    private void OnHealthDisconnected(string profileId)
+    private void OnHealthDisconnected(object? sender, BridgeDisconnectedEventArgs arguments)
     {
-        if (Snapshot.ProfileId != profileId || !Snapshot.IsRunning)
+        if (Snapshot.ProfileId != arguments.ProfileId || !Snapshot.IsRunning)
         {
             return;
         }
@@ -855,6 +919,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var message = error is OperatorException
             ? error.Message
             : $"DapperCode could not complete the action: {error.Message}";
-        _dispatcher.Post(() => ErrorOccurred?.Invoke(message));
+        _dispatcher.Post(() => ErrorOccurred?.Invoke(this, new MessageEventArgs(message)));
     }
 }

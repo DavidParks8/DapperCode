@@ -27,9 +27,22 @@ public sealed class BridgeServicesTests
 
         Assert.AreEqual("wss", endpoint.SocketUri.Scheme);
         Assert.AreEqual("/private/broker/rpc", endpoint.SocketUri.AbsolutePath);
-        StringAssert.Contains(endpoint.SocketUri.Query, "clientType=desktop-monitor");
-        StringAssert.Contains(endpoint.SocketUri.Query, "workspace=profile-a");
+        StringAssert.Contains(
+            endpoint.SocketUri.Query,
+            "clientType=desktop-monitor",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            endpoint.SocketUri.Query,
+            "workspace=profile-a",
+            StringComparison.Ordinal);
         Assert.AreEqual("secret", endpoint.Token);
+        StringAssert.StartsWith(
+            endpoint.AuthorizationHeader,
+            "Bearer ",
+            StringComparison.Ordinal);
+        Assert.AreEqual(
+            endpoint.Token,
+            endpoint.AuthorizationHeader["Bearer ".Length..]);
         Assert.AreEqual("Bearer secret", endpoint.AuthorizationHeader);
     }
 
@@ -86,7 +99,7 @@ public sealed class BridgeServicesTests
         var error = Assert.Throws<ArgumentOutOfRangeException>(
             () => new QrCodeService().RenderPng(new string('x', 2_201)));
 
-        StringAssert.Contains(error.Message, "too large");
+        StringAssert.Contains(error.Message, "too large", StringComparison.Ordinal);
     }
 
     [TestMethod]
@@ -124,8 +137,9 @@ public sealed class BridgeServicesTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var healthReceived = new TaskCompletionSource<BridgeObservedHealth>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        observer.Disconnected += _ => disconnected.TrySetResult();
-        observer.HealthUpdated += (_, health) => healthReceived.TrySetResult(health);
+        observer.Disconnected += (_, _) => disconnected.TrySetResult();
+        observer.HealthUpdated += (_, arguments) =>
+            healthReceived.TrySetResult(arguments.Health);
         var target = new BridgeObservationTarget("profile-a", "payload");
 
         observer.Synchronize([target]);

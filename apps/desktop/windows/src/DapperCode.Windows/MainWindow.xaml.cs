@@ -99,7 +99,8 @@ public sealed partial class MainWindow : Window
         _backdrop?.Dispose();
     }
 
-    public void ReportFatalError(string message) => OnErrorOccurred(message);
+    public void ReportFatalError(string message) =>
+        OnErrorOccurred(this, new MessageEventArgs(message));
 
     public async Task ShowFatalErrorAsync(string message)
     {
@@ -286,7 +287,7 @@ public sealed partial class MainWindow : Window
 
         var version = Interlocked.Increment(ref _qrVersion);
         var bytes = ViewModel.PairingQrPng;
-        if (bytes is null)
+        if (bytes.IsEmpty)
         {
             PairingQrImage.Source = null;
             return;
@@ -295,7 +296,7 @@ public sealed partial class MainWindow : Window
         using var stream = new InMemoryRandomAccessStream();
         using (var writer = new DataWriter(stream))
         {
-            writer.WriteBytes(bytes);
+            writer.WriteBytes(bytes.ToArray());
             _ = await writer.StoreAsync();
             _ = writer.DetachStream();
         }
@@ -309,20 +310,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnErrorOccurred(string message)
+    private void OnErrorOccurred(object? sender, MessageEventArgs arguments)
     {
         if (!_isVisible || !_contentReady)
         {
-            _pendingError = message;
+            _pendingError = arguments.Message;
             return;
         }
 
-        _ = ShowMessageAsync("DapperCode couldn’t complete the action", message);
+        _ = ShowMessageAsync("DapperCode couldn’t complete the action", arguments.Message);
     }
 
-    private void OnNoticeOccurred(string message)
+    private void OnNoticeOccurred(object? sender, MessageEventArgs arguments)
     {
-        NoticeBar.Message = message;
+        NoticeBar.Message = arguments.Message;
         NoticeBar.IsOpen = true;
     }
 

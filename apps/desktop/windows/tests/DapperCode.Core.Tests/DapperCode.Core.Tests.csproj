@@ -4,9 +4,14 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>DapperCode.Core.Tests</RootNamespace>
-    <NoWarn>$(NoWarn);CA1861</NoWarn>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- MSTest requires public test classes, and test continuations intentionally use its context. -->
+    <NoWarn>$(NoWarn);CA1515;CA1861;CA2007</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\src\DapperCode.Windows\Services\NativeMethods.cs"
+             Link="Interop\NativeMethods.cs" />
     <PackageReference Include="NSubstitute" />
     <ProjectReference Include="..\..\src\DapperCode.Core\DapperCode.Core.csproj" />
     <ProjectReference Include="..\DapperCode.ProcessFixture\DapperCode.ProcessFixture.csproj" />

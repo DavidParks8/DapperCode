@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class TrayIconService : IDisposable
+public sealed class TrayIconService : IDisposable
 {
     private const string ActiveIconUri = "ms-appx:///Assets/TrayActive.ico";
     private const string IdleIconUri = "ms-appx:///Assets/TrayIdle.ico";

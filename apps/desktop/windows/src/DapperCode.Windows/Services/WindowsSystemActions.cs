@@ -1,9 +1,5 @@
 using System.Diagnostics;
 using DapperCode.Core.Services;
-using Microsoft.UI.Dispatching;
-using Microsoft.UI.Windowing;
-using Microsoft.Windows.Storage.Pickers;
-using Windows.ApplicationModel;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.System;
@@ -27,8 +23,8 @@ public sealed class WindowsSystemActions : ISystemActions
         cancellationToken.ThrowIfCancellationRequested();
         if (File.Exists(path))
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            if (!await Launcher.LaunchFileAsync(file))
+            var file = await StorageFile.GetFileFromPathAsync(path).AsTask(cancellationToken);
+            if (!await Launcher.LaunchFileAsync(file).AsTask(cancellationToken))
             {
                 throw new InvalidOperationException("Windows could not open the broker log.");
             }
@@ -42,8 +38,9 @@ public sealed class WindowsSystemActions : ISystemActions
             throw new FileNotFoundException("The broker log folder does not exist.", path);
         }
 
-        var folder = await StorageFolder.GetFolderFromPathAsync(parent);
-        if (!await Launcher.LaunchFolderAsync(folder))
+        var folder = await StorageFolder.GetFolderFromPathAsync(parent)
+            .AsTask(cancellationToken);
+        if (!await Launcher.LaunchFolderAsync(folder).AsTask(cancellationToken))
         {
             throw new InvalidOperationException("Windows could not open the broker log folder.");
         }

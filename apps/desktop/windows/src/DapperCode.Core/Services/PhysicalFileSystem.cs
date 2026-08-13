@@ -1,5 +1,3 @@
-using DapperCode.Core.Models;
-
 namespace DapperCode.Core.Services;
 
 public sealed class PhysicalFileSystem : IFileSystem

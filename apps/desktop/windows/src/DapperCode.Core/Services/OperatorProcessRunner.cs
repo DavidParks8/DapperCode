@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 
@@ -12,6 +11,8 @@ public sealed class OperatorProcessRunner(OperatorProcessRegistry registry) : IO
         bool allowDuringShutdown,
         CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executable);
+        ArgumentNullException.ThrowIfNull(arguments);
         if (!File.Exists(executable))
         {
             throw OperatorException.Unavailable(executable);
