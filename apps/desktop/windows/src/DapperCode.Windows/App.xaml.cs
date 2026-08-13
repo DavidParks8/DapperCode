@@ -3,7 +3,9 @@ using System.ComponentModel;
 using DapperCode.Core.Services;
 using DapperCode.Core.ViewModels;
 using DapperCode.Windows.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
 
@@ -12,9 +14,8 @@ namespace DapperCode.Windows;
 public sealed partial class App : Application
 {
     private DispatcherQueue? _dispatcher;
+    private ServiceProvider? _services;
     private OperatorProcessRegistry? _processRegistry;
-    private IOperatorClient? _operatorClient;
-    private BridgeHealthObserver? _healthObserver;
     private AppShutdownCoordinator? _shutdownCoordinator;
     private MainViewModel? _viewModel;
     private MainWindow? _window;
@@ -30,38 +31,17 @@ public sealed partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs arguments)
     {
-        _dispatcher = DispatcherQueue.GetForCurrentThread();
+        var dispatcher = DispatcherQueue.GetForCurrentThread();
+        _dispatcher = dispatcher;
         try
         {
-            _processRegistry = new OperatorProcessRegistry();
-            var processRunner = new OperatorProcessRunner(_processRegistry);
-            _operatorClient = new OperatorClient(
-                new PackagedOperatorPathProvider(),
-                processRunner);
-            _healthObserver = new BridgeHealthObserver(
-                new ClientWebSocketHealthConnectionFactory());
-
             MainWindow? window = null;
-            var dispatcherService = new DispatcherQueueService(_dispatcher);
-            var endpointConfirmation = new BrokerEndpointReplacementConfirmationService(
-                () => window?.Content.XamlRoot);
-            _viewModel = new MainViewModel(
-                _operatorClient,
-                _healthObserver,
-                new QrCodeService(),
-                new WindowsUserSettings(),
-                new WindowsStartupService(),
-                new WindowsFilePickerService(() => window!.AppWindow),
-                new WindowsSystemActions(),
-                new PhysicalFileSystem(),
-                endpointConfirmation,
-                dispatcherService);
-            window = new MainWindow(_viewModel);
+            _services = BuildServiceProvider(dispatcher, () => window);
+            _processRegistry = _services.GetRequiredService<OperatorProcessRegistry>();
+            _viewModel = _services.GetRequiredService<MainViewModel>();
+            window = _services.GetRequiredService<MainWindow>();
             _window = window;
-            _shutdownCoordinator = new AppShutdownCoordinator(
-                _processRegistry,
-                _operatorClient,
-                _healthObserver);
+            _shutdownCoordinator = _services.GetRequiredService<AppShutdownCoordinator>();
 
             _trayIcon = new TrayIconService(GetTrayMenuState);
             WireTrayEvents(_trayIcon);
@@ -107,6 +87,44 @@ public sealed partial class App : Application
                 Exit();
             }
         }
+    }
+
+    private static ServiceProvider BuildServiceProvider(
+        DispatcherQueue dispatcher,
+        Func<MainWindow?> window)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(dispatcher);
+        services.AddSingleton<Func<AppWindow>>(() =>
+            window()?.AppWindow ?? throw new InvalidOperationException(
+                "The DapperCode window is not ready for file selection."));
+        services.AddSingleton<Func<XamlRoot?>>(() => window()?.Content.XamlRoot);
+        services.AddSingleton<OperatorProcessRegistry>();
+        services.AddSingleton<IOperatorProcessRunner, OperatorProcessRunner>();
+        services.AddSingleton<IOperatorPathProvider, PackagedOperatorPathProvider>();
+        services.AddSingleton<IOperatorClient, OperatorClient>();
+        services.AddSingleton<IBridgeHealthConnectionFactory,
+            ClientWebSocketHealthConnectionFactory>();
+        services.AddSingleton<IAsyncDelay, SystemAsyncDelay>();
+        services.AddSingleton<IBridgeHealthObserver, BridgeHealthObserver>();
+        services.AddSingleton<IQrCodeService, QrCodeService>();
+        services.AddSingleton<IUserSettings, WindowsUserSettings>();
+        services.AddSingleton<IStartupService, WindowsStartupService>();
+        services.AddSingleton<IFilePickerService, WindowsFilePickerService>();
+        services.AddSingleton<ISystemActions, WindowsSystemActions>();
+        services.AddSingleton<IFileSystem, PhysicalFileSystem>();
+        services.AddSingleton<IBrokerEndpointReplacementConfirmation,
+            BrokerEndpointReplacementConfirmationService>();
+        services.AddSingleton<IUiDispatcher, DispatcherQueueService>();
+        services.AddSingleton<MainViewModel>();
+        services.AddSingleton<MainWindow>();
+        services.AddSingleton<AppShutdownCoordinator>();
+
+        return services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
     }
 
     private TrayMenuState GetTrayMenuState()
@@ -219,9 +237,12 @@ public sealed partial class App : Application
             await _shutdownCoordinator.ShutdownAsync();
         }
 
-        _processRegistry?.Dispose();
         _window?.PrepareForShutdown();
         _window?.Close();
+        if (_services is not null)
+        {
+            await _services.DisposeAsync();
+        }
         Program.ActivationQueued -= OnActivationQueued;
         AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
         Exit();

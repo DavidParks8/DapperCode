@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class PackagedOperatorPathProvider : IOperatorPathProvider
+public sealed class PackagedOperatorPathProvider : IOperatorPathProvider
 {
     public string OperatorPath { get; } =
         Path.Combine(AppContext.BaseDirectory, "bin", "dappercode.exe");

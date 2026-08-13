@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class WindowsSystemActions : ISystemActions
+public sealed class WindowsSystemActions : ISystemActions
 {
     public Task CopyTextAsync(string value, CancellationToken cancellationToken)
     {

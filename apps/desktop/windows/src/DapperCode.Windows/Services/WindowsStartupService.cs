@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class WindowsStartupService : IStartupService
+public sealed class WindowsStartupService : IStartupService
 {
     private const string StartupTaskId = "DapperCodeStartup";
 

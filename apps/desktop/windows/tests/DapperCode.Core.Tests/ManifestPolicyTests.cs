@@ -117,6 +117,10 @@ public sealed class ManifestPolicyTests
             "Directory.Packages.props"));
         AssertPackageVersion(packageVersions, "CommunityToolkit.Mvvm", "8.4.2");
         AssertPackageVersion(packageVersions, "H.NotifyIcon.WinUI", "2.4.1");
+        AssertPackageVersion(
+            packageVersions,
+            "Microsoft.Extensions.DependencyInjection",
+            "10.0.11");
 
         AssertPackageReference(
             XDocument.Load(Path.Combine(CoreProject, "DapperCode.Core.csproj")),
@@ -124,6 +128,26 @@ public sealed class ManifestPolicyTests
         AssertPackageReference(
             XDocument.Load(Path.Combine(AppProject, "DapperCode.Windows.csproj")),
             "H.NotifyIcon.WinUI");
+        AssertPackageReference(
+            XDocument.Load(Path.Combine(AppProject, "DapperCode.Windows.csproj")),
+            "Microsoft.Extensions.DependencyInjection");
+    }
+
+    [TestMethod]
+    public void AppCompositionUsesDependencyInjection()
+    {
+        var source = File.ReadAllText(Path.Combine(AppProject, "App.xaml.cs"));
+
+        StringAssert.Contains(source, "new ServiceCollection()");
+        StringAssert.Contains(source, "ValidateOnBuild = true");
+        StringAssert.Contains(source, "GetRequiredService<MainViewModel>()");
+        StringAssert.Contains(source, "AddSingleton<IOperatorClient, OperatorClient>()");
+        StringAssert.Contains(
+            source,
+            "AddSingleton<IBridgeHealthObserver, BridgeHealthObserver>()");
+        Assert.IsFalse(source.Contains("new MainViewModel(", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("new OperatorClient(", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("new BridgeHealthObserver(", StringComparison.Ordinal));
     }
 
     [TestMethod]

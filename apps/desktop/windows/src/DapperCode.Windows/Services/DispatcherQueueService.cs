@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class DispatcherQueueService(
+public sealed class DispatcherQueueService(
     DispatcherQueue dispatcherQueue) : IUiDispatcher
 {
     public void Post(Action action)

@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class WindowsUserSettings : IUserSettings
+public sealed class WindowsUserSettings : IUserSettings
 {
     private const string WorkspaceKey = "workspace";
     private readonly ApplicationDataContainer _settings =

@@ -10,7 +10,7 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-internal sealed class WindowsFilePickerService(Func<AppWindow> appWindow) : IFilePickerService
+public sealed class WindowsFilePickerService(Func<AppWindow> appWindow) : IFilePickerService
 {
     public async Task<string?> PickWorkspaceAsync(
         string currentPath,

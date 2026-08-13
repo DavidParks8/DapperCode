@@ -41,6 +41,7 @@
 
   <ItemGroup>
     <PackageReference Include="H.NotifyIcon.WinUI" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <ProjectReference Include="..\DapperCode.Core\DapperCode.Core.csproj" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.WindowsAppSDK" />

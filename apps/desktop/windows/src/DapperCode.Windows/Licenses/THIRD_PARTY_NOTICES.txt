@@ -316,12 +316,14 @@ Bundled NuGet packages:
 - H.GeneratedIcons.System.Drawing 2.4.1 (MIT)
 - H.NotifyIcon 2.4.1 (MIT)
 - H.NotifyIcon.WinUI 2.4.1 (MIT)
-- Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.9 (MIT)
-- Microsoft.AspNetCore.App.Runtime.win-x64 10.0.9 (MIT)
-- Microsoft.NETCore.App.Host.win-arm64 10.0.9 (MIT)
-- Microsoft.NETCore.App.Host.win-x64 10.0.9 (MIT)
-- Microsoft.NETCore.App.Runtime.win-arm64 10.0.9 (MIT)
-- Microsoft.NETCore.App.Runtime.win-x64 10.0.9 (MIT)
+- Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.10 (MIT)
+- Microsoft.AspNetCore.App.Runtime.win-x64 10.0.10 (MIT)
+- Microsoft.Extensions.DependencyInjection 10.0.11 (MIT)
+- Microsoft.Extensions.DependencyInjection.Abstractions 10.0.11 (MIT)
+- Microsoft.NETCore.App.Host.win-arm64 10.0.10 (MIT)
+- Microsoft.NETCore.App.Host.win-x64 10.0.10 (MIT)
+- Microsoft.NETCore.App.Runtime.win-arm64 10.0.10 (MIT)
+- Microsoft.NETCore.App.Runtime.win-x64 10.0.10 (MIT)
 - Microsoft.Web.WebView2 1.0.3179.45 (See included license text)
 - Microsoft.Win32.SystemEvents 10.0.0 (MIT)
 - Microsoft.WindowsAppSDK.AI 1.8.79 (See included license text)
@@ -332,8 +334,8 @@ Bundled NuGet packages:
 - Microsoft.WindowsAppSDK.Runtime 1.8.260710003 (See included license text)
 - Microsoft.WindowsAppSDK.Widgets 1.8.251231004 (See included license text)
 - Microsoft.WindowsAppSDK.WinUI 1.8.260709004 (See included license text)
-- Microsoft.WindowsDesktop.App.Runtime.win-arm64 10.0.9 (MIT)
-- Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.9 (MIT)
+- Microsoft.WindowsDesktop.App.Runtime.win-arm64 10.0.10 (MIT)
+- Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.10 (MIT)
 - QRCoder 1.8.0 (MIT)
 - System.Drawing.Common 10.0.0 (MIT)
 - System.Numerics.Tensors 9.0.0 (MIT)
@@ -6170,7 +6172,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------
-Applies to: Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.9, Microsoft.AspNetCore.App.Runtime.win-x64 10.0.9, Microsoft.NETCore.App.Host.win-arm64 10.0.9, Microsoft.NETCore.App.Host.win-x64 10.0.9, Microsoft.NETCore.App.Runtime.win-arm64 10.0.9, Microsoft.NETCore.App.Runtime.win-x64 10.0.9, Microsoft.WindowsDesktop.App.Runtime.win-arm64 10.0.9, Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.9, System.Drawing.Common 10.0.0, System.Numerics.Tensors 9.0.0
+Applies to: Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.10, Microsoft.AspNetCore.App.Runtime.win-x64 10.0.10, Microsoft.NETCore.App.Host.win-arm64 10.0.10, Microsoft.NETCore.App.Host.win-x64 10.0.10, Microsoft.NETCore.App.Runtime.win-arm64 10.0.10, Microsoft.NETCore.App.Runtime.win-x64 10.0.10, Microsoft.WindowsDesktop.App.Runtime.win-arm64 10.0.10, Microsoft.WindowsDesktop.App.Runtime.win-x64 10.0.10, System.Drawing.Common 10.0.0, System.Numerics.Tensors 9.0.0
 ------------------------------------------------------------
 
 The MIT License (MIT)
@@ -6198,7 +6200,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------
-Applies to: Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.9, Microsoft.AspNetCore.App.Runtime.win-x64 10.0.9
+Applies to: Microsoft.AspNetCore.App.Runtime.win-arm64 10.0.10, Microsoft.AspNetCore.App.Runtime.win-x64 10.0.10
 ------------------------------------------------------------
 
 .NET Core uses third-party libraries or other resources that may be
@@ -7313,7 +7315,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ------------------------------------------------------------
-Applies to: Microsoft.NETCore.App.Host.win-arm64 10.0.9, Microsoft.NETCore.App.Host.win-x64 10.0.9, Microsoft.NETCore.App.Runtime.win-arm64 10.0.9, Microsoft.NETCore.App.Runtime.win-x64 10.0.9, Microsoft.Win32.SystemEvents 10.0.0
+Applies to: Microsoft.Extensions.DependencyInjection 10.0.11, Microsoft.Extensions.DependencyInjection.Abstractions 10.0.11, Microsoft.NETCore.App.Host.win-arm64 10.0.10, Microsoft.NETCore.App.Host.win-x64 10.0.10, Microsoft.NETCore.App.Runtime.win-arm64 10.0.10, Microsoft.NETCore.App.Runtime.win-x64 10.0.10, Microsoft.Win32.SystemEvents 10.0.0
 ------------------------------------------------------------
 
 .NET Runtime uses third-party libraries or other resources that may be
@@ -8733,6 +8735,62 @@ NIST-developed software is provided by NIST as a public service. You may use, co
 NIST-developed software is expressly provided "AS IS." NIST MAKES NO WARRANTY OF ANY KIND, EXPRESS, IMPLIED, IN FACT, OR ARISING BY OPERATION OF LAW, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND DATA ACCURACY. NIST NEITHER REPRESENTS NOR WARRANTS THAT THE OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE, OR THAT ANY DEFECTS WILL BE CORRECTED. NIST DOES NOT WARRANT OR MAKE ANY REPRESENTATIONS REGARDING THE USE OF THE SOFTWARE OR THE RESULTS THEREOF, INCLUDING BUT NOT LIMITED TO THE CORRECTNESS, ACCURACY, RELIABILITY, OR USEFULNESS OF THE SOFTWARE.
 
 You are solely responsible for determining the appropriateness of using and distributing the software and you assume all risks associated with its use, including but not limited to the risks and costs of program errors, compliance with applicable laws, damage to or loss of data, programs or equipment, and the unavailability or interruption of operation. This software is not intended to be used in any situation where a failure could cause risk of injury or damage to property. The software developed by NIST employees is not subject to copyright protection within the United States.
+
+------------------------------------------------------------
+Applies to: Microsoft.Extensions.DependencyInjection 10.0.11
+------------------------------------------------------------
+
+Package metadata attribution: Microsoft.Extensions.DependencyInjection 10.0.11 declares the MIT license in its NuGet package metadata. The package does not bundle a license file, so the standard MIT license text is reproduced below.
+
+MIT License
+
+Copyright (c) the authors and contributors of Microsoft.Extensions.DependencyInjection
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------
+Applies to: Microsoft.Extensions.DependencyInjection.Abstractions 10.0.11
+------------------------------------------------------------
+
+Package metadata attribution: Microsoft.Extensions.DependencyInjection.Abstractions 10.0.11 declares the MIT license in its NuGet package metadata. The package does not bundle a license file, so the standard MIT license text is reproduced below.
+
+MIT License
+
+Copyright (c) the authors and contributors of Microsoft.Extensions.DependencyInjection.Abstractions
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ------------------------------------------------------------
 Applies to: Microsoft.Web.WebView2 1.0.3179.45
