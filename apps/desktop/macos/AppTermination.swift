@@ -102,11 +102,10 @@ enum ApplicationTermination {
 }
 
 enum BridgeLaunchPolicy {
-    static func shouldRestore(
-        autoStart: Bool,
+    static func shouldStart(
         isRunning: Bool,
         state: String
     ) -> Bool {
-        autoStart && !isRunning && state == "stopped"
+        !isRunning && state == "stopped"
     }
 }
