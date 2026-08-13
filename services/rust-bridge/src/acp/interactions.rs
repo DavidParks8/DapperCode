@@ -341,14 +341,17 @@ impl InteractionRegistry {
         let outcome = RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
             option_id.to_string(),
         ));
-        let summary = entry.summary.clone();
-        let session_id = entry.session_id.clone();
-        let response = entry
-            .responder
+        let PermissionEntry {
+            responder,
+            summary,
+            session_id,
+            _session_lease: session_lease,
+            ..
+        } = entry;
+        let response = responder
             .respond(RequestPermissionResponse::new(outcome))
             .map_err(response_error);
-        self.emit_permission_resolved(&session_id, &summary, option_id)
-            .await;
+        self.publish_permission_resolved(session_id, summary, option_id.to_string(), session_lease);
         response
     }
 
@@ -370,16 +373,24 @@ impl InteractionRegistry {
             Self::bump_epoch(&mut state, &entry.session_id);
             entry
         };
-        let summary = entry.summary.clone();
-        let session_id = entry.session_id.clone();
-        let response = entry
-            .responder
+        let PermissionEntry {
+            responder,
+            summary,
+            session_id,
+            _session_lease: session_lease,
+            ..
+        } = entry;
+        let response = responder
             .respond(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
             ))
             .map_err(response_error);
-        self.emit_permission_resolved(&session_id, &summary, "cancelled")
-            .await;
+        self.publish_permission_resolved(
+            session_id,
+            summary,
+            "cancelled".to_string(),
+            session_lease,
+        );
         response
     }
 
@@ -846,6 +857,24 @@ impl InteractionRegistry {
         if let Some(session) = self.sessions.get(session_id).await {
             emit_permission(&session, summary, false, Some(outcome)).await;
         }
+    }
+
+    fn publish_permission_resolved(
+        &self,
+        session_id: SessionId,
+        summary: PendingPermissionSummary,
+        outcome: String,
+        session_lease: super::session::SessionLease,
+    ) {
+        let registry = self.clone();
+        // The ACP response is authoritative. Replay/UI publication must not keep its RPC spinning
+        // when the bounded canonical event pipeline is busy.
+        tokio::spawn(async move {
+            registry
+                .emit_permission_resolved(&session_id, &summary, &outcome)
+                .await;
+            drop(session_lease);
+        });
     }
 
     async fn emit_elicitation_resolved(

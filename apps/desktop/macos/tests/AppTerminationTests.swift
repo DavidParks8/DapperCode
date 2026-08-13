@@ -114,40 +114,28 @@ private struct AppTerminationTests {
         }
 
         try require(
-            BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
+            BridgeLaunchPolicy.shouldStart(
                 isRunning: false,
                 state: "stopped"
             ),
-            "a remembered stopped bridge should be restored"
+            "a configured stopped bridge should be started"
         )
         try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: false,
-                isRunning: false,
-                state: "stopped"
-            ),
-            "an unremembered bridge should stay stopped"
-        )
-        try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
+            !BridgeLaunchPolicy.shouldStart(
                 isRunning: true,
                 state: "running"
             ),
             "a running bridge should not be started twice"
         )
         try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
+            !BridgeLaunchPolicy.shouldStart(
                 isRunning: false,
                 state: "needsSetup"
             ),
             "an unconfigured bridge should not be autostarted"
         )
         try require(
-            !BridgeLaunchPolicy.shouldRestore(
-                autoStart: true,
+            !BridgeLaunchPolicy.shouldStart(
                 isRunning: false,
                 state: "error"
             ),

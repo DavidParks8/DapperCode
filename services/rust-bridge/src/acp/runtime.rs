@@ -2234,6 +2234,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn permission_response_does_not_wait_for_resolved_event_backpressure() {
+        let mut fixture = start_pending_interaction(TestInteraction::Permission(
+            permission_request(permission_options()),
+            false,
+        ))
+        .await;
+        requested_event(&mut fixture.events, true).await;
+        let pending = fixture.connection.pending_permissions().await;
+        let request = pending.first().expect("pending permission");
+        let session = fixture
+            .connection
+            .session(&fixture.session_id)
+            .await
+            .expect("interaction session");
+
+        for index in 0..256 {
+            session
+                .emit(CanonicalEvent::Ignored {
+                    agent_id: "test-agent".to_string(),
+                    thread_id: Some(request.thread_id.clone()),
+                    kind: format!("approval-backpressure-{index}"),
+                })
+                .await;
+        }
+
+        let mut resolution = {
+            let connection = fixture.connection.clone();
+            let thread_id = request.thread_id.clone();
+            let request_id = request.request_id.clone();
+            tokio::spawn(async move {
+                connection
+                    .resolve_permission(&thread_id, &request_id, "allow-once")
+                    .await
+            })
+        };
+
+        let ObservedInteraction::Permission(response) =
+            tokio::time::timeout(Duration::from_secs(1), fixture.observed.recv())
+                .await
+                .expect("ACP permission response should not wait for event delivery")
+                .expect("permission response")
+        else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            response.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Selected(
+                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+            )
+        );
+        tokio::time::timeout(Duration::from_millis(100), &mut resolution)
+            .await
+            .expect("approval resolution should finish while its event is backpressured")
+            .expect("resolution task")
+            .expect("approval resolves");
+        assert!(fixture.connection.pending_permissions().await.is_empty());
+
+        assert!(matches!(
+            resolved_event(&mut fixture.events, true).await,
+            CanonicalEvent::PermissionResolved { request_id, .. }
+                if request_id == request.request_id
+        ));
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
     async fn simultaneous_two_agent_interactions_are_unique_and_never_cross_route() {
         let mut alpha_permission = start_pending_interaction_for_agent(
             "alpha-agent",
