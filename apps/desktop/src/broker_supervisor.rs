@@ -709,14 +709,15 @@ mod tests {
         config_sha256: &str,
     ) -> (std::process::Child, BrokerOwnershipRecord) {
         let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-        let child = Command::new(&executable)
+        let mut command = Command::new(&executable);
+        command
             .arg(BROKER_LIFECYCLE_CHILD)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::null());
+        crate::platform::detach_process(&mut command);
+        let child = command.spawn().unwrap();
         let record = process_identity(child.id(), &executable, cwd, config_sha256, None).unwrap();
         (child, record)
     }
