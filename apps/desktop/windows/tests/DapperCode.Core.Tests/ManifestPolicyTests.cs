@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -7,8 +6,7 @@ namespace DapperCode.Core.Tests;
 [TestClass]
 public sealed class ManifestPolicyTests
 {
-    private static readonly string WindowsRoot = Path.GetFullPath(
-        Path.Combine(Path.GetDirectoryName(CurrentSourcePath())!, "..", ".."));
+    private static readonly string WindowsRoot = FindWindowsRoot();
     private static readonly string AppProject = Path.Combine(
         WindowsRoot,
         "src",
@@ -461,5 +459,21 @@ public sealed class ManifestPolicyTests
             .Any(element => element.Attribute("Include")?.Value == package));
     }
 
-    private static string CurrentSourcePath([CallerFilePath] string path = "") => path;
+    private static string FindWindowsRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Directory.Build.props")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "src", "DapperCode.Core")) &&
+                Directory.Exists(Path.Combine(directory.FullName, "src", "DapperCode.Windows")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        throw new DirectoryNotFoundException(
+            $"Could not locate the Windows desktop source from {AppContext.BaseDirectory}.");
+    }
 }

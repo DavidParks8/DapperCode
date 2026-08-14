@@ -156,6 +156,38 @@ mod tests {
     }
 
     #[test]
+    fn process_probe_distinguishes_live_and_missing_processes() {
+        assert!(unix_process_is_alive(std::process::id()));
+        assert!(!unix_process_is_alive(u32::MAX - 1));
+    }
+
+    #[tokio::test]
+    async fn git_process_group_cleanup_handles_grouped_ungrouped_and_settled_children() {
+        let mut grouped_command = Command::new("/bin/sh");
+        grouped_command.args(["-c", "sleep 30"]);
+        configure_unix_git_command(&mut grouped_command);
+        let mut grouped = grouped_command.spawn().expect("spawn grouped child");
+        kill_unix_git_process_group(&grouped);
+        tokio::time::timeout(Duration::from_secs(5), grouped.wait())
+            .await
+            .expect("grouped child should exit")
+            .expect("wait for grouped child");
+
+        let mut ungrouped = Command::new("/bin/sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn ungrouped child");
+        kill_unix_git_process_group(&ungrouped);
+        assert!(ungrouped
+            .try_wait()
+            .expect("inspect ungrouped child")
+            .is_none());
+        ungrouped.kill().await.expect("kill ungrouped child");
+        ungrouped.wait().await.expect("wait for ungrouped child");
+        kill_unix_git_process_group(&ungrouped);
+    }
+
+    #[test]
     fn every_kevent_outcome_maps_to_the_right_next_step() {
         use std::io::ErrorKind;
 

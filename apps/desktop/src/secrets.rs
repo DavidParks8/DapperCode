@@ -828,6 +828,367 @@ mod tests {
     }
 
     #[test]
+    fn windows_validates_layout_profiles_and_tokens() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+
+        assert!(store.get(&paths, "").is_err());
+        assert!(store.get(&paths, &"p".repeat(MAX_TOKEN_BYTES + 1)).is_err());
+        assert!(store.set(&paths, "alpha", " ").is_err());
+        assert!(store
+            .set(&paths, "alpha", &"x".repeat(MAX_TOKEN_BYTES + 1))
+            .is_err());
+        assert_eq!(store.ensure_profiles(&paths, &[]).unwrap(), None);
+        store.refresh(&paths).unwrap();
+
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                VAULT_ENTRY_ACCOUNT.to_string(),
+                serde_json::to_string(&SecretVault::default()).unwrap(),
+            );
+        }
+        store.refresh(&paths).unwrap();
+        let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        keychain.entries.remove(VAULT_ENTRY_ACCOUNT);
+        keychain.entries.insert(
+            WINDOWS_LAYOUT_ENTRY_ACCOUNT.to_string(),
+            "unsupported-layout".to_string(),
+        );
+        drop(keychain);
+        assert!(store
+            .get(&paths, "alpha")
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported Windows bridge credential layout marker"));
+    }
+
+    #[test]
+    fn windows_reuses_existing_entries_and_detects_legacy_conflicts() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let alpha_account = windows_profile_entry_account("alpha");
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain
+                .entries
+                .insert(alpha_account.clone(), "alpha-token".to_string());
+        }
+
+        let (alpha, created) = store.get_or_create_with_status(&paths, "alpha").unwrap();
+        assert!(!created);
+        assert_eq!(alpha.token, "alpha-token");
+        assert_eq!(
+            store
+                .ensure_profiles(&paths, &["alpha".to_string(), "beta".to_string()])
+                .unwrap(),
+            Some(SecretBackend::Keychain)
+        );
+        assert!(store.get(&paths, "beta").unwrap().is_some());
+
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.remove(WINDOWS_LAYOUT_ENTRY_ACCOUNT);
+            let mut legacy = SecretVault::default();
+            legacy
+                .bridge_auth_tokens
+                .insert("alpha".to_string(), "different-token".to_string());
+            keychain.entries.insert(
+                VAULT_ENTRY_ACCOUNT.to_string(),
+                serde_json::to_string(&legacy).unwrap(),
+            );
+        }
+        assert!(store
+            .get(&paths, "alpha")
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting Windows bridge credentials"));
+        assert!(store.get(&paths, "missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn windows_reuses_and_deletes_file_fallback_entries() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reject_all_sets = true;
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+
+        let (alpha, created) = store.get_or_create_with_status(&paths, "alpha").unwrap();
+        assert!(created);
+        assert_eq!(alpha.backend, SecretBackend::File);
+        let (reused, created) = store.get_or_create_with_status(&paths, "alpha").unwrap();
+        assert!(!created);
+        assert_eq!(reused.token, alpha.token);
+        assert_eq!(
+            store.get(&paths, "alpha").unwrap().unwrap().backend,
+            SecretBackend::File
+        );
+        store.get_or_create_with_status(&paths, "beta").unwrap();
+        assert_eq!(
+            store
+                .ensure_profiles(&paths, &["alpha".to_string(), "gamma".to_string()])
+                .unwrap(),
+            Some(SecretBackend::File)
+        );
+
+        store.delete(&paths, "missing").unwrap();
+        store.delete(&paths, "alpha").unwrap();
+        assert!(store.get(&paths, "alpha").unwrap().is_none());
+        assert!(store.get(&paths, "beta").unwrap().is_some());
+    }
+
+    #[test]
+    fn windows_rejects_conflicting_legacy_and_file_migrations() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let mut legacy = SecretVault::default();
+        legacy
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), "legacy-token".to_string());
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                windows_profile_entry_account("alpha"),
+                "direct-token".to_string(),
+            );
+            keychain.entries.insert(
+                VAULT_ENTRY_ACCOUNT.to_string(),
+                serde_json::to_string(&legacy).unwrap(),
+            );
+        }
+        assert!(store
+            .ensure_profiles(&paths, &["alpha".to_string()])
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting Windows bridge credentials"));
+
+        WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entries
+            .remove(VAULT_ENTRY_ACCOUNT);
+        vault_file_set(&paths.secret_vault_file_path(), &legacy).unwrap();
+        assert!(store
+            .ensure_profiles(&paths, &["alpha".to_string()])
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting file and Windows credentials"));
+        assert!(store
+            .get(&paths, "alpha")
+            .unwrap_err()
+            .to_string()
+            .contains("conflicting file and Windows credentials"));
+    }
+
+    #[test]
+    fn windows_file_migration_fails_closed_after_existing_credentials() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let mut vault = SecretVault::default();
+        vault
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), "alpha-token".to_string());
+        vault
+            .bridge_auth_tokens
+            .insert("beta".to_string(), "beta-token".to_string());
+        vault_file_set(&paths.secret_vault_file_path(), &vault).unwrap();
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                windows_profile_entry_account("alpha"),
+                "alpha-token".to_string(),
+            );
+            keychain
+                .fail_sets
+                .insert(windows_profile_entry_account("beta"));
+        }
+
+        assert!(store
+            .ensure_profiles(&paths, &["alpha".to_string(), "beta".to_string()])
+            .unwrap_err()
+            .to_string()
+            .contains("after Windows credentials existed"));
+    }
+
+    #[test]
+    fn windows_covers_existing_and_duplicate_profile_extension_paths() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                windows_profile_entry_account("alpha"),
+                "alpha-token".to_string(),
+            );
+        }
+
+        assert_eq!(
+            store
+                .ensure_profiles(&paths, &["alpha".to_string(), "beta".to_string()])
+                .unwrap(),
+            Some(SecretBackend::Keychain)
+        );
+        let (_, created) = store.get_or_create_with_status(&paths, "alpha").unwrap();
+        assert!(!created);
+        let (_, created) = store.get_or_create_with_status(&paths, "alpha").unwrap();
+        assert!(!created);
+        store.refresh(&paths).unwrap();
+
+        reset_windows_memory_keychain();
+        assert_eq!(
+            store
+                .ensure_profiles(&paths, &["duplicate".to_string(), "duplicate".to_string()])
+                .unwrap(),
+            Some(SecretBackend::Keychain)
+        );
+    }
+
+    #[test]
+    fn windows_extending_existing_entries_fails_closed() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                windows_profile_entry_account("alpha"),
+                "alpha-token".to_string(),
+            );
+            keychain
+                .fail_sets
+                .insert(windows_profile_entry_account("beta"));
+        }
+
+        assert!(store
+            .ensure_profiles(&paths, &["alpha".to_string(), "beta".to_string()])
+            .unwrap_err()
+            .to_string()
+            .contains("failed to extend an existing Windows"));
+        assert!(!paths.secret_vault_file_path().exists());
+    }
+
+    #[test]
+    fn windows_delete_cleans_legacy_file_and_direct_entries() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let mut legacy = SecretVault::default();
+        legacy
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), "alpha-token".to_string());
+        legacy
+            .bridge_auth_tokens
+            .insert("beta".to_string(), "beta-token".to_string());
+        let mut fallback = SecretVault::default();
+        fallback
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), "alpha-token".to_string());
+        {
+            let mut keychain = WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            keychain.entries.insert(
+                WINDOWS_LAYOUT_ENTRY_ACCOUNT.to_string(),
+                WINDOWS_LAYOUT_MARKER.to_string(),
+            );
+            keychain.entries.insert(
+                VAULT_ENTRY_ACCOUNT.to_string(),
+                serde_json::to_string(&legacy).unwrap(),
+            );
+            keychain.entries.insert(
+                windows_profile_entry_account("alpha"),
+                "alpha-token".to_string(),
+            );
+        }
+        vault_file_set(&paths.secret_vault_file_path(), &fallback).unwrap();
+
+        store.delete(&paths, "missing").unwrap();
+        store.delete(&paths, "alpha").unwrap();
+        let keychain = WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(!keychain
+            .entries
+            .contains_key(&windows_profile_entry_account("alpha")));
+        let remaining = parse_vault(
+            keychain.entries.get(VAULT_ENTRY_ACCOUNT).unwrap(),
+            "test keychain",
+        )
+        .unwrap();
+        assert!(remaining.bridge_auth_tokens.contains_key("beta"));
+        drop(keychain);
+
+        remove_file_if_exists(&paths.secret_vault_file_path()).unwrap();
+        reset_windows_memory_keychain();
+        WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entries
+            .insert(
+                windows_profile_entry_account("alpha"),
+                "alpha-token".to_string(),
+            );
+        store.delete(&paths, "alpha").unwrap();
+        assert!(store.get(&paths, "alpha").unwrap().is_none());
+    }
+
+    #[test]
     fn windows_migrates_a_shared_vault_without_losing_partial_progress() {
         let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
             .lock()

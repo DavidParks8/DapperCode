@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package>
+  <metadata>
+    <id>Microsoft.Windows.SDK.BuildTools</id>
+    <version>10.0.26100.1</version>
+    <license type="expression">MIT</license>
+  </metadata>
+</package>

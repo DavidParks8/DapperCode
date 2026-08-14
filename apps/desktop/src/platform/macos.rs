@@ -124,7 +124,11 @@ fn resolve_tailscale_host() -> Result<String, SetupPreflightError> {
     if !output.status.success() {
         return Err(SetupPreflightError::TailscaleDisconnected);
     }
-    String::from_utf8_lossy(&output.stdout)
+    tailscale_ipv4_from_output(&output.stdout)
+}
+
+fn tailscale_ipv4_from_output(output: &[u8]) -> Result<String, SetupPreflightError> {
+    String::from_utf8_lossy(output)
         .lines()
         .map(str::trim)
         .find(|value| valid_non_loopback_ipv4(value))
@@ -168,4 +172,56 @@ fn command_path(command: &str) -> Option<String> {
         .map(|directory| directory.join(command))
         .find(|candidate| candidate.is_file())
         .map(|candidate| candidate.display().to_string())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn models_runtime_and_agent_paths() {
+        assert_eq!(
+            STRATEGY.runtime_candidates(Path::new(
+                "/Applications/DapperCode.app/Contents/Resources/bin/dappercode"
+            )),
+            vec![PathBuf::from(
+                "/Applications/DapperCode.app/Contents/Resources"
+            )]
+        );
+        assert!(STRATEGY.runtime_candidates(Path::new("/")).is_empty());
+        assert_eq!(STRATEGY.agent_executable_name("opencode"), "opencode");
+        assert_eq!(STRATEGY.credential_layout(), CredentialLayout::SharedVault);
+    }
+
+    #[test]
+    fn validates_manual_lan_addresses_without_probing_interfaces() {
+        assert_eq!(
+            resolve_lan_host(Some(" 192.168.1.20 ")).unwrap(),
+            "192.168.1.20"
+        );
+        assert!(matches!(
+            resolve_lan_host(Some("127.0.0.1")),
+            Err(SetupPreflightError::InvalidLanHost(_))
+        ));
+    }
+
+    #[test]
+    fn parses_connected_tailscale_output() {
+        assert_eq!(
+            tailscale_ipv4_from_output(b"\n127.0.0.1\n 100.100.10.20 \n").unwrap(),
+            "100.100.10.20"
+        );
+        assert!(matches!(
+            tailscale_ipv4_from_output(b"127.0.0.1\n0.0.0.0\n"),
+            Err(SetupPreflightError::TailscaleDisconnected)
+        ));
+    }
+
+    #[test]
+    fn command_lookup_handles_known_and_missing_commands() {
+        assert!(command_path("sh").is_some());
+        assert!(command_path("definitely-not-a-dappercode-command").is_none());
+        let _ = command_path("tailscale");
+    }
 }

@@ -448,6 +448,15 @@ mod tests {
             Some("10.0.0.20".parse().unwrap())
         );
         assert_eq!(
+            select_local_ipv4([
+                candidate("127.0.0.1".parse().unwrap(), 1, 1),
+                candidate("0.0.0.0".parse().unwrap(), 2, 2),
+                candidate("224.0.0.1".parse().unwrap(), 3, 3),
+                candidate("255.255.255.255".parse().unwrap(), 4, 4),
+            ]),
+            None
+        );
+        assert_eq!(
             windows_tailscale_install_candidates([PathBuf::from("ProgramFilesRoot")]),
             vec![PathBuf::from("ProgramFilesRoot")
                 .join("Tailscale")
@@ -456,6 +465,11 @@ mod tests {
         assert_eq!(
             windows_runtime_candidates(Path::new("package/bin/dappercode.exe"))[0],
             PathBuf::from("package")
+        );
+        assert!(windows_runtime_candidates(Path::new("/")).is_empty());
+        assert_eq!(
+            windows_runtime_candidates(Path::new("package/dappercode.exe")),
+            vec![PathBuf::from("package/runtime")]
         );
     }
 
