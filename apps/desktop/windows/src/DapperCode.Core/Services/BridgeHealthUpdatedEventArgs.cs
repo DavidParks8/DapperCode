@@ -7,7 +7,6 @@ public sealed class BridgeHealthUpdatedEventArgs : EventArgs
     public BridgeHealthUpdatedEventArgs(string profileId, BridgeObservedHealth health)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
-        ArgumentNullException.ThrowIfNull(health);
         ProfileId = profileId;
         Health = health;
     }

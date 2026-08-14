@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using DapperCode.Core.Services;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
@@ -6,7 +5,8 @@ using Windows.System;
 
 namespace DapperCode.Windows.Services;
 
-public sealed class WindowsSystemActions : ISystemActions
+/// <summary>Uses WinRT shell APIs for clipboard, log launching, and file revelation.</summary>
+public sealed class WindowsSystemActions(IFileSystem fileSystem) : ISystemActions
 {
     public Task CopyTextAsync(string value, CancellationToken cancellationToken)
     {
@@ -21,7 +21,7 @@ public sealed class WindowsSystemActions : ISystemActions
     public async Task OpenLogAsync(string path, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (File.Exists(path))
+        if (fileSystem.FileExists(path))
         {
             var file = await StorageFile.GetFileFromPathAsync(path).AsTask(cancellationToken);
             if (!await Launcher.LaunchFileAsync(file).AsTask(cancellationToken))
@@ -32,8 +32,8 @@ public sealed class WindowsSystemActions : ISystemActions
             return;
         }
 
-        var parent = Path.GetDirectoryName(path);
-        if (parent is null || !Directory.Exists(parent))
+        var parent = fileSystem.GetDirectoryName(path);
+        if (parent is null || !fileSystem.DirectoryExists(parent))
         {
             throw new FileNotFoundException("The broker log folder does not exist.", path);
         }
@@ -46,7 +46,7 @@ public sealed class WindowsSystemActions : ISystemActions
         }
     }
 
-    public Task RevealFileAsync(string path, CancellationToken cancellationToken)
+    public async Task RevealFileAsync(string path, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(path))
@@ -54,16 +54,18 @@ public sealed class WindowsSystemActions : ISystemActions
             throw new FileNotFoundException("The DapperCode configuration path is unavailable.");
         }
 
-        var startInfo = new ProcessStartInfo
+        var parent = fileSystem.GetDirectoryName(path);
+        if (parent is null || !fileSystem.DirectoryExists(parent))
         {
-            FileName = "explorer.exe",
-            UseShellExecute = true,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("/select,");
-        startInfo.ArgumentList.Add(path);
-        _ = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Windows could not open File Explorer.");
-        return Task.CompletedTask;
+            throw new FileNotFoundException("The configuration folder does not exist.", path);
+        }
+
+        var file = await StorageFile.GetFileFromPathAsync(path).AsTask(cancellationToken);
+        var options = new FolderLauncherOptions();
+        options.ItemsToSelect.Add(file);
+        if (!await Launcher.LaunchFolderPathAsync(parent, options).AsTask(cancellationToken))
+        {
+            throw new InvalidOperationException("Windows could not reveal the configuration file.");
+        }
     }
 }

@@ -10,9 +10,6 @@ public sealed record SetupResult
     [JsonPropertyName("profileId")]
     public string ProfileId { get; init; } = string.Empty;
 
-    [JsonPropertyName("bridgeUrl")]
-    public string BridgeUrl { get; init; } = string.Empty;
-
     [JsonPropertyName("bridgePort")]
     public ushort BridgePort { get; init; }
 

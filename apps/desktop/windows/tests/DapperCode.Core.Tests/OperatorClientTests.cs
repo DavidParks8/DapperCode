@@ -14,7 +14,7 @@ public sealed class OperatorClientTests
     public async Task ProcessRunnerConcurrentlyDrainsLargeStandardOutputAndError()
     {
         using var registry = new OperatorProcessRegistry();
-        var runner = new OperatorProcessRunner(registry);
+        var runner = new OperatorProcessRunner(registry, new PhysicalFileSystem());
         var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH")
             ?? throw new InvalidOperationException(
                 "DOTNET_HOST_PATH is required to run the process fixture.");
@@ -72,7 +72,6 @@ public sealed class OperatorClientTests
         var (runner, arguments) = CreateRunner(Success(new SetupResult
         {
             Workspace = @"C:\work\repo",
-            BridgeUrl = "http://100.100.1.2:8787",
             BridgePort = 8787,
         }));
         var client = new OperatorClient(CreatePathProvider(), runner);
@@ -118,7 +117,6 @@ public sealed class OperatorClientTests
         var (runner, arguments) = CreateRunner(Success(new SetupResult
         {
             Workspace = @"C:\work\repo",
-            BridgeUrl = "http://192.168.1.20:8787",
             BridgePort = 8787,
         }));
         var client = new OperatorClient(CreatePathProvider(), runner);

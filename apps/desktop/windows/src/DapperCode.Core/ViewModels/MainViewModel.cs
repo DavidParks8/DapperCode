@@ -11,6 +11,10 @@ using QRCoder.Exceptions;
 
 namespace DapperCode.Core.ViewModels;
 
+/// <summary>
+/// Coordinates Windows shell state, automatic broker ownership, setup, health reconciliation, and
+/// user-facing commands on the UI dispatcher.
+/// </summary>
 public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private readonly IOperatorClient _operatorClient;
@@ -397,7 +401,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public async Task OpenLogsAsync(BridgeSnapshot bridge)
     {
-        ArgumentNullException.ThrowIfNull(bridge);
         try
         {
             await _systemActions.OpenLogAsync(bridge.LogPath, _lifetime.Token)

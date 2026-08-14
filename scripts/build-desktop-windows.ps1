@@ -487,6 +487,8 @@ try {
             "/p:Configuration=Release",
             "/p:Platform=$($architecture.Platform)",
             "/p:RuntimeIdentifier=$($architecture.Runtime)",
+            "/p:PublishTrimmed=true",
+            "/p:PublishSingleFile=false",
             "/p:AppxBundle=Never",
             "/p:AppxPackageSigningEnabled=false",
             "/p:GenerateAppxPackageOnBuild=true",

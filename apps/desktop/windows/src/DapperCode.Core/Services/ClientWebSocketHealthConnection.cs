@@ -8,6 +8,11 @@ using DapperCode.Core.Serialization;
 
 namespace DapperCode.Core.Services;
 
+/// <summary>
+/// Maintains the broker's ordered JSON-RPC WebSocket stream and translates health responses and
+/// notifications into typed callbacks. The socket remains the transport boundary; internal
+/// channels would add a second queue without replacing WebSocket framing or backpressure.
+/// </summary>
 internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
 {
     private const int MaximumMessageBytes = 256 * 1024;
@@ -34,8 +39,6 @@ internal sealed class ClientWebSocketHealthConnection : IBridgeHealthConnection
         Action<BridgeObservedHealth> onHealth,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(target);
-        ArgumentNullException.ThrowIfNull(onHealth);
         var runCompletion = BeginRun();
         try
         {

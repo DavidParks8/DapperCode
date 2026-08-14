@@ -4,11 +4,16 @@ using DapperCode.Core.Serialization;
 
 namespace DapperCode.Core.Services;
 
-public sealed record BridgeEndpoint(Uri SocketUri, string Token, string? WorkspaceId)
+/// <summary>
+/// Represents the authenticated WebSocket endpoint derived from broker pairing data.
+/// </summary>
+internal sealed record BridgeEndpoint(Uri SocketUri, string Token, string? WorkspaceId)
 {
-    public static BridgeEndpoint Parse(BridgeObservationTarget target)
+    /// <summary>
+    /// Validates pairing data and converts its HTTP broker URL into the private RPC WebSocket URL.
+    /// </summary>
+    internal static BridgeEndpoint Parse(BridgeObservationTarget target)
     {
-        ArgumentNullException.ThrowIfNull(target);
         PairingPayload? payload;
         try
         {

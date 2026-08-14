@@ -61,7 +61,6 @@ public sealed class OperatorClient(
         SetupOptions options,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(options);
         var arguments = new List<string>
         {
             "setup",

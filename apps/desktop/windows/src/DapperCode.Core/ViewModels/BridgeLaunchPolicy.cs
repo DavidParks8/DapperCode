@@ -6,7 +6,6 @@ public static class BridgeLaunchPolicy
 {
     public static bool ShouldStart(BridgeSnapshot snapshot)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
         return !snapshot.IsRunning && snapshot.State == "stopped";
     }
 }

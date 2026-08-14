@@ -16,7 +16,7 @@
     <WindowsPackageType>MSIX</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
-    <PublishTrimmed>false</PublishTrimmed>
+    <PublishTrimmed>true</PublishTrimmed>
     <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppxBundle>Always</AppxBundle>

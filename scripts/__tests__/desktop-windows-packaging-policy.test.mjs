@@ -7,6 +7,9 @@ const root = path.resolve(import.meta.dirname, '../..');
 const read = (relative) => readFileSync(path.join(root, relative), 'utf8');
 const buildScript = read('scripts/build-desktop-windows.ps1');
 const testScript = read('scripts/test-desktop-windows.ps1');
+const restoreScript = read('scripts/restore-desktop-windows.ps1');
+const dotnetTestScript = read('scripts/test-desktop-windows-dotnet.ps1');
+const productionSigningScript = read('scripts/sign-desktop-windows-production.ps1');
 const workflow = read('.github/workflows/build-and-test.yml');
 const readme = read('README.md');
 const setupOperations = read('docs/setup-and-operations.md');
@@ -44,6 +47,8 @@ test('Windows packaging builds architecture-matched native binaries and an MSIX 
   assert.match(buildScript, /"\/bv", \$msixVersion/);
   assert.match(buildScript, /x64_arm64\.msixbundle/);
   assert.match(buildScript, /"\/t:Restore"/);
+  assert.match(buildScript, /"\/p:PublishTrimmed=true"/);
+  assert.match(buildScript, /"\/p:PublishSingleFile=false"/);
   assert.match(buildScript, /\$requiredDotNetSdkVersion = "10\.0\.302"/);
   assert.match(buildScript, /Resolve-PinnedDotNet/);
   assert.match(buildScript, /dotnet --version/);
@@ -123,28 +128,34 @@ test('production signing credentials are isolated from checkout, npm, build, and
   assert.match(signingJob, /actions\/download-artifact@v4/);
   assert.match(signingJob, /actions\/upload-artifact@v4/);
   assert.doesNotMatch(signingJob, /actions\/checkout|Checkout code/);
-  assert.doesNotMatch(
-    signingJob,
-    /(?:npm|node|dotnet|cargo)\s|[.][\\/](?:scripts|apps|services)\b|build-desktop-windows|test-desktop-windows|Invoke-Expression|\biex\b|\.ps1\b/i,
-  );
+  assert.doesNotMatch(signingJob, /(?:npm|node|dotnet|cargo)\s|Invoke-Expression|\biex\b/i);
+  assert.match(signingJob, /Download reviewed production signing script/);
+  assert.match(signingJob, /windows-signing-script\/sign-desktop-windows-production\.ps1/);
 
   const signingStep = signingJob.match(
     /\n      - name: Sign and verify production packages[\s\S]*?(?=\n      - name:)/,
   )?.[0];
-  assert.ok(signingStep, 'Inline production signing step is missing');
+  assert.ok(signingStep, 'Production signing step is missing');
   assert.match(signingStep, /WINDOWS_SIGNING_CERTIFICATE_BASE64/);
   assert.match(signingStep, /WINDOWS_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(signingStep, /WINDOWS_SIGNING_TIMESTAMP_URL/);
-  assert.match(signingStep, /expectedRelativeFiles/);
-  assert.match(signingStep, /DapperCode-\$version-x64\.msix/);
-  assert.match(signingStep, /DapperCode-\$version-arm64\.msix/);
-  assert.match(signingStep, /certificate\.Subject -ne \$env:DAPPERCODE_WINDOWS_PUBLISHER/);
-  assert.match(signingStep, /absolute HTTPS RFC 3161 endpoint/);
-  assert.match(signingStep, /"\/tr", \$timestampUrl, "\/td", "SHA256"/);
-  assert.match(signingStep, /"verify", "\/pa", "\/all", "\/v"/);
-  assert.match(signingStep, /DapperCode-Signing\.cer/);
-  assert.match(signingStep, /INSTALL-WINDOWS\.txt/);
   assert.doesNotMatch(signingStep, /\bnpm\b/);
+  for (const required of [
+    'expectedRelativeFiles',
+    'DapperCode-$version-x64.msix',
+    'DapperCode-$version-arm64.msix',
+    'certificate.Subject -ne $env:DAPPERCODE_WINDOWS_PUBLISHER',
+    'absolute HTTPS RFC 3161 endpoint',
+    '"/tr", $timestampUrl, "/td", "SHA256"',
+    '"verify", "/pa", "/all", "/v"',
+    'DapperCode-Signing.cer',
+    'INSTALL-WINDOWS.txt',
+  ]) {
+    assert.ok(
+      productionSigningScript.includes(required),
+      `Production signing script is missing ${required}`,
+    );
+  }
 
   const workflowWithoutSigningStep = workflow.replace(signingStep, '');
   assert.doesNotMatch(workflowWithoutSigningStep, /secrets\.WINDOWS_SIGNING_CERTIFICATE_BASE64/);
@@ -231,11 +242,10 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
   assert.match(workflow, /DOTNET_VERSION: ['"]10\.0\.302['"]/);
   assert.match(workflow, /NUGET_VERSION: ['"]6\.14\.0['"]/);
   assert.match(workflow, /targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc/);
-  assert.match(
-    workflow,
-    /dotnet msbuild apps\/desktop\/windows\/DapperCode\.Windows\.slnx \/t:Restore/,
-  );
-  assert.match(workflow, /Get-ChildItem.+\*\.Tests\.csproj/);
+  assert.match(workflow, /scripts\/restore-desktop-windows\.ps1/);
+  assert.match(workflow, /scripts\/test-desktop-windows-dotnet\.ps1/);
+  assert.match(restoreScript, /dotnet msbuild \$solution \/t:Restore/);
+  assert.match(dotnetTestScript, /Get-ChildItem.+\*\.Tests\.csproj/);
   assert.doesNotMatch(
     workflow,
     /dotnet test\s+apps\/desktop\/windows\/tests\/DapperCode\.Core\.Tests/,

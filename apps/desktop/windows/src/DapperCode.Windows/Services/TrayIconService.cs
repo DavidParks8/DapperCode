@@ -6,6 +6,9 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DapperCode.Windows.Services;
 
+/// <summary>
+/// Owns the notification-area icon and projects view-model state into native tray commands.
+/// </summary>
 public sealed class TrayIconService : IDisposable
 {
     private const string ActiveIconUri = "ms-appx:///Assets/TrayActive.ico";

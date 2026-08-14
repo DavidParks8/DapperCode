@@ -3,7 +3,13 @@ using System.Text;
 
 namespace DapperCode.Core.Services;
 
-public sealed class OperatorProcessRunner(OperatorProcessRegistry registry) : IOperatorProcessRunner
+/// <summary>
+/// Runs the bundled operator without a shell while tracking it for coordinated application
+/// shutdown and draining both redirected streams concurrently.
+/// </summary>
+public sealed class OperatorProcessRunner(
+    OperatorProcessRegistry registry,
+    IFileSystem fileSystem) : IOperatorProcessRunner
 {
     public async Task<ProcessExecutionResult> RunAsync(
         string executable,
@@ -13,7 +19,7 @@ public sealed class OperatorProcessRunner(OperatorProcessRegistry registry) : IO
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(arguments);
-        if (!File.Exists(executable))
+        if (!fileSystem.FileExists(executable))
         {
             throw OperatorException.Unavailable(executable);
         }

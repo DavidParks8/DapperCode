@@ -755,6 +755,8 @@ public sealed class MainViewModelTests
                 .Returns(Task.CompletedTask);
             FileSystem.FileExists(Arg.Any<string>()).Returns(true);
             FileSystem.DirectoryExists(Arg.Any<string>()).Returns(true);
+            FileSystem.GetDirectoryName(Arg.Any<string>())
+                .Returns(call => Path.GetDirectoryName(call.Arg<string>()));
             Dispatcher.When(dispatcher => dispatcher.Post(Arg.Any<Action>()))
                 .Do(call => call.Arg<Action>()());
 

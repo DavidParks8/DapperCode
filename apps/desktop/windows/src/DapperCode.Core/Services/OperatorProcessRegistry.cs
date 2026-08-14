@@ -4,6 +4,10 @@ using System.Diagnostics;
 
 namespace DapperCode.Core.Services;
 
+/// <summary>
+/// Tracks short-lived operator children so application shutdown can cancel and terminate the full
+/// process set deterministically.
+/// </summary>
 public sealed class OperatorProcessRegistry : IDisposable
 {
     private readonly ConcurrentDictionary<int, Process> _processes = new();

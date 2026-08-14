@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using DapperCode.Windows.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -9,6 +7,7 @@ using WinRT;
 
 namespace DapperCode.Windows;
 
+/// <summary>Bootstraps the WinUI dispatcher and redirects secondary activations to one app instance.</summary>
 public static class Program
 {
     private static readonly ConcurrentQueue<AppActivationArguments> PendingActivations = new();
@@ -48,7 +47,10 @@ public static class Program
             return false;
         }
 
-        RedirectActivation(InitialActivation, primary);
+        primary.RedirectActivationToAsync(InitialActivation)
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
         return true;
     }
 
@@ -56,54 +58,6 @@ public static class Program
     {
         PendingActivations.Enqueue(arguments);
         ActivationQueued?.Invoke();
-    }
-
-    private static void RedirectActivation(
-        AppActivationArguments arguments,
-        AppInstance primary)
-    {
-        using var completed = NativeMethods.CreateEventW(IntPtr.Zero, true, false, null);
-        if (completed.IsInvalid)
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-
-        Exception? redirectError = null;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await primary.RedirectActivationToAsync(arguments);
-            }
-            catch (Exception error)
-            {
-                redirectError = error;
-            }
-            finally
-            {
-                _ = NativeMethods.SetEvent(completed);
-            }
-        });
-
-        const uint redirectTimeoutMilliseconds = 30_000;
-        var handles = new[] { completed.DangerousGetHandle() };
-        var result = NativeMethods.CoWaitForMultipleObjects(
-            0,
-            redirectTimeoutMilliseconds,
-            1,
-            handles,
-            out _);
-        if (result != 0)
-        {
-            Marshal.ThrowExceptionForHR(unchecked((int)result));
-        }
-
-        if (redirectError is not null)
-        {
-            throw new InvalidOperationException(
-                "Could not redirect DapperCode activation to the running instance.",
-                redirectError);
-        }
     }
 
 }

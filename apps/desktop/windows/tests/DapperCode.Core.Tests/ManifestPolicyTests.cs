@@ -116,10 +116,9 @@ public sealed class ManifestPolicyTests
             "NativeMethods.cs"));
 
         StringAssert.Contains(source, "[Library" + "Import(", StringComparison.Ordinal);
-        StringAssert.Contains(source, "SafeWaitHandle CreateEventW(", StringComparison.Ordinal);
-        StringAssert.Contains(source, "uint handleCount", StringComparison.Ordinal);
+        StringAssert.Contains(source, "SetForegroundWindow", StringComparison.Ordinal);
         Assert.IsFalse(source.Contains("[Dll" + "Import(", StringComparison.Ordinal));
-        Assert.IsFalse(source.Contains("ulong handleCount", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("CoWaitForMultipleObjects", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -163,6 +162,25 @@ public sealed class ManifestPolicyTests
         AssertPackageReference(
             XDocument.Load(Path.Combine(AppProject, "DapperCode.Windows.csproj")),
             "Microsoft.Extensions.DependencyInjection");
+    }
+
+    [TestMethod]
+    public void PackagedPublishTrimsManagedCodeWithoutUnsupportedSingleFileBundling()
+    {
+        var project = XDocument.Load(Path.Combine(
+            AppProject,
+            "DapperCode.Windows.csproj"));
+        Assert.AreEqual(
+            "true",
+            project.Descendants("PublishTrimmed").Single().Value);
+        foreach (var profile in Directory.EnumerateFiles(
+                     Path.Combine(AppProject, "Properties", "PublishProfiles"),
+                     "*.pubxml"))
+        {
+            var publish = XDocument.Load(profile);
+            Assert.AreEqual("true", publish.Descendants("PublishTrimmed").Single().Value);
+            Assert.AreEqual("false", publish.Descendants("PublishSingleFile").Single().Value);
+        }
     }
 
     [TestMethod]
@@ -241,6 +259,51 @@ public sealed class ManifestPolicyTests
                 tray.Contains(prohibited, StringComparison.Ordinal),
                 $"Windows shell contains manual broker control '{prohibited}'.");
         }
+    }
+
+    [TestMethod]
+    public void WindowsSystemActionsUseFilesystemAndWinRtShellAbstractions()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            AppProject,
+            "Services",
+            "WindowsSystemActions.cs"));
+
+        StringAssert.Contains(source, "IFileSystem fileSystem", StringComparison.Ordinal);
+        StringAssert.Contains(source, "LaunchFolderPathAsync", StringComparison.Ordinal);
+        StringAssert.Contains(source, "FolderLauncherOptions", StringComparison.Ordinal);
+        Assert.IsFalse(source.Contains("Process.Start", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("File.Exists", StringComparison.Ordinal));
+        Assert.IsFalse(source.Contains("Directory.Exists", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ProductionWorkflowReferencesReviewedPowerShellFiles()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            WindowsRoot,
+            "..",
+            "..",
+            "..",
+            ".github",
+            "workflows",
+            "build-and-test.yml"));
+
+        StringAssert.Contains(
+            workflow,
+            "scripts/restore-desktop-windows.ps1",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            workflow,
+            "scripts/test-desktop-windows-dotnet.ps1",
+            StringComparison.Ordinal);
+        StringAssert.Contains(
+            workflow,
+            "sign-desktop-windows-production.ps1",
+            StringComparison.Ordinal);
+        Assert.IsFalse(workflow.Contains(
+            "function Find-WindowsSdkTool",
+            StringComparison.Ordinal));
     }
 
     [TestMethod]

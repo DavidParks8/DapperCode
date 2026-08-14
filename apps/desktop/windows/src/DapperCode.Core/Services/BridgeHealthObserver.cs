@@ -43,7 +43,6 @@ public sealed class BridgeHealthObserver(
 
     public void Synchronize(IReadOnlyCollection<BridgeObservationTarget> targets)
     {
-        ArgumentNullException.ThrowIfNull(targets);
         var next = targets.ToDictionary(target => target.ProfileId, StringComparer.Ordinal);
         List<Entry> removed = [];
         lock (_gate)

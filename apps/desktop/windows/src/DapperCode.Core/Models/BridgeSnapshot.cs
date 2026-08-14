@@ -78,7 +78,6 @@ public sealed record BridgeSnapshot
 
     public BridgeSnapshot Apply(BridgeObservedHealth health)
     {
-        ArgumentNullException.ThrowIfNull(health);
         var state = health.Status switch
         {
             "ok" => "running",

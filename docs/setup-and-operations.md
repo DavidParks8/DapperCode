@@ -41,6 +41,8 @@ service, request elevation, register a scheduled task, or write machine-wide con
 Production-signed installation and normal use require no administrator rights. A local test-signed
 build requires one elevated certificate-trust step; the app remains non-elevated afterward. The
 optional packaged startup task is per-user and disabled until the user enables **Launch at login**.
+Managed .NET assemblies are trimmed in the self-contained package. The MSIX remains multi-file
+because Windows App SDK single-file publishing is supported only for unpackaged applications.
 
 Build it on Windows with PowerShell 7 (`pwsh`), the pinned .NET 10 SDK (`10.0.302`, which supplies
 MSBuild 18), the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and npm:
@@ -99,10 +101,11 @@ absent.
 GitHub Actions first builds, tests, and fully inspects the unsigned bundle and both standalone
 packages without signing secrets. A separate `main`-only job downloads that artifact into the
 approval-protected `windows-production-signing` environment. That job performs no checkout and runs
-no repository script: its inline workflow PowerShell validates the exact artifact set, certificate
-subject, and HTTPS timestamp endpoint before using the PFX and password to sign. It then verifies
-every signature and emits the public certificate and installation guidance. Configure required
-reviewers on that environment before enabling Production workflow dispatches.
+only the reviewed PowerShell signing script uploaded by the build job: that script validates the
+exact artifact set, certificate subject, and HTTPS timestamp endpoint before using the PFX and
+password to sign. It then verifies every signature and emits the public certificate and installation
+guidance. Configure required reviewers on that environment before enabling Production workflow
+dispatches.
 
 Launch DapperCode from Start and complete the same in-app setup used on macOS:
 
