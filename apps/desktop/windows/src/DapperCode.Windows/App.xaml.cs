@@ -29,7 +29,7 @@ public sealed partial class App : Application
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }
 
-    protected override async void OnLaunched(LaunchActivatedEventArgs arguments)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         var dispatcher = DispatcherQueue.GetForCurrentThread();
         _dispatcher = dispatcher;

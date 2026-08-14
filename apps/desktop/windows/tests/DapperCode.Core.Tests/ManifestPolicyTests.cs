@@ -287,6 +287,16 @@ public sealed class ManifestPolicyTests
     }
 
     [TestMethod]
+    public void MainWindowDisposesOwnedUiResources()
+    {
+        var source = File.ReadAllText(Path.Combine(AppProject, "MainWindow.xaml.cs"));
+
+        StringAssert.Contains(source, "Window, IDisposable", StringComparison.Ordinal);
+        StringAssert.Contains(source, "_backdrop?.Dispose()", StringComparison.Ordinal);
+        StringAssert.Contains(source, "_dialogGate.Dispose()", StringComparison.Ordinal);
+    }
+
+    [TestMethod]
     public void ProductionWorkflowReferencesReviewedPowerShellFiles()
     {
         var workflow = File.ReadAllText(Path.Combine(

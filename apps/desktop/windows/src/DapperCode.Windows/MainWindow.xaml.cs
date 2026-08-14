@@ -20,7 +20,7 @@ using WinRT.Interop;
 
 namespace DapperCode.Windows;
 
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly MicaBackdropService? _backdrop;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
     private bool _isVisible;
     private bool _updatingStartupToggle;
     private string? _pendingError;
+    private int _disposed;
     private int _qrVersion;
 
     public MainWindow(MainViewModel viewModel)
@@ -96,7 +97,17 @@ public sealed partial class MainWindow : Window
         ViewModel.ErrorOccurred -= OnErrorOccurred;
         ViewModel.NoticeOccurred -= OnNoticeOccurred;
         AppWindow.Closing -= OnWindowClosing;
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _backdrop?.Dispose();
+        _dialogGate.Dispose();
     }
 
     public void ReportFatalError(string message) =>
