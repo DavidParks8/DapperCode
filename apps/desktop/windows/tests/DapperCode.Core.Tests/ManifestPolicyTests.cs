@@ -521,6 +521,20 @@ public sealed class ManifestPolicyTests
     }
 
     [TestMethod]
+    public void PackageManifestNamesThePublishedAppHostAndEntryPoint()
+    {
+        var manifest = File.ReadAllText(Path.Combine(AppProject, "Package.appxmanifest"));
+
+        Assert.IsFalse(manifest.Contains("$targetnametoken$", StringComparison.Ordinal));
+        Assert.IsFalse(manifest.Contains("$targetentrypoint$", StringComparison.Ordinal));
+        StringAssert.Contains(manifest, "Executable=\"DapperCode.exe\"", StringComparison.Ordinal);
+        StringAssert.Contains(
+            manifest,
+            "EntryPoint=\"DapperCode.Windows.App\"",
+            StringComparison.Ordinal);
+    }
+
+    [TestMethod]
     public void PolicyEnabledStartupIsReportedAsEnabled()
     {
         var source = File.ReadAllText(Path.Combine(

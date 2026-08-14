@@ -28,8 +28,8 @@
 
   <Applications>
     <Application Id="App"
-                 Executable="$targetnametoken$.exe"
-                 EntryPoint="$targetentrypoint$">
+                 Executable="DapperCode.exe"
+                 EntryPoint="DapperCode.Windows.App">
       <uap:VisualElements
         DisplayName="DapperCode"
         Description="Control DapperCode from the Windows notification area."
@@ -44,7 +44,7 @@
       <Extensions>
         <desktop:Extension
           Category="windows.startupTask"
-          Executable="$targetnametoken$.exe"
+          Executable="DapperCode.exe"
           EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask
             TaskId="DapperCodeStartup"
