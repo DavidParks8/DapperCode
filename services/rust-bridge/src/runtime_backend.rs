@@ -1438,22 +1438,8 @@ pub(super) fn bridge_prompt(params: &Value) -> Result<Vec<ContentBlock>, String>
     Ok(prompt)
 }
 
-#[cfg(unix)]
 pub(super) async fn wait_for_shutdown_signal() -> &'static str {
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-        .expect("failed to install SIGINT handler");
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("failed to install SIGTERM handler");
-    tokio::select! {
-        _ = sigint.recv() => "SIGINT",
-        _ = sigterm.recv() => "SIGTERM",
-    }
-}
-
-#[cfg(not(unix))]
-pub(super) async fn wait_for_shutdown_signal() -> &'static str {
-    let _ = tokio::signal::ctrl_c().await;
-    "Ctrl+C"
+    crate::platform::wait_for_shutdown_signal().await
 }
 
 #[cfg(test)]

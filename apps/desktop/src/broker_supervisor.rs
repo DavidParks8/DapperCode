@@ -10,10 +10,11 @@ use std::{
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::{
     config::BridgeRuntimeConfig,
+    platform::{detach_process, process_start_identity, request_process_stop, ProcessStopRequest},
     secrets::SecretStore,
     store::{
         atomic_private_write, remove_file_if_exists, AppPaths, BrokerSettings, FileLease, Profile,
@@ -428,6 +429,17 @@ impl BrokerSupervisor {
     }
 }
 
+pub fn clean_stale_broker_ownership(paths: &AppPaths) -> Result<bool> {
+    let Some(record) = read_ownership(&paths.broker_ownership_path())? else {
+        return Ok(false);
+    };
+    if process_matches(&record) {
+        return Ok(true);
+    }
+    remove_file_if_exists(&paths.broker_ownership_path())?;
+    Ok(false)
+}
+
 fn plural(count: usize) -> &'static str {
     if count == 1 {
         ""
@@ -479,7 +491,7 @@ fn process_identity(
     if actual_data_dir != data_dir.canonicalize()? {
         bail!("broker working directory identity did not match the data directory");
     }
-    let started_at_epoch_sec = process.start_time();
+    let started_at_epoch_sec = process_start_identity(pid, process.start_time())?;
     if started_at_epoch_sec == 0 {
         bail!("broker process start time is unavailable");
     }
@@ -505,7 +517,8 @@ fn process_matches(record: &BrokerOwnershipRecord) -> bool {
     let Some(process) = system.process(pid) else {
         return false;
     };
-    process.start_time() == record.started_at_epoch_sec
+    process_start_identity(record.pid, process.start_time()).ok()
+        == Some(record.started_at_epoch_sec)
         && process.exe().and_then(|path| path.canonicalize().ok())
             == Some(record.executable.clone())
         && process.cwd().and_then(|path| path.canonicalize().ok()) == Some(record.data_dir.clone())
@@ -544,16 +557,27 @@ fn stop_owned_process(record: &BrokerOwnershipRecord, ownership_path: &Path) -> 
             record.pid
         );
     }
-    signal_process(record.pid, Signal::Term)?;
-    let started = Instant::now();
-    while started.elapsed() < STOP_TIMEOUT {
-        if !process_matches(record) {
-            remove_file_if_exists(ownership_path)?;
-            return Ok(());
+    if request_process_stop(
+        record.pid,
+        record.started_at_epoch_sec,
+        ProcessStopRequest::Graceful,
+    )? {
+        let started = Instant::now();
+        while started.elapsed() < STOP_TIMEOUT {
+            if !process_matches(record) {
+                remove_file_if_exists(ownership_path)?;
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(200));
         }
-        thread::sleep(Duration::from_millis(200));
     }
-    signal_process(record.pid, Signal::Kill)?;
+    if process_matches(record) {
+        request_process_stop(
+            record.pid,
+            record.started_at_epoch_sec,
+            ProcessStopRequest::Force,
+        )?;
+    }
     let forced = Instant::now();
     while forced.elapsed() < Duration::from_secs(3) {
         if !process_matches(record) {
@@ -572,52 +596,13 @@ fn process_exists(pid: u32) -> bool {
     system.process(pid).is_some()
 }
 
-fn signal_process(pid: u32, signal: Signal) -> Result<()> {
-    let mut system = System::new();
-    let pid = Pid::from_u32(pid);
-    system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-    let process = system
-        .process(pid)
-        .ok_or_else(|| anyhow!("broker process {} no longer exists", pid.as_u32()))?;
-    match process.kill_with(signal) {
-        Some(true) => Ok(()),
-        Some(false) => bail!(
-            "operating system refused to signal broker process {}",
-            pid.as_u32()
-        ),
-        None => bail!("requested broker process signal is unsupported"),
-    }
-}
-
-#[cfg(unix)]
-fn detach_process(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(windows)]
-fn detach_process(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    const DETACHED_PROCESS: u32 = 0x00000008;
-    command.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
-}
-
-#[cfg(not(any(unix, windows)))]
-fn detach_process(_command: &mut Command) {}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    const BROKER_LIFECYCLE_CHILD: &str = "__broker_lifecycle_child";
 
     fn test_supervisor(
         paths: &AppPaths,
@@ -724,14 +709,15 @@ mod tests {
         config_sha256: &str,
     ) -> (std::process::Child, BrokerOwnershipRecord) {
         let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-        let child = Command::new(&executable)
-            .arg("__broker")
+        let mut command = Command::new(&executable);
+        command
+            .arg(BROKER_LIFECYCLE_CHILD)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::null());
+        crate::platform::detach_process(&mut command);
+        let child = command.spawn().unwrap();
         let record = process_identity(child.id(), &executable, cwd, config_sha256, None).unwrap();
         (child, record)
     }
@@ -740,6 +726,13 @@ mod tests {
     fn __broker_child_stays_alive_for_process_lifecycle_fixtures() {
         if std::env::args().any(|argument| argument == "__broker") {
             thread::sleep(Duration::from_millis(800));
+        }
+    }
+
+    #[test]
+    fn __broker_lifecycle_child() {
+        if std::env::args().any(|argument| argument == BROKER_LIFECYCLE_CHILD) {
+            thread::sleep(Duration::from_secs(30));
         }
     }
 
@@ -1153,6 +1146,23 @@ mod tests {
         assert!(!paths.broker_ownership_path().exists());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_broker_stop_uses_the_reliable_process_fallback() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let supervisor = test_supervisor(&paths, closed_port(), None);
+        let (mut child, ownership) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+
+        stop_owned_process(&ownership, &paths.broker_ownership_path()).unwrap();
+        child.wait().unwrap();
+
+        assert!(!process_matches(&ownership));
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
     #[test]
     fn process_identity_matching_and_stale_cleanup_fail_closed() {
         let current_executable = std::env::current_exe().unwrap().canonicalize().unwrap();
@@ -1166,9 +1176,13 @@ mod tests {
         )
         .unwrap();
         assert!(process_matches(&current));
+        let different_executable_dir = tempfile::tempdir().unwrap();
+        let different_executable = different_executable_dir.path().join("different-executable");
+        fs::write(&different_executable, b"not the test executable").unwrap();
+        let different_executable = different_executable.canonicalize().unwrap();
         assert!(process_identity(
             std::process::id(),
-            Path::new("/bin/echo"),
+            &different_executable,
             &current_directory,
             &current.config_sha256,
             None,
@@ -1187,9 +1201,8 @@ mod tests {
         wrong_start.started_at_epoch_sec = wrong_start.started_at_epoch_sec.saturating_add(1);
         assert!(!process_matches(&wrong_start));
         let mut wrong_executable = current.clone();
-        wrong_executable.executable = PathBuf::from("/bin/echo");
+        wrong_executable.executable = different_executable;
         assert!(!process_matches(&wrong_executable));
-        assert!(signal_process(u32::MAX, Signal::Term).is_err());
         let stale_record = BrokerOwnershipRecord {
             version: OWNERSHIP_VERSION,
             pid: u32::MAX,
@@ -1210,11 +1223,12 @@ mod tests {
         let supervisor = test_supervisor(&paths, closed_port(), None);
         assert!(supervisor.clean_stale_ownership().is_ok());
         write_ownership(&paths.broker_ownership_path(), &stale_record).unwrap();
-        assert!(supervisor.clean_stale_ownership().is_ok());
+        assert!(!clean_stale_broker_ownership(&paths).unwrap());
         assert!(!paths.broker_ownership_path().exists());
         let (mut child, mut ownership) =
             spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
         write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        assert!(clean_stale_broker_ownership(&paths).unwrap());
         assert!(supervisor.clean_stale_ownership().is_ok());
         ownership.config_sha256 = format!("sha256:{}", "c".repeat(64));
         write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
@@ -1227,14 +1241,18 @@ mod tests {
         let executable_drift_paths =
             AppPaths::for_tests(executable_drift_data.path().to_path_buf());
         let executable_drift = test_supervisor(&executable_drift_paths, closed_port(), None);
-        let mut sleep = Command::new("/bin/sleep")
-            .arg("2")
+        let fixture_name = format!("broker-fixture{}", std::env::consts::EXE_SUFFIX);
+        let fixture_executable = executable_drift_paths.base_dir().join(fixture_name);
+        fs::copy(&current_executable, &fixture_executable).unwrap();
+        let fixture_executable = fixture_executable.canonicalize().unwrap();
+        let mut drift_child = Command::new(&fixture_executable)
+            .arg(BROKER_LIFECYCLE_CHILD)
             .current_dir(executable_drift_paths.base_dir())
             .spawn()
             .unwrap();
-        let sleep_record = process_identity(
-            sleep.id(),
-            Path::new("/bin/sleep"),
+        let drift_record = process_identity(
+            drift_child.id(),
+            &fixture_executable,
             executable_drift_paths.base_dir(),
             &settings_digest(&executable_drift.settings),
             None,
@@ -1242,12 +1260,12 @@ mod tests {
         .unwrap();
         write_ownership(
             &executable_drift_paths.broker_ownership_path(),
-            &sleep_record,
+            &drift_record,
         )
         .unwrap();
         assert!(executable_drift.clean_stale_ownership().is_err());
-        let _ = sleep.kill();
-        let _ = sleep.wait();
+        let _ = drift_child.kill();
+        let _ = drift_child.wait();
 
         let source_data = tempfile::tempdir().unwrap();
         let different_data = tempfile::tempdir().unwrap();

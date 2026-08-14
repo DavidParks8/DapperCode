@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package>
+  <metadata>
+    <id>Example.Managed.Package</id>
+    <version>1.2.3</version>
+    <license type="file">legal\LICENSE.txt</license>
+  </metadata>
+</package>

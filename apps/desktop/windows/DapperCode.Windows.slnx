@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="src/DapperCode.Core/DapperCode.Core.csproj" />
+  <Project Path="src/DapperCode.Windows/DapperCode.Windows.csproj">
+    <Platform Solution="*|ARM64" Project="ARM64" />
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="tests/DapperCode.Core.Tests/DapperCode.Core.Tests.csproj" />
+  <Project Path="tests/DapperCode.ProcessFixture/DapperCode.ProcessFixture.csproj" />
+</Solution>

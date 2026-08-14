@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <RootNamespace>DapperCode.Windows</RootNamespace>
+    <AssemblyName>DapperCode</AssemblyName>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>MSIX</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2081</WarningsNotAsErrors>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AppxBundle>Always</AppxBundle>
+    <AppxBundlePlatforms>x64|arm64</AppxBundlePlatforms>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <RepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\..\..\'))\</RepositoryRoot>
+    <PackageIdentityName>DapperCode.Desktop</PackageIdentityName>
+    <PackagePublisher>CN=DapperCode</PackagePublisher>
+    <PackageVersion>0.1.0.0</PackageVersion>
+    <PackageManifestTemplate>$(MSBuildProjectDirectory)\Package.appxmanifest</PackageManifestTemplate>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Platform)' == 'x64'">
+    <RustTargetTriple>x86_64-pc-windows-msvc</RustTargetTriple>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)' == 'ARM64'">
+    <RustTargetTriple>aarch64-pc-windows-msvc</RustTargetTriple>
+  </PropertyGroup>
+  <PropertyGroup>
+    <RustOperatorPath>$(RepositoryRoot)apps\desktop\target\$(RustTargetTriple)\release\dappercode.exe</RustOperatorPath>
+    <RustBridgePath>$(RepositoryRoot)services\rust-bridge\target\$(RustTargetTriple)\release\dappercode-bridge.exe</RustBridgePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="H.NotifyIcon.WinUI" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <ProjectReference Include="..\DapperCode.Core\DapperCode.Core.csproj" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CsWinRT projection assemblies use runtime activation that the linker cannot infer. -->
+    <TrimmerRootAssembly Include="Microsoft.Windows.SDK.NET" />
+    <TrimmerRootAssembly Include="WinRT.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+    <AppxManifest Include="$(PackageManifestTemplate)" />
+    <Content Update="Assets\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Licenses\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(RepositoryRoot)LICENSE" Link="Licenses\DapperCode-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(RustOperatorPath)" Link="bin\dappercode.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(RustBridgePath)" Link="bin\dappercode-bridge.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="BuildRustPayload" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipRustPayloadBuild)' != 'true'">
+    <Error Condition="'$(RustTargetTriple)' == ''" Text="Build DapperCode.Windows with Platform=x64 or Platform=ARM64." />
+    <Exec WorkingDirectory="$(RepositoryRoot)" Command="cargo build --locked --release --target $(RustTargetTriple) --manifest-path &quot;$(RepositoryRoot)apps\desktop\Cargo.toml&quot;" />
+    <Exec WorkingDirectory="$(RepositoryRoot)" Command="cargo build --locked --release --target $(RustTargetTriple) --manifest-path &quot;$(RepositoryRoot)services\rust-bridge\Cargo.toml&quot;" />
+    <Error Condition="!Exists('$(RustOperatorPath)')" Text="The packaged Rust operator was not produced at $(RustOperatorPath)." />
+    <Error Condition="!Exists('$(RustBridgePath)')" Text="The packaged Rust bridge was not produced at $(RustBridgePath)." />
+  </Target>
+
+  <Target Name="GenerateParameterizedPackageManifest" BeforeTargets="_ValidatePresenceOfAppxManifestItems" Condition="'$(WindowsPackageType)' != 'None'">
+    <Error Condition="'$(PackageIdentityName)' == ''" Text="PackageIdentityName must not be empty." />
+    <Error Condition="'$(PackagePublisher)' == ''" Text="PackagePublisher must not be empty." />
+    <Error Condition="'$(PackageVersion)' == ''" Text="PackageVersion must not be empty." />
+    <PropertyGroup>
+      <GeneratedPackageManifest>$(IntermediateOutputPath)DapperCode.generated.appxmanifest</GeneratedPackageManifest>
+    </PropertyGroup>
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(GeneratedPackageManifest)'))" />
+    <Copy SourceFiles="$(PackageManifestTemplate)" DestinationFiles="$(GeneratedPackageManifest)" />
+    <XmlPoke XmlInputPath="$(GeneratedPackageManifest)" Query="/*[local-name()='Package']/*[local-name()='Identity']/@Name" Value="$(PackageIdentityName)" />
+    <XmlPoke XmlInputPath="$(GeneratedPackageManifest)" Query="/*[local-name()='Package']/*[local-name()='Identity']/@Publisher" Value="$(PackagePublisher)" />
+    <XmlPoke XmlInputPath="$(GeneratedPackageManifest)" Query="/*[local-name()='Package']/*[local-name()='Identity']/@Version" Value="$(PackageVersion)" />
+    <ItemGroup>
+      <AppxManifest Remove="@(AppxManifest)" />
+      <AppxManifest Include="$(GeneratedPackageManifest)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

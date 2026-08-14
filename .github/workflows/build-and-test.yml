@@ -8,6 +8,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      windows_signing_mode:
+        description: Windows package signing mode
+        required: true
+        default: Test
+        type: choice
+        options:
+          - Test
+          - Production
 
 concurrency:
   group: build-and-test-${{ github.ref }}
@@ -17,8 +26,10 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: "22.13.1"
-  RUST_VERSION: "1.97.1"
+  NODE_VERSION: '22.13.1'
+  RUST_VERSION: '1.97.1'
+  DOTNET_VERSION: '10.0.302'
+  NUGET_VERSION: '6.14.0'
 
 jobs:
   repository-policy:
@@ -226,6 +237,268 @@ jobs:
         with:
           name: dappercode-desktop-macos-${{ runner.arch }}
           path: apps/desktop/dist/DapperCode-*.zip
+          if-no-files-found: error
+
+  desktop-windows-validate:
+    name: Desktop Windows Validation
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+          package-manager-cache: false
+
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup pinned NuGet
+        uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: ${{ env.NUGET_VERSION }}
+
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup Rust with Windows targets
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache desktop Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop -> target
+            services/rust-bridge -> target
+
+      - name: Install repository dependencies
+        run: npm ci
+
+      - name: Restore pinned WinUI dependencies
+        shell: pwsh
+        run: ./scripts/restore-desktop-windows.ps1 -ExpectedSdkVersion "${{ env.DOTNET_VERSION }}"
+
+      - name: Test all WinUI suites
+        shell: pwsh
+        run: ./scripts/test-desktop-windows-dotnet.ps1
+
+      - name: Check Windows desktop source policy
+        shell: pwsh
+        run: ./scripts/test-desktop-windows.ps1 -SourceOnly
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --check --manifest-path apps/desktop/Cargo.toml
+          cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml
+
+      - name: Check and lint Windows Rust
+        run: |
+          cargo check --locked --all-targets --manifest-path apps/desktop/Cargo.toml
+          cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+          cargo check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+          cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings
+
+      - name: Test Windows Rust
+        shell: pwsh
+        run: ./scripts/test-rust-windows.ps1
+
+  desktop-windows-package:
+    name: Desktop Windows Package (${{ matrix.architecture }})
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            rust-target: x86_64-pc-windows-msvc
+          - architecture: arm64
+            rust-target: aarch64-pc-windows-msvc
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup architecture Rust target
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache architecture Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop -> target
+            services/rust-bridge -> target
+          shared-key: windows-${{ matrix.architecture }}-release
+
+      - name: Build unsigned architecture package
+        shell: pwsh
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Architecture ${{ matrix.architecture }}
+          -SkipBundle
+          -SkipInspection
+
+      - name: Upload unsigned architecture package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-${{ matrix.architecture }}-package
+          path: apps/desktop/dist/windows/packages/*.msix
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop-windows:
+    name: Desktop Windows
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    needs:
+      - desktop-windows-validate
+      - desktop-windows-package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download unsigned architecture packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dappercode-desktop-windows-*-package
+          path: apps/desktop/dist/windows/packages
+          merge-multiple: true
+
+      - name: Bundle, sign, and inspect architecture packages
+        shell: pwsh
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Operation Bundle
+          -SigningMode ${{ env.DAPPERCODE_WINDOWS_SIGNING_MODE }}
+
+      - name: Upload test-signed Windows bundle and public certificate
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-x64-arm64
+          path: |
+            apps/desktop/dist/windows/*.msixbundle
+            apps/desktop/dist/windows/DapperCode-Signing.cer
+            apps/desktop/dist/windows/INSTALL-WINDOWS.txt
+          if-no-files-found: error
+
+      - name: Upload inspected unsigned production packages
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-unsigned-production
+          path: |
+            apps/desktop/dist/windows/*.msixbundle
+            apps/desktop/dist/windows/packages/*.msix
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload reviewed production signing script
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-production-signing-script
+          path: scripts/sign-desktop-windows-production.ps1
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop-windows-production-sign:
+    name: Desktop Windows Production Signing
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.windows_signing_mode == 'Production' &&
+      github.ref == 'refs/heads/main'
+    needs: desktop-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: windows-production-signing
+    permissions:
+      actions: read
+      contents: none
+    steps:
+      - name: Download inspected unsigned production packages
+        uses: actions/download-artifact@v4
+        with:
+          name: dappercode-desktop-windows-unsigned-production
+          path: windows-production
+
+      - name: Download reviewed production signing script
+        uses: actions/download-artifact@v4
+        with:
+          name: dappercode-desktop-windows-production-signing-script
+          path: windows-signing-script
+
+      - name: Sign and verify production packages
+        shell: pwsh
+        env:
+          DAPPERCODE_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          DAPPERCODE_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+          DAPPERCODE_WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: >-
+          ./windows-signing-script/sign-desktop-windows-production.ps1
+          -ArtifactRoot ./windows-production
+
+      - name: Upload signed production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-x64-arm64
+          path: windows-production
           if-no-files-found: error
 
   rust-coverage:

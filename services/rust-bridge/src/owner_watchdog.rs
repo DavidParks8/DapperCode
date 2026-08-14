@@ -6,8 +6,10 @@
 //! therefore passes its own process ID as `BRIDGE_OWNER_PID`, and the bridge shuts itself down as
 //! soon as that process goes away.
 
+#[cfg(test)]
 use std::time::Duration;
 
+#[cfg(test)]
 const OWNER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Reads and validates `BRIDGE_OWNER_PID`.
@@ -39,131 +41,30 @@ pub(crate) async fn wait_for_owner_exit(owner_pid: Option<u32>) {
     if !process_is_alive(owner_pid) {
         return;
     }
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    if wait_for_owner_exit_via_kqueue(owner_pid).await {
-        return;
-    }
-    poll_until_owner_exits(owner_pid).await;
+    crate::platform::wait_for_owner_exit(owner_pid).await;
 }
 
-async fn poll_until_owner_exits(owner_pid: u32) {
-    while process_is_alive(owner_pid) {
-        tokio::time::sleep(OWNER_POLL_INTERVAL).await;
-    }
-}
-
-/// Watches the owner with `kqueue`'s `NOTE_EXIT`.
-///
-/// Registration binds to the live process, so a recycled PID cannot make the watch miss the real
-/// exit. Returns `false` when the watch could not be established and the caller should poll instead.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-async fn wait_for_owner_exit_via_kqueue(owner_pid: u32) -> bool {
-    // A join failure means the runtime is going down, which the polling fallback handles.
-    tokio::task::spawn_blocking(move || block_on_owner_exit(owner_pid))
-        .await
-        .unwrap_or(false)
-}
-
-/// What a `kevent` wait result means for the watch loop.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WatchStep {
-    /// The owner exited, so the bridge should shut down.
-    OwnerExited,
-    /// A spurious or interrupted wait; keep waiting.
-    Retry,
-    /// The watch broke, so the caller should fall back to polling.
-    Unavailable,
-}
-
-/// Interprets a `kevent` return value.
-///
-/// Split out from the syscall so every outcome is reachable in tests: interrupted and failed waits
-/// are otherwise nearly impossible to provoke, and getting them wrong would either spin forever or
-/// silently stop watching the owner.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn classify_kevent(received: libc::c_int, error_kind: std::io::ErrorKind) -> WatchStep {
-    if received > 0 {
-        return WatchStep::OwnerExited;
-    }
-    if received == 0 || error_kind == std::io::ErrorKind::Interrupted {
-        return WatchStep::Retry;
-    }
-    WatchStep::Unavailable
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn block_on_owner_exit(owner_pid: u32) -> bool {
-    use std::os::fd::{FromRawFd, OwnedFd};
-
-    let queue = unsafe { libc::kqueue() };
-    if queue < 0 {
-        return false;
-    }
-    // Owning the descriptor guarantees it is closed on every exit path below.
-    let queue = unsafe { OwnedFd::from_raw_fd(queue) };
-    let queue_fd = std::os::fd::AsRawFd::as_raw_fd(&queue);
-
-    let mut change = libc::kevent {
-        ident: owner_pid as libc::uintptr_t,
-        filter: libc::EVFILT_PROC,
-        flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_ONESHOT,
-        fflags: libc::NOTE_EXIT,
-        data: 0,
-        udata: std::ptr::null_mut(),
-    };
-    let registered = unsafe {
-        libc::kevent(
-            queue_fd,
-            &raw const change,
-            1,
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null(),
-        )
-    };
-    if registered < 0 {
-        return false;
-    }
-
-    loop {
-        let received = unsafe {
-            libc::kevent(
-                queue_fd,
-                std::ptr::null(),
-                0,
-                &raw mut change,
-                1,
-                std::ptr::null(),
-            )
-        };
-        match classify_kevent(received, std::io::Error::last_os_error().kind()) {
-            WatchStep::OwnerExited => return true,
-            WatchStep::Unavailable => return false,
-            WatchStep::Retry => {}
-        }
-    }
-}
-
-#[cfg(unix)]
 pub(crate) fn process_is_alive(pid: u32) -> bool {
-    // Signal 0 performs the permission and existence checks without delivering anything. EPERM
-    // means the process exists but belongs to another user, which still counts as alive.
-    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    crate::platform::process_is_alive(pid)
 }
 
-#[cfg(not(unix))]
-pub(crate) fn process_is_alive(_pid: u32) -> bool {
-    true
+#[cfg(test)]
+async fn poll_until_owner_exits(owner_pid: u32) {
+    poll_while_owner_is_alive(|| process_is_alive(owner_pid), OWNER_POLL_INTERVAL).await;
+}
+
+#[cfg(test)]
+async fn poll_while_owner_is_alive(mut owner_is_alive: impl FnMut() -> bool, interval: Duration) {
+    crate::platform::poll_while_owner_is_alive(&mut owner_is_alive, interval).await;
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    const SHORT_LIVED_CHILD: &str = "__watchdog_short_lived_child";
+    const LONG_LIVED_CHILD: &str = "__watchdog_long_lived_child";
 
     struct EnvGuard;
 
@@ -182,6 +83,23 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             std::env::remove_var("BRIDGE_OWNER_PID");
+        }
+    }
+
+    fn spawn_fixture(marker: &str) -> std::process::Child {
+        std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .arg(marker)
+            .spawn()
+            .expect("spawn watchdog fixture")
+    }
+
+    #[test]
+    fn __watchdog_short_lived_child() {}
+
+    #[test]
+    fn __watchdog_long_lived_child() {
+        if std::env::args().any(|argument| argument == LONG_LIVED_CHILD) {
+            std::thread::sleep(Duration::from_secs(30));
         }
     }
 
@@ -212,12 +130,10 @@ mod tests {
     #[test]
     fn recognizes_a_live_process_and_a_dead_one() {
         assert!(process_is_alive(std::process::id()));
+        #[cfg(unix)]
         assert!(process_is_alive(1), "init is owned by another user");
 
-        let mut child = std::process::Command::new("/bin/echo")
-            .arg("done")
-            .spawn()
-            .expect("spawn short-lived child");
+        let mut child = spawn_fixture(SHORT_LIVED_CHILD);
         let pid = child.id();
         child.wait().expect("reap child");
         // The reaped PID is free, so nothing with that identity is running for us to watch.
@@ -226,10 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn returns_immediately_when_the_owner_is_already_gone() {
-        let mut child = std::process::Command::new("/bin/echo")
-            .arg("done")
-            .spawn()
-            .expect("spawn short-lived child");
+        let mut child = spawn_fixture(SHORT_LIVED_CHILD);
         let pid = child.id();
         child.wait().expect("reap child");
 
@@ -240,10 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_when_a_live_owner_exits() {
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .expect("spawn long-lived child");
+        let mut child = spawn_fixture(LONG_LIVED_CHILD);
         let pid = child.id();
 
         let watchdog = tokio::spawn(async move { wait_for_owner_exit(Some(pid)).await });
@@ -270,61 +180,121 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[test]
-    fn the_kqueue_watch_reports_failure_for_a_process_that_cannot_be_registered() {
-        // A PID that cannot exist fails registration, which is what tells the caller to poll.
-        assert!(!block_on_owner_exit(u32::MAX - 1));
+    fn windows_owner_identity_checks_fail_closed() {
+        assert!(crate::platform::owner_identity_matches(Some(42), 42));
+        assert!(!crate::platform::owner_identity_matches(Some(41), 42));
+        assert!(!crate::platform::owner_identity_matches(None, 42));
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[test]
-    fn every_kevent_outcome_maps_to_the_right_next_step() {
-        use std::io::ErrorKind;
+    fn windows_zero_timeout_wait_checks_fail_closed() {
+        const WAIT_OBJECT_0: u32 = 0;
+        const WAIT_TIMEOUT: u32 = 258;
+        const WAIT_FAILED: u32 = u32::MAX;
 
-        // A delivered event is the only thing that means the owner is gone.
-        assert_eq!(classify_kevent(1, ErrorKind::Other), WatchStep::OwnerExited);
-        assert_eq!(
-            classify_kevent(2, ErrorKind::Interrupted),
-            WatchStep::OwnerExited
-        );
-
-        // A spurious wake or a signal must keep waiting rather than abandon the watch.
-        assert_eq!(classify_kevent(0, ErrorKind::Other), WatchStep::Retry);
-        assert_eq!(
-            classify_kevent(-1, ErrorKind::Interrupted),
-            WatchStep::Retry
-        );
-
-        // Anything else means the watch is broken and the caller should fall back to polling.
-        assert_eq!(
-            classify_kevent(-1, ErrorKind::PermissionDenied),
-            WatchStep::Unavailable
-        );
-        assert_eq!(
-            classify_kevent(-1, ErrorKind::Other),
-            WatchStep::Unavailable
-        );
+        assert!(crate::platform::zero_timeout_wait_means_alive(
+            WAIT_TIMEOUT,
+            WAIT_TIMEOUT
+        ));
+        assert!(!crate::platform::zero_timeout_wait_means_alive(
+            WAIT_OBJECT_0,
+            WAIT_TIMEOUT
+        ));
+        assert!(!crate::platform::zero_timeout_wait_means_alive(
+            WAIT_FAILED,
+            WAIT_TIMEOUT
+        ));
     }
 
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[tokio::test]
-    async fn the_kqueue_watch_resolves_when_the_owner_exits() {
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .expect("spawn long-lived child");
-        let pid = child.id();
+    async fn bounded_polling_waits_for_a_live_owner_then_resolves() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
 
-        let watch = tokio::spawn(async move { wait_for_owner_exit_via_kqueue(pid).await });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        child.kill().expect("kill owner");
-        child.wait().expect("reap owner");
+        let owner_is_alive = Arc::new(AtomicBool::new(true));
+        let first_poll = Arc::new(tokio::sync::Notify::new());
+        let watchdog = tokio::spawn(poll_while_owner_is_alive(
+            {
+                let owner_is_alive = Arc::clone(&owner_is_alive);
+                let first_poll = Arc::clone(&first_poll);
+                move || {
+                    first_poll.notify_one();
+                    owner_is_alive.load(Ordering::SeqCst)
+                }
+            },
+            Duration::from_millis(10),
+        ));
 
-        assert!(tokio::time::timeout(Duration::from_secs(10), watch)
+        tokio::time::timeout(Duration::from_secs(1), first_poll.notified())
             .await
-            .expect("kqueue watch should resolve")
-            .expect("watch task should not panic"));
+            .expect("polling should start");
+        assert!(
+            !watchdog.is_finished(),
+            "a live owner must keep the watch open"
+        );
+
+        owner_is_alive.store(false, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(1), watchdog)
+            .await
+            .expect("watchdog should observe the owner exit")
+            .expect("watchdog task should not panic");
+    }
+
+    #[tokio::test]
+    async fn cancelling_bounded_polling_drops_all_work() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+
+        struct DropSignal(Arc<AtomicBool>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let first_poll = Arc::new(tokio::sync::Notify::new());
+        let watchdog = tokio::spawn(poll_while_owner_is_alive(
+            {
+                let drop_signal = DropSignal(Arc::clone(&dropped));
+                let first_poll = Arc::clone(&first_poll);
+                move || {
+                    let _keep_until_cancelled = &drop_signal;
+                    first_poll.notify_one();
+                    true
+                }
+            },
+            Duration::from_secs(30),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(1), first_poll.notified())
+            .await
+            .expect("polling should start");
+        watchdog.abort();
+        let cancellation = tokio::time::timeout(Duration::from_secs(1), watchdog)
+            .await
+            .expect("cancellation should be prompt")
+            .expect_err("the watchdog should be cancelled");
+        assert!(cancellation.is_cancelled());
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "cancellation must drop the polling closure"
+        );
+    }
+
+    #[test]
+    fn windows_watch_policy_forbids_unbounded_blocking() {
+        let source = include_str!("platform/windows/process.rs");
+        assert!(!source.contains("spawn_blocking"));
+        assert!(!source.contains("INFINITE"));
+        assert!(source.contains("WaitForSingleObject"));
+        assert!(source.contains(", 0)"));
     }
 
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -332,10 +302,7 @@ mod tests {
     async fn falls_back_to_polling_when_the_kqueue_watch_cannot_be_established() {
         // The owner is alive, so `wait_for_owner_exit` gets past its early return, but a PID that
         // cannot be registered forces the polling path to take over.
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .expect("spawn long-lived child");
+        let mut child = spawn_fixture(LONG_LIVED_CHILD);
         let pid = child.id();
 
         let watchdog = tokio::spawn(async move { wait_for_owner_exit(Some(pid)).await });
@@ -352,10 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn polling_fallback_resolves_after_the_owner_exits() {
-        let mut child = std::process::Command::new("/bin/sleep")
-            .arg("30")
-            .spawn()
-            .expect("spawn long-lived child");
+        let mut child = spawn_fixture(LONG_LIVED_CHILD);
         let pid = child.id();
 
         let watchdog = tokio::spawn(async move { poll_until_owner_exits(pid).await });
@@ -369,10 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn polling_fallback_returns_immediately_for_a_dead_owner() {
-        let mut child = std::process::Command::new("/bin/echo")
-            .arg("done")
-            .spawn()
-            .expect("spawn short-lived child");
+        let mut child = spawn_fixture(SHORT_LIVED_CHILD);
         let pid = child.id();
         child.wait().expect("reap child");
 
@@ -380,5 +341,91 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), poll_until_owner_exits(pid))
             .await
             .expect("a dead owner should resolve without waiting a poll interval");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_watch_rejects_a_reused_pid_creation_identity() {
+        let mut child = spawn_fixture(LONG_LIVED_CHILD);
+        let pid = child.id();
+        assert!(process_is_alive(pid));
+        let creation_time = crate::platform::test_observed_process_creation_time(pid)
+            .expect("captured creation time");
+        assert_eq!(
+            crate::platform::test_process_creation_time(pid).unwrap(),
+            creation_time
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            crate::platform::test_wait_for_owner_exit_with_identity(
+                pid,
+                Some(creation_time.wrapping_add(1)),
+            ),
+        )
+        .await
+        .expect("a reused PID identity must be rejected immediately");
+        assert!(child.try_wait().unwrap().is_none());
+
+        child.kill().expect("kill owner");
+        child.wait().expect("reap owner");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancelling_windows_watch_does_not_delay_runtime_shutdown() {
+        let mut child = spawn_fixture(LONG_LIVED_CHILD);
+        let pid = child.id();
+        assert!(process_is_alive(pid));
+        let creation_time = crate::platform::test_observed_process_creation_time(pid)
+            .expect("captured creation time");
+
+        let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
+        let runtime_thread = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .expect("watchdog test runtime");
+            runtime.block_on(async move {
+                let watchdog =
+                    tokio::spawn(crate::platform::test_wait_for_owner_exit_with_identity(
+                        pid,
+                        Some(creation_time),
+                    ));
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                assert!(
+                    !watchdog.is_finished(),
+                    "the watch must remain pending for a live owner"
+                );
+
+                watchdog.abort();
+                let cancellation = tokio::time::timeout(Duration::from_secs(1), watchdog)
+                    .await
+                    .expect("watch cancellation should be prompt")
+                    .expect_err("watchdog should be cancelled");
+                assert!(cancellation.is_cancelled());
+            });
+            drop(runtime);
+            shutdown_tx
+                .send(())
+                .expect("report prompt runtime shutdown");
+        });
+
+        let shutdown_was_prompt = shutdown_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        let owner_was_still_alive = child.try_wait().expect("query owner").is_none();
+        if owner_was_still_alive {
+            child.kill().expect("kill owner");
+        }
+        child.wait().expect("reap owner");
+        runtime_thread.join().expect("watchdog runtime thread");
+
+        assert!(
+            owner_was_still_alive,
+            "cancelling the watch must not terminate the owner"
+        );
+        assert!(
+            shutdown_was_prompt,
+            "cancelled owner watches must not leave runtime-blocking work"
+        );
     }
 }

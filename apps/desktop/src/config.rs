@@ -7,6 +7,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use crate::{
+    platform,
     secrets::SecretBackend,
     store::{AppConfig, AppPaths, Profile},
 };
@@ -20,7 +21,7 @@ impl RuntimePaths {
     pub fn discover() -> Result<Self> {
         let mut candidates = Vec::new();
         if let Ok(executable) = std::env::current_exe() {
-            candidates.extend(platform_runtime_candidates(&executable));
+            candidates.extend(platform::runtime_candidates(&executable));
         }
 
         #[cfg(debug_assertions)]
@@ -38,7 +39,7 @@ impl RuntimePaths {
             let Ok(package_root) = candidate.canonicalize() else {
                 continue;
             };
-            let contains_bridge = package_root.join("bin/dappercode-bridge").is_file()
+            let contains_bridge = contains_bundled_bridge(&package_root)
                 || cfg!(debug_assertions)
                     && package_root
                         .join("services/rust-bridge/Cargo.toml")
@@ -54,21 +55,13 @@ impl RuntimePaths {
 
     #[cfg(not(debug_assertions))]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
-        let binary_name = if cfg!(windows) {
-            "dappercode-bridge.exe"
-        } else {
-            "dappercode-bridge"
-        };
+        let binary_name = platform::bridge_binary_name();
         vec![self.package_root.join("bin").join(binary_name)]
     }
 
     #[cfg(debug_assertions)]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
-        let binary_name = if cfg!(windows) {
-            "dappercode-bridge.exe"
-        } else {
-            "dappercode-bridge"
-        };
+        let binary_name = platform::bridge_binary_name();
         let mut candidates = vec![self.package_root.join("bin").join(binary_name)];
         if let Some(target) = runtime_target() {
             candidates.push(
@@ -95,44 +88,26 @@ impl RuntimePaths {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .and_then(Path::parent)
-        .map(|resources| vec![resources.to_path_buf()])
-        .unwrap_or_default()
-}
-
-#[cfg(target_os = "windows")]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .map(|directory| vec![directory.join("runtime")])
-        .unwrap_or_default()
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .map(|directory| {
-            vec![
-                directory.join("../share/dappercode/runtime"),
-                directory.join("runtime"),
-            ]
-        })
-        .unwrap_or_default()
+fn contains_bundled_bridge(package_root: &Path) -> bool {
+    ["dappercode-bridge", "dappercode-bridge.exe"]
+        .iter()
+        .any(|binary| package_root.join("bin").join(binary).is_file())
 }
 
 #[cfg(debug_assertions)]
 fn runtime_target() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    runtime_target_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+#[cfg(debug_assertions)]
+fn runtime_target_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
         ("macos", "aarch64") => Some("darwin-arm64"),
         ("macos", "x86_64") => Some("darwin-x64"),
         ("linux", "x86_64") => Some("linux-x64"),
         ("linux", "aarch64") => Some("linux-arm64"),
         ("windows", "x86_64") => Some("win32-x64"),
+        ("windows", "aarch64") => Some("win32-arm64"),
         _ => None,
     }
 }
@@ -341,6 +316,29 @@ pub fn allocate_port_pair(
         }
     }
     bail!("no free bridge port pair is available on {host} at or above {start}")
+}
+
+pub fn allocate_broker_replacement_ports(
+    config: &AppConfig,
+    host: &str,
+    current_bridge_port: u16,
+    current_preview_port: u16,
+    requested_port: Option<u16>,
+) -> Result<(u16, u16)> {
+    let bridge_port = requested_port.unwrap_or(current_bridge_port);
+    if config
+        .profiles
+        .iter()
+        .any(|profile| profile.preview_port == bridge_port)
+    {
+        bail!(
+            "port {bridge_port} is already assigned to a workspace browser preview; choose another --port"
+        );
+    }
+    if !port_is_bindable(host, bridge_port) {
+        bail!("port {bridge_port} is already in use on {host}");
+    }
+    Ok((bridge_port, current_preview_port))
 }
 
 pub fn allocate_preview_port(
@@ -793,7 +791,8 @@ mod tests {
         let candidates = runtime.bridge_binary_candidates();
         assert!(candidates
             .iter()
-            .any(|candidate| candidate.ends_with("bin/dappercode-bridge")));
+            .any(|candidate| candidate
+                .ends_with(Path::new("bin").join(platform::bridge_binary_name()))));
         assert!(runtime_target().is_some(), "this platform should be mapped");
 
         let managed_target = temp.path().join("managed-target");
@@ -809,6 +808,33 @@ mod tests {
         // A package root that cannot be canonicalized is skipped rather than failing discovery.
         std::env::set_var("DAPPERCODE_PACKAGE_ROOT", temp.path().join("missing"));
         assert!(RuntimePaths::discover().is_ok());
+    }
+
+    #[test]
+    fn recognizes_the_windows_release_bridge_and_arm64_runtime() {
+        let temp = tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("bin")).unwrap();
+        std::fs::write(temp.path().join("bin/dappercode-bridge.exe"), b"bridge").unwrap();
+
+        assert!(contains_bundled_bridge(temp.path()));
+        assert_eq!(
+            runtime_target_for("windows", "aarch64"),
+            Some("win32-arm64")
+        );
+        assert_eq!(runtime_target_for("windows", "x86_64"), Some("win32-x64"));
+    }
+
+    #[test]
+    fn discovers_windows_runtime_from_operator_bin_layouts() {
+        assert_eq!(
+            platform::windows_runtime_candidates(Path::new("package/bin/dappercode.exe"))[0],
+            PathBuf::from("package")
+        );
+        assert_eq!(
+            platform::windows_runtime_candidates(Path::new("package/runtime/bin/dappercode.exe"))
+                [0],
+            PathBuf::from("package/runtime")
+        );
     }
 
     #[test]
@@ -935,5 +961,37 @@ mod tests {
         )
         .unwrap();
         assert_ne!(bridge, taken);
+    }
+
+    #[test]
+    fn broker_replacement_ignores_shared_bridge_copies_but_keeps_preview_reservations() {
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        let mut config = AppConfig {
+            version: 2,
+            broker: None,
+            profiles: vec![
+                profile("alpha-000000000001", first.path(), 18_871),
+                profile("beta-000000000002", second.path(), 18_871),
+            ],
+        };
+        config.profiles[0].preview_port = 18_872;
+        config.profiles[1].preview_port = 18_873;
+
+        assert_eq!(
+            allocate_broker_replacement_ports(&config, "127.0.0.1", 18_871, 18_872, Some(18_871),)
+                .unwrap(),
+            (18_871, 18_872)
+        );
+        assert!(allocate_broker_replacement_ports(
+            &config,
+            "127.0.0.1",
+            18_871,
+            18_872,
+            Some(18_873),
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("browser preview"));
     }
 }

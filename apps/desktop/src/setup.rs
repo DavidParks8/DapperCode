@@ -11,7 +11,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::{allocate_port_pair, allocate_preview_port, format_host, validate_workspace},
+    broker_supervisor::clean_stale_broker_ownership,
+    config::{
+        allocate_broker_replacement_ports, allocate_port_pair, allocate_preview_port, format_host,
+        validate_workspace,
+    },
+    platform,
     secrets::{BridgeSecret, SecretStore},
     store::{
         atomic_private_write, profile_id_for, remove_file_if_exists, AppPaths, BrokerSettings,
@@ -214,15 +219,15 @@ pub fn setup_profile(
                     || host != broker.host
                     || request.network_mode != broker.network_mode;
                 if endpoint_changed && request.replace_broker_endpoint {
-                    if paths.broker_ownership_path().exists() {
+                    if clean_stale_broker_ownership(paths)? {
                         bail!("stop the desktop broker before replacing its endpoint");
                     }
-                    let (bridge_port, preview_port) = allocate_port_pair(
+                    let (bridge_port, preview_port) = allocate_broker_replacement_ports(
                         config,
-                        &profile_id,
                         &host,
+                        broker.bridge_port,
+                        broker.preview_port,
                         request.bridge_port,
-                        request.bridge_port.is_some(),
                     )?;
                     let authority = format_host(&host);
                     let mut replacement = BrokerSettings::new(
@@ -343,21 +348,11 @@ pub fn setup_profile(
 }
 
 pub fn discover_agent_executable(agent_id: &str) -> Option<PathBuf> {
-    let executable_name = if cfg!(windows) {
-        format!("{agent_id}.exe")
-    } else {
-        agent_id.to_string()
-    };
+    let executable_name = platform::agent_executable_name(agent_id);
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default();
-    if cfg!(target_os = "macos") {
-        directories.extend([
-            PathBuf::from("/opt/homebrew/bin"),
-            PathBuf::from("/usr/local/bin"),
-            PathBuf::from("/usr/bin"),
-        ]);
-    }
+    directories.extend(platform::agent_search_roots());
     directories
         .into_iter()
         .map(|directory| directory.join(&executable_name))
@@ -787,7 +782,7 @@ mod tests {
         assert!(setup_profile(replacement.clone(), &paths, &secrets)
             .unwrap_err()
             .to_string()
-            .contains("stop the desktop broker"));
+            .contains("invalid broker ownership record"));
         fs::remove_file(ownership_path).unwrap();
         let result = setup_profile(replacement, &paths, &secrets).unwrap();
         let config = paths.load_config().unwrap();
@@ -802,6 +797,44 @@ mod tests {
         assert!(config.profiles[0]
             .preview_connect_url
             .starts_with("http://127.0.0.1:"));
+    }
+
+    #[test]
+    fn replaces_a_shared_endpoint_without_treating_other_profile_copies_as_conflicts() {
+        let first_workspace = tempdir().unwrap();
+        let second_workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        setup_profile(
+            request(first_workspace.path(), Some(18_867)),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+        setup_profile(
+            request(second_workspace.path(), Some(18_867)),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+
+        let mut replacement = request(second_workspace.path(), Some(18_867));
+        replacement.bridge_host = "127.0.0.2".to_string();
+        replacement.replace_broker_endpoint = true;
+        let result = setup_profile(replacement, &paths, &secrets).unwrap();
+
+        assert_eq!(result.bridge_port, 18_867);
+        let config = paths.load_config().unwrap();
+        assert_eq!(config.profiles.len(), 2);
+        assert!(config
+            .profiles
+            .iter()
+            .all(|profile| profile.bridge_port == 18_867));
+        assert!(config
+            .profiles
+            .iter()
+            .all(|profile| profile.bridge_host == "127.0.0.2"));
     }
 
     #[test]

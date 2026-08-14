@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <AppxPackageRegistration Include="$(MSBuildThisFileDirectory)..\tools\MSIX\win10-x64\Example.Missing.License.Main.msix" />
+  </ItemGroup>
+</Project>

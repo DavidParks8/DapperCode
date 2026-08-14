@@ -45,6 +45,7 @@ use tokio_tungstenite::{
 
 use crate::{
     config::{BridgeRuntimeConfig, RuntimePaths},
+    platform,
     secrets::{SecretBackend, SecretStore},
     store::{AppPaths, BrokerSettings, Profile},
 };
@@ -175,7 +176,7 @@ impl BrokerServer {
         let serve_result = axum::serve(bridge_listener, bridge_router)
             .with_graceful_shutdown(async move {
                 tokio::select! {
-                    _ = wait_for_shutdown_signal() => {}
+                    _ = platform::wait_for_shutdown_signal() => {}
                     _ = owner.wait_for_exit() => {}
                 }
                 let _ = shutdown_tx.send(true);
@@ -1051,20 +1052,7 @@ impl ManagedWorker for ProcessWorker {
         if child.try_wait()?.is_some() {
             return Ok(());
         }
-        #[cfg(unix)]
-        {
-            let pid = child.id().context("worker process id is unavailable")?;
-            let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-            if result != 0 {
-                return Err(std::io::Error::last_os_error()).context("failed to stop worker");
-            }
-            if timeout(Duration::from_secs(8), child.wait()).await.is_ok() {
-                return Ok(());
-            }
-        }
-        child.kill().await.context("failed to kill worker")?;
-        let _ = child.wait().await;
-        Ok(())
+        platform::stop_child(&mut child, Duration::from_secs(8)).await
     }
 }
 
@@ -1594,24 +1582,9 @@ fn process_start_time(pid: u32) -> Option<u64> {
         true,
         ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
     );
-    system.process(pid).map(|process| process.start_time())
-}
-
-async fn wait_for_shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("install SIGTERM handler");
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = terminate.recv() => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
+    system.process(pid).and_then(|process| {
+        platform::process_start_identity(pid.as_u32(), process.start_time()).ok()
+    })
 }
 
 async fn wait_for_shutdown(receiver: &mut tokio::sync::watch::Receiver<bool>) {

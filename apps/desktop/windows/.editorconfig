@@ -1,0 +1,11 @@
+[src/DapperCode.Core/**/*.cs]
+# Nullable reference types define the public non-null contract; avoid duplicate runtime guards.
+dotnet_diagnostic.CA1062.severity = none
+
+[src/DapperCode.Core/Models/BridgeSnapshot.cs]
+# The property mirrors the Rust operator's JSON wire contract verbatim.
+dotnet_diagnostic.CA1056.severity = none
+
+[src/DapperCode.Core/Services/ClientWebSocketHealthConnection.cs]
+# RunCoreAsync cancels and awaits every task before disposable transport state leaves scope.
+dotnet_diagnostic.CA2025.severity = none

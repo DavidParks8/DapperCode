@@ -1,9 +1,11 @@
 {
   "minTokens": 240,
   "minLines": 30,
-  "format": ["rust", "swift"],
-  "pattern": "**/*.{rs,swift}",
+  "format": ["csharp", "rust", "swift"],
+  "pattern": "**/*.{cs,rs,swift}",
   "ignore": [
+    "**/bin/**",
+    "**/obj/**",
     "**/target/**",
     "**/tests/**",
     "**/*_test.rs",

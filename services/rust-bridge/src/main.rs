@@ -61,6 +61,7 @@ mod health;
 mod observability;
 mod owner_watchdog;
 mod path_policy;
+mod platform;
 mod preview;
 mod protocol_constants;
 mod push;

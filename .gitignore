@@ -9,6 +9,8 @@ yarn-error.log*
 
 # TypeScript build artifacts
 **/dist/
+**/bin/
+**/obj/
 *.tsbuildinfo
 **/target/
 **/.build/
@@ -54,6 +56,7 @@ local.properties
 .env
 .env.*
 !.env.example
+*.pfx
 google-services.json
 GoogleService-Info.plist
 
