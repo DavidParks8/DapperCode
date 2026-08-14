@@ -278,6 +278,15 @@ public sealed class ManifestPolicyTests
     }
 
     [TestMethod]
+    public void MainWindowDoesNotShadowTheGeneratedContentLoadedMember()
+    {
+        var source = File.ReadAllText(Path.Combine(AppProject, "MainWindow.xaml.cs"));
+
+        Assert.IsFalse(source.Contains("_contentLoaded", StringComparison.Ordinal));
+        StringAssert.Contains(source, "_contentReadyCompletion", StringComparison.Ordinal);
+    }
+
+    [TestMethod]
     public void ProductionWorkflowReferencesReviewedPowerShellFiles()
     {
         var workflow = File.ReadAllText(Path.Combine(

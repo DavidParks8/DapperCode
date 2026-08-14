@@ -24,7 +24,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly MicaBackdropService? _backdrop;
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
-    private readonly TaskCompletionSource _contentLoaded =
+    private readonly TaskCompletionSource _contentReadyCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _allowClose;
     private bool _contentReady;
@@ -105,7 +105,7 @@ public sealed partial class MainWindow : Window
     public async Task ShowFatalErrorAsync(string message)
     {
         ShowManagementWindow();
-        await _contentLoaded.Task;
+        await _contentReadyCompletion.Task;
         await ShowMessageAsync("DapperCode couldn’t start", message);
     }
 
@@ -203,7 +203,7 @@ public sealed partial class MainWindow : Window
     private void OnContentLoaded(object sender, RoutedEventArgs arguments)
     {
         _contentReady = true;
-        _contentLoaded.TrySetResult();
+        _contentReadyCompletion.TrySetResult();
         _ = UpdateQrImageAsync();
         if (_pendingError is not null && _isVisible)
         {

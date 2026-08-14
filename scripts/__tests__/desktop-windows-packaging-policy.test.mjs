@@ -264,8 +264,10 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
   assert.match(restoreScript, /dotnet msbuild \$solution \/t:Restore/);
   assert.match(dotnetTestScript, /Get-ChildItem.+\*\.Tests\.csproj/);
   assert.match(rustTestScript, /services\/rust-bridge\/Cargo\.toml/);
+  assert.match(rustTestScript, /apps\/desktop\/Cargo\.toml/);
   assert.match(rustTestScript, /"--no-run"/);
   assert.match(rustTestScript, /"platform::"/);
+  assert.match(rustTestScript, /"supervisor::tests::windows_"/);
   assert.doesNotMatch(
     workflow,
     /dotnet test\s+apps\/desktop\/windows\/tests\/DapperCode\.Core\.Tests/,
