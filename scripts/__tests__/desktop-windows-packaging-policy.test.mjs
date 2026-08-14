@@ -9,6 +9,7 @@ const buildScript = read('scripts/build-desktop-windows.ps1');
 const testScript = read('scripts/test-desktop-windows.ps1');
 const restoreScript = read('scripts/restore-desktop-windows.ps1');
 const dotnetTestScript = read('scripts/test-desktop-windows-dotnet.ps1');
+const rustTestScript = read('scripts/test-rust-windows.ps1');
 const productionSigningScript = read('scripts/sign-desktop-windows-production.ps1');
 const workflow = read('.github/workflows/build-and-test.yml');
 const readme = read('README.md');
@@ -247,8 +248,12 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
   assert.match(workflow, /targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc/);
   assert.match(workflow, /scripts\/restore-desktop-windows\.ps1/);
   assert.match(workflow, /scripts\/test-desktop-windows-dotnet\.ps1/);
+  assert.match(workflow, /scripts\/test-rust-windows\.ps1/);
   assert.match(restoreScript, /dotnet msbuild \$solution \/t:Restore/);
   assert.match(dotnetTestScript, /Get-ChildItem.+\*\.Tests\.csproj/);
+  assert.match(rustTestScript, /services\/rust-bridge\/Cargo\.toml/);
+  assert.match(rustTestScript, /"--no-run"/);
+  assert.match(rustTestScript, /"platform::"/);
   assert.doesNotMatch(
     workflow,
     /dotnet test\s+apps\/desktop\/windows\/tests\/DapperCode\.Core\.Tests/,
