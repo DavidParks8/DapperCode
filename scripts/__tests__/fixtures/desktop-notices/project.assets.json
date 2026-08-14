@@ -42,7 +42,7 @@
       "Microsoft.Windows.SDK.BuildTools/10.0.26100.1": {
         "type": "package",
         "build": {
-          "build/Microsoft.Windows.SDK.BuildTools.targets": {}
+          "tools/Microsoft.Windows.SDK.BuildTools.targets": {}
         }
       },
       "Microsoft.WindowsAppSDK.DWrite/1.8.25122902": {
