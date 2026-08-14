@@ -245,8 +245,13 @@ $signTool = if ($SkipSignature) {
 } else {
     Find-WindowsSdkTool "signtool.exe"
 }
+$certificateUtility = if ($SigningMode -eq "Test") {
+    (Get-Command "certutil.exe" -ErrorAction Stop).Source
+} else {
+    $null
+}
 $inspectionRoot = Join-Path $distDirectory ".inspection"
-$temporaryTrustedPeopleThumbprint = $null
+$temporaryTrustedRootThumbprint = $null
 Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $inspectionRoot -ItemType Directory -Force | Out-Null
 
@@ -261,12 +266,13 @@ try {
             $certificatePath
         )
         try {
-            $trustedPeoplePath = "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)"
-            if (-not (Test-Path $trustedPeoplePath)) {
+            $trustedRootPath = "Cert:\CurrentUser\Root\$($certificate.Thumbprint)"
+            if (-not (Test-Path $trustedRootPath)) {
                 Write-Host "Temporarily trusting the test signer for package verification."
-                Import-Certificate -FilePath $certificatePath `
-                    -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" | Out-Null
-                $temporaryTrustedPeopleThumbprint = $certificate.Thumbprint
+                Invoke-Native $certificateUtility @(
+                    "-user", "-f", "-addstore", "Root", $certificatePath
+                )
+                $temporaryTrustedRootThumbprint = $certificate.Thumbprint
             }
         } finally {
             $certificate.Dispose()
@@ -374,8 +380,9 @@ try {
     }
 } finally {
     Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
-    if ($temporaryTrustedPeopleThumbprint) {
-        Remove-Item "Cert:\CurrentUser\TrustedPeople\$temporaryTrustedPeopleThumbprint" `
-            -Force -ErrorAction SilentlyContinue
+    if ($temporaryTrustedRootThumbprint) {
+        Invoke-Native $certificateUtility @(
+            "-user", "-delstore", "Root", $temporaryTrustedRootThumbprint
+        )
     }
 }
