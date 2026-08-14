@@ -742,14 +742,15 @@ mod tests {
     }
 
     fn spawn_lifecycle_child(cwd: &Path) -> std::process::Child {
-        Command::new(test_executable())
+        let mut command = Command::new(test_executable());
+        command
             .arg(LIFECYCLE_CHILD)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn lifecycle fixture")
+            .stderr(Stdio::null());
+        crate::platform::detach_process(&mut command);
+        command.spawn().expect("spawn lifecycle fixture")
     }
 
     #[test]

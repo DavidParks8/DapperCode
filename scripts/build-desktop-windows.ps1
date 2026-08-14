@@ -503,8 +503,8 @@ try {
     }
 
     $architecturePackages = @()
-    foreach ($architecture in $architectures) {
-        $rustTarget = $architecture.RustTarget
+    foreach ($targetArchitecture in $architectures) {
+        $rustTarget = $targetArchitecture.RustTarget
         if (-not $SkipRust) {
             Invoke-Native "cargo" @(
                 "build", "--locked", "--release", "--target", $rustTarget,
@@ -526,7 +526,7 @@ try {
             }
         }
 
-        $stage = Join-Path $distDirectory "build/$($architecture.Machine)"
+        $stage = Join-Path $distDirectory "build/$($targetArchitecture.Machine)"
         New-Item $stage -ItemType Directory -Force | Out-Null
         Invoke-Native $dotnet @(
             "msbuild",
@@ -534,8 +534,8 @@ try {
             "/m",
             "/t:Restore",
             "/p:Configuration=Release",
-            "/p:Platform=$($architecture.Platform)",
-            "/p:RuntimeIdentifier=$($architecture.Runtime)",
+            "/p:Platform=$($targetArchitecture.Platform)",
+            "/p:RuntimeIdentifier=$($targetArchitecture.Runtime)",
             "/p:RepositoryRoot=$root\"
         )
 
@@ -559,8 +559,8 @@ try {
             "/m",
             "/t:Build",
             "/p:Configuration=Release",
-            "/p:Platform=$($architecture.Platform)",
-            "/p:RuntimeIdentifier=$($architecture.Runtime)",
+            "/p:Platform=$($targetArchitecture.Platform)",
+            "/p:RuntimeIdentifier=$($targetArchitecture.Runtime)",
             "/p:PublishTrimmed=true",
             "/p:PublishSingleFile=false",
             "/p:AppxBundle=Never",
@@ -579,10 +579,10 @@ try {
 
         $generatedPackage = Find-GeneratedPackage $stage
         $outputPackage = Join-Path $packageDirectory `
-            "DapperCode-$version-$($architecture.Machine).msix"
+            "DapperCode-$version-$($targetArchitecture.Machine).msix"
         Copy-Item $generatedPackage $outputPackage
         $bundleInput = Join-Path $bundleInputDirectory `
-            "DapperCode-$($architecture.Machine).msix"
+            "DapperCode-$($targetArchitecture.Machine).msix"
         Copy-Item $generatedPackage $bundleInput
         $architecturePackages += $outputPackage
     }

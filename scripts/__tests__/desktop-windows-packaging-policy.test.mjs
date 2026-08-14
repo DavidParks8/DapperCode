@@ -53,6 +53,8 @@ test('Windows packaging builds architecture-matched native binaries and an MSIX 
   assert.match(buildScript, /\[ValidateSet\("All", "x64", "arm64"\)\]/);
   assert.match(buildScript, /\$Operation -eq "Bundle"/);
   assert.match(buildScript, /-SkipBundle requires Package operation/);
+  assert.match(buildScript, /foreach \(\$targetArchitecture in \$architectures\)/);
+  assert.doesNotMatch(buildScript, /foreach \(\$architecture in \$architectures\)/);
   assert.match(buildScript, /\$requiredDotNetSdkVersion = "10\.0\.302"/);
   assert.match(buildScript, /Resolve-PinnedDotNet/);
   assert.match(buildScript, /dotnet --version/);
@@ -87,7 +89,7 @@ test('Windows packaging builds architecture-matched native binaries and an MSIX 
   }
   assert.match(
     buildScript,
-    /foreach \(\$architecture in \$architectures\)[\s\S]+?"--cargo-target", \$rustTarget[\s\S]+?\/p:Platform=\$\(\$architecture\.Platform\)/,
+    /foreach \(\$targetArchitecture in \$architectures\)[\s\S]+?"--cargo-target", \$rustTarget[\s\S]+?\/p:Platform=\$\(\$targetArchitecture\.Platform\)/,
   );
 });
 
