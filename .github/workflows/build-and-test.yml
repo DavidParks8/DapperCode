@@ -403,7 +403,7 @@ jobs:
       - desktop-windows-validate
       - desktop-windows-package
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
       DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}

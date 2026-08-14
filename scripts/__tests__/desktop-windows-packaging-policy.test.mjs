@@ -214,6 +214,9 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   );
   assert.match(testScript, /ProcessorArchitecture/);
   assert.match(testScript, /Get-PeMachine/);
+  assert.match(testScript, /Test-ForbiddenRuntimeContent/);
+  assert.match(testScript, /\[byte\[\]\]::new\(1MB\)/);
+  assert.doesNotMatch(testScript, /ReadAllBytes\(\$file\.FullName\)/);
   assert.match(
     testScript,
     /if \(\$SkipSignature\)[\s\S]+standaloneArchitectures[\s\S]+Assert-PackagePayload/,

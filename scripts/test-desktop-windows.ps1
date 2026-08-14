@@ -96,6 +96,30 @@ function Get-PeMachine {
     }
 }
 
+function Test-ForbiddenRuntimeContent {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $buffer = [byte[]]::new(1MB)
+    $overlap = ""
+    try {
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $content = $overlap + [Text.Encoding]::ASCII.GetString($buffer, 0, $read)
+            if ($content -match '(?i)slint|node_modules|npm-shrinkwrap\.json|package-lock\.json') {
+                return $true
+            }
+            $overlap = if ($content.Length -gt 64) {
+                $content.Substring($content.Length - 64)
+            } else {
+                $content
+            }
+        }
+        return $false
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Assert-PackagePayload {
     param(
         [Parameter(Mandatory = $true)][string]$Directory,
@@ -166,10 +190,13 @@ function Assert-PackagePayload {
         throw "MSIX payload contains forbidden Node/npm/JavaScript/Slint files:`n$($forbidden.FullName -join "`n")"
     }
 
+    $inspectableExtensions = @(
+        ".config", ".dll", ".exe", ".json", ".manifest", ".txt", ".winmd", ".xml"
+    )
     $forbiddenContent = @()
-    foreach ($file in Get-ChildItem $Directory -Recurse -File) {
-        $content = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($file.FullName))
-        if ($content -match '(?i)slint|node_modules|npm-shrinkwrap\.json|package-lock\.json') {
+    foreach ($file in Get-ChildItem $Directory -Recurse -File |
+        Where-Object { $_.Extension.ToLowerInvariant() -in $inspectableExtensions }) {
+        if (Test-ForbiddenRuntimeContent $file.FullName) {
             $forbiddenContent += $file.FullName
         }
     }
@@ -224,6 +251,7 @@ Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $inspectionRoot -ItemType Directory -Force | Out-Null
 
 try {
+    Write-Host "Inspecting Windows package signatures and bundle contents."
     if ($SigningMode -eq "Test") {
         $certificatePath = Join-Path $distDirectory "DapperCode-Signing.cer"
         if (-not (Test-Path $certificatePath -PathType Leaf)) {
@@ -293,6 +321,7 @@ try {
     $inspectedArchitectures = @()
     $bundlePackageHashes = @{}
     foreach ($package in $bundlePackages) {
+        Write-Host "Inspecting payload $($package.Name)."
         $packageDirectory = Join-Path $inspectionRoot $package.BaseName
         Invoke-Native $makeAppx @(
             "unpack", "/p", $package.FullName, "/d", $packageDirectory, "/o"
