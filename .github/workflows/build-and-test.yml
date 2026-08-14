@@ -239,11 +239,11 @@ jobs:
           path: apps/desktop/dist/DapperCode-*.zip
           if-no-files-found: error
 
-  desktop-windows:
-    name: Desktop Windows
+  desktop-windows-validate:
+    name: Desktop Windows Validation
     if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
       DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
@@ -270,11 +270,21 @@ jobs:
         with:
           nuget-version: ${{ env.NUGET_VERSION }}
 
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
       - name: Setup Rust with Windows targets
         uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy,rustfmt
-          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
 
       - name: Cache desktop Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -314,25 +324,107 @@ jobs:
         shell: pwsh
         run: ./scripts/test-rust-windows.ps1
 
-      - name: Build test-signed x64 and ARM64 bundle
-        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
-        shell: pwsh
-        run: ./scripts/build-desktop-windows.ps1 -SkipInspection
+  desktop-windows-package:
+    name: Desktop Windows Package (${{ matrix.architecture }})
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            rust-target: x86_64-pc-windows-msvc
+          - architecture: arm64
+            rust-target: aarch64-pc-windows-msvc
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-      - name: Build unsigned production x64 and ARM64 bundle
-        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
-        shell: pwsh
-        run: ./scripts/build-desktop-windows.ps1 -SigningMode Production -SkipInspection
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
 
-      - name: Inspect test-signed Windows packages
-        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
-        shell: pwsh
-        run: ./scripts/test-desktop-windows.ps1
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Inspect unsigned production Windows packages
-        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup architecture Rust target
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache architecture Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop -> target
+            services/rust-bridge -> target
+          shared-key: windows-${{ matrix.architecture }}-release
+
+      - name: Build unsigned architecture package
         shell: pwsh
-        run: ./scripts/test-desktop-windows.ps1 -SigningMode Production -SkipSignature
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Architecture ${{ matrix.architecture }}
+          -SkipBundle
+          -SkipInspection
+
+      - name: Upload unsigned architecture package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-${{ matrix.architecture }}-package
+          path: apps/desktop/dist/windows/packages/*.msix
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop-windows:
+    name: Desktop Windows
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    needs:
+      - desktop-windows-validate
+      - desktop-windows-package
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download unsigned architecture packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dappercode-desktop-windows-*-package
+          path: apps/desktop/dist/windows/packages
+          merge-multiple: true
+
+      - name: Bundle, sign, and inspect architecture packages
+        shell: pwsh
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Operation Bundle
+          -SigningMode ${{ env.DAPPERCODE_WINDOWS_SIGNING_MODE }}
 
       - name: Upload test-signed Windows bundle and public certificate
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'

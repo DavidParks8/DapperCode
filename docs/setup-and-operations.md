@@ -99,7 +99,9 @@ uses SignTool `/tr` with `/td SHA256` (and `/fd SHA256`) and fails closed when a
 absent.
 
 GitHub Actions first builds, tests, and fully inspects the unsigned bundle and both standalone
-packages without signing secrets. A separate `main`-only job downloads that artifact into the
+packages without signing secrets. Windows validation and the x64/ARM64 package builds run in
+parallel; a lightweight dependent job bundles and inspects the two architecture artifacts. A
+separate `main`-only job downloads that artifact into the
 approval-protected `windows-production-signing` environment. That job performs no checkout and runs
 only the reviewed PowerShell signing script uploaded by the build job: that script validates the
 exact artifact set, certificate subject, and HTTPS timestamp endpoint before using the PFX and

@@ -6,9 +6,12 @@ param(
     } else {
         "Test"
     }),
-    [ValidateSet("Package", "Sign")]
+    [ValidateSet("Package", "Bundle", "Sign")]
     [string]$Operation = "Package",
+    [ValidateSet("All", "x64", "arm64")]
+    [string]$Architecture = "All",
     [switch]$SkipRust,
+    [switch]$SkipBundle,
     [switch]$SkipInspection
 )
 
@@ -37,7 +40,7 @@ $publisher = if ($SigningMode -eq "Production") {
 $temporaryProductionCertificate = $null
 
 if (
-    $Operation -eq "Package" -and
+    $Operation -ne "Sign" -and
     (
         $env:DAPPERCODE_WINDOWS_CERTIFICATE_PATH -or
         $env:DAPPERCODE_WINDOWS_CERTIFICATE_BASE64 -or
@@ -49,6 +52,9 @@ if (
 }
 if ($Operation -eq "Sign" -and $SigningMode -ne "Production") {
     throw "The Sign operation is only available with SigningMode Production."
+}
+if ($SkipBundle -and ($Operation -ne "Package" -or $Architecture -eq "All")) {
+    throw "-SkipBundle requires Package operation with one explicit architecture."
 }
 
 function Invoke-Native {
@@ -368,6 +374,68 @@ if ($Operation -eq "Sign") {
     return
 }
 
+$msixVersion = ConvertTo-MsixVersion $version
+if ($Operation -eq "Bundle") {
+    $makeAppx = Find-WindowsSdkTool "makeappx.exe"
+    $signTool = if ($SigningMode -eq "Test") {
+        Find-WindowsSdkTool "signtool.exe"
+    } else {
+        $null
+    }
+    $architecturePackages = @(
+        (Join-Path $packageDirectory "DapperCode-$version-x64.msix"),
+        (Join-Path $packageDirectory "DapperCode-$version-arm64.msix")
+    )
+    foreach ($package in $architecturePackages) {
+        if (-not (Test-Path $package -PathType Leaf)) {
+            throw "Architecture package does not exist: $package"
+        }
+    }
+
+    Remove-Item $bundleInputDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item $bundleInputDirectory -ItemType Directory -Force | Out-Null
+    Copy-Item $architecturePackages[0] (Join-Path $bundleInputDirectory "DapperCode-x64.msix")
+    Copy-Item $architecturePackages[1] (Join-Path $bundleInputDirectory "DapperCode-arm64.msix")
+    $bundle = Join-Path $distDirectory "DapperCode-$version-x64_arm64.msixbundle"
+    Invoke-Native $makeAppx @(
+        "bundle", "/d", $bundleInputDirectory, "/p", $bundle, "/bv", $msixVersion, "/o"
+    )
+
+    if ($SigningMode -eq "Test") {
+        $testCertificate = Get-TestSigningCertificate
+        foreach ($artifact in @($architecturePackages) + @($bundle)) {
+            Invoke-Native $signTool @(
+                "sign", "/fd", "SHA256", "/s", "My",
+                "/sha1", $testCertificate.Thumbprint, $artifact
+            )
+        }
+        $publicCertificate = Join-Path $distDirectory "DapperCode-Signing.cer"
+        Export-Certificate -Cert $testCertificate -FilePath $publicCertificate -Force |
+            Out-Null
+        Write-InstallGuidance -Bundle $bundle
+    }
+
+    if (-not $SkipInspection) {
+        $inspectionParameters = @{
+            BundlePath = $bundle
+            SigningMode = $SigningMode
+            ExpectedIdentity = $packageIdentity
+            ExpectedPublisher = $publisher
+        }
+        if ($SigningMode -eq "Production") {
+            $inspectionParameters["SkipSignature"] = $true
+        }
+        & (Join-Path $PSScriptRoot "test-desktop-windows.ps1") @inspectionParameters
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows desktop package inspection failed with code $LASTEXITCODE."
+        }
+    }
+
+    Remove-Item $bundleInputDirectory -Recurse -Force
+    Write-Host "Windows bundle: $bundle"
+    return
+}
+
 $preferredProject = Join-Path $windowsDirectory `
     "src/DapperCode.Windows/DapperCode.Windows.csproj"
 if (Test-Path $preferredProject -PathType Leaf) {
@@ -381,13 +449,16 @@ if (Test-Path $preferredProject -PathType Leaf) {
     $sourceProject = $projects[0].FullName
 }
 $dotnet = Resolve-PinnedDotNet
-$makeAppx = Find-WindowsSdkTool "makeappx.exe"
-$signTool = if ($SigningMode -eq "Test") {
+$makeAppx = if (-not $SkipBundle) {
+    Find-WindowsSdkTool "makeappx.exe"
+} else {
+    $null
+}
+$signTool = if ($SigningMode -eq "Test" -and -not $SkipBundle) {
     Find-WindowsSdkTool "signtool.exe"
 } else {
     $null
 }
-$msixVersion = ConvertTo-MsixVersion $version
 
 Remove-Item $distDirectory -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $packageDirectory -ItemType Directory -Force | Out-Null
@@ -409,7 +480,7 @@ try {
     $project = Join-Path $stagedWindowsDirectory $projectRelativePath
 
     $testCertificate = $null
-    if ($SigningMode -eq "Test") {
+    if ($SigningMode -eq "Test" -and -not $SkipBundle) {
         $testCertificate = Get-TestSigningCertificate
     }
 
@@ -427,6 +498,9 @@ try {
             Machine = "arm64"
         }
     )
+    if ($Architecture -ne "All") {
+        $architectures = @($architectures | Where-Object { $_.Machine -eq $Architecture })
+    }
 
     $architecturePackages = @()
     foreach ($architecture in $architectures) {
@@ -511,6 +585,13 @@ try {
             "DapperCode-$($architecture.Machine).msix"
         Copy-Item $generatedPackage $bundleInput
         $architecturePackages += $outputPackage
+    }
+
+    if ($SkipBundle) {
+        Remove-Item (Join-Path $distDirectory "build") -Recurse -Force
+        Remove-Item $bundleInputDirectory -Recurse -Force
+        Write-Host "Unsigned Windows architecture package: $($architecturePackages[0])"
+        return
     }
 
     $bundle = Join-Path $distDirectory "DapperCode-$version-x64_arm64.msixbundle"

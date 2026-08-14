@@ -50,6 +50,9 @@ test('Windows packaging builds architecture-matched native binaries and an MSIX 
   assert.match(buildScript, /"\/t:Restore"/);
   assert.match(buildScript, /"\/p:PublishTrimmed=true"/);
   assert.match(buildScript, /"\/p:PublishSingleFile=false"/);
+  assert.match(buildScript, /\[ValidateSet\("All", "x64", "arm64"\)\]/);
+  assert.match(buildScript, /\$Operation -eq "Bundle"/);
+  assert.match(buildScript, /-SkipBundle requires Package operation/);
   assert.match(buildScript, /\$requiredDotNetSdkVersion = "10\.0\.302"/);
   assert.match(buildScript, /Resolve-PinnedDotNet/);
   assert.match(buildScript, /dotnet --version/);
@@ -92,7 +95,7 @@ test('Windows signing keeps private keys outside artifacts and fails closed in p
   assert.match(buildScript, /\} else \{\s+"Test"\s+\}\),/);
   assert.match(buildScript, /Cert:\\CurrentUser\\My/);
   assert.match(buildScript, /LOCALAPPDATA/);
-  assert.match(buildScript, /\[ValidateSet\("Package", "Sign"\)\]/);
+  assert.match(buildScript, /\[ValidateSet\("Package", "Bundle", "Sign"\)\]/);
   assert.match(buildScript, /DAPPERCODE_WINDOWS_CERTIFICATE_(PATH|BASE64)/);
   assert.match(buildScript, /DAPPERCODE_WINDOWS_CERTIFICATE_PASSWORD is missing/);
   assert.match(buildScript, /DAPPERCODE_WINDOWS_PUBLISHER is missing/);
@@ -112,14 +115,22 @@ test('Windows signing keeps private keys outside artifacts and fails closed in p
 
 test('production signing credentials are isolated from checkout, npm, build, and tests', () => {
   const buildJob = workflowJob('desktop-windows');
+  const packageJob = workflowJob('desktop-windows-package');
+  const validationJob = workflowJob('desktop-windows-validate');
   const signingJob = workflowJob('desktop-windows-production-sign');
-  assert.ok(buildJob, 'Desktop Windows build/test workflow job is missing');
+  assert.ok(buildJob, 'Desktop Windows bundle workflow job is missing');
+  assert.ok(packageJob, 'Desktop Windows package matrix job is missing');
+  assert.ok(validationJob, 'Desktop Windows validation job is missing');
   assert.ok(signingJob, 'Protected production signing workflow job is missing');
 
   assert.match(
     buildJob,
     /if: inputs\.windows_signing_mode != 'Production' \|\| github\.ref == 'refs\/heads\/main'/,
   );
+  assert.match(buildJob, /needs:[\s\S]+desktop-windows-validate[\s\S]+desktop-windows-package/);
+  assert.match(packageJob, /architecture: x64[\s\S]+architecture: arm64/);
+  assert.match(packageJob, /Build unsigned architecture package/);
+  assert.match(packageJob, /Upload unsigned architecture package/);
   assert.match(
     signingJob,
     /github\.event_name == 'workflow_dispatch'[\s\S]+inputs\.windows_signing_mode == 'Production'[\s\S]+github\.ref == 'refs\/heads\/main'/,
@@ -161,18 +172,12 @@ test('production signing credentials are isolated from checkout, npm, build, and
   const workflowWithoutSigningStep = workflow.replace(signingStep, '');
   assert.doesNotMatch(workflowWithoutSigningStep, /secrets\.WINDOWS_SIGNING_CERTIFICATE_BASE64/);
   assert.doesNotMatch(workflowWithoutSigningStep, /secrets\.WINDOWS_SIGNING_CERTIFICATE_PASSWORD/);
+  assert.match(buildJob, /Download unsigned architecture packages/);
+  assert.match(buildJob, /Bundle, sign, and inspect architecture packages/);
   assert.ok(
-    buildJob.indexOf('Build unsigned production') < buildJob.indexOf('Inspect unsigned production'),
-    'Unsigned production inspection must happen after the build',
-  );
-  assert.ok(
-    buildJob.indexOf('Inspect unsigned production') <
+    buildJob.indexOf('Bundle, sign, and inspect architecture packages') <
       buildJob.indexOf('Upload inspected unsigned production'),
     'Only an inspected unsigned production artifact may be uploaded for signing',
-  );
-  assert.match(
-    buildJob,
-    /scripts\/test-desktop-windows\.ps1 -SigningMode Production -SkipSignature/,
   );
   assert.match(buildJob, /retention-days: 1/);
   assert.doesNotMatch(buildJob, /secrets\.WINDOWS_SIGNING_/);
@@ -245,7 +250,12 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
   assert.match(workflow, /windows_signing_mode:[\s\S]+default: Test/);
   assert.match(workflow, /DOTNET_VERSION: ['"]10\.0\.302['"]/);
   assert.match(workflow, /NUGET_VERSION: ['"]6\.14\.0['"]/);
-  assert.match(workflow, /targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc/);
+  assert.match(workflow, /rust-target: x86_64-pc-windows-msvc/);
+  assert.match(workflow, /rust-target: aarch64-pc-windows-msvc/);
+  assert.match(workflow, /desktop-windows-validate/);
+  assert.match(workflow, /desktop-windows-package/);
+  assert.match(workflow, /needs:[\s\S]+desktop-windows-validate[\s\S]+desktop-windows-package/);
+  assert.match(workflow, /name: Cache WinUI NuGet packages[\s\S]+~\/\.nuget\/packages/);
   assert.match(workflow, /scripts\/restore-desktop-windows\.ps1/);
   assert.match(workflow, /scripts\/test-desktop-windows-dotnet\.ps1/);
   assert.match(workflow, /scripts\/test-rust-windows\.ps1/);
@@ -258,16 +268,12 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
     workflow,
     /dotnet test\s+apps\/desktop\/windows\/tests\/DapperCode\.Core\.Tests/,
   );
-  assert.match(workflow, /scripts\/build-desktop-windows\.ps1 -SkipInspection/);
   assert.match(
     workflow,
-    /scripts\/build-desktop-windows\.ps1 -SigningMode Production -SkipInspection/,
+    /scripts\/build-desktop-windows\.ps1[\s\S]{0,120}-Architecture \$\{\{ matrix\.architecture \}\}[\s\S]{0,80}-SkipBundle/,
   );
   assert.match(workflow, /scripts\/test-desktop-windows\.ps1 -SourceOnly/);
-  assert.match(
-    workflow,
-    /scripts\/test-desktop-windows\.ps1 -SigningMode Production -SkipSignature/,
-  );
+  assert.match(workflow, /-Operation Bundle/);
   assert.match(workflow, /dappercode-desktop-windows-unsigned-production/);
   assert.match(workflow, /Upload test-signed Windows bundle and public certificate/);
   assert.match(workflow, /Upload signed production bundle/);
