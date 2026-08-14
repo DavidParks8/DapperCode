@@ -74,6 +74,40 @@ function Find-WindowsSdkTool {
     return $tool.FullName
 }
 
+function Assert-PackageSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$ExpectedSignerThumbprint
+    )
+
+    $arguments = @("verify", "/pa", "/all")
+    if ($ExpectedSignerThumbprint) {
+        $arguments += @("/sha1", $ExpectedSignerThumbprint)
+    }
+    $arguments += $Path
+
+    $output = @(& $signTool @arguments 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output | ForEach-Object { Write-Host $_ }
+    if ($exitCode -eq 0) {
+        return
+    }
+
+    $outputText = $output -join [Environment]::NewLine
+    if (
+        $SigningMode -eq "Test" -and
+        $exitCode -eq 1 -and
+        $outputText -match "A certificate chain processed, but terminated in a root" -and
+        $outputText -match "certificate which is not trusted by the trust provider\." -and
+        $outputText -match "Number of errors:\s+1"
+    ) {
+        Write-Host "Signature integrity and signer identity passed; the test root is intentionally untrusted."
+        return
+    }
+
+    throw "$signTool exited with code $exitCode while verifying $Path"
+}
+
 function Get-PeMachine {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -245,13 +279,8 @@ $signTool = if ($SkipSignature) {
 } else {
     Find-WindowsSdkTool "signtool.exe"
 }
-$certificateUtility = if ($SigningMode -eq "Test") {
-    (Get-Command "certutil.exe" -ErrorAction Stop).Source
-} else {
-    $null
-}
 $inspectionRoot = Join-Path $distDirectory ".inspection"
-$temporaryTrustedRootThumbprint = $null
+$testSignerThumbprint = $null
 Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $inspectionRoot -ItemType Directory -Force | Out-Null
 
@@ -266,14 +295,7 @@ try {
             $certificatePath
         )
         try {
-            $trustedRootPath = "Cert:\CurrentUser\Root\$($certificate.Thumbprint)"
-            if (-not (Test-Path $trustedRootPath)) {
-                Write-Host "Temporarily trusting the test signer for package verification."
-                Invoke-Native $certificateUtility @(
-                    "-user", "-f", "-addstore", "Root", $certificatePath
-                )
-                $temporaryTrustedRootThumbprint = $certificate.Thumbprint
-            }
+            $testSignerThumbprint = $certificate.Thumbprint
         } finally {
             $certificate.Dispose()
         }
@@ -281,7 +303,7 @@ try {
 
     if (-not $SkipSignature) {
         Write-Host "Verifying bundle signature."
-        Invoke-Native $signTool @("verify", "/pa", "/all", $BundlePath)
+        Assert-PackageSignature $BundlePath $testSignerThumbprint
     }
     $architecturePackages = @(Get-ChildItem (Join-Path $distDirectory "packages") `
         -Filter "*.msix" -File)
@@ -291,7 +313,7 @@ try {
     if (-not $SkipSignature) {
         foreach ($package in $architecturePackages) {
             Write-Host "Verifying signature $($package.Name)."
-            Invoke-Native $signTool @("verify", "/pa", "/all", $package.FullName)
+            Assert-PackageSignature $package.FullName $testSignerThumbprint
         }
     }
 
@@ -380,9 +402,4 @@ try {
     }
 } finally {
     Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
-    if ($temporaryTrustedRootThumbprint) {
-        Invoke-Native $certificateUtility @(
-            "-user", "-delstore", "Root", $temporaryTrustedRootThumbprint
-        )
-    }
 }

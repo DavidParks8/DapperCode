@@ -203,10 +203,10 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   assert.match(testScript, /\$SkipSignature -and \$SigningMode -ne "Production"/);
   assert.match(testScript, /ExpectedIdentity/);
   assert.match(testScript, /ExpectedPublisher/);
-  assert.match(testScript, /Cert:\\CurrentUser\\Root/);
-  assert.match(testScript, /temporaryTrustedRootThumbprint/);
-  assert.match(testScript, /certutil\.exe/);
-  assert.match(testScript, /"-user", "-f", "-addstore", "Root"/);
+  assert.match(testScript, /Assert-PackageSignature/);
+  assert.match(testScript, /"\/sha1", \$ExpectedSignerThumbprint/);
+  assert.match(testScript, /certificate which is not trusted by the trust provider/);
+  assert.match(testScript, /Number of errors:\\s\+1/);
   assert.match(testScript, /bundleIdentity\.Version -ne \$packageVersions\[0\]/);
   const inspectionParameters = testScript.slice(0, testScript.indexOf('$ErrorActionPreference'));
   assert.doesNotMatch(inspectionParameters, /DAPPERCODE_WINDOWS_PUBLISHER/);
@@ -219,7 +219,7 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   assert.match(testScript, /Test-ForbiddenRuntimeContent/);
   assert.match(testScript, /\[byte\[\]\]::new\(1MB\)/);
   assert.doesNotMatch(testScript, /ReadAllBytes\(\$file\.FullName\)/);
-  assert.doesNotMatch(testScript, /Import-Certificate/);
+  assert.doesNotMatch(testScript, /Import-Certificate|certutil\.exe|CurrentUser\\Root/);
   assert.match(
     testScript,
     /if \(\$SkipSignature\)[\s\S]+standaloneArchitectures[\s\S]+Assert-PackagePayload/,
