@@ -169,7 +169,10 @@ test('production signing credentials are isolated from checkout, npm, build, and
       buildJob.indexOf('Upload inspected unsigned production'),
     'Only an inspected unsigned production artifact may be uploaded for signing',
   );
-  assert.match(buildJob, /desktop:test:windows -- -SigningMode Production -SkipSignature/);
+  assert.match(
+    buildJob,
+    /scripts\/test-desktop-windows\.ps1 -SigningMode Production -SkipSignature/,
+  );
   assert.match(buildJob, /retention-days: 1/);
   assert.doesNotMatch(buildJob, /secrets\.WINDOWS_SIGNING_/);
 });
@@ -250,9 +253,16 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
     workflow,
     /dotnet test\s+apps\/desktop\/windows\/tests\/DapperCode\.Core\.Tests/,
   );
-  assert.match(workflow, /desktop:build:windows/);
-  assert.match(workflow, /desktop:build:windows -- -SkipInspection/);
-  assert.match(workflow, /desktop:test:windows/);
+  assert.match(workflow, /scripts\/build-desktop-windows\.ps1 -SkipInspection/);
+  assert.match(
+    workflow,
+    /scripts\/build-desktop-windows\.ps1 -SigningMode Production -SkipInspection/,
+  );
+  assert.match(workflow, /scripts\/test-desktop-windows\.ps1 -SourceOnly/);
+  assert.match(
+    workflow,
+    /scripts\/test-desktop-windows\.ps1 -SigningMode Production -SkipSignature/,
+  );
   assert.match(workflow, /dappercode-desktop-windows-unsigned-production/);
   assert.match(workflow, /Upload test-signed Windows bundle and public certificate/);
   assert.match(workflow, /Upload signed production bundle/);

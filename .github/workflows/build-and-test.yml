@@ -295,7 +295,8 @@ jobs:
         run: ./scripts/test-desktop-windows-dotnet.ps1
 
       - name: Check Windows desktop source policy
-        run: npm run desktop:test:windows -- -SourceOnly
+        shell: pwsh
+        run: ./scripts/test-desktop-windows.ps1 -SourceOnly
 
       - name: Check Rust formatting
         run: |
@@ -316,19 +317,23 @@ jobs:
 
       - name: Build test-signed x64 and ARM64 bundle
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
-        run: npm run desktop:build:windows -- -SkipInspection
+        shell: pwsh
+        run: ./scripts/build-desktop-windows.ps1 -SkipInspection
 
       - name: Build unsigned production x64 and ARM64 bundle
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
-        run: npm run desktop:build:windows -- -SigningMode Production -SkipInspection
+        shell: pwsh
+        run: ./scripts/build-desktop-windows.ps1 -SigningMode Production -SkipInspection
 
       - name: Inspect test-signed Windows packages
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
-        run: npm run desktop:test:windows
+        shell: pwsh
+        run: ./scripts/test-desktop-windows.ps1
 
       - name: Inspect unsigned production Windows packages
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
-        run: npm run desktop:test:windows -- -SigningMode Production -SkipSignature
+        shell: pwsh
+        run: ./scripts/test-desktop-windows.ps1 -SigningMode Production -SkipSignature
 
       - name: Upload test-signed Windows bundle and public certificate
         if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
