@@ -17,6 +17,8 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <PublishTrimmed>true</PublishTrimmed>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2081</WarningsNotAsErrors>
     <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AppxBundle>Always</AppxBundle>
@@ -46,6 +48,12 @@
     <ProjectReference Include="..\DapperCode.Core\DapperCode.Core.csproj" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.WindowsAppSDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CsWinRT projection assemblies use runtime activation that the linker cannot infer. -->
+    <TrimmerRootAssembly Include="Microsoft.Windows.SDK.NET" />
+    <TrimmerRootAssembly Include="WinRT.Runtime" />
   </ItemGroup>
 
   <ItemGroup>

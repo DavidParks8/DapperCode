@@ -173,6 +173,19 @@ public sealed class ManifestPolicyTests
         Assert.AreEqual(
             "true",
             project.Descendants("PublishTrimmed").Single().Value);
+        Assert.AreEqual(
+            "false",
+            project.Descendants("TrimmerSingleWarn").Single().Value);
+        StringAssert.Contains(
+            project.Descendants("WarningsNotAsErrors").Single().Value,
+            "IL2081",
+            StringComparison.Ordinal);
+        var trimRoots = project
+            .Descendants("TrimmerRootAssembly")
+            .Select(element => element.Attribute("Include")?.Value)
+            .ToArray();
+        CollectionAssert.Contains(trimRoots, "Microsoft.Windows.SDK.NET");
+        CollectionAssert.Contains(trimRoots, "WinRT.Runtime");
         foreach (var profile in Directory.EnumerateFiles(
                      Path.Combine(AppProject, "Properties", "PublishProfiles"),
                      "*.pubxml"))
