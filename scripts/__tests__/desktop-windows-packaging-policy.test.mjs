@@ -203,8 +203,8 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   assert.match(testScript, /\$SkipSignature -and \$SigningMode -ne "Production"/);
   assert.match(testScript, /ExpectedIdentity/);
   assert.match(testScript, /ExpectedPublisher/);
-  assert.match(testScript, /Cert:\\CurrentUser\\Root/);
-  assert.match(testScript, /temporaryTrustedRootThumbprint/);
+  assert.match(testScript, /Cert:\\CurrentUser\\TrustedPeople/);
+  assert.match(testScript, /temporaryTrustedPeopleThumbprint/);
   assert.match(testScript, /bundleIdentity\.Version -ne \$packageVersions\[0\]/);
   const inspectionParameters = testScript.slice(0, testScript.indexOf('$ErrorActionPreference'));
   assert.doesNotMatch(inspectionParameters, /DAPPERCODE_WINDOWS_PUBLISHER/);
@@ -217,6 +217,8 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   assert.match(testScript, /Test-ForbiddenRuntimeContent/);
   assert.match(testScript, /\[byte\[\]\]::new\(1MB\)/);
   assert.doesNotMatch(testScript, /ReadAllBytes\(\$file\.FullName\)/);
+  assert.match(testScript, /CurrentUser\\TrustedPeople/);
+  assert.doesNotMatch(testScript, /CurrentUser\\Root/);
   assert.match(
     testScript,
     /if \(\$SkipSignature\)[\s\S]+standaloneArchitectures[\s\S]+Assert-PackagePayload/,

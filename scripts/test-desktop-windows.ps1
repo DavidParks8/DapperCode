@@ -246,7 +246,7 @@ $signTool = if ($SkipSignature) {
     Find-WindowsSdkTool "signtool.exe"
 }
 $inspectionRoot = Join-Path $distDirectory ".inspection"
-$temporaryTrustedRootThumbprint = $null
+$temporaryTrustedPeopleThumbprint = $null
 Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $inspectionRoot -ItemType Directory -Force | Out-Null
 
@@ -261,11 +261,12 @@ try {
             $certificatePath
         )
         try {
-            $trustedRootPath = "Cert:\CurrentUser\Root\$($certificate.Thumbprint)"
-            if (-not (Test-Path $trustedRootPath)) {
+            $trustedPeoplePath = "Cert:\CurrentUser\TrustedPeople\$($certificate.Thumbprint)"
+            if (-not (Test-Path $trustedPeoplePath)) {
+                Write-Host "Temporarily trusting the test signer for package verification."
                 Import-Certificate -FilePath $certificatePath `
-                    -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
-                $temporaryTrustedRootThumbprint = $certificate.Thumbprint
+                    -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" | Out-Null
+                $temporaryTrustedPeopleThumbprint = $certificate.Thumbprint
             }
         } finally {
             $certificate.Dispose()
@@ -273,6 +274,7 @@ try {
     }
 
     if (-not $SkipSignature) {
+        Write-Host "Verifying bundle signature."
         Invoke-Native $signTool @("verify", "/pa", "/all", $BundlePath)
     }
     $architecturePackages = @(Get-ChildItem (Join-Path $distDirectory "packages") `
@@ -282,6 +284,7 @@ try {
     }
     if (-not $SkipSignature) {
         foreach ($package in $architecturePackages) {
+            Write-Host "Verifying signature $($package.Name)."
             Invoke-Native $signTool @("verify", "/pa", "/all", $package.FullName)
         }
     }
@@ -371,8 +374,8 @@ try {
     }
 } finally {
     Remove-Item $inspectionRoot -Recurse -Force -ErrorAction SilentlyContinue
-    if ($temporaryTrustedRootThumbprint) {
-        Remove-Item "Cert:\CurrentUser\Root\$temporaryTrustedRootThumbprint" `
+    if ($temporaryTrustedPeopleThumbprint) {
+        Remove-Item "Cert:\CurrentUser\TrustedPeople\$temporaryTrustedPeopleThumbprint" `
             -Force -ErrorAction SilentlyContinue
     }
 }
