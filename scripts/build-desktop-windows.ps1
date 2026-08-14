@@ -557,7 +557,8 @@ try {
             "msbuild",
             $project,
             "/m",
-            "/t:Build",
+            # Trimming produces its apphost in the publish layout; packaging the Build layout omits it.
+            "/t:Publish",
             "/p:Configuration=Release",
             "/p:Platform=$($targetArchitecture.Platform)",
             "/p:RuntimeIdentifier=$($targetArchitecture.Runtime)",

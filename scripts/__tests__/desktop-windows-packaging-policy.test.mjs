@@ -60,7 +60,7 @@ test('Windows packaging builds architecture-matched native binaries and an MSIX 
   assert.match(buildScript, /dotnet --version/);
   assert.match(buildScript, /must provide MSBuild 18/);
   assert.match(buildScript, /Invoke-Native \$dotnet @\(\s*"msbuild",[\s\S]{0,300}"\/t:Restore"/);
-  assert.match(buildScript, /Invoke-Native \$dotnet @\(\s*"msbuild",[\s\S]{0,300}"\/t:Build"/);
+  assert.match(buildScript, /Invoke-Native \$dotnet @\(\s*"msbuild",[\s\S]{0,300}"\/t:Publish"/);
   assert.doesNotMatch(
     buildScript,
     /Find-MSBuild|vswhere|Visual Studio Build Tools|Get-Command "msbuild\.exe"/i,
