@@ -1,8 +1,8 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, type ReactElement, type ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { useAppTheme } from '@shared/theme';
+import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { toMarkdownImageSource } from './imageSource';
 import { MarkdownImage, SelectableMessageText } from './Primitives';
 import {
@@ -14,11 +14,7 @@ import {
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
-import {
-  compositeOverlayColor,
-  horizontalFadeColors,
-  useHorizontalOverflow,
-} from './useHorizontalOverflow';
+import { useHorizontalOverflow } from './useHorizontalOverflow';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
@@ -193,7 +189,6 @@ function ToolDiffBlock({
     [stats.lines, syntax.grammar],
   );
   const overflow = useHorizontalOverflow();
-  const fadeSurface = compositeOverlayColor(theme.colors.bgMain, theme.colors.bgCanvasAccent);
   return (
     <View
       style={[styles.diffBlock, separated && styles.diffBlockSeparated]}
@@ -227,7 +222,13 @@ function ToolDiffBlock({
       {stats.unavailable ? (
         <Text style={[styles.errorNote, styles.diffBlockNote]}>Diff too large to display.</Text>
       ) : (
-        <View style={styles.diffScrollFrame}>
+        <HorizontalFadeMask
+          style={styles.diffScrollFrame}
+          active={overflow.overflowing}
+          fadeStart={overflow.showStartFade}
+          fadeEnd={overflow.showEndFade}
+          testID="tool-diff-overflow"
+        >
           <ScrollView
             horizontal
             nestedScrollEnabled
@@ -280,27 +281,7 @@ function ToolDiffBlock({
               ))}
             </View>
           </ScrollView>
-          {overflow.showStartFade ? (
-            <LinearGradient
-              colors={horizontalFadeColors(fadeSurface, 'start')}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              pointerEvents="none"
-              style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeStart]}
-              testID="tool-diff-overflow-fade-start"
-            />
-          ) : null}
-          {overflow.showEndFade ? (
-            <LinearGradient
-              colors={horizontalFadeColors(fadeSurface, 'end')}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              pointerEvents="none"
-              style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeEnd]}
-              testID="tool-diff-overflow-fade-end"
-            />
-          ) : null}
-        </View>
+        </HorizontalFadeMask>
       )}
       {stats.omittedChangedLines > 0 ? (
         <Text style={[styles.note, styles.diffBlockNote]}>

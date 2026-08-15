@@ -12,7 +12,11 @@ import {
   ReduceMotion,
   setMockReducedMotionEnabled,
 } from '@shared/testing/reanimatedMock';
-import { compositeOverlayColor } from './useHorizontalOverflow';
+
+const MASK_CLEAR = 'rgba(0, 0, 0, 0)';
+const MASK_OPAQUE = 'rgba(0, 0, 0, 1)';
+const CLEAR_TO_OPAQUE = [MASK_CLEAR, MASK_OPAQUE];
+const OPAQUE_TO_CLEAR = [MASK_OPAQUE, MASK_CLEAR];
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
@@ -101,11 +105,68 @@ function fadeVisible(tree: QueryableRenderer, testID: string): boolean {
   return tree.root.findAllByProps({ testID }).length > 0;
 }
 
-function transparentVariant(hexColor: string): string {
-  const channels = [1, 3, 5].map((index) =>
-    String(Number.parseInt(hexColor.slice(index, index + 2), 16)),
+function maskApplied(tree: QueryableRenderer, testID: string): boolean {
+  return tree.root
+    .findAllByProps({ testID })
+    .some((node) => node.props['maskElement'] !== undefined);
+}
+
+function measureOverflow(
+  tree: QueryableRenderer,
+  testID: string,
+  viewportWidth = 100,
+  contentWidth = 300,
+) {
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onLayout'] as (event: {
+        nativeEvent: { layout: { width: number } };
+      }) => void
+    )({ nativeEvent: { layout: { width: viewportWidth } } });
+  });
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onContentSizeChange'] as (
+        width: number,
+        height: number,
+      ) => void
+    )(contentWidth, 16);
+  });
+}
+
+function emitScroll(tree: QueryableRenderer, testID: string, offsetX: number) {
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onScroll'] as (event: {
+        nativeEvent: { contentOffset: { x: number } };
+      }) => void
+    )({ nativeEvent: { contentOffset: { x: offsetX } } });
+  });
+}
+
+function surfaceColouredFades(tree: QueryableRenderer): string[][] {
+  return tree.root
+    .findAll((node) => Array.isArray(node.props['colors']))
+    .map((node) => node.props['colors'] as unknown[])
+    .filter((colors): colors is string[] => colors.every((color) => typeof color === 'string'))
+    .filter((colors) => colors.some((color) => color !== MASK_CLEAR && color !== MASK_OPAQUE));
+}
+
+function compositeOverlayColor(backgroundColor: string, overlayColor: string): string {
+  const background = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(backgroundColor);
+  const overlay = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(
+    overlayColor,
   );
-  return `rgba(${channels.join(', ')}, 0)`;
+  if (!background || !overlay) {
+    return backgroundColor;
+  }
+  const alpha = Math.min(1, Math.max(0, Number.parseFloat(overlay[4] ?? '0')));
+  const blended = [1, 2, 3].map((channel) => {
+    const base = Number.parseInt(background[channel] ?? '0', 16);
+    const top = Number.parseInt(overlay[channel] ?? '0', 10);
+    return Math.round(top * alpha + base * (1 - alpha));
+  });
+  return `#${blended.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
 
 function textLines(tree: QueryableRenderer): string[] {
@@ -857,7 +918,7 @@ describe('ToolInvocationOutput', () => {
     act(() => longTree.unmount());
   });
 
-  it('shows measured overflow fades on the edges the content can still scroll toward', () => {
+  it('masks overflowing content on the edges it can still scroll toward', () => {
     const value = invocation({
       id: 'tool-overflow',
       kind: 'execute',
@@ -866,84 +927,54 @@ describe('ToolInvocationOutput', () => {
       diffs: [{ path: 'src/a.ts', oldText: 'short', newText: 'a very long replacement line' }],
     });
     const tree = render(value);
-    const commandScroll = tree.root.findByProps({ testID: 'tool-command-scroll' });
-    const commandLayout = commandScroll.props['onLayout'] as (event: {
-      nativeEvent: { layout: { width: number } };
-    }) => void;
-    const commandContentSize = commandScroll.props['onContentSizeChange'] as (
-      width: number,
-      height: number,
-    ) => void;
-    act(() => {
-      commandLayout({ nativeEvent: { layout: { width: 100 } } });
-      commandContentSize(300, 16);
-    });
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(false);
+    measureOverflow(tree, 'tool-command-scroll');
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
     const commandFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-end' })[0],
       'command overflow fade',
     );
     expect(commandFade.props['start']).toEqual({ x: 0, y: 0.5 });
     expect(commandFade.props['end']).toEqual({ x: 1, y: 0.5 });
-    expect(commandFade.props['colors']).toEqual(['rgba(0, 0, 0, 0)', theme.colors.bgMain]);
+    expect(commandFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
     expect(fadeVisible(tree, 'tool-command-overflow-fade-start')).toBe(false);
 
     expand(tree, value.title);
-    const diffScroll = tree.root.findByProps({ testID: 'tool-diff-scroll' });
-    const diffLayout = diffScroll.props['onLayout'] as (event: {
-      nativeEvent: { layout: { width: number } };
-    }) => void;
-    const diffContentSize = diffScroll.props['onContentSizeChange'] as (
-      width: number,
-      height: number,
-    ) => void;
-    act(() => {
-      diffLayout({ nativeEvent: { layout: { width: 100 } } });
-      diffContentSize(300, 16);
-    });
+    measureOverflow(tree, 'tool-diff-scroll');
     const diffFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade-end' })[0],
       'diff overflow fade',
     );
-    expect(diffFade.props['colors']).toEqual(['rgba(10, 10, 10, 0)', '#0A0A0A']);
+    expect(diffFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
     expect(fadeVisible(tree, 'tool-diff-overflow-fade-start')).toBe(false);
 
-    const commandOnScroll = commandScroll.props['onScroll'] as (event: {
-      nativeEvent: { contentOffset: { x: number } };
-    }) => void;
-    const diffOnScroll = diffScroll.props['onScroll'] as (event: {
-      nativeEvent: { contentOffset: { x: number } };
-    }) => void;
-    act(() => {
-      commandOnScroll({ nativeEvent: { contentOffset: { x: 100 } } });
-      diffOnScroll({ nativeEvent: { contentOffset: { x: 100 } } });
-    });
+    emitScroll(tree, 'tool-command-scroll', 100);
+    emitScroll(tree, 'tool-diff-scroll', 100);
     expect(fadeVisible(tree, 'tool-command-overflow-fade-start')).toBe(true);
     expect(fadeVisible(tree, 'tool-command-overflow-fade-end')).toBe(true);
     expect(fadeVisible(tree, 'tool-diff-overflow-fade-start')).toBe(true);
     expect(fadeVisible(tree, 'tool-diff-overflow-fade-end')).toBe(true);
 
-    const scrolledToEnd = { nativeEvent: { contentOffset: { x: 200 } } };
-    act(() => {
-      commandOnScroll(scrolledToEnd);
-      diffOnScroll(scrolledToEnd);
-    });
+    emitScroll(tree, 'tool-command-scroll', 200);
+    emitScroll(tree, 'tool-diff-scroll', 200);
     const commandStartFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-start' })[0],
       'command start overflow fade',
     );
-    expect(commandStartFade.props['colors']).toEqual([theme.colors.bgMain, 'rgba(0, 0, 0, 0)']);
+    expect(commandStartFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
     const diffStartFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade-start' })[0],
       'diff start overflow fade',
     );
-    expect(diffStartFade.props['colors']).toEqual(['#0A0A0A', 'rgba(10, 10, 10, 0)']);
+    expect(diffStartFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
     expect(fadeVisible(tree, 'tool-command-overflow-fade-end')).toBe(false);
     expect(fadeVisible(tree, 'tool-diff-overflow-fade-end')).toBe(false);
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
 
     act(() => tree.unmount());
   });
 
-  it('fades a failed command into the error row surface instead of the page background', () => {
+  it('dissolves a failed command instead of painting a surface-coloured scrim over it', () => {
     const value = invocation({
       id: 'tool-failed-overflow',
       kind: 'execute',
@@ -953,43 +984,30 @@ describe('ToolInvocationOutput', () => {
       title: 'rm -rf /var/folders/tt/4843kq2n6zdgh8vh3f3lmr_c0000gn/T/dappercode-cache',
     });
     const tree = render(value);
-    const commandScroll = tree.root.findByProps({ testID: 'tool-command-scroll' });
-    act(() => {
-      (
-        commandScroll.props['onLayout'] as (event: {
-          nativeEvent: { layout: { width: number } };
-        }) => void
-      )({ nativeEvent: { layout: { width: 100 } } });
-      (commandScroll.props['onContentSizeChange'] as (width: number, height: number) => void)(
-        300,
-        16,
-      );
-    });
-    const errorSurface = compositeOverlayColor(theme.colors.bgMain, theme.colors.errorBg);
-    expect(errorSurface).not.toBe(theme.colors.bgMain);
-    const commandFade = requireTestValue(
+    expect(
+      StyleSheet.flatten(tree.root.findByProps({ testID: 'tool-row' }).props['style'] as object),
+    ).toMatchObject({ backgroundColor: theme.colors.errorBg });
+
+    measureOverflow(tree, 'tool-command-scroll');
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
+    const endFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-end' })[0],
       'failed command overflow fade',
     );
-    expect(commandFade.props['colors']).toEqual([transparentVariant(errorSurface), errorSurface]);
+    expect(endFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
 
-    act(() => {
-      (
-        commandScroll.props['onScroll'] as (event: {
-          nativeEvent: { contentOffset: { x: number } };
-        }) => void
-      )({ nativeEvent: { contentOffset: { x: 200 } } });
-    });
+    emitScroll(tree, 'tool-command-scroll', 200);
     const startFade = requireTestValue(
       tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-start' })[0],
       'failed command start overflow fade',
     );
-    expect(startFade.props['colors']).toEqual([errorSurface, transparentVariant(errorSurface)]);
+    expect(startFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
+    expect(surfaceColouredFades(tree)).toEqual([]);
 
     act(() => tree.unmount());
   });
 
-  it('composites the diff overflow fade against the actual panel surface', () => {
+  it('composites translucent overlays correctly in the contrast test helper', () => {
     expect(compositeOverlayColor('#DDE7F0', 'rgba(41, 58, 84, 0.09)')).toBe('#CDD7E2');
   });
 });

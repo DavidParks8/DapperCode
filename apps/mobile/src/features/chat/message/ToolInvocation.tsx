@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
@@ -8,6 +7,7 @@ import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
 import { useAppTheme } from '@shared/theme';
+import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { motionDuration } from '@shared/ui/motion';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { createStyles } from './styles';
@@ -19,11 +19,7 @@ import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
 } from './toolInvocationPresentation';
-import {
-  compositeOverlayColor,
-  horizontalFadeColors,
-  useHorizontalOverflow,
-} from './useHorizontalOverflow';
+import { useHorizontalOverflow } from './useHorizontalOverflow';
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
@@ -45,9 +41,6 @@ function ToolHeaderText({
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const textStyles = [styles.rowSubject, invocation.isError && styles.rowTitleError];
   const commandOverflow = useHorizontalOverflow();
-  const fadeSurface = invocation.isError
-    ? compositeOverlayColor(theme.colors.bgMain, theme.colors.errorBg)
-    : theme.colors.bgMain;
   const renderCommand = (highlight: boolean) => (
     <>
       {header.action ? (
@@ -72,7 +65,13 @@ function ToolHeaderText({
 
   if (invocation.monospaceTitle && header.subject) {
     return (
-      <View style={styles.horizontalScrollFrame}>
+      <HorizontalFadeMask
+        style={styles.horizontalScrollFrame}
+        active={commandOverflow.overflowing}
+        fadeStart={commandOverflow.showStartFade}
+        fadeEnd={commandOverflow.showEndFade}
+        testID="tool-command-overflow"
+      >
         <ScrollView
           horizontal
           bounces={false}
@@ -106,27 +105,7 @@ function ToolHeaderText({
             </ToolHeaderShimmer>
           </Pressable>
         </ScrollView>
-        {commandOverflow.showStartFade ? (
-          <LinearGradient
-            colors={horizontalFadeColors(fadeSurface, 'start')}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            pointerEvents="none"
-            style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeStart]}
-            testID="tool-command-overflow-fade-start"
-          />
-        ) : null}
-        {commandOverflow.showEndFade ? (
-          <LinearGradient
-            colors={horizontalFadeColors(fadeSurface, 'end')}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            pointerEvents="none"
-            style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeEnd]}
-            testID="tool-command-overflow-fade-end"
-          />
-        ) : null}
-      </View>
+      </HorizontalFadeMask>
     );
   }
 
