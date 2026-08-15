@@ -2897,10 +2897,10 @@ function MainRouteShell() {
       expect(hasText(root, 'tool:Read files')).toBe(true);
       expect(hasText(root, 'Partial answer')).toBe(true);
       expect(hasWorkingStatus(root, hasText)).toBe(true);
-      expect(byLabel(root, 'Stop agent')).toBeTruthy();
       expect(
-        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
+      expect(byLabel(root, 'Send message')).toBeTruthy();
 
       await press(byLabelPrefix(root, 'Model, '));
       await act(async () => {
@@ -2945,10 +2945,11 @@ function MainRouteShell() {
       expect(hasText(root, 'tool:Read files')).toBe(true);
       expect(hasText(root, 'Partial answer')).toBe(true);
       expect(hasWorkingStatus(root, hasText)).toBe(true);
-      expect(byLabel(root, 'Stop agent')).toBeTruthy();
       expect(
-        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
+      expect(byLabel(root, 'Send message')).toBeTruthy();
+      expect(textInput(root, 'Message').props.value).toBe('Follow up');
       expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
       expect(api.rememberChat).toHaveBeenLastCalledWith(store.get(selectedChatAtom));
       act(() => tree.unmount());
