@@ -52,10 +52,19 @@ export function useHorizontalOverflow() {
     },
     [updateOverflow],
   );
+  /**
+   * Realigns the fades with a programmatic rewind. A `scrollTo` is not guaranteed to deliver a
+   * scroll event, so without this the start fade lingers over content that is already flush left.
+   */
+  const reset = useCallback(() => {
+    offsetX.current = 0;
+    updateOverflow();
+  }, [updateOverflow]);
   return {
     onLayout,
     onContentSizeChange,
     onScroll,
+    reset,
     overflowing: overflow.overflowing,
     showStartFade: overflow.start,
     showEndFade: overflow.end,

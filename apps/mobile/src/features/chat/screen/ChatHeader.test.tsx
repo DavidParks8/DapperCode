@@ -1,4 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Platform, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -32,6 +34,7 @@ type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll
 };
 
 const theme = createAppTheme('dark');
+const MASK_RAMP_COLORS = new Set(['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 1)']);
 const safeAreaMetrics = {
   frame: { x: 0, y: 0, width: 390, height: 844 },
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
@@ -293,8 +296,28 @@ function createTitleScroller(
   };
 }
 
-function gradients(root: QueryableInstance): QueryableInstance[] {
-  return root.findAll((node) => node.type === 'LinearGradient');
+/**
+ * Gradients that paint colour onto the header. Alpha ramps feeding the title's mask are excluded:
+ * they never reach the glass, they only decide which pixels of the title survive.
+ */
+function paintedGradients(root: QueryableInstance): QueryableInstance[] {
+  return gradientNodes(root).filter((node) => {
+    const colors = node.props['colors'];
+    return !Array.isArray(colors) || colors.some((color) => !MASK_RAMP_COLORS.has(String(color)));
+  });
+}
+
+/** The alpha ramps masking the title at each edge, keyed by the edge they dissolve. */
+function maskRamps(root: QueryableInstance): string[] {
+  return gradientNodes(root)
+    .map((node) => (typeof node.props['testID'] === 'string' ? node.props['testID'] : ''))
+    .filter((testID) => testID.startsWith('chat-header-title-overflow-fade-'))
+    .map((testID) => testID.replace('chat-header-title-overflow-fade-', ''))
+    .sort();
+}
+
+function gradientNodes(root: QueryableInstance): QueryableInstance[] {
+  return root.findAll((node) => node.type === LinearGradient);
 }
 
 const LONG_TITLE = 'Refactor the bridge session lifecycle and rename handling end to end';
@@ -504,18 +527,43 @@ describe('ChatHeader', () => {
     const root = queryRoot(tree);
     const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
 
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
 
     scroller.drag(120);
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
 
     scroller.drag(scroller.maxOffset());
     expect(scroller.offset()).toBe(scroller.maxOffset());
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
 
     scroller.drag(-scroller.maxOffset());
     expect(scroller.offset()).toBe(0);
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('dissolves the title on the edges it can still be dragged toward', () => {
+    const tree = render(
+      <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
+    );
+    const root = queryRoot(tree);
+    const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
+
+    // Parked at the start there is nothing to the left, so only the trailing edge dissolves.
+    expect(maskRamps(root)).toEqual(['end']);
+
+    scroller.drag(120);
+    expect(maskRamps(root)).toEqual(['end', 'start']);
+
+    scroller.drag(scroller.maxOffset());
+    expect(scroller.offset()).toBe(scroller.maxOffset());
+    expect(maskRamps(root)).toEqual(['start']);
+
+    scroller.drag(-scroller.maxOffset());
+    expect(maskRamps(root)).toEqual(['end']);
+
+    // The title is masked, never covered: the whole string stays in the tree behind the ramps.
+    expect(textContent(root)).toContain(LONG_TITLE);
     act(() => tree.unmount());
   });
 
@@ -529,7 +577,9 @@ describe('ChatHeader', () => {
 
     expect(scroller.maxOffset()).toBe(0);
     expect(scroller.drag(400)).toBe(0);
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
+    expect(maskRamps(root)).toEqual([]);
+    expect(root.findAll((node) => node.type === MaskedView)).toHaveLength(0);
     expect(scroller.seenText()).toBe(title);
     act(() => tree.unmount());
   });
@@ -544,7 +594,7 @@ describe('ChatHeader', () => {
     const scroller = createTitleScroller(tree, { title: LONG_TITLE, viewportWidth: 180 });
 
     scroller.drag(scroller.maxOffset());
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
     scrollTo.mockClear();
 
     const renamed = `${LONG_TITLE} (renamed)`;
@@ -556,11 +606,12 @@ describe('ChatHeader', () => {
 
     expect(scrollTo).toHaveBeenCalledWith({ x: 0, animated: false });
     expect(textContent(queryRoot(tree))).toContain(renamed);
-    expect(gradients(queryRoot(tree))).toHaveLength(0);
+    expect(paintedGradients(queryRoot(tree))).toHaveLength(0);
 
     const rewound = createTitleScroller(tree, { title: renamed, viewportWidth: 180 });
     expect(rewound.offset()).toBe(0);
     expect(rewound.visibleText()).toBe(renamed.slice(0, 20));
+    expect(maskRamps(queryRoot(tree))).toEqual(['end']);
     scrollTo.mockRestore();
     act(() => tree.unmount());
   });
@@ -570,7 +621,7 @@ describe('ChatHeader', () => {
       <ChatHeader onOpenDrawer={jest.fn()} title={LONG_TITLE} onRenameTitle={jest.fn()} />,
     );
     const root = queryRoot(tree);
-    expect(gradients(root)).toHaveLength(0);
+    expect(paintedGradients(root)).toHaveLength(0);
 
     act(() => {
       tree.update(
@@ -583,7 +634,7 @@ describe('ChatHeader', () => {
         ),
       );
     });
-    expect(gradients(queryRoot(tree))).toHaveLength(0);
+    expect(paintedGradients(queryRoot(tree))).toHaveLength(0);
     act(() => tree.unmount());
   });
 

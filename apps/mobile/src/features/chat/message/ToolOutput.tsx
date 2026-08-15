@@ -14,7 +14,7 @@ import {
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
-import { useHorizontalOverflow } from './useHorizontalOverflow';
+import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;

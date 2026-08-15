@@ -19,7 +19,7 @@ import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
 } from './toolInvocationPresentation';
-import { useHorizontalOverflow } from './useHorizontalOverflow';
+import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
