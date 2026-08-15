@@ -4579,6 +4579,168 @@ function MainRouteShell() {
       await unmount(tree);
     });
 
+    it('keeps the final response and its usage after a backgrounded turn fast-forwards', async () => {
+      const currentUser = {
+        id: 'background-user',
+        role: 'user' as const,
+        content: 'Finish this while the phone is locked',
+        createdAt: '2026-07-20T00:00:02.000Z',
+      };
+      const runningChat: Chat = {
+        ...chat,
+        status: 'running',
+        activeTurnId: 'turn-background',
+        lastMessagePreview: currentUser.content,
+        messages: [
+          {
+            id: 'older-user',
+            role: 'user',
+            content: 'Earlier question',
+            createdAt: '2026-07-20T00:00:00.000Z',
+          },
+          {
+            id: 'older-answer',
+            role: 'assistant',
+            content: 'Earlier answer',
+            createdAt: '2026-07-20T00:00:01.000Z',
+          },
+          currentUser,
+        ],
+      };
+      const responseUsage = {
+        inputTokens: 1_024,
+        outputTokens: 512,
+        reasoningTokens: 128,
+        cachedReadTokens: 384,
+        cachedWriteTokens: null,
+        totalTokens: 2_048,
+        model: 'gpt-5.4',
+      };
+      const tokenTotals = {
+        turns: 1,
+        inputTokens: 1_024,
+        outputTokens: 512,
+        reasoningTokens: 128,
+        cachedReadTokens: 384,
+        cachedWriteTokens: null,
+        totalTokens: 2_048,
+      };
+      const recoveredChat: Chat = {
+        ...chat,
+        status: 'complete',
+        activeTurnId: null,
+        updatedAt: '2026-07-20T00:00:04.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:04.000Z',
+        lastMessagePreview: 'Recovered while backgrounded',
+        messages: [
+          currentUser,
+          {
+            id: 'background-answer',
+            role: 'assistant',
+            content: 'Recovered while backgrounded',
+            createdAt: '2026-07-20T00:00:03.000Z',
+            completedAt: '2026-07-20T00:00:04.000Z',
+            usage: responseUsage,
+          },
+        ],
+        tokenTotals,
+      };
+      let latestChat = runningChat;
+      const api = createApi();
+      (api.peekChat as jest.Mock).mockReturnValue(runningChat);
+      (api.getChat as jest.Mock).mockImplementation(() => Promise.resolve(latestChat));
+      const { tree, store, ws } = await renderMain({ api });
+      const root = tree.root as Queryable;
+
+      await act(async () => {
+        store.set(selectedChatAtom, runningChat);
+        appStateHandler?.('background');
+        await Promise.resolve();
+      });
+      latestChat = recoveredChat;
+      await act(async () => {
+        appStateHandler?.('active');
+        statusHandlers.forEach((handler) => handler(true));
+        jest.advanceTimersByTime(2_000);
+        for (let index = 0; index < 8; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      await emit(agUi({ type: 'RUN_STARTED', threadId, runId: 'run-background' }));
+      await emit(
+        agUi({
+          type: 'TEXT_MESSAGE_START',
+          messageId: 'background-answer',
+          role: 'assistant',
+        }),
+      );
+      await emit(
+        agUi({
+          type: 'TEXT_MESSAGE_CONTENT',
+          messageId: 'background-answer',
+          delta: 'Recovered while backgrounded',
+        }),
+      );
+      await emit(agUi({ type: 'TEXT_MESSAGE_END', messageId: 'background-answer' }));
+      await emit(
+        agUi({
+          type: 'CUSTOM',
+          name: 'dappercode.dev/tokenTotals',
+          value: tokenTotals,
+        }),
+      );
+      await emit(agUi({ type: 'RUN_FINISHED', threadId, runId: 'run-background' }));
+      expect(
+        transcript(tree).some(
+          ({ message }) =>
+            message.id === 'background-answer' &&
+            message.content === 'Recovered while backgrounded',
+        ),
+      ).toBe(true);
+
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 84 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const settled = store.get(selectedChatAtom);
+      expect(settled?.messages.map(({ id }) => id)).toEqual([
+        'older-user',
+        'older-answer',
+        'background-user',
+        'background-answer',
+      ]);
+      expect(settled?.messages.at(-1)?.usage).toEqual(responseUsage);
+      expect(settled?.tokenTotals).toEqual(tokenTotals);
+      expect(settled?.status).toBe('complete');
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom)).toEqual({ tone: 'complete', title: 'Turn completed' });
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message').length,
+      ).toBeGreaterThan(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Message')[0]?.props[
+          'editable'
+        ],
+      ).not.toBe(false);
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Token usage, 2,048 tokens this session',
+        ).length,
+      ).toBeGreaterThan(0);
+      expect(ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(84);
+      await unmount(tree);
+    });
+
     it('recovers snapshots and covers reconnect, disconnect, status callbacks, and app state', async () => {
       const api = createApi();
       const { tree, ws } = await renderMain({ api, connected: false });
