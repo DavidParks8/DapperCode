@@ -177,6 +177,12 @@ function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight
   );
 }
 
+function drag(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
+  act(() => list.props.onScrollBeginDrag());
+  scroll(list, y, contentHeight, viewportHeight);
+  act(() => list.props.onScrollEndDrag());
+}
+
 function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewProps>): void {
   act(() =>
     tree.update(
@@ -1091,6 +1097,116 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps streaming pinned through overflow and keyboard insets until the user browses history', () => {
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+    };
+    const scrollToLatest = jest.fn();
+    const onPinnedAutoScroll: ChatTranscriptViewProps['onPinnedAutoScroll'] = (animated = true) => {
+      const autoScrollState = autoScrollStateRef.current;
+      if (
+        autoScrollState.isUserInteracting ||
+        autoScrollState.isMomentumScrolling ||
+        !autoScrollState.shouldStickToBottom
+      ) {
+        return;
+      }
+      scrollToLatest(animated);
+    };
+    const runningChat = makeChat({
+      status: 'running',
+      messages: [
+        {
+          id: 'user',
+          role: 'user',
+          content: 'Explain the result',
+          createdAt: '2026-08-01T00:00:00.000Z',
+        },
+      ],
+    });
+    const liveState = (
+      content: string,
+    ): NonNullable<ChatTranscriptViewProps['liveMessageState']> => ({
+      ...createAgUiThreadMessageState(),
+      messages: [
+        {
+          id: 'live-response',
+          role: 'assistant',
+          content,
+          createdAt: '2026-08-01T00:00:01.000Z',
+          pending: true,
+        },
+      ],
+      messageIndexById: { 'live-response': 0 },
+    });
+    const sharedProps = {
+      chat: runningChat,
+      autoScrollStateRef,
+      onPinnedAutoScroll,
+    };
+    const tree = render({
+      ...sharedProps,
+      liveMessageState: liveState('The response starts in view.'),
+      bottomInset: 88,
+    });
+    let list = getList(tree);
+    act(() => list.props.onLayout({ nativeEvent: { layout: { height: 500 } } }));
+    scroll(list, 0, 420, 500);
+
+    update(tree, {
+      ...sharedProps,
+      liveMessageState: liveState('The response now spans the viewport. '.repeat(30)),
+      bottomInset: 88,
+    });
+    list = getList(tree);
+    // Fabric preserves visible content by shifting this inverted offset as the live cell grows.
+    scroll(list, 96, 760, 500);
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => list.props.onContentSizeChange(320, 760));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+
+    scrollToLatest.mockClear();
+    update(tree, {
+      ...sharedProps,
+      liveMessageState: liveState('The keyboard stays open while more output streams. '.repeat(35)),
+      bottomInset: 380,
+    });
+    list = getList(tree);
+    expect(list.props.contentContainerStyle[1]).toEqual({
+      paddingTop: 380,
+      paddingBottom: theme.spacing.lg,
+    });
+    scroll(list, 320, 1100, 500);
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    act(() => list.props.onContentSizeChange(320, 1100));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+
+    scrollToLatest.mockClear();
+    act(() => list.props.onScrollBeginDrag());
+    scroll(list, 420, 1180, 500);
+    act(() => list.props.onScrollEndDrag());
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
+    ).toBeGreaterThan(0);
+    act(() => list.props.onContentSizeChange(320, 1180));
+    expect(scrollToLatest).not.toHaveBeenCalled();
+
+    act(() => list.props.onScrollBeginDrag());
+    scroll(list, 10, 1180, 500);
+    act(() => list.props.onScrollEndDrag());
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => list.props.onContentSizeChange(320, 1240));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+    act(() => tree.unmount());
+  });
+
   it('keeps the jump-to-latest control hidden when the transcript is not scrollable', () => {
     const tree = render({});
     const list = getList(tree);
@@ -1106,7 +1222,7 @@ describe('ChatTranscriptView continuation', () => {
     const tree = render({});
     let list = getList(tree);
 
-    scroll(list, 120, 1000, 200);
+    drag(list, 120, 1000, 200);
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
     ).toBeGreaterThan(0);
@@ -1122,7 +1238,7 @@ describe('ChatTranscriptView continuation', () => {
   it('renders the jump-to-latest button as a 48pt circular toolbar target', () => {
     const tree = render({});
     const list = getList(tree);
-    scroll(list, 100);
+    drag(list, 100);
 
     const jump = tree.root.findByProps({
       accessibilityLabel: 'Jump to latest message',
@@ -1150,7 +1266,7 @@ describe('ChatTranscriptView continuation', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
     const tree = render({});
-    scroll(getList(tree), 100);
+    drag(getList(tree), 100);
 
     const glassProps = getRenderedGlassViewProps().find(
       (props) => props.testID === 'jump-to-latest-glass-surface',
@@ -1166,7 +1282,7 @@ describe('ChatTranscriptView continuation', () => {
     const exitSpy = jest.spyOn(ZoomOut, 'reduceMotion');
     const tree = render({});
     const list = getList(tree);
-    scroll(list, 100);
+    drag(list, 100);
 
     expect(enterSpy).toHaveBeenCalledWith(ReduceMotion.System);
     expect(exitSpy).toHaveBeenCalledWith(ReduceMotion.System);
@@ -1326,7 +1442,7 @@ describe('ChatTranscriptView continuation', () => {
     };
     const first = makeChat({ id: 'first', messages: makeMessages(180) });
     const tree = render({ chat: first, autoScrollStateRef });
-    scroll(getList(tree), 100);
+    drag(getList(tree), 100);
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
     ).toBeGreaterThan(0);

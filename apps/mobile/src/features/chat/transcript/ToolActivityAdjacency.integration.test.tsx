@@ -159,7 +159,11 @@ describe('tool rows adjacent to the transcript activity row', () => {
     expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
 
     act(() => {
-      const onScroll = list().props['onScroll'] as (event: unknown) => void;
+      const currentList = list();
+      const onScrollBeginDrag = currentList.props['onScrollBeginDrag'] as () => void;
+      const onScroll = currentList.props['onScroll'] as (event: unknown) => void;
+      const onScrollEndDrag = currentList.props['onScrollEndDrag'] as () => void;
+      onScrollBeginDrag();
       onScroll({
         nativeEvent: {
           contentOffset: { x: 0, y: 100 },
@@ -167,6 +171,7 @@ describe('tool rows adjacent to the transcript activity row', () => {
           layoutMeasurement: { width: 370, height: 500 },
         },
       });
+      onScrollEndDrag();
     });
     expect(root.findByType(ActivityEvent).props['animationActive']).toBe(false);
 

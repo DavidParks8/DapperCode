@@ -58,8 +58,7 @@ import {
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
-
-const PINNED_SCROLL_EPSILON_PX = 1;
+import { PINNED_SCROLL_EPSILON_PX, updateAutoScrollStickiness } from './autoScroll';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -299,9 +298,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       scrollingTowardOlderMessagesRef.current = nextOffsetY > previousScrollOffsetYRef.current + 1;
       previousScrollOffsetYRef.current = nextOffsetY;
 
-      const distanceFromBottom = contentOffset.y;
-      const shouldStickToBottom = distanceFromBottom <= theme.spacing.xl * 2;
-      autoScrollStateRef.current.shouldStickToBottom = shouldStickToBottom;
+      // Streaming growth and keyboard insets move native offsets; only user interaction can unpin.
+      const shouldStickToBottom = updateAutoScrollStickiness(
+        autoScrollStateRef.current,
+        contentOffset.y <= theme.spacing.xl * 2,
+      );
       updateActivityVisibility(shouldStickToBottom);
       const hasScrollableHistory =
         contentSize.height - layoutMeasurement.height > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX;
