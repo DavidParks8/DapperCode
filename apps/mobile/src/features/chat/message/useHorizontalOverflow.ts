@@ -3,19 +3,27 @@ import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 
 
 const OVERFLOW_EPSILON = 1;
 
+type OverflowFades = { start: boolean; end: boolean };
+
+const NO_FADES: OverflowFades = { start: false, end: false };
+
 export function useHorizontalOverflow() {
   const viewportWidth = useRef(0);
   const contentWidth = useRef(0);
   const offsetX = useRef(0);
-  const fadeVisible = useRef(false);
-  const [showEndFade, setShowEndFade] = useState(false);
+  const fadeVisible = useRef<OverflowFades>(NO_FADES);
+  const [fades, setFades] = useState<OverflowFades>(NO_FADES);
   const updateFade = useCallback(() => {
-    const next =
-      contentWidth.current > viewportWidth.current + OVERFLOW_EPSILON &&
-      offsetX.current + viewportWidth.current < contentWidth.current - OVERFLOW_EPSILON;
-    if (next !== fadeVisible.current) {
+    const overflowing = contentWidth.current > viewportWidth.current + OVERFLOW_EPSILON;
+    const next: OverflowFades = {
+      start: overflowing && offsetX.current > OVERFLOW_EPSILON,
+      end:
+        overflowing &&
+        offsetX.current + viewportWidth.current < contentWidth.current - OVERFLOW_EPSILON,
+    };
+    if (next.start !== fadeVisible.current.start || next.end !== fadeVisible.current.end) {
       fadeVisible.current = next;
-      setShowEndFade(next);
+      setFades(next);
     }
   }, []);
   const onLayout = useCallback(
@@ -43,19 +51,20 @@ export function useHorizontalOverflow() {
     onLayout,
     onContentSizeChange,
     onScroll,
-    showEndFade,
+    showStartFade: fades.start,
+    showEndFade: fades.end,
   };
 }
 
-export function horizontalFadeColors(backgroundColor: string): [string, string] {
-  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(backgroundColor);
-  if (!match) {
-    return ['rgba(0, 0, 0, 0)', backgroundColor];
-  }
-  const red = Number.parseInt(match[1] ?? '0', 16);
-  const green = Number.parseInt(match[2] ?? '0', 16);
-  const blue = Number.parseInt(match[3] ?? '0', 16);
-  return [`rgba(${String(red)}, ${String(green)}, ${String(blue)}, 0)`, backgroundColor];
+export function horizontalFadeColors(
+  backgroundColor: string,
+  edge: 'start' | 'end' = 'end',
+): [string, string] {
+  const parsed = parseHexColor(backgroundColor);
+  const transparent = parsed
+    ? `rgba(${parsed.map((component) => String(component)).join(', ')}, 0)`
+    : 'rgba(0, 0, 0, 0)';
+  return edge === 'start' ? [backgroundColor, transparent] : [transparent, backgroundColor];
 }
 
 export function compositeOverlayColor(backgroundColor: string, overlayColor: string): string {

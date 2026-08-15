@@ -85,10 +85,11 @@ export const createToolCardStyles = (theme: AppTheme) =>
     horizontalOverflowFade: {
       position: 'absolute',
       top: 0,
-      right: 0,
       bottom: 0,
       width: theme.spacing.xl,
     },
+    horizontalOverflowFadeStart: { left: 0 },
+    horizontalOverflowFadeEnd: { right: 0 },
     panel: {
       marginLeft: theme.spacing.sm,
       marginTop: theme.spacing.xs,

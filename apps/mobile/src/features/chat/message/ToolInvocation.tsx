@@ -19,7 +19,11 @@ import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
 } from './toolInvocationPresentation';
-import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
+import {
+  compositeOverlayColor,
+  horizontalFadeColors,
+  useHorizontalOverflow,
+} from './useHorizontalOverflow';
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
@@ -41,6 +45,9 @@ function ToolHeaderText({
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const textStyles = [styles.rowSubject, invocation.isError && styles.rowTitleError];
   const commandOverflow = useHorizontalOverflow();
+  const fadeSurface = invocation.isError
+    ? compositeOverlayColor(theme.colors.bgMain, theme.colors.errorBg)
+    : theme.colors.bgMain;
   const renderCommand = (highlight: boolean) => (
     <>
       {header.action ? (
@@ -99,14 +106,24 @@ function ToolHeaderText({
             </ToolHeaderShimmer>
           </Pressable>
         </ScrollView>
-        {commandOverflow.showEndFade ? (
+        {commandOverflow.showStartFade ? (
           <LinearGradient
-            colors={horizontalFadeColors(theme.colors.bgMain)}
+            colors={horizontalFadeColors(fadeSurface, 'start')}
             start={{ x: 0, y: 0.5 }}
             end={{ x: 1, y: 0.5 }}
             pointerEvents="none"
-            style={styles.horizontalOverflowFade}
-            testID="tool-command-overflow-fade"
+            style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeStart]}
+            testID="tool-command-overflow-fade-start"
+          />
+        ) : null}
+        {commandOverflow.showEndFade ? (
+          <LinearGradient
+            colors={horizontalFadeColors(fadeSurface, 'end')}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            pointerEvents="none"
+            style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeEnd]}
+            testID="tool-command-overflow-fade-end"
           />
         ) : null}
       </View>

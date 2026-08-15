@@ -280,14 +280,24 @@ function ToolDiffBlock({
               ))}
             </View>
           </ScrollView>
-          {overflow.showEndFade ? (
+          {overflow.showStartFade ? (
             <LinearGradient
-              colors={horizontalFadeColors(fadeSurface)}
+              colors={horizontalFadeColors(fadeSurface, 'start')}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               pointerEvents="none"
-              style={styles.horizontalOverflowFade}
-              testID="tool-diff-overflow-fade"
+              style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeStart]}
+              testID="tool-diff-overflow-fade-start"
+            />
+          ) : null}
+          {overflow.showEndFade ? (
+            <LinearGradient
+              colors={horizontalFadeColors(fadeSurface, 'end')}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              pointerEvents="none"
+              style={[styles.horizontalOverflowFade, styles.horizontalOverflowFadeEnd]}
+              testID="tool-diff-overflow-fade-end"
             />
           ) : null}
         </View>
