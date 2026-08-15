@@ -991,7 +991,7 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('preserves a selected-thread draft while interrupting a known running turn', async () => {
+    it('interrupts a known running turn while the composer is empty', async () => {
       const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
       const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
       const { tree } = await renderMain({
@@ -1000,22 +1000,64 @@ function MainRouteShell() {
         pendingOpenChatSnapshot: runningChat,
       });
       const root = tree.root as Queryable;
-      const message = root
-        .findAllByType(TextInput)
-        .find((node) => node.props['accessibilityLabel'] === 'Message');
-      if (!message) {
-        throw new Error('Missing composer');
-      }
-      act(() => message.props.onChangeText('Follow up'));
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
       ).toHaveLength(0);
-      expect(message.props['value']).toBe('Follow up');
       await pressLabel(root, 'Stop agent');
       expect(api.interruptLatestTurn).toHaveBeenCalledWith(chat.id);
       expect(api.interruptTurn).not.toHaveBeenCalled();
       expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
-      expect(message.props['value']).toBe('Follow up');
+      act(() => tree.unmount());
+    });
+
+    it('replaces Stop with Send and queues a typed follow-up while a turn runs', async () => {
+      const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
+      const queuedState = {
+        ...emptyQueue,
+        items: [
+          { id: 'queued-follow-up', createdAt: '2026-07-20T00:00:03.000Z', content: 'Follow up' },
+        ],
+      };
+      const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
+      (api.sendOrQueueChatMessage as jest.Mock).mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: queuedState,
+      });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: runningChat,
+      });
+      const root = tree.root as Queryable;
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
+
+      act(() => messageInput(root).props.onChangeText('Follow up'));
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).not.toHaveLength(0);
+
+      await pressLabel(root, 'Send message');
+
+      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+        chat.id,
+        expect.objectContaining({ content: 'Follow up' }),
+        expect.objectContaining({ skipResume: true, submissionId: expect.any(String) }),
+      );
+      expect(messageInput(root).props['value']).toBe('');
+      expect(hasText(root, 'Follow up')).toBe(true);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
       act(() => tree.unmount());
     });
 
@@ -1704,13 +1746,21 @@ function MainRouteShell() {
     });
 
     it('shows a queued send from the returned disposition and restores a failed queued draft', async () => {
+      const runningQueuedChat = {
+        ...chat,
+        status: 'running' as const,
+        activeTurnId: 'turn-queued',
+      };
       const queuedState = {
         ...emptyQueue,
         items: [
           { id: 'queued-returned', createdAt: '2026-07-20T00:00:03.000Z', content: 'Queue this' },
         ],
       };
-      const queuedApi = createApi();
+      const queuedApi = createApi({
+        loadedChat: runningQueuedChat,
+        cachedChat: runningQueuedChat,
+      });
       (queuedApi.sendOrQueueChatMessage as jest.Mock).mockResolvedValueOnce({
         disposition: 'queued',
         queue: queuedState,
@@ -1718,7 +1768,7 @@ function MainRouteShell() {
       const queuedHarness = await renderMain({
         api: queuedApi,
         pendingOpenChatId: chat.id,
-        pendingOpenChatSnapshot: chat,
+        pendingOpenChatSnapshot: runningQueuedChat,
       });
       const queuedRoot = queuedHarness.tree.root as Queryable;
       act(() => messageInput(queuedRoot).props.onChangeText('Queue this'));
@@ -6315,6 +6365,124 @@ function MainRouteShell() {
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
       expect(input(harness.root).props['placeholder']).toBe('Reply...');
+      harness.unmount();
+    });
+
+    it('never flashes the queue card when sending after an existing turn settles', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-previous',
+      };
+      let latest: Chat = running;
+      const getChat = jest.fn().mockImplementation(() => Promise.resolve(latest));
+      const sendRequest = deferred<unknown>();
+      const api = createApi({
+        getChat,
+        sendOrQueueChatMessage: jest.fn().mockReturnValue(sendRequest.promise),
+      });
+      const harness = await renderMain({ api, chat: running });
+
+      latest = {
+        ...baseChat,
+        status: 'idle',
+        activeTurnId: null,
+        updatedAt: '2026-07-20T12:00:01.000Z',
+        statusUpdatedAt: '2026-07-20T12:00:01.000Z',
+      };
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        await flush();
+      });
+
+      expect(harness.store.get(selectedChatAtom)?.status).toBe('idle');
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        input(harness.root).props.onChangeText('Start the next turn');
+        await flush();
+      });
+      await act(async () => {
+        (labeled(harness.root, 'Send message').props['onPress'] as () => void)();
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Steer queued message'),
+      ).toHaveLength(0);
+      expect(api['sendOrQueueChatMessage']).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ content: 'Start the next turn' }),
+        expect.objectContaining({ skipResume: false, submissionId: expect.any(String) }),
+      );
+
+      latest = {
+        ...latest,
+        status: 'running',
+        activeTurnId: 'turn-next',
+      };
+      sendRequest.resolve({
+        disposition: 'sent',
+        queue: emptyQueue,
+        turnId: 'turn-next',
+        chat: latest,
+      });
+      await act(async () => {
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
+      harness.unmount();
+    });
+
+    it('shows the queue card immediately for a message sent during an active turn', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-current',
+      };
+      const sendRequest = deferred<unknown>();
+      const api = createApi({
+        getChat: jest.fn().mockResolvedValue(running),
+        sendOrQueueChatMessage: jest.fn().mockReturnValue(sendRequest.promise),
+      });
+      const harness = await renderMain({ api, chat: running });
+
+      await act(async () => {
+        input(harness.root).props.onChangeText('Steer the active turn');
+        await flush();
+      });
+      await act(async () => {
+        (labeled(harness.root, 'Send message').props['onPress'] as () => void)();
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(true);
+
+      sendRequest.resolve({
+        disposition: 'queued',
+        queue: {
+          ...emptyQueue,
+          items: [
+            {
+              id: 'queued-active-turn',
+              content: 'Steer the active turn',
+              createdAt: '2026-07-20T12:00:01.000Z',
+            },
+          ],
+        },
+      });
+      await act(async () => {
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queued message')).toBe(true);
       harness.unmount();
     });
 
