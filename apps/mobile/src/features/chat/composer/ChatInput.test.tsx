@@ -437,14 +437,14 @@ describe('ChatInput behavior', () => {
     act(() => rendered.unmount());
   });
 
-  it('uses one 48-point trailing slot and replaces Send with Stop while a turn runs', () => {
+  it('uses one 48-point trailing slot and prioritizes a sendable draft over Stop', () => {
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
         wrap(
           <ChatInput
             {...base}
-            value="hi"
+            value=""
             isLoading
             showStopButton
             onAttachPress={base.onAttachPress}
@@ -478,6 +478,37 @@ describe('ChatInput behavior', () => {
     expect(
       root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
     ).toHaveLength(0);
+
+    act(() =>
+      rendered.update(
+        wrap(
+          <ChatInput
+            {...base}
+            value="Follow up"
+            isLoading
+            showStopButton
+            onAttachPress={base.onAttachPress}
+            attachments={[{ id: 'a1', label: 'error.log' }]}
+          />,
+        ),
+      ),
+    );
+
+    expect(root.findAll((node) => node.props['testID'] === 'composer-stop-slot')).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'composer-submit-slot'),
+    ).not.toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'composer-stop-glass-surface'),
+    ).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'composer-submit-glass-surface'),
+    ).not.toHaveLength(0);
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent')).toHaveLength(
+      0,
+    );
+    act(() => byLabel(root, 'Send message').props.onPress());
+    expect(base.onSubmit).toHaveBeenCalledTimes(1);
     expect(byLabel(root, 'Add attachment').props['hitSlop']).toEqual({
       top: 6,
       right: 6,

@@ -4,7 +4,11 @@ import {
   registerAcceptedTurn,
   resolveAcceptedTurnChat,
 } from './acceptedTurnState';
-import { createSentMessageState, type StartedTurnResultArgs } from './sendMessageState';
+import {
+  createQueuedMessageState,
+  createSentMessageState,
+  type StartedTurnResultArgs,
+} from './sendMessageState';
 
 function chat(id: string, status: Chat['status'] = 'complete'): Chat {
   return {
@@ -29,6 +33,50 @@ function chat(id: string, status: Chat['status'] = 'complete'): Chat {
 }
 
 describe('accepted send state', () => {
+  it('only creates an optimistic queue card from live active-turn state', () => {
+    const queueOptimisticQueuedMessage = jest.fn(() => ({
+      id: 'queued-placeholder',
+      content: 'Follow up',
+      createdAt: '2026-01-01T00:00:01.000Z',
+    }));
+    const idleChat = chat('target', 'idle');
+    const staleRuntimeSnapshot = {
+      activeTurnId: 'turn-stale',
+      updatedAtMs: Date.now(),
+    };
+
+    const idleState = createQueuedMessageState({
+      targetChatId: idleChat.id,
+      content: 'Follow up',
+      selectedThreadSnapshot: staleRuntimeSnapshot,
+      activeTurnId: null,
+      selectedChat: idleChat,
+      pendingApproval: null,
+      pendingUserInputRequest: null,
+      queueOptimisticQueuedMessage,
+    });
+
+    expect(idleState.likelyQueuesLocally).toBe(true);
+    expect(idleState.optimisticQueuedMessage).toBeNull();
+    expect(queueOptimisticQueuedMessage).not.toHaveBeenCalled();
+
+    const activeState = createQueuedMessageState({
+      targetChatId: idleChat.id,
+      content: 'Follow up',
+      selectedThreadSnapshot: null,
+      activeTurnId: 'turn-current',
+      selectedChat: idleChat,
+      pendingApproval: null,
+      pendingUserInputRequest: null,
+      queueOptimisticQueuedMessage,
+    });
+
+    expect(activeState.optimisticQueuedMessage).toEqual(
+      expect.objectContaining({ content: 'Follow up' }),
+    );
+    expect(queueOptimisticQueuedMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('promotes a queued placeholder without switching chats or changing its original ordinal', () => {
     const targetChat = chat('target');
     const otherChat = chat('other');

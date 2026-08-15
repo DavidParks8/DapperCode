@@ -3,6 +3,8 @@ import { Text, View } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import {
+  clearMermaidRenderCacheForTests,
+  MERMAID_CACHE_MAX_ENTRIES,
   MERMAID_MAX_QUEUED_RENDERS,
   MERMAID_MAX_QUEUED_SOURCE_BYTES,
   MermaidRenderProvider,
@@ -81,6 +83,7 @@ async function flushEffects() {
 
 describe('MermaidRenderProvider hardening', () => {
   beforeEach(() => {
+    clearMermaidRenderCacheForTests();
     mockFrameProps = null;
     mockPostMessage.mockClear();
   });
@@ -338,7 +341,10 @@ describe('MermaidRenderProvider hardening', () => {
   });
 
   it('evicts least-recently-used results by entry and byte budgets', async () => {
-    const sources = Array.from({ length: 9 }, (_, index) => `graph TD; Cache${String(index)}-->X`);
+    const sources = Array.from(
+      { length: MERMAID_CACHE_MAX_ENTRIES + 1 },
+      (_, index) => `graph TD; Cache${String(index)}-->X`,
+    );
     let tree: ReactTestRenderer | undefined;
     act(() => {
       tree = renderer.create(
@@ -352,7 +358,7 @@ describe('MermaidRenderProvider hardening', () => {
       markFrameReady();
       await Promise.resolve();
     });
-    for (const source of sources) {
+    for (const source of sources.slice(0, MERMAID_CACHE_MAX_ENTRIES)) {
       if (latestCommand()['source'] !== source) {
         act(() => {
           tree?.update(
@@ -387,7 +393,41 @@ describe('MermaidRenderProvider hardening', () => {
       );
     });
     await flushEffects();
-    expect(mockPostMessage).toHaveBeenCalledTimes(callsAfterEntryFill + 1);
+    expect(mockPostMessage).toHaveBeenCalledTimes(callsAfterEntryFill);
+
+    const overflowSource = sources.at(-1) ?? '';
+    act(() => {
+      tree?.update(
+        <Tree>
+          <Consumer source={overflowSource} testID="result" />
+        </Tree>,
+      );
+    });
+    await flushEffects();
+    const overflowCommand = latestCommand();
+    await act(async () => {
+      invokeFrame(
+        'onMessage',
+        JSON.stringify({
+          type: 'rendered',
+          id: overflowCommand['id'],
+          width: 20,
+          height: 10,
+          svg: `<svg id="${overflowSource}"/>`,
+        }),
+      );
+      await Promise.resolve();
+    });
+    const callsAfterEntryOverflow = mockPostMessage.mock.calls.length;
+    act(() => {
+      tree?.update(
+        <Tree>
+          <Consumer source={sources[1] ?? ''} testID="result" />
+        </Tree>,
+      );
+    });
+    await flushEffects();
+    expect(mockPostMessage).toHaveBeenCalledTimes(callsAfterEntryOverflow + 1);
     act(() => tree?.unmount());
 
     mockFrameProps = null;

@@ -9,7 +9,11 @@ import {
   MERMAID_RENDER_TIMEOUT_MS,
   type MermaidThemePayload,
 } from './mermaidProtocol';
-import { MermaidRenderProvider, useMermaidRender } from './MermaidRenderProvider';
+import {
+  clearMermaidRenderCacheForTests,
+  MermaidRenderProvider,
+  useMermaidRender,
+} from './MermaidRenderProvider';
 
 let mockFrameProps: Record<string, unknown> | null = null;
 const mockPostMessage = jest.fn<boolean, [string]>(() => true);
@@ -103,6 +107,7 @@ function readConsumerText(tree: ReactTestRenderer | undefined, testID: string): 
 
 describe('MermaidRenderProvider', () => {
   beforeEach(() => {
+    clearMermaidRenderCacheForTests();
     mockFrameProps = null;
     mockPostMessage.mockClear();
     mockPostMessage.mockReturnValue(true);
@@ -169,6 +174,59 @@ describe('MermaidRenderProvider', () => {
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
 
     act(() => tree?.unmount());
+  });
+
+  it('restores a rendered diagram after its provider unmounts during a session switch', async () => {
+    const source = 'sequenceDiagram\n  Client->>Server: Cached session';
+    let firstTree: ReactTestRenderer | undefined;
+    act(() => {
+      firstTree = renderer.create(
+        <Tree>
+          <Consumer source={source} testID="result" />
+        </Tree>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      markFrameReady();
+      await Promise.resolve();
+    });
+    const command = latestCommand();
+    await act(async () => {
+      invokeFrame(
+        'onMessage',
+        JSON.stringify({
+          type: 'rendered',
+          id: command['id'],
+          width: 400,
+          height: 200,
+          svg: '<svg viewBox="0 0 400 200"><text>Cached session</text></svg>',
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(readConsumerText(firstTree, 'result')).toContain('Cached session');
+    act(() => firstTree?.unmount());
+
+    mockFrameProps = null;
+    mockPostMessage.mockClear();
+    let restoredTree: ReactTestRenderer | undefined;
+    act(() => {
+      restoredTree = renderer.create(
+        <Tree>
+          <Consumer source={source} testID="result" />
+        </Tree>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(readConsumerText(restoredTree, 'result')).toContain('Cached session');
+    expect(mockFrameProps).toBeNull();
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    act(() => restoredTree?.unmount());
   });
 
   it('ignores malformed and stale responses before surfacing the active renderer error', async () => {

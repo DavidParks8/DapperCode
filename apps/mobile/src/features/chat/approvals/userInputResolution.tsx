@@ -36,6 +36,7 @@ export function useMainScreenApprovalAndUserInputResolution(
     appStateRef,
     approvalController,
     bumpRunWatchdog,
+    cacheThreadTurnState,
     cacheThreadPendingApproval,
     cacheThreadPendingUserInputRequest,
     chatSyncController,
@@ -104,6 +105,10 @@ export function useMainScreenApprovalAndUserInputResolution(
         setStreamingText(null);
         setActiveTurnId(null);
         setStoppingTurn(false);
+        cacheThreadTurnState(targetChatId, {
+          activeTurnId: null,
+          runWatchdogUntil: 0,
+        });
         reasoningSummaryRef.current = {};
         reasoningBufferRef.current = '';
         hadCommandRef.current = false;
@@ -140,6 +145,7 @@ export function useMainScreenApprovalAndUserInputResolution(
       pendingApproval?.requestId,
       pendingUserInputRequest?.requestId,
       bumpRunWatchdog,
+      cacheThreadTurnState,
       clearRunWatchdog,
       hadCommandRef,
       mergeChatWithPendingOptimisticMessages,

@@ -3,6 +3,9 @@ import path from 'node:path';
 import { TextDecoder, TextEncoder } from 'node:util';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
+import { createAppTheme } from '@shared/theme';
+import { createMermaidTheme } from './mermaidProtocol';
+
 describe('generated Mermaid runtime asset', () => {
   const mobileRoot = path.resolve(__dirname, '../../../../..');
   const runtime = readFileSync(
@@ -59,6 +62,102 @@ describe('generated Mermaid runtime asset', () => {
       expect(result['svg']).toEqual(expect.stringContaining('<style'));
       expect(result['svg']).not.toMatch(/\b(?:href|src)=["']https?:/iu);
       expect(runtimeErrors).toEqual([]);
+    } finally {
+      dom.window.close();
+    }
+  }, 15_000);
+
+  it('inlines sequence-diagram colors for native SVG renderers', async () => {
+    const { dom, messages, runtimeErrors } = createRuntimeHarness(runtime);
+    const theme = createMermaidTheme(createAppTheme('dark'));
+
+    try {
+      await waitForRuntimeMessage(messages, (message) => message['type'] === 'ready');
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'render',
+            id: 'sequence-colors',
+            source: [
+              'sequenceDiagram',
+              '  participant C as Client',
+              '  participant S as Server',
+              '  participant D as DB',
+              '  C->>S: POST /login',
+              '  S->>D: Query user',
+              '  D-->>S: User found',
+              '  S-->>C: 200 OK + token',
+              '  C->>S: GET /dashboard',
+              '  S-->>C: 200 dashboard',
+            ].join('\n'),
+            theme,
+          }),
+        }),
+      );
+      const result = await waitForRuntimeMessage(
+        messages,
+        (message) =>
+          message['id'] === 'sequence-colors' &&
+          (message['type'] === 'rendered' || message['type'] === 'error'),
+      );
+
+      expect(result['type']).toBe('rendered');
+      const rendered = new JSDOM(String(result['svg']), { contentType: 'image/svg+xml' });
+      try {
+        expect(
+          rendered.window.document.querySelector('text.actor > tspan')?.getAttribute('fill'),
+        ).toBe(theme['actorTextColor']);
+        expect(
+          rendered.window.document.querySelector('text.messageText')?.getAttribute('fill'),
+        ).toBe(theme['signalTextColor']);
+        expect(runtimeErrors).toEqual([]);
+      } finally {
+        rendered.window.close();
+      }
+    } finally {
+      dom.window.close();
+    }
+  }, 15_000);
+
+  it('rejects oversized rendered SVG before attaching it for style computation', async () => {
+    const constrainedRuntime = runtime.replace(
+      'const MAX_SVG_BYTES = 2097152;',
+      'const MAX_SVG_BYTES = 128;',
+    );
+    const { dom, messages } = createRuntimeHarness(constrainedRuntime);
+    const attachedNodes: Node[] = [];
+
+    try {
+      await waitForRuntimeMessage(messages, (message) => message['type'] === 'ready');
+      const diagram = dom.window.document.getElementById('diagram');
+      if (!diagram) {
+        throw new Error('Expected Mermaid diagram host');
+      }
+      const observer = new dom.window.MutationObserver((records) => {
+        records.forEach((record) => attachedNodes.push(...Array.from(record.addedNodes)));
+      });
+      observer.observe(diagram, { childList: true });
+      dom.window.dispatchEvent(
+        new dom.window.MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'render',
+            id: 'oversized-render',
+            source: 'graph TD\n  A --> B',
+            theme: {},
+          }),
+        }),
+      );
+      const result = await waitForRuntimeMessage(
+        messages,
+        (message) => message['id'] === 'oversized-render',
+      );
+      observer.disconnect();
+
+      expect(result).toMatchObject({
+        type: 'error',
+        message: 'This Mermaid diagram is too complex to display safely.',
+      });
+      expect(attachedNodes).toHaveLength(0);
     } finally {
       dom.window.close();
     }

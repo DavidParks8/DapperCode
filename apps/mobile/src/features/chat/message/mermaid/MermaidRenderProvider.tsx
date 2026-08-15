@@ -22,8 +22,8 @@ import {
   type MermaidThemePayload,
 } from './mermaidProtocol';
 
-const CACHE_MAX_ENTRIES = 8;
 const CACHE_MAX_BYTES = 8 * 1024 * 1024;
+export const MERMAID_CACHE_MAX_ENTRIES = 32;
 export const MERMAID_MAX_QUEUED_RENDERS = 16;
 export const MERMAID_MAX_QUEUED_SOURCE_BYTES = 512 * 1024;
 
@@ -63,6 +63,9 @@ interface CacheEntry {
   bytes: number;
 }
 
+const sharedCache = new Map<string, CacheEntry>();
+let sharedCacheBytes = 0;
+
 export type MermaidRenderState =
   | { status: 'loading'; result: null; error: null }
   | { status: 'ready'; result: MermaidRenderResult; error: null }
@@ -78,8 +81,6 @@ export function MermaidRenderProvider({ children }: PropsWithChildren) {
   const queuedSourceBytesRef = useRef(0);
   const activeRef = useRef<PendingRender | null>(null);
   const inFlightRef = useRef(new Map<string, PendingRender>());
-  const cacheRef = useRef(new Map<string, CacheEntry>());
-  const cacheBytesRef = useRef(0);
   const nextRequestRef = useRef(0);
   const restartCountRef = useRef(0);
   const fatalErrorRef = useRef<string | null>(null);
@@ -178,18 +179,6 @@ export function MermaidRenderProvider({ children }: PropsWithChildren) {
     [rejectAll, restartHost],
   );
 
-  const cacheResult = useCallback((key: string, result: MermaidRenderResult) => {
-    const bytes = utf8ByteLength(result.svg);
-    cacheRef.current.set(key, { result, bytes });
-    cacheBytesRef.current += bytes;
-    while (cacheRef.current.size > CACHE_MAX_ENTRIES || cacheBytesRef.current > CACHE_MAX_BYTES) {
-      const oldestKey = cacheRef.current.keys().next().value as string;
-      const oldest = cacheRef.current.get(oldestKey) as CacheEntry;
-      cacheRef.current.delete(oldestKey);
-      cacheBytesRef.current -= oldest.bytes;
-    }
-  }, []);
-
   pumpRef.current = () => {
     if (
       !frameReadyRef.current ||
@@ -278,10 +267,10 @@ export function MermaidRenderProvider({ children }: PropsWithChildren) {
         return Promise.reject(new Error('This Mermaid source is too large to render safely.'));
       }
       const key = `${JSON.stringify(theme)}\u0000${source}`;
-      const cached = cacheRef.current.get(key);
+      const cached = sharedCache.get(key);
       if (cached) {
-        cacheRef.current.delete(key);
-        cacheRef.current.set(key, cached);
+        sharedCache.delete(key);
+        sharedCache.set(key, cached);
         return Promise.resolve(cached.result);
       }
       if (signal?.aborted) {
@@ -365,7 +354,7 @@ export function MermaidRenderProvider({ children }: PropsWithChildren) {
       }
       schedulePump();
     },
-    [cacheResult, clearHostStartupTimeout, rejectPending, resolvePending, schedulePump],
+    [clearHostStartupTimeout, rejectPending, resolvePending, schedulePump],
   );
 
   useEffect(() => {
@@ -487,4 +476,26 @@ function createRenderCancelledError(): Error {
   const error = new Error('The Mermaid render was cancelled.');
   error.name = 'AbortError';
   return error;
+}
+
+function cacheResult(key: string, result: MermaidRenderResult): void {
+  const existing = sharedCache.get(key);
+  if (existing) {
+    sharedCache.delete(key);
+    sharedCacheBytes -= existing.bytes;
+  }
+  const bytes = utf8ByteLength(result.svg);
+  sharedCache.set(key, { result, bytes });
+  sharedCacheBytes += bytes;
+  while (sharedCache.size > MERMAID_CACHE_MAX_ENTRIES || sharedCacheBytes > CACHE_MAX_BYTES) {
+    const oldestKey = sharedCache.keys().next().value as string;
+    const oldest = sharedCache.get(oldestKey) as CacheEntry;
+    sharedCache.delete(oldestKey);
+    sharedCacheBytes -= oldest.bytes;
+  }
+}
+
+export function clearMermaidRenderCacheForTests(): void {
+  sharedCache.clear();
+  sharedCacheBytes = 0;
 }

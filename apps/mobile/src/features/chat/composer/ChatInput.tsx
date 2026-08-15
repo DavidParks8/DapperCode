@@ -148,7 +148,7 @@ function resolveChatInputActionState({
   ChatInputActionButtonProps,
   'canSend' | 'canStop' | 'isLoading' | 'isStopping' | 'label' | 'hint'
 >): ChatInputActionState {
-  if (canStop) {
+  if (canStop && !canSend) {
     return {
       accessibilityHint: 'Stops the current turn',
       accessibilityLabel: isStopping ? 'Stopping agent' : 'Stop agent',
