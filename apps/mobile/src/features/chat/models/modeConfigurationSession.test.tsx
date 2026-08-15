@@ -69,7 +69,7 @@ function deferred<T>() {
 type TestContextOverrides = Omit<Partial<MainScreenModeConfigurationSessionContext>, 'api'> & {
   api?: Pick<
     MainScreenModeConfigurationSessionContext['api'],
-    'listModelOptions' | 'peekModelOptions' | 'setThreadConfigOption'
+    'listModelOptions' | 'peekModelOptions' | 'rememberChat' | 'setThreadConfigOption'
   >;
 };
 
@@ -85,6 +85,7 @@ function createContext(
     api: {
       listModelOptions,
       peekModelOptions: jest.fn().mockReturnValue(null),
+      rememberChat: jest.fn(),
       setThreadConfigOption: jest.fn(),
     },
     chatModelPreferencesRef: { current: {} },
@@ -176,6 +177,7 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
       api: {
         listModelOptions: jest.fn(),
         peekModelOptions: jest.fn().mockReturnValue(null),
+        rememberChat: jest.fn(),
         setThreadConfigOption,
       },
     });
@@ -223,7 +225,12 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
     const selectedChatRef = { current: configuredChat as Chat | null };
-    const setSelectedChat = jest.fn();
+    const setSelectedChat = jest.fn(
+      (update: Chat | null | ((current: Chat | null) => Chat | null)) => {
+        selectedChatRef.current =
+          typeof update === 'function' ? update(selectedChatRef.current) : update;
+      },
+    );
     const context = createContext(jest.fn(), {
       selectedChatId: configuredChat.id,
       selectedChatRef,
@@ -231,6 +238,7 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
       api: {
         listModelOptions: jest.fn(),
         peekModelOptions: jest.fn().mockReturnValue(null),
+        rememberChat: jest.fn(),
         setThreadConfigOption,
       },
     });
@@ -266,7 +274,128 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
     second.resolve(configuredChatWith('model', 'gpt-b'));
     await flush();
     expect(store.get(pendingAcpConfigByChatAtom)[configuredChat.id]).toBeUndefined();
-    expect(setSelectedChat).toHaveBeenLastCalledWith(configuredChatWith('model', 'gpt-b'));
+    expect(selectedChatRef.current).toEqual(configuredChatWith('model', 'gpt-b'));
+  });
+
+  it('preserves streamed messages and run state when a model write returns a stale snapshot', async () => {
+    const store: AppStore = createTestStore();
+    const request = deferred<Chat>();
+    const liveMessages: Chat['messages'] = [
+      {
+        id: 'user-live',
+        role: 'user',
+        content: 'Inspect the current state',
+        createdAt: '2026-08-15T21:00:00.000Z',
+      },
+      {
+        id: 'reasoning-live',
+        role: 'reasoning',
+        content: 'Checking the state transitions',
+        createdAt: '2026-08-15T21:00:01.000Z',
+        pending: true,
+      },
+      {
+        id: 'tool-live',
+        role: 'tool',
+        toolCallId: 'call-live',
+        content: 'Reading files',
+        createdAt: '2026-08-15T21:00:02.000Z',
+        toolMeta: {
+          toolCallId: 'call-live',
+          kind: 'read',
+          status: 'in_progress',
+          title: 'Read files',
+        },
+      },
+    ];
+    const liveChat: Chat = {
+      ...configuredChat,
+      title: 'Live thread',
+      status: 'running',
+      createdAt: '2026-08-15T21:00:00.000Z',
+      updatedAt: '2026-08-15T21:00:02.000Z',
+      statusUpdatedAt: '2026-08-15T21:00:00.000Z',
+      lastMessagePreview: 'Reading files',
+      messages: liveMessages,
+      activeTurnId: 'turn-live',
+      latestTurnStatus: 'inProgress',
+      acpActive: {
+        runId: 'run-live',
+        sourceTurnId: 'turn-live',
+        generation: 1,
+        toolIds: ['call-live'],
+      },
+    };
+    const selectedChatRef = { current: liveChat as Chat | null };
+    const setSelectedChat = jest.fn(
+      (update: Chat | null | ((current: Chat | null) => Chat | null)) => {
+        selectedChatRef.current =
+          typeof update === 'function' ? update(selectedChatRef.current) : update;
+      },
+    );
+    const rememberChat = jest.fn();
+    const context = createContext(jest.fn(), {
+      selectedChatId: liveChat.id,
+      selectedChatRef,
+      setSelectedChat,
+      api: {
+        listModelOptions: jest.fn(),
+        peekModelOptions: jest.fn().mockReturnValue(null),
+        rememberChat,
+        setThreadConfigOption: jest.fn().mockReturnValue(request.promise),
+      },
+    });
+    const resultRef: { current: ReturnType<typeof useMainScreenModeConfigurationSession> | null } =
+      { current: null };
+
+    act(() => {
+      renderer.create(withAppStore(store, <Harness context={context} resultRef={resultRef} />));
+    });
+    act(() => {
+      expect(
+        resultRef.current?.applyAcpConfigOption(configuredChat.acpConfig?.[0] ?? null, 'gpt-b'),
+      ).toBe(true);
+    });
+    await flush();
+
+    const streamedMessages: Chat['messages'] = [
+      ...liveMessages,
+      {
+        id: 'assistant-live',
+        role: 'assistant',
+        content: 'Partial answer',
+        createdAt: '2026-08-15T21:00:03.000Z',
+        pending: true,
+      },
+    ];
+    selectedChatRef.current = { ...liveChat, messages: streamedMessages };
+    request.resolve({
+      ...liveChat,
+      status: 'complete',
+      statusUpdatedAt: '2026-08-15T21:00:04.000Z',
+      lastMessagePreview: '',
+      messages: [],
+      activeTurnId: null,
+      latestTurnStatus: 'completed',
+      acpActive: null,
+      acpConfig: configuredChatWith('model', 'gpt-b').acpConfig,
+    });
+    await flush();
+
+    expect(selectedChatRef.current).toEqual(
+      expect.objectContaining({
+        status: 'running',
+        activeTurnId: 'turn-live',
+        latestTurnStatus: 'inProgress',
+        acpActive: liveChat.acpActive,
+        messages: streamedMessages,
+      }),
+    );
+    const selectedModel = selectedChatRef.current?.acpConfig?.find(
+      (option) => option.id === 'model',
+    )?.value;
+    expect(selectedModel).toBe('gpt-b');
+    expect(rememberChat).toHaveBeenLastCalledWith(selectedChatRef.current);
   });
 
   it('reverts only the latest failed optimistic value and surfaces the error', async () => {
@@ -278,6 +407,7 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
       api: {
         listModelOptions: jest.fn(),
         peekModelOptions: jest.fn().mockReturnValue(null),
+        rememberChat: jest.fn(),
         setThreadConfigOption: jest.fn().mockReturnValue(request.promise),
       },
     });

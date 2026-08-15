@@ -2753,6 +2753,157 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps an in-flight transcript visible when switching models', async () => {
+      const messages: Chat['messages'] = [
+        {
+          id: 'user-in-flight',
+          role: 'user',
+          content: 'Inspect the current state',
+          createdAt: '2026-08-15T21:00:00.000Z',
+        },
+        {
+          id: 'reasoning-in-flight',
+          role: 'reasoning',
+          content: 'Checking the state transitions',
+          createdAt: '2026-08-15T21:00:01.000Z',
+          pending: true,
+        },
+        {
+          id: 'tool-in-flight',
+          role: 'tool',
+          toolCallId: 'call-in-flight',
+          content: 'Reading files',
+          createdAt: '2026-08-15T21:00:02.000Z',
+          toolMeta: {
+            toolCallId: 'call-in-flight',
+            kind: 'read',
+            status: 'in_progress',
+            title: 'Read files',
+          },
+        },
+        {
+          id: 'assistant-in-flight',
+          role: 'assistant',
+          content: 'Partial answer',
+          createdAt: '2026-08-15T21:00:03.000Z',
+          pending: true,
+        },
+      ];
+      const configuredChat: Chat = {
+        ...rootChat,
+        status: 'running',
+        updatedAt: '2026-08-15T21:00:03.000Z',
+        statusUpdatedAt: '2026-08-15T21:00:00.000Z',
+        lastMessagePreview: 'Partial answer',
+        messages,
+        activeTurnId: 'turn-in-flight',
+        latestTurnStatus: 'inProgress',
+        acpActive: {
+          runId: 'run-in-flight',
+          sourceTurnId: 'turn-in-flight',
+          generation: 1,
+          toolIds: ['call-in-flight'],
+        },
+        acpConfig: [
+          {
+            id: 'model',
+            value: 'github-copilot/gpt-5.4',
+            category: 'model',
+            options: [
+              { value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' },
+              { value: 'github-copilot/gpt-5-mini', name: 'GitHub Copilot/GPT-5 Mini' },
+            ],
+          },
+        ],
+      };
+      let resolveConfig!: (chat: Chat) => void;
+      const api = createApi();
+      (api.getChat as jest.Mock).mockResolvedValue(configuredChat);
+      (api.peekChat as jest.Mock).mockReturnValue(configuredChat);
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'github-copilot/gpt-5.4',
+          displayName: 'GPT-5.4',
+          providerName: 'GitHub Copilot',
+        },
+        {
+          id: 'github-copilot/gpt-5-mini',
+          displayName: 'GPT-5 Mini',
+          providerName: 'GitHub Copilot',
+        },
+      ]);
+      (api.setThreadConfigOption as jest.Mock).mockImplementation(
+        () =>
+          new Promise<Chat>((resolve) => {
+            resolveConfig = resolve;
+          }),
+      );
+      const { tree, store } = await renderMain({ api, selectedChat: configuredChat });
+      const root = rootOf(tree);
+
+      act(() => textInput(root, 'Message').props.onChangeText('Follow up'));
+      expect(hasText(root, 'Inspect the current state')).toBe(true);
+      expect(hasText(root, 'Checking the state transitions')).toBe(true);
+      expect(hasText(root, 'tool:Read files')).toBe(true);
+      expect(hasText(root, 'Partial answer')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
+      expect(byLabel(root, 'Stop agent')).toBeTruthy();
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await act(async () => {
+        await flush();
+      });
+      await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(
+        configuredChat.id,
+        'model',
+        'github-copilot/gpt-5-mini',
+      );
+
+      await act(async () => {
+        resolveConfig({
+          ...configuredChat,
+          status: 'complete',
+          statusUpdatedAt: '2026-08-15T21:00:04.000Z',
+          lastMessagePreview: '',
+          messages: [],
+          activeTurnId: null,
+          latestTurnStatus: 'completed',
+          acpActive: null,
+          acpConfig: configuredChat.acpConfig?.map((option) => ({
+            ...option,
+            value: 'github-copilot/gpt-5-mini',
+          })),
+        });
+        await flush();
+      });
+
+      expect(store.get(selectedChatAtom)).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          activeTurnId: 'turn-in-flight',
+          latestTurnStatus: 'inProgress',
+          acpActive: configuredChat.acpActive,
+          messages,
+        }),
+      );
+      expect(hasText(root, 'Inspect the current state')).toBe(true);
+      expect(hasText(root, 'Checking the state transitions')).toBe(true);
+      expect(hasText(root, 'tool:Read files')).toBe(true);
+      expect(hasText(root, 'Partial answer')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
+      expect(byLabel(root, 'Stop agent')).toBeTruthy();
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(api.rememberChat).toHaveBeenLastCalledWith(store.get(selectedChatAtom));
+      act(() => tree.unmount());
+    });
+
     it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
       let resolvePreferences: ((value: string) => void) | null = null;
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {

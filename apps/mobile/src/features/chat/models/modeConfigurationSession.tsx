@@ -8,7 +8,7 @@ import {
 } from '../state/models';
 import { useSetAtom } from 'jotai';
 import { useCallback, useRef } from 'react';
-import type { AcpConfigOption, ReasoningEffort } from '@bridge/types/types';
+import type { AcpConfigOption, Chat, ReasoningEffort } from '@bridge/types/types';
 import { normalizeModelId } from '../helpers/helpers';
 import { agentModelPreferenceKey } from '../helpers/preferences';
 import type {
@@ -25,6 +25,26 @@ import {
 
 export type MainScreenModeConfigurationSessionContext = MainScreenWorkspaceCheckoutActionsContext &
   MainScreenWorkspaceCheckoutActionsResult;
+
+function mergeThreadConfigResponse(current: Chat, updated: Chat): Chat {
+  const acpSnapshot =
+    current.acpSnapshot && updated.acpSnapshot
+      ? {
+          ...current.acpSnapshot,
+          mode: updated.acpSnapshot.mode,
+          config: updated.acpSnapshot.config,
+          commands: updated.acpSnapshot.commands,
+        }
+      : (current.acpSnapshot ?? updated.acpSnapshot);
+
+  return {
+    ...current,
+    acpSnapshot,
+    acpMode: updated.acpMode,
+    acpConfig: updated.acpConfig,
+    acpCommands: updated.acpCommands,
+  };
+}
 
 export function useMainScreenModeConfigurationSession(
   context: MainScreenModeConfigurationSessionContext,
@@ -200,8 +220,15 @@ export function useMainScreenModeConfigurationSession(
           const updated = await api.setThreadConfigOption(threadId, config.id, value);
           const wasLatest = clearPendingAcpConfig(threadId, configKey, revision);
           if (selectedChatRef.current?.id === threadId) {
-            selectedChatRef.current = updated;
-            setSelectedChat(updated);
+            setSelectedChat((current) => {
+              if (!current || current.id !== threadId) {
+                return current;
+              }
+              const merged = mergeThreadConfigResponse(current, updated);
+              selectedChatRef.current = merged;
+              api.rememberChat(merged);
+              return merged;
+            });
           }
           if (wasLatest) {
             onSuccess?.();
