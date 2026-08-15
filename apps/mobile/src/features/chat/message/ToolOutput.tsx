@@ -15,6 +15,7 @@ import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
+import { SelectableOutput } from './SelectableOutput/SelectableOutput';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
@@ -99,11 +100,11 @@ export function ToolInvocationOutput({
             key={`${terminal.terminalId ?? 'terminal'}-${String(index)}`}
             style={[styles.outputSurface, styles.consoleSurface]}
           >
-            {splitLines(terminal.output).map((line, lineIndex) => (
-              <SelectableMessageText key={`line-${String(lineIndex)}`} style={styles.outputLine}>
-                {line}
-              </SelectableMessageText>
-            ))}
+            <SelectableOutput
+              text={terminal.output}
+              testID={`selectable-output-terminal-${String(index)}`}
+              accessibilityLabel={`Tool output: ${terminal.output}`}
+            />
           </View>
         ))}
       </>,
@@ -124,11 +125,11 @@ export function ToolInvocationOutput({
       <>
         <Text style={styles.sectionLabel}>Response</Text>
         <View style={styles.outputSurface}>
-          {invocation.textLines.map((line, index) => (
-            <SelectableMessageText key={`text-${String(index)}`} style={styles.outputLine}>
-              {line}
-            </SelectableMessageText>
-          ))}
+          <SelectableOutput
+            text={invocation.textLines.join('\n')}
+            testID="selectable-output-text"
+            accessibilityLabel={`Tool output: ${invocation.textLines.join('\n')}`}
+          />
         </View>
       </>,
     );

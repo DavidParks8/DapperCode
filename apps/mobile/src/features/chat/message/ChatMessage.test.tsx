@@ -2151,7 +2151,14 @@ function toOfficialMessage(message: ApiChatMessage | TestMessageInput): ApiChatM
 }
 
 function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
-  return root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0;
+  if (root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0) {
+    return true;
+  }
+  return root.findAllByType('mock-web-view').some((node) => {
+    const source = node.props['source'] as { html?: unknown } | undefined;
+    const html = source?.html;
+    return typeof html === 'string' && decodeHtmlText(html).includes(text);
+  });
 }
 
 /** The resolved height of the rendered sub-agent card, which must not depend on its state. */
@@ -2253,6 +2260,15 @@ function flattenTestTreeText(node: QueryableTestInstance): string {
         : flattenTestTreeText(child as QueryableTestInstance),
     )
     .join('');
+}
+
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, '&');
 }
 
 function flattenRenderedText(value: unknown): string {
