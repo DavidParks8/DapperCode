@@ -22,6 +22,10 @@ import {
 } from '../helpers/helpers';
 import type { MainScreenWsEventRouterContext } from './wsEventRouter';
 
+function isTerminalActivityTone(tone: string | undefined): boolean {
+  return tone === 'complete' || tone === 'error';
+}
+
 export function processBridgeInteractionEvents(
   context: MainScreenWsEventRouterContext,
   event: RpcNotification,
@@ -161,17 +165,25 @@ export function processBridgeInteractionEvents(
             continue;
           }
           cacheThreadPendingApproval(threadId, null);
-          cacheThreadActivity(threadId, {
-            tone: 'running',
-            title: 'Approval resolved',
-          });
+          if (!isTerminalActivityTone(snapshot.activity?.tone)) {
+            cacheThreadActivity(threadId, {
+              tone: 'running',
+              title: 'Approval resolved',
+            });
+          }
         }
       }
       if (!selectedPendingApprovalId || resolvedId !== selectedPendingApprovalId) {
         return;
       }
-      bumpRunWatchdog();
       setPendingApproval(null);
+      // Permission responses are authoritative to the agent, but their UI control event can
+      // arrive after an immediately rejected run has already finished. A terminal run must not
+      // be resurrected into a permanent "Approval resolved" running state.
+      if (isTerminalActivityTone(store.get(activityAtom).tone)) {
+        return;
+      }
+      bumpRunWatchdog();
       setActivity({
         tone: 'running',
         title: 'Approval resolved',

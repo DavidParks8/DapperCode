@@ -405,8 +405,8 @@ function MainRouteShell() {
         command: 'npm test',
         cwd: '/workspace',
         options: [
-          { id: 'allow-once', label: 'Allow once', kind: 'accept' },
-          { id: 'decline', label: 'Decline', kind: 'decline' },
+          { id: 'allow-once', label: 'Allow once', kind: 'AllowOnce' },
+          { id: 'reject-once', label: 'Reject', kind: 'RejectOnce' },
         ],
       },
     };
@@ -1604,6 +1604,57 @@ function MainRouteShell() {
       );
       await emitWs({ method: 'bridge/approval.resolved', params: { id: 'approval-1' } });
       expect(api.resolveApproval).not.toHaveBeenCalled();
+      act(() => tree.unmount());
+    });
+
+    it('keeps a rejected permission terminal when its resolved event arrives after run finish', async () => {
+      const api = createApi();
+      const { tree, store } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const runEvent = (type: 'RUN_STARTED' | 'RUN_FINISHED') => ({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: chat.id,
+          runId: 'run-rejected',
+          sourceTurnId: 'turn-1',
+          event: { type, threadId: chat.id, runId: 'run-rejected' },
+        },
+      });
+
+      await emitWs(runEvent('RUN_STARTED'));
+      await emitWs(approvalRequested());
+      await act(async () => {
+        await (
+          approvalBannerProps?.['onResolve'] as (id: string, optionId: string) => Promise<void>
+        )('approval-1', 'reject-once');
+      });
+      expect(api.resolveApproval).toHaveBeenCalledWith(
+        'approval-1',
+        'reject-once',
+        expect.any(String),
+      );
+
+      await emitWs(runEvent('RUN_FINISHED'));
+      await emitWs({
+        method: 'bridge/approval.resolved',
+        params: { id: 'approval-1', threadId: chat.id, outcome: 'reject-once' },
+      });
+
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom)).toEqual({ tone: 'complete', title: 'Turn completed' });
+      expect(hasWorkingStatus(root, hasText)).toBe(false);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).not.toHaveLength(0);
+      expect(messageInput(root).props['editable']).not.toBe(false);
       act(() => tree.unmount());
     });
 
