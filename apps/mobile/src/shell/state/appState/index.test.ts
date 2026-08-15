@@ -456,6 +456,22 @@ describe('app-state persistence format', () => {
     expect(parsePersistedAppState(raw)).toEqual(createDefaultAppStateData());
   });
 
+  it('defaults deletion confirmation on for older state and preserves an explicit opt-out', () => {
+    const persisted = JSON.parse(serializeAppState(createDefaultAppStateData())) as {
+      settings: Record<string, unknown>;
+    };
+    delete persisted.settings['confirmSessionDeletion'];
+    expect(parsePersistedAppState(JSON.stringify(persisted)).settings.confirmSessionDeletion).toBe(
+      true,
+    );
+
+    const optedOut = createDefaultAppStateData();
+    optedOut.settings.confirmSessionDeletion = false;
+    expect(
+      parsePersistedAppState(serializeAppState(optedOut)).settings.confirmSessionDeletion,
+    ).toBe(false);
+  });
+
   it('rejects unknown versions without falling back and overwriting them', () => {
     expect(() => parsePersistedAppState('{"version":999}')).toThrow(AppStatePersistenceError);
   });

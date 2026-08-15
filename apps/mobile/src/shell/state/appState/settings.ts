@@ -30,5 +30,6 @@ export const preferredAgentIdAtom = settingAtom('preferredAgentId');
 export const agentSettingsAtom = settingAtom('agentSettings');
 export const approvalModeAtom = settingAtom('approvalMode');
 export const showToolCallsAtom = settingAtom('showToolCalls');
+export const confirmSessionDeletionAtom = settingAtom('confirmSessionDeletion');
 export const workspaceChatLimitAtom = settingAtom('workspaceChatLimit');
 export const recentBrowserTargetUrlsAtom = settingAtom('recentBrowserTargetUrls');

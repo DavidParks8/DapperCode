@@ -15,6 +15,7 @@ export function parseAppSettings(raw: string): {
   agentSettings: AgentDefaultSettingsMap;
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
+  confirmSessionDeletion: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
 } {
@@ -25,6 +26,7 @@ export function parseAppSettings(raw: string): {
       agentSettings: {},
       approvalMode: 'normal',
       showToolCalls: true,
+      confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
@@ -40,6 +42,7 @@ export function parseAppSettings(raw: string): {
         agentSettings: {},
         approvalMode: 'normal',
         showToolCalls: true,
+        confirmSessionDeletion: true,
         workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
       };
@@ -60,6 +63,10 @@ export function parseAppSettings(raw: string): {
         typeof (parsed as { showToolCalls?: unknown }).showToolCalls === 'undefined'
           ? true
           : normalizeBoolean((parsed as { showToolCalls?: unknown }).showToolCalls),
+      confirmSessionDeletion:
+        typeof (parsed as { confirmSessionDeletion?: unknown }).confirmSessionDeletion === 'boolean'
+          ? (parsed as { confirmSessionDeletion: boolean }).confirmSessionDeletion
+          : true,
       workspaceChatLimit: normalizeWorkspaceChatLimit(
         (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit,
       ),
@@ -74,6 +81,7 @@ export function parseAppSettings(raw: string): {
       agentSettings: {},
       approvalMode: 'normal',
       showToolCalls: true,
+      confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
     };
