@@ -170,11 +170,38 @@ function compositeOverlayColor(backgroundColor: string, overlayColor: string): s
 }
 
 function textLines(tree: QueryableRenderer): string[] {
-  return tree.root
+  const nativeLines = tree.root
     .findAllByType(Text)
     .filter((node) => !hasTextAncestor(node))
     .map((node) => flattenTestText(node))
     .filter(Boolean);
+  return [...nativeLines, ...selectableOutputLines(tree.root)];
+}
+
+function selectableOutputLines(root: Queryable): string[] {
+  const lines: string[] = [];
+  for (const node of root.findAllByType('mock-web-view')) {
+    const source = node.props['source'] as { html?: unknown } | undefined;
+    const html = source?.html;
+    if (typeof html !== 'string') {
+      continue;
+    }
+    const match = /<pre id="content">([\s\S]*?)<\/pre>/u.exec(html);
+    if (!match?.[1]) {
+      continue;
+    }
+    lines.push(...decodeHtmlText(match[1]).split('\n'));
+  }
+  return lines;
+}
+
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, '&');
 }
 
 function flattenTestText(node: Queryable): string {
@@ -635,6 +662,38 @@ describe('ToolInvocationRow', () => {
 });
 
 describe('ToolInvocationOutput', () => {
+  it('renders terminal and text responses as an in-line selectable surface', () => {
+    const value = invocation({
+      id: 'tool-selectable-output',
+      kind: 'execute',
+      terminals: [{ terminalId: 'term-1', output: 'compile error\nexit 1' }],
+      textLines: ['fix the import', 'then rerun'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const frames = tree.root.findAllByType('mock-web-view');
+    expect(frames).toHaveLength(2);
+    const htmls = frames.map((frame) => {
+      const source = frame.props['source'] as { html?: unknown } | undefined;
+      return typeof source?.html === 'string' ? source.html : '';
+    });
+    expect(htmls.some((html) => html.includes('compile error\nexit 1'))).toBe(true);
+    expect(htmls.some((html) => html.includes('fix the import\nthen rerun'))).toBe(true);
+    for (const html of htmls) {
+      expect(html).toContain('user-select: text');
+    }
+
+    const outputLines = tree.root
+      .findAllByType(Text)
+      .filter((node) =>
+        ['compile error', 'exit 1', 'fix the import', 'then rerun'].includes(flattenTestText(node)),
+      );
+    expect(outputLines).toHaveLength(0);
+
+    act(() => tree.unmount());
+  });
+
   it('renders a location chip when the header does not already contain it', () => {
     const value = invocation({
       id: 'tool-read',
