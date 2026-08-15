@@ -33,6 +33,7 @@ import { resetHuggedTextWidthCache } from './UserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
 import { projectTranscript } from '../transcript/controllers/projectionController';
+import { isMermaidFence } from './markdownRules';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -63,9 +64,18 @@ type TestMessageInput = Omit<ApiChatMessage, 'role' | 'content'> & {
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
 afterEach(() => {
-  getDefaultStore().set(responseUsageOverlayAtom, null);
+  act(() => {
+    getDefaultStore().set(responseUsageOverlayAtom, null);
+  });
 });
 
+jest.mock('@expo/vector-icons', () => {
+  const React = jest.requireActual('react');
+  const ReactNative = jest.requireActual('react-native');
+  return {
+    Ionicons: (props: Record<string, unknown>) => React.createElement(ReactNative.View, props),
+  };
+});
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
 jest.mock('react-native-gesture-handler', () => {
@@ -329,6 +339,92 @@ describe('ChatMessage markdown formatting', () => {
     expect(Clipboard.setStringAsync).toHaveBeenCalledWith(code);
     expect(root.findByProps({ accessibilityLabel: 'Code copied' })).toBeTruthy();
 
+    act(() => tree.unmount());
+  });
+
+  it('shows a diagram placeholder while an incomplete Mermaid fence streams, then renders it', () => {
+    const pending: ApiChatMessage = {
+      id: 'msg_streamed_mermaid',
+      role: 'assistant',
+      content: '```mermaid\ngraph TD\n  A -->',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
+    };
+    const tree = renderMessage(pending);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll(
+        (node) => node.type === View && node.props['testID'] === 'mermaid-streaming-placeholder',
+      ),
+    ).toHaveLength(1);
+    expect(
+      tree.root.findByProps({
+        accessibilityRole: 'progressbar',
+        accessibilityLabel: 'Building Mermaid diagram',
+      }),
+    ).toBeTruthy();
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(0);
+
+    act(() => {
+      tree.update(
+        renderMessageElement({
+          ...pending,
+          content: '```mermaid\ngraph TD\n  A --> B\n```',
+          pending: false,
+        }),
+      );
+    });
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll(
+        (node) => node.type === View && node.props['testID'] === 'mermaid-streaming-placeholder',
+      ),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it('recognizes Mermaid as the first case-insensitive info token and preserves other fences', () => {
+    expect(isMermaidFence(' Mermaid theme=dark ')).toBe(true);
+    expect(isMermaidFence('mermaid-js')).toBe(false);
+    expect(isMermaidFence('typescript mermaid')).toBe(false);
+    expect(isMermaidFence(null)).toBe(false);
+
+    const tree = renderMessage({
+      id: 'msg_multiple_mermaid',
+      role: 'assistant',
+      content: [
+        '``` Mermaid theme=dark',
+        'graph TD',
+        '  A --> B',
+        '```',
+        '',
+        '```mermaid',
+        'sequenceDiagram',
+        '  A->>B: Hello',
+        '```',
+        '',
+        '```typescript',
+        'const diagram = "raw code";',
+        '```',
+      ].join('\n'),
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(2);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(1);
     act(() => tree.unmount());
   });
 
@@ -1968,21 +2064,33 @@ function renderMessage(
 ): QueryableRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
-    tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 59, right: 0, bottom: 34, left: 0 },
-        }}
-      >
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ChatMessage message={toOfficialMessage(message)} {...props} />
-          <ResponseUsageOverlay />
-        </AppThemeProvider>
-      </SafeAreaProvider>,
-    );
+    tree = renderer.create(renderMessageElement(message, props));
   });
   return expectValue(tree) as QueryableRenderer;
+}
+
+function renderMessageElement(
+  message: ApiChatMessage | TestMessageInput,
+  props: {
+    bridgeUrl?: string;
+    bridgeToken?: string;
+    onOpenLocalPreview?: (url: string) => void;
+    onOpenSubAgentThread?: (id: string) => void;
+  } = {},
+): ReactElement {
+  return (
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 59, right: 0, bottom: 34, left: 0 },
+      }}
+    >
+      <AppThemeProvider theme={createAppTheme('dark')}>
+        <ChatMessage message={toOfficialMessage(message)} {...props} />
+        <ResponseUsageOverlay />
+      </AppThemeProvider>
+    </SafeAreaProvider>
+  );
 }
 
 function onlyInvocation(messages: TestMessageInput[]): ToolInvocation {

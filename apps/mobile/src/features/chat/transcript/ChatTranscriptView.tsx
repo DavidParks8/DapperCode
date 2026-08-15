@@ -10,7 +10,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
 
 import type { Chat } from '@bridge/types/types';
 import type { ChatScrollRailJumpController } from './scrollRail/jumpController';
@@ -59,6 +58,7 @@ import {
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
 import { PINNED_SCROLL_EPSILON_PX, updateAutoScrollStickiness } from './autoScroll';
+import { TranscriptRenderRoot } from './TranscriptRenderRoot';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -475,7 +475,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   );
 
   return (
-    <GestureDetector gesture={timestampReveal.gesture}>
+    <TranscriptRenderRoot gesture={timestampReveal.gesture}>
       <View style={styles.messageListShell}>
         <FlatList
           key={chat.id}
@@ -575,6 +575,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           theme,
         })}
       </View>
-    </GestureDetector>
+    </TranscriptRenderRoot>
   );
 }, areChatTranscriptViewPropsEqual);

@@ -85,6 +85,7 @@ export const runOnJS =
   <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
   (...args: Args) =>
     callback(...args);
+export const useAnimatedProps = (factory: () => unknown) => factory();
 export const useAnimatedStyle = (factory: () => unknown) => factory();
 export const useDerivedValue = <T,>(factory: () => T) => ({ value: factory() });
 interface MockFrameCallback {

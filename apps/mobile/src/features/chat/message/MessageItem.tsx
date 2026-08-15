@@ -31,8 +31,12 @@ function ChatMessageComponent({
   const markdownRules = useMemo(
     // The chat surface offers its own selection sheet, so the markdown must not claim the long
     // press for React Native's copy-the-whole-block edit menu.
-    () => createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview, { selectable: false }),
-    [bridgeToken, bridgeUrl, onOpenLocalPreview],
+    () =>
+      createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview, {
+        selectable: false,
+        mermaidPending: message.pending === true,
+      }),
+    [bridgeToken, bridgeUrl, message.pending, onOpenLocalPreview],
   );
   const [expandedTimelineEntries, setExpandedTimelineEntries] = useState<Record<string, boolean>>(
     {},

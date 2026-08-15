@@ -1,16 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
-import { feedback } from '@shared/feedback';
 import { type AppTheme, useAppTheme } from '@shared/theme';
 import { highlightCode, renderSyntaxTokens, resolveSyntaxLanguage } from './syntaxHighlight';
-
-const COPY_STATUS_RESET_MS = 1600;
-
-type CopyStatus = 'idle' | 'copied' | 'error';
+import { useCopyText } from './useCopyText';
 
 export function ChatCodeBlock({
   code,
@@ -23,39 +18,12 @@ export function ChatCodeBlock({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle');
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { copy, copyStatus, copyLabel, accessibilityLabel } = useCopyText(code);
   const syntax = useMemo(() => resolveSyntaxLanguage(language), [language]);
   const highlightedCode = useMemo(
     () => highlightCode(code, syntax.grammar),
     [code, syntax.grammar],
   );
-
-  useEffect(
-    () => () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  const handleCopy = useCallback(() => {
-    void Clipboard.setStringAsync(code)
-      .then(() => {
-        void feedback.success();
-        setCopyStatus('copied');
-        if (resetTimerRef.current) {
-          clearTimeout(resetTimerRef.current);
-        }
-        resetTimerRef.current = setTimeout(() => setCopyStatus('idle'), COPY_STATUS_RESET_MS);
-      })
-      .catch(() => {
-        setCopyStatus('error');
-      });
-  }, [code]);
-
-  const copyLabel = copyStatus === 'copied' ? 'Copied' : copyStatus === 'error' ? 'Retry' : 'Copy';
   const copyColor = copyStatus === 'error' ? theme.colors.error : theme.colors.textSecondary;
 
   return (
@@ -66,16 +34,10 @@ export function ChatCodeBlock({
         </Text>
         <Pressable
           testID="chat-code-block-copy"
-          onPress={handleCopy}
+          onPress={copy}
           style={({ pressed }) => [styles.copyButton, pressed && styles.copyButtonPressed]}
           accessibilityRole="button"
-          accessibilityLabel={
-            copyStatus === 'copied'
-              ? 'Code copied'
-              : copyStatus === 'error'
-                ? 'Copy failed. Try again'
-                : 'Copy code'
-          }
+          accessibilityLabel={accessibilityLabel}
           accessibilityHint="Copies this code block to the clipboard"
         >
           <Ionicons

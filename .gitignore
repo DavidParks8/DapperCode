@@ -18,6 +18,7 @@ yarn-error.log*
 # Expo / React Native
 .expo/
 .expo-shared/
+/apps/mobile/assets/generated/mermaid-renderer.html
 *.jks
 *.p8
 *.p12

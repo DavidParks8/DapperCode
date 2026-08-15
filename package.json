@@ -37,6 +37,7 @@
     "apps/mobile"
   ],
   "scripts": {
+    "postinstall": "npm run mermaid:prepare -w @dappercode/mobile",
     "mobile": "./scripts/start-expo.sh mobile",
     "ios": "./scripts/start-expo.sh ios",
     "android": "./scripts/start-expo.sh android",
