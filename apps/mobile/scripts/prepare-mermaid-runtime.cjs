@@ -21,6 +21,20 @@ const harness = String.raw`
 
   const MAX_SOURCE_BYTES = 65536;
   const MAX_SVG_BYTES = 2097152;
+  const PORTABLE_PRESENTATION_PROPERTIES = [
+    'color',
+    'fill',
+    'fill-opacity',
+    'fill-rule',
+    'opacity',
+    'stroke',
+    'stroke-dasharray',
+    'stroke-dashoffset',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-opacity',
+    'stroke-width',
+  ];
   const viewport = document.getElementById('viewport');
   const stage = document.getElementById('stage');
   const diagram = document.getElementById('diagram');
@@ -137,6 +151,27 @@ const harness = String.raw`
       style.textContent = assertSafeCss(style.textContent || '');
     });
     return svg.outerHTML;
+  }
+
+  function inlineComputedPresentationStyles(svg) {
+    const stylesheetMirrors = Array.from(svg.querySelectorAll('style')).map((source) => {
+      const mirror = document.createElement('style');
+      mirror.textContent = source.textContent;
+      document.head.appendChild(mirror);
+      return mirror;
+    });
+    try {
+      [svg, ...Array.from(svg.querySelectorAll('*'))].forEach((element) => {
+        if (element.localName === 'style') return;
+        const computed = window.getComputedStyle(element);
+        PORTABLE_PRESENTATION_PROPERTIES.forEach((property) => {
+          const value = computed.getPropertyValue(property).trim();
+          if (value) element.setAttribute(property, value);
+        });
+      });
+    } finally {
+      stylesheetMirrors.forEach((mirror) => mirror.remove());
+    }
   }
 
   function readSvgSize(svg) {
@@ -278,14 +313,22 @@ const harness = String.raw`
       parsedSvg.style.display = 'block';
       parsedSvg.style.width = '100%';
       parsedSvg.style.height = '100%';
-      const sanitizedSvg = sanitizeSvg(parsedSvg);
+      const initialSanitizedSvg = sanitizeSvg(parsedSvg);
+      if (new TextEncoder().encode(initialSanitizedSvg).byteLength > MAX_SVG_BYTES) {
+        throw new Error('This Mermaid diagram is too complex to display safely.');
+      }
+      diagram.innerHTML = initialSanitizedSvg;
+      const svg = diagram.querySelector('svg');
+      if (!svg) throw new Error('Mermaid returned no SVG.');
+      inlineComputedPresentationStyles(svg);
+      const sanitizedSvg = sanitizeSvg(svg);
       if (new TextEncoder().encode(sanitizedSvg).byteLength > MAX_SVG_BYTES) {
         throw new Error('This Mermaid diagram is too complex to display safely.');
       }
       diagram.innerHTML = sanitizedSvg;
-      const svg = diagram.querySelector('svg');
-      if (!svg) throw new Error('Mermaid returned no SVG.');
-      const size = readSvgSize(svg);
+      const renderedSvg = diagram.querySelector('svg');
+      if (!renderedSvg) throw new Error('Mermaid returned no SVG.');
+      const size = readSvgSize(renderedSvg);
       diagramWidth = size.width;
       diagramHeight = size.height;
       paintTransform();
