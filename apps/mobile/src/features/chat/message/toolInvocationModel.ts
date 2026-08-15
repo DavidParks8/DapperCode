@@ -166,6 +166,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   const metaFields = resolveInvocationMetaFields(meta);
   const parsed = parseStructuredContent(meta?.content);
   const locations = parseLocations(meta?.locations);
+  suppressRenderedLocationLines(parsed.suppressedLines, meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
   // the diff or console block, so it is not repeated as loose lines.
   const textLines = rawLines.filter(
@@ -373,6 +374,21 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
     seen.add(key);
     return true;
   });
+}
+
+function suppressRenderedLocationLines(suppressedLines: Set<string>, value: unknown): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  for (const entry of value) {
+    const location = asRecord(entry);
+    const path = asString(location?.['path'])?.trim();
+    if (!path) {
+      continue;
+    }
+    const line = typeof location?.['line'] === 'number' ? location['line'] : null;
+    suppressedLines.add(`[location: ${path}${line ? `:${String(line)}` : ''}]`);
+  }
 }
 
 function normalizeLocationPath(path: string): string {

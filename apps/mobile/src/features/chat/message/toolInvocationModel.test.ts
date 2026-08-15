@@ -109,6 +109,29 @@ describe('buildToolInvocations', () => {
     expect(requireTestValue(invocations[0], 'indexed test value').truncated).toBe(true);
   });
 
+  it('does not keep flattened location markers as loose response lines', () => {
+    const invocation = requireTestValue(
+      buildToolInvocations([
+        toolMessage(
+          'tool-result:call-1',
+          '[terminal: term-1]\ncompile error\n[location: ./src//app.ts:12]',
+          meta({
+            kind: 'execute',
+            title: 'npm run build',
+            content: [{ type: 'terminal', terminalId: 'term-1', output: 'compile error' }],
+            locations: [{ path: './src//app.ts', line: 12 }],
+          }),
+          'call-1',
+        ),
+      ])[0],
+      'terminal invocation with a location',
+    );
+
+    expect(invocation.locations).toEqual([{ path: 'src/app.ts', line: 12 }]);
+    expect(invocation.terminals).toEqual([{ terminalId: 'term-1', output: 'compile error' }]);
+    expect(invocation.textLines).toEqual([]);
+  });
+
   it('marks a failed invocation and keeps execute titles monospaced', () => {
     const invocations = buildToolInvocations([
       toolMessage(

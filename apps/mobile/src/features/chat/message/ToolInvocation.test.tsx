@@ -6,7 +6,7 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
 import { createToolCardStyles } from './toolCardStyles';
-import type { ToolInvocation } from './toolInvocationModel';
+import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import {
   LinearTransition,
   ReduceMotion,
@@ -646,6 +646,40 @@ describe('ToolInvocationOutput', () => {
     expand(tree, value.title);
 
     expect(textLines(tree)).toContain('README.md');
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps a terminal location at the top without repeating its raw marker in the response', () => {
+    const value = requireTestValue(
+      buildToolInvocations([
+        {
+          id: 'tool-result:terminal-location',
+          role: 'tool',
+          toolCallId: 'terminal-location',
+          content: '[terminal: term-1]\ncompile error\n[location: src/app.ts:12]',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          toolMeta: {
+            toolCallId: 'terminal-location',
+            kind: 'execute',
+            status: 'failed',
+            title: 'npm run build',
+            content: [{ type: 'terminal', terminalId: 'term-1', output: 'compile error' }],
+            locations: [{ path: 'src/app.ts', line: 12 }],
+          },
+        },
+      ])[0],
+      'terminal invocation with a location',
+    );
+    const tree = render(value);
+    expand(tree, value.title);
+    const lines = textLines(tree);
+
+    expect(lines).toContain('Locations');
+    expect(lines).toContain('src/app.ts:12');
+    expect(lines).toContain('compile error');
+    expect(lines).not.toContain('[location: src/app.ts:12]');
+    expect(lines.filter((line) => line === 'Response')).toHaveLength(1);
 
     act(() => tree.unmount());
   });
