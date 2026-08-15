@@ -2949,7 +2949,7 @@ function MainRouteShell() {
         root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
       expect(byLabel(root, 'Send message')).toBeTruthy();
-      expect(textInput(root, 'Message').props.value).toBe('Follow up');
+      expect(textInput(root, 'Message').props['value']).toBe('Follow up');
       expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
       expect(api.rememberChat).toHaveBeenLastCalledWith(store.get(selectedChatAtom));
       act(() => tree.unmount());
