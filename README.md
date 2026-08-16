@@ -15,8 +15,8 @@ the public internet.
 - `contracts`: versioned bridge RPC fixtures
 - `scripts`: development, contract, version, coverage, and app-bundle automation
 
-There is no npm bridge package and no JavaScript operator CLI. npm is used only for the mobile and
-repository development toolchain. Each desktop package includes the Rust operator and bridge. On
+There is no published Node bridge package and no JavaScript operator CLI. pnpm is used only for the
+mobile and repository development toolchain. Each desktop package includes the Rust operator and bridge. On
 macOS the layout is:
 
 ```text
@@ -32,8 +32,8 @@ DapperCode.app
 Build and open the self-contained app:
 
 ```bash
-npm ci
-npm run desktop:build:macos
+pnpm install --frozen-lockfile
+pnpm run desktop:build:macos
 open apps/desktop/dist/DapperCode.app
 ```
 
@@ -67,11 +67,11 @@ before installation. Release packaging has a separate production certificate sig
 certificate is not a production trust mechanism.
 
 On Windows with PowerShell 7 (`pwsh`), the pinned .NET 10 SDK (`10.0.302`, including MSBuild 18),
-the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and npm:
+the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and pnpm:
 
 ```powershell
-npm ci
-npm run desktop:build:windows
+pnpm install --frozen-lockfile
+pnpm run desktop:build:windows
 ```
 
 This creates the bundle, public test certificate, and installation instructions under
@@ -83,7 +83,7 @@ First-time setup registers an ACP executable already installed on the computer, 
 Rust operator hashes that executable and stores the resulting configuration centrally, in
 the platform application-data directory, never inside your repositories. Distinct workspace bearer
 tokens are protected by the operating-system credential store: one shared macOS Keychain vault and
-bounded per-workspace Windows Credential Manager entries. It does not invoke npm, npx, Node.js,
+bounded per-workspace Windows Credential Manager entries. It does not invoke pnpm, npm, npx, Node.js,
 shell setup scripts, or floating package resolution.
 
 Every workspace keeps an isolated profile, vault entry, manifest, state directory, and attachment root.
@@ -99,13 +99,13 @@ keep their worker alive.
 For direct terminal operation from a source checkout:
 
 ```bash
-npm run operator -- discover-agent --agent-id opencode
-npm run operator -- setup --workspace "$PWD" --network local --host 192.168.1.20 \
+pnpm run operator discover-agent --agent-id opencode
+pnpm run operator setup --workspace "$PWD" --network local --host 192.168.1.20 \
   --agent-id opencode --agent-args acp
-npm run operator -- start --workspace "$PWD"
-npm run operator -- status --workspace "$PWD" --human
-npm run operator -- restart --workspace "$PWD"
-npm run operator -- stop --workspace "$PWD"
+pnpm run operator start --workspace "$PWD"
+pnpm run operator status --workspace "$PWD" --human
+pnpm run operator restart --workspace "$PWD"
+pnpm run operator stop --workspace "$PWD"
 ```
 
 The installed macOS app's operator is at:
@@ -120,11 +120,11 @@ before signaling the process. The broker owns and reaps isolated workspace worke
 
 ## Mobile Development
 
-Requirements: Node.js 22.13+, npm 10+, Rust 1.97.1, and Git.
+Requirements: Node.js 22.13+, pnpm 11.1.2, Rust 1.97.1, and Git.
 
 ```bash
-npm ci
-npm run mobile
+pnpm install --frozen-lockfile
+pnpm run mobile
 ```
 
 Use a LAN or Tailscale bridge address on physical devices. `localhost` on a phone refers to the
@@ -133,25 +133,25 @@ phone, not the computer running the bridge.
 ## Quality Gates
 
 ```bash
-npm run lint
-npm run duplicates:check
-npm run typecheck
-npm run test
-npm run contract:check
-npm run coverage:check
-npm run coverage:rust
-npm run desktop:build:macos
+pnpm run lint
+pnpm run duplicates:check
+pnpm run typecheck
+pnpm run test
+pnpm run contract:check
+pnpm run coverage:check
+pnpm run coverage:rust
+pnpm run desktop:build:macos
 # On Windows:
-npm run desktop:build:windows
+pnpm run desktop:build:windows
 ```
 
-`npm run duplicates:check` scans authored mobile TypeScript and native Rust/Swift sources with
+`pnpm run duplicates:check` scans authored mobile TypeScript and native Rust/Swift sources with
 separate production-focused thresholds. Generated artifacts and dedicated test files/directories
 are excluded; inline Rust unit tests remain subject to the native high-signal threshold.
 
 GitHub Actions validates repository policy, RPC contracts, mobile quality/coverage, Rust bridge
 quality/coverage, and desktop packages. Mobile EAS distribution remains a separate protected
-workflow. There is no npm publication workflow for the bridge.
+workflow. There is no package-registry publication workflow for the bridge.
 
 ## Documentation
 

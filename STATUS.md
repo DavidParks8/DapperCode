@@ -15,7 +15,7 @@ Expo mobile app -> authenticated private-network WebSocket/HTTP
 - Bridge: `services/rust-bridge`
 - Mobile: `apps/mobile`
 
-The desktop app bundles the Rust operator and bridge. The bridge is not published through npm and
+The desktop app bundles the Rust operator and bridge. The bridge is not published through a package registry and
 there is no JavaScript operator. Setup registers and hashes an ACP executable already installed by
 the user.
 

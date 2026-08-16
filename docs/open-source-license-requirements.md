@@ -1,6 +1,6 @@
 # Open Source License Requirements
 
-This project includes third-party open source software through npm, Cargo, and NuGet dependencies.
+This project includes third-party open source software through Node, Cargo, and NuGet dependencies.
 
 ## Distribution Requirements
 

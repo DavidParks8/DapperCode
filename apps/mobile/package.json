@@ -6,19 +6,19 @@
   "scripts": {
     "mermaid:prepare": "node scripts/prepare-mermaid-runtime.cjs",
     "mermaid:check": "node scripts/prepare-mermaid-runtime.cjs --check",
-    "prestart": "npm run mermaid:prepare",
+    "prestart": "pnpm run mermaid:prepare",
     "start": "node scripts/run-expo.cjs start",
-    "preios": "npm run mermaid:prepare",
+    "preios": "pnpm run mermaid:prepare",
     "ios": "node scripts/run-expo.cjs run:ios",
-    "preandroid": "npm run mermaid:prepare",
+    "preandroid": "pnpm run mermaid:prepare",
     "android": "node scripts/run-expo.cjs run:android",
-    "prelint": "npm run mermaid:prepare",
+    "prelint": "pnpm run mermaid:prepare",
     "lint": "eslint src widgets --ext .ts,.tsx --max-warnings=0 --cache --cache-strategy content --concurrency 4",
-    "pretypecheck": "npm run mermaid:prepare",
+    "pretypecheck": "pnpm run mermaid:prepare",
     "typecheck": "node scripts/run-expo.cjs customize tsconfig.json && tsc --noEmit",
-    "prebuild": "npm run mermaid:prepare",
+    "prebuild": "pnpm run mermaid:prepare",
     "build": "node scripts/run-expo.cjs export --platform all --output-dir dist",
-    "pretest": "npm run mermaid:prepare",
+    "pretest": "pnpm run mermaid:prepare",
     "test": "jest --passWithNoTests",
     "test:coverage": "jest --runInBand --coverage",
     "test:contract": "jest --runInBand src/bridge/ws/ws.test.ts src/bridge/agui/agUi.test.ts",
@@ -70,6 +70,7 @@
     "valibot": "1.4.2"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "0.86.2",
     "@testing-library/react-native": "13.3.3",
     "@types/jest": "29.5.14",
     "@types/jsdom": "20.0.1",
@@ -79,6 +80,7 @@
     "@types/react-test-renderer": "19.1.0",
     "@typescript-eslint/eslint-plugin": "^8.57.1",
     "@typescript-eslint/parser": "^8.57.1",
+    "babel-preset-expo": "57.0.6",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-jest": "^29.16.0",
@@ -114,7 +116,7 @@
       }
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|expo-router|standard-navigation|@expo(nent)?/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
+      "node_modules/(?!(?:\\.pnpm/[^/]+/node_modules/)?(?:((jest-)?react-native|@react-native(-community)?)|expo(nent)?|expo-router|standard-navigation|@expo(nent)?/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg))"
     ]
   }
 }

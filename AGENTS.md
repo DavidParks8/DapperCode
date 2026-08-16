@@ -23,7 +23,8 @@ The bridge is private-network software. Never treat it as internet-safe by defau
 - `scripts/build-desktop-macos.mjs`: deterministic macOS app assembly
 
 The app bundle contains a native Swift executable and two Rust executables. It must not contain
-Node, npm, JavaScript, npm manifests, `node_modules`, or Slint. macOS styling comes from standard
+Node, package-manager executables, JavaScript, package manifests, `node_modules`, or Slint. macOS
+styling comes from standard
 SwiftUI/AppKit controls. Windows will require a native WinUI shell for Mica/future OS styling.
 
 ### Bridge
@@ -56,20 +57,20 @@ distributions.
 ## Primary Commands
 
 ```bash
-npm run mobile
-npm run ios
-npm run android
-npm run bridge
-npm run operator -- status --workspace <path>
-npm run desktop:check
-npm run desktop:test
-npm run desktop:build:macos
-npm run lint
-npm run typecheck
-npm run test
-npm run contract:check
-npm run coverage:rust
-npm run release:testflight -- --dry-run
+pnpm run mobile
+pnpm run ios
+pnpm run android
+pnpm run bridge
+pnpm run operator status --workspace <path>
+pnpm run desktop:check
+pnpm run desktop:test
+pnpm run desktop:build:macos
+pnpm run lint
+pnpm run typecheck
+pnpm run test
+pnpm run contract:check
+pnpm run coverage:rust
+pnpm run release:testflight --dry-run
 ```
 
 Do not automatically restart a user bridge during debugging unless explicitly requested.
@@ -77,8 +78,8 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 ## Editing Rules
 
 - Keep bridge contract changes mirrored in Rust, mobile types/client, fixtures, tests, and docs.
-- Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not npm scripts.
-- Never add an npm bridge package, JavaScript operator fallback, or bridge update RPC.
+- Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not package scripts.
+- Never add a Node bridge package, JavaScript operator fallback, or bridge update RPC.
 - Never write app-owned configuration or state into a user repository; it belongs in the central data
   directory (`DAPPERCODE_DATA_DIR` overrides it for tests).
 - Preserve the central data directory, keychain entries, bridge logs, and user-installed agent state.
@@ -110,26 +111,26 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 Desktop changes:
 
 ```bash
-npm run cargo -- fmt --check --manifest-path apps/desktop/Cargo.toml
-npm run cargo -- clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
-npm run cargo -- test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
-npm run desktop:build:macos
+pnpm run cargo fmt --check --manifest-path apps/desktop/Cargo.toml
+pnpm run cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+pnpm run cargo test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
+pnpm run desktop:build:macos
 ```
 
 Bridge changes:
 
 ```bash
-npm run cargo -- fmt --check --manifest-path services/rust-bridge/Cargo.toml
-npm run cargo -- check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
-npm run cargo -- test --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
+pnpm run cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml
+pnpm run cargo check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+pnpm run cargo test --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
 ```
 
 Mobile changes:
 
 ```bash
-npm run lint -w @dappercode/mobile
-npm run typecheck -w @dappercode/mobile
-npm run test -w @dappercode/mobile
+pnpm --filter @dappercode/mobile run lint
+pnpm --filter @dappercode/mobile run typecheck
+pnpm --filter @dappercode/mobile run test
 ```
 
 Use `docs/setup-and-operations.md` for smoke tests and `docs/troubleshooting.md` for recovery.

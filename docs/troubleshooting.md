@@ -42,8 +42,8 @@ DapperCode.app/Contents/Resources/bin/dappercode
 DapperCode.app/Contents/Resources/bin/dappercode-bridge
 ```
 
-Rebuild or reinstall the app if either file is missing. The app does not fall back to npm, Node.js,
-or shell scripts.
+Rebuild or reinstall the app if either file is missing. The app does not fall back to Node.js,
+package managers, or shell scripts.
 
 The Windows package likewise carries `dappercode.exe` and `dappercode-bridge.exe` in its private
 runtime payload. Repair or reinstall the MSIX bundle if the app reports that either runtime
@@ -54,7 +54,7 @@ executable is unavailable.
 Use the native file picker or inspect discovery directly:
 
 ```bash
-npm run operator -- discover-agent --agent-id opencode
+pnpm run operator discover-agent --agent-id opencode
 ```
 
 Install the ACP-capable agent independently, then select its executable. DapperCode setup registers
@@ -75,7 +75,7 @@ Alternatively choose **Local network** and enter the desktop computer's LAN IPv4
 Inspect status and logs:
 
 ```bash
-npm run operator -- status --workspace /path/to/repository --human
+pnpm run operator status --workspace /path/to/repository --human
 open "$HOME/Library/Application Support/dev.dappercode.desktop/broker.log"
 ```
 
@@ -97,7 +97,7 @@ The Rust operator verifies its private ownership record independently of current
 a live owned broker even when the stored configuration needs repair:
 
 ```bash
-npm run operator -- stop --workspace /path/to/repository
+pnpm run operator stop --workspace /path/to/repository
 ```
 
 Repair setup before starting again.
@@ -115,15 +115,15 @@ Repair setup before starting again.
 Configure the bridge through the desktop app or Rust operator first, then run:
 
 ```bash
-npm run mobile
+pnpm run mobile
 ```
 
 The Expo script reads the bridge host from the central `config.json`, falling back to a repo-root
-`.env.secure` for the `npm run bridge` development flow.
+`.env.secure` for the `pnpm run bridge` development flow.
 
 ## macOS Asks for Keychain Access After a Rebuild
 
-The app is ad-hoc code-signed, so `npm run desktop:build:macos` produces a new code signature and
+The app is ad-hoc code-signed, so `pnpm run desktop:build:macos` produces a new code signature and
 macOS treats it as a different application. Approve the single shared-vault prompt, or set
 `DAPPERCODE_SECRETS_BACKEND=file` to keep the credential vault in a `0600` file under `secrets/` in
 the data directory instead. The desktop app shows which backend is in use.
@@ -157,7 +157,7 @@ workspace's current pairing QR to replace the old URL with the canonical broker 
 Stop the broker, then:
 
 ```bash
-npm run operator -- forget --workspace /path/to/repository
+pnpm run operator forget --workspace /path/to/repository
 ```
 
 That removes the profile from `config.json`, deletes its token, and removes its profile directory.

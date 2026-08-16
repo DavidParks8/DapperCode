@@ -97,8 +97,8 @@ start is retried without one — losing sub-agent streaming rather than the agen
 
 ## Testing
 
-- `npm run test:acp` covers fake ACP transports, session lifecycle, interactions, canonical events,
+- `pnpm run test:acp` covers fake ACP transports, session lifecycle, interactions, canonical events,
   steering, cancellation, and manager recovery.
-- `npm run test -w apps/mobile` covers WebSocket replay ordering, stream changes, and snapshot
+- `pnpm --filter @dappercode/mobile run test` covers WebSocket replay ordering, stream changes, and snapshot
   convergence behavior.
-- `npm run contract:check` validates the checked mobile/Rust bridge contract fixtures.
+- `pnpm run contract:check` validates the checked mobile/Rust bridge contract fixtures.

@@ -13,30 +13,30 @@ Read [README.md](README.md), [setup and operations](docs/setup-and-operations.md
 ## Development
 
 ```bash
-npm ci
-npm run desktop:build:macos
-npm run mobile
+pnpm install --frozen-lockfile
+pnpm run desktop:build:macos
+pnpm run mobile
 ```
 
 Useful focused commands:
 
 ```bash
-npm run operator -- status --workspace "$PWD"
-npm run desktop:test
-npm run contract:check
-npm run lint
-npm run duplicates:check
-npm run typecheck
-npm run test
+pnpm run operator status --workspace "$PWD"
+pnpm run desktop:test
+pnpm run contract:check
+pnpm run lint
+pnpm run duplicates:check
+pnpm run typecheck
+pnpm run test
 ```
 
-`npm run duplicates:check` validates authored mobile and native source separately. Generated
+`pnpm run duplicates:check` validates authored mobile and native source separately. Generated
 artifacts and dedicated test files/directories are excluded; inline Rust unit tests remain subject
 to the native high-signal threshold.
 
 The repository pins Rust in `rust-toolchain.toml`.
 
-Repository commands run Cargo through `npm run cargo -- <args>`. Local builds use an isolated target
+Repository commands run Cargo through `pnpm run cargo <args>`. Local builds use an isolated target
 directory per Git worktree under the operating system cache directory. Each invocation removes
 inactive managed targets whose worktrees are no longer registered, preventing deleted Copilot
 worktrees from leaving Rust build artifacts behind. CI retains its checkout-local targets for
@@ -48,7 +48,7 @@ GitHub Actions caching. Set `DAPPERCODE_MANAGED_CARGO_TARGETS=0` to opt out loca
 - Keep changes scoped.
 - Never expose the bridge publicly.
 - Mirror bridge contract changes across Rust, mobile, fixtures, tests, and docs.
-- Keep bridge setup and lifecycle in Rust; do not add npm/Node/JavaScript operator fallbacks.
+- Keep bridge setup and lifecycle in Rust; do not add Node/JavaScript operator fallbacks.
 - Native shells should use OS controls and styling rather than hard-coded cross-platform themes.
 - Do not edit generated paths such as `node_modules`, `.expo`, `target`, `dist`, or Pods.
 - Update documentation when setup, runtime, platform, or distribution behavior changes.

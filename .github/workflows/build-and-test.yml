@@ -40,25 +40,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Validate repository policy
         run: |
-          npm run docs:check
-          npm run payment:check
-          npm run format:check
-          npm run test:scripts
-          npm run security:check
-          npm run duplicates:native
+          pnpm run docs:check
+          pnpm run payment:check
+          pnpm run format:check
+          pnpm run test:scripts
+          pnpm run security:check
+          pnpm run duplicates:native
 
   rpc-contract:
     name: RPC Contract
@@ -68,13 +70,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
@@ -86,10 +90,10 @@ jobs:
             services/rust-bridge -> target
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Validate RPC contract
-        run: npm run contract:check
+        run: pnpm run contract:check
 
   mobile:
     name: Mobile
@@ -99,31 +103,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run lint
 
       - name: Check source duplication
-        run: npm run duplicates:mobile
+        run: pnpm run duplicates:mobile
 
       - name: Typecheck
-        run: npm run typecheck -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run typecheck
 
       - name: Test with branch coverage
-        run: npm run test:coverage -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run test:coverage
 
       - name: Build Expo export
-        run: npm run build -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run build
 
       - name: Upload mobile coverage
         if: always()
@@ -182,13 +188,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
@@ -203,24 +211,24 @@ jobs:
             services/rust-bridge -> target
 
       - name: Install repository dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting
         working-directory: apps/desktop
         run: cargo fmt --check
 
       - name: Check desktop
-        run: npm run desktop:check
+        run: pnpm run desktop:check
 
       - name: Lint desktop
         working-directory: apps/desktop
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test desktop
-        run: npm run desktop:test
+        run: pnpm run desktop:test
 
       - name: Build macOS app
-        run: npm run desktop:build:macos
+        run: pnpm run desktop:build:macos
 
       - name: Verify native bundle policy
         run: |
@@ -228,7 +236,7 @@ jobs:
           test -x "$APP/Contents/MacOS/DapperCode"
           test -x "$APP/Contents/Resources/bin/dappercode"
           test -x "$APP/Contents/Resources/bin/dappercode-bridge"
-          ! find "$APP" -type f \( -name '*.js' -o -name package.json -o -name package-lock.json -o -name node -o -name npm -o -name npx \) -print | grep .
+          ! find "$APP" -type f \( -name '*.js' -o -name package.json -o -name package-lock.json -o -name pnpm-lock.yaml -o -name node -o -name npm -o -name npx -o -name pnpm -o -name pnpx \) -print | grep .
           ! find "$APP" -type f -print0 | xargs -0 strings | grep -Ei 'slint|node_modules|DAPPERCODE_BRIDGE_BINARY|DAPPERCODE_PACKAGE_ROOT|vendor/bridge-binaries|services/rust-bridge/target'
           codesign --verify --deep --strict "$APP"
 
@@ -252,13 +260,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v5
@@ -294,7 +304,7 @@ jobs:
             services/rust-bridge -> target
 
       - name: Install repository dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Restore pinned WinUI dependencies
         shell: pwsh
@@ -509,13 +519,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup pinned nightly Rust
         uses: dtolnay/rust-toolchain@stable
@@ -540,7 +552,7 @@ jobs:
           cache-on-failure: true
 
       - name: Enforce Rust branch coverage
-        run: npm run coverage:rust
+        run: pnpm run coverage:rust
 
       - name: Upload Rust coverage
         if: always()

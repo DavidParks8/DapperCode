@@ -487,7 +487,7 @@ impl BridgeSupervisor {
         let candidates = self.runtime.bridge_binary_candidates();
         resolve_existing_executable(&candidates).ok_or_else(|| {
             anyhow!(
-                "bridge binary is not installed; build it with 'npm run cargo -- build --locked --release --manifest-path services/rust-bridge/Cargo.toml' or reinstall DapperCode"
+                "bridge binary is not installed; build it with 'pnpm run cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml' or reinstall DapperCode"
             )
         })
     }
