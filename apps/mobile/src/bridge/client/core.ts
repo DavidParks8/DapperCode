@@ -155,7 +155,12 @@ export abstract class HostBridgeApiClientCore {
     ids: readonly string[],
     options?: ChatSummariesReadOptions,
   ): Promise<ChatSummary[]>;
-  abstract setChatWorkspace(id: string, cwd: string): Promise<Chat>;
+  abstract setChatWorkspace(
+    id: string,
+    cwd: string,
+    approvalPolicy?: ApprovalPolicy | null,
+  ): Promise<Chat>;
+  abstract setApprovalPolicy(approvalPolicy: ApprovalPolicy): Promise<void>;
   abstract resumeThread(
     id: string,
     options?: {

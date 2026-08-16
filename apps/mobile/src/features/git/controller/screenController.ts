@@ -14,6 +14,7 @@ import type {
   GitStatusResponse,
 } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
+import { toApprovalPolicyForMode } from '../../chat/helpers/helpers';
 import { useGitScreenDerived } from './derived';
 import { useGitScreenReviewController } from './reviewController';
 
@@ -284,7 +285,11 @@ export function useGitScreenController({
 
     try {
       setSavingWorkspace(true);
-      const updated = await api.setChatWorkspace(activeChat.id, nextWorkspace);
+      const updated = await api.setChatWorkspace(
+        activeChat.id,
+        nextWorkspace,
+        toApprovalPolicyForMode(approvalMode),
+      );
       setActiveChat(updated);
       setWorkspaceDraft(updated.cwd ?? nextWorkspace);
       setError(null);
@@ -294,7 +299,7 @@ export function useGitScreenController({
     } finally {
       setSavingWorkspace(false);
     }
-  }, [activeChat.id, api, onChatUpdated, savingWorkspace, workspaceDraft]);
+  }, [activeChat.id, api, approvalMode, onChatUpdated, savingWorkspace, workspaceDraft]);
 
   const commit = useCallback(async () => {
     const trimmedMessage = commitMessage.trim();

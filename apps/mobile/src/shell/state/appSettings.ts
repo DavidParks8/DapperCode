@@ -27,7 +27,7 @@ export function parseAppSettings(raw: string): {
       defaultStartCwd: null,
       preferredAgentId: null,
       agentSettings: {},
-      approvalMode: 'normal',
+      approvalMode: 'all',
       showToolCalls: true,
       confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
@@ -44,7 +44,7 @@ export function parseAppSettings(raw: string): {
         defaultStartCwd: null,
         preferredAgentId: null,
         agentSettings: {},
-        approvalMode: 'normal',
+        approvalMode: 'all',
         showToolCalls: true,
         confirmSessionDeletion: true,
         workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
@@ -87,7 +87,7 @@ export function parseAppSettings(raw: string): {
       defaultStartCwd: null,
       preferredAgentId: null,
       agentSettings: {},
-      approvalMode: 'normal',
+      approvalMode: 'all',
       showToolCalls: true,
       confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
@@ -219,7 +219,13 @@ export function pushRecentModelId(currentValues: readonly string[], nextValue: s
 }
 
 function normalizeStoredApprovalMode(value: unknown): ApprovalMode {
-  return value === 'yolo' ? 'yolo' : 'normal';
+  if (value === 'some') {
+    return 'some';
+  }
+  if (value === 'none' || value === 'yolo') {
+    return 'none';
+  }
+  return 'all';
 }
 
 function normalizeBoolean(value: unknown): boolean {

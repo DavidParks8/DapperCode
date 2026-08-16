@@ -6,13 +6,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
-import type { BridgeCapabilities } from '@bridge/types/types';
+import type { ApprovalMode, BridgeCapabilities } from '@bridge/types/types';
 import type { AppStateData, PushSettingsState } from '@shell/state/appState';
 import { AppStatePersistenceError, createDefaultAppStateData } from '@shell/state/appState';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
 import type { BridgeProfile } from '@shell/state/bridgeProfiles';
 import { requestPushRegistration } from '@shell/push/notifications';
 import { appStateSnapshotAtom, pushSettingsAtom } from '@shell/state/appState/atoms';
+import { approvalPolicySyncRevisionAtom } from '@shell/state/approvalPolicy';
 import {
   approvalModeAtom,
   confirmSessionDeletionAtom,
@@ -115,6 +116,7 @@ const capabilities: BridgeCapabilities = {
 interface SettingsStoreOptions {
   push?: Partial<PushSettingsState>;
   activeProfileId?: string | null;
+  approvalMode?: ApprovalMode;
   workspaceChatLimit?: WorkspaceChatLimit;
   persistenceError?: AppStatePersistenceError | null;
   writeCurrent?: jest.Mock;
@@ -129,6 +131,9 @@ function createSettingsData(options: SettingsStoreOptions): AppStateData {
   };
   if (options.workspaceChatLimit !== undefined) {
     data.settings = { ...data.settings, workspaceChatLimit: options.workspaceChatLimit };
+  }
+  if (options.approvalMode !== undefined) {
+    data.settings = { ...data.settings, approvalMode: options.approvalMode };
   }
   return data;
 }
@@ -219,10 +224,12 @@ async function renderSettings(
     drawerToggle?: jest.Mock;
   } = {},
 ): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: AppStore }> {
-  const api = options.api ?? {
+  const api = {
     readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
     registerPushDevice: jest.fn().mockResolvedValue(undefined),
     unregisterPushDevice: jest.fn().mockResolvedValue(undefined),
+    setApprovalPolicy: jest.fn().mockResolvedValue(undefined),
+    ...options.api,
   };
   const store =
     options.store ??
@@ -286,13 +293,11 @@ describe('SettingsScreen behavior', () => {
     expect(hasText(root, 'Preferred · Active · ready · 1.2.3 · managed')).toBe(true);
     expect(hasText(root, 'Agent unavailable (details redacted)')).toBe(true);
 
-    await changeToggle(findToggle(root, 'Require approvals'), false);
     await changeToggle(findToggle(root, 'Show tool calls'), false);
     const deletionConfirmation = findToggle(root, 'Confirm before deleting sessions');
     expect(deletionConfirmation.props['value']).toBe(true);
     await changeToggle(deletionConfirmation, false);
     await press(findPressableByText(root, 'Chats per workspace'));
-    expect(store.get(approvalModeAtom)).toBe('yolo');
     expect(store.get(showToolCallsAtom)).toBe(false);
     expect(store.get(confirmSessionDeletionAtom)).toBe(false);
     expect(store.get(workspaceChatLimitAtom)).toBe(10);
@@ -316,6 +321,129 @@ describe('SettingsScreen behavior', () => {
     );
     await press(drawer);
     expect(drawerToggle).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    {
+      initial: 'all' as const,
+      initialTitle: 'Require all approvals',
+      selected: 'Require some approvals',
+      expected: 'some' as const,
+    },
+    {
+      initial: 'some' as const,
+      initialTitle: 'Require some approvals',
+      selected: 'Require absolutely no approvals',
+      expected: 'none' as const,
+    },
+    {
+      initial: 'none' as const,
+      initialTitle: 'Require absolutely no approvals',
+      selected: 'Require all approvals',
+      expected: 'all' as const,
+    },
+  ])(
+    'changes approval mode from $initial to $expected',
+    async ({ initial, initialTitle, selected, expected }) => {
+      const store = createSettingsStore({ approvalMode: initial });
+      const { tree, api } = await renderSettings({ store });
+      const root = tree.root as Queryable;
+
+      expect(hasText(root, initialTitle)).toBe(true);
+      await press(findPressableByText(root, 'Approvals'));
+      await press(findPressableByText(root, selected));
+
+      expect(store.get(approvalModeAtom)).toBe(expected);
+      expect(api['setApprovalPolicy']).toHaveBeenCalledWith(
+        expected === 'all' ? 'untrusted' : expected === 'some' ? 'on-request' : 'never',
+      );
+      act(() => tree.unmount());
+    },
+  );
+
+  it('applies a connected bridge policy before committing the setting', async () => {
+    let resolvePolicy!: () => void;
+    const setApprovalPolicy = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePolicy = resolve;
+        }),
+    );
+    const store = createSettingsStore({ approvalMode: 'all' });
+    const { tree } = await renderSettings({ store, api: { setApprovalPolicy } });
+    const root = tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Approvals'));
+    await press(findPressableByText(root, 'Require absolutely no approvals'));
+    expect(setApprovalPolicy).toHaveBeenCalledWith('never');
+    expect(store.get(approvalModeAtom)).toBe('all');
+
+    await act(async () => {
+      resolvePolicy();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(store.get(approvalModeAtom)).toBe('none');
+    act(() => tree.unmount());
+  });
+
+  it('keeps the prior setting when a connected bridge rejects a permissive policy change', async () => {
+    const store = createSettingsStore({ approvalMode: 'all' });
+    const { tree } = await renderSettings({
+      store,
+      api: {
+        setApprovalPolicy: jest.fn().mockRejectedValue(new Error('policy update failed')),
+      },
+    });
+    const root = tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Approvals'));
+    await press(findPressableByText(root, 'Require absolutely no approvals'));
+
+    expect(store.get(approvalModeAtom)).toBe('all');
+    expect(hasText(root, 'policy update failed')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('persists a stricter mode when the bridge rejects the immediate policy update', async () => {
+    const setApprovalPolicy = jest.fn().mockRejectedValue(new Error('policy update failed'));
+    const store = createSettingsStore({ approvalMode: 'none' });
+    const { tree } = await renderSettings({
+      store,
+      api: { setApprovalPolicy },
+    });
+    const root = tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Approvals'));
+    await press(findPressableByText(root, 'Require all approvals'));
+
+    expect(setApprovalPolicy).toHaveBeenCalledWith('untrusted');
+    expect(store.get(approvalModeAtom)).toBe('all');
+    expect(store.get(approvalPolicySyncRevisionAtom)).toBe(1);
+    expect(hasText(root, 'policy update failed')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('retries the current approval mode when its selected option is pressed again', async () => {
+    const store = createSettingsStore({ approvalMode: 'some' });
+    const { tree, api } = await renderSettings({ store });
+    const root = tree.root as Queryable;
+
+    await press(findPressableByText(root, 'Approvals'));
+    const selectedOption = requireTestValue(
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Require some approvals' &&
+          (node.props['accessibilityState'] as { selected?: boolean } | undefined)?.selected ===
+            true,
+      )[0],
+      'selected approval option',
+    );
+    await press(selectedOption);
+
+    expect(api['setApprovalPolicy']).toHaveBeenCalledWith('on-request');
+    expect(store.get(approvalModeAtom)).toBe('some');
     act(() => tree.unmount());
   });
 

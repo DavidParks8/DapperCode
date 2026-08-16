@@ -32,6 +32,11 @@ import {
 } from '@shell/state/bridge/capabilities';
 import { bindBridgeCapabilitiesRevalidation } from '@shell/state/bridge/capabilitiesLifecycle';
 import {
+  approvalPolicySyncRevisionAtom,
+  toApprovalPolicyForMode,
+} from '@shell/state/approvalPolicy';
+import { approvalModeAtom } from '@shell/state/appState/settings';
+import {
   revalidateWorkspacePickerResourcesAtom,
   WORKSPACE_RESOURCES_TTL_MS,
 } from '../../features/workspace/state/workspaceActions';
@@ -70,6 +75,74 @@ export function useAppBridgeLifecycle(): void {
 
     return bindAppWebSocketLifecycle(ws);
   }, [store, ws]);
+
+  useEffect(() => {
+    if (!api || !ws || !activeBridgeProfileId || !settingsLoaded || isOnboarding) {
+      return;
+    }
+    let cancelled = false;
+    let inFlight = false;
+    let rerun = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryDelay = 1000;
+
+    const attempt = () => {
+      if (cancelled || !ws.isConnected) {
+        return;
+      }
+      if (inFlight) {
+        rerun = true;
+        return;
+      }
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      inFlight = true;
+      const attemptedMode = store.get(approvalModeAtom);
+      void api
+        .setApprovalPolicy(toApprovalPolicyForMode(attemptedMode))
+        .then(() => {
+          retryDelay = 1000;
+        })
+        .catch(() => {
+          if (!cancelled) {
+            retryTimer = setTimeout(attempt, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, 30_000);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+          const modeChanged = store.get(approvalModeAtom) !== attemptedMode;
+          if (!cancelled && ws.isConnected && (rerun || modeChanged)) {
+            rerun = false;
+            if (retryTimer) {
+              clearTimeout(retryTimer);
+              retryTimer = null;
+            }
+            void Promise.resolve().then(attempt);
+          }
+        });
+    };
+
+    const unsubscribePolicySyncRequests = store.sub(approvalPolicySyncRevisionAtom, attempt);
+    if (ws.isConnected) {
+      attempt();
+    }
+    const unsubscribe = ws.onStatus((connected) => {
+      if (connected) {
+        attempt();
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      unsubscribePolicySyncRequests();
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+      }
+    };
+  }, [activeBridgeProfileId, api, isOnboarding, settingsLoaded, store, ws]);
 
   useEffect(() => {
     if (!api || !ws || !activeBridgeProfileId) {

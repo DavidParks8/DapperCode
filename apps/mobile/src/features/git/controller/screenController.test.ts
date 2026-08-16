@@ -5,7 +5,7 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
-import type { Chat, GitStatusResponse } from '@bridge/types/types';
+import type { ApprovalMode, Chat, GitStatusResponse } from '@bridge/types/types';
 import {
   GIT_SCREEN_REFRESH_INTERVAL_MS,
   gitErrorMessage,
@@ -82,13 +82,18 @@ function createApi() {
   return methods as unknown as HostBridgeApiClient;
 }
 
-function makeHarness(api: HostBridgeApiClient, initialChat: Chat = chat) {
+function makeHarness(
+  api: HostBridgeApiClient,
+  initialChat: Chat = chat,
+  approvalMode?: ApprovalMode,
+) {
   let current: GitScreenController;
   const onChatUpdated = jest.fn();
   function Probe(props: { chat: Chat }) {
     current = useGitScreenController({
       api,
       chat: props.chat,
+      approvalMode,
       onBack: jest.fn(),
       onChatUpdated,
     });
@@ -249,7 +254,7 @@ describe('useGitScreenController committed cwd handling', () => {
   it('switches reads and mutations to the newly committed cwd once the workspace is saved', async () => {
     const api = createApi();
     (api.setChatWorkspace as jest.Mock).mockResolvedValue({ ...chat, cwd: '/next' });
-    const harness = makeHarness(api);
+    const harness = makeHarness(api, chat, 'none');
     await harness.mount();
 
     act(() => harness.current.setWorkspaceDraft('/next'));
@@ -263,7 +268,7 @@ describe('useGitScreenController committed cwd handling', () => {
       await Promise.resolve();
     });
 
-    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next');
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next', 'never');
     expect(harness.current.requestedCwd).toBe('/next');
     expect(api.gitStatus).toHaveBeenCalledWith('/next');
 

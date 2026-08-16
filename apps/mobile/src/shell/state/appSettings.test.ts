@@ -4,9 +4,26 @@ test('fresh settings have no preferred agent', () => {
   expect(parseAppSettings('')).toMatchObject({
     preferredAgentId: null,
     agentSettings: {},
+    approvalMode: 'all',
     confirmSessionDeletion: true,
     recentModelIdsByAgent: {},
   });
+});
+
+test('normalizes explicit approval modes and preserves legacy safety levels', () => {
+  for (const [stored, expected] of [
+    ['all', 'all'],
+    ['some', 'some'],
+    ['none', 'none'],
+    ['normal', 'all'],
+    ['yolo', 'none'],
+    ['invalid', 'all'],
+  ] as const) {
+    expect(
+      parseAppSettings(JSON.stringify({ version: APP_SETTINGS_VERSION, approvalMode: stored }))
+        .approvalMode,
+    ).toBe(expected);
+  }
 });
 
 test('persists opaque agent IDs without fixed-name migration', () => {

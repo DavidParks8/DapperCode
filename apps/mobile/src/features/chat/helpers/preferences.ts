@@ -1,11 +1,7 @@
-import type {
-  AgentId,
-  ApprovalMode,
-  ApprovalPolicy,
-  ReasoningEffort,
-  ServiceTier,
-} from '@bridge/types/types';
+import type { AgentId, ReasoningEffort, ServiceTier } from '@bridge/types/types';
 import type { ChatModelPreference, SelectedServiceTier } from './types';
+
+export { toApprovalPolicyForMode } from '@shell/state/approvalPolicy';
 
 export const AGENT_MODEL_PREFERENCE_PREFIX = '__agent_model__:';
 
@@ -98,10 +94,6 @@ export function resolveSelectedServiceTier(
   }
 
   return toSelectedServiceTier(defaultServiceTier);
-}
-
-export function toApprovalPolicyForMode(mode: ApprovalMode | null | undefined): ApprovalPolicy {
-  return mode === 'yolo' ? 'never' : 'untrusted';
 }
 
 export function shouldSurfaceChatLoadError(

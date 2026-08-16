@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use agent_client_protocol::schema::v1::{
@@ -9,14 +10,45 @@ use agent_client_protocol::schema::v1::{
     SelectedPermissionOutcome, SessionId, ToolCallStatus, ToolKind,
 };
 use agent_client_protocol::Responder;
-use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::events::CanonicalEvent;
-use super::session::SessionRegistry;
+use super::session::{AcpSession, SessionRegistry};
 
 const MAX_PENDING_GLOBAL: usize = 128;
 const MAX_PENDING_PER_SESSION: usize = 16;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalPolicy {
+    #[default]
+    Untrusted,
+    OnRequest,
+    Never,
+}
+
+impl ApprovalPolicy {
+    pub fn from_wire(value: Option<&str>) -> Self {
+        match value {
+            Some("on-request") => Self::OnRequest,
+            Some("never") => Self::Never,
+            _ => Self::Untrusted,
+        }
+    }
+
+    fn automatically_approves(self, request: &RequestPermissionRequest) -> bool {
+        match self {
+            Self::Untrusted => false,
+            Self::OnRequest => matches!(
+                request.tool_call.fields.kind,
+                Some(ToolKind::Read | ToolKind::Search | ToolKind::Think)
+            ),
+            Self::Never => true,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InteractionError {
@@ -97,14 +129,19 @@ pub struct InteractionRegistry {
     sessions: SessionRegistry,
     max_global: usize,
     max_per_session: usize,
+    #[cfg(test)]
+    permission_publication_barrier: Arc<Mutex<Option<PermissionPublicationBarrier>>>,
 }
 
 #[derive(Default)]
 struct InteractionState {
     next_order: u64,
     session_epochs: HashMap<SessionId, u64>,
+    approval_policies: HashMap<SessionId, ApprovalPolicy>,
     permissions: HashMap<String, PermissionEntry>,
     elicitations: HashMap<String, ElicitationEntry>,
+    blocked_sessions: HashSet<SessionId>,
+    draining: bool,
 }
 
 struct PermissionEntry {
@@ -113,6 +150,7 @@ struct PermissionEntry {
     summary: PendingPermissionSummary,
     session_id: SessionId,
     generation: u64,
+    publication: Arc<InteractionPublication>,
     _session_lease: super::session::SessionLease,
     #[cfg(test)]
     fail_cancel_response: bool,
@@ -124,9 +162,207 @@ struct ElicitationEntry {
     summary: PendingElicitationSummary,
     session_id: SessionId,
     generation: u64,
+    publication: Arc<InteractionPublication>,
     _session_lease: super::session::SessionLease,
     #[cfg(test)]
     fail_cancel_response: bool,
+}
+
+pub(crate) struct PolicySessionLocks {
+    session_ids: Vec<SessionId>,
+    loaded_ids: HashSet<SessionId>,
+    _leases: Vec<super::session::SessionLease>,
+    guards: Vec<OwnedMutexGuard<()>>,
+}
+
+const PUBLICATION_PENDING: u8 = 0;
+const PUBLICATION_PUBLISHED: u8 = 1;
+const PUBLICATION_ABANDONED: u8 = 2;
+
+struct InteractionPublication {
+    state: AtomicU8,
+    changed: tokio::sync::Notify,
+}
+
+impl InteractionPublication {
+    fn new(cleanup: AbandonedInteractionCleanup) -> (Arc<Self>, InteractionPublisher) {
+        let publication = Arc::new(Self {
+            state: AtomicU8::new(PUBLICATION_PENDING),
+            changed: tokio::sync::Notify::new(),
+        });
+        (
+            publication.clone(),
+            InteractionPublisher {
+                publication,
+                cleanup: Some(cleanup),
+                completed: false,
+            },
+        )
+    }
+
+    fn is_published(&self) -> bool {
+        self.state.load(Ordering::Acquire) == PUBLICATION_PUBLISHED
+    }
+
+    fn is_abandoned(&self) -> bool {
+        self.state.load(Ordering::Acquire) == PUBLICATION_ABANDONED
+    }
+
+    async fn wait(&self) -> bool {
+        loop {
+            let changed = self.changed.notified();
+            match self.state.load(Ordering::Acquire) {
+                PUBLICATION_PUBLISHED => return true,
+                PUBLICATION_ABANDONED => return false,
+                _ => changed.await,
+            }
+        }
+    }
+}
+
+struct InteractionPublisher {
+    publication: Arc<InteractionPublication>,
+    cleanup: Option<AbandonedInteractionCleanup>,
+    completed: bool,
+}
+
+enum AbandonedInteractionKind {
+    Permission,
+    Elicitation,
+}
+
+struct AbandonedInteractionCleanup {
+    inner: Arc<Mutex<InteractionState>>,
+    request_id: String,
+    kind: AbandonedInteractionKind,
+}
+
+struct BlockedSessionGuard {
+    inner: Arc<Mutex<InteractionState>>,
+    session_id: SessionId,
+    armed: bool,
+}
+
+impl BlockedSessionGuard {
+    fn new(inner: Arc<Mutex<InteractionState>>, session_id: SessionId) -> Self {
+        Self {
+            inner,
+            session_id,
+            armed: true,
+        }
+    }
+
+    async fn clear(mut self) {
+        self.inner
+            .lock()
+            .await
+            .blocked_sessions
+            .remove(&self.session_id);
+        self.armed = false;
+    }
+}
+
+impl Drop for BlockedSessionGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let inner = self.inner.clone();
+        let session_id = self.session_id.clone();
+        tokio::spawn(async move {
+            inner.lock().await.blocked_sessions.remove(&session_id);
+        });
+    }
+}
+
+impl InteractionPublisher {
+    fn publish(mut self) {
+        self.publication
+            .state
+            .store(PUBLICATION_PUBLISHED, Ordering::Release);
+        self.cleanup = None;
+        self.completed = true;
+        self.publication.changed.notify_waiters();
+    }
+}
+
+impl Drop for InteractionPublisher {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        self.publication
+            .state
+            .store(PUBLICATION_ABANDONED, Ordering::Release);
+        self.publication.changed.notify_waiters();
+        let Some(cleanup) = self.cleanup.take() else {
+            return;
+        };
+        tokio::spawn(async move {
+            cleanup.discard().await;
+        });
+    }
+}
+
+impl AbandonedInteractionCleanup {
+    async fn discard(self) {
+        match self.kind {
+            AbandonedInteractionKind::Permission => {
+                let entry = {
+                    let mut state = self.inner.lock().await;
+                    let entry = state
+                        .permissions
+                        .remove(&self.request_id)
+                        .filter(|entry| entry.publication.is_abandoned());
+                    if let Some(entry) = &entry {
+                        InteractionRegistry::bump_epoch(&mut state, &entry.session_id);
+                    }
+                    entry
+                };
+                if let Some(entry) = entry {
+                    let _ = entry.responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ));
+                }
+            }
+            AbandonedInteractionKind::Elicitation => {
+                let entry = {
+                    let mut state = self.inner.lock().await;
+                    let entry = state
+                        .elicitations
+                        .remove(&self.request_id)
+                        .filter(|entry| entry.publication.is_abandoned());
+                    if let Some(entry) = &entry {
+                        InteractionRegistry::bump_epoch(&mut state, &entry.session_id);
+                    }
+                    entry
+                };
+                if let Some(entry) = entry {
+                    let _ = entry
+                        .responder
+                        .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct PermissionPublicationBarrier {
+    reached: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl PermissionPublicationBarrier {
+    pub(crate) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
 }
 
 impl InteractionRegistry {
@@ -141,12 +377,198 @@ impl InteractionRegistry {
     }
 
     fn with_limits(sessions: SessionRegistry, max_global: usize, max_per_session: usize) -> Self {
+        let inner = Arc::new(Mutex::new(InteractionState::default()));
+        let mut removals = sessions.subscribe_removals();
+        let cleanup_inner = inner.clone();
+        let _removal_cleanup = tokio::spawn(async move {
+            while let Some((session_id, acknowledge)) = removals.recv().await {
+                cleanup_inner
+                    .lock()
+                    .await
+                    .approval_policies
+                    .remove(&session_id);
+                let _ = acknowledge.send(());
+            }
+        });
         Self {
-            inner: Arc::new(Mutex::new(InteractionState::default())),
+            inner,
             sessions,
             max_global,
             max_per_session,
+            #[cfg(test)]
+            permission_publication_barrier: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pause_next_permission_publication(&self) -> PermissionPublicationBarrier {
+        let barrier = PermissionPublicationBarrier {
+            reached: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        *self.permission_publication_barrier.lock().await = Some(barrier.clone());
+        barrier
+    }
+
+    #[cfg(test)]
+    pub async fn set_approval_policy(
+        &self,
+        session_id: &SessionId,
+        policy: ApprovalPolicy,
+    ) -> Result<(), InteractionError> {
+        self.set_approval_policies(std::slice::from_ref(session_id), policy)
+            .await
+    }
+
+    pub(crate) async fn lock_policy_sessions(
+        &self,
+        session_ids: &[SessionId],
+    ) -> PolicySessionLocks {
+        let mut session_ids = session_ids.to_vec();
+        session_ids.sort_by_key(ToString::to_string);
+        session_ids.dedup();
+        let mut loaded_ids = HashSet::new();
+        let mut leases = Vec::new();
+        let mut guards = Vec::new();
+        for session_id in &session_ids {
+            let Some(lease) = self.sessions.stable_lease(session_id).await else {
+                continue;
+            };
+            guards.push(lease.session().lock_interactions().await);
+            loaded_ids.insert(session_id.clone());
+            leases.push(lease);
+        }
+        PolicySessionLocks {
+            session_ids,
+            loaded_ids,
+            _leases: leases,
+            guards,
+        }
+    }
+
+    pub(crate) async fn set_approval_policies(
+        &self,
+        session_ids: &[SessionId],
+        policy: ApprovalPolicy,
+    ) -> Result<(), InteractionError> {
+        let locks = self.lock_policy_sessions(session_ids).await;
+        self.set_approval_policies_locked(locks, policy).await
+    }
+
+    pub(crate) async fn set_approval_policies_locked(
+        &self,
+        locks: PolicySessionLocks,
+        policy: ApprovalPolicy,
+    ) -> Result<(), InteractionError> {
+        let publications = {
+            let mut state = self.inner.lock().await;
+            for session_id in &locks.session_ids {
+                if policy == ApprovalPolicy::Untrusted {
+                    state.approval_policies.remove(session_id);
+                } else {
+                    state.approval_policies.insert(session_id.clone(), policy);
+                }
+            }
+            state
+                .permissions
+                .values()
+                .filter(|entry| {
+                    locks.loaded_ids.contains(&entry.session_id)
+                        && policy.automatically_approves(&entry.request)
+                })
+                .map(|entry| entry.publication.clone())
+                .collect::<Vec<_>>()
+        };
+        let PolicySessionLocks {
+            loaded_ids, guards, ..
+        } = locks;
+        drop(guards);
+        for publication in publications {
+            publication.wait().await;
+        }
+        let permissions = {
+            let mut state = self.inner.lock().await;
+            let approval_policies = state.approval_policies.clone();
+            let permissions = state
+                .permissions
+                .extract_if(|_, entry| {
+                    loaded_ids.contains(&entry.session_id)
+                        && approval_policies
+                            .get(&entry.session_id)
+                            .copied()
+                            .unwrap_or_default()
+                            .automatically_approves(&entry.request)
+                        && (entry.publication.is_published() || entry.publication.is_abandoned())
+                })
+                .map(|(_, entry)| entry)
+                .collect::<Vec<_>>();
+            let drained_sessions = permissions
+                .iter()
+                .map(|entry| entry.session_id.clone())
+                .collect::<HashSet<_>>();
+            for session_id in drained_sessions {
+                Self::bump_epoch(&mut state, &session_id);
+            }
+            permissions
+        };
+
+        for entry in permissions {
+            if entry.publication.is_abandoned() {
+                let result = entry
+                    .responder
+                    .respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ))
+                    .map_err(response_error);
+                if let Err(error) = result {
+                    eprintln!(
+                        "approval policy committed but abandoned permission response failed: {error}"
+                    );
+                }
+                continue;
+            }
+            let (outcome, outcome_name) = automatic_permission_outcome(&entry.request);
+            #[cfg(test)]
+            let result = if entry.fail_cancel_response {
+                Err(InteractionError::Response(
+                    "injected automatic permission response failure".to_string(),
+                ))
+            } else {
+                entry
+                    .responder
+                    .respond(RequestPermissionResponse::new(outcome))
+                    .map_err(response_error)
+            };
+            #[cfg(not(test))]
+            let result = entry
+                .responder
+                .respond(RequestPermissionResponse::new(outcome))
+                .map_err(response_error);
+            emit_permission(
+                entry._session_lease.session(),
+                &entry.summary,
+                false,
+                Some(&outcome_name),
+            )
+            .await;
+            if let Err(error) = result {
+                eprintln!(
+                    "approval policy committed but automatic permission response failed: {error}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn approval_policy(&self, session_id: &SessionId) -> ApprovalPolicy {
+        self.inner
+            .lock()
+            .await
+            .approval_policies
+            .get(session_id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub async fn register_permission(
@@ -155,12 +577,13 @@ impl InteractionRegistry {
         responder: Responder<RequestPermissionResponse>,
     ) -> Result<(), agent_client_protocol::Error> {
         let cancellation = responder.cancellation();
-        let Some(session_lease) = self.sessions.lease(&request.session_id).await else {
+        let Some(session_lease) = self.sessions.stable_lease(&request.session_id).await else {
             return responder.respond(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
             ));
         };
         let session = session_lease.session().clone();
+        let publication_guard = session.lock_interactions().await;
         let mut state = self.inner.lock().await;
         let Some(generation) = session.active_interaction_generation().await else {
             drop(state);
@@ -168,6 +591,22 @@ impl InteractionRegistry {
                 RequestPermissionOutcome::Cancelled,
             ));
         };
+        if state.draining || state.blocked_sessions.contains(&request.session_id) {
+            drop(state);
+            return responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        }
+        let policy = state
+            .approval_policies
+            .get(&request.session_id)
+            .copied()
+            .unwrap_or_default();
+        if policy.automatically_approves(&request) {
+            drop(state);
+            let (outcome, _) = automatic_permission_outcome(&request);
+            return responder.respond(RequestPermissionResponse::new(outcome));
+        }
         let snapshot = session.snapshot().await;
         let thread_id = snapshot.thread_id;
         let turn_id = snapshot.active_source_turn_id.unwrap_or_default();
@@ -188,6 +627,11 @@ impl InteractionRegistry {
             turn_id,
             &request,
         );
+        let (publication, publisher) = InteractionPublication::new(AbandonedInteractionCleanup {
+            inner: self.inner.clone(),
+            request_id: request_id.clone(),
+            kind: AbandonedInteractionKind::Permission,
+        });
         state.permissions.insert(
             request_id.clone(),
             PermissionEntry {
@@ -196,13 +640,21 @@ impl InteractionRegistry {
                 responder,
                 summary: summary.clone(),
                 generation,
+                publication,
                 _session_lease: session_lease,
                 #[cfg(test)]
                 fail_cancel_response: false,
             },
         );
         drop(state);
+        drop(publication_guard);
+        #[cfg(test)]
+        if let Some(barrier) = self.permission_publication_barrier.lock().await.take() {
+            barrier.reached.notify_one();
+            barrier.release.notified().await;
+        }
         emit_permission(&session, &summary, true, None).await;
+        publisher.publish();
         let registry = self.clone();
         tokio::spawn(async move {
             cancellation.cancelled().await;
@@ -223,7 +675,7 @@ impl InteractionRegistry {
         let session_id = match request.scope() {
             ElicitationScope::Session(scope) => self
                 .sessions
-                .lease(&scope.session_id)
+                .stable_lease(&scope.session_id)
                 .await
                 .map(|lease| (scope.session_id.clone(), lease)),
             _ => None,
@@ -231,6 +683,8 @@ impl InteractionRegistry {
         let Some((session_id, session_lease)) = session_id else {
             return responder.respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
         };
+        let session = session_lease.session().clone();
+        let publication_guard = session.lock_interactions().await;
         let ElicitationMode::Form(form) = &request.mode else {
             return responder.respond_with_error(
                 agent_client_protocol::Error::method_not_found()
@@ -239,11 +693,14 @@ impl InteractionRegistry {
         };
         let schema = form.requested_schema.clone();
         let mut state = self.inner.lock().await;
-        let session = session_lease.session().clone();
         let Some(generation) = session.active_interaction_generation().await else {
             drop(state);
             return responder.respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
         };
+        if state.draining || state.blocked_sessions.contains(&session_id) {
+            drop(state);
+            return responder.respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
+        }
         let snapshot = session.snapshot().await;
         let agent_id = snapshot.agent_id;
         let thread_id = snapshot.thread_id;
@@ -262,6 +719,11 @@ impl InteractionRegistry {
             turn_id,
             &request,
         );
+        let (publication, publisher) = InteractionPublication::new(AbandonedInteractionCleanup {
+            inner: self.inner.clone(),
+            request_id: request_id.clone(),
+            kind: AbandonedInteractionKind::Elicitation,
+        });
         state.elicitations.insert(
             request_id.clone(),
             ElicitationEntry {
@@ -270,15 +732,16 @@ impl InteractionRegistry {
                 summary: summary.clone(),
                 session_id: session_id.clone(),
                 generation,
+                publication,
                 _session_lease: session_lease,
                 #[cfg(test)]
                 fail_cancel_response: false,
             },
         );
         drop(state);
-        if let Some(session) = self.sessions.get(&session_id).await {
-            emit_elicitation(&session, &summary, true, None).await;
-        }
+        drop(publication_guard);
+        emit_elicitation(&session, &summary, true, None).await;
+        publisher.publish();
         let registry = self.clone();
         tokio::spawn(async move {
             cancellation.cancelled().await;
@@ -315,6 +778,15 @@ impl InteractionRegistry {
         request_id: &str,
         option_id: &str,
     ) -> Result<(), InteractionError> {
+        let (session, publication) = self
+            .permission_context(request_id)
+            .await
+            .ok_or_else(|| InteractionError::UnknownRequest(request_id.to_string()))?;
+        if !publication.wait().await {
+            self.discard_abandoned_permission(request_id).await;
+            return Err(InteractionError::UnknownRequest(request_id.to_string()));
+        }
+        let _publication = session.lock_interactions().await;
         let entry = {
             let mut state = self.inner.lock().await;
             let entry = state
@@ -344,14 +816,13 @@ impl InteractionRegistry {
         let PermissionEntry {
             responder,
             summary,
-            session_id,
             _session_lease: session_lease,
             ..
         } = entry;
         let response = responder
             .respond(RequestPermissionResponse::new(outcome))
             .map_err(response_error);
-        self.publish_permission_resolved(session_id, summary, option_id.to_string(), session_lease);
+        self.publish_permission_resolved(summary, option_id.to_string(), session_lease);
         response
     }
 
@@ -360,6 +831,15 @@ impl InteractionRegistry {
         thread_id: &str,
         request_id: &str,
     ) -> Result<(), InteractionError> {
+        let (session, publication) = self
+            .permission_context(request_id)
+            .await
+            .ok_or_else(|| InteractionError::UnknownRequest(request_id.to_string()))?;
+        if !publication.wait().await {
+            self.discard_abandoned_permission(request_id).await;
+            return Err(InteractionError::UnknownRequest(request_id.to_string()));
+        }
+        let _publication = session.lock_interactions().await;
         let entry = {
             let mut state = self.inner.lock().await;
             let entry = state
@@ -376,7 +856,6 @@ impl InteractionRegistry {
         let PermissionEntry {
             responder,
             summary,
-            session_id,
             _session_lease: session_lease,
             ..
         } = entry;
@@ -385,12 +864,7 @@ impl InteractionRegistry {
                 RequestPermissionOutcome::Cancelled,
             ))
             .map_err(response_error);
-        self.publish_permission_resolved(
-            session_id,
-            summary,
-            "cancelled".to_string(),
-            session_lease,
-        );
+        self.publish_permission_resolved(summary, "cancelled".to_string(), session_lease);
         response
     }
 
@@ -400,6 +874,15 @@ impl InteractionRegistry {
         request_id: &str,
         values: BTreeMap<String, ElicitationContentValue>,
     ) -> Result<(), InteractionError> {
+        let (session, publication) = self
+            .elicitation_context(request_id)
+            .await
+            .ok_or_else(|| InteractionError::UnknownRequest(request_id.to_string()))?;
+        if !publication.wait().await {
+            self.discard_abandoned_elicitation(request_id).await;
+            return Err(InteractionError::UnknownRequest(request_id.to_string()));
+        }
+        let publication_guard = session.lock_interactions().await;
         let entry = {
             let mut state = self.inner.lock().await;
             let entry = state
@@ -415,15 +898,20 @@ impl InteractionRegistry {
             entry
         };
         let summary = entry.summary.clone();
-        let session_id = entry.session_id.clone();
         let response = entry
             .responder
             .respond(CreateElicitationResponse::new(ElicitationAction::Accept(
                 ElicitationAcceptAction::new().content(values),
             )))
             .map_err(response_error);
-        self.emit_elicitation_resolved(&session_id, &summary, "accepted")
-            .await;
+        drop(publication_guard);
+        emit_elicitation(
+            entry._session_lease.session(),
+            &summary,
+            false,
+            Some("accepted"),
+        )
+        .await;
         response
     }
 
@@ -459,31 +947,73 @@ impl InteractionRegistry {
         &self,
         session_id: &SessionId,
     ) -> (Option<u64>, Vec<InteractionError>) {
-        let mut state = self.inner.lock().await;
-        let generation = match self.sessions.get(session_id).await {
-            Some(session) => session.mark_cancelling().await,
-            None => None,
+        let Some(session_lease) = self.sessions.stable_lease(session_id).await else {
+            return (None, Vec::new());
         };
-        let permissions = state
-            .permissions
-            .extract_if(|_, entry| {
-                &entry.session_id == session_id && generation == Some(entry.generation)
-            })
-            .map(|(_, entry)| entry)
-            .collect::<Vec<_>>();
-        let elicitations = state
-            .elicitations
-            .extract_if(|_, entry| {
-                &entry.session_id == session_id && generation == Some(entry.generation)
-            })
-            .map(|(_, entry)| entry)
-            .collect::<Vec<_>>();
-        if !permissions.is_empty() || !elicitations.is_empty() {
-            Self::bump_epoch(&mut state, session_id);
+        let session = session_lease.session().clone();
+        let publication_guard = session.lock_interactions().await;
+        let generation = session.mark_cancelling().await;
+        let publications = {
+            let state = self.inner.lock().await;
+            state
+                .permissions
+                .values()
+                .filter(|entry| {
+                    &entry.session_id == session_id && generation == Some(entry.generation)
+                })
+                .map(|entry| entry.publication.clone())
+                .chain(
+                    state
+                        .elicitations
+                        .values()
+                        .filter(|entry| {
+                            &entry.session_id == session_id && generation == Some(entry.generation)
+                        })
+                        .map(|entry| entry.publication.clone()),
+                )
+                .collect::<Vec<_>>()
+        };
+        drop(publication_guard);
+        for publication in publications {
+            publication.wait().await;
         }
-        drop(state);
+        let publication_guard = session.lock_interactions().await;
+        let (permissions, elicitations) = {
+            let mut state = self.inner.lock().await;
+            let permissions = state
+                .permissions
+                .extract_if(|_, entry| {
+                    &entry.session_id == session_id && generation == Some(entry.generation)
+                })
+                .map(|(_, entry)| entry)
+                .collect::<Vec<_>>();
+            let elicitations = state
+                .elicitations
+                .extract_if(|_, entry| {
+                    &entry.session_id == session_id && generation == Some(entry.generation)
+                })
+                .map(|(_, entry)| entry)
+                .collect::<Vec<_>>();
+            if !permissions.is_empty() || !elicitations.is_empty() {
+                Self::bump_epoch(&mut state, session_id);
+            }
+            (permissions, elicitations)
+        };
+        drop(publication_guard);
         let mut errors = Vec::new();
         for entry in permissions {
+            if entry.publication.is_abandoned() {
+                let response = entry
+                    .responder
+                    .respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ))
+                    .map_err(response_error);
+                if let Err(error) = response {
+                    errors.push(error);
+                }
+                continue;
+            }
             let summary = entry.summary.clone();
             #[cfg(test)]
             let response = if entry.fail_cancel_response {
@@ -508,10 +1038,25 @@ impl InteractionRegistry {
             if let Err(error) = response {
                 errors.push(error);
             }
-            self.emit_permission_resolved(session_id, &summary, "cancelled")
-                .await;
+            emit_permission(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some("cancelled"),
+            )
+            .await;
         }
         for entry in elicitations {
+            if entry.publication.is_abandoned() {
+                let response = entry
+                    .responder
+                    .respond(CreateElicitationResponse::new(ElicitationAction::Cancel))
+                    .map_err(response_error);
+                if let Err(error) = response {
+                    errors.push(error);
+                }
+                continue;
+            }
             let summary = entry.summary.clone();
             #[cfg(test)]
             let response = if entry.fail_cancel_response {
@@ -532,20 +1077,23 @@ impl InteractionRegistry {
             if let Err(error) = response {
                 errors.push(error);
             }
-            self.emit_elicitation_resolved(session_id, &summary, "cancelled")
-                .await;
+            emit_elicitation(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some("cancelled"),
+            )
+            .await;
         }
         if !errors.is_empty() {
-            if let Some(session) = self.sessions.get(session_id).await {
-                let snapshot = session.snapshot().await;
-                session
-                    .emit(CanonicalEvent::Ignored {
-                        agent_id: snapshot.agent_id,
-                        thread_id: Some(snapshot.thread_id),
-                        kind: "interaction_cancel_response_failed".to_string(),
-                    })
-                    .await;
-            }
+            let snapshot = session.snapshot().await;
+            session
+                .emit(CanonicalEvent::Ignored {
+                    agent_id: snapshot.agent_id,
+                    thread_id: Some(snapshot.thread_id),
+                    kind: "interaction_cancel_response_failed".to_string(),
+                })
+                .await;
         }
         (generation, errors)
     }
@@ -606,7 +1154,12 @@ impl InteractionRegistry {
     }
 
     pub async fn prepare_steer(&self, session_id: &SessionId) -> Result<u64, InteractionError> {
-        let (permissions, elicitations, epoch) = {
+        let session_lease = self.sessions.stable_lease(session_id).await;
+        let publication_guard = match &session_lease {
+            Some(lease) => Some(lease.session().lock_interactions().await),
+            None => None,
+        };
+        let (plans, elicitation_ids, publications) = {
             let mut state = self.inner.lock().await;
             let plans = state
                 .permissions
@@ -635,6 +1188,33 @@ impl InteractionRegistry {
                 .filter(|(_, entry)| &entry.session_id == session_id)
                 .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>();
+            let publications = state
+                .permissions
+                .values()
+                .filter(|entry| &entry.session_id == session_id)
+                .map(|entry| entry.publication.clone())
+                .chain(
+                    state
+                        .elicitations
+                        .values()
+                        .filter(|entry| &entry.session_id == session_id)
+                        .map(|entry| entry.publication.clone()),
+                )
+                .collect::<Vec<_>>();
+            state.blocked_sessions.insert(session_id.clone());
+            (plans, elicitation_ids, publications)
+        };
+        let blocked_session = BlockedSessionGuard::new(self.inner.clone(), session_id.clone());
+        drop(publication_guard);
+        for publication in publications {
+            publication.wait().await;
+        }
+        let publication_guard = match &session_lease {
+            Some(lease) => Some(lease.session().lock_interactions().await),
+            None => None,
+        };
+        let (permissions, elicitations, epoch) = {
+            let mut state = self.inner.lock().await;
             let permissions = plans
                 .into_iter()
                 .filter_map(|(id, option_id)| {
@@ -658,31 +1238,70 @@ impl InteractionRegistry {
                 .unwrap_or_default();
             (permissions, elicitations, epoch)
         };
+        drop(publication_guard);
+        let mut first_error = None;
         for (entry, option_id) in permissions {
-            let summary = entry.summary.clone();
-            let response = entry.responder.respond(RequestPermissionResponse::new(
-                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                    option_id.clone(),
-                )),
-            ));
-            self.emit_permission_resolved(session_id, &summary, &option_id)
-                .await;
-            if let Err(error) = response {
-                return Err(response_error(error));
+            if entry.publication.is_abandoned() {
+                let response = entry
+                    .responder
+                    .respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ))
+                    .map_err(response_error);
+                if first_error.is_none() {
+                    first_error = response.err();
+                }
+                continue;
             }
-        }
-        for entry in elicitations {
             let summary = entry.summary.clone();
             let response = entry
                 .responder
-                .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
-            self.emit_elicitation_resolved(session_id, &summary, "cancelled")
-                .await;
-            if let Err(error) = response {
-                return Err(response_error(error));
+                .respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                        option_id.clone(),
+                    )),
+                ))
+                .map_err(response_error);
+            emit_permission(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some(&option_id),
+            )
+            .await;
+            if first_error.is_none() {
+                first_error = response.err();
             }
         }
-        Ok(epoch)
+        for entry in elicitations {
+            if entry.publication.is_abandoned() {
+                let response = entry
+                    .responder
+                    .respond(CreateElicitationResponse::new(ElicitationAction::Cancel))
+                    .map_err(response_error);
+                if first_error.is_none() {
+                    first_error = response.err();
+                }
+                continue;
+            }
+            let summary = entry.summary.clone();
+            let response = entry
+                .responder
+                .respond(CreateElicitationResponse::new(ElicitationAction::Cancel))
+                .map_err(response_error);
+            emit_elicitation(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some("cancelled"),
+            )
+            .await;
+            if first_error.is_none() {
+                first_error = response.err();
+            }
+        }
+        blocked_session.clear().await;
+        first_error.map_or(Ok(epoch), Err)
     }
 
     pub async fn verify_steer_epoch(&self, session_id: &SessionId, epoch: u64) -> bool {
@@ -728,6 +1347,24 @@ impl InteractionRegistry {
     }
 
     pub async fn drain(&self) {
+        let publications = {
+            let mut state = self.inner.lock().await;
+            state.draining = true;
+            state
+                .permissions
+                .values()
+                .map(|entry| entry.publication.clone())
+                .chain(
+                    state
+                        .elicitations
+                        .values()
+                        .map(|entry| entry.publication.clone()),
+                )
+                .collect::<Vec<_>>()
+        };
+        for publication in publications {
+            publication.wait().await;
+        }
         let (permissions, elicitations) = {
             let mut state = self.inner.lock().await;
             let permissions = std::mem::take(&mut state.permissions);
@@ -741,20 +1378,41 @@ impl InteractionRegistry {
             (permissions, elicitations)
         };
         for (_, entry) in permissions {
+            if entry.publication.is_abandoned() {
+                let _ = entry.responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ));
+                continue;
+            }
             let _ = entry.responder.respond(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
             ));
-            self.emit_permission_resolved(&entry.session_id, &entry.summary, "cancelled")
-                .await;
+            emit_permission(
+                entry._session_lease.session(),
+                &entry.summary,
+                false,
+                Some("cancelled"),
+            )
+            .await;
         }
         for (_, entry) in elicitations {
+            if entry.publication.is_abandoned() {
+                let _ = entry
+                    .responder
+                    .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
+                continue;
+            }
             let summary = entry.summary.clone();
-            let session_id = entry.session_id.clone();
             let _ = entry
                 .responder
                 .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
-            self.emit_elicitation_resolved(&session_id, &summary, "cancelled")
-                .await;
+            emit_elicitation(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some("cancelled"),
+            )
+            .await;
         }
     }
 
@@ -786,6 +1444,15 @@ impl InteractionRegistry {
         action: ElicitationAction,
         resolution: &str,
     ) -> Result<(), InteractionError> {
+        let (session, publication) = self
+            .elicitation_context(request_id)
+            .await
+            .ok_or_else(|| InteractionError::UnknownRequest(request_id.to_string()))?;
+        if !publication.wait().await {
+            self.discard_abandoned_elicitation(request_id).await;
+            return Err(InteractionError::UnknownRequest(request_id.to_string()));
+        }
+        let publication_guard = session.lock_interactions().await;
         let entry = {
             let mut state = self.inner.lock().await;
             let entry = state
@@ -800,20 +1467,127 @@ impl InteractionRegistry {
             entry
         };
         let summary = entry.summary.clone();
-        let session_id = entry.session_id.clone();
         let response = entry
             .responder
             .respond(CreateElicitationResponse::new(action))
             .map_err(response_error);
-        self.emit_elicitation_resolved(&session_id, &summary, resolution)
-            .await;
+        drop(publication_guard);
+        emit_elicitation(
+            entry._session_lease.session(),
+            &summary,
+            false,
+            Some(resolution),
+        )
+        .await;
         response
     }
 
     async fn cancel_permission_from_peer(&self, request_id: &str) {
+        let Some((session, publication)) = self.permission_context(request_id).await else {
+            return;
+        };
+        if !publication.wait().await {
+            self.discard_abandoned_permission(request_id).await;
+            return;
+        }
+        let publication_guard = session.lock_interactions().await;
         let entry = {
             let mut state = self.inner.lock().await;
             let entry = state.permissions.remove(request_id);
+            if let Some(entry) = &entry {
+                Self::bump_epoch(&mut state, &entry.session_id);
+            }
+            entry
+        };
+        drop(publication_guard);
+        if let Some(entry) = entry {
+            let _ = entry.responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+            emit_permission(
+                entry._session_lease.session(),
+                &entry.summary,
+                false,
+                Some("request_cancelled"),
+            )
+            .await;
+        }
+    }
+
+    async fn cancel_elicitation_from_peer(&self, request_id: &str) {
+        let Some((session, publication)) = self.elicitation_context(request_id).await else {
+            return;
+        };
+        if !publication.wait().await {
+            self.discard_abandoned_elicitation(request_id).await;
+            return;
+        }
+        let publication_guard = session.lock_interactions().await;
+        let entry = {
+            let mut state = self.inner.lock().await;
+            let entry = state.elicitations.remove(request_id);
+            if let Some(entry) = &entry {
+                Self::bump_epoch(&mut state, &entry.session_id);
+            }
+            entry
+        };
+        drop(publication_guard);
+        if let Some(entry) = entry {
+            let summary = entry.summary.clone();
+            let _ = entry
+                .responder
+                .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
+            emit_elicitation(
+                entry._session_lease.session(),
+                &summary,
+                false,
+                Some("request_cancelled"),
+            )
+            .await;
+        }
+    }
+
+    async fn permission_context(
+        &self,
+        request_id: &str,
+    ) -> Option<(AcpSession, Arc<InteractionPublication>)> {
+        self.inner
+            .lock()
+            .await
+            .permissions
+            .get(request_id)
+            .map(|entry| {
+                (
+                    entry._session_lease.session().clone(),
+                    entry.publication.clone(),
+                )
+            })
+    }
+
+    async fn elicitation_context(
+        &self,
+        request_id: &str,
+    ) -> Option<(AcpSession, Arc<InteractionPublication>)> {
+        self.inner
+            .lock()
+            .await
+            .elicitations
+            .get(request_id)
+            .map(|entry| {
+                (
+                    entry._session_lease.session().clone(),
+                    entry.publication.clone(),
+                )
+            })
+    }
+
+    async fn discard_abandoned_permission(&self, request_id: &str) {
+        let entry = {
+            let mut state = self.inner.lock().await;
+            let entry = state
+                .permissions
+                .remove(request_id)
+                .filter(|entry| entry.publication.is_abandoned());
             if let Some(entry) = &entry {
                 Self::bump_epoch(&mut state, &entry.session_id);
             }
@@ -823,69 +1597,40 @@ impl InteractionRegistry {
             let _ = entry.responder.respond(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
             ));
-            self.emit_permission_resolved(&entry.session_id, &entry.summary, "request_cancelled")
-                .await;
         }
     }
 
-    async fn cancel_elicitation_from_peer(&self, request_id: &str) {
+    async fn discard_abandoned_elicitation(&self, request_id: &str) {
         let entry = {
             let mut state = self.inner.lock().await;
-            let entry = state.elicitations.remove(request_id);
+            let entry = state
+                .elicitations
+                .remove(request_id)
+                .filter(|entry| entry.publication.is_abandoned());
             if let Some(entry) = &entry {
                 Self::bump_epoch(&mut state, &entry.session_id);
             }
             entry
         };
         if let Some(entry) = entry {
-            let summary = entry.summary.clone();
-            let session_id = entry.session_id.clone();
             let _ = entry
                 .responder
                 .respond(CreateElicitationResponse::new(ElicitationAction::Cancel));
-            self.emit_elicitation_resolved(&session_id, &summary, "request_cancelled")
-                .await;
-        }
-    }
-
-    async fn emit_permission_resolved(
-        &self,
-        session_id: &SessionId,
-        summary: &PendingPermissionSummary,
-        outcome: &str,
-    ) {
-        if let Some(session) = self.sessions.get(session_id).await {
-            emit_permission(&session, summary, false, Some(outcome)).await;
         }
     }
 
     fn publish_permission_resolved(
         &self,
-        session_id: SessionId,
         summary: PendingPermissionSummary,
         outcome: String,
         session_lease: super::session::SessionLease,
     ) {
-        let registry = self.clone();
         // The ACP response is authoritative. Replay/UI publication must not keep its RPC spinning
         // when the bounded canonical event pipeline is busy.
         tokio::spawn(async move {
-            registry
-                .emit_permission_resolved(&session_id, &summary, &outcome)
-                .await;
+            emit_permission(session_lease.session(), &summary, false, Some(&outcome)).await;
             drop(session_lease);
         });
-    }
-
-    async fn emit_elicitation_resolved(
-        &self,
-        session_id: &SessionId,
-        summary: &PendingElicitationSummary,
-        action: &str,
-    ) {
-        if let Some(session) = self.sessions.get(session_id).await {
-            emit_elicitation(&session, summary, false, Some(action)).await;
-        }
     }
 }
 
@@ -1225,6 +1970,33 @@ fn response_error(error: agent_client_protocol::Error) -> InteractionError {
     InteractionError::Response(error.to_string())
 }
 
+fn automatic_permission_outcome(
+    request: &RequestPermissionRequest,
+) -> (RequestPermissionOutcome, String) {
+    let allowed = request
+        .options
+        .iter()
+        .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+        .or_else(|| {
+            request
+                .options
+                .iter()
+                .find(|option| option.kind == PermissionOptionKind::AllowAlways)
+        });
+    match allowed {
+        Some(option) => {
+            let option_id = option.option_id.to_string();
+            (
+                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    option_id.clone(),
+                )),
+                option_id,
+            )
+        }
+        None => (RequestPermissionOutcome::Cancelled, "cancelled".to_string()),
+    }
+}
+
 async fn emit_permission(
     session: &super::session::AcpSession,
     summary: &PendingPermissionSummary,
@@ -1291,6 +2063,7 @@ mod tests {
             let mut state = registry.inner.lock().await;
             assert_eq!(InteractionRegistry::bump_epoch(&mut state, &session_id), 1);
         }
+
         assert!(registry.verify_steer_epoch(&session_id, 1).await);
         assert!(!registry.verify_steer_epoch(&session_id, 0).await);
         assert_eq!(
@@ -1304,6 +2077,99 @@ mod tests {
                 .with_verified_steer_epoch(&session_id, 0, || "not-sent")
                 .await,
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn committed_session_eviction_removes_approval_policy_state() {
+        let sessions = SessionRegistry::with_capacity(1);
+        let registry = InteractionRegistry::new(sessions.clone());
+        let first_id = SessionId::new("first-policy-session");
+        sessions.register("agent", first_id.clone()).await.unwrap();
+        registry
+            .set_approval_policy(&first_id, ApprovalPolicy::Never)
+            .await
+            .unwrap();
+        assert_eq!(registry.inner.lock().await.approval_policies.len(), 1);
+
+        sessions
+            .register("agent", SessionId::new("second-policy-session"))
+            .await
+            .unwrap();
+
+        assert!(!registry
+            .inner
+            .lock()
+            .await
+            .approval_policies
+            .contains_key(&first_id));
+    }
+
+    #[tokio::test]
+    async fn policy_update_restores_a_tentative_eviction_before_applying_state() {
+        let sessions = SessionRegistry::with_capacity(1);
+        let registry = InteractionRegistry::new(sessions.clone());
+        let first_id = SessionId::new("tentatively-evicted");
+        sessions.register("agent", first_id.clone()).await.unwrap();
+        registry
+            .set_approval_policy(&first_id, ApprovalPolicy::Never)
+            .await
+            .unwrap();
+        let eviction = sessions.pause_next_eviction().await;
+        let replacement = {
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                sessions
+                    .register("agent", SessionId::new("replacement"))
+                    .await
+            })
+        };
+        eviction.wait_until_reached().await;
+
+        registry
+            .set_approval_policy(&first_id, ApprovalPolicy::OnRequest)
+            .await
+            .expect("policy update restores the live session");
+        eviction.release();
+
+        assert!(replacement.await.expect("replacement task").is_err());
+        assert!(sessions.get(&first_id).await.is_some());
+        assert_eq!(
+            registry.approval_policy(&first_id).await,
+            ApprovalPolicy::OnRequest
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_update_is_retained_while_a_session_is_registering() {
+        let sessions = SessionRegistry::default();
+        let registry = InteractionRegistry::new(sessions.clone());
+        let session_id = SessionId::new("registering-policy-session");
+        let barrier = sessions.pause_next_registration().await;
+        let registration = {
+            let sessions = sessions.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { sessions.register("agent", session_id).await })
+        };
+        barrier.wait_until_reached().await;
+
+        registry
+            .set_approval_policy(&session_id, ApprovalPolicy::Never)
+            .await
+            .expect("policy update succeeds during registration");
+        assert_eq!(
+            registry.approval_policy(&session_id).await,
+            ApprovalPolicy::Never
+        );
+
+        barrier.release();
+        registration
+            .await
+            .expect("registration task")
+            .expect("registration succeeds");
+        assert_eq!(
+            registry.approval_policy(&session_id).await,
+            ApprovalPolicy::Never
         );
     }
 

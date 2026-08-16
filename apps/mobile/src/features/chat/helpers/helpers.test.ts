@@ -89,11 +89,12 @@ describe('mainScreenHelpers', () => {
     expect(helpers.shouldSurfaceChatLoadError(true, 'thread-1', 'thread-1', 0)).toBe(true);
   });
 
-  it('maps only explicit YOLO mode to never approvals', () => {
+  it('maps the three approval modes to progressively less restrictive policies', () => {
     expect(helpers.toApprovalPolicyForMode(undefined)).toBe('untrusted');
     expect(helpers.toApprovalPolicyForMode(null)).toBe('untrusted');
-    expect(helpers.toApprovalPolicyForMode('normal')).toBe('untrusted');
-    expect(helpers.toApprovalPolicyForMode('yolo')).toBe('never');
+    expect(helpers.toApprovalPolicyForMode('all')).toBe('untrusted');
+    expect(helpers.toApprovalPolicyForMode('some')).toBe('on-request');
+    expect(helpers.toApprovalPolicyForMode('none')).toBe('never');
   });
 
   it('keeps successful git clone responses quiet', () => {

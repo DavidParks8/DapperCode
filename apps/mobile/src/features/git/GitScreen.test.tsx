@@ -376,7 +376,7 @@ describe('GitScreen behavior', () => {
     expect(api.gitCommit).toHaveBeenCalled();
     expect(api.gitPush).toHaveBeenCalled();
     expect(api.gitSwitch).toHaveBeenCalledWith(expect.objectContaining({ branch: 'main' }));
-    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next');
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next', 'untrusted');
     act(() => tree.unmount());
   });
 
@@ -632,7 +632,7 @@ describe('GitScreen behavior', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next');
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next', 'untrusted');
     // Once the workspace is actually committed, reads target the new cwd.
     expect(api.gitStatus).toHaveBeenLastCalledWith('/next');
     expect(hasText(root, 'Clean')).toBe(true);
@@ -739,7 +739,7 @@ describe('GitScreen behavior', () => {
     const workspace = findByLabel(root, 'Git workspace path');
     act(() => workspace.props.onChangeText('  /broken\npath  '));
     await invoke(findByLabel(root, 'Git workspace path'), 'onSubmitEditing');
-    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/brokenpath');
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/brokenpath', 'untrusted');
 
     (api.gitBranches as jest.Mock).mockResolvedValueOnce({
       current: 'feature/coverage',

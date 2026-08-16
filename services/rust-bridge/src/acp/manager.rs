@@ -32,7 +32,9 @@ use super::harness::{
     SessionContext,
 };
 use super::identity::AgentSessionId;
-use super::interactions::{InteractionError, PendingElicitationSummary, PendingPermissionSummary};
+use super::interactions::{
+    ApprovalPolicy, InteractionError, PendingElicitationSummary, PendingPermissionSummary,
+};
 use super::runtime::{
     AcpConnection, AcpRuntimeError, ForkRequest, NegotiatedInitialize, PromptAdmission,
     RequestCancellation, SteerRequest,
@@ -442,6 +444,8 @@ struct SessionIndexEntry {
     agent_id: AgentId,
     acp_session_id: String,
     cwd: PathBuf,
+    #[serde(default)]
+    approval_policy: ApprovalPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -511,6 +515,21 @@ impl DurableSessionIndex {
         &mut self,
         entries: Vec<SessionIndexEntry>,
     ) -> Result<(), AgentManagerError> {
+        self.merge_entries(entries, false).await
+    }
+
+    async fn insert_inherited_entries(
+        &mut self,
+        entries: Vec<SessionIndexEntry>,
+    ) -> Result<(), AgentManagerError> {
+        self.merge_entries(entries, true).await
+    }
+
+    async fn merge_entries(
+        &mut self,
+        entries: Vec<SessionIndexEntry>,
+        replace_approval_policy: bool,
+    ) -> Result<(), AgentManagerError> {
         let mut staged = self.entries.clone();
         let mut changed = false;
         for entry in entries {
@@ -530,6 +549,9 @@ impl DurableSessionIndex {
                 if merged.forked_from_acp_session_id.is_none() {
                     merged.forked_from_acp_session_id = existing.forked_from_acp_session_id.clone();
                 }
+                if !replace_approval_policy {
+                    merged.approval_policy = existing.approval_policy;
+                }
                 if *existing != merged {
                     *existing = merged;
                     changed = true;
@@ -545,6 +567,60 @@ impl DurableSessionIndex {
         staged.sort();
         if staged.len() > MAX_SESSIONS {
             staged.drain(0..staged.len() - MAX_SESSIONS);
+        }
+        self.persist(staged).await
+    }
+
+    #[cfg(test)]
+    async fn set_approval_policy(
+        &mut self,
+        identity: &AgentSessionId,
+        policy: ApprovalPolicy,
+    ) -> Result<(), AgentManagerError> {
+        self.set_approval_policies(&[(identity.clone(), policy)])
+            .await
+    }
+
+    async fn set_approval_policies(
+        &mut self,
+        updates: &[(AgentSessionId, ApprovalPolicy)],
+    ) -> Result<(), AgentManagerError> {
+        self.update_approval_policies(updates, true).await
+    }
+
+    async fn set_existing_approval_policies(
+        &mut self,
+        updates: &[(AgentSessionId, ApprovalPolicy)],
+    ) -> Result<(), AgentManagerError> {
+        self.update_approval_policies(updates, false).await
+    }
+
+    async fn update_approval_policies(
+        &mut self,
+        updates: &[(AgentSessionId, ApprovalPolicy)],
+        require_all: bool,
+    ) -> Result<(), AgentManagerError> {
+        let mut staged = self.entries.clone();
+        let mut changed = false;
+        for (identity, policy) in updates {
+            let Some(entry) = staged.iter_mut().find(|entry| {
+                entry.agent_id == identity.agent_id
+                    && entry.acp_session_id == identity.acp_session_id
+            }) else {
+                if require_all {
+                    return Err(AgentManagerError::SessionIndex(
+                        "session is not indexed".to_string(),
+                    ));
+                }
+                continue;
+            };
+            if entry.approval_policy != *policy {
+                entry.approval_policy = *policy;
+                changed = true;
+            }
+        }
+        if !changed {
+            return Ok(());
         }
         self.persist(staged).await
     }
@@ -624,10 +700,19 @@ fn sanitize_index_entries(entries: Vec<SessionIndexEntry>) -> Vec<SessionIndexEn
 }
 
 fn index_entry(identity: AgentSessionId, cwd: PathBuf) -> SessionIndexEntry {
+    index_entry_with_policy(identity, cwd, ApprovalPolicy::Untrusted)
+}
+
+fn index_entry_with_policy(
+    identity: AgentSessionId,
+    cwd: PathBuf,
+    approval_policy: ApprovalPolicy,
+) -> SessionIndexEntry {
     SessionIndexEntry {
         agent_id: identity.agent_id,
         acp_session_id: identity.acp_session_id,
         cwd,
+        approval_policy,
         title: None,
         parent_acp_session_id: None,
         forked_from_acp_session_id: None,
@@ -714,6 +799,24 @@ pub(crate) struct AcceptedSubagentTerminal {
 
 const MAX_TRACKED_SUBAGENT_GENERATIONS: usize = 2048;
 
+#[cfg(test)]
+#[derive(Clone)]
+struct PolicySnapshotBarrier {
+    reached: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl PolicySnapshotBarrier {
+    async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
 pub struct AgentManager {
     agents: HashMap<AgentId, AgentRuntime>,
     preferred_agent_id: AgentId,
@@ -728,6 +831,8 @@ pub struct AgentManager {
     event_receiver: Mutex<Option<CanonicalEventReceiver>>,
     stopped: AtomicBool,
     http: reqwest::Client,
+    #[cfg(test)]
+    policy_snapshot_barrier: Mutex<Option<PolicySnapshotBarrier>>,
 }
 
 impl AgentManager {
@@ -913,7 +1018,19 @@ impl AgentManager {
                 .no_proxy()
                 .build()
                 .unwrap_or_default(),
+            #[cfg(test)]
+            policy_snapshot_barrier: Mutex::new(None),
         })
+    }
+
+    #[cfg(test)]
+    async fn pause_next_policy_snapshot(&self) -> PolicySnapshotBarrier {
+        let barrier = PolicySnapshotBarrier {
+            reached: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        *self.policy_snapshot_barrier.lock().await = Some(barrier.clone());
+        barrier
     }
 
     pub fn preferred_agent_id(&self) -> &str {
@@ -1023,10 +1140,27 @@ impl AgentManager {
             .map_err(AgentOperationFailure::into_error)
     }
 
+    #[cfg(test)]
     pub async fn new_session_with_cancellation_outcome(
         &self,
         agent_id: &str,
+        request: NewSessionRequest,
+        cancellation: RequestCancellation,
+    ) -> Result<ManagedSession, AgentOperationFailure> {
+        self.new_session_with_policy_outcome(
+            agent_id,
+            request,
+            ApprovalPolicy::Untrusted,
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn new_session_with_policy_outcome(
+        &self,
+        agent_id: &str,
         mut request: NewSessionRequest,
+        approval_policy: ApprovalPolicy,
         cancellation: RequestCancellation,
     ) -> Result<ManagedSession, AgentOperationFailure> {
         let cwd = self
@@ -1041,14 +1175,16 @@ impl AgentManager {
             .await
             .map_err(classify_runtime_operation_failure)?;
         let session_id = response.session_id.clone();
-        self.track_session(
-            AgentSessionId::new(agent_id, session_id.to_string()).map_err(|_| {
-                AgentOperationFailure::indeterminate(AgentManagerError::InvalidThreadId)
-            })?,
-            cwd,
-        )
-        .await
-        .map_err(AgentOperationFailure::indeterminate)?;
+        let identity = AgentSessionId::new(agent_id, session_id.to_string()).map_err(|_| {
+            AgentOperationFailure::indeterminate(AgentManagerError::InvalidThreadId)
+        })?;
+        connection
+            .set_approval_policy(&session_id, approval_policy)
+            .await
+            .map_err(|error| AgentOperationFailure::indeterminate(error.into()))?;
+        self.track_session_with_policy(identity, cwd, approval_policy)
+            .await
+            .map_err(AgentOperationFailure::indeterminate)?;
         self.apply_config_options(connection, &session_id, response.config_options)
             .await
             .map_err(AgentOperationFailure::indeterminate)?;
@@ -1263,29 +1399,111 @@ impl AgentManager {
         loaded
     }
 
+    #[cfg(test)]
     pub async fn resume_session(
         &self,
         thread_id: &str,
         cwd: impl Into<PathBuf>,
     ) -> Result<ManagedSession, AgentManagerError> {
+        self.resume_session_with_policy(thread_id, cwd, ApprovalPolicy::Untrusted)
+            .await
+    }
+
+    pub async fn resume_session_with_policy(
+        &self,
+        thread_id: &str,
+        cwd: impl Into<PathBuf>,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<ManagedSession, AgentManagerError> {
         let (identity, session_id, connection) = self.route_thread(thread_id)?;
         let cwd = self.validate_cwd(&cwd.into())?;
-        let config_options = if connection.negotiated().supports_session_resume() {
-            connection
-                .resume_session(ResumeSessionRequest::new(session_id.clone(), cwd.clone()))
-                .await?
-                .config_options
-        } else if connection.negotiated().supports_session_load() {
-            connection
-                .load_session(LoadSessionRequest::new(session_id.clone(), cwd.clone()))
-                .await?
-                .config_options
-        } else {
+        if !connection.negotiated().supports_session_resume()
+            && !connection.negotiated().supports_session_load()
+        {
             return Err(AcpRuntimeError::Unsupported("session/resume or session/load").into());
+        }
+        let (family, operations) = loop {
+            let mut family = self.indexed_session_family(&identity).await;
+            family.sort_by_key(AgentSessionId::encode);
+            let mut operations = Vec::with_capacity(family.len());
+            for family_identity in &family {
+                operations.push(
+                    self.session_operation_lock(&family_identity.encode())
+                        .await
+                        .lock_owned()
+                        .await,
+                );
+            }
+            let mut current = self.indexed_session_family(&identity).await;
+            current.sort_by_key(AgentSessionId::encode);
+            if current == family {
+                break (family, operations);
+            }
+            drop(operations);
         };
-        self.track_session(identity, cwd).await?;
-        self.apply_config_options(connection, &session_id, config_options)
+        let previous_policies = {
+            let mut index = self.session_index.lock().await;
+            let previous_policies = family
+                .iter()
+                .filter_map(|family_identity| {
+                    index.entries.iter().find_map(|entry| {
+                        (entry.agent_id == family_identity.agent_id
+                            && entry.acp_session_id == family_identity.acp_session_id)
+                            .then_some((family_identity.clone(), entry.approval_policy))
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !previous_policies.is_empty() {
+                let updates = previous_policies
+                    .iter()
+                    .map(|(family_identity, _)| (family_identity.clone(), approval_policy))
+                    .collect::<Vec<_>>();
+                index.set_approval_policies(&updates).await?;
+            }
+            previous_policies
+        };
+        let policy_session_ids = family
+            .iter()
+            .map(|family_identity| SessionId::new(family_identity.acp_session_id.clone()))
+            .collect::<Vec<_>>();
+        let restoration = if connection.negotiated().supports_session_resume() {
+            connection
+                .resume_session_with_policy_for_sessions(
+                    ResumeSessionRequest::new(session_id.clone(), cwd.clone()),
+                    approval_policy,
+                    policy_session_ids,
+                )
+                .await
+                .map(|response| response.config_options)
+        } else {
+            connection
+                .load_session_with_policy_for_sessions(
+                    LoadSessionRequest::new(session_id.clone(), cwd.clone()),
+                    approval_policy,
+                    policy_session_ids,
+                )
+                .await
+                .map(|response| response.config_options)
+        };
+        let restoration = match restoration {
+            Ok(config_options) => config_options,
+            Err(error @ (AcpRuntimeError::SessionBusy | AcpRuntimeError::UnknownSession(_))) => {
+                if !previous_policies.is_empty() {
+                    self.session_index
+                        .lock()
+                        .await
+                        .set_approval_policies(&previous_policies)
+                        .await?;
+                }
+                return Err(error.into());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.track_session_with_policy_locked(identity, cwd, approval_policy)
             .await?;
+        self.apply_config_options(connection, &session_id, restoration)
+            .await?;
+        drop(operations);
         self.read_known_session_from(connection, &session_id).await
     }
 
@@ -1497,6 +1715,19 @@ impl AgentManager {
                 AgentManagerError::Fork("fork returned the source session ID".to_string()),
             ));
         }
+        let forked_thread_id = forked_identity.encode();
+        let mut operation_thread_ids = vec![source.encode(), forked_thread_id.clone()];
+        operation_thread_ids.sort();
+        operation_thread_ids.dedup();
+        let mut operations = Vec::with_capacity(operation_thread_ids.len());
+        for operation_thread_id in operation_thread_ids {
+            operations.push(
+                self.session_operation_lock(&operation_thread_id)
+                    .await
+                    .lock_owned()
+                    .await,
+            );
+        }
         {
             let mut index = self.session_index.lock().await;
             if index.entries.iter().any(|entry| {
@@ -1507,11 +1738,25 @@ impl AgentManager {
                     AgentManagerError::Fork("fork returned an existing session ID".to_string()),
                 ));
             }
+            let approval_policy = index
+                .entries
+                .iter()
+                .find(|entry| {
+                    entry.agent_id == source.agent_id
+                        && entry.acp_session_id == source.acp_session_id
+                })
+                .map(|entry| entry.approval_policy)
+                .ok_or_else(|| {
+                    AgentOperationFailure::indeterminate(AgentManagerError::SessionIndex(
+                        "source session is no longer durably indexed".to_string(),
+                    ))
+                })?;
             index
                 .insert_all([SessionIndexEntry {
                     agent_id: forked_identity.agent_id.clone(),
                     acp_session_id: forked_identity.acp_session_id.clone(),
                     cwd: directory,
+                    approval_policy,
                     title: title.filter(|title| valid_session_title(title)),
                     parent_acp_session_id: None,
                     forked_from_acp_session_id: Some(source.acp_session_id.clone()),
@@ -1519,10 +1764,15 @@ impl AgentManager {
                 .await
                 .map_err(AgentOperationFailure::indeterminate)?;
         }
-        let forked_thread_id = forked_identity.encode();
+        drop(operations);
         match self.read_session(&forked_thread_id).await {
             Ok(session) => Ok(session),
             Err(error) => {
+                let rollback_operation = self
+                    .session_operation_lock(&forked_thread_id)
+                    .await
+                    .lock_owned()
+                    .await;
                 let rollback_error = self
                     .session_index
                     .lock()
@@ -1534,14 +1784,12 @@ impl AgentManager {
                     .evict_session(&SessionId::new(forked_identity.acp_session_id))
                     .await;
                 self.tracked_sessions.lock().await.remove(&forked_thread_id);
-                self.reconstruction_locks
-                    .lock()
-                    .await
-                    .remove(&forked_thread_id);
                 self.pending_durable_sessions
                     .lock()
                     .await
                     .remove(&forked_thread_id);
+                drop(rollback_operation);
+                self.prune_session_operation_lock(&forked_thread_id).await;
                 match rollback_error {
                     Some(rollback_error) => Err(AgentOperationFailure::indeterminate(
                         AgentManagerError::Fork(format!(
@@ -1570,10 +1818,33 @@ impl AgentManager {
         if !native_delete && !harness_delete {
             return Err(AcpRuntimeError::Unsupported("session/delete").into());
         }
-        let affected = if !native_delete && harness_delete {
-            self.indexed_deletion_family(&identity).await
-        } else {
-            vec![identity.clone()]
+        let (affected, operations) = loop {
+            let affected = if !native_delete && harness_delete {
+                self.indexed_session_family(&identity).await
+            } else {
+                vec![identity.clone()]
+            };
+            let mut sorted_affected = affected.clone();
+            sorted_affected.sort_by_key(AgentSessionId::encode);
+            let mut operations = Vec::with_capacity(affected.len());
+            for affected_identity in &sorted_affected {
+                operations.push(
+                    self.session_operation_lock(&affected_identity.encode())
+                        .await
+                        .lock_owned()
+                        .await,
+                );
+            }
+            let mut current = if !native_delete && harness_delete {
+                self.indexed_session_family(&identity).await
+            } else {
+                vec![identity.clone()]
+            };
+            current.sort_by_key(AgentSessionId::encode);
+            if current == sorted_affected {
+                break (affected, operations);
+            }
+            drop(operations);
         };
         for affected_identity in &affected {
             let affected_session_id = SessionId::new(affected_identity.acp_session_id.clone());
@@ -1632,14 +1903,14 @@ impl AgentManager {
                 .await
                 .remove(deleted_thread_id);
             self.tracked_sessions.lock().await.remove(deleted_thread_id);
-            self.reconstruction_locks
-                .lock()
-                .await
-                .remove(deleted_thread_id);
             self.subagent_generations
                 .lock()
                 .await
                 .remove(deleted_thread_id);
+        }
+        drop(operations);
+        for deleted_thread_id in &deleted_thread_ids {
+            self.prune_session_operation_lock(deleted_thread_id).await;
         }
         Ok(deleted_thread_ids)
     }
@@ -1688,7 +1959,7 @@ impl AgentManager {
         ))
     }
 
-    async fn indexed_deletion_family(&self, root: &AgentSessionId) -> Vec<AgentSessionId> {
+    async fn indexed_session_family(&self, root: &AgentSessionId) -> Vec<AgentSessionId> {
         let entries = self.session_index.lock().await.entries.clone();
         let mut affected = vec![root.clone()];
         let mut seen = HashSet::from([root.acp_session_id.clone()]);
@@ -1719,40 +1990,40 @@ impl AgentManager {
             None => true,
         };
         if requires_reconstruction {
-            let entry = self
-                .session_index
-                .lock()
-                .await
-                .entries
-                .iter()
-                .find(|entry| {
-                    entry.agent_id == identity.agent_id
-                        && entry.acp_session_id == identity.acp_session_id
-                })
-                .cloned()
-                .ok_or_else(|| AcpRuntimeError::UnknownSession(session_id.to_string()))?;
-            let operation_lock = {
-                let mut locks = self.reconstruction_locks.lock().await;
-                locks
-                    .entry(thread_id.to_string())
-                    .or_insert_with(|| Arc::new(Mutex::new(())))
-                    .clone()
-            };
+            let operation_lock = self.session_operation_lock(thread_id).await;
             let _operation = operation_lock.lock().await;
             let requires_reconstruction = match connection.session(&session_id).await {
                 Some(session) => session.snapshot().await.history_reconstruction,
                 None => true,
             };
             if requires_reconstruction {
+                let entry = self
+                    .session_index
+                    .lock()
+                    .await
+                    .entries
+                    .iter()
+                    .find(|entry| {
+                        entry.agent_id == identity.agent_id
+                            && entry.acp_session_id == identity.acp_session_id
+                    })
+                    .cloned()
+                    .ok_or_else(|| AcpRuntimeError::UnknownSession(session_id.to_string()))?;
                 let cwd = self.validate_cwd(&entry.cwd)?;
                 let config_options = if connection.negotiated().supports_session_resume() {
                     connection
-                        .resume_session(ResumeSessionRequest::new(session_id.clone(), cwd))
+                        .resume_session_with_policy(
+                            ResumeSessionRequest::new(session_id.clone(), cwd),
+                            entry.approval_policy,
+                        )
                         .await?
                         .config_options
                 } else if connection.negotiated().supports_session_load() {
                     connection
-                        .load_session(LoadSessionRequest::new(session_id.clone(), cwd))
+                        .load_session_with_policy(
+                            LoadSessionRequest::new(session_id.clone(), cwd),
+                            entry.approval_policy,
+                        )
                         .await?
                         .config_options
                 } else {
@@ -2044,6 +2315,18 @@ impl AgentManager {
         if child.acp_session_id == parent.acp_session_id {
             return Err(AgentManagerError::InvalidThreadId);
         }
+        let mut operation_thread_ids = vec![parent.encode(), child.encode()];
+        operation_thread_ids.sort();
+        operation_thread_ids.dedup();
+        let mut operations = Vec::with_capacity(operation_thread_ids.len());
+        for operation_thread_id in operation_thread_ids {
+            operations.push(
+                self.session_operation_lock(&operation_thread_id)
+                    .await
+                    .lock_owned()
+                    .await,
+            );
+        }
         let parent_entry = self
             .session_index
             .lock()
@@ -2057,20 +2340,20 @@ impl AgentManager {
             .ok_or_else(|| {
                 AgentManagerError::SessionIndex("parent session is not indexed".to_string())
             })?;
-        self.session_index
-            .lock()
-            .await
-            .insert_all([SessionIndexEntry {
-                agent_id: child.agent_id.clone(),
-                acp_session_id: child.acp_session_id.clone(),
-                cwd: parent_entry.cwd,
-                title: title
-                    .filter(|title| valid_session_title(title))
-                    .map(str::to_string),
-                parent_acp_session_id: Some(parent.acp_session_id),
-                forked_from_acp_session_id: None,
-            }])
+        let entry = SessionIndexEntry {
+            agent_id: child.agent_id.clone(),
+            acp_session_id: child.acp_session_id.clone(),
+            cwd: parent_entry.cwd,
+            approval_policy: parent_entry.approval_policy,
+            title: title
+                .filter(|title| valid_session_title(title))
+                .map(str::to_string),
+            parent_acp_session_id: Some(parent.acp_session_id),
+            forked_from_acp_session_id: None,
+        };
+        self.persist_inherited_entries_locked(std::slice::from_ref(&entry))
             .await?;
+        drop(operations);
         Ok(child.encode())
     }
 
@@ -2087,6 +2370,7 @@ impl AgentManager {
             .map_err(AgentOperationFailure::into_error)
     }
 
+    #[cfg(test)]
     pub async fn prompt_with_outcome(
         &self,
         thread_id: &str,
@@ -2094,17 +2378,211 @@ impl AgentManager {
         run_id: String,
         source_turn_id: String,
     ) -> Result<PromptAdmission, AgentOperationFailure> {
-        let (_, session_id, connection) = self
+        self.prompt_with_policy_outcome(
+            thread_id,
+            prompt,
+            run_id,
+            source_turn_id,
+            ApprovalPolicy::Untrusted,
+        )
+        .await
+    }
+
+    pub async fn prompt_with_policy_outcome(
+        &self,
+        thread_id: &str,
+        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        run_id: String,
+        source_turn_id: String,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<PromptAdmission, AgentOperationFailure> {
+        let (identity, session_id, connection) = self
             .route_thread(thread_id)
             .map_err(AgentOperationFailure::definitive)?;
-        connection
-            .prompt(
+        let (family, operations) = loop {
+            let mut family = self.indexed_session_family(&identity).await;
+            family.sort_by_key(AgentSessionId::encode);
+            let mut operations = Vec::with_capacity(family.len());
+            for family_identity in &family {
+                operations.push(
+                    self.session_operation_lock(&family_identity.encode())
+                        .await
+                        .lock_owned()
+                        .await,
+                );
+            }
+            let mut current = self.indexed_session_family(&identity).await;
+            current.sort_by_key(AgentSessionId::encode);
+            if current == family {
+                break (family, operations);
+            }
+            drop(operations);
+        };
+        let (previous_policies, policy_updates) = {
+            let mut index = self.session_index.lock().await;
+            let previous_policies = family
+                .iter()
+                .map(|family_identity| {
+                    index
+                        .entries
+                        .iter()
+                        .find(|entry| {
+                            entry.agent_id == family_identity.agent_id
+                                && entry.acp_session_id == family_identity.acp_session_id
+                        })
+                        .map(|entry| (family_identity.clone(), entry.approval_policy))
+                        .ok_or_else(|| {
+                            AgentOperationFailure::definitive(AgentManagerError::SessionIndex(
+                                "session family contains an unindexed session".to_string(),
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let policy_updates = family
+                .iter()
+                .cloned()
+                .map(|family_identity| (family_identity, approval_policy))
+                .collect::<Vec<_>>();
+            index
+                .set_approval_policies(&policy_updates)
+                .await
+                .map_err(AgentOperationFailure::definitive)?;
+            (previous_policies, policy_updates)
+        };
+        let policy_session_ids = policy_updates
+            .iter()
+            .map(|(family_identity, _)| SessionId::new(family_identity.acp_session_id.clone()))
+            .collect();
+        let result = connection
+            .prompt_with_policy_for_sessions(
                 PromptRequest::new(session_id, prompt),
                 run_id,
                 source_turn_id,
+                approval_policy,
+                policy_session_ids,
             )
+            .await;
+        if matches!(
+            result,
+            Err(AcpRuntimeError::SessionBusy | AcpRuntimeError::UnknownSession(_))
+        ) {
+            self.session_index
+                .lock()
+                .await
+                .set_approval_policies(&previous_policies)
+                .await
+                .map_err(AgentOperationFailure::definitive)?;
+        }
+        drop(operations);
+        result.map_err(classify_runtime_operation_failure)
+    }
+
+    pub async fn set_all_session_approval_policies(
+        &self,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<(), AgentManagerError> {
+        let (indexed_entries, pending_entries, identities, operations) = loop {
+            let indexed_entries = self.session_index.lock().await.entries.clone();
+            let pending_entries = self
+                .pending_durable_sessions
+                .lock()
+                .await
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut identities = indexed_entries
+                .iter()
+                .chain(&pending_entries)
+                .map(|entry| {
+                    AgentSessionId::new(&entry.agent_id, &entry.acp_session_id)
+                        .map_err(|_| AgentManagerError::InvalidThreadId)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            identities.sort_by_key(AgentSessionId::encode);
+            identities.dedup();
+            #[cfg(test)]
+            if let Some(barrier) = self.policy_snapshot_barrier.lock().await.take() {
+                barrier.reached.notify_one();
+                barrier.release.notified().await;
+            }
+            let mut operations = Vec::with_capacity(identities.len());
+            for identity in &identities {
+                operations.push(
+                    self.session_operation_lock(&identity.encode())
+                        .await
+                        .lock_owned()
+                        .await,
+                );
+            }
+            let current_indexed = self.session_index.lock().await.entries.clone();
+            let current_pending = self
+                .pending_durable_sessions
+                .lock()
+                .await
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut current = current_indexed
+                .iter()
+                .chain(&current_pending)
+                .map(|entry| {
+                    AgentSessionId::new(&entry.agent_id, &entry.acp_session_id)
+                        .map_err(|_| AgentManagerError::InvalidThreadId)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            current.sort_by_key(AgentSessionId::encode);
+            current.dedup();
+            if current == identities {
+                break (current_indexed, current_pending, identities, operations);
+            }
+            drop(operations);
+        };
+        let updates = indexed_entries
+            .iter()
+            .map(|entry| {
+                AgentSessionId::new(&entry.agent_id, &entry.acp_session_id)
+                    .map(|identity| (identity, approval_policy))
+                    .map_err(|_| AgentManagerError::InvalidThreadId)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.session_index
+            .lock()
             .await
-            .map_err(classify_runtime_operation_failure)
+            .set_existing_approval_policies(&updates)
+            .await?;
+        let mut pending = self.pending_durable_sessions.lock().await;
+        for entry in pending_entries {
+            let identity = AgentSessionId::new(&entry.agent_id, &entry.acp_session_id)
+                .map_err(|_| AgentManagerError::InvalidThreadId)?;
+            if let Some(current) = pending.get_mut(&identity.encode()) {
+                current.approval_policy = approval_policy;
+            }
+        }
+        drop(pending);
+
+        let mut sessions_by_agent = BTreeMap::<AgentId, Vec<SessionId>>::new();
+        for identity in identities {
+            sessions_by_agent
+                .entry(identity.agent_id)
+                .or_default()
+                .push(SessionId::new(identity.acp_session_id));
+        }
+        for (agent_id, session_ids) in sessions_by_agent {
+            let result = match self.connection(&agent_id) {
+                Ok(connection) => connection
+                    .set_approval_policies(&session_ids, approval_policy)
+                    .await
+                    .map_err(AgentManagerError::from),
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
+                eprintln!(
+                    "approval policy was committed but live delivery to agent {agent_id} failed: {error}"
+                );
+            }
+        }
+        drop(operations);
+        Ok(())
     }
 
     pub async fn cancel_turn(
@@ -2406,14 +2884,173 @@ impl AgentManager {
         Ok((identity, session_id, connection))
     }
 
+    async fn session_operation_lock(&self, thread_id: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.reconstruction_locks.lock().await;
+        locks
+            .entry(thread_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    async fn prune_session_operation_lock(&self, thread_id: &str) {
+        let mut locks = self.reconstruction_locks.lock().await;
+        let can_remove = locks
+            .get(thread_id)
+            .is_some_and(|lock| Arc::strong_count(lock) == 1);
+        if can_remove {
+            locks.remove(thread_id);
+        }
+    }
+
+    async fn apply_entry_approval_policies_locked(
+        &self,
+        entries: &[SessionIndexEntry],
+    ) -> Result<(), AgentManagerError> {
+        let mut first_error = None;
+        for entry in entries {
+            let identity = match AgentSessionId::new(&entry.agent_id, &entry.acp_session_id) {
+                Ok(identity) => identity,
+                Err(_) => {
+                    first_error.get_or_insert(AgentManagerError::InvalidThreadId);
+                    continue;
+                }
+            };
+            let result = match self.connection(&identity.agent_id) {
+                Ok(connection) => connection
+                    .set_approval_policy(
+                        &SessionId::new(identity.acp_session_id),
+                        entry.approval_policy,
+                    )
+                    .await
+                    .map_err(AgentManagerError::from),
+                Err(error) => Err(error),
+            };
+            if first_error.is_none() {
+                first_error = result.err();
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn persist_inherited_entries(
+        &self,
+        entries: &[SessionIndexEntry],
+    ) -> Result<(), AgentManagerError> {
+        let mut thread_ids = entries
+            .iter()
+            .flat_map(|entry| {
+                [
+                    Some(entry.acp_session_id.as_str()),
+                    entry.parent_acp_session_id.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|session_id| {
+                    AgentSessionId::new(&entry.agent_id, session_id)
+                        .map(|identity| identity.encode())
+                        .map_err(|_| AgentManagerError::InvalidThreadId)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        thread_ids.sort();
+        thread_ids.dedup();
+        let mut operations = Vec::with_capacity(thread_ids.len());
+        for thread_id in thread_ids {
+            operations.push(
+                self.session_operation_lock(&thread_id)
+                    .await
+                    .lock_owned()
+                    .await,
+            );
+        }
+        let result = self.persist_inherited_entries_locked(entries).await;
+        drop(operations);
+        result
+    }
+
+    async fn persist_inherited_entries_locked(
+        &self,
+        entries: &[SessionIndexEntry],
+    ) -> Result<(), AgentManagerError> {
+        let entries = {
+            let mut index = self.session_index.lock().await;
+            let mut entries = entries.to_vec();
+            for entry in &mut entries {
+                let existing = index
+                    .entries
+                    .iter()
+                    .find(|existing| {
+                        existing.agent_id == entry.agent_id
+                            && existing.acp_session_id == entry.acp_session_id
+                    })
+                    .cloned();
+                if let Some(existing) = existing.as_ref() {
+                    if existing.parent_acp_session_id.is_some()
+                        && existing.parent_acp_session_id != entry.parent_acp_session_id
+                    {
+                        *entry = existing.clone();
+                        continue;
+                    }
+                }
+                let Some(parent_id) = entry.parent_acp_session_id.as_deref() else {
+                    continue;
+                };
+                let parent = index
+                    .entries
+                    .iter()
+                    .find(|parent| {
+                        parent.agent_id == entry.agent_id && parent.acp_session_id == parent_id
+                    })
+                    .ok_or_else(|| {
+                        AgentManagerError::SessionIndex(
+                            "parent session is no longer indexed".to_string(),
+                        )
+                    })?;
+                entry.approval_policy = parent.approval_policy;
+            }
+            index.insert_inherited_entries(entries.clone()).await?;
+            entries
+        };
+        self.apply_entry_approval_policies_locked(&entries).await
+    }
+
+    #[cfg(test)]
     async fn track_session(
         &self,
         identity: AgentSessionId,
         cwd: PathBuf,
     ) -> Result<(), AgentManagerError> {
+        self.track_session_with_policy(identity, cwd, ApprovalPolicy::Untrusted)
+            .await
+    }
+
+    async fn track_session_with_policy(
+        &self,
+        identity: AgentSessionId,
+        cwd: PathBuf,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<(), AgentManagerError> {
+        let operation = self
+            .session_operation_lock(&identity.encode())
+            .await
+            .lock_owned()
+            .await;
+        let result = self
+            .track_session_with_policy_locked(identity, cwd, approval_policy)
+            .await;
+        drop(operation);
+        result
+    }
+
+    async fn track_session_with_policy_locked(
+        &self,
+        identity: AgentSessionId,
+        cwd: PathBuf,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<(), AgentManagerError> {
         self.register_session_events(&identity).await;
         let thread_id = identity.encode();
-        let entry = index_entry(identity, cwd);
+        let entry = index_entry_with_policy(identity, cwd, approval_policy);
         self.pending_durable_sessions
             .lock()
             .await
@@ -2431,12 +3068,30 @@ impl AgentManager {
     }
 
     async fn flush_pending_durable_sessions(&self) -> Result<(), AgentManagerError> {
+        let mut pending_thread_ids = self
+            .pending_durable_sessions
+            .lock()
+            .await
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        pending_thread_ids.sort();
+        let mut operations = Vec::with_capacity(pending_thread_ids.len());
+        for thread_id in &pending_thread_ids {
+            operations.push(
+                self.session_operation_lock(thread_id)
+                    .await
+                    .lock_owned()
+                    .await,
+            );
+        }
         let pending = self
             .pending_durable_sessions
             .lock()
             .await
-            .values()
-            .cloned()
+            .iter()
+            .filter(|(thread_id, _)| pending_thread_ids.binary_search(thread_id).is_ok())
+            .map(|(_, entry)| entry.clone())
             .collect::<Vec<_>>();
         if pending.is_empty() {
             return Ok(());
@@ -2450,6 +3105,7 @@ impl AgentManager {
             .lock()
             .await
             .retain(|_, entry| !pending.contains(entry));
+        drop(operations);
         Ok(())
     }
 
@@ -2669,6 +3325,17 @@ impl AgentManager {
     ) -> Result<(), AgentManagerError> {
         let parent = AgentSessionId::decode(&snapshot.thread_id)
             .map_err(|_| AgentManagerError::InvalidThreadId)?;
+        let approval_policy = self
+            .session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.agent_id == parent.agent_id && entry.acp_session_id == parent.acp_session_id
+            })
+            .map(|entry| entry.approval_policy)
+            .unwrap_or_default();
         let entries = snapshot
             .tools
             .values()
@@ -2678,10 +3345,18 @@ impl AgentManager {
                     .ok()
                     .filter(|child| child.acp_session_id != parent.acp_session_id)
             })
-            .map(|child| index_entry(child, cwd.to_path_buf()))
+            .map(|child| SessionIndexEntry {
+                agent_id: child.agent_id,
+                acp_session_id: child.acp_session_id,
+                cwd: cwd.to_path_buf(),
+                approval_policy,
+                title: None,
+                parent_acp_session_id: Some(parent.acp_session_id.clone()),
+                forked_from_acp_session_id: None,
+            })
             .collect::<Vec<_>>();
         if !entries.is_empty() {
-            self.session_index.lock().await.insert_all(entries).await?;
+            self.persist_inherited_entries(&entries).await?;
         }
         Ok(())
     }
@@ -2691,6 +3366,17 @@ impl AgentManager {
         parent: &AgentSessionId,
         cwd: &Path,
     ) -> Result<(), AgentManagerError> {
+        let approval_policy = self
+            .session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.agent_id == parent.agent_id && entry.acp_session_id == parent.acp_session_id
+            })
+            .map(|entry| entry.approval_policy)
+            .unwrap_or_default();
         let entries = self
             .opencode_related_sessions(parent, cwd)
             .await
@@ -2703,6 +3389,7 @@ impl AgentManager {
                         agent_id: child.agent_id,
                         acp_session_id: child.acp_session_id,
                         cwd: cwd.to_path_buf(),
+                        approval_policy,
                         title: related.title.filter(|title| valid_session_title(title)),
                         parent_acp_session_id: Some(parent.acp_session_id.clone()),
                         forked_from_acp_session_id: None,
@@ -2710,7 +3397,7 @@ impl AgentManager {
             })
             .collect::<Vec<_>>();
         if !entries.is_empty() {
-            self.session_index.lock().await.insert_all(entries).await?;
+            self.persist_inherited_entries(&entries).await?;
         }
         Ok(())
     }
@@ -4687,7 +5374,11 @@ mod tests {
             .session_index
             .lock()
             .await
-            .insert_all([index_entry(parent.clone(), PathBuf::from("/tmp"))])
+            .insert_all([index_entry_with_policy(
+                parent.clone(),
+                PathBuf::from("/tmp"),
+                ApprovalPolicy::Never,
+            )])
             .await
             .unwrap();
 
@@ -4710,7 +5401,372 @@ mod tests {
                 .acp_session_id,
             "child-session"
         );
+        assert_eq!(
+            manager
+                .session_index
+                .lock()
+                .await
+                .entries
+                .iter()
+                .find(|entry| entry.acp_session_id == "child-session")
+                .expect("child indexed")
+                .approval_policy,
+            ApprovalPolicy::Never
+        );
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&SessionId::new("child-session"))
+                .await,
+            ApprovalPolicy::Never
+        );
         assert_eq!(observed_rx.recv().await.as_deref(), Some("load:alpha"));
+        manager
+            .session_index
+            .lock()
+            .await
+            .set_approval_policy(&parent, ApprovalPolicy::Untrusted)
+            .await
+            .unwrap();
+        manager
+            .adopt_related_session(&parent_thread_id, "child-session", Some("Child task"))
+            .await
+            .expect("existing child policy refreshed");
+        assert_eq!(
+            manager
+                .session_index
+                .lock()
+                .await
+                .entries
+                .iter()
+                .find(|entry| entry.acp_session_id == "child-session")
+                .expect("child remains indexed")
+                .approval_policy,
+            ApprovalPolicy::Untrusted
+        );
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&SessionId::new("child-session"))
+                .await,
+            ApprovalPolicy::Untrusted
+        );
+        manager
+            .resume_session_with_policy(&parent_thread_id, "/tmp", ApprovalPolicy::OnRequest)
+            .await
+            .expect("parent workspace resume refreshes its family");
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&SessionId::new("child-session"))
+                .await,
+            ApprovalPolicy::OnRequest
+        );
+        assert!(manager
+            .session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.acp_session_id == "parent-session" || entry.acp_session_id == "child-session"
+            })
+            .all(|entry| entry.approval_policy == ApprovalPolicy::OnRequest));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_subagent_adoption_keeps_the_canonical_parent_policy() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed).await;
+        let child_id = SessionId::new("shared-child");
+        ready
+            .0
+            .ensure_session(child_id.clone())
+            .await
+            .expect("child session loaded");
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "alpha".into(),
+                vec![(manifest("alpha", "Alpha"), Ok(ready))],
+            )
+            .await
+            .expect("manager starts"),
+        );
+        let first_parent = AgentSessionId::new("alpha", "first-parent").unwrap();
+        let second_parent = AgentSessionId::new("alpha", "second-parent").unwrap();
+        let child = AgentSessionId::new("alpha", child_id.to_string()).unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([
+                index_entry_with_policy(
+                    first_parent.clone(),
+                    PathBuf::from("/tmp"),
+                    ApprovalPolicy::Never,
+                ),
+                index_entry_with_policy(
+                    second_parent.clone(),
+                    PathBuf::from("/tmp"),
+                    ApprovalPolicy::Untrusted,
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let first_adoption = {
+            let manager = manager.clone();
+            let parent = first_parent.encode();
+            let child = child.acp_session_id.clone();
+            tokio::spawn(async move { manager.adopt_related_session(&parent, &child, None).await })
+        };
+        let second_adoption = {
+            let manager = manager.clone();
+            let parent = second_parent.encode();
+            let child = child.acp_session_id.clone();
+            tokio::spawn(async move { manager.adopt_related_session(&parent, &child, None).await })
+        };
+        first_adoption
+            .await
+            .expect("first adoption task")
+            .expect("first parent discovery");
+        second_adoption
+            .await
+            .expect("second adoption task")
+            .expect("second parent discovery");
+
+        let indexed_child = manager
+            .session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .find(|entry| entry.acp_session_id == child.acp_session_id)
+            .cloned()
+            .expect("child remains indexed");
+        let expected_policy = match indexed_child.parent_acp_session_id.as_deref() {
+            Some(parent) if parent == first_parent.acp_session_id => ApprovalPolicy::Never,
+            Some(parent) if parent == second_parent.acp_session_id => ApprovalPolicy::Untrusted,
+            parent => panic!("unexpected canonical parent: {parent:?}"),
+        };
+        assert_eq!(indexed_child.approval_policy, expected_policy);
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&child_id)
+                .await,
+            expected_policy
+        );
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn global_policy_uses_the_locked_pending_to_indexed_classification() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed).await;
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "alpha".into(),
+                vec![(manifest("alpha", "Alpha"), Ok(ready))],
+            )
+            .await
+            .expect("manager starts"),
+        );
+        let identity = AgentSessionId::new("alpha", "transitioning").unwrap();
+        let thread_id = identity.encode();
+        let operation = manager
+            .session_operation_lock(&thread_id)
+            .await
+            .lock_owned()
+            .await;
+        manager.pending_durable_sessions.lock().await.insert(
+            thread_id,
+            index_entry_with_policy(
+                identity.clone(),
+                PathBuf::from("/tmp"),
+                ApprovalPolicy::Untrusted,
+            ),
+        );
+        let snapshot = manager.pause_next_policy_snapshot().await;
+        let update = {
+            let manager = manager.clone();
+            tokio::spawn(async move {
+                manager
+                    .set_all_session_approval_policies(ApprovalPolicy::Never)
+                    .await
+            })
+        };
+        snapshot.wait_until_reached().await;
+        let transitioned = manager
+            .pending_durable_sessions
+            .lock()
+            .await
+            .remove(&identity.encode())
+            .expect("pending session");
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([transitioned])
+            .await
+            .unwrap();
+        snapshot.release();
+        drop(operation);
+
+        update
+            .await
+            .expect("policy task")
+            .expect("policy update succeeds");
+        assert_eq!(
+            manager
+                .session_index
+                .lock()
+                .await
+                .entries
+                .iter()
+                .find(|entry| entry.acp_session_id == identity.acp_session_id)
+                .expect("session indexed")
+                .approval_policy,
+            ApprovalPolicy::Never
+        );
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn committed_global_policy_succeeds_when_live_delivery_is_unavailable() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![
+                (manifest("alpha", "Alpha"), Ok(ready)),
+                (
+                    manifest("beta", "Beta"),
+                    Err(AcpRuntimeError::Connection("offline".to_string())),
+                ),
+            ],
+        )
+        .await
+        .expect("manager starts");
+        let offline = AgentSessionId::new("beta", "offline-session").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry_with_policy(
+                offline.clone(),
+                PathBuf::from("/tmp"),
+                ApprovalPolicy::Untrusted,
+            )])
+            .await
+            .unwrap();
+
+        manager
+            .set_all_session_approval_policies(ApprovalPolicy::Never)
+            .await
+            .expect("durably committed policy is acknowledged");
+        assert_eq!(
+            manager
+                .session_index
+                .lock()
+                .await
+                .entries
+                .iter()
+                .find(|entry| entry.acp_session_id == offline.acp_session_id)
+                .expect("offline session indexed")
+                .approval_policy,
+            ApprovalPolicy::Never
+        );
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn parent_prompt_updates_loaded_descendant_policies_before_dispatch() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed_tx).await;
+        let child_id = SessionId::new("loaded-child");
+        ready
+            .0
+            .ensure_session(child_id.clone())
+            .await
+            .expect("child session loaded");
+        let manager = AgentManager::from_start_results(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .expect("manager starts");
+        let parent = manager
+            .new_session("alpha", NewSessionRequest::new("/tmp"))
+            .await
+            .expect("parent session created");
+        let parent_identity = AgentSessionId::decode(&parent.thread_id).unwrap();
+        let child_identity = AgentSessionId::new("alpha", child_id.to_string()).unwrap();
+        let mut child_entry = index_entry(child_identity.clone(), PathBuf::from("/tmp"));
+        child_entry.parent_acp_session_id = Some(parent_identity.acp_session_id.clone());
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([child_entry])
+            .await
+            .unwrap();
+
+        manager
+            .set_all_session_approval_policies(ApprovalPolicy::OnRequest)
+            .await
+            .expect("global policy applied");
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&SessionId::new(parent_identity.acp_session_id.clone()))
+                .await,
+            ApprovalPolicy::OnRequest
+        );
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&child_id)
+                .await,
+            ApprovalPolicy::OnRequest
+        );
+
+        manager
+            .prompt_with_policy_outcome(
+                &parent.thread_id,
+                vec!["update policy".into()],
+                "family-run".to_string(),
+                "family-turn".to_string(),
+                ApprovalPolicy::Never,
+            )
+            .await
+            .expect("parent prompt admitted");
+
+        assert_eq!(
+            manager
+                .connection("alpha")
+                .unwrap()
+                .approval_policy(&child_id)
+                .await,
+            ApprovalPolicy::Never
+        );
+        let policies = manager
+            .session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .map(|entry| entry.approval_policy)
+            .collect::<Vec<_>>();
+        assert_eq!(policies, vec![ApprovalPolicy::Never, ApprovalPolicy::Never]);
+        assert_eq!(observed_rx.recv().await.as_deref(), Some("prompt:alpha"));
         manager.shutdown().await;
     }
 
@@ -4946,6 +6002,14 @@ mod tests {
             .new_session("alpha", NewSessionRequest::new("/tmp"))
             .await
             .expect("parent created");
+        let parent_identity = AgentSessionId::decode(&parent.thread_id).unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .set_approval_policy(&parent_identity, ApprovalPolicy::Never)
+            .await
+            .unwrap();
         let (_, session_id, connection) = manager.route_thread(&parent.thread_id).unwrap();
         let session = connection
             .session(&session_id)
@@ -4974,15 +6038,20 @@ mod tests {
             .read_session(&parent.thread_id)
             .await
             .expect("parent read");
-        assert!(manager
+        let child_entry = manager
             .session_index
             .lock()
             .await
             .entries
             .iter()
-            .any(|entry| {
-                entry.agent_id == "alpha" && entry.acp_session_id == "child-persisted"
-            }));
+            .find(|entry| entry.agent_id == "alpha" && entry.acp_session_id == "child-persisted")
+            .cloned()
+            .expect("child indexed");
+        assert_eq!(
+            child_entry.parent_acp_session_id.as_deref(),
+            Some(parent_identity.acp_session_id.as_str())
+        );
+        assert_eq!(child_entry.approval_policy, ApprovalPolicy::Never);
         manager.shutdown().await;
     }
 
@@ -5316,6 +6385,14 @@ mod tests {
                 .entries
                 .is_empty());
         }
+        std::fs::write(
+            &path,
+            br#"{"version":2,"sessions":[{"agentId":"alpha","acpSessionId":"legacy","cwd":"/tmp"}]}"#,
+        )
+        .unwrap();
+        let legacy = DurableSessionIndex::load(Some(path.clone())).await;
+        assert_eq!(legacy.entries.len(), 1);
+        assert_eq!(legacy.entries[0].approval_policy, ApprovalPolicy::Untrusted);
         std::fs::write(&path, vec![b'x'; MAX_SESSION_INDEX_BYTES + 1]).unwrap();
         assert!(DurableSessionIndex::load(Some(path.clone()))
             .await
@@ -5326,6 +6403,7 @@ mod tests {
             agent_id: "alpha".into(),
             acp_session_id: "valid".into(),
             cwd: PathBuf::from("/tmp"),
+            approval_policy: ApprovalPolicy::Untrusted,
             title: None,
             parent_acp_session_id: None,
             forked_from_acp_session_id: None,
@@ -5334,6 +6412,7 @@ mod tests {
             agent_id: "alpha".into(),
             acp_session_id: "valid-two".into(),
             cwd: PathBuf::from("/tmp"),
+            approval_policy: ApprovalPolicy::Untrusted,
             title: None,
             parent_acp_session_id: None,
             forked_from_acp_session_id: None,
@@ -5342,6 +6421,7 @@ mod tests {
             agent_id: "beta".into(),
             acp_session_id: "valid".into(),
             cwd: PathBuf::from("/tmp"),
+            approval_policy: ApprovalPolicy::Untrusted,
             title: None,
             parent_acp_session_id: None,
             forked_from_acp_session_id: None,
@@ -5355,6 +6435,7 @@ mod tests {
                 agent_id: "bad/agent".into(),
                 acp_session_id: "invalid".into(),
                 cwd: PathBuf::from("/tmp"),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: None,
                 parent_acp_session_id: None,
                 forked_from_acp_session_id: None,
@@ -5363,6 +6444,7 @@ mod tests {
                 agent_id: "alpha".into(),
                 acp_session_id: "relative".into(),
                 cwd: PathBuf::from("relative"),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: None,
                 parent_acp_session_id: None,
                 forked_from_acp_session_id: None,
@@ -5371,6 +6453,7 @@ mod tests {
                 agent_id: "alpha".into(),
                 acp_session_id: "oversized-cwd".into(),
                 cwd: PathBuf::from(format!("/{}", "x".repeat(MAX_SESSION_CWD_BYTES))),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: None,
                 parent_acp_session_id: None,
                 forked_from_acp_session_id: None,
@@ -5379,6 +6462,7 @@ mod tests {
                 agent_id: "alpha".into(),
                 acp_session_id: "self-parent".into(),
                 cwd: PathBuf::from("/tmp"),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: None,
                 parent_acp_session_id: Some("self-parent".into()),
                 forked_from_acp_session_id: None,
@@ -5392,20 +6476,30 @@ mod tests {
                 agent_id: "alpha".into(),
                 acp_session_id: "titled".into(),
                 cwd: PathBuf::from("/tmp"),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: Some("Manual title".into()),
                 parent_acp_session_id: None,
                 forked_from_acp_session_id: None,
             }])
             .await
             .unwrap();
+        persisted
+            .set_approval_policy(
+                &AgentSessionId::new("alpha", "titled").unwrap(),
+                ApprovalPolicy::Never,
+            )
+            .await
+            .unwrap();
         let reloaded = DurableSessionIndex::load(Some(path.clone())).await;
         assert_eq!(reloaded.entries[0].title.as_deref(), Some("Manual title"));
+        assert_eq!(reloaded.entries[0].approval_policy, ApprovalPolicy::Never);
 
         let mut memory_only = DurableSessionIndex::load(None).await;
         let original = SessionIndexEntry {
             agent_id: "alpha".into(),
             acp_session_id: "memory".into(),
             cwd: PathBuf::from("/tmp/original"),
+            approval_policy: ApprovalPolicy::Never,
             title: Some("Original title".into()),
             parent_acp_session_id: Some("original-parent".into()),
             forked_from_acp_session_id: None,
@@ -5416,6 +6510,7 @@ mod tests {
                 agent_id: "alpha".into(),
                 acp_session_id: "memory".into(),
                 cwd: PathBuf::from("/tmp/updated"),
+                approval_policy: ApprovalPolicy::Untrusted,
                 title: None,
                 parent_acp_session_id: None,
                 forked_from_acp_session_id: None,
@@ -5432,10 +6527,15 @@ mod tests {
             memory_only.entries[0].parent_acp_session_id.as_deref(),
             Some("original-parent")
         );
+        assert_eq!(
+            memory_only.entries[0].approval_policy,
+            ApprovalPolicy::Never
+        );
         let replacement = SessionIndexEntry {
             agent_id: "alpha".into(),
             acp_session_id: "memory".into(),
             cwd: PathBuf::from("/tmp/replaced"),
+            approval_policy: ApprovalPolicy::Untrusted,
             title: Some("Replacement title".into()),
             parent_acp_session_id: Some("replacement-parent".into()),
             forked_from_acp_session_id: None,
@@ -5449,6 +6549,21 @@ mod tests {
         assert_eq!(
             memory_only.entries[0].parent_acp_session_id.as_deref(),
             Some("original-parent")
+        );
+        assert_eq!(
+            memory_only.entries[0].approval_policy,
+            ApprovalPolicy::Never
+        );
+        memory_only
+            .set_approval_policy(
+                &AgentSessionId::new("alpha", "memory").unwrap(),
+                ApprovalPolicy::Untrusted,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_only.entries[0].approval_policy,
+            ApprovalPolicy::Untrusted
         );
         memory_only
             .insert_all((0..=MAX_SESSIONS).map(|index| {
@@ -5479,6 +6594,29 @@ mod tests {
         ));
         assert_eq!(unwritable.entries, before);
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn durable_policy_sweep_skips_sessions_that_vanished_after_its_snapshot() {
+        let mut index = DurableSessionIndex::load(None).await;
+        let existing = AgentSessionId::new("alpha", "existing").unwrap();
+        let vanished = AgentSessionId::new("alpha", "vanished").unwrap();
+        index
+            .insert_all([index_entry(existing.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+
+        index
+            .set_existing_approval_policies(&[
+                (vanished, ApprovalPolicy::Never),
+                (existing.clone(), ApprovalPolicy::Never),
+            ])
+            .await
+            .expect("vanished sessions do not reject the whole policy sweep");
+
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.entries[0].acp_session_id, existing.acp_session_id);
+        assert_eq!(index.entries[0].approval_policy, ApprovalPolicy::Never);
     }
 
     #[tokio::test]
@@ -5539,14 +6677,32 @@ mod tests {
         .await
         .unwrap();
         manager.session_index.lock().await.fail_writes = true;
+        let failure = manager
+            .new_session_with_policy_outcome(
+                "alpha",
+                NewSessionRequest::new(directory.clone()),
+                ApprovalPolicy::Never,
+                RequestCancellation::default(),
+            )
+            .await
+            .expect_err("post-creation durability failure is reported");
+        assert!(failure.is_indeterminate());
         assert!(matches!(
-            manager
-                .new_session("alpha", NewSessionRequest::new(directory.clone()))
-                .await,
-            Err(AgentManagerError::SessionIndex(_))
+            failure.into_error(),
+            AgentManagerError::SessionIndex(_)
         ));
         assert_eq!(manager.loaded_session_ids().await.len(), 1);
-        assert_eq!(manager.pending_durable_sessions.lock().await.len(), 1);
+        let pending = manager.pending_durable_sessions.lock().await;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending
+                .values()
+                .next()
+                .expect("pending session")
+                .approval_policy,
+            ApprovalPolicy::Never
+        );
+        drop(pending);
         assert!(manager.session_index.lock().await.entries.is_empty());
 
         manager.session_index.lock().await.fail_writes = false;
@@ -5558,6 +6714,7 @@ mod tests {
 
         let restarted = DurableSessionIndex::load(Some(index_path)).await;
         assert_eq!(restarted.entries.len(), 1);
+        assert_eq!(restarted.entries[0].approval_policy, ApprovalPolicy::Never);
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -5681,6 +6838,161 @@ mod tests {
         );
         assert!(manager.session_index.lock().await.entries.is_empty());
         assert!(manager.loaded_session_ids().await.is_empty());
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_delete_waits_for_the_session_operation_lock() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "delete-agent".to_string(),
+                vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+            )
+            .await
+            .unwrap(),
+        );
+        let identity = AgentSessionId::new("delete-agent", "delete-agent-listed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        let thread_id = identity.encode();
+        let operation = manager
+            .session_operation_lock(&thread_id)
+            .await
+            .lock_owned()
+            .await;
+        let deletion = {
+            let manager = manager.clone();
+            let thread_id = thread_id.clone();
+            tokio::spawn(async move { manager.delete_session(&thread_id).await })
+        };
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), observed_rx.recv())
+                .await
+                .is_err(),
+            "delete reached the agent while a policy/family operation owned the session lock"
+        );
+        drop(operation);
+        deletion
+            .await
+            .expect("delete task")
+            .expect("delete succeeds after operation finishes");
+        assert_eq!(
+            observed_rx.recv().await.as_deref(),
+            Some("delete:delete-agent:delete-agent-listed")
+        );
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn operation_lock_pruning_preserves_identity_while_contended() {
+        let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
+        let manager = AgentManager::from_start_results(
+            "delete-agent".to_string(),
+            vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+        )
+        .await
+        .unwrap();
+        let thread_id = "contended-thread";
+        let original = manager.session_operation_lock(thread_id).await;
+        let held = original.clone().lock_owned().await;
+        let waiter = {
+            let operation = original.clone();
+            tokio::spawn(async move { operation.lock_owned().await })
+        };
+        tokio::task::yield_now().await;
+
+        manager.prune_session_operation_lock(thread_id).await;
+        let while_queued = manager.session_operation_lock(thread_id).await;
+        assert!(Arc::ptr_eq(&original, &while_queued));
+
+        drop(held);
+        let waiter_guard = waiter.await.expect("operation waiter");
+        manager.prune_session_operation_lock(thread_id).await;
+        let while_held = manager.session_operation_lock(thread_id).await;
+        assert!(Arc::ptr_eq(&original, &while_held));
+
+        drop(waiter_guard);
+        drop(while_held);
+        drop(while_queued);
+        drop(original);
+        manager.prune_session_operation_lock(thread_id).await;
+        assert!(!manager
+            .reconstruction_locks
+            .lock()
+            .await
+            .contains_key(thread_id));
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn stale_subagent_adoption_cannot_recreate_a_child_after_parent_deletion() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "delete-agent".to_string(),
+                vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+            )
+            .await
+            .unwrap(),
+        );
+        let parent = AgentSessionId::new("delete-agent", "parent").unwrap();
+        let child = AgentSessionId::new("delete-agent", "child").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(parent.clone(), PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        let mut stale_child = index_entry(child, PathBuf::from("/tmp"));
+        stale_child.parent_acp_session_id = Some(parent.acp_session_id.clone());
+        let parent_thread_id = parent.encode();
+        let operation = manager
+            .session_operation_lock(&parent_thread_id)
+            .await
+            .lock_owned()
+            .await;
+        let deletion = {
+            let manager = manager.clone();
+            let parent_thread_id = parent_thread_id.clone();
+            tokio::spawn(async move { manager.delete_session(&parent_thread_id).await })
+        };
+        tokio::task::yield_now().await;
+        let adoption = {
+            let manager = manager.clone();
+            tokio::spawn(async move {
+                manager
+                    .persist_inherited_entries(std::slice::from_ref(&stale_child))
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+
+        drop(operation);
+        deletion
+            .await
+            .expect("delete task")
+            .expect("parent deletion succeeds");
+        assert_eq!(
+            observed_rx.recv().await.as_deref(),
+            Some("delete:delete-agent:parent")
+        );
+        assert!(matches!(
+            adoption.await.expect("adoption task"),
+            Err(AgentManagerError::SessionIndex(message))
+                if message == "parent session is no longer indexed"
+        ));
+        assert!(manager.session_index.lock().await.entries.is_empty());
         manager.shutdown().await;
     }
 
@@ -6321,7 +7633,7 @@ mod tests {
             .unwrap()
             .encode();
         manager
-            .resume_session(&resume_thread, "/tmp")
+            .resume_session_with_policy(&resume_thread, "/tmp", ApprovalPolicy::Never)
             .await
             .unwrap();
         assert_eq!(
@@ -6331,8 +7643,31 @@ mod tests {
         let load_thread = AgentSessionId::new("load-agent", "load-session")
             .unwrap()
             .encode();
-        manager.resume_session(&load_thread, "/tmp").await.unwrap();
+        manager
+            .resume_session_with_policy(&load_thread, "/tmp", ApprovalPolicy::OnRequest)
+            .await
+            .unwrap();
         assert_eq!(observed_rx.recv().await.as_deref(), Some("load:load-agent"));
+        {
+            let index = manager.session_index.lock().await;
+            let entries = &index.entries;
+            assert_eq!(
+                entries
+                    .iter()
+                    .find(|entry| entry.acp_session_id == "resume-session")
+                    .expect("resumed session indexed")
+                    .approval_policy,
+                ApprovalPolicy::Never
+            );
+            assert_eq!(
+                entries
+                    .iter()
+                    .find(|entry| entry.acp_session_id == "load-session")
+                    .expect("loaded session indexed")
+                    .approval_policy,
+                ApprovalPolicy::OnRequest
+            );
+        }
         manager
             .resume_session(&resume_thread, "/tmp")
             .await
@@ -6340,6 +7675,18 @@ mod tests {
         assert_eq!(
             observed_rx.recv().await.as_deref(),
             Some("resume:resume-agent")
+        );
+        assert_eq!(
+            manager
+                .session_index
+                .lock()
+                .await
+                .entries
+                .iter()
+                .find(|entry| entry.acp_session_id == "resume-session")
+                .expect("resumed session remains indexed")
+                .approval_policy,
+            ApprovalPolicy::Untrusted
         );
         let listed = manager.list_sessions(None, 100).await.unwrap().sessions;
         assert_eq!(listed.len(), 2);

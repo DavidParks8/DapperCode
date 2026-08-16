@@ -2531,8 +2531,17 @@ describe('HostBridgeApiClient', () => {
     ws.request
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ thread: { id: 'workspace', cwd: '/old', turns: [] } });
-    await expect(client.setChatWorkspace('workspace', '/new')).resolves.toMatchObject({
+    await expect(client.setChatWorkspace('workspace', '/new', 'never')).resolves.toMatchObject({
       cwd: '/new',
+    });
+    expect(ws.request).toHaveBeenCalledWith(
+      'thread/resume',
+      expect.objectContaining({ approvalPolicy: 'never', cwd: '/new' }),
+    );
+    ws.request.mockResolvedValueOnce({ ok: true });
+    await expect(client.setApprovalPolicy('on-request')).resolves.toBeUndefined();
+    expect(ws.request).toHaveBeenLastCalledWith('thread/approvalPolicy/set', {
+      approvalPolicy: 'on-request',
     });
   });
 

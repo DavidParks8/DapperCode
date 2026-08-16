@@ -55,6 +55,7 @@
   ],
   "mobileForwardedMethods": [
     "model/list",
+    "thread/approvalPolicy/set",
     "thread/config/set",
     "thread/delete",
     "thread/list",

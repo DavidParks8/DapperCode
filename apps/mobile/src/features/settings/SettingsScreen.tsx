@@ -14,8 +14,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { AgentDescriptor, BridgeCapabilities } from '@bridge/types/types';
+import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
 import { AgentIcon } from '@shared/ui/AgentIcon';
+import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { feedback } from '@shared/feedback';
 import { disablePush, enablePush, updatePushEvents } from '@shell/push/controller';
 import { retryPersistenceAtom } from '@shell/state/appState/actions';
@@ -25,7 +27,6 @@ import {
   bridgeProfilesAtom,
 } from '@shell/state/appState/atoms';
 import {
-  approvalModeAtom,
   confirmSessionDeletionAtom,
   showToolCallsAtom,
   workspaceChatLimitAtom,
@@ -40,6 +41,7 @@ import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
 import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { useAppTheme, type AppTheme } from '@shared/theme';
+import { approvalModeTitle, useApprovalModeSettings } from './useApprovalModeSettings';
 
 function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
   if (current === 5) {
@@ -115,18 +117,30 @@ function InstalledAgentsSection({ loading, capabilities, theme }: InstalledAgent
   );
 }
 
-function ChatSettingsSection() {
-  const [approvalMode, setApprovalMode] = useAtom(approvalModeAtom);
+interface ChatSettingsSectionProps {
+  api: HostBridgeApiClient | null;
+  bridgeConnected: boolean;
+  onError: (message: string | null) => void;
+}
+
+function ChatSettingsSection({ api, bridgeConnected, onError }: ChatSettingsSectionProps) {
   const [confirmSessionDeletion, setConfirmSessionDeletion] = useAtom(confirmSessionDeletionAtom);
   const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
   const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
+  const {
+    approvalBusy,
+    approvalMode,
+    approvalOptions,
+    approvalSheetVisible,
+    setApprovalSheetVisible,
+  } = useApprovalModeSettings({ api, bridgeConnected, onError });
 
   return (
     <Section title="Chat">
-      <Toggle
-        label="Require approvals"
-        value={approvalMode !== 'yolo'}
-        onChange={(value) => setApprovalMode(value ? 'normal' : 'yolo')}
+      <Row
+        label="Approvals"
+        value={approvalModeTitle(approvalMode)}
+        onPress={() => setApprovalSheetVisible(true)}
       />
       <Toggle label="Show tool calls" value={showToolCalls} onChange={setShowToolCalls} />
       <Toggle
@@ -138,6 +152,15 @@ function ChatSettingsSection() {
         label="Chats per workspace"
         value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
         onPress={() => setWorkspaceChatLimit(cycleWorkspaceChatLimit(workspaceChatLimit))}
+      />
+      <SelectionSheet
+        visible={approvalSheetVisible}
+        title="Approval requirements"
+        subtitle="Choose when agents must ask before acting."
+        options={approvalOptions}
+        onClose={() => setApprovalSheetVisible(false)}
+        loading={approvalBusy}
+        loadingLabel="Applying approval requirement"
       />
     </Section>
   );
@@ -286,7 +309,7 @@ export function SettingsScreen() {
 
         <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-        <ChatSettingsSection />
+        <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
 
         <NotificationsSection
           pushSettings={pushSettings}

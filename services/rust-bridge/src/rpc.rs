@@ -59,6 +59,7 @@ pub(crate) fn is_forwarded_method(method: &str) -> bool {
             | "review/start"
             | "thread/list"
             | "thread/delete"
+            | "thread/approvalPolicy/set"
             | "thread/name/update"
             | "thread/snapshot/page"
             | "thread/loaded/list"
@@ -121,6 +122,7 @@ mod tests {
         assert_eq!(parse_client_request_id("not json"), Value::Null);
         assert!(is_forwarded_method("thread/read"));
         assert!(is_forwarded_method("thread/delete"));
+        assert!(is_forwarded_method("thread/approvalPolicy/set"));
         assert!(is_forwarded_method("turn/start"));
         assert!(!is_forwarded_method("bridge/capabilities/read"));
         assert!(!is_forwarded_method("thread/read/extra"));

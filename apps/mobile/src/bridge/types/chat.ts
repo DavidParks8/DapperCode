@@ -338,7 +338,7 @@ export type ServiceTier = 'flex' | 'fast';
 
 export type ApprovalPolicy = 'untrusted' | 'on-request' | 'on-failure' | 'never';
 
-export type ApprovalMode = 'normal' | 'yolo';
+export type ApprovalMode = 'all' | 'some' | 'none';
 
 export interface ModelReasoningEffortOption {
   effort: ReasoningEffort;

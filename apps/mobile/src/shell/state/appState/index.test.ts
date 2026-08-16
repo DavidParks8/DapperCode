@@ -230,7 +230,7 @@ describe('appStateReducer', () => {
 
     expect(toolsChanged.settings.defaultStartCwd).toBe('/workspace');
     expect(toolsChanged.settings.showToolCalls).toBe(false);
-    expect(toolsChanged.settings.approvalMode).toBe('normal');
+    expect(toolsChanged.settings.approvalMode).toBe('all');
   });
 
   it('remembers agent collaboration settings without replacing other agents', () => {

@@ -121,7 +121,7 @@ export function createDefaultAppSettings(): AppSettingsState {
     defaultStartCwd: null,
     preferredAgentId: null,
     agentSettings: {},
-    approvalMode: 'normal',
+    approvalMode: 'all',
     showToolCalls: true,
     confirmSessionDeletion: true,
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,

@@ -12,7 +12,7 @@ use agent_client_protocol::schema::v1::{
 };
 use futures_util::future::BoxFuture;
 
-use crate::acp::interactions::ElicitationFieldKind;
+use crate::acp::interactions::{ApprovalPolicy, ElicitationFieldKind};
 use crate::acp::manager::{
     AgentLifecycle, AgentManager, AgentOperationFailure, HarnessChildSession,
     LocalAgentManifestSet, ManagedSession,
@@ -38,6 +38,7 @@ pub(super) struct RuntimeBackend {
     manager: Arc<AgentManager>,
     hub: Arc<ClientHub>,
     event_pump: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    event_side_effects: Mutex<Option<tokio::task::JoinHandle<()>>>,
     client_requests: ClientRequestTracker,
 }
 
@@ -284,6 +285,196 @@ async fn adopt_subagent_session(
     Some(thread_id)
 }
 
+async fn process_event_side_effects(
+    manager: &Arc<AgentManager>,
+    hub: &Arc<ClientHub>,
+    subagent_discoveries: &SubagentDiscoveries,
+    event: &crate::acp::events::CanonicalEvent,
+) {
+    if let crate::acp::events::CanonicalEvent::Tool {
+        thread_id,
+        tool_call_id,
+        kind,
+        status,
+        title,
+        ..
+    } = event
+    {
+        let settled = matches!(
+            status,
+            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+        );
+        if !settled
+            && crate::acp::snapshot::is_subagent_task_tool(*kind, title)
+            && manager.can_discover_subagents(thread_id)
+        {
+            let key = discovery_key(thread_id, tool_call_id);
+            let started = subagent_discoveries
+                .lock()
+                .map(|mut state| state.polling.insert(key))
+                .unwrap_or(false);
+            if started {
+                tokio::spawn(discover_subagent_session(
+                    manager.clone(),
+                    hub.clone(),
+                    thread_id.clone(),
+                    tool_call_id.clone(),
+                    subagent_discoveries.clone(),
+                ));
+            }
+        }
+    }
+    if let crate::acp::events::CanonicalEvent::RunStarted {
+        thread_id,
+        generation,
+        ..
+    } = event
+    {
+        manager.note_subagent_started(thread_id, *generation).await;
+    }
+    let related_terminal = match event {
+        crate::acp::events::CanonicalEvent::RunFinished {
+            thread_id,
+            stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            generation,
+            ..
+        } => Some((thread_id.as_str(), *generation, "cancelled")),
+        crate::acp::events::CanonicalEvent::RunFinished {
+            thread_id,
+            generation,
+            ..
+        } => Some((thread_id.as_str(), *generation, "completed")),
+        crate::acp::events::CanonicalEvent::RunFailed {
+            thread_id,
+            generation,
+            ..
+        } => Some((thread_id.as_str(), *generation, "failed")),
+        _ => None,
+    };
+    if let Some((child_thread_id, generation, status)) = related_terminal {
+        let accepted = manager
+            .accepted_subagent_terminal(child_thread_id, generation)
+            .await;
+        let correlation_target = accepted.clone();
+        let correction = if let Some(target) = accepted {
+            manager
+                .mark_parent_subagent_tool_terminal(
+                    &target.parent_thread_id,
+                    &target.tool_call_id,
+                    status,
+                )
+                .await
+        } else if !manager.tracks_subagent_generation(child_thread_id).await {
+            manager
+                .mark_parent_subagent_terminal(child_thread_id, status)
+                .await
+        } else {
+            Ok(None)
+        };
+        match correction {
+            Ok(Some(parent)) => {
+                if let Some(target) = correlation_target {
+                    manager
+                        .retire_subagent_link(child_thread_id, &target.tool_call_id)
+                        .await;
+                }
+                hub.broadcast_ag_ui_envelope(parent_subagent_snapshot_envelope(&parent))
+                    .await;
+            }
+            Ok(None) => {
+                if let Some(target) = correlation_target {
+                    manager
+                        .retire_subagent_link(child_thread_id, &target.tool_call_id)
+                        .await;
+                }
+            }
+            Err(error) => {
+                eprintln!("failed to persist parent sub-agent status: {error}");
+            }
+        }
+    }
+    if let Some((parent_thread_id, child_session_id, child_title, tool_call_id, terminal)) =
+        crate::agui::discovered_subagent_session(event)
+    {
+        let (parent_run_id, parent_source_turn_id) = match event {
+            crate::acp::events::CanonicalEvent::Tool {
+                run_id,
+                source_turn_id,
+                ..
+            } => (run_id.as_deref(), source_turn_id.clone()),
+            _ => (None, None),
+        };
+        if terminal {
+            if let Some(thread_id) = child_thread_id(parent_thread_id, &child_session_id) {
+                manager.retire_subagent_link(&thread_id, tool_call_id).await;
+            }
+        }
+        adopt_subagent_session(
+            manager,
+            hub,
+            AdoptedSubagent {
+                parent_thread_id,
+                parent_run_id,
+                parent_source_turn_id,
+                child_session_id: &child_session_id,
+                child_title,
+                tool_call_id,
+                link: !terminal,
+            },
+        )
+        .await;
+    }
+    let terminal = match event {
+        crate::acp::events::CanonicalEvent::RunFinished {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        }
+        | crate::acp::events::CanonicalEvent::RunFailed {
+            thread_id,
+            run_id,
+            source_turn_id,
+            ..
+        } => Some((thread_id.clone(), run_id.clone(), source_turn_id.clone())),
+        _ => None,
+    };
+    if let Some((thread_id, run_id, source_turn_id)) = terminal {
+        if let Ok(session) = manager.read_session(&thread_id).await {
+            hub.broadcast_ag_ui_envelope(crate::agui::messages_snapshot_envelope(
+                &session.snapshot,
+                run_id,
+                Some(source_turn_id),
+            ))
+            .await;
+        }
+    }
+}
+
+fn event_has_side_effects(event: &crate::acp::events::CanonicalEvent) -> bool {
+    matches!(
+        event,
+        crate::acp::events::CanonicalEvent::Tool { .. }
+            | crate::acp::events::CanonicalEvent::RunStarted { .. }
+            | crate::acp::events::CanonicalEvent::RunFinished { .. }
+            | crate::acp::events::CanonicalEvent::RunFailed { .. }
+    )
+}
+
+async fn pump_canonical_events(
+    mut events: crate::acp::events::CanonicalEventReceiver,
+    event_hub: Arc<ClientHub>,
+    side_effects_tx: tokio::sync::mpsc::UnboundedSender<crate::acp::events::CanonicalEvent>,
+) {
+    while let Some(event) = events.recv().await {
+        event_hub.broadcast_canonical_event(&event).await;
+        if event_has_side_effects(&event) && side_effects_tx.send(event).is_err() {
+            break;
+        }
+    }
+}
+
 struct ClientRequestOwner {
     client_id: u64,
     cancellation: RequestCancellation,
@@ -506,200 +697,35 @@ impl RuntimeBackend {
             .await
             .map_err(|error| error.to_string())?,
         );
-        let mut events = manager
+        let events = manager
             .take_events()
             .await
             .ok_or_else(|| "ACP canonical event receiver already taken".to_string())?;
         let event_hub = hub.clone();
-        let snapshot_manager = manager.clone();
         let subagent_discoveries: SubagentDiscoveries =
             Arc::new(StdMutex::new(SubagentDiscoveryState::default()));
-        let event_pump = tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                if let crate::acp::events::CanonicalEvent::Tool {
-                    thread_id,
-                    tool_call_id,
-                    kind,
-                    status,
-                    title,
-                    ..
-                } = &event
-                {
-                    let settled = matches!(
-                        status,
-                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                            | agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                    );
-                    if !settled
-                        && crate::acp::snapshot::is_subagent_task_tool(*kind, title)
-                        && snapshot_manager.can_discover_subagents(thread_id)
-                    {
-                        let key = discovery_key(thread_id, tool_call_id);
-                        let started = subagent_discoveries
-                            .lock()
-                            .map(|mut state| state.polling.insert(key))
-                            .unwrap_or(false);
-                        if started {
-                            tokio::spawn(discover_subagent_session(
-                                snapshot_manager.clone(),
-                                event_hub.clone(),
-                                thread_id.clone(),
-                                tool_call_id.clone(),
-                                subagent_discoveries.clone(),
-                            ));
-                        }
-                    }
-                }
-                if let crate::acp::events::CanonicalEvent::RunStarted {
-                    thread_id,
-                    generation,
-                    ..
-                } = &event
-                {
-                    snapshot_manager
-                        .note_subagent_started(thread_id, *generation)
-                        .await;
-                }
-                let related_terminal = match &event {
-                    crate::acp::events::CanonicalEvent::RunFinished {
-                        thread_id,
-                        stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
-                        generation,
-                        ..
-                    } => Some((thread_id.as_str(), *generation, "cancelled")),
-                    crate::acp::events::CanonicalEvent::RunFinished {
-                        thread_id,
-                        generation,
-                        ..
-                    } => Some((thread_id.as_str(), *generation, "completed")),
-                    crate::acp::events::CanonicalEvent::RunFailed {
-                        thread_id,
-                        generation,
-                        ..
-                    } => Some((thread_id.as_str(), *generation, "failed")),
-                    _ => None,
-                };
-                if let Some((child_thread_id, generation, status)) = related_terminal {
-                    let accepted = snapshot_manager
-                        .accepted_subagent_terminal(child_thread_id, generation)
-                        .await;
-                    let correlation_target = accepted.clone();
-                    let correction = if let Some(target) = accepted {
-                        snapshot_manager
-                            .mark_parent_subagent_tool_terminal(
-                                &target.parent_thread_id,
-                                &target.tool_call_id,
-                                status,
-                            )
-                            .await
-                    } else if !snapshot_manager
-                        .tracks_subagent_generation(child_thread_id)
-                        .await
-                    {
-                        snapshot_manager
-                            .mark_parent_subagent_terminal(child_thread_id, status)
-                            .await
-                    } else {
-                        Ok(None)
-                    };
-                    match correction {
-                        Ok(Some(parent)) => {
-                            if let Some(target) = correlation_target {
-                                snapshot_manager
-                                    .retire_subagent_link(child_thread_id, &target.tool_call_id)
-                                    .await;
-                            }
-                            event_hub
-                                .broadcast_ag_ui_envelope(parent_subagent_snapshot_envelope(
-                                    &parent,
-                                ))
-                                .await;
-                        }
-                        Ok(None) => {
-                            if let Some(target) = correlation_target {
-                                snapshot_manager
-                                    .retire_subagent_link(child_thread_id, &target.tool_call_id)
-                                    .await;
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("failed to persist parent sub-agent status: {error}");
-                        }
-                    }
-                }
-                if let Some((
-                    parent_thread_id,
-                    child_session_id,
-                    child_title,
-                    tool_call_id,
-                    terminal,
-                )) = crate::agui::discovered_subagent_session(&event)
-                {
-                    let (parent_run_id, parent_source_turn_id) = match &event {
-                        crate::acp::events::CanonicalEvent::Tool {
-                            run_id,
-                            source_turn_id,
-                            ..
-                        } => (run_id.as_deref(), source_turn_id.clone()),
-                        _ => (None, None),
-                    };
-                    if terminal {
-                        if let Some(thread_id) =
-                            child_thread_id(parent_thread_id, &child_session_id)
-                        {
-                            snapshot_manager
-                                .retire_subagent_link(&thread_id, tool_call_id)
-                                .await;
-                        }
-                    }
-                    adopt_subagent_session(
-                        &snapshot_manager,
-                        &event_hub,
-                        AdoptedSubagent {
-                            parent_thread_id,
-                            parent_run_id,
-                            parent_source_turn_id,
-                            child_session_id: &child_session_id,
-                            child_title,
-                            tool_call_id,
-                            link: !terminal,
-                        },
-                    )
-                    .await;
-                }
-                event_hub.broadcast_canonical_event(&event).await;
-                let terminal = match &event {
-                    crate::acp::events::CanonicalEvent::RunFinished {
-                        thread_id,
-                        run_id,
-                        source_turn_id,
-                        ..
-                    }
-                    | crate::acp::events::CanonicalEvent::RunFailed {
-                        thread_id,
-                        run_id,
-                        source_turn_id,
-                        ..
-                    } => Some((thread_id.clone(), run_id.clone(), source_turn_id.clone())),
-                    _ => None,
-                };
-                if let Some((thread_id, run_id, source_turn_id)) = terminal {
-                    if let Ok(session) = snapshot_manager.read_session(&thread_id).await {
-                        event_hub
-                            .broadcast_ag_ui_envelope(crate::agui::messages_snapshot_envelope(
-                                &session.snapshot,
-                                run_id,
-                                Some(source_turn_id),
-                            ))
-                            .await;
-                    }
-                }
+        let (side_effects_tx, mut side_effects_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::acp::events::CanonicalEvent>();
+        let side_effects_manager = manager.clone();
+        let side_effects_hub = hub.clone();
+        let side_effects_discoveries = subagent_discoveries.clone();
+        let event_side_effects = tokio::spawn(async move {
+            while let Some(event) = side_effects_rx.recv().await {
+                process_event_side_effects(
+                    &side_effects_manager,
+                    &side_effects_hub,
+                    &side_effects_discoveries,
+                    &event,
+                )
+                .await;
             }
         });
+        let event_pump = tokio::spawn(pump_canonical_events(events, event_hub, side_effects_tx));
         Ok(Arc::new(Self {
             manager,
             hub,
             event_pump: Mutex::new(Some(event_pump)),
+            event_side_effects: Mutex::new(Some(event_side_effects)),
             client_requests: ClientRequestTracker::default(),
         }))
     }
@@ -710,6 +736,15 @@ impl RuntimeBackend {
         if let Some(pump) = self.event_pump.lock().await.take() {
             pump.abort();
             let _ = pump.await;
+        }
+        if let Some(mut side_effects) = self.event_side_effects.lock().await.take() {
+            if tokio::time::timeout(std::time::Duration::from_secs(5), &mut side_effects)
+                .await
+                .is_err()
+            {
+                side_effects.abort();
+                let _ = side_effects.await;
+            }
         }
     }
 
@@ -942,12 +977,21 @@ impl RuntimeBackend {
                     .map_err(|error| error.to_string())?;
                 serde_json::to_value(page).map_err(|error| error.to_string())
             }
+            "thread/approvalPolicy/set" => {
+                let approval_policy = approval_policy(&params);
+                self.manager
+                    .set_all_session_approval_policies(approval_policy)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(json!({ "ok": true }))
+            }
             "thread/resume" => {
                 let thread_id = required_string(&params, "threadId")?;
                 let cwd = required_string(&params, "cwd")?;
+                let approval_policy = approval_policy(&params);
                 let session = self
                     .manager
-                    .resume_session(&thread_id, cwd)
+                    .resume_session_with_policy(&thread_id, cwd, approval_policy)
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok(json!({ "thread": session_to_thread_value(session)? }))
@@ -974,11 +1018,18 @@ impl RuntimeBackend {
             "turn/start" => {
                 let thread_id = required_string(&params, "threadId")?;
                 let prompt = bridge_prompt(&params)?;
+                let approval_policy = approval_policy(&params);
                 let source_turn_id = Uuid::new_v4().to_string();
                 let run_id = format!("{thread_id}::turn::{source_turn_id}");
                 let admission = self
                     .manager
-                    .prompt_with_outcome(&thread_id, prompt, run_id, source_turn_id)
+                    .prompt_with_policy_outcome(
+                        &thread_id,
+                        prompt,
+                        run_id,
+                        source_turn_id,
+                        approval_policy,
+                    )
                     .await
                     .map_err(classified_operation_error)?;
                 Ok(json!({
@@ -1012,6 +1063,7 @@ impl RuntimeBackend {
         let cwd = read_string(params.get("cwd")).unwrap_or_else(|| ".".to_string());
         let model = read_string(params.get("model"));
         let effort = read_string(params.get("effort"));
+        let approval_policy = approval_policy(&params);
         let mode = read_string(params.get("mode")).map(|value| {
             if value == "default" {
                 "build".to_string()
@@ -1021,9 +1073,10 @@ impl RuntimeBackend {
         });
         let mut session = self
             .manager
-            .new_session_with_cancellation_outcome(
+            .new_session_with_policy_outcome(
                 &agent_id,
                 NewSessionRequest::new(cwd),
+                approval_policy,
                 cancellation,
             )
             .await
@@ -1337,6 +1390,10 @@ fn required_string(params: &Value, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{name} must not be empty"))
 }
 
+fn approval_policy(params: &Value) -> ApprovalPolicy {
+    ApprovalPolicy::from_wire(read_string(params.get("approvalPolicy")).as_deref())
+}
+
 fn session_to_thread_value(session: crate::acp::manager::ManagedSession) -> Result<Value, String> {
     let snapshot = crate::acp::snapshot::BridgeThreadSnapshot::from(session.snapshot);
     let title = snapshot.session.title.clone();
@@ -1446,12 +1503,66 @@ pub(super) async fn wait_for_shutdown_signal() -> &'static str {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod client_request_tests {
     use super::*;
+    use crate::acp::events::{canonical_event_channel, CanonicalEvent, MessageRole};
     use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
     use std::path::PathBuf;
     use tokio::{
         sync::{oneshot, Semaphore},
         time::{timeout, Duration},
     };
+
+    #[tokio::test]
+    async fn canonical_event_pump_keeps_draining_while_side_effects_are_backlogged() {
+        let (sender, events) = canonical_event_channel(4);
+        let hub = Arc::new(ClientHub::new());
+        let mut subscriber = hub.subscribe_canonical_events();
+        let (side_effects_tx, mut side_effects_rx) = tokio::sync::mpsc::unbounded_channel();
+        let pump = tokio::spawn(pump_canonical_events(events, hub.clone(), side_effects_tx));
+
+        sender
+            .send(CanonicalEvent::RunStarted {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run".to_string(),
+                source_turn_id: "turn".to_string(),
+                generation: 1,
+            })
+            .await
+            .expect("run event");
+        sender
+            .send(CanonicalEvent::MessageChunk {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: Some("run".to_string()),
+                source_turn_id: Some("turn".to_string()),
+                generation: Some(1),
+                role: MessageRole::Agent,
+                message_id: "message".to_string(),
+                content: "continued".to_string(),
+                content_block: None,
+            })
+            .await
+            .expect("message event");
+
+        let first = timeout(Duration::from_millis(100), subscriber.recv())
+            .await
+            .expect("first event broadcast")
+            .expect("first event");
+        let second = timeout(Duration::from_millis(100), subscriber.recv())
+            .await
+            .expect("second event broadcast")
+            .expect("second event");
+        assert!(matches!(first.event, CanonicalEvent::RunStarted { .. }));
+        assert!(matches!(second.event, CanonicalEvent::MessageChunk { .. }));
+        assert!(matches!(
+            side_effects_rx.try_recv(),
+            Ok(CanonicalEvent::RunStarted { .. })
+        ));
+        assert!(side_effects_rx.try_recv().is_err());
+
+        drop(sender);
+        pump.await.expect("event pump");
+    }
 
     /// Several sub-agents at once are told apart by the description their child session is
     /// named after; the placeholder title every task tool starts with names none of them.
@@ -1497,6 +1608,27 @@ mod client_request_tests {
                     },
                 },
             })
+        );
+    }
+
+    #[test]
+    fn parses_all_three_approval_policies_conservatively() {
+        assert_eq!(
+            approval_policy(&json!({ "approvalPolicy": "never" })),
+            ApprovalPolicy::Never
+        );
+        assert_eq!(
+            approval_policy(&json!({ "approvalPolicy": "on-request" })),
+            ApprovalPolicy::OnRequest
+        );
+        assert_eq!(
+            approval_policy(&json!({ "approvalPolicy": "untrusted" })),
+            ApprovalPolicy::Untrusted
+        );
+        assert_eq!(approval_policy(&json!({})), ApprovalPolicy::Untrusted);
+        assert_eq!(
+            approval_policy(&json!({ "approvalPolicy": "invalid" })),
+            ApprovalPolicy::Untrusted
         );
     }
 

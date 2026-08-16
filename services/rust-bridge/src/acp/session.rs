@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex,
 };
 
 use agent_client_protocol::schema::v1::{SessionId, SessionNotification};
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::{mpsc, oneshot, Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::events::{
@@ -36,6 +36,7 @@ pub struct AcpSession {
     instance_id: Uuid,
     inner: Arc<Mutex<SessionState>>,
     operation_lock: Arc<Mutex<()>>,
+    interaction_lock: Arc<Mutex<()>>,
     events: CanonicalEventSender,
     event_receiver: Arc<Mutex<Option<CanonicalEventReceiver>>>,
     #[cfg(test)]
@@ -103,6 +104,7 @@ impl AcpSession {
                 notification_draining: false,
             })),
             operation_lock: Arc::new(Mutex::new(())),
+            interaction_lock: Arc::new(Mutex::new(())),
             events,
             event_receiver: Arc::new(Mutex::new(Some(event_receiver))),
             #[cfg(test)]
@@ -113,6 +115,11 @@ impl AcpSession {
     pub fn instance_id(&self) -> Uuid {
         self.instance_id
     }
+
+    pub(crate) async fn lock_interactions(&self) -> OwnedMutexGuard<()> {
+        self.interaction_lock.clone().lock_owned().await
+    }
+
     pub async fn begin_reconstruction(
         &self,
     ) -> Result<ReconstructionTransaction, ReconstructionError> {
@@ -622,6 +629,8 @@ impl ReconstructionTransaction {
 
 const PENDING_NOTIFICATION_CAPACITY: usize = 4096;
 const LIVE_SESSION_CAPACITY: usize = 256;
+type SessionRemovalNotice = (SessionId, oneshot::Sender<()>);
+type SessionRemovalSender = mpsc::UnboundedSender<SessionRemovalNotice>;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SessionRouteError {
@@ -641,6 +650,19 @@ struct RegistryState {
     next_reservation: u64,
 }
 
+impl RegistryState {
+    fn discard_pending_notifications(&mut self, session_id: &SessionId) {
+        let discarded = self
+            .pending_notifications
+            .remove(session_id)
+            .map_or(0, |notifications| notifications.len());
+        self.pending_notification_count = self
+            .pending_notification_count
+            .checked_sub(discarded)
+            .expect("pending notification count tracks every journal entry");
+    }
+}
+
 enum RegistryEntry {
     Registering {
         session: AcpSession,
@@ -656,6 +678,10 @@ enum RegistryEntry {
         session: AcpSession,
         last_access: u64,
         leases: Arc<AtomicUsize>,
+    },
+    Removing {
+        token: Uuid,
+        ready: tokio::sync::watch::Receiver<bool>,
     },
 }
 
@@ -678,15 +704,27 @@ impl Drop for SessionLease {
 
 #[cfg(test)]
 #[derive(Clone)]
-struct RegistrationBarrier {
+pub(crate) struct RegistrationBarrier {
     reached: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl RegistrationBarrier {
+    pub(crate) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
 }
 
 #[derive(Clone)]
 pub struct SessionRegistry {
     inner: Arc<Mutex<RegistryState>>,
     capacity: usize,
+    removal_listener: Arc<StdMutex<Option<SessionRemovalSender>>>,
     #[cfg(test)]
     registration_barrier: Arc<Mutex<Option<RegistrationBarrier>>>,
     #[cfg(test)]
@@ -771,7 +809,18 @@ impl SessionRegistry {
                 && !state.pending_notifications.contains_key(&session_id)
                 && session.is_evictable().await
             {
-                state.sessions.remove(&session_id);
+                let token = Uuid::new_v4();
+                let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
+                state.sessions.insert(
+                    session_id.clone(),
+                    RegistryEntry::Removing {
+                        token,
+                        ready: ready_rx.clone(),
+                    },
+                );
+                drop(state);
+                self.spawn_removal(session_id.clone(), token, ready_tx);
+                Self::wait_for_removal(&mut ready_rx).await;
                 continue;
             }
             drop(state);
@@ -838,14 +887,93 @@ impl SessionRegistry {
             .await;
     }
 
-    fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(RegistryState::default())),
             capacity,
+            removal_listener: Arc::new(StdMutex::new(None)),
             #[cfg(test)]
             registration_barrier: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             eviction_barrier: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn subscribe_removals(&self) -> mpsc::UnboundedReceiver<SessionRemovalNotice> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        *self
+            .removal_listener
+            .lock()
+            .expect("session removal listener lock") = Some(sender);
+        receiver
+    }
+
+    async fn notify_removed(&self, session_id: SessionId) {
+        let listener = self
+            .removal_listener
+            .lock()
+            .expect("session removal listener lock")
+            .clone();
+        let Some(listener) = listener else {
+            return;
+        };
+        let (acknowledge, acknowledged) = oneshot::channel();
+        if listener.send((session_id, acknowledge)).is_ok() {
+            let _ = acknowledged.await;
+        }
+    }
+
+    async fn complete_removal(
+        &self,
+        session_id: SessionId,
+        token: Uuid,
+        ready: tokio::sync::watch::Sender<bool>,
+    ) {
+        self.notify_removed(session_id.clone()).await;
+        let mut state = self.inner.lock().await;
+        if matches!(
+            state.sessions.get(&session_id),
+            Some(RegistryEntry::Removing {
+                token: current, ..
+            }) if *current == token
+        ) {
+            state.sessions.remove(&session_id);
+            state.discard_pending_notifications(&session_id);
+        }
+        let _ = ready.send(true);
+    }
+
+    fn spawn_removal(
+        &self,
+        session_id: SessionId,
+        token: Uuid,
+        ready: tokio::sync::watch::Sender<bool>,
+    ) {
+        let registry = self.clone();
+        tokio::spawn(async move {
+            registry.complete_removal(session_id, token, ready).await;
+        });
+    }
+
+    async fn wait_for_removal(ready: &mut tokio::sync::watch::Receiver<bool>) -> bool {
+        while !*ready.borrow_and_update() {
+            if ready.changed().await.is_err() {
+                return false;
+            }
+        }
+        true
+    }
+
+    async fn clear_abandoned_removal(&self, session_id: &SessionId, token: Uuid) {
+        let mut state = self.inner.lock().await;
+        if matches!(
+            state.sessions.get(session_id),
+            Some(RegistryEntry::Removing {
+                token: current, ..
+            }) if *current == token
+        ) {
+            state.sessions.remove(session_id);
+            state.discard_pending_notifications(session_id);
         }
     }
 
@@ -871,8 +999,14 @@ impl SessionRegistry {
                 return Err(SessionRouteError::Capacity(self.capacity));
             }
             if state.sessions.contains_key(&session_id) {
-                if let Some(reservation) = reservation {
-                    state.reservations.remove(&reservation);
+                let is_removing = matches!(
+                    state.sessions.get(&session_id),
+                    Some(RegistryEntry::Removing { .. })
+                );
+                if !is_removing {
+                    if let Some(reservation) = reservation {
+                        state.reservations.remove(&reservation);
+                    }
                 }
                 let entry = state
                     .sessions
@@ -904,6 +1038,15 @@ impl SessionRegistry {
                         self.restore_eviction(&session_id, session.clone(), last_access, leases)
                             .await;
                         return Ok((session, false));
+                    }
+                    RegistryEntry::Removing { token, ready } => {
+                        let token = *token;
+                        let mut ready = ready.clone();
+                        drop(state);
+                        if !Self::wait_for_removal(&mut ready).await {
+                            self.clear_abandoned_removal(&session_id, token).await;
+                        }
+                        continue;
                     }
                 }
             }
@@ -976,8 +1119,18 @@ impl SessionRegistry {
                 && !state.pending_notifications.contains_key(&evicted_id)
                 && evicted_session.is_evictable().await
             {
-                state.sessions.remove(&evicted_id);
-                state.pending_notifications.remove(&evicted_id);
+                let token = Uuid::new_v4();
+                let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
+                state.sessions.insert(
+                    evicted_id.clone(),
+                    RegistryEntry::Removing {
+                        token,
+                        ready: ready_rx.clone(),
+                    },
+                );
+                drop(state);
+                self.spawn_removal(evicted_id.clone(), token, ready_tx);
+                Self::wait_for_removal(&mut ready_rx).await;
                 continue;
             }
             if still_evicting {
@@ -1092,6 +1245,42 @@ impl SessionRegistry {
             leases: leases.clone(),
         })
     }
+
+    pub(crate) async fn stable_lease(&self, session_id: &SessionId) -> Option<SessionLease> {
+        loop {
+            let mut state = self.inner.lock().await;
+            let last_access = state.next_access;
+            state.next_access = state.next_access.saturating_add(1);
+            match state.sessions.get_mut(session_id)? {
+                RegistryEntry::Live {
+                    session,
+                    last_access: seen,
+                    leases,
+                } => {
+                    *seen = last_access;
+                    leases.fetch_add(1, Ordering::AcqRel);
+                    return Some(SessionLease {
+                        session: session.clone(),
+                        leases: leases.clone(),
+                    });
+                }
+                RegistryEntry::Evicting {
+                    session,
+                    last_access,
+                    leases,
+                } => {
+                    let session = session.clone();
+                    let last_access = *last_access;
+                    let leases = leases.clone();
+                    drop(state);
+                    self.restore_eviction(session_id, session, last_access, leases)
+                        .await;
+                }
+                RegistryEntry::Registering { .. } | RegistryEntry::Removing { .. } => return None,
+            }
+        }
+    }
+
     pub async fn all(&self) -> Vec<AcpSession> {
         self.inner
             .lock()
@@ -1100,12 +1289,51 @@ impl SessionRegistry {
             .values()
             .filter_map(|entry| match entry {
                 RegistryEntry::Live { session, .. } => Some(session.clone()),
-                RegistryEntry::Registering { .. } | RegistryEntry::Evicting { .. } => None,
+                RegistryEntry::Registering { .. }
+                | RegistryEntry::Evicting { .. }
+                | RegistryEntry::Removing { .. } => None,
             })
             .collect()
     }
     pub async fn remove(&self, session_id: &SessionId) {
-        self.inner.lock().await.sessions.remove(session_id);
+        let removal = {
+            let mut state = self.inner.lock().await;
+            let registering_notification_count = match state.sessions.get(session_id) {
+                None => {
+                    state.discard_pending_notifications(session_id);
+                    return;
+                }
+                Some(RegistryEntry::Removing { token, ready }) => {
+                    let token = *token;
+                    let mut ready = ready.clone();
+                    drop(state);
+                    if !Self::wait_for_removal(&mut ready).await {
+                        self.clear_abandoned_removal(session_id, token).await;
+                    }
+                    return;
+                }
+                Some(RegistryEntry::Registering { journal, .. }) => journal.len(),
+                Some(_) => 0,
+            };
+            state.discard_pending_notifications(session_id);
+            state.pending_notification_count = state
+                .pending_notification_count
+                .checked_sub(registering_notification_count)
+                .expect("pending notification count tracks every journal entry");
+            let token = Uuid::new_v4();
+            let (ready_tx, ready_rx) = tokio::sync::watch::channel(false);
+            state.sessions.insert(
+                session_id.clone(),
+                RegistryEntry::Removing {
+                    token,
+                    ready: ready_rx.clone(),
+                },
+            );
+            (token, ready_tx, ready_rx)
+        };
+        let (token, ready_tx, mut ready_rx) = removal;
+        self.spawn_removal(session_id.clone(), token, ready_tx);
+        Self::wait_for_removal(&mut ready_rx).await;
     }
     pub async fn route(
         &self,
@@ -1125,6 +1353,12 @@ impl SessionRegistry {
             leases.fetch_sub(1, Ordering::AcqRel);
             return Ok(());
         }
+        if matches!(
+            state.sessions.get(&notification.session_id),
+            Some(RegistryEntry::Removing { .. })
+        ) {
+            return Ok(());
+        }
         if let Some(RegistryEntry::Evicting { session, .. }) =
             state.sessions.get(&notification.session_id)
         {
@@ -1142,6 +1376,12 @@ impl SessionRegistry {
                 session
                     .route_received_notifications(agent_id, std::iter::once(received))
                     .await;
+                return Ok(());
+            }
+            if matches!(
+                state.sessions.get(&session_id),
+                Some(RegistryEntry::Removing { .. })
+            ) {
                 return Ok(());
             }
             if state.pending_notification_count >= PENDING_NOTIFICATION_CAPACITY {
@@ -1188,7 +1428,7 @@ impl SessionRegistry {
     }
 
     #[cfg(test)]
-    async fn pause_next_registration(&self) -> RegistrationBarrier {
+    pub(crate) async fn pause_next_registration(&self) -> RegistrationBarrier {
         let barrier = RegistrationBarrier {
             reached: Arc::new(tokio::sync::Notify::new()),
             release: Arc::new(tokio::sync::Notify::new()),
@@ -1198,7 +1438,7 @@ impl SessionRegistry {
     }
 
     #[cfg(test)]
-    async fn pause_next_eviction(&self) -> RegistrationBarrier {
+    pub(crate) async fn pause_next_eviction(&self) -> RegistrationBarrier {
         let barrier = RegistrationBarrier {
             reached: Arc::new(tokio::sync::Notify::new()),
             release: Arc::new(tokio::sync::Notify::new()),
@@ -1518,6 +1758,7 @@ mod tests {
                 .await
                 .unwrap();
         }
+
         assert_eq!(
             registry
                 .route("agent", notification("pressure", "overflow"))
@@ -1549,6 +1790,86 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_removal_still_blocks_same_id_replacement_until_cleanup_finishes() {
+        let registry = SessionRegistry::default();
+        let mut removals = registry.subscribe_removals();
+        let session_id = SessionId::new("replacement-safe");
+        let original = registry
+            .register("agent", session_id.clone())
+            .await
+            .expect("original session");
+
+        let removal = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.remove(&session_id).await })
+        };
+        let (removed_id, acknowledge) = removals.recv().await.expect("removal notice");
+        assert_eq!(removed_id, session_id);
+        removal.abort();
+        assert!(removal
+            .await
+            .expect_err("outer removal is cancelled")
+            .is_cancelled());
+
+        let replacement = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.register_with_freshness("agent", session_id).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!replacement.is_finished());
+        acknowledge.send(()).expect("cleanup acknowledged");
+        let (replacement, fresh) = replacement
+            .await
+            .expect("replacement task")
+            .expect("replacement registered");
+        assert!(fresh);
+        assert!(!Arc::ptr_eq(&original.inner, &replacement.inner));
+    }
+
+    #[tokio::test]
+    async fn notifications_during_removal_are_discarded_before_same_id_replacement() {
+        let registry = SessionRegistry::default();
+        let mut removals = registry.subscribe_removals();
+        let session_id = SessionId::new("removal-notifications");
+        registry
+            .register("agent", session_id.clone())
+            .await
+            .expect("original session");
+
+        let removal = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.remove(&session_id).await })
+        };
+        let (removed_id, acknowledge) = removals.recv().await.expect("removal notice");
+        assert_eq!(removed_id, session_id);
+
+        registry
+            .route(
+                "agent",
+                notification("removal-notifications", "late-message"),
+            )
+            .await
+            .expect("late notification is discarded");
+        {
+            let state = registry.inner.lock().await;
+            assert_eq!(state.pending_notification_count, 0);
+            assert!(!state.pending_notifications.contains_key(&session_id));
+        }
+
+        acknowledge.send(()).expect("cleanup acknowledged");
+        removal.await.expect("removal task");
+        let (replacement, fresh) = registry
+            .register_with_freshness("agent", session_id)
+            .await
+            .expect("replacement registered");
+        assert!(fresh);
+        assert!(replacement.snapshot().await.messages.is_empty());
     }
 
     #[tokio::test]
