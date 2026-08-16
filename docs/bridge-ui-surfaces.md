@@ -140,7 +140,7 @@ content changes: a pure `in_progress` → `completed` transition would be lost.
     "toolCallId": "call-1",
     "kind": "execute",
     "status": "in_progress",
-    "title": "npm test",
+    "title": "pnpm test",
     "startedAtMs": 1784505600000,
     "completedAtMs": null
   }
@@ -165,10 +165,10 @@ Raw tool input is deliberately absent. The bridge strips `rawInput`, `rawOutput`
 
 For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
 ```bash
-npm run bridge:ui:demo
+pnpm run bridge:ui:demo
 ```
 
-That sends a sample workflow card to the latest chat. Use `npm run bridge:ui:demo -- --modal` or `npm run bridge:ui:demo -- --banner` to test the other presentations. Use `npm run bridge:ui:demo -- --thread <thread-id>` when the latest chat is not the one visible on the device.
+That sends a sample workflow card to the latest chat. Use `pnpm run bridge:ui:demo --modal` or `pnpm run bridge:ui:demo --banner` to test the other presentations. Use `pnpm run bridge:ui:demo --thread <thread-id>` when the latest chat is not the one visible on the device.
 
 ## Implemented Session Token Totals Example
 

@@ -33,7 +33,7 @@ We will acknowledge the report as soon as practical and work toward a fix and co
 - `BRIDGE_ALLOW_INSECURE_NO_AUTH=true` is restricted to literal loopback listeners. No-auth browser access to RPC, status, and local images accepts only the listener origin or exact `BRIDGE_NO_AUTH_ALLOWED_ORIGINS`; origin-less native/operator clients remain supported.
 - Never allow wildcard or `null` browser origins.
 - Do not expose the bridge directly to the public internet.
-- Desktop setup registers an ACP executable already installed by the user. It canonicalizes and hashes the executable before atomically writing the agent manifest into the central data directory; it never resolves or executes npm, npx, uvx, shell installer, registry, or floating package sources.
+- Desktop setup registers an ACP executable already installed by the user. It canonicalizes and hashes the executable before atomically writing the agent manifest into the central data directory; it never resolves or executes pnpm, npm, npx, uvx, shell installer, registry, or floating package sources.
 - Configuration and runtime state live in a per-user data directory (`~/Library/Application Support/dev.dappercode.desktop` on macOS) with owner-only permissions, not inside repositories. Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
 - The bridge bearer token is stored in the operating system keychain. Where no keychain exists it falls back to a `0600` file in the data directory, and the app reports which backend is in use. The token is never written to a repository and never appears in the process ownership record.
 - Each workspace gets a distinct token, so compromising one workspace's bridge does not grant access to another.

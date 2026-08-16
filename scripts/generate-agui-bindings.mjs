@@ -66,7 +66,7 @@ for (const [target, expected] of [
   if (check) {
     const actual = await readFile(target, 'utf8').catch(() => '');
     if (actual !== expected) {
-      throw new Error(`${path.relative(root, target)} is stale; run npm run agui:generate`);
+      throw new Error(`${path.relative(root, target)} is stale; run pnpm run agui:generate`);
     }
   } else {
     await writeFile(target, expected);

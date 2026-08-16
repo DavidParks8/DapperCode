@@ -113,16 +113,19 @@ function assertRustNativeBundle() {
       relative.endsWith('.js') ||
       relative.endsWith('package.json') ||
       relative.endsWith('package-lock.json') ||
+      relative.endsWith('pnpm-lock.yaml') ||
       relative.includes('node_modules') ||
       path.basename(relative) === 'node' ||
       path.basename(relative) === 'npm' ||
       path.basename(relative) === 'npx' ||
+      path.basename(relative) === 'pnpm' ||
+      path.basename(relative) === 'pnpx' ||
       relative.includes('slint')
     );
   });
   if (forbidden.length > 0) {
     throw new Error(
-      `macOS bundle contains forbidden npm/Slint runtime files:\n${forbidden.join('\n')}`,
+      `macOS bundle contains forbidden package-manager/Slint runtime files:\n${forbidden.join('\n')}`,
     );
   }
   const required = [

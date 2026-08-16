@@ -18,20 +18,20 @@ cd apps/mobile
 You can also run from repo root with workspace scoping:
 
 ```bash
-npm exec --workspace apps/mobile -- eas <command>
+pnpm --dir apps/mobile dlx eas-cli <command>
 ```
 
 ## Prerequisites
 
-- `eas-cli` installed (`npm install -g eas-cli`)
-- Logged in (`eas login`)
+- pnpm 11.1.2
+- Logged in (`pnpm dlx eas-cli login`)
 - Access to the Expo organization `davidparks8s-team`
 
 The active app is linked as `@davidparks8s-team/dappercode` with EAS project ID
 `dc4bb45d-72cf-4c82-8fcd-f841b1ef6c71`. Verify it from `apps/mobile`:
 
 ```bash
-eas project:info
+pnpm dlx eas-cli project:info
 ```
 
 ## Build Profiles
@@ -48,26 +48,26 @@ From `apps/mobile`:
 
 ```bash
 # Internal/dev-client builds
-eas build --platform ios --profile development
-eas build --platform android --profile development
+pnpm dlx eas-cli build --platform ios --profile development
+pnpm dlx eas-cli build --platform android --profile development
 
 # Internal preview builds
-eas build --platform ios --profile preview
-eas build --platform android --profile preview
+pnpm dlx eas-cli build --platform ios --profile preview
+pnpm dlx eas-cli build --platform android --profile preview
 
 # Production builds
-eas build --platform ios --profile production
-eas build --platform android --profile production
+pnpm dlx eas-cli build --platform ios --profile production
+pnpm dlx eas-cli build --platform android --profile production
 
 # Both platforms
-eas build --platform all --profile preview
+pnpm dlx eas-cli build --platform all --profile preview
 ```
 
 Track builds:
 
 ```bash
-eas build:list --limit 10
-eas build:view <BUILD_ID>
+pnpm dlx eas-cli build:list --limit 10
+pnpm dlx eas-cli build:view <BUILD_ID>
 ```
 
 ## Release To TestFlight
@@ -76,7 +76,7 @@ Use the wrapper rather than remembering flags. It runs preflight checks, builds,
 step, from the repository root:
 
 ```bash
-npm run release:testflight
+pnpm run release:testflight
 ```
 
 Preflight refuses a dirty working tree, because EAS archives the *local* git state: releasing with
@@ -87,11 +87,11 @@ account with access to `davidparks8s-team`.
 Options:
 
 ```bash
-npm run release:testflight -- --dry-run                      # preflight only, print the command
-npm run release:testflight -- --no-submit                    # build without submitting
-npm run release:testflight -- --no-wait                      # queue and return immediately
-npm run release:testflight -- --platform android --profile preview
-npm run release:testflight -- --allow-dirty                  # opt out of the clean-tree check
+pnpm run release:testflight --dry-run                      # preflight only, print the command
+pnpm run release:testflight --no-submit                    # build without submitting
+pnpm run release:testflight --no-wait                      # queue and return immediately
+pnpm run release:testflight --platform android --profile preview
+pnpm run release:testflight --allow-dirty                  # opt out of the clean-tree check
 ```
 
 The script lives at `scripts/release-testflight.mts` and runs through Node's built-in TypeScript
@@ -103,7 +103,7 @@ To fast-forward to `origin/main`, rebuild and launch the macOS tray app, and sub
 production archive to TestFlight with one command:
 
 ```bash
-npm run release:latest
+pnpm run release:latest
 ```
 
 This command requires macOS, Xcode, CocoaPods, and an authenticated EAS account. It uses a local
@@ -111,14 +111,14 @@ EAS build so it is not blocked by the account's cloud iOS build quota, submits t
 and removes the temporary archive afterward. Tracked working-tree changes must be committed
 beforehand; untracked local files are left untouched.
 
-Use `npm run release:latest -- --dry-run` to print the workflow without changing the checkout or
+Use `pnpm run release:latest --dry-run` to print the workflow without changing the checkout or
 starting a build.
 
 ## Submit To Stores Manually
 
 ```bash
-eas submit --platform ios --latest --profile production
-eas submit --platform android --latest --profile production
+pnpm dlx eas-cli submit --platform ios --latest --profile production
+pnpm dlx eas-cli submit --platform android --latest --profile production
 ```
 
 For App Review, do not make the bridge public. Prepare an isolated private VPN or overlay,
@@ -140,8 +140,8 @@ product configuration.
 If you want local native builds instead:
 
 ```bash
-npx expo run:ios
-npx expo run:android
+pnpm --filter @dappercode/mobile exec expo run:ios
+pnpm --filter @dappercode/mobile exec expo run:android
 ```
 
 For iOS local device/signed builds, Apple signing/tooling is still required.

@@ -20,7 +20,7 @@ for (const dependencyName of dependencyNames) {
 }
 
 const sourceFiles = [
-  path.join(root, 'package-lock.json'),
+  path.join(root, 'pnpm-lock.yaml'),
   path.join(mobileRoot, '.env.example'),
   path.join(mobileRoot, 'src/app/_layout.tsx'),
   path.join(mobileRoot, 'app.json'),

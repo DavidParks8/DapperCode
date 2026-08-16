@@ -80,7 +80,7 @@ function parseOptions(argv: ReadonlyArray<string>): Options {
       case '-h':
         info(
           [
-            'Usage: npm run release:latest',
+            'Usage: pnpm run release:latest',
             '',
             'Fast-forward origin/main, then in parallel rebuild and launch the macOS tray app',
             'while preparing and submitting a local iOS production archive to TestFlight.',
@@ -132,7 +132,7 @@ function syncMain(): string {
 }
 
 async function buildAndLaunchTray(signal: AbortSignal): Promise<void> {
-  await runAsync('npm', ['run', 'desktop:build:macos'], ROOT, signal);
+  await runAsync('pnpm', ['run', 'desktop:build:macos'], ROOT, signal);
   await runAsync('open', [TRAY_APP], ROOT, signal);
   await runAsync('sleep', ['2'], ROOT, signal);
 
@@ -147,9 +147,9 @@ async function publishTestFlight(signal: AbortSignal): Promise<void> {
 
   try {
     await runAsync(
-      'npx',
+      'pnpm',
       [
-        '--yes',
+        'dlx',
         'eas-cli',
         'build',
         '--platform',
@@ -169,9 +169,9 @@ async function publishTestFlight(signal: AbortSignal): Promise<void> {
     }
 
     await runAsync(
-      'npx',
+      'pnpm',
       [
-        '--yes',
+        'dlx',
         'eas-cli',
         'submit',
         '--platform',
@@ -196,7 +196,7 @@ function printDryRun(): void {
       'Dry run. Would:',
       '  1. Verify tracked changes are clean.',
       '  2. Fetch and fast-forward to origin/main.',
-      '  3. In parallel, run npm run desktop:build:macos, open the tray app, and start',
+      '  3. In parallel, run pnpm run desktop:build:macos, open the tray app, and start',
       '     a local iOS production EAS build.',
       '  4. Submit the generated IPA to TestFlight.',
     ].join('\n'),
