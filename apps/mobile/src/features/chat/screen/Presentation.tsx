@@ -10,56 +10,41 @@ import {
   View,
 } from 'react-native';
 import { BrandMark } from '@shared/ui/BrandMark';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
 
-const SUGGESTIONS = ['Explain the current codebase structure', 'Write tests for the main module'];
+const SUGGESTIONS = [
+  { label: 'Explain the codebase', prompt: 'Explain the current codebase structure' },
+  { label: 'Write tests', prompt: 'Write tests for the main module' },
+  { label: 'Review my diff', prompt: 'Review my uncommitted changes and flag anything risky' },
+] as const;
+
+/**
+ * The capsule is a pill, so it shows the folder the path ends in rather than the whole path. The
+ * untruncated path stays on the accessibility label.
+ */
+function workspaceDisplayName(label: string): string {
+  const trimmed = label.trim();
+  const segment = trimmed.split('/').filter(Boolean).pop();
+  return segment && segment.length > 0 ? segment : trimmed;
+}
 
 export function ComposeView({
   startWorkspaceLabel,
-  showAgentPicker,
-  agentLabel,
-  showModelControls,
-  modelLabel,
-  showThinkingControls,
-  thinkingLabel,
-  collaborationModeLabel,
-  showFastMode,
-  fastModeEnabled,
-  fastModeLabel,
   keyboardVisible,
   bottomInset,
   topInset,
   onSuggestion,
   onOpenWorkspacePicker,
-  onOpenAgentPicker,
-  onOpenModelPicker,
-  onOpenThinkingPicker,
-  onOpenCollaborationModePicker,
-  onToggleFastMode,
 }: {
   startWorkspaceLabel: string;
-  showAgentPicker: boolean;
-  agentLabel: string;
-  showModelControls: boolean;
-  modelLabel: string;
-  showThinkingControls: boolean;
-  thinkingLabel: string;
-  collaborationModeLabel: string;
-  showFastMode: boolean;
-  fastModeEnabled: boolean;
-  fastModeLabel: string;
   keyboardVisible: boolean;
   bottomInset: number;
   topInset: number;
   onSuggestion: (s: string) => void;
   onOpenWorkspacePicker: () => void;
-  onOpenAgentPicker: () => void;
-  onOpenModelPicker: () => void;
-  onOpenThinkingPicker: () => void;
-  onOpenCollaborationModePicker: () => void;
-  onToggleFastMode: () => void;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -91,177 +76,51 @@ export function ComposeView({
       <Text style={styles.composeTitle}>Let's build</Text>
       <Pressable
         style={({ pressed }) => [
-          styles.workspaceSelectBtn,
-          styles.workspacePathSelectBtn,
-          pressed && styles.workspaceSelectBtnPressed,
+          styles.workspaceCapsule,
+          pressed && styles.workspaceCapsulePressed,
         ]}
         onPress={onOpenWorkspacePicker}
         accessibilityRole="button"
         accessibilityLabel={`Workspace, ${startWorkspaceLabel}`}
       >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="folder-open-outline"
-          size={16}
-          color={theme.colors.textMuted}
-        />
-        <Text style={[styles.workspaceSelectLabel, styles.workspacePathSelectLabel]}>
-          {startWorkspaceLabel}
-        </Text>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="chevron-forward"
-          size={14}
-          color={theme.colors.textMuted}
-        />
+        <GlassSurface
+          pointerEvents="none"
+          role="capsule"
+          style={styles.workspaceCapsuleGlass}
+          testID="compose-workspace-glass-surface"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="folder-outline"
+            size={15}
+            color={theme.colors.textSecondary}
+          />
+          <Text style={styles.workspaceCapsuleLabel} numberOfLines={1}>
+            {workspaceDisplayName(startWorkspaceLabel)}
+          </Text>
+          <View style={styles.workspaceCapsuleChevron}>
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="chevron-forward"
+              size={12}
+              color={theme.colors.textSecondary}
+            />
+          </View>
+        </GlassSurface>
       </Pressable>
-      {showAgentPicker ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.workspaceSelectBtn,
-            pressed && styles.workspaceSelectBtnPressed,
-          ]}
-          onPress={onOpenAgentPicker}
-          accessibilityRole="button"
-          accessibilityLabel={`Agent, ${agentLabel}`}
-        >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="layers-outline"
-            size={16}
-            color={theme.colors.textMuted}
-          />
-          <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
-            {agentLabel}
-          </Text>
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="chevron-forward"
-            size={14}
-            color={theme.colors.textMuted}
-          />
-        </Pressable>
-      ) : null}
-      {showModelControls ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.workspaceSelectBtn,
-            pressed && styles.workspaceSelectBtnPressed,
-          ]}
-          onPress={onOpenModelPicker}
-          accessibilityRole="button"
-          accessibilityLabel={`Model, ${modelLabel}`}
-        >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="sparkles-outline"
-            size={16}
-            color={theme.colors.textMuted}
-          />
-          <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
-            {modelLabel}
-          </Text>
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="chevron-forward"
-            size={14}
-            color={theme.colors.textMuted}
-          />
-        </Pressable>
-      ) : null}
-      {showThinkingControls ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.workspaceSelectBtn,
-            pressed && styles.workspaceSelectBtnPressed,
-          ]}
-          onPress={onOpenThinkingPicker}
-          accessibilityRole="button"
-          accessibilityLabel={`Thinking level, ${thinkingLabel}`}
-        >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="pulse-outline"
-            size={16}
-            color={theme.colors.textMuted}
-          />
-          <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
-            {thinkingLabel}
-          </Text>
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="chevron-forward"
-            size={14}
-            color={theme.colors.textMuted}
-          />
-        </Pressable>
-      ) : null}
-      <Pressable
-        style={({ pressed }) => [
-          styles.workspaceSelectBtn,
-          pressed && styles.workspaceSelectBtnPressed,
-        ]}
-        onPress={onOpenCollaborationModePicker}
-        accessibilityRole="button"
-        accessibilityLabel={`Agent mode, ${collaborationModeLabel}`}
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="map-outline"
-          size={16}
-          color={theme.colors.textMuted}
-        />
-        <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
-          {collaborationModeLabel}
-        </Text>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="chevron-forward"
-          size={14}
-          color={theme.colors.textMuted}
-        />
-      </Pressable>
-      {showFastMode ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.workspaceSelectBtn,
-            pressed && styles.workspaceSelectBtnPressed,
-          ]}
-          onPress={onToggleFastMode}
-          accessibilityRole="switch"
-          accessibilityLabel="Fast mode"
-          accessibilityState={{ checked: fastModeEnabled }}
-        >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="flash-outline"
-            size={16}
-            color={theme.colors.textMuted}
-          />
-          <Text style={styles.workspaceSelectLabel} numberOfLines={1}>
-            {fastModeLabel}
-          </Text>
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name={fastModeEnabled ? 'checkmark-circle' : 'ellipse-outline'}
-            size={14}
-            color={theme.colors.textMuted}
-          />
-        </Pressable>
-      ) : null}
       <View style={styles.suggestions}>
-        {SUGGESTIONS.map((s, index) => (
+        {SUGGESTIONS.map((suggestion) => (
           <Pressable
-            key={`${s}-${String(index)}`}
+            key={suggestion.label}
             style={({ pressed }) => [
               styles.suggestionCard,
               pressed && styles.suggestionCardPressed,
             ]}
-            onPress={() => onSuggestion(s)}
+            onPress={() => onSuggestion(suggestion.prompt)}
             accessibilityRole="button"
-            accessibilityLabel={`Use suggestion: ${s}`}
+            accessibilityLabel={`Use suggestion: ${suggestion.label}`}
           >
-            <Text style={styles.suggestionText}>{s}</Text>
+            <Text style={styles.suggestionText}>{suggestion.label}</Text>
           </Pressable>
         ))}
       </View>
