@@ -198,6 +198,77 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps every session control on the chip row before a chat exists', () => {
+    // The compose screen used to stack these as full-width rows in its own body. They now live on
+    // the one chip row, so the row has to render without a selected chat.
+    const context = baseContext({
+      selectedChat: null,
+      headerTitle: 'New chat',
+      readyAgents: [
+        { id: 'codex', label: 'Codex' },
+        { id: 'claude', label: 'Claude' },
+      ],
+      activeAgentLabel: 'Codex',
+      openAgentModal: jest.fn(),
+    } as unknown as Partial<Context>);
+    const tree = render(context);
+    const root = queryRoot(tree);
+
+    expect(
+      root.findAll((node) => node.props['testID'] === 'session-meta-row').length,
+    ).toBeGreaterThan(0);
+    for (const prefix of ['Agent,', 'Model,', 'Thinking level,', 'Agent mode,', 'Fast mode']) {
+      expect(() => findPressableByLabelPrefix(root, prefix)).not.toThrow();
+    }
+
+    invokeProp(findPressableByLabelPrefix(root, 'Agent,'), 'onPress');
+    expect(context.openAgentModal).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('drops the agent chip once a chat is bound to the agent that created it', () => {
+    const context = baseContext({
+      readyAgents: [
+        { id: 'codex', label: 'Codex' },
+        { id: 'claude', label: 'Claude' },
+      ],
+      activeAgentLabel: 'Codex',
+      openAgentModal: jest.fn(),
+    } as unknown as Partial<Context>);
+    const tree = render(context);
+    const root = queryRoot(tree);
+
+    expect(() => findPressableByLabelPrefix(root, 'Agent,')).toThrow();
+    // The agent-thread chip also starts with "Agent", so the row itself must still be there.
+    expect(
+      root.findAll((node) => node.props['testID'] === 'session-meta-row').length,
+    ).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('offers no agent chip when only one agent is ready to run', () => {
+    const context = baseContext({
+      selectedChat: null,
+      readyAgents: [{ id: 'codex', label: 'Codex' }],
+      activeAgentLabel: 'Codex',
+      openAgentModal: jest.fn(),
+    } as unknown as Partial<Context>);
+    const tree = render(context);
+    const root = queryRoot(tree);
+
+    expect(() => findPressableByLabelPrefix(root, 'Agent,')).toThrow();
+    act(() => tree.unmount());
+  });
+
+  it('leaves the opening placeholder without a chip row to configure', () => {
+    const context = baseContext({ selectedChat: null, isOpeningChat: true });
+    const tree = render(context);
+    const root = queryRoot(tree);
+
+    expect(root.findAll((node) => node.props['testID'] === 'session-meta-row')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('fires a selection haptic and opens the agent mode menu when the mode chip is pressed', () => {
     const context = baseContext();
     const tree = render(context);

@@ -164,6 +164,10 @@ function SessionMetaRow(props: {
 }) {
   const { context, styles, theme, hitSlop, tokenTotals, onOpenTokenSheet } = props;
   const {
+    selectedChat,
+    readyAgents,
+    activeAgentLabel,
+    openAgentModal,
     modelOptions,
     openModelModal,
     activeModelLabel,
@@ -180,6 +184,9 @@ function SessionMetaRow(props: {
     fastModeControlDisabled,
     toggleFastMode,
   } = context;
+  // The agent is only selectable before a session exists; an open chat is bound to the agent that
+  // created it.
+  const showAgentChip = !selectedChat && readyAgents.length > 1;
 
   return (
     <View style={styles.sessionMetaRow} testID="session-meta-row">
@@ -189,6 +196,19 @@ function SessionMetaRow(props: {
         contentContainerStyle={styles.sessionMetaRowContent}
         testID="session-meta-selectors"
       >
+        {showAgentChip ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.modelChip}
+            label={`Agent, ${activeAgentLabel}`}
+            displayText={activeAgentLabel}
+            iconName="layers-outline"
+            accessibilityRole="button"
+            hitSlop={hitSlop}
+            onPress={openAgentModal}
+          />
+        ) : null}
         {modelOptions.length > 0 ? (
           <SessionMetaChip
             styles={styles}
@@ -441,7 +461,9 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     () => computeHitSlop(SESSION_META_CHIP_VISIBLE_SIZE, SESSION_META_CHIP_HIT_SLOP_OPTIONS),
     [],
   );
-  const showSessionMetaRow = Boolean(selectedChat) && !isOpeningChat;
+  // The compose screen carries the same session controls, so the chip row is the one place they
+  // live in both states. Only the opening placeholder has nothing to configure.
+  const showSessionMetaRow = !isOpeningChat;
   const tokenTotals =
     context.selectedThreadRuntimeSnapshot?.tokenTotals ?? selectedChat?.tokenTotals ?? null;
 
