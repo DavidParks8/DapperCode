@@ -39,16 +39,18 @@ describe('bindAppWebSocketLifecycle', () => {
     expect(ws.disconnect).not.toHaveBeenCalled();
 
     const emitState = listener as ((state: AppStateStatus) => void) | null;
-    emitState?.('background');
     emitState?.('inactive');
-    expect(ws.disconnect).toHaveBeenCalledTimes(2);
+    expect(ws.connect).toHaveBeenCalledTimes(2);
+    expect(ws.disconnect).not.toHaveBeenCalled();
+    emitState?.('background');
+    expect(ws.disconnect).toHaveBeenCalledTimes(1);
 
     emitState?.('active');
-    expect(ws.connect).toHaveBeenCalledTimes(2);
+    expect(ws.connect).toHaveBeenCalledTimes(3);
 
     cleanup();
     expect(remove).toHaveBeenCalledTimes(1);
-    expect(ws.disconnect).toHaveBeenCalledTimes(3);
+    expect(ws.disconnect).toHaveBeenCalledTimes(2);
   });
 
   it('does not connect when initially backgrounded', () => {

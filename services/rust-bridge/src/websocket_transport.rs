@@ -5,6 +5,21 @@ fn failure_is_definitive(error: &str) -> bool {
 }
 
 const RPC_IDENTIFIER_MAX_BYTES: usize = 4096;
+const WS_CLIENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const WS_CLIENT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
+
+fn client_heartbeat_expired(
+    last_activity: tokio::time::Instant,
+    now: tokio::time::Instant,
+) -> bool {
+    now.duration_since(last_activity) >= WS_CLIENT_HEARTBEAT_TIMEOUT
+}
+
+fn heartbeat_send_requires_disconnect(
+    result: Result<(), mpsc::error::TrySendError<Message>>,
+) -> bool {
+    matches!(result, Err(mpsc::error::TrySendError::Closed(_)))
+}
 
 pub(super) fn protected_request_error(
     config: &BridgeConfig,
@@ -46,6 +61,7 @@ pub(super) async fn handle_socket(
 ) {
     let (mut socket_tx, mut socket_rx) = socket.split();
     let (tx, mut rx) = mpsc::channel::<Message>(WS_CLIENT_QUEUE_CAPACITY);
+    let heartbeat_tx = tx.clone();
     let client_in_flight = Arc::new(Semaphore::new(state.config.ws_limits.per_client_in_flight));
     let client_id = state
         .hub
@@ -65,6 +81,13 @@ pub(super) async fn handle_socket(
         .hub
         .send_json(client_id, state.hub.connection_state_payload())
         .await;
+    let heartbeat_started_at = tokio::time::Instant::now();
+    let mut heartbeat = tokio::time::interval_at(
+        heartbeat_started_at + WS_CLIENT_HEARTBEAT_INTERVAL,
+        WS_CLIENT_HEARTBEAT_INTERVAL,
+    );
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_client_activity = heartbeat_started_at;
 
     loop {
         tokio::select! {
@@ -74,13 +97,42 @@ pub(super) async fn handle_socket(
                 }
                 break;
             }
+            _ = heartbeat.tick() => {
+                if client_heartbeat_expired(last_client_activity, tokio::time::Instant::now()) {
+                    break;
+                }
+                if heartbeat_send_requires_disconnect(
+                    heartbeat_tx.try_send(Message::Ping(Vec::new().into())),
+                ) {
+                    break;
+                }
+            }
             maybe_message = socket_rx.next() => {
                 let Some(message) = maybe_message else {
                     break;
                 };
+                let message = match message {
+                    Ok(message) => message,
+                    Err(error) => {
+                        eprintln!("websocket error: {error}");
+                        break;
+                    }
+                };
+                last_client_activity = tokio::time::Instant::now();
+                state.hub.mark_client_seen(client_id).await;
 
                 match message {
-                    Ok(Message::Text(text)) => {
+                    Message::Text(text) => {
+                        if is_ordered_push_control(&text) {
+                            handle_client_message(
+                                client_id,
+                                text.to_string(),
+                                &state,
+                                None,
+                            )
+                            .await;
+                            continue;
+                        }
                         let request_id = parse_client_request_id(&text);
                         let client_permit = match client_in_flight.clone().try_acquire_owned() {
                             Ok(permit) => permit,
@@ -95,6 +147,7 @@ pub(super) async fn handle_socket(
                                 .await;
                                 continue;
                             }
+
                         };
                         let global_permit = match state.ws_global_in_flight.clone().try_acquire_owned() {
                             Ok(permit) => permit,
@@ -125,8 +178,8 @@ pub(super) async fn handle_socket(
                             .await;
                         });
                     }
-                    Ok(Message::Close(_)) => break,
-                    Ok(Message::Binary(_)) => {
+                    Message::Close(_) => break,
+                    Message::Binary(_) => {
                         state
                             .hub
                             .send_json(
@@ -141,7 +194,7 @@ pub(super) async fn handle_socket(
                             )
                             .await;
                     }
-                    Ok(Message::Ping(payload)) => {
+                    Message::Ping(payload) => {
                         state
                             .hub
                             .send_json(
@@ -155,11 +208,7 @@ pub(super) async fn handle_socket(
                             )
                             .await;
                     }
-                    Ok(Message::Pong(_)) => {}
-                    Err(error) => {
-                        eprintln!("websocket error: {error}");
-                        break;
-                    }
+                    Message::Pong(_) => {}
                 }
             }
         }
@@ -172,6 +221,18 @@ pub(super) async fn handle_socket(
     if !writer_task.is_finished() {
         writer_task.abort();
     }
+}
+
+fn is_ordered_push_control(text: &str) -> bool {
+    let method = match parse_request(text) {
+        Ok(request) => request.method,
+        Err(RpcRequestParseError::Notification { method, .. }) => method,
+        _ => return false,
+    };
+    matches!(
+        method.as_str(),
+        "bridge/push/observed" | "bridge/push/presence"
+    )
 }
 
 pub(super) async fn handle_client_message(
@@ -212,7 +273,28 @@ pub(super) async fn handle_client_message(
             send_rpc_error(state, client_id, id, -32600, "Missing method", None).await;
             return;
         }
-        Err(RpcRequestParseError::Notification) => return,
+        Err(RpcRequestParseError::Notification { method, params }) => {
+            if matches!(
+                method.as_str(),
+                "bridge/push/observed" | "bridge/push/presence"
+            ) {
+                let trace = state.metrics.start_request(&method, "bridge");
+                match handle_bridge_method(&method, params, state, client_id).await {
+                    Ok(_) => state.metrics.finish_request(&trace, "ok"),
+                    Err(error) => {
+                        state.metrics.finish_request(&trace, "bridge_error");
+                        state.metrics.record_error(
+                            Some(&trace.request_id),
+                            Some(&method),
+                            Some("bridge"),
+                            "bridge_error",
+                        );
+                        eprintln!("rejected push presence notification: {}", error.message);
+                    }
+                }
+            }
+            return;
+        }
     };
     let id = request.id;
     let method = request.method;
@@ -283,6 +365,66 @@ pub(super) async fn handle_bridge_method(
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
             .map_err(|error| BridgeError::server(&error.to_string())),
+        "bridge/push/observed" => {
+            let params = params.unwrap_or_else(|| json!({}));
+            let candidate_id = read_string(params.get("candidateId"))
+                .and_then(|candidate_id| candidate_id.parse::<u64>().ok())
+                .ok_or_else(|| {
+                    BridgeError::invalid_params("candidateId must be an unsigned integer string")
+                })?;
+            let presence_sequence = params
+                .get("presenceSequence")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    BridgeError::invalid_params("presenceSequence must be an unsigned integer")
+                })?;
+            let update = state
+                .hub
+                .observe_push_candidate(client_id, candidate_id, presence_sequence)
+                .await;
+            if update == PushObservationUpdate::NotMobile {
+                return Err(BridgeError::invalid_params(
+                    "push observation requires a mobile client",
+                ));
+            }
+            Ok(json!({
+                "ok": true,
+                "observed": update == PushObservationUpdate::Observed,
+            }))
+        }
+        "bridge/push/presence" => {
+            let params = params.unwrap_or_else(|| json!({}));
+            let foreground = params
+                .get("foreground")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| BridgeError::invalid_params("foreground must be a boolean"))?;
+            let sequence = params
+                .get("sequence")
+                .and_then(Value::as_u64)
+                .filter(|sequence| *sequence > 0)
+                .ok_or_else(|| {
+                    BridgeError::invalid_params("sequence must be a positive integer")
+                })?;
+            let applied = match state
+                .hub
+                .set_mobile_client_foreground(client_id, foreground, sequence)
+                .await
+            {
+                MobilePresenceUpdate::Applied => true,
+                MobilePresenceUpdate::Stale => false,
+                MobilePresenceUpdate::NotMobile => {
+                    return Err(BridgeError::invalid_params(
+                        "push presence requires a mobile client",
+                    ));
+                }
+            };
+            Ok(json!({
+                "ok": true,
+                "applied": applied,
+                "foreground": foreground,
+                "sequence": sequence,
+            }))
+        }
         "bridge/push/register" => {
             let params = params.unwrap_or_else(|| json!({}));
             let profile_id = required_push_id(&params, "profileId")?;
@@ -1608,6 +1750,50 @@ mod tests {
         )));
         assert!(!failure_is_definitive("client request cancelled"));
         assert!(failure_is_definitive("client disconnected"));
+    }
+
+    #[test]
+    fn client_connection_heartbeat_has_a_bounded_expiry() {
+        assert!(WS_CLIENT_HEARTBEAT_TIMEOUT > WS_CLIENT_HEARTBEAT_INTERVAL);
+        let last_activity = tokio::time::Instant::now();
+        assert!(!client_heartbeat_expired(
+            last_activity,
+            last_activity + WS_CLIENT_HEARTBEAT_TIMEOUT - Duration::from_millis(1),
+        ));
+        assert!(client_heartbeat_expired(
+            last_activity,
+            last_activity + WS_CLIENT_HEARTBEAT_TIMEOUT,
+        ));
+    }
+
+    #[test]
+    fn push_controls_are_processed_in_socket_order_for_notifications_and_requests() {
+        assert!(is_ordered_push_control(
+            r#"{"method":"bridge/push/presence","params":{"foreground":false,"sequence":2}}"#
+        ));
+        assert!(is_ordered_push_control(
+            r#"{"method":"bridge/push/observed","params":{"candidateId":"7","presenceSequence":2}}"#
+        ));
+        assert!(is_ordered_push_control(
+            r#"{"id":1,"method":"bridge/push/presence","params":{"foreground":true,"sequence":1}}"#
+        ));
+        assert!(!is_ordered_push_control(
+            r#"{"method":"bridge/other","params":{}}"#
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_full_heartbeat_queue_is_recoverable_but_a_closed_queue_is_not() {
+        let (sender, receiver) = mpsc::channel(1);
+        sender.try_send(Message::Text("busy".into())).unwrap();
+        assert!(!heartbeat_send_requires_disconnect(
+            sender.try_send(Message::Ping(Vec::new().into()))
+        ));
+
+        drop(receiver);
+        assert!(heartbeat_send_requires_disconnect(
+            sender.try_send(Message::Ping(Vec::new().into()))
+        ));
     }
 
     fn protected_request_config() -> BridgeConfig {

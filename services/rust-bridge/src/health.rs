@@ -17,6 +17,12 @@ pub(crate) struct BridgeDeviceConnection {
     pub(crate) client_name: String,
     pub(crate) connected_at: String,
     pub(crate) last_seen_at: String,
+    #[serde(skip)]
+    pub(crate) foreground: bool,
+    #[serde(skip)]
+    pub(crate) foreground_sequence: u64,
+    #[serde(skip)]
+    pub(crate) foreground_updated_at: Instant,
 }
 
 pub(crate) fn user_device_connections(
@@ -214,6 +220,9 @@ mod tests {
             client_name: "phone".to_string(),
             connected_at: "then".to_string(),
             last_seen_at: "now".to_string(),
+            foreground: true,
+            foreground_sequence: 1,
+            foreground_updated_at: Instant::now(),
         }];
         let agents = vec![
             agent("alpha", AgentLifecycle::Ready),
@@ -240,6 +249,9 @@ mod tests {
                 client_name: "phone".to_string(),
                 connected_at: "then".to_string(),
                 last_seen_at: "now".to_string(),
+                foreground: true,
+                foreground_sequence: 1,
+                foreground_updated_at: Instant::now(),
             },
             BridgeDeviceConnection {
                 client_id: 2,
@@ -247,6 +259,9 @@ mod tests {
                 client_name: "DapperCode".to_string(),
                 connected_at: "then".to_string(),
                 last_seen_at: "now".to_string(),
+                foreground: false,
+                foreground_sequence: 0,
+                foreground_updated_at: Instant::now(),
             },
         ];
 

@@ -1,5 +1,8 @@
 import { toBridgeHealthUrl } from '@shell/state/bridgeUrl';
 import { HostBridgeWsClient } from '@bridge/ws/ws';
+import { MOBILE_BRIDGE_CLIENT_NAME, MOBILE_BRIDGE_CLIENT_TYPE } from '@bridge/ws/types';
+import { isUserPresentAppState, supportsNativePushPresence } from '@shell/session/appVisibility';
+import { AppState, Platform } from 'react-native';
 import { CONNECTION_CHECK_TIMEOUT_MS } from './constants';
 
 interface ProbeOptions {
@@ -70,9 +73,15 @@ export async function probeBridgeConnection(options: ProbeOptions): Promise<Prob
         throw new Error(timeoutMessage);
       }
 
+      const supportsPushPresence = supportsNativePushPresence(Platform.OS);
       probeClient = new HostBridgeWsClient(normalizedUrl, {
         authToken: token,
         workspaceId,
+        clientType: supportsPushPresence ? MOBILE_BRIDGE_CLIENT_TYPE : Platform.OS,
+        clientName: MOBILE_BRIDGE_CLIENT_NAME,
+        getClientForeground: supportsPushPresence
+          ? () => isUserPresentAppState(AppState.currentState)
+          : undefined,
         allowQueryTokenAuth,
         requestTimeoutMs: CONNECTION_CHECK_TIMEOUT_MS,
       });

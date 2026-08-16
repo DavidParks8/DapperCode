@@ -1,6 +1,7 @@
 import { useAtomValue, useStore } from 'jotai';
 import { usePathname } from 'expo-router';
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 
 import {
   createEmptyChatSnapshotCache,
@@ -13,6 +14,8 @@ import {
   bindChatSnapshotBackgroundFlush,
   createChatSnapshotPersistScheduler,
 } from '@shell/boot/chatSnapshotPersistLifecycle';
+import { bindPushForegroundPresence } from '@shell/push/presence';
+import { supportsNativePushPresence } from '@shell/session/appVisibility';
 import { bindAppWebSocketLifecycle } from '@shell/session/webSocketLifecycle';
 import { syncPushRegistration } from '@shell/push/controller';
 import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
@@ -68,7 +71,14 @@ export function useAppBridgeLifecycle(): void {
       return;
     }
 
-    return bindAppWebSocketLifecycle(ws);
+    const unbindPresence = supportsNativePushPresence(Platform.OS)
+      ? bindPushForegroundPresence(ws)
+      : () => {};
+    const unbindWebSocket = bindAppWebSocketLifecycle(ws);
+    return () => {
+      unbindPresence();
+      unbindWebSocket();
+    };
   }, [store, ws]);
 
   useEffect(() => {

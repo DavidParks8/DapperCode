@@ -53,6 +53,15 @@ export abstract class HostBridgeWsClientCompletionAndDispatchLayer extends HostB
     if (this.workspaceId) {
       query.push(`workspace=${encodeURIComponent(this.workspaceId)}`);
     }
+    if (this.clientType) {
+      query.push(`clientType=${encodeURIComponent(this.clientType)}`);
+    }
+    if (this.clientName) {
+      query.push(`clientName=${encodeURIComponent(this.clientName)}`);
+    }
+    if (this.getClientForeground) {
+      query.push(`clientForeground=${String(this.getClientForeground())}`);
+    }
     const suffix = query.join('&');
     if (!suffix) {
       return base;

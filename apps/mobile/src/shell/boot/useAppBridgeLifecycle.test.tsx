@@ -2,6 +2,10 @@ const mockBindAppWebSocketLifecycle = jest.fn((ws: unknown) => {
   void ws;
   return jest.fn();
 });
+const mockBindPushForegroundPresence = jest.fn((ws: unknown) => {
+  void ws;
+  return jest.fn();
+});
 const mockSyncPushRegistration = jest.fn().mockResolvedValue(undefined);
 const mockBindCapabilities = jest.fn((ws: unknown, revalidate: unknown) => {
   void ws;
@@ -19,6 +23,9 @@ const mockRevalidateWorkspace = jest.fn();
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('@shell/session/webSocketLifecycle', () => ({
   bindAppWebSocketLifecycle: (ws: unknown) => mockBindAppWebSocketLifecycle(ws),
+}));
+jest.mock('@shell/push/presence', () => ({
+  bindPushForegroundPresence: (ws: unknown) => mockBindPushForegroundPresence(ws),
 }));
 jest.mock('@shell/push/controller', () => ({
   syncPushRegistration: (api: unknown, store: unknown, profileId: unknown) =>
@@ -126,6 +133,7 @@ describe('useAppBridgeLifecycle route gates', () => {
     });
     expect(mockSyncPushRegistration).toHaveBeenCalled();
     expect(api.primeChats).toHaveBeenCalled();
+    expect(mockBindPushForegroundPresence).toHaveBeenCalledWith(ws);
     expect(mockBindAppWebSocketLifecycle).toHaveBeenCalledWith(ws);
 
     act(() => tree?.unmount());

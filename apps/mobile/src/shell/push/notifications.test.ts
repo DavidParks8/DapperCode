@@ -147,6 +147,13 @@ describe('pushNotifications', () => {
       shouldPlaySound: false,
       shouldSetBadge: false,
     });
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'inactive' });
+    await expect(handler.handleNotification()).resolves.toEqual({
+      shouldShowBanner: false,
+      shouldShowList: false,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    });
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
     await expect(handler.handleNotification()).resolves.toEqual({
       shouldShowBanner: true,

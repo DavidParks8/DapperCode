@@ -59,7 +59,12 @@ for (const relativeFile of currentMarkdown) {
 }
 
 const push = readFileSync(path.join(root, 'docs/push-notifications.md'), 'utf8');
-for (const method of ['bridge/push/register', 'bridge/push/unregister']) {
+for (const method of [
+  'bridge/push/observed',
+  'bridge/push/presence',
+  'bridge/push/register',
+  'bridge/push/unregister',
+]) {
   if (!push.includes(method)) fail(`push guide is missing method ${method}`);
 }
 if (/content-free/i.test(push)) fail('push guide incorrectly describes payloads as content-free');
