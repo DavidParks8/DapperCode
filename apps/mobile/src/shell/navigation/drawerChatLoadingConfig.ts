@@ -1,5 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { ChatSummary, RpcNotification } from '@bridge/types/types';
+import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { parseAgUiEventNotification } from '@bridge/agui/agUi';
 import type { DrawerRunIndicatorMap } from '@shell/navigation/drawerRuntimeIndicators';
 import { EventType } from '@ag-ui/core';
@@ -16,6 +18,34 @@ export const DRAWER_STREAM_BATCH_DELAY_MS = 900;
 export const DRAWER_DEEP_CHAT_PAGE_LIMIT = 50;
 export const DRAWER_DEEP_LOAD_DELAY_MS = 2500;
 export const DRAWER_DEEP_CHAT_CACHE_TTL_MS = Number.MAX_SAFE_INTEGER;
+
+interface DrawerClientIdentity {
+  api: HostBridgeApiClient;
+  profileId: string | null;
+  ws: HostBridgeWsClient;
+}
+
+export function createDrawerClientGenerationGuard(generationRef: {
+  current: number;
+}): () => boolean {
+  const generation = generationRef.current;
+  return () => generationRef.current === generation;
+}
+
+export function advanceDrawerClientGeneration(
+  identityRef: { current: DrawerClientIdentity },
+  generationRef: { current: number },
+  next: DrawerClientIdentity,
+): boolean {
+  const previous = identityRef.current;
+  const changed =
+    previous.api !== next.api || previous.profileId !== next.profileId || previous.ws !== next.ws;
+  if (changed) {
+    identityRef.current = next;
+    generationRef.current += 1;
+  }
+  return changed;
+}
 
 export interface DrawerChatLoadingState {
   chats: ChatSummary[];

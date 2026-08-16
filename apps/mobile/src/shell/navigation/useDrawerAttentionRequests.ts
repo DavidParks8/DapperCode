@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  PendingApproval,
-  PendingUserInputRequest,
-  RpcNotification,
-} from '@bridge/types/types';
+import { useAtom } from 'jotai';
+import { useCallback, useEffect, useRef } from 'react';
+import type { RpcNotification } from '@bridge/types/types';
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
+import {
+  createDrawerContentAtoms,
+  type DrawerContentAtoms,
+} from '@shell/state/drawer/contentAtoms';
 
 const ATTENTION_REQUEST_EVENT_METHODS = new Set([
   'bridge/approval.requested',
@@ -27,16 +28,41 @@ export function useDrawerAttentionRequests(
   api: HostBridgeApiClient,
   ws: HostBridgeWsClient,
   active: boolean,
+  contentAtoms?: DrawerContentAtoms,
 ) {
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
-  const [pendingUserInputs, setPendingUserInputs] = useState<PendingUserInputRequest[]>([]);
-  const [attentionRequestError, setAttentionRequestError] = useState<string | null>(null);
-  const [refreshingAttentionRequests, setRefreshingAttentionRequests] = useState(false);
+  const fallbackAtomsRef = useRef<{
+    atoms: DrawerContentAtoms;
+    profileId: string | null;
+  } | null>(null);
+  let atoms = contentAtoms;
+  if (!atoms) {
+    if (!fallbackAtomsRef.current || fallbackAtomsRef.current.profileId !== api.profileId) {
+      fallbackAtomsRef.current = {
+        atoms: createDrawerContentAtoms({
+          profileId: api.profileId,
+          wsConnected: ws.isConnected,
+        }),
+        profileId: api.profileId,
+      };
+    }
+    atoms = fallbackAtomsRef.current.atoms;
+  }
+  const [pendingApprovals, setPendingApprovals] = useAtom(atoms.pendingApprovalsAtom);
+  const [pendingUserInputs, setPendingUserInputs] = useAtom(atoms.pendingUserInputsAtom);
+  const [attentionRequestError, setAttentionRequestError] = useAtom(
+    atoms.attentionRequestErrorAtom,
+  );
+  const [refreshingAttentionRequests, setRefreshingAttentionRequests] = useAtom(
+    atoms.refreshingAttentionRequestsAtom,
+  );
   const activeRef = useRef(active);
+  const apiRef = useRef(api);
+  apiRef.current = api;
   const mountedRef = useRef(true);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const refreshQueuedRef = useRef(false);
   const scheduledRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRefreshRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   useEffect(() => {
     activeRef.current = active;
@@ -72,7 +98,7 @@ export function useDrawerAttentionRequests(
       Promise.resolve().then(() => api.listPendingUserInputs()),
     ])
       .then(([approvalResult, userInputResult]) => {
-        if (!mountedRef.current || !activeRef.current) {
+        if (!mountedRef.current || !activeRef.current || apiRef.current !== api) {
           return;
         }
         if (approvalResult.status === 'fulfilled') {
@@ -99,12 +125,19 @@ export function useDrawerAttentionRequests(
         const shouldRefreshAgain = refreshQueuedRef.current;
         refreshQueuedRef.current = false;
         if (shouldRefreshAgain && activeRef.current && mountedRef.current) {
-          void refreshAttentionRequests();
+          void latestRefreshRef.current();
         }
       });
     refreshInFlightRef.current = request;
     return request;
-  }, [api]);
+  }, [
+    api,
+    setAttentionRequestError,
+    setPendingApprovals,
+    setPendingUserInputs,
+    setRefreshingAttentionRequests,
+  ]);
+  latestRefreshRef.current = refreshAttentionRequests;
 
   const scheduleAttentionRefresh = useCallback(
     (delay: number = ATTENTION_EVENT_REFRESH_DEBOUNCE_MS) => {

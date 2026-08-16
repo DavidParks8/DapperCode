@@ -24,6 +24,7 @@ import type {
 } from '@bridge/types/types';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state/appState/settings';
+import { apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
@@ -441,6 +442,158 @@ describe('DrawerContent render behavior matrix', () => {
       ),
     ).toBe(true);
     act(() => tree?.unmount());
+  });
+
+  it('preserves drawer state and reloads when bridge clients change for the same profile', async () => {
+    const alpha = createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' });
+    const firstHarness = createHarness({
+      chats: [alpha, createChat({ id: 'beta', title: 'Beta chat', cwd: '/repo/beta' })],
+    });
+    const replacementHarness = createHarness({
+      chats: [alpha, createChat({ id: 'gamma', title: 'Gamma chat', cwd: '/repo/gamma' })],
+    });
+    const store = createDrawerStore(firstHarness.api, firstHarness.ws);
+    const tree = await renderDrawer(firstHarness, { store });
+    const root = tree.root as Queryable;
+
+    await act(async () => {
+      (findByLabel(root, 'Search sessions').props['onChangeText'] as (value: string) => void)(
+        'alpha',
+      );
+      await Promise.resolve();
+    });
+    await press(findByLabel(root, 'Select sessions'));
+    const alphaRow = root.findAll(
+      (candidate) =>
+        typeof candidate.props['accessibilityLabel'] === 'string' &&
+        candidate.props['accessibilityLabel'].startsWith('Alpha chat,') &&
+        typeof candidate.props['onPress'] === 'function',
+    )[0];
+    if (!alphaRow) {
+      throw new Error('Expected Alpha chat row');
+    }
+    await press(alphaRow);
+    expect(hasText(root, '1 Selected')).toBe(true);
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+    expect(findByLabel(root, 'Search sessions').props['value']).toBe('alpha');
+    expect(hasText(root, '1 Selected')).toBe(true);
+    expect(hasText(root, 'Loading sessions')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('ignores a pending stream batch from the replaced client', async () => {
+    const originalHarness = createHarness();
+    let originalBatch:
+      | ((batch: { streamId: string; limit: number; done: boolean; chats: ChatSummary[] }) => void)
+      | undefined;
+    let resolveOriginalStream:
+      ((controller: { streamId: string; cancel: () => void }) => void) | undefined;
+    (originalHarness.api.startChatListStream as jest.Mock).mockImplementation(
+      (_options, onBatch) => {
+        originalBatch = onBatch;
+        return new Promise((resolve) => {
+          resolveOriginalStream = resolve;
+        });
+      },
+    );
+    const replacementHarness = createHarness({
+      chats: [createChat({ id: 'replacement', title: 'Replacement stream chat' })],
+    });
+    const store = createDrawerStore(originalHarness.api, originalHarness.ws);
+    const tree = await renderDrawer(originalHarness, { store });
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      originalBatch?.({
+        streamId: 'stale',
+        limit: 20,
+        done: true,
+        chats: [createChat({ id: 'stale', title: 'Stale stream chat' })],
+      });
+      resolveOriginalStream?.({
+        streamId: 'stale',
+        cancel: originalHarness.cancelStream,
+      });
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(originalHarness.cancelStream).toHaveBeenCalledTimes(1);
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+    expect(hasText(tree.root as Queryable, 'Replacement stream chat')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Stale stream chat')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('loads replacement deep history after an old client deep request settles', async () => {
+    const originalHarness = createHarness({
+      chats: [createChat({ id: 'original', title: 'Original recent chat' })],
+    });
+    let resolveOriginalDeep!: (value: {
+      chats: ChatSummary[];
+      partial: boolean;
+      diagnostics: string[];
+    }) => void;
+    (originalHarness.api.listAllChats as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveOriginalDeep = resolve;
+      }),
+    );
+    const replacementChat = createChat({
+      id: 'replacement',
+      title: 'Replacement recent chat',
+    });
+    const replacementHarness = createHarness({ chats: [replacementChat] });
+    const store = createDrawerStore(originalHarness.api, originalHarness.ws);
+    const tree = await renderDrawer(originalHarness, { store });
+
+    await act(async () => {
+      jest.advanceTimersByTime(2500);
+      await Promise.resolve();
+    });
+    expect(originalHarness.api.listAllChats).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve();
+      }
+    });
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveOriginalDeep({
+        chats: [createChat({ id: 'stale-deep', title: 'Stale deep chat' })],
+        partial: false,
+        diagnostics: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      jest.advanceTimersByTime(2500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(replacementHarness.api.listAllChats).toHaveBeenCalledTimes(1);
+    expect(hasText(tree.root as Queryable, 'Replacement recent chat')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Stale deep chat')).toBe(false);
+    act(() => tree.unmount());
   });
 
   it('keeps pending-session hydration failures retryable in an empty drawer', async () => {

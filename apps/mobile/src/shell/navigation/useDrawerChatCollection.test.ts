@@ -117,6 +117,40 @@ describe('useDrawerChatCollection hydration purge barrier', () => {
   });
 });
 
+describe('useDrawerChatCollection client identity barrier', () => {
+  it('ignores an apply callback captured from the previous API client', () => {
+    const originalApi = { rememberChats: jest.fn() } as unknown as HostBridgeApiClient;
+    const replacementApi = { rememberChats: jest.fn() } as unknown as HostBridgeApiClient;
+    const onChatsApplied = jest.fn();
+    let activeApi = originalApi;
+    let latestResult!: HookResult;
+    function Probe() {
+      latestResult = useDrawerChatCollection(activeApi, 'profile-1', onChatsApplied);
+      return null;
+    }
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(createElement(Probe));
+    });
+    const staleApplyChats = latestResult.applyChats;
+
+    act(() => {
+      activeApi = replacementApi;
+      tree.update(createElement(Probe));
+    });
+    act(() => {
+      staleApplyChats([summary('stale')], undefined, false);
+    });
+    expect(latestResult.chats).toEqual([]);
+
+    act(() => {
+      latestResult.applyChats([summary('fresh')], undefined, false);
+    });
+    expect(latestResult.chats.map((chat) => chat.id)).toEqual(['fresh']);
+    act(() => tree.unmount());
+  });
+});
+
 /**
  * Regression coverage for the scheduling side of the chat-summary-cache
  * purge barrier: `schedulePersistence` used to carry a previously buffered
