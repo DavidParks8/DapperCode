@@ -251,9 +251,10 @@ export const DrawerContent = memo(function DrawerContentComponent({
     (chatId: string) => {
       void feedback.selection();
       cancelChatListStream();
+      onClose?.();
       onSelectChat(chatId);
     },
-    [cancelChatListStream, onSelectChat],
+    [cancelChatListStream, onClose, onSelectChat],
   );
 
   const handleNewChat = useCallback(() => {
