@@ -6,8 +6,10 @@ import {
 
 export const APP_SETTINGS_VERSION = 13;
 export const DEFAULT_WORKSPACE_CHAT_LIMIT = 5;
+export const RECENT_MODEL_LIMIT = 3;
 export const WORKSPACE_CHAT_LIMIT_OPTIONS = [5, 10, 25, null] as const;
 export type WorkspaceChatLimit = (typeof WORKSPACE_CHAT_LIMIT_OPTIONS)[number];
+export type RecentModelIdsByAgent = Record<AgentId, string[]>;
 
 export function parseAppSettings(raw: string): {
   defaultStartCwd: string | null;
@@ -18,6 +20,7 @@ export function parseAppSettings(raw: string): {
   confirmSessionDeletion: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
+  recentModelIdsByAgent: RecentModelIdsByAgent;
 } {
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return {
@@ -29,6 +32,7 @@ export function parseAppSettings(raw: string): {
       confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
+      recentModelIdsByAgent: {},
     };
   }
 
@@ -45,6 +49,7 @@ export function parseAppSettings(raw: string): {
         confirmSessionDeletion: true,
         workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
+        recentModelIdsByAgent: {},
       };
     }
 
@@ -73,6 +78,9 @@ export function parseAppSettings(raw: string): {
       recentBrowserTargetUrls: normalizeBrowserTargetUrls(
         (parsed as { recentBrowserTargetUrls?: unknown }).recentBrowserTargetUrls,
       ),
+      recentModelIdsByAgent: normalizeRecentModelIdsByAgent(
+        (parsed as { recentModelIdsByAgent?: unknown }).recentModelIdsByAgent,
+      ),
     };
   } catch {
     return {
@@ -84,6 +92,7 @@ export function parseAppSettings(raw: string): {
       confirmSessionDeletion: true,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
+      recentModelIdsByAgent: {},
     };
   }
 }
@@ -166,6 +175,47 @@ function normalizeBrowserTargetUrls(value: unknown): string[] {
       .map((entry) => (typeof entry === 'string' ? normalizePreviewTargetInput(entry) : null))
       .filter((entry): entry is string => typeof entry === 'string'),
   );
+}
+
+function normalizeRecentModelIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of value) {
+    const modelId = typeof entry === 'string' ? entry.trim() : '';
+    if (!modelId || seen.has(modelId)) {
+      continue;
+    }
+    seen.add(modelId);
+    normalized.push(modelId);
+    if (normalized.length >= RECENT_MODEL_LIMIT) {
+      break;
+    }
+  }
+  return normalized;
+}
+
+function normalizeRecentModelIdsByAgent(value: unknown): RecentModelIdsByAgent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const normalized: RecentModelIdsByAgent = {};
+  for (const [rawAgentId, rawModelIds] of Object.entries(value)) {
+    const agentId = normalizeAgentId(rawAgentId);
+    const modelIds = normalizeRecentModelIds(rawModelIds);
+    if (agentId && modelIds.length > 0) {
+      normalized[agentId] = modelIds;
+    }
+  }
+  return normalized;
+}
+
+export function pushRecentModelId(currentValues: readonly string[], nextValue: string): string[] {
+  return normalizeRecentModelIds([nextValue, ...currentValues]);
 }
 
 function normalizeStoredApprovalMode(value: unknown): ApprovalMode {

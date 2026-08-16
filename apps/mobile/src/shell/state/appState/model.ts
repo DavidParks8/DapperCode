@@ -8,6 +8,7 @@ import {
   APP_SETTINGS_VERSION,
   DEFAULT_WORKSPACE_CHAT_LIMIT,
   parseAppSettings,
+  type RecentModelIdsByAgent,
   type WorkspaceChatLimit,
 } from '@shell/state/appSettings';
 import {
@@ -54,6 +55,7 @@ export interface AppSettingsState {
   confirmSessionDeletion: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
+  recentModelIdsByAgent: RecentModelIdsByAgent;
 }
 
 export interface AppStateData {
@@ -124,6 +126,7 @@ export function createDefaultAppSettings(): AppSettingsState {
     confirmSessionDeletion: true,
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
     recentBrowserTargetUrls: [],
+    recentModelIdsByAgent: {},
   };
 }
 
@@ -271,6 +274,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       confirmSessionDeletion: record['confirmSessionDeletion'],
       workspaceChatLimit: record['workspaceChatLimit'],
       recentBrowserTargetUrls: record['recentBrowserTargetUrls'],
+      recentModelIdsByAgent: record['recentModelIdsByAgent'],
     }),
   );
   return {
@@ -286,6 +290,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
         .map(normalizePreviewTargetInput)
         .filter((target): target is string => target !== null),
     ),
+    recentModelIdsByAgent: parsed.recentModelIdsByAgent,
   };
 }
 

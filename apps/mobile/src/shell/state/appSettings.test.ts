@@ -5,6 +5,7 @@ test('fresh settings have no preferred agent', () => {
     preferredAgentId: null,
     agentSettings: {},
     confirmSessionDeletion: true,
+    recentModelIdsByAgent: {},
   });
 });
 
@@ -37,4 +38,21 @@ test('preserves a session deletion confirmation opt-out and safely defaults inva
       JSON.stringify({ version: APP_SETTINGS_VERSION, confirmSessionDeletion: 'no' }),
     ).confirmSessionDeletion,
   ).toBe(true);
+});
+
+test('normalizes and caps recent model IDs per agent', () => {
+  const parsed = parseAppSettings(
+    JSON.stringify({
+      version: APP_SETTINGS_VERSION,
+      recentModelIdsByAgent: {
+        ' codex ': ['gpt-c', ' gpt-b ', 'gpt-c', 'gpt-a', 'gpt-d'],
+        empty: [],
+        invalid: 'gpt-z',
+      },
+    }),
+  );
+
+  expect(parsed.recentModelIdsByAgent).toEqual({
+    codex: ['gpt-c', 'gpt-b', 'gpt-a'],
+  });
 });

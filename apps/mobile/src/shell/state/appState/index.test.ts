@@ -55,12 +55,18 @@ describe('current appState production behavior', () => {
         defaultStartCwd: ' /workspace ',
         showToolCalls: false,
         recentBrowserTargetUrls: ['3000', '3000'],
+        recentModelIdsByAgent: {
+          ' codex ': ['gpt-c', 'gpt-b', 'gpt-c', 'gpt-a', 'gpt-d'],
+        },
       },
     });
     expect(state.settings).toEqual(
       expect.objectContaining({ defaultStartCwd: '/workspace', showToolCalls: false }),
     );
     expect(state.settings.recentBrowserTargetUrls).toEqual(['http://127.0.0.1:3000/']);
+    expect(state.settings.recentModelIdsByAgent).toEqual({
+      codex: ['gpt-c', 'gpt-b', 'gpt-a'],
+    });
     state = appStateReducer(state, {
       type: 'settings/remember-thread',
       agentId: ' codex ',
