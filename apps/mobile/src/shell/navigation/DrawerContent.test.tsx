@@ -25,6 +25,7 @@ import type {
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state/appState/settings';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
+import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
@@ -544,6 +545,40 @@ describe('DrawerContent render behavior matrix', () => {
     ).toHaveLength(1);
     await press(findByLabel(tree.root as Queryable, 'Close session list'));
     expect(onClose).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('closes the session list after lock/unlock when a session row is pressed', async () => {
+    const listeners = new Set<(state: string) => void>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
+      listeners.add(handler as (state: string) => void);
+      return {
+        remove: () => {
+          listeners.delete(handler as (state: string) => void);
+        },
+      };
+    });
+    const onClose = jest.fn();
+    const closeDrawer = jest.fn();
+    const harness = createHarness({
+      chats: [createChat({ id: 'thread', title: 'Listed thread', cwd: '/workspace' })],
+    });
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'thread' });
+    store.set(drawerCommandsAtom, { closeDrawer, toggleNavigation: jest.fn() });
+    const tree = await renderDrawer(harness, { onClose, selectedChatId: 'thread', store });
+
+    await act(async () => {
+      for (const listener of listeners) {
+        listener('inactive');
+        listener('background');
+        listener('active');
+      }
+      await Promise.resolve();
+    });
+
+    await press(findByLabel(tree.root as Queryable, 'Listed thread, workspace, Agent, Complete'));
+    expect(onClose).toHaveBeenCalled();
+    expect(closeDrawer).toHaveBeenCalled();
     act(() => tree.unmount());
   });
 
