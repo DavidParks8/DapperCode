@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -132,6 +132,17 @@ export function SwipeToDeleteRow({
     width: Math.max(0, -translateX.value),
   }));
 
+  // Disabling has to make the destructive action genuinely unreachable, not just stop the pan:
+  // an already-open row snaps shut and the action stops rendering so it can no longer be pressed
+  // or reached by a screen reader while the caller has swiping paused.
+  useEffect(() => {
+    if (enabled) {
+      return;
+    }
+    setOpen(false);
+    translateX.value = withTiming(0, { duration: SWIPE_ANIMATION_MS });
+  }, [enabled, translateX]);
+
   return (
     <View style={style}>
       <View
@@ -142,27 +153,29 @@ export function SwipeToDeleteRow({
         style={[styles.clip, { backgroundColor: contentBackgroundColor ?? theme.colors.bgMain }]}
         testID="swipe-delete-clip"
       >
-        <Animated.View
-          style={[styles.actionLayer, actionLayerStyle]}
-          pointerEvents="box-none"
-          testID="swipe-delete-action-layer"
-        >
-          <Pressable
-            accessibilityHint="Deletes this session."
-            accessibilityLabel={deleteAccessibilityLabel}
-            accessibilityRole="button"
-            onPress={commitDelete}
-            style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+        {enabled ? (
+          <Animated.View
+            style={[styles.actionLayer, actionLayerStyle]}
+            pointerEvents="box-none"
+            testID="swipe-delete-action-layer"
           >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="trash-outline"
-              size={18}
-              color={theme.colors.white}
-            />
-            <Text style={styles.actionLabel}>{deleteLabel}</Text>
-          </Pressable>
-        </Animated.View>
+            <Pressable
+              accessibilityHint="Deletes this session."
+              accessibilityLabel={deleteAccessibilityLabel}
+              accessibilityRole="button"
+              onPress={commitDelete}
+              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+            >
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="trash-outline"
+                size={18}
+                color={theme.colors.white}
+              />
+              <Text style={styles.actionLabel}>{deleteLabel}</Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
         <GestureDetector gesture={panGesture}>
           <Animated.View
             style={[

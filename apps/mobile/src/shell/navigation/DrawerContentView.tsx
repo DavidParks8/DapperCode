@@ -10,9 +10,172 @@ import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionS
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
 import { useDrawerContentViewModel } from '@shell/navigation/drawerContentViewContext';
+import {
+  formatBulkDeleteLabel,
+  formatSelectionSummary,
+  formatSelectionTitle,
+} from '@shell/navigation/drawerSelection';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 
 const CLEAR_SEARCH_HIT_SLOP = computeHitSlop({ width: 28, height: 28 });
+
+/** `Edit` / `Cancel` affordance that opens and closes bulk selection. */
+function DrawerSelectionButton() {
+  const { enterSelectionMode, exitSelectionMode, hasAnySessions, selectionMode, styles } =
+    useDrawerContentViewModel();
+
+  if (!selectionMode && !hasAnySessions) {
+    return null;
+  }
+
+  return (
+    <Pressable
+      accessibilityHint={
+        selectionMode
+          ? 'Leaves selection mode without deleting.'
+          : 'Starts selecting sessions to delete in bulk.'
+      }
+      accessibilityLabel={selectionMode ? 'Cancel selecting sessions' : 'Select sessions'}
+      accessibilityRole="button"
+      onPress={selectionMode ? exitSelectionMode : enterSelectionMode}
+      style={({ pressed }) => [styles.headerTextButton, pressed && styles.headerTextButtonPressed]}
+    >
+      <Text style={styles.headerTextButtonLabel}>{selectionMode ? 'Cancel' : 'Edit'}</Text>
+    </Pressable>
+  );
+}
+
+/** Bottom bar that replaces the footer while selecting, mirroring the iOS Mail edit toolbar. */
+function DrawerSelectionToolbar() {
+  const {
+    allSelectableChatsSelected,
+    handleDeleteSelectedChats,
+    selectedChatCount,
+    styles,
+    toggleSelectAllChats,
+  } = useDrawerContentViewModel();
+
+  return (
+    <View style={styles.selectionToolbar}>
+      <Pressable
+        accessibilityHint={
+          allSelectableChatsSelected
+            ? 'Clears the current selection.'
+            : 'Selects every session currently listed.'
+        }
+        accessibilityLabel={
+          allSelectableChatsSelected ? 'Deselect all sessions' : 'Select all sessions'
+        }
+        accessibilityRole="button"
+        onPress={toggleSelectAllChats}
+        style={({ pressed }) => [
+          styles.selectionToolbarButton,
+          pressed && styles.selectionToolbarButtonPressed,
+        ]}
+      >
+        <Text style={styles.selectionToolbarLabel}>
+          {allSelectableChatsSelected ? 'Deselect All' : 'Select All'}
+        </Text>
+      </Pressable>
+      <Pressable
+        accessibilityHint="Deletes every selected session."
+        accessibilityLabel={
+          selectedChatCount === 0
+            ? 'Delete selected sessions'
+            : `Delete ${String(selectedChatCount)} selected ${selectedChatCount === 1 ? 'session' : 'sessions'}`
+        }
+        accessibilityRole="button"
+        accessibilityState={controlAccessibilityState({ disabled: selectedChatCount === 0 })}
+        disabled={selectedChatCount === 0}
+        onPress={() => {
+          void handleDeleteSelectedChats();
+        }}
+        style={({ pressed }) => [
+          styles.selectionToolbarButton,
+          pressed && selectedChatCount > 0 && styles.selectionToolbarButtonPressed,
+        ]}
+      >
+        <Text
+          style={[
+            styles.selectionToolbarDeleteLabel,
+            selectedChatCount === 0 && styles.selectionToolbarLabelDisabled,
+          ]}
+        >
+          {formatBulkDeleteLabel(selectedChatCount)}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function DrawerFooter() {
+  const { handleNavigate, handleOpenConnection, styles, theme, totalChatCount, wsConnected } =
+    useDrawerContentViewModel();
+
+  return (
+    <View style={styles.footer}>
+      <Pressable
+        accessibilityHint={
+          wsConnected
+            ? 'Opens the bridge connection settings.'
+            : 'Opens the bridge connection settings to reconnect.'
+        }
+        accessibilityLabel={
+          wsConnected
+            ? 'Bridge connected. Edit connection'
+            : 'Bridge offline. Reconnect or edit connection'
+        }
+        accessibilityLiveRegion="polite"
+        accessibilityRole="button"
+        onPress={handleOpenConnection}
+        style={({ pressed }) => [
+          styles.connectionStatus,
+          pressed && styles.connectionStatusPressed,
+        ]}
+      >
+        <View
+          style={[
+            styles.connectionDot,
+            wsConnected ? styles.connectionDotConnected : styles.connectionDotDisconnected,
+          ]}
+        />
+        <View style={styles.connectionCopy}>
+          <Text style={styles.connectionTitle}>
+            {wsConnected ? 'Bridge connected' : 'Bridge offline'}
+          </Text>
+          <Text style={styles.connectionMeta}>
+            {`${formatCompactCount(totalChatCount)} sessions`}
+          </Text>
+        </View>
+      </Pressable>
+      <Pressable
+        accessibilityLabel="Open preview browser"
+        accessibilityRole="button"
+        onPress={() => handleNavigate('Browser')}
+        style={({ pressed }) => [styles.footerBrowserButton, pressed && styles.footerActionPressed]}
+      >
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="globe-outline"
+          size={17}
+          color={theme.colors.userBubble}
+        />
+        <Text style={styles.footerBrowserText}>Browser</Text>
+      </Pressable>
+      <CircularToolbarButton
+        accessibilityLabel="Open settings"
+        onPress={() => handleNavigate('Settings')}
+      >
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="settings-outline"
+          size={18}
+          color={theme.colors.userBubble}
+        />
+      </CircularToolbarButton>
+    </View>
+  );
+}
 
 export function DrawerContentView() {
   const {
@@ -22,9 +185,7 @@ export function DrawerContentView() {
     handleClearSearch,
     handleClose,
     handleDismissFolderPicker,
-    handleNavigate,
     handleNewChat,
-    handleOpenConnection,
     handleOpenFolderPicker,
     handleSearchQueryChange,
     handleSelectFolder,
@@ -32,13 +193,13 @@ export function DrawerContentView() {
     recentCount,
     searchQuery,
     searchResultCount,
+    selectedChatCount,
     selectedFolderKey,
     selectedFolderLabel,
+    selectionMode,
     styles,
     theme,
-    totalChatCount,
     workingCount,
-    wsConnected,
   } = useDrawerContentViewModel();
   const attentionSummary =
     attentionCount === 0
@@ -68,18 +229,27 @@ export function DrawerContentView() {
           <View style={styles.header}>
             <View style={styles.titleRow}>
               <View style={styles.titleCopy}>
-                <Text style={styles.title}>Agent activity</Text>
-                <Text style={styles.subtitle}>Ordered by what needs you next</Text>
+                <Text style={styles.title}>
+                  {selectionMode ? formatSelectionTitle(selectedChatCount) : 'Agent activity'}
+                </Text>
+                <Text style={styles.subtitle}>
+                  {selectionMode
+                    ? 'Swipe actions pause while selecting'
+                    : 'Ordered by what needs you next'}
+                </Text>
               </View>
-              <CircularToolbarButton accessibilityLabel="New chat" onPress={handleNewChat}>
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="add"
-                  size={24}
-                  color={theme.colors.userBubble}
-                />
-              </CircularToolbarButton>
-              {handleClose ? (
+              <DrawerSelectionButton />
+              {selectionMode ? null : (
+                <CircularToolbarButton accessibilityLabel="New chat" onPress={handleNewChat}>
+                  <Ionicons
+                    {...decorativeAccessibilityProps}
+                    name="add"
+                    size={24}
+                    color={theme.colors.userBubble}
+                  />
+                </CircularToolbarButton>
+              )}
+              {handleClose && !selectionMode ? (
                 <CircularToolbarButton
                   accessibilityLabel="Close session list"
                   onPress={handleClose}
@@ -95,11 +265,19 @@ export function DrawerContentView() {
             </View>
 
             <View style={styles.statusSummary} accessibilityLiveRegion="polite">
-              <Text style={styles.statusSummaryAttention}>{attentionSummary}</Text>
-              <View style={styles.statusSummarySeparator} />
-              <Text style={styles.statusSummaryText}>{`${String(workingCount)} working`}</Text>
-              <View style={styles.statusSummarySeparator} />
-              <Text style={styles.statusSummaryText}>{`${String(recentCount)} recent`}</Text>
+              {selectionMode ? (
+                <Text style={styles.statusSummaryAttention}>
+                  {formatSelectionSummary(selectedChatCount)}
+                </Text>
+              ) : (
+                <>
+                  <Text style={styles.statusSummaryAttention}>{attentionSummary}</Text>
+                  <View style={styles.statusSummarySeparator} />
+                  <Text style={styles.statusSummaryText}>{`${String(workingCount)} working`}</Text>
+                  <View style={styles.statusSummarySeparator} />
+                  <Text style={styles.statusSummaryText}>{`${String(recentCount)} recent`}</Text>
+                </>
+              )}
             </View>
 
             <View style={styles.searchField}>
@@ -186,70 +364,7 @@ export function DrawerContentView() {
           <DrawerChatList />
         </View>
 
-        <View style={styles.footer}>
-          <Pressable
-            accessibilityHint={
-              wsConnected
-                ? 'Opens the bridge connection settings.'
-                : 'Opens the bridge connection settings to reconnect.'
-            }
-            accessibilityLabel={
-              wsConnected
-                ? 'Bridge connected. Edit connection'
-                : 'Bridge offline. Reconnect or edit connection'
-            }
-            accessibilityLiveRegion="polite"
-            accessibilityRole="button"
-            onPress={handleOpenConnection}
-            style={({ pressed }) => [
-              styles.connectionStatus,
-              pressed && styles.connectionStatusPressed,
-            ]}
-          >
-            <View
-              style={[
-                styles.connectionDot,
-                wsConnected ? styles.connectionDotConnected : styles.connectionDotDisconnected,
-              ]}
-            />
-            <View style={styles.connectionCopy}>
-              <Text style={styles.connectionTitle}>
-                {wsConnected ? 'Bridge connected' : 'Bridge offline'}
-              </Text>
-              <Text style={styles.connectionMeta}>
-                {`${formatCompactCount(totalChatCount)} sessions`}
-              </Text>
-            </View>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Open preview browser"
-            accessibilityRole="button"
-            onPress={() => handleNavigate('Browser')}
-            style={({ pressed }) => [
-              styles.footerBrowserButton,
-              pressed && styles.footerActionPressed,
-            ]}
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="globe-outline"
-              size={17}
-              color={theme.colors.userBubble}
-            />
-            <Text style={styles.footerBrowserText}>Browser</Text>
-          </Pressable>
-          <CircularToolbarButton
-            accessibilityLabel="Open settings"
-            onPress={() => handleNavigate('Settings')}
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="settings-outline"
-              size={18}
-              color={theme.colors.userBubble}
-            />
-          </CircularToolbarButton>
-        </View>
+        {selectionMode ? <DrawerSelectionToolbar /> : <DrawerFooter />}
       </SafeAreaView>
 
       <SelectionSheet

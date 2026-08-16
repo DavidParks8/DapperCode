@@ -30,9 +30,12 @@ export function DrawerChatList() {
     retryDeepChatListRef,
     searchQuery,
     selectedChatId,
+    selectedChatIds,
+    selectionMode,
     styles,
     theme,
     toggleAttentionSection,
+    toggleChatSelection,
     visibleAttentionSections,
     wsConnected,
   } = useDrawerContentViewModel();
@@ -153,6 +156,23 @@ export function DrawerChatList() {
         // too — otherwise the chevron/accessibilityState would claim collapsed while rows are
         // visibly rendered underneath it.
         const collapsed = !isSearching && collapsedLaneKeys.has(section.key);
+        // Collapsing during selection would hide rows the delete count still includes, so lanes
+        // stay expanded and inert until selection ends.
+        if (selectionMode) {
+          return (
+            <View
+              accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}
+              style={styles.laneHeader}
+            >
+              <View
+                {...decorativeAccessibilityProps}
+                style={[styles.laneDot, laneDotStyle(section.key, styles)]}
+              />
+              <Text style={styles.laneTitle}>{section.title}</Text>
+              <Text style={styles.laneCount}>{String(section.itemCount)}</Text>
+            </View>
+          );
+        }
         return (
           <Pressable
             accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}
@@ -180,6 +200,7 @@ export function DrawerChatList() {
       renderSectionFooter={() => <View style={styles.laneFooter} />}
       renderItem={({ item, index, section }) => {
         const isSelected = item.chat.id === selectedChatId;
+        const isChecked = selectedChatIds.has(item.chat.id);
         const isLast = index === section.data.length - 1;
         const chatIndent = Math.min(item.indentLevel, 4) * 12;
         const chatTitle = item.chat.title || 'Untitled session';
@@ -187,6 +208,7 @@ export function DrawerChatList() {
           <SwipeToDeleteRow
             contentBackgroundColor={theme.colors.transparent}
             deleteAccessibilityLabel={`Delete ${chatTitle}`}
+            enabled={!selectionMode}
             onDelete={() => handleDeleteChat(item.chat.id)}
             style={[
               styles.chatItemFrame,
@@ -198,22 +220,51 @@ export function DrawerChatList() {
           >
             <Pressable
               accessibilityLabel={`${chatTitle}, ${item.workspaceLabel}, ${item.agentLabel}, ${item.stateLabel}`}
-              accessibilityHint="Opens this session."
-              accessibilityRole="button"
-              accessibilityState={controlAccessibilityState({ selected: isSelected })}
-              onPress={() => handleSelectChat(item.chat.id)}
+              accessibilityHint={
+                selectionMode ? 'Toggles this session for deletion.' : 'Opens this session.'
+              }
+              accessibilityRole={selectionMode ? 'checkbox' : 'button'}
+              accessibilityState={
+                selectionMode
+                  ? controlAccessibilityState({ checked: isChecked })
+                  : controlAccessibilityState({ selected: isSelected })
+              }
+              onPress={() =>
+                selectionMode ? toggleChatSelection(item.chat.id) : handleSelectChat(item.chat.id)
+              }
             >
               {({ pressed }) => (
                 <View
                   style={[
                     styles.chatItem,
-                    isSelected && styles.chatItemSelected,
+                    (selectionMode ? isChecked : isSelected) && styles.chatItemSelected,
                     pressed && styles.chatItemPressed,
                   ]}
                 >
+                  {selectionMode ? (
+                    <View
+                      {...decorativeAccessibilityProps}
+                      style={[
+                        styles.chatSelectionIndicator,
+                        isChecked && styles.chatSelectionIndicatorChecked,
+                      ]}
+                    >
+                      {isChecked ? (
+                        <Ionicons
+                          {...decorativeAccessibilityProps}
+                          name="checkmark"
+                          size={14}
+                          color={theme.colors.userBubbleText}
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
                   <View style={styles.chatItemTextBlock}>
                     <Text
-                      style={[styles.chatTitle, isSelected && styles.chatTitleSelected]}
+                      style={[
+                        styles.chatTitle,
+                        (selectionMode ? isChecked : isSelected) && styles.chatTitleSelected,
+                      ]}
                       numberOfLines={1}
                     >
                       {item.chat.title || 'Untitled'}

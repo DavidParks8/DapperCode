@@ -28,6 +28,14 @@ describe('accessibility helpers', () => {
       controlAccessibilityState({ disabled: true, selected: false, expanded: true, busy: true }),
     ).toEqual({ disabled: true, selected: false, expanded: true, busy: true });
     expect(controlAccessibilityState({})).toEqual({ disabled: false });
+    expect(controlAccessibilityState({ checked: false })).toEqual({
+      disabled: false,
+      checked: false,
+    });
+    expect(controlAccessibilityState({ checked: true })).toEqual({
+      disabled: false,
+      checked: true,
+    });
   });
 
   it('hides decorative descendants from accessibility', () => {

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Alert, AppState, Keyboard } from 'react-native';
+import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { ChatSummary } from '@bridge/types/types';
 import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import { confirmAction } from '@shared/ui/confirm';
@@ -24,6 +25,15 @@ import { createDrawerContentStyles } from '@shell/navigation/drawerContentStyles
 import type { DrawerContentProps, DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { DrawerContentView } from '@shell/navigation/DrawerContentView';
 import { DrawerContentViewContext } from '@shell/navigation/drawerContentViewContext';
+import {
+  areAllChatIdsSelected,
+  collectSelectableChatIds,
+  describeBulkDeleteFailure,
+  describeBulkDeletion,
+  pruneSelectedChatIds,
+  resolveBulkDeleteRootIds,
+  toggleSelectedChatId,
+} from '@shell/navigation/drawerSelection';
 import {
   filterDrawerAttentionSections,
   normalizeWorkspaceChatLimit,
@@ -50,6 +60,64 @@ function chatDeletionFamily(chats: ChatSummary[], rootId: string): ChatSummary[]
     }
   }
   return chats.filter((chat) => affectedIds.has(chat.id));
+}
+
+type BulkDeletionFamily = { rootId: string; chats: ChatSummary[] };
+
+/** Expands the selection into the exact set of sessions a bulk delete will remove. */
+function buildBulkDeletionPlan(
+  chats: ChatSummary[],
+  selectedChatIds: ReadonlySet<string>,
+): { families: BulkDeletionFamily[]; affectedChatIds: Set<string> } {
+  const families = resolveBulkDeleteRootIds(chats, selectedChatIds).map((rootId) => ({
+    rootId,
+    chats: chatDeletionFamily(chats, rootId),
+  }));
+  const affectedChatIds = new Set<string>();
+  for (const family of families) {
+    affectedChatIds.add(family.rootId);
+    for (const chat of family.chats) {
+      affectedChatIds.add(chat.id);
+    }
+  }
+  return { families, affectedChatIds };
+}
+
+async function deleteBulkDeletionFamilies(
+  api: Pick<HostBridgeApiClient, 'deleteChat' | 'forgetChat'>,
+  families: BulkDeletionFamily[],
+): Promise<{ failedFamilies: BulkDeletionFamily[]; deletedChatIds: Set<string> }> {
+  const failedFamilies: BulkDeletionFamily[] = [];
+  const deletedChatIds = new Set<string>();
+  for (const family of families) {
+    try {
+      await api.deleteChat(family.rootId);
+      deletedChatIds.add(family.rootId);
+      for (const chat of family.chats) {
+        if (chat.id !== family.rootId) {
+          api.forgetChat(chat.id);
+          deletedChatIds.add(chat.id);
+        }
+      }
+    } catch {
+      failedFamilies.push(family);
+    }
+  }
+  return { failedFamilies, deletedChatIds };
+}
+
+function restoreBulkDeletionFamilies(
+  families: BulkDeletionFamily[],
+  restoreChat: (chat: ChatSummary) => void,
+): Set<string> {
+  const restoredChatIds = new Set<string>();
+  for (const family of families) {
+    for (const chat of family.chats) {
+      restoreChat(chat);
+      restoredChatIds.add(chat.id);
+    }
+  }
+  return restoredChatIds;
 }
 
 export const DrawerContent = memo(function DrawerContentComponent({
@@ -109,6 +177,8 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const [collapsedLaneKeys, setCollapsedLaneKeys] = useState<Set<DrawerAttentionLane>>(new Set());
   const [folderPickerVisible, setFolderPickerVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedChatIds, setSelectedChatIds] = useState<ReadonlySet<string>>(() => new Set());
   const trimmedSearchQuery = searchQuery.trim();
   const isSearching = trimmedSearchQuery.length > 0;
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
@@ -166,6 +236,64 @@ export const DrawerContent = memo(function DrawerContentComponent({
     () => visibleAttentionSections.reduce((total, section) => total + section.data.length, 0),
     [visibleAttentionSections],
   );
+
+  const selectableChatIds = useMemo(
+    () => collectSelectableChatIds(visibleAttentionSections),
+    [visibleAttentionSections],
+  );
+  const allSelectableChatsSelected = areAllChatIdsSelected(selectableChatIds, selectedChatIds);
+  const selectedChatCount = selectedChatIds.size;
+
+  // A session deleted from another client (or filtered out of the loaded window) must not stay
+  // selected behind the scenes, or the delete button would count rows the drawer no longer has.
+  useEffect(() => {
+    setSelectedChatIds((previous) => {
+      if (previous.size === 0) {
+        return previous;
+      }
+      return pruneSelectedChatIds(
+        previous,
+        chats.map((chat) => chat.id),
+      );
+    });
+  }, [chats]);
+
+  // Selection is a transient mode: reopening the drawer should never resume a stale "3 Selected".
+  useEffect(() => {
+    if (active) {
+      return;
+    }
+    setSelectionMode(false);
+    setSelectedChatIds(new Set());
+  }, [active]);
+
+  const enterSelectionMode = useCallback(() => {
+    Keyboard.dismiss();
+    // Collapsed lanes would hide rows that "Select All" and the delete count still include, so
+    // selection always starts from a fully expanded list.
+    setCollapsedLaneKeys(new Set());
+    setSelectedChatIds(new Set());
+    setSelectionMode(true);
+    void feedback.selection();
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedChatIds(new Set());
+    void feedback.selection();
+  }, []);
+
+  const toggleChatSelection = useCallback((chatId: string) => {
+    void feedback.selection();
+    setSelectedChatIds((previous) => toggleSelectedChatId(previous, chatId));
+  }, []);
+
+  const toggleSelectAllChats = useCallback(() => {
+    void feedback.selection();
+    setSelectedChatIds((previous) =>
+      areAllChatIdsSelected(selectableChatIds, previous) ? new Set() : new Set(selectableChatIds),
+    );
+  }, [selectableChatIds]);
 
   const searchAnnouncementMessage = isSearching
     ? searchResultCount === 0
@@ -328,6 +456,67 @@ export const DrawerContent = memo(function DrawerContentComponent({
     [cancelChatListStream, onNavigate],
   );
 
+  /**
+   * Bulk sibling of `handleDeleteChat`: one confirmation for the whole selection, one optimistic
+   * removal pass, then a per-session delete. Sessions the bridge refuses are restored and stay
+   * selected so the user can retry exactly those without rebuilding the selection.
+   */
+  const handleDeleteSelectedChats = useCallback(async (): Promise<boolean> => {
+    if (selectedChatIds.size === 0) {
+      return false;
+    }
+    const { families, affectedChatIds } = buildBulkDeletionPlan(chats, selectedChatIds);
+    if (families.length === 0) {
+      setSelectionMode(false);
+      setSelectedChatIds(new Set());
+      return false;
+    }
+    if (confirmSessionDeletion) {
+      const linkedCount = Array.from(affectedChatIds).filter(
+        (chatId) => !selectedChatIds.has(chatId),
+      ).length;
+      const { title, message } = describeBulkDeletion(selectedChatIds.size, linkedCount);
+      const confirmed = await confirmAction({
+        title,
+        message,
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!confirmed) {
+        return false;
+      }
+    }
+    void feedback.destructive();
+    for (const chatId of affectedChatIds) {
+      removeChat(chatId);
+    }
+    const { failedFamilies, deletedChatIds } = await deleteBulkDeletionFamilies(api, families);
+    if (failedFamilies.length > 0) {
+      const restoredChatIds = restoreBulkDeletionFamilies(failedFamilies, restoreChat);
+      const { title, message } = describeBulkDeleteFailure(failedFamilies.length);
+      Alert.alert(title, message);
+      setSelectedChatIds(
+        new Set(Array.from(selectedChatIds).filter((chatId) => restoredChatIds.has(chatId))),
+      );
+    } else {
+      setSelectionMode(false);
+      setSelectedChatIds(new Set());
+    }
+    if (selectedChatId && deletedChatIds.has(selectedChatId)) {
+      onNewChat({ keepDrawerOpen: true });
+    }
+    return failedFamilies.length === 0;
+  }, [
+    api,
+    chats,
+    confirmSessionDeletion,
+    onNewChat,
+    removeChat,
+    restoreChat,
+    selectedChatId,
+    selectedChatIds,
+  ]);
+
   const resolvedEmptyTitle =
     chats.length === 0
       ? 'No sessions yet'
@@ -345,14 +534,18 @@ export const DrawerContent = memo(function DrawerContentComponent({
   ].filter((message): message is string => Boolean(message));
 
   const viewModel = {
+    allSelectableChatsSelected,
     attentionCount: attentionModel.attentionCount,
     collapsedLaneKeys,
+    enterSelectionMode,
+    exitSelectionMode,
     folderOptions: attentionModel.folderOptions,
     folderPickerVisible,
     handleClearSearch,
     handleClose: onClose,
     handleDismissFolderPicker: () => setFolderPickerVisible(false),
     handleDeleteChat,
+    handleDeleteSelectedChats,
     handleNavigate,
     handleNewChat,
     handleOpenConnection,
@@ -373,12 +566,17 @@ export const DrawerContent = memo(function DrawerContentComponent({
     retryDeepChatListRef,
     searchQuery,
     searchResultCount,
+    selectedChatCount,
     selectedChatId,
+    selectedChatIds,
     selectedFolderKey,
     selectedFolderLabel: attentionModel.selectedFolderLabel,
+    selectionMode,
     styles,
     theme,
     toggleAttentionSection,
+    toggleChatSelection,
+    toggleSelectAllChats,
     totalChatCount: attentionModel.sessionCount,
     visibleAttentionSections,
     visibleChatCount: attentionModel.visibleChatCount,

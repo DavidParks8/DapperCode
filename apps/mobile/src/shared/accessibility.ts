@@ -66,16 +66,19 @@ export function controlAccessibilityState({
   selected,
   expanded,
   busy,
+  checked,
 }: {
   disabled?: boolean;
   selected?: boolean;
   expanded?: boolean;
   busy?: boolean;
+  checked?: boolean;
 }): AccessibilityState {
   return {
     disabled,
     ...(selected === undefined ? null : { selected }),
     ...(expanded === undefined ? null : { expanded }),
     ...(busy === undefined ? null : { busy }),
+    ...(checked === undefined ? null : { checked }),
   };
 }
