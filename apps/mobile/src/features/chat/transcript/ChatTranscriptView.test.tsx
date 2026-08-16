@@ -959,7 +959,7 @@ describe('ChatTranscriptView continuation', () => {
     });
     const list = tree.root.findByType(FlatList);
     expect(list.props['inverted']).toBe(true);
-    expect(list.props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 0 });
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
     const loadBoundary = list.props['ListFooterComponent'] as React.ReactElement<{
       onPress: () => void;
     }>;
@@ -1097,7 +1097,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps streaming pinned through overflow and keyboard insets until the user browses history', () => {
+  it('keeps streaming activity above the composer until the user browses history', () => {
     const autoScrollStateRef = {
       current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
     };
@@ -1143,6 +1143,7 @@ describe('ChatTranscriptView continuation', () => {
       chat: runningChat,
       autoScrollStateRef,
       onPinnedAutoScroll,
+      activity: { tone: 'running', title: 'Working' } as const,
     };
     const tree = render({
       ...sharedProps,
@@ -1150,6 +1151,8 @@ describe('ChatTranscriptView continuation', () => {
       bottomInset: 88,
     });
     let list = getList(tree);
+    expect(list.props['ListHeaderComponent']).not.toBeNull();
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
     act(() => list.props.onLayout({ nativeEvent: { layout: { height: 500 } } }));
     scroll(list, 0, 420, 500);
 
@@ -1159,7 +1162,9 @@ describe('ChatTranscriptView continuation', () => {
       bottomInset: 88,
     });
     list = getList(tree);
-    // Fabric preserves visible content by shifting this inverted offset as the live cell grows.
+    expect(list.props['ListHeaderComponent']).not.toBeNull();
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
+    // Native inset changes can still report a transient offset while the sticky state remains set.
     scroll(list, 96, 760, 500);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
@@ -1189,6 +1194,9 @@ describe('ChatTranscriptView continuation', () => {
     scroll(list, 420, 1180, 500);
     act(() => list.props.onScrollEndDrag());
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
+    expect(getList(tree).props['maintainVisibleContentPosition']).toEqual({
+      minIndexForVisible: 0,
+    });
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
     ).toBeGreaterThan(0);
@@ -1199,6 +1207,7 @@ describe('ChatTranscriptView continuation', () => {
     scroll(list, 10, 1180, 500);
     act(() => list.props.onScrollEndDrag());
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    expect(getList(tree).props['maintainVisibleContentPosition']).toBeUndefined();
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
       0,
     );

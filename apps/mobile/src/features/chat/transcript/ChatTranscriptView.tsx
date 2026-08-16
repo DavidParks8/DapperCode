@@ -488,7 +488,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           ListFooterComponent={historyBoundary}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          // Preserving the first response cell while it grows shifts this inverted list's activity
+          // header toward the overlay composer. Preserve cells only after the user leaves latest.
+          maintainVisibleContentPosition={showJumpToLatest ? { minIndexForVisible: 0 } : undefined}
           inverted
           scrollEnabled={rail.scrollEnabled}
           showsVerticalScrollIndicator={false}
