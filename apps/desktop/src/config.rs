@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs,
     net::{SocketAddr, TcpListener, ToSocketAddrs},
     path::{Path, PathBuf},
 };
@@ -86,6 +87,25 @@ impl RuntimePaths {
         );
         candidates
     }
+}
+
+pub(crate) fn runtime_executable_available(path: &Path) -> bool {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    true
 }
 
 fn contains_bundled_bridge(package_root: &Path) -> bool {

@@ -17,7 +17,7 @@ pub(super) fn process_start_identity(_pid: u32, sysinfo_start_time: u64) -> Resu
 
 pub(super) fn request_process_stop(
     pid: u32,
-    _expected_start_time: u64,
+    expected_start_time: u64,
     request: ProcessStopRequest,
 ) -> Result<bool> {
     let signal = match request {
@@ -30,6 +30,9 @@ pub(super) fn request_process_stop(
     let process = system
         .process(sysinfo_pid)
         .ok_or_else(|| anyhow!("bridge process {pid} no longer exists"))?;
+    if process_start_identity(pid, process.start_time())? != expected_start_time {
+        bail!("refusing to signal bridge process {pid} because its start identity changed");
+    }
     match process.kill_with(signal) {
         Some(true) => Ok(true),
         Some(false) => bail!("operating system refused to signal bridge process {pid}"),
@@ -140,5 +143,25 @@ pub(super) async fn wait_for_shutdown_signal() {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
         _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_stop_rejects_a_stale_start_identity_before_signalling() {
+        let pid = std::process::id();
+        let mut system = System::new();
+        let sysinfo_pid = Pid::from_u32(pid);
+        system.refresh_processes(ProcessesToUpdate::Some(&[sysinfo_pid]), true);
+        let start_time = system.process(sysinfo_pid).unwrap().start_time();
+
+        let error =
+            request_process_stop(pid, start_time.saturating_add(1), ProcessStopRequest::Force)
+                .unwrap_err();
+
+        assert!(error.to_string().contains("start identity changed"));
     }
 }

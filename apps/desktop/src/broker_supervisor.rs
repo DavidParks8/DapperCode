@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::{
-    config::BridgeRuntimeConfig,
+    config::{runtime_executable_available, BridgeRuntimeConfig},
     platform::{detach_process, process_start_identity, request_process_stop, ProcessStopRequest},
     secrets::SecretStore,
     store::{
@@ -138,7 +138,9 @@ impl BrokerSupervisor {
     }
 
     pub fn snapshot(&self) -> BridgeSnapshot {
+        let replacement_required = self.owned_runtime_unavailable();
         match self.fetch_health() {
+            Ok(_) if replacement_required => self.runtime_replacement_snapshot(),
             Ok(health) => BridgeSnapshot {
                 state: BridgeState::Running,
                 headline: "Broker running".to_string(),
@@ -160,6 +162,7 @@ impl BrokerSupervisor {
                 recent_error_count: 0,
                 managed_process: self.owns_running_process(),
             },
+            Err(_) if replacement_required => self.runtime_replacement_snapshot(),
             Err(error) if self.owns_running_process() => BridgeSnapshot {
                 state: BridgeState::Inaccessible,
                 headline: "Broker starting".to_string(),
@@ -187,15 +190,24 @@ impl BrokerSupervisor {
         }
     }
 
-    fn start_locked(&self) -> Result<BridgeSnapshot> {
-        if self.fetch_health().is_ok() {
-            if self.owns_running_process() {
-                return Ok(self.snapshot());
-            }
-            bail!("a broker is already listening but is not owned by this desktop app");
+    fn runtime_replacement_snapshot(&self) -> BridgeSnapshot {
+        BridgeSnapshot {
+            state: BridgeState::Stopped,
+            headline: "Broker update required".to_string(),
+            detail: "The running broker's runtime bundle is unavailable. DapperCode will replace it before accepting devices.".to_string(),
+            url: Some(self.settings.connect_url.clone()),
+            uptime_sec: None,
+            connected_clients: 0,
+            ready_agents: 0,
+            total_agents: 0,
+            recent_error_count: 1,
+            managed_process: true,
         }
-        if self.owns_running_process() {
-            bail!("the owned broker process is running but its health endpoint is unavailable");
+    }
+
+    fn start_locked(&self) -> Result<BridgeSnapshot> {
+        if self.reconcile_existing_process()? {
+            return Ok(self.snapshot());
         }
         self.clean_stale_ownership()?;
         let executable = std::env::current_exe()?.canonicalize()?;
@@ -276,6 +288,51 @@ impl BrokerSupervisor {
             START_TIMEOUT.as_secs(),
             log_path.display()
         )
+    }
+
+    /// Keep a healthy broker while its recorded runtime still exists. A broker whose executable
+    /// disappeared cannot launch its lazily-created workers, so stop only that exactly identified
+    /// owned process and let the current operator replace it.
+    fn reconcile_existing_process(&self) -> Result<bool> {
+        let health_available = self.fetch_health().is_ok();
+        let Some(ownership) = read_ownership(&self.paths.broker_ownership_path())? else {
+            if health_available {
+                bail!("a broker is already listening but is not owned by this desktop app");
+            }
+            return Ok(false);
+        };
+        if !process_matches_for_recovery(&ownership) {
+            if health_available && self.fetch_health().is_ok() {
+                bail!("a broker is already listening but its ownership record is stale");
+            }
+            remove_file_if_exists(&self.paths.broker_ownership_path())?;
+            return Ok(false);
+        }
+        self.validate_ownership_data_dir(&ownership)?;
+        if runtime_executable_unavailable_for_recovery(&ownership.executable) {
+            stop_owned_process_for_recovery(&ownership, &self.paths.broker_ownership_path())?;
+            return Ok(false);
+        }
+        if health_available {
+            return Ok(true);
+        }
+        bail!("the owned broker process is running but its health endpoint is unavailable");
+    }
+
+    fn validate_ownership_data_dir(&self, record: &BrokerOwnershipRecord) -> Result<()> {
+        if record.data_dir != self.paths.base_dir().canonicalize()? {
+            bail!("broker data directory changed while its managed process was running");
+        }
+        Ok(())
+    }
+
+    fn owned_runtime_unavailable(&self) -> bool {
+        let Ok(Some(record)) = read_ownership(&self.paths.broker_ownership_path()) else {
+            return false;
+        };
+        process_matches_for_recovery(&record)
+            && self.validate_ownership_data_dir(&record).is_ok()
+            && runtime_executable_unavailable_for_recovery(&record.executable)
     }
 
     pub fn stop(&self) -> Result<BridgeSnapshot> {
@@ -421,7 +478,7 @@ impl BrokerSupervisor {
         let executable = std::env::current_exe()?.canonicalize()?;
         if record.executable != executable
             || record.data_dir != self.paths.base_dir().canonicalize()?
-            || record.config_sha256 != settings_digest(&self.settings)
+            || !settings_digest_matches(&record.config_sha256, &self.settings)
         {
             bail!("broker configuration changed while its managed process was running");
         }
@@ -456,8 +513,22 @@ fn http_agent() -> ureq::Agent {
 }
 
 fn settings_digest(settings: &BrokerSettings) -> String {
+    let mut runtime_settings = settings.clone();
+    runtime_settings.auto_start = false;
+    digest_settings(&runtime_settings)
+}
+
+fn legacy_settings_digest(settings: &BrokerSettings) -> String {
+    digest_settings(settings)
+}
+
+fn digest_settings(settings: &BrokerSettings) -> String {
     let encoded = serde_json::to_vec(settings).expect("broker settings serialize");
     format!("sha256:{:x}", Sha256::digest(encoded))
+}
+
+fn settings_digest_matches(recorded: &str, settings: &BrokerSettings) -> bool {
+    recorded == settings_digest(settings) || recorded == legacy_settings_digest(settings)
 }
 
 fn process_identity(
@@ -507,6 +578,10 @@ fn process_identity(
 }
 
 fn process_matches(record: &BrokerOwnershipRecord) -> bool {
+    process_matches_with(record, false)
+}
+
+fn process_matches_with(record: &BrokerOwnershipRecord, allow_unlinked_executable: bool) -> bool {
     let mut system = System::new();
     let pid = Pid::from_u32(record.pid);
     system.refresh_processes_specifics(
@@ -517,11 +592,66 @@ fn process_matches(record: &BrokerOwnershipRecord) -> bool {
     let Some(process) = system.process(pid) else {
         return false;
     };
+    let executable_matches = process
+        .exe()
+        .is_some_and(|path| process_path_matches(path, &record.executable))
+        || allow_unlinked_executable && !record.executable.exists();
     process_start_identity(record.pid, process.start_time()).ok()
         == Some(record.started_at_epoch_sec)
-        && process.exe().and_then(|path| path.canonicalize().ok())
-            == Some(record.executable.clone())
+        && executable_matches
         && process.cwd().and_then(|path| path.canonicalize().ok()) == Some(record.data_dir.clone())
+}
+
+fn process_matches_for_recovery(record: &BrokerOwnershipRecord) -> bool {
+    // macOS can resolve an unlinked executable to its new vnode path. Recovery still requires the
+    // private record's exact PID start identity and canonical central-data cwd.
+    process_matches_with_retry(record, true)
+}
+
+fn process_matches_with_retry(
+    record: &BrokerOwnershipRecord,
+    allow_unlinked_executable: bool,
+) -> bool {
+    for attempt in 0..3 {
+        if process_matches_with(record, allow_unlinked_executable) {
+            return true;
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    false
+}
+
+fn runtime_executable_unavailable_for_recovery(path: &Path) -> bool {
+    for attempt in 0..3 {
+        if runtime_executable_available(path) {
+            return false;
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    true
+}
+
+fn process_path_matches(observed: &Path, recorded: &Path) -> bool {
+    if observed == recorded || observed.canonicalize().ok().as_deref() == Some(recorded) {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let observed = observed.to_string_lossy();
+        let recorded = recorded.to_string_lossy();
+        observed
+            .strip_prefix("/var/")
+            .is_some_and(|suffix| recorded == format!("/private/var/{suffix}"))
+            || observed
+                .strip_prefix("/tmp/")
+                .is_some_and(|suffix| recorded == format!("/private/tmp/{suffix}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 fn read_ownership(path: &Path) -> Result<Option<BrokerOwnershipRecord>> {
@@ -547,6 +677,24 @@ fn write_ownership(path: &Path, record: &BrokerOwnershipRecord) -> Result<()> {
 }
 
 fn stop_owned_process(record: &BrokerOwnershipRecord, ownership_path: &Path) -> Result<()> {
+    stop_owned_process_with(record, ownership_path, false)
+}
+
+fn stop_owned_process_for_recovery(
+    record: &BrokerOwnershipRecord,
+    ownership_path: &Path,
+) -> Result<()> {
+    stop_owned_process_with(record, ownership_path, true)
+}
+
+fn stop_owned_process_with(
+    record: &BrokerOwnershipRecord,
+    ownership_path: &Path,
+    allow_unlinked_executable: bool,
+) -> Result<()> {
+    let process_matches = |record: &BrokerOwnershipRecord| {
+        process_matches_with_retry(record, allow_unlinked_executable)
+    };
     if !process_matches(record) {
         if !process_exists(record.pid) {
             remove_file_if_exists(ownership_path)?;
@@ -709,7 +857,15 @@ mod tests {
         config_sha256: &str,
     ) -> (std::process::Child, BrokerOwnershipRecord) {
         let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-        let mut command = Command::new(&executable);
+        spawn_owned_fixture_from(&executable, cwd, config_sha256)
+    }
+
+    fn spawn_owned_fixture_from(
+        executable: &Path,
+        cwd: &Path,
+        config_sha256: &str,
+    ) -> (std::process::Child, BrokerOwnershipRecord) {
+        let mut command = Command::new(executable);
         command
             .arg(BROKER_LIFECYCLE_CHILD)
             .current_dir(cwd)
@@ -718,8 +874,18 @@ mod tests {
             .stderr(Stdio::null());
         crate::platform::detach_process(&mut command);
         let child = command.spawn().unwrap();
-        let record = process_identity(child.id(), &executable, cwd, config_sha256, None).unwrap();
+        let record = process_identity(child.id(), executable, cwd, config_sha256, None).unwrap();
         (child, record)
+    }
+
+    #[cfg(unix)]
+    fn copied_lifecycle_executable(directory: &Path, name: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let executable = directory.join(name);
+        fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        executable.canonicalize().unwrap()
     }
 
     #[test]
@@ -871,8 +1037,8 @@ mod tests {
     }
 
     #[test]
-    fn settings_digest_is_stable_and_contains_no_workspace_credential() {
-        let settings = BrokerSettings::new(
+    fn settings_digest_is_stable_across_autostart_and_accepts_legacy_records() {
+        let mut settings = BrokerSettings::new(
             "local".to_string(),
             "127.0.0.1".to_string(),
             8787,
@@ -884,6 +1050,13 @@ mod tests {
         let digest = settings_digest(&settings);
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), 71);
+        assert!(settings_digest_matches(&digest, &settings));
+
+        settings.auto_start = true;
+        assert_eq!(settings_digest(&settings), digest);
+        let legacy = legacy_settings_digest(&settings);
+        assert_ne!(legacy, digest);
+        assert!(settings_digest_matches(&legacy, &settings));
     }
 
     #[test]
@@ -1002,18 +1175,145 @@ mod tests {
 
         let (owned_port, owned_server) = health_server(health, 2);
         let owned = test_supervisor(&paths, owned_port, None);
-        let current = process_identity(
-            std::process::id(),
-            &std::env::current_exe().unwrap(),
-            &std::env::current_dir().unwrap(),
-            &settings_digest(&owned.settings),
-            None,
-        )
-        .unwrap();
+        let (mut current_process, current) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&owned.settings));
         write_ownership(&paths.broker_ownership_path(), &current).unwrap();
         assert_eq!(owned.start_locked().unwrap().state, BridgeState::Running);
         owned_server.join().unwrap();
+        let _ = current_process.kill();
+        let _ = current_process.wait();
         remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+    }
+
+    #[test]
+    fn reconcile_rechecks_health_before_rejecting_a_stale_ownership_record() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":1,"configuredWorkspaces":1,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (port, server) = health_server(health, 1);
+        let supervisor = test_supervisor(&paths, port, None);
+        write_ownership(
+            &paths.broker_ownership_path(),
+            &BrokerOwnershipRecord {
+                version: OWNERSHIP_VERSION,
+                pid: u32::MAX,
+                started_at_epoch_sec: 1,
+                executable: PathBuf::from("/missing"),
+                data_dir: paths.base_dir().to_path_buf(),
+                config_sha256: settings_digest(&supervisor.settings),
+                owner_pid: None,
+            },
+        )
+        .unwrap();
+
+        assert!(!supervisor.reconcile_existing_process().unwrap());
+        server.join().unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_recorded_executable_remains_safe_to_identify_and_stop() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let executable = copied_lifecycle_executable(paths.base_dir(), "obsolete-dappercode");
+        let config_sha256 = format!("sha256:{}", "a".repeat(64));
+        let (mut child, ownership) =
+            spawn_owned_fixture_from(&executable, paths.base_dir(), &config_sha256);
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        let moved_executable = paths.base_dir().join("moved-dappercode");
+        fs::rename(&executable, &moved_executable).unwrap();
+
+        assert!(process_matches_for_recovery(&ownership));
+        assert!(!runtime_executable_available(&ownership.executable));
+        stop_owned_process_for_recovery(&ownership, &paths.broker_ownership_path()).unwrap();
+        child.wait().unwrap();
+        fs::remove_file(moved_executable).unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_marks_deleted_owned_runtime_for_replacement() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":7,"configuredWorkspaces":2,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (port, server) = health_server(health, 1);
+        let supervisor = test_supervisor(&paths, port, None);
+        let executable = copied_lifecycle_executable(paths.base_dir(), "deleted-dappercode");
+        let (mut child, mut ownership) = spawn_owned_fixture_from(
+            &executable,
+            paths.base_dir(),
+            &settings_digest(&supervisor.settings),
+        );
+        ownership.config_sha256 = format!("sha256:{}", "c".repeat(64));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        let moved_executable = paths.base_dir().join("moved-dappercode");
+        fs::rename(&executable, &moved_executable).unwrap();
+
+        let snapshot = supervisor.snapshot();
+        assert_eq!(snapshot.state, BridgeState::Stopped);
+        assert_eq!(snapshot.headline, "Broker update required");
+        assert!(snapshot.detail.contains("runtime bundle is unavailable"));
+        assert!(snapshot.managed_process);
+        assert_eq!(snapshot.connected_clients, 0);
+        assert_eq!(snapshot.total_agents, 0);
+
+        let _ = child.kill();
+        let _ = child.wait();
+        remove_file_if_exists(&paths.broker_ownership_path()).unwrap();
+        fs::remove_file(moved_executable).unwrap();
+        server.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reconcile_stops_a_healthy_owned_broker_after_its_runtime_disappears() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":7,"configuredWorkspaces":2,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (port, server) = health_server(health, 1);
+        let supervisor = test_supervisor(&paths, port, None);
+        let executable = copied_lifecycle_executable(paths.base_dir(), "deleted-dappercode");
+        let (mut child, mut ownership) = spawn_owned_fixture_from(
+            &executable,
+            paths.base_dir(),
+            &settings_digest(&supervisor.settings),
+        );
+        ownership.config_sha256 = format!("sha256:{}", "c".repeat(64));
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+        let moved_executable = paths.base_dir().join("moved-dappercode");
+        fs::rename(&executable, &moved_executable).unwrap();
+
+        assert!(!supervisor.reconcile_existing_process().unwrap());
+        child.wait().unwrap();
+        fs::remove_file(moved_executable).unwrap();
+        server.join().unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn healthy_owned_runtime_from_another_existing_bundle_is_kept() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let health = r#"{"status":"ok","uptimeSec":7,"configuredWorkspaces":1,"runningWorkers":0,"connectedClients":0,"busyWorkers":0}"#;
+        let (port, server) = health_server(health, 1);
+        let supervisor = test_supervisor(&paths, port, None);
+        let executable = copied_lifecycle_executable(paths.base_dir(), "other-dappercode");
+        let (mut child, ownership) = spawn_owned_fixture_from(
+            &executable,
+            paths.base_dir(),
+            &settings_digest(&supervisor.settings),
+        );
+        write_ownership(&paths.broker_ownership_path(), &ownership).unwrap();
+
+        assert!(supervisor.reconcile_existing_process().unwrap());
+        assert!(child.try_wait().unwrap().is_none());
+
+        stop_owned_process(&ownership, &paths.broker_ownership_path()).unwrap();
+        child.wait().unwrap();
+        server.join().unwrap();
     }
 
     #[test]

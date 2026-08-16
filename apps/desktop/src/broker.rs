@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs::OpenOptions,
+    future::IntoFuture,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     process::Stdio,
@@ -44,7 +45,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    config::{BridgeRuntimeConfig, RuntimePaths},
+    config::{runtime_executable_available, BridgeRuntimeConfig, RuntimePaths},
     platform,
     secrets::{SecretBackend, SecretStore},
     store::{AppPaths, BrokerSettings, Profile},
@@ -58,6 +59,9 @@ const CLIENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 const CLIENT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const WORKER_WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const WORKER_RUNTIME_WATCH_INTERVAL: Duration = Duration::from_secs(1);
+const WORKER_RUNTIME_MISSING_SAMPLES: u8 = 3;
+const BROKER_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_FAILURE_LIMIT: u32 = 3;
 const MAX_CREDENTIAL_BYTES: usize = 4096;
@@ -94,9 +98,10 @@ impl BrokerServer {
         let bridge_binary = RuntimePaths::discover()?
             .bridge_binary_candidates()
             .into_iter()
-            .find(|candidate| candidate.is_file())
+            .find(|candidate| runtime_executable_available(candidate))
             .and_then(|candidate| candidate.canonicalize().ok())
             .context("the bundled dappercode-bridge worker executable is unavailable")?;
+        let watched_bridge_binary = bridge_binary.clone();
         let launcher = Arc::new(ProcessWorkerLauncher {
             paths: self.paths.clone(),
             bridge_binary,
@@ -176,23 +181,55 @@ impl BrokerServer {
             self.settings.host, self.settings.bridge_port
         );
         let mut bridge_shutdown = shutdown_rx.clone();
-        let serve_result = axum::serve(bridge_listener, bridge_router)
+        let serve = axum::serve(bridge_listener, bridge_router)
             .with_graceful_shutdown(async move {
                 tokio::select! {
                     _ = platform::wait_for_shutdown_signal() => {}
                     _ = owner.wait_for_exit() => {}
+                    _ = wait_for_runtime_executable_loss(
+                        watched_bridge_binary,
+                        WORKER_RUNTIME_WATCH_INTERVAL,
+                        WORKER_RUNTIME_MISSING_SAMPLES,
+                    ) => {
+                        eprintln!(
+                            "broker worker executable is unavailable; shutting down so the desktop app can recover"
+                        );
+                    }
                 }
                 let _ = shutdown_tx.send(true);
                 wait_for_shutdown(&mut bridge_shutdown).await;
             })
-            .await;
+            .into_future();
+        tokio::pin!(serve);
+        let mut shutdown_completion = shutdown_rx.clone();
+        let serve_result = tokio::select! {
+            result = &mut serve => result,
+            _ = wait_for_shutdown(&mut shutdown_completion) => {
+                match timeout(BROKER_GRACEFUL_SHUTDOWN_TIMEOUT, &mut serve).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        eprintln!(
+                            "broker graceful shutdown timed out; forcing active connections closed"
+                        );
+                        Ok(())
+                    }
+                }
+            }
+        };
 
         sweep_task.abort();
         let _ = sweep_task.await;
-        for task in legacy_tasks {
-            task.await
-                .context("legacy broker listener task failed to join")?
-                .context("legacy broker listener failed")?;
+        for mut task in legacy_tasks {
+            match timeout(BROKER_GRACEFUL_SHUTDOWN_TIMEOUT, &mut task).await {
+                Ok(result) => result
+                    .context("legacy broker listener task failed to join")?
+                    .context("legacy broker listener failed")?,
+                Err(_) => {
+                    task.abort();
+                    let _ = task.await;
+                    eprintln!("legacy broker listener shutdown timed out; forcing it closed");
+                }
+            }
         }
         pool.shutdown().await;
         serve_result.context("broker server failed")?;
@@ -356,14 +393,13 @@ async fn proxy_workspace_socket(
     client_name: Option<String>,
     client_foreground: Option<bool>,
 ) {
+    let profile_id = access.profile.profile_id.clone();
     let session = match state.pool.acquire_client(access).await {
         Ok(session) => session,
         Err(error) => {
-            close_downstream(
-                downstream,
-                &format!("workspace runtime unavailable: {error:#}"),
-            )
-            .await;
+            let reason = format!("workspace runtime unavailable: {error:#}");
+            eprintln!("workspace {profile_id} runtime launch failed: {error:#}");
+            close_downstream(downstream, &reason).await;
             return;
         }
     };
@@ -382,11 +418,9 @@ async fn proxy_workspace_socket(
     match upstream_result {
         Ok(upstream) => pump_websockets(downstream, upstream).await,
         Err(error) => {
-            close_downstream(
-                downstream,
-                &format!("workspace runtime connection failed: {error}"),
-            )
-            .await;
+            let reason = format!("workspace runtime connection failed: {error}");
+            eprintln!("workspace {profile_id} runtime connection failed: {error:#}");
+            close_downstream(downstream, &reason).await;
             session.release().await;
             return;
         }
@@ -1688,6 +1722,26 @@ async fn wait_for_shutdown(receiver: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
+async fn wait_for_runtime_executable_loss(
+    path: PathBuf,
+    poll_interval: Duration,
+    required_missing_samples: u8,
+) {
+    let required_missing_samples = required_missing_samples.max(1);
+    let mut missing_samples = 0_u8;
+    loop {
+        sleep(poll_interval).await;
+        if runtime_executable_available(&path) {
+            missing_samples = 0;
+            continue;
+        }
+        missing_samples = missing_samples.saturating_add(1);
+        if missing_samples >= required_missing_samples {
+            return;
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -1695,6 +1749,31 @@ mod tests {
     use crate::store::ProfileAgent;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn worker_runtime_watch_detects_executable_removal() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempdir().unwrap();
+        let executable = root.path().join("dappercode-bridge");
+        std::fs::write(&executable, b"fixture").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(runtime_executable_available(&executable));
+
+        let watch = tokio::spawn(wait_for_runtime_executable_loss(
+            executable.clone(),
+            Duration::from_millis(10),
+            2,
+        ));
+        sleep(Duration::from_millis(25)).await;
+        std::fs::remove_file(&executable).unwrap();
+
+        timeout(Duration::from_secs(1), watch)
+            .await
+            .expect("runtime watch should settle")
+            .expect("runtime watch task should succeed");
+    }
 
     fn profile(id: &str, workspace: PathBuf) -> Profile {
         Profile {
