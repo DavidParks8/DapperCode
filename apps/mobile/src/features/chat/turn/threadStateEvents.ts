@@ -154,7 +154,7 @@ function handleThreadDeletedEvent(
   }
 
   // The thread is gone on the agent, so keeping it open would only surface stale history.
-  context.store.set(startNewChatAtom);
+  context.store.set(startNewChatAtom, { keepDrawerOpen: true });
 }
 
 function handleThreadTokenUsageUpdatedEvent(

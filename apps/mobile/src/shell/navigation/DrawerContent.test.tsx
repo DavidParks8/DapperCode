@@ -1991,15 +1991,21 @@ describe('DrawerContent session deletion', () => {
     act(() => tree.unmount());
   });
 
-  it('starts a new chat when the session being viewed is deleted', async () => {
+  it('starts a new chat without closing the session list when the current session is deleted', async () => {
     const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
     answerConfirm('confirm');
     const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'a' });
+    const closeDrawer = jest.fn();
+    store.set(drawerCommandsAtom, { closeDrawer });
     const tree = await renderDrawer(harness, { store, selectedChatId: 'a' });
 
     await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
 
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
     expect(store.get(selectedChatIdAtom)).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(closeDrawer).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 

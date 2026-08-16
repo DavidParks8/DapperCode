@@ -69,25 +69,30 @@ export const selectChatAtom = atom(null, (get, set, id: string): void => {
   navigateRoot(routes.chat(profileId, id));
 });
 
-export const startNewChatAtom = atom(null, (get, set): void => {
-  const profileId = activeProfileId(get);
-  set(cancelChatTransitionAtom);
-  set(newChatRoutePendingAtom, Boolean(profileId));
-  set(pendingMainChatIdAtom, null);
-  set(pendingMainChatSnapshotAtom, null);
-  set(selectedChatIdAtom, null);
-  set(activeChatAtom, null);
-  set(gitChatAtom, null);
-  get(mainScreenCommandsAtom)?.startNewChat();
-  set(closeDrawerAtom);
-  if (profileId) {
-    // `new` is commonly absent from the current stack. Do not call navigateRoot here: its
-    // dismissTo preflight can replace the current route when the destination is not in history.
-    router.navigate(routes.newChat(profileId));
-  } else {
-    replaceRoot(routes.onboarding);
-  }
-});
+export const startNewChatAtom = atom(
+  null,
+  (get, set, options: { keepDrawerOpen?: boolean } = {}): void => {
+    const profileId = activeProfileId(get);
+    set(cancelChatTransitionAtom);
+    set(newChatRoutePendingAtom, Boolean(profileId));
+    set(pendingMainChatIdAtom, null);
+    set(pendingMainChatSnapshotAtom, null);
+    set(selectedChatIdAtom, null);
+    set(activeChatAtom, null);
+    set(gitChatAtom, null);
+    get(mainScreenCommandsAtom)?.startNewChat();
+    if (!options.keepDrawerOpen) {
+      set(closeDrawerAtom);
+    }
+    if (profileId) {
+      // `new` is commonly absent from the current stack. Do not call navigateRoot here: its
+      // dismissTo preflight can replace the current route when the destination is not in history.
+      router.navigate(routes.newChat(profileId));
+    } else {
+      replaceRoot(routes.onboarding);
+    }
+  },
+);
 
 export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null): void => {
   const profileId = activeProfileId(get);

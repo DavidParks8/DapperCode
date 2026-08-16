@@ -56,6 +56,7 @@ import { toggleWorkspaceFavoriteAtom } from '../../workspace/state/workspaceActi
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import { refreshBridgeCapabilitiesAtom } from '@shell/state/bridge/capabilities';
+import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
 import { WORKING_PHRASES } from '../helpers/workingPhrases';
 
@@ -4343,8 +4344,13 @@ function MainRouteShell() {
       await unmount(tree);
     });
 
-    it('leaves a deleted session and keeps unrelated deletions on screen', async () => {
-      const { tree } = await renderMain();
+    it('leaves a deleted session without closing an open session list', async () => {
+      const { tree, store } = await renderMain();
+      const closeDrawer = jest.fn();
+      await act(async () => {
+        store.set(drawerCommandsAtom, { closeDrawer });
+        await Promise.resolve();
+      });
       expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
 
       await emit({ method: 'thread/deleted', params: { threadId: otherThreadId } });
@@ -4358,6 +4364,8 @@ function MainRouteShell() {
       expect(
         transcript(tree).some(({ message }) => message.content.includes('Existing answer')),
       ).toBe(false);
+      expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-events'));
+      expect(closeDrawer).not.toHaveBeenCalled();
       await unmount(tree);
     });
 

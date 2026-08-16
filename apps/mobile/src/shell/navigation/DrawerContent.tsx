@@ -313,7 +313,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
         return false;
       }
       if (selectedChatId && affectedChatIds.has(selectedChatId)) {
-        onNewChat();
+        onNewChat({ keepDrawerOpen: true });
       }
       return true;
     },
