@@ -32,6 +32,8 @@ describe('tool metadata readers', () => {
         toolCallId: 'call-1',
         kind: 'edit',
         status: 'in_progress',
+        startedAtMs: 1_000,
+        completedAtMs: 2_500,
         content: [{ type: 'text', text: 'hi' }],
         locations: [{ path: 'a.ts' }],
         truncated: true,
@@ -41,6 +43,8 @@ describe('tool metadata readers', () => {
       kind: 'edit',
       status: 'in_progress',
       title: 'edit',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       content: [{ type: 'text', text: 'hi' }],
       locations: [{ path: 'a.ts' }],
       truncated: true,
@@ -51,10 +55,28 @@ describe('tool metadata readers', () => {
     expect(parseToolMeta({ kind: 'read' }, 'call-9')?.toolCallId).toBe('call-9');
     expect(parseToolMeta({ kind: 'read' })).toBeNull();
     expect(parseToolMeta('nope', 'call-9')).toBeNull();
+    expect(
+      parseToolMeta(
+        { kind: 'read', startedAtMs: -1, completedAtMs: Number.POSITIVE_INFINITY },
+        'call-9',
+      ),
+    ).toEqual({
+      toolCallId: 'call-9',
+      kind: 'read',
+      status: 'pending',
+      title: 'read',
+    });
   });
 
   it('keeps previous payloads when an update omits them', () => {
-    const previous: ChatToolMeta = { ...baseMeta, content: [1], locations: [2], truncated: true };
+    const previous: ChatToolMeta = {
+      ...baseMeta,
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
+      content: [1],
+      locations: [2],
+      truncated: true,
+    };
     expect(mergeToolMeta(previous, { ...baseMeta, status: 'failed' })).toEqual({
       ...previous,
       status: 'failed',

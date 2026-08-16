@@ -126,9 +126,9 @@ The projected AG-UI event shape is:
 
 Every ACP tool call carries a `kind` (`read`, `edit`, `execute`, …) and a per-call `status`
 (`pending`, `in_progress`, `completed`, `failed`). Neither fits an AG-UI `TOOL_CALL_START`, so the
-projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the
-`(kind, status, title)` tuple moves. It cannot ride on `dappercode.dev/tool-content`, which only
-fires when structured content changes: a pure `in_progress` → `completed` transition would be lost.
+projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the metadata
+revision moves. It cannot ride on `dappercode.dev/tool-content`, which only fires when structured
+content changes: a pure `in_progress` → `completed` transition would be lost.
 
 ```json
 {
@@ -140,7 +140,9 @@ fires when structured content changes: a pure `in_progress` → `completed` tran
     "toolCallId": "call-1",
     "kind": "execute",
     "status": "in_progress",
-    "title": "npm test"
+    "title": "pnpm test",
+    "startedAtMs": 1784505600000,
+    "completedAtMs": null
   }
 }
 ```
@@ -152,15 +154,21 @@ pair, holding the same payload plus the bounded `content`, `locations`, and `tru
 Mobile folds it into the tool row and never renders it on its own. Sub-agent tools are excluded from
 both paths because they already have their own `dappercode.subagent` card.
 
+`startedAtMs` and `completedAtMs` are Unix epoch milliseconds measured by the bridge. The start is
+the first time the bridge observes the call and remains stable across updates. Completion is frozen
+on the first completed or failed update; run termination also completes any dangling active call,
+never earlier than its start. Mobile uses these fields for the expanded row's local start time and
+duration, including a live elapsed value while `completedAtMs` is null.
+
 Raw tool input is deliberately absent. The bridge strips `rawInput`, `rawOutput`, and `_meta` in
 `acp/handlers.rs` and `acp/snapshot.rs`; rows are built from the ACP `title` and `locations` instead.
 
 For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
 ```bash
-npm run bridge:ui:demo
+pnpm run bridge:ui:demo
 ```
 
-That sends a sample workflow card to the latest chat. Use `npm run bridge:ui:demo -- --modal` or `npm run bridge:ui:demo -- --banner` to test the other presentations. Use `npm run bridge:ui:demo -- --thread <thread-id>` when the latest chat is not the one visible on the device.
+That sends a sample workflow card to the latest chat. Use `pnpm run bridge:ui:demo --modal` or `pnpm run bridge:ui:demo --banner` to test the other presentations. Use `pnpm run bridge:ui:demo --thread <thread-id>` when the latest chat is not the one visible on the device.
 
 ## Implemented Session Token Totals Example
 

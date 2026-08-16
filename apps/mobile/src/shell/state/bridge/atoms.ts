@@ -1,7 +1,10 @@
 import { atom } from 'jotai';
+import { AppState, Platform } from 'react-native';
 
 import { HostBridgeApiClient } from '@bridge/client/client';
+import { MOBILE_BRIDGE_CLIENT_NAME, MOBILE_BRIDGE_CLIENT_TYPE } from '@bridge/ws/types';
 import { HostBridgeWsClient } from '@bridge/ws/ws';
+import { isUserPresentAppState, supportsNativePushPresence } from '@shell/session/appVisibility';
 import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
 import { env } from '@shared/config';
 import { bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
@@ -34,9 +37,15 @@ export const wsClientAtom = atom(
     if (!bridgeUrl) {
       return null;
     }
+    const supportsPushPresence = supportsNativePushPresence(Platform.OS);
     return new HostBridgeWsClient(bridgeUrl, {
       authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
       workspaceId: get(bridgeWorkspaceIdAtom),
+      clientType: supportsPushPresence ? MOBILE_BRIDGE_CLIENT_TYPE : Platform.OS,
+      clientName: MOBILE_BRIDGE_CLIENT_NAME,
+      getClientForeground: supportsPushPresence
+        ? () => isUserPresentAppState(AppState.currentState)
+        : undefined,
       allowQueryTokenAuth: env.allowWsQueryTokenAuth,
     });
   },

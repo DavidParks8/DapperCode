@@ -1,6 +1,6 @@
 # Setup and Operations
 
-DapperCode's desktop app owns bridge setup and lifecycle. The bridge is not distributed through npm.
+DapperCode's desktop app owns bridge setup and lifecycle. The bridge is not distributed through a package registry.
 The macOS app uses a native SwiftUI/AppKit shell. The Windows app uses a native C# WinUI 3 shell.
 Both packages contain the Rust `dappercode` operator and Rust bridge and expose the same setup,
 pairing, workspace, status, logs, and automatic app-owned lifecycle.
@@ -10,8 +10,8 @@ pairing, workspace, status, logs, and automatic app-owned lifecycle.
 Build and open the app from a source checkout:
 
 ```bash
-npm ci
-npm run desktop:build:macos
+pnpm install --frozen-lockfile
+pnpm run desktop:build:macos
 open apps/desktop/dist/DapperCode.app
 ```
 
@@ -45,11 +45,11 @@ Managed .NET assemblies are trimmed in the self-contained package. The MSIX rema
 because Windows App SDK single-file publishing is supported only for unpackaged applications.
 
 Build it on Windows with PowerShell 7 (`pwsh`), the pinned .NET 10 SDK (`10.0.302`, which supplies
-MSBuild 18), the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and npm:
+MSBuild 18), the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and pnpm:
 
 ```powershell
-npm ci
-npm run desktop:build:windows
+pnpm install --frozen-lockfile
+pnpm run desktop:build:windows
 ```
 
 Artifacts are written to `apps/desktop/dist/windows`, including
@@ -75,7 +75,7 @@ build phase:
 ```powershell
 $env:DAPPERCODE_WINDOWS_SIGNING_MODE = "Production"
 $env:DAPPERCODE_WINDOWS_PUBLISHER = "CN=<distribution identity>"
-npm run desktop:build:windows
+pnpm run desktop:build:windows
 ```
 
 After the checkout, dependency installation, tests, and unsigned build have completed, provide the
@@ -89,11 +89,11 @@ $env:DAPPERCODE_WINDOWS_TIMESTAMP_URL = "https://<provider>/rfc3161"
 
 Remove-Item Env:DAPPERCODE_WINDOWS_CERTIFICATE_PATH
 Remove-Item Env:DAPPERCODE_WINDOWS_CERTIFICATE_PASSWORD
-npm run desktop:test:windows -- -SigningMode Production
+pnpm run desktop:test:windows -SigningMode Production
 ```
 
 `DAPPERCODE_WINDOWS_CERTIFICATE_BASE64` may replace the external path in protected CI. Never commit
-the PFX or password and never expose either value to checkout, npm, build, or test steps. The
+the PFX or password and never expose either value to checkout, dependency installation, build, or test steps. The
 timestamp URL is mandatory and must identify the provider's RFC 3161 endpoint; production signing
 uses SignTool `/tr` with `/td SHA256` (and `/fd SHA256`) and fails closed when any signing input is
 absent.
@@ -236,16 +236,16 @@ The app calls the bundled operator with JSON output. The same commands are avail
 checkout:
 
 ```bash
-npm run operator -- discover-agent --agent-id opencode
-npm run operator -- setup --workspace /path/to/repository \
+pnpm run operator discover-agent --agent-id opencode
+pnpm run operator setup --workspace /path/to/repository \
   --network tailscale --agent-id opencode --agent-args acp
-npm run operator -- start --workspace /path/to/repository --owner-pid $$
-npm run operator -- status --workspace /path/to/repository --human
-npm run operator -- restart --workspace /path/to/repository
-npm run operator -- stop --workspace /path/to/repository
-npm run operator -- list --human
-npm run operator -- stop --all
-npm run operator -- forget --workspace /path/to/repository
+pnpm run operator start --workspace /path/to/repository --owner-pid $$
+pnpm run operator status --workspace /path/to/repository --human
+pnpm run operator restart --workspace /path/to/repository
+pnpm run operator stop --workspace /path/to/repository
+pnpm run operator list --human
+pnpm run operator stop --all
+pnpm run operator forget --workspace /path/to/repository
 ```
 
 `setup` accepts:
@@ -288,7 +288,7 @@ so the ownership record never contains a secret.
 The desktop app passes its own process ID as `--owner-pid`. The broker watches that exact PID and
 start time; every worker separately watches the broker PID. Quitting the app runs
 `dappercode stop --all`; a force-quit or crash also causes the broker and then every worker to exit.
-The standalone `npm run bridge` development flow remains workspace-bound and keeps its existing
+The standalone `pnpm run bridge` development flow remains workspace-bound and keeps its existing
 owner behavior. The native shell restores the broker once, regardless of profile count.
 While the broker is running, the desktop shell keeps one authenticated broker-level WebSocket
 observer open. A broker crash or external kill closes it and triggers immediate operator
@@ -300,7 +300,7 @@ launch, foreground presentation, explicit actions, or disconnect instead of cont
 
 The broker builds each worker environment in memory and passes it directly to the child process.
 External workspace credentials never reach workers; worker-only credentials never reach disk.
-Workers remain configured through the existing environment contract, which keeps `npm run bridge`
+Workers remain configured through the existing environment contract, which keeps `pnpm run bridge`
 working:
 
 - `BRIDGE_HOST`, `BRIDGE_PORT`
@@ -347,11 +347,11 @@ allowlist remains authoritative at runtime.
 Start Expo independently after the desktop app has configured the bridge:
 
 ```bash
-npm run mobile
+pnpm run mobile
 ```
 
 The Expo bootstrap reads the bridge host from the central `config.json`, falling back to a repo-root
-`.env.secure` for the `npm run bridge` development flow. Physical devices must use a LAN or Tailscale
+`.env.secure` for the `pnpm run bridge` development flow. Physical devices must use a LAN or Tailscale
 bridge URL, not localhost.
 
 The mobile app uses Expo Router with the `dappercode` scheme. Canonical links include
@@ -362,13 +362,13 @@ direct load or browser refresh.
 
 ## Distribution
 
-`npm run desktop:build:macos` creates:
+`pnpm run desktop:build:macos` creates:
 
 - `apps/desktop/dist/DapperCode.app`
 - `apps/desktop/dist/DapperCode-<version>-<arch>.zip`
 
-The build fails if the app contains Node, npm, npx, JavaScript, npm manifests, `node_modules`, or
-Slint artifacts. Local builds are ad-hoc signed. Public distribution requires project-owned Apple
+The build fails if the app contains Node, package-manager executables, JavaScript, package manifests,
+`node_modules`, or Slint artifacts. Local builds are ad-hoc signed. Public distribution requires project-owned Apple
 Developer signing and notarization.
 
 The Windows build produces a test-signed x64/ARM64 MSIX bundle and its local test certificate. The
@@ -379,7 +379,7 @@ DapperCode license, and platform-aware third-party notices covering the Cargo an
 dependency closures. The installed copies are `Licenses\DapperCode-LICENSE.txt` and
 `Licenses\THIRD_PARTY_NOTICES.txt`.
 
-Run `npm run desktop:test:windows` on Windows to inspect bundle signatures, identity, architectures,
+Run `pnpm run desktop:test:windows` on Windows to inspect bundle signatures, identity, architectures,
 native executable architecture, required payloads, and forbidden runtime content.
 
 To uninstall, first choose **Quit** from the tray menu, then remove DapperCode from **Settings → Apps

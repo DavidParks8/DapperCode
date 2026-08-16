@@ -53,6 +53,9 @@ use crate::{
 const WORKSPACE_HEADER: &str = "x-dappercode-workspace";
 const CLIENT_TYPE_HEADER: &str = "x-dappercode-client-type";
 const CLIENT_NAME_HEADER: &str = "x-dappercode-client-name";
+const CLIENT_FOREGROUND_HEADER: &str = "x-dappercode-client-foreground";
+const CLIENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+const CLIENT_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(45);
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const WORKER_WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
@@ -205,11 +208,14 @@ struct BrokerState {
     http: Client,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrokerQuery {
     token: Option<String>,
     workspace: Option<String>,
+    client_type: Option<String>,
+    client_name: Option<String>,
+    client_foreground: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -326,12 +332,19 @@ async fn broker_websocket(
         Ok(access) => access,
         Err(response) => return response,
     };
-    let client_type = sanitized_forwarded_header(&headers, CLIENT_TYPE_HEADER);
-    let client_name = sanitized_forwarded_header(&headers, CLIENT_NAME_HEADER);
+    let (client_type, client_name, client_foreground) = broker_client_metadata(&headers, &query);
     ws.max_frame_size(MAX_WEBSOCKET_BYTES)
         .max_message_size(MAX_WEBSOCKET_BYTES)
         .on_upgrade(move |socket| async move {
-            proxy_workspace_socket(state, access, socket, client_type, client_name).await;
+            proxy_workspace_socket(
+                state,
+                access,
+                socket,
+                client_type,
+                client_name,
+                client_foreground,
+            )
+            .await;
         })
 }
 
@@ -341,6 +354,7 @@ async fn proxy_workspace_socket(
     downstream: WebSocket,
     client_type: Option<String>,
     client_name: Option<String>,
+    client_foreground: Option<bool>,
 ) {
     let session = match state.pool.acquire_client(access).await {
         Ok(session) => session,
@@ -355,14 +369,18 @@ async fn proxy_workspace_socket(
     };
     let upstream_result = timeout(
         WORKER_WEBSOCKET_CONNECT_TIMEOUT,
-        connect_worker_socket(&session.worker.target(), client_type, client_name),
+        connect_worker_socket(
+            &session.worker.target(),
+            client_type,
+            client_name,
+            client_foreground,
+        ),
     )
     .await
     .map_err(|_| anyhow!("workspace worker websocket handshake timed out"))
     .and_then(|result| result);
-    let mut downstream = downstream;
     match upstream_result {
-        Ok(upstream) => pump_websockets(&mut downstream, upstream).await,
+        Ok(upstream) => pump_websockets(downstream, upstream).await,
         Err(error) => {
             close_downstream(
                 downstream,
@@ -390,6 +408,7 @@ async fn connect_worker_socket(
     target: &WorkerTarget,
     client_type: Option<String>,
     client_name: Option<String>,
+    client_foreground: Option<bool>,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 > {
@@ -399,18 +418,12 @@ async fn connect_worker_socket(
     request
         .headers_mut()
         .insert(AUTHORIZATION, bearer_header(&target.internal_token)?);
-    if let Some(value) = client_type {
-        request.headers_mut().insert(
-            HeaderName::from_static(CLIENT_TYPE_HEADER),
-            HeaderValue::from_str(&value)?,
-        );
-    }
-    if let Some(value) = client_name {
-        request.headers_mut().insert(
-            HeaderName::from_static(CLIENT_NAME_HEADER),
-            HeaderValue::from_str(&value)?,
-        );
-    }
+    insert_client_metadata_headers(
+        request.headers_mut(),
+        client_type,
+        client_name,
+        client_foreground,
+    )?;
     let (socket, _) = connect_async(request)
         .await
         .context("failed to connect to workspace worker")?;
@@ -418,16 +431,25 @@ async fn connect_worker_socket(
 }
 
 async fn pump_websockets(
-    downstream: &mut WebSocket,
+    downstream: WebSocket,
     upstream: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
 ) {
+    let (mut downstream_tx, mut downstream_rx) = downstream.split();
     let (mut upstream_tx, mut upstream_rx) = upstream.split();
+    let heartbeat_started_at = tokio::time::Instant::now();
+    let mut heartbeat = tokio::time::interval_at(
+        heartbeat_started_at + CLIENT_HEARTBEAT_INTERVAL,
+        CLIENT_HEARTBEAT_INTERVAL,
+    );
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut last_downstream_activity = heartbeat_started_at;
     loop {
         tokio::select! {
-            downstream_message = downstream.recv() => {
+            downstream_message = downstream_rx.next() => {
                 let Some(Ok(message)) = downstream_message else { break };
+                last_downstream_activity = tokio::time::Instant::now();
                 let close = matches!(message, AxumMessage::Close(_));
                 if let Some(message) = axum_to_tungstenite(message) {
                     if upstream_tx.send(message).await.is_err() {
@@ -442,7 +464,7 @@ async fn pump_websockets(
                 let Some(Ok(message)) = upstream_message else { break };
                 let close = matches!(message, TungsteniteMessage::Close(_));
                 if let Some(message) = tungstenite_to_axum(message) {
-                    if downstream.send(message).await.is_err() {
+                    if downstream_tx.send(message).await.is_err() {
                         break;
                     }
                 }
@@ -450,8 +472,30 @@ async fn pump_websockets(
                     break;
                 }
             }
+            _ = heartbeat.tick() => {
+                if client_heartbeat_expired(
+                    last_downstream_activity,
+                    tokio::time::Instant::now(),
+                ) {
+                    break;
+                }
+                if downstream_tx
+                    .send(AxumMessage::Ping(Vec::new().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
+}
+
+fn client_heartbeat_expired(
+    last_activity: tokio::time::Instant,
+    now: tokio::time::Instant,
+) -> bool {
+    now.duration_since(last_activity) >= CLIENT_HEARTBEAT_TIMEOUT
 }
 
 fn axum_to_tungstenite(message: AxumMessage) -> Option<TungsteniteMessage> {
@@ -607,25 +651,25 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
 
 fn parse_broker_query(uri: &Uri) -> BrokerQuery {
     let Some(query) = uri.query() else {
-        return BrokerQuery {
-            token: None,
-            workspace: None,
-        };
+        return BrokerQuery::default();
     };
     let Ok(url) = Url::parse(&format!("http://localhost/?{query}")) else {
-        return BrokerQuery {
-            token: None,
-            workspace: None,
-        };
+        return BrokerQuery::default();
     };
-    let mut result = BrokerQuery {
-        token: None,
-        workspace: None,
-    };
+    let mut result = BrokerQuery::default();
     for (name, value) in url.query_pairs() {
         match name.as_ref() {
             "token" => result.token = Some(value.into_owned()),
             "workspace" => result.workspace = Some(value.into_owned()),
+            "clientType" => result.client_type = Some(value.into_owned()),
+            "clientName" => result.client_name = Some(value.into_owned()),
+            "clientForeground" => {
+                result.client_foreground = match value.as_ref() {
+                    "true" => Some(true),
+                    "false" => Some(false),
+                    _ => None,
+                }
+            }
             _ => {}
         }
     }
@@ -826,9 +870,11 @@ fn bearer_header(token: &str) -> Result<HeaderValue> {
 }
 
 fn sanitized_forwarded_header(headers: &HeaderMap, name: &'static str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
+    sanitized_forwarded_value(headers.get(name).and_then(|value| value.to_str().ok()))
+}
+
+fn sanitized_forwarded_value(value: Option<&str>) -> Option<String> {
+    value
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| {
@@ -838,6 +884,53 @@ fn sanitized_forwarded_header(headers: &HeaderMap, name: &'static str) -> Option
                 .take(128)
                 .collect()
         })
+}
+
+fn broker_client_metadata(
+    headers: &HeaderMap,
+    query: &BrokerQuery,
+) -> (Option<String>, Option<String>, Option<bool>) {
+    let client_type = sanitized_forwarded_header(headers, CLIENT_TYPE_HEADER)
+        .or_else(|| sanitized_forwarded_value(query.client_type.as_deref()));
+    let client_name = sanitized_forwarded_header(headers, CLIENT_NAME_HEADER)
+        .or_else(|| sanitized_forwarded_value(query.client_name.as_deref()));
+    let client_foreground = headers
+        .get(CLIENT_FOREGROUND_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| match value.trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        })
+        .or(query.client_foreground);
+    (client_type, client_name, client_foreground)
+}
+
+fn insert_client_metadata_headers(
+    headers: &mut HeaderMap,
+    client_type: Option<String>,
+    client_name: Option<String>,
+    client_foreground: Option<bool>,
+) -> Result<()> {
+    if let Some(value) = client_type {
+        headers.insert(
+            HeaderName::from_static(CLIENT_TYPE_HEADER),
+            HeaderValue::from_str(&value)?,
+        );
+    }
+    if let Some(value) = client_name {
+        headers.insert(
+            HeaderName::from_static(CLIENT_NAME_HEADER),
+            HeaderValue::from_str(&value)?,
+        );
+    }
+    if let Some(value) = client_foreground {
+        headers.insert(
+            HeaderName::from_static(CLIENT_FOREGROUND_HEADER),
+            HeaderValue::from_static(if value { "true" } else { "false" }),
+        );
+    }
+    Ok(())
 }
 
 fn unauthorized(message: &str) -> Response {
@@ -2104,6 +2197,7 @@ mod tests {
         let query = BrokerQuery {
             token: None,
             workspace: None,
+            ..BrokerQuery::default()
         };
 
         let mismatch = registry.authenticate(&headers, &query).await;
@@ -2117,6 +2211,7 @@ mod tests {
                 &BrokerQuery {
                     token: Some("token-a".to_string()),
                     workspace: Some("profile-a".to_string()),
+                    ..BrokerQuery::default()
                 },
             )
             .await;
@@ -2133,6 +2228,7 @@ mod tests {
                 &BrokerQuery {
                     token: None,
                     workspace: None,
+                    ..BrokerQuery::default()
                 },
             )
             .await
@@ -2178,11 +2274,85 @@ mod tests {
                 &BrokerQuery {
                     token: None,
                     workspace: None,
+                    ..BrokerQuery::default()
                 },
             )
             .await
             .is_ok());
         assert_eq!(registry.snapshot().await.workspace_count, 1);
+    }
+
+    #[test]
+    fn broker_forwards_sanitized_query_client_metadata_and_prefers_headers() {
+        let uri: Uri = "/broker/rpc?clientType=mobile&clientName=Phone%0AOne&clientForeground=true"
+            .parse()
+            .unwrap();
+        let query = parse_broker_query(&uri);
+        let (client_type, client_name, client_foreground) =
+            broker_client_metadata(&HeaderMap::new(), &query);
+        assert_eq!(client_type.as_deref(), Some("mobile"));
+        assert_eq!(client_name.as_deref(), Some("PhoneOne"));
+        assert_eq!(client_foreground, Some(true));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static(CLIENT_TYPE_HEADER),
+            HeaderValue::from_static("desktop-monitor"),
+        );
+        headers.insert(
+            HeaderName::from_static(CLIENT_NAME_HEADER),
+            HeaderValue::from_static("DapperCode"),
+        );
+        headers.insert(
+            HeaderName::from_static(CLIENT_FOREGROUND_HEADER),
+            HeaderValue::from_static("false"),
+        );
+        let (client_type, client_name, client_foreground) =
+            broker_client_metadata(&headers, &query);
+        assert_eq!(client_type.as_deref(), Some("desktop-monitor"));
+        assert_eq!(client_name.as_deref(), Some("DapperCode"));
+        assert_eq!(client_foreground, Some(false));
+
+        let mut worker_headers = HeaderMap::new();
+        insert_client_metadata_headers(
+            &mut worker_headers,
+            client_type,
+            client_name,
+            client_foreground,
+        )
+        .unwrap();
+        assert_eq!(
+            worker_headers
+                .get(CLIENT_TYPE_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("desktop-monitor"),
+        );
+        assert_eq!(
+            worker_headers
+                .get(CLIENT_NAME_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("DapperCode"),
+        );
+        assert_eq!(
+            worker_headers
+                .get(CLIENT_FOREGROUND_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some("false"),
+        );
+    }
+
+    #[test]
+    fn broker_client_heartbeat_has_a_bounded_expiry() {
+        assert!(CLIENT_HEARTBEAT_TIMEOUT > CLIENT_HEARTBEAT_INTERVAL);
+        let last_activity = tokio::time::Instant::now();
+        assert!(!client_heartbeat_expired(
+            last_activity,
+            last_activity + CLIENT_HEARTBEAT_TIMEOUT - Duration::from_millis(1),
+        ));
+        assert!(client_heartbeat_expired(
+            last_activity,
+            last_activity + CLIENT_HEARTBEAT_TIMEOUT,
+        ));
     }
 
     #[test]

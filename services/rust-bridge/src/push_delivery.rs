@@ -2,13 +2,16 @@ use crate::*;
 
 // ---- Push notifications ----------------------------------------------------
 //
-// The mobile app can only run JavaScript (and therefore keep its WebSocket
-// open) while it is foregrounded. The moment it is backgrounded or killed the
-// socket closes, so the *phone* can never observe a turn completing. The bridge
-// is the only component reliably alive at that moment, so it is the sender:
-// devices register an Expo push token, and the bridge POSTs a minimal,
-// content-free payload to the Expo push service when a turn completes or an
-// approval is requested. Expo relays to APNs/FCM, which wakes the app.
+// The mobile app explicitly reports whether it is foregrounded over its
+// WebSocket. The socket can remain connected after the app is backgrounded, so
+// connection state alone cannot decide whether the user will observe an event.
+// The bridge is the component reliably alive in the background, so it is the sender:
+// devices register an Expo push token, and the bridge POSTs a bounded
+// notification payload to the Expo push service when a turn completes or an
+// approval is requested. After the live event is queued, a foreground mobile
+// client can acknowledge its push candidate. Delivery is suppressed for every
+// device only with that observation proof; missing or stale presence fails open.
+// Expo relays remaining pushes to APNs/FCM, which wakes the app.
 
 pub(super) const EXPO_PUSH_SEND_ENDPOINT: &str = "https://exp.host/--/api/v2/push/send";
 pub(super) const EXPO_PUSH_RECEIPTS_ENDPOINT: &str = "https://exp.host/--/api/v2/push/getReceipts";
@@ -22,6 +25,9 @@ pub(super) const EXPO_RECEIPT_BATCH_SIZE: usize = 1000;
 pub(super) const RECEIPT_CHECK_DELAY_SECS: u64 = 900;
 pub(super) const PUSH_SEND_MAX_ATTEMPTS: u32 = 4;
 pub(super) const QUEUE_COMPLETION_DISPOSITION_WAIT_MS: u64 = 2_000;
+// The candidate follows the live event on the same socket. Keep this bounded so
+// an unresponsive foreground lease delays, rather than drops, a needed push.
+pub(super) const PUSH_OBSERVATION_WAIT_MS: u64 = 750;
 pub(super) const QUEUE_COMPLETION_DISPOSITION_LIMIT: usize = 1_024;
 pub(super) const SUBMISSION_DEDUPE_LIMIT: usize = 1_024;
 pub(super) const APPROVAL_RESOLUTION_DEDUPE_LIMIT: usize = 1_024;
@@ -69,9 +75,14 @@ impl PushService {
     ) -> tokio::task::JoinHandle<()> {
         let this = Arc::clone(self);
         let mut receiver = hub.subscribe_canonical_events();
+        let hub = Arc::downgrade(hub);
         tokio::spawn(async move {
             while let Some(event) = receiver.recv().await {
-                this.handle_canonical_event(event, queue.as_deref()).await;
+                let Some(hub) = hub.upgrade() else {
+                    break;
+                };
+                this.handle_canonical_event(event, queue.as_deref(), &hub)
+                    .await;
             }
         })
     }
@@ -80,7 +91,21 @@ impl PushService {
         self: &Arc<Self>,
         received: CanonicalHubEvent,
         queue: Option<&BridgeQueueService>,
+        hub: &ClientHub,
     ) {
+        self.handle_canonical_event_to_endpoint(EXPO_PUSH_SEND_ENDPOINT, received, queue, hub)
+            .await;
+    }
+
+    async fn handle_canonical_event_to_endpoint(
+        self: &Arc<Self>,
+        endpoint: &str,
+        received: CanonicalHubEvent,
+        queue: Option<&BridgeQueueService>,
+        hub: &ClientHub,
+    ) {
+        let foreground_mobile_present = received.foreground_mobile_present;
+        let candidate_id = received.event_id;
         match received.event {
             crate::acp::events::CanonicalEvent::MessageChunk {
                 thread_id,
@@ -92,6 +117,7 @@ impl PushService {
             | crate::acp::events::CanonicalEvent::RunFailed { thread_id, .. } => {
                 let reply_preview = self.take_reply_preview(&thread_id).await;
                 let Some(queue) = queue else {
+                    hub.discard_push_observation(candidate_id).await;
                     return;
                 };
                 if queue
@@ -99,22 +125,47 @@ impl PushService {
                     .await
                     .is_none_or(|disposition| !completion_is_final(disposition))
                 {
+                    hub.discard_push_observation(candidate_id).await;
                     return;
                 }
-                self.send_canonical_push(
+                let observed = if foreground_mobile_present {
+                    hub.take_push_observation(
+                        candidate_id,
+                        Duration::from_millis(PUSH_OBSERVATION_WAIT_MS),
+                    )
+                    .await
+                } else {
+                    hub.discard_push_observation(candidate_id).await;
+                    false
+                };
+                self.send_canonical_push_to_endpoint(
+                    endpoint,
                     PushEvent::TurnCompleted,
                     Some(thread_id),
                     None,
                     reply_preview,
+                    observed,
                 )
                 .await;
             }
             crate::acp::events::CanonicalEvent::PermissionRequested { approval } => {
-                self.send_canonical_push(
+                let observed = if foreground_mobile_present {
+                    hub.take_push_observation(
+                        candidate_id,
+                        Duration::from_millis(PUSH_OBSERVATION_WAIT_MS),
+                    )
+                    .await
+                } else {
+                    hub.discard_push_observation(candidate_id).await;
+                    false
+                };
+                self.send_canonical_push_to_endpoint(
+                    endpoint,
                     PushEvent::ApprovalRequested,
                     Some(approval.thread_id),
                     Some(approval.request_id),
                     None,
+                    observed,
                 )
                 .await;
             }
@@ -143,23 +194,6 @@ impl PushService {
         }
     }
 
-    async fn send_canonical_push(
-        self: &Arc<Self>,
-        event: PushEvent,
-        thread_id: Option<String>,
-        approval_id: Option<String>,
-        reply_preview: Option<String>,
-    ) {
-        self.send_canonical_push_to_endpoint(
-            EXPO_PUSH_SEND_ENDPOINT,
-            event,
-            thread_id,
-            approval_id,
-            reply_preview,
-        )
-        .await;
-    }
-
     async fn send_canonical_push_to_endpoint(
         self: &Arc<Self>,
         endpoint: &str,
@@ -167,6 +201,7 @@ impl PushService {
         thread_id: Option<String>,
         approval_id: Option<String>,
         reply_preview: Option<String>,
+        observed_by_foreground_mobile: bool,
     ) {
         let targets = {
             let registry = self.registry.snapshot().await;
@@ -187,6 +222,9 @@ impl PushService {
                 .collect::<Vec<_>>()
         };
         if targets.is_empty() {
+            return;
+        }
+        if observed_by_foreground_mobile {
             return;
         }
         let (title, body) = match event {
@@ -567,6 +605,68 @@ mod tests {
         }
     }
 
+    fn approval_requested(request_id: &str) -> CanonicalEvent {
+        CanonicalEvent::PermissionRequested {
+            approval: PendingApproval {
+                request_id: request_id.to_string(),
+                agent_id: "agent".to_string(),
+                kind: "fileChange".to_string(),
+                thread_id: "thread".to_string(),
+                turn_id: "turn".to_string(),
+                item_id: "tool".to_string(),
+                title: "Permission".to_string(),
+                message: "Permission".to_string(),
+                requested_at: "2026-07-20T00:00:00Z".to_string(),
+                reason: None,
+                command: None,
+                cwd: None,
+                grant_root: None,
+                proposed_execpolicy_amendment: None,
+                options: vec![],
+            },
+        }
+    }
+
+    fn run_finished(source_turn_id: &str) -> CanonicalEvent {
+        CanonicalEvent::RunFinished {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run".to_string(),
+            source_turn_id: source_turn_id.to_string(),
+            generation: 1,
+            stop_reason: StopReason::EndTurn,
+        }
+    }
+
+    fn run_started(source_turn_id: &str) -> CanonicalEvent {
+        CanonicalEvent::RunStarted {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: "run".to_string(),
+            source_turn_id: source_turn_id.to_string(),
+            generation: 1,
+        }
+    }
+
+    async fn next_push_candidate(receiver: &mut mpsc::Receiver<Message>) -> u64 {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let Message::Text(text) = receiver.recv().await.expect("candidate message") else {
+                    continue;
+                };
+                let payload: Value = serde_json::from_str(&text).unwrap();
+                if payload["method"] == "bridge/push/candidate" {
+                    break payload["params"]["candidateId"]
+                        .as_str()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        .expect("candidate id");
+                }
+            }
+        })
+        .await
+        .expect("candidate notification timeout")
+    }
+
     async fn retrying_push_fixture(State(attempts): State<Arc<AtomicUsize>>) -> Response {
         if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             return (
@@ -625,6 +725,7 @@ mod tests {
             Arc::new(OperationalMetrics::new()),
         )
         .await;
+        let delivery_hub = ClientHub::new();
 
         service.accumulate_canonical_reply("empty", "").await;
         assert!(!service.recent_replies.read().await.contains_key("empty"));
@@ -657,6 +758,7 @@ mod tests {
                 None,
                 None,
                 None,
+                false,
             )
             .await;
 
@@ -710,8 +812,10 @@ mod tests {
                         content: "completed".to_string(),
                         content_block: None,
                     },
+                    foreground_mobile_present: false,
                 },
                 None,
+                &delivery_hub,
             )
             .await;
         assert!(service.recent_replies.read().await.contains_key("thread"));
@@ -727,8 +831,10 @@ mod tests {
                         generation: 1,
                         stop_reason: StopReason::EndTurn,
                     },
+                    foreground_mobile_present: false,
                 },
                 None,
+                &delivery_hub,
             )
             .await;
         assert!(!service.recent_replies.read().await.contains_key("thread"));
@@ -757,12 +863,315 @@ mod tests {
                             generation: 1,
                             stop_reason: StopReason::EndTurn,
                         },
+                        foreground_mobile_present: false,
                     },
                     Some(&queue),
+                    &delivery_hub,
                 )
                 .await;
         }
 
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn observed_foreground_events_suppress_all_registered_devices() {
+        let delivered_targets = Arc::new(AtomicUsize::new(0));
+        let captured_targets = Arc::clone(&delivered_targets);
+        let app = Router::new().route(
+            "/push",
+            post(move |Json(payload): Json<Value>| {
+                let captured_targets = Arc::clone(&captured_targets);
+                async move {
+                    captured_targets
+                        .fetch_add(payload.as_array().map_or(0, Vec::len), Ordering::SeqCst);
+                    Json(json!({ "data": [] }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let endpoint = format!("http://{}/push", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-presence-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+        for (profile, registration, token) in [
+            ("profile-a", "registration-a", "token-a"),
+            ("profile-b", "registration-b", "token-b"),
+        ] {
+            service
+                .register(
+                    profile.to_string(),
+                    registration.to_string(),
+                    token.to_string(),
+                    "ios".to_string(),
+                    "Phone".to_string(),
+                    PushEventPreferences::default(),
+                )
+                .await
+                .unwrap();
+        }
+
+        service
+            .send_canonical_push_to_endpoint(
+                &endpoint,
+                PushEvent::TurnCompleted,
+                Some("thread".to_string()),
+                None,
+                Some("Finished".to_string()),
+                false,
+            )
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 2);
+        service
+            .send_canonical_push_to_endpoint(
+                &endpoint,
+                PushEvent::ApprovalRequested,
+                Some("thread".to_string()),
+                Some("approval".to_string()),
+                None,
+                true,
+            )
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 2);
+        service
+            .send_canonical_push_to_endpoint(
+                &endpoint,
+                PushEvent::TurnCompleted,
+                Some("thread".to_string()),
+                None,
+                Some("Finished".to_string()),
+                true,
+            )
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 2);
+        service
+            .send_canonical_push_to_endpoint(
+                &endpoint,
+                PushEvent::ApprovalRequested,
+                Some("thread".to_string()),
+                Some("approval".to_string()),
+                None,
+                false,
+            )
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 4);
+
+        server.abort();
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn observation_proof_suppresses_but_stale_presence_fails_open() {
+        let delivered_targets = Arc::new(AtomicUsize::new(0));
+        let captured_targets = Arc::clone(&delivered_targets);
+        let app = Router::new().route(
+            "/push",
+            post(move |Json(payload): Json<Value>| {
+                let captured_targets = Arc::clone(&captured_targets);
+                async move {
+                    captured_targets
+                        .fetch_add(payload.as_array().map_or(0, Vec::len), Ordering::SeqCst);
+                    Json(json!({ "data": [] }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let endpoint = format!("http://{}/push", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-observed-{}", Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+        service
+            .register(
+                "profile".to_string(),
+                "registration".to_string(),
+                "token".to_string(),
+                "ios".to_string(),
+                "Phone".to_string(),
+                PushEventPreferences::default(),
+            )
+            .await
+            .unwrap();
+        service
+            .register(
+                "second-profile".to_string(),
+                "second-registration".to_string(),
+                "second-token".to_string(),
+                "android".to_string(),
+                "Second phone".to_string(),
+                PushEventPreferences::default(),
+            )
+            .await
+            .unwrap();
+
+        let hub = Arc::new(ClientHub::new());
+        let mut canonical_events = hub.subscribe_canonical_events();
+        let (sender, mut messages) = mpsc::channel(16);
+        let mobile = hub
+            .add_client_with_metadata(
+                sender,
+                ClientConnectionMetadata {
+                    client_type: MOBILE_CLIENT_TYPE.to_string(),
+                    client_name: "Phone".to_string(),
+                    foreground: true,
+                },
+            )
+            .await;
+        let (background_sender, _background_messages) = mpsc::channel(16);
+        let background_mobile = hub
+            .add_client_with_metadata(
+                background_sender,
+                ClientConnectionMetadata {
+                    client_type: MOBILE_CLIENT_TYPE.to_string(),
+                    client_name: "Background phone".to_string(),
+                    foreground: false,
+                },
+            )
+            .await;
+
+        hub.broadcast_canonical_event(&approval_requested("observed"))
+            .await;
+        let observed_event = canonical_events.recv().await.unwrap();
+        let observed_candidate = next_push_candidate(&mut messages).await;
+        assert_eq!(observed_candidate, observed_event.event_id);
+        let observed_delivery = {
+            let service = Arc::clone(&service);
+            let hub = Arc::clone(&hub);
+            let endpoint = endpoint.clone();
+            tokio::spawn(async move {
+                service
+                    .handle_canonical_event_to_endpoint(&endpoint, observed_event, None, &hub)
+                    .await;
+            })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(
+            hub.observe_push_candidate(background_mobile, observed_candidate, 0)
+                .await,
+            PushObservationUpdate::NotForeground
+        );
+        assert_eq!(
+            hub.observe_push_candidate(mobile, observed_candidate, 0)
+                .await,
+            PushObservationUpdate::Observed
+        );
+        observed_delivery.await.unwrap();
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 0);
+
+        assert_eq!(
+            hub.set_mobile_client_foreground(mobile, false, 1).await,
+            MobilePresenceUpdate::Applied
+        );
+        hub.broadcast_canonical_event(&approval_requested("background"))
+            .await;
+        let background_event = canonical_events.recv().await.unwrap();
+        let background_candidate = next_push_candidate(&mut messages).await;
+        assert_eq!(background_candidate, background_event.event_id);
+        service
+            .handle_canonical_event_to_endpoint(&endpoint, background_event, None, &hub)
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 2);
+
+        assert_eq!(
+            hub.set_mobile_client_foreground(mobile, true, 2).await,
+            MobilePresenceUpdate::Applied
+        );
+        hub.broadcast_canonical_event(&approval_requested("stale"))
+            .await;
+        let stale_event = canonical_events.recv().await.unwrap();
+        let stale_candidate = next_push_candidate(&mut messages).await;
+        assert_eq!(stale_candidate, stale_event.event_id);
+        service
+            .handle_canonical_event_to_endpoint(&endpoint, stale_event, None, &hub)
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 4);
+
+        let queue = Arc::new(BridgeQueueService::new(
+            Arc::new(UnusedQueueDispatcher),
+            Arc::new(ClientHub::new()),
+        ));
+        hub.broadcast_canonical_event(&run_started("final")).await;
+        canonical_events.recv().await.unwrap();
+        while messages.try_recv().is_ok() {}
+        hub.broadcast_canonical_event(&run_finished("final")).await;
+        let final_event = canonical_events.recv().await.unwrap();
+        let final_candidate = next_push_candidate(&mut messages).await;
+        let final_event_id = final_event.event_id;
+        let final_delivery = {
+            let service = Arc::clone(&service);
+            let hub = Arc::clone(&hub);
+            let queue = Arc::clone(&queue);
+            let endpoint = endpoint.clone();
+            tokio::spawn(async move {
+                service
+                    .handle_canonical_event_to_endpoint(
+                        &endpoint,
+                        final_event,
+                        Some(queue.as_ref()),
+                        &hub,
+                    )
+                    .await;
+            })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(
+            hub.observe_push_candidate(mobile, final_candidate, 2).await,
+            PushObservationUpdate::Observed
+        );
+        queue
+            .record_completion_disposition(final_event_id, QueueCompletionDisposition::Final)
+            .await;
+        final_delivery.await.unwrap();
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 4);
+
+        hub.broadcast_canonical_event(&run_started("continued"))
+            .await;
+        canonical_events.recv().await.unwrap();
+        while messages.try_recv().is_ok() {}
+        hub.broadcast_canonical_event(&run_finished("continued"))
+            .await;
+        let continued_event = canonical_events.recv().await.unwrap();
+        let continued_candidate = next_push_candidate(&mut messages).await;
+        queue
+            .record_completion_disposition(
+                continued_event.event_id,
+                QueueCompletionDisposition::Continued,
+            )
+            .await;
+        service
+            .handle_canonical_event_to_endpoint(
+                &endpoint,
+                continued_event,
+                Some(queue.as_ref()),
+                &hub,
+            )
+            .await;
+        assert_eq!(delivered_targets.load(Ordering::SeqCst), 4);
+        assert!(
+            !hub.take_push_observation(continued_candidate, Duration::ZERO)
+                .await
+        );
+
+        server.abort();
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -939,6 +1348,7 @@ mod tests {
                 Some("thread".to_string()),
                 None,
                 Some("reply".to_string()),
+                false,
             )
             .await;
         service
@@ -948,6 +1358,7 @@ mod tests {
                 Some("thread".to_string()),
                 None,
                 None,
+                false,
             )
             .await;
         service
@@ -957,6 +1368,7 @@ mod tests {
                 Some("thread".to_string()),
                 Some("approval".to_string()),
                 None,
+                false,
             )
             .await;
         service

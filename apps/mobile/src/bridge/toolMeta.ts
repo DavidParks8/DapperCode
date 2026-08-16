@@ -1,5 +1,6 @@
 import { nonEmptyString, record } from '@bridge/agui/agUiValueReaders';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
+import { readFiniteNumber } from '@shared/runtimeValidation';
 
 /** Custom AG-UI event the bridge streams whenever a tool's kind, status or title moves. */
 export const TOOL_META_EVENT_NAME = 'dappercode.dev/tool-meta';
@@ -39,15 +40,24 @@ export function parseToolMeta(value: unknown, fallbackToolCallId?: string): Chat
     return null;
   }
   const kind = toToolKind(entry['kind']);
+  const startedAtMs = readToolTimestamp(entry['startedAtMs']);
+  const completedAtMs = readToolTimestamp(entry['completedAtMs']);
   return {
     toolCallId,
     kind,
     status: toToolStatus(entry['status']),
     title: nonEmptyString(entry['title']) ?? kind,
+    ...(startedAtMs === null ? {} : { startedAtMs }),
+    ...(completedAtMs === null ? {} : { completedAtMs }),
     ...(Array.isArray(entry['content']) ? { content: entry['content'] } : {}),
     ...(Array.isArray(entry['locations']) ? { locations: entry['locations'] } : {}),
     ...(typeof entry['truncated'] === 'boolean' ? { truncated: entry['truncated'] } : {}),
   };
+}
+
+function readToolTimestamp(value: unknown): number | null {
+  const timestamp = readFiniteNumber(value);
+  return timestamp !== null && timestamp >= 0 ? timestamp : null;
 }
 
 /**
@@ -125,6 +135,8 @@ function shallowEqualMeta(left: ChatToolMeta, right: ChatToolMeta): boolean {
     left.kind === right.kind &&
     left.status === right.status &&
     left.title === right.title &&
+    left.startedAtMs === right.startedAtMs &&
+    left.completedAtMs === right.completedAtMs &&
     left.truncated === right.truncated &&
     left.content === right.content &&
     left.locations === right.locations

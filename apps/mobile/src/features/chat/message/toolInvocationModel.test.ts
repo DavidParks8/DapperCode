@@ -40,7 +40,12 @@ describe('buildToolInvocations', () => {
         toolCalls: [
           { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } },
         ],
-        toolMeta: meta({ kind: 'read', status: 'in_progress', title: 'Read package.json' }),
+        toolMeta: meta({
+          kind: 'read',
+          status: 'in_progress',
+          title: 'Read package.json',
+          startedAtMs: 1_000,
+        }),
       },
       toolMessage(
         'tool-result:call-1',
@@ -49,6 +54,8 @@ describe('buildToolInvocations', () => {
           kind: 'read',
           status: 'completed',
           title: 'Read package.json',
+          startedAtMs: 1_000,
+          completedAtMs: 2_500,
           locations: [{ path: 'package.json', line: 2 }],
         }),
         'call-1',
@@ -63,11 +70,34 @@ describe('buildToolInvocations', () => {
       kind: 'read',
       status: 'completed',
       title: 'Read package.json',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       monospaceTitle: false,
       isError: false,
       locations: [{ path: 'package.json', line: 2 }],
       textLines: ['name dappercode'],
       empty: false,
+    });
+  });
+
+  it('falls back to message timestamps when metadata has no timing fields', () => {
+    const invocations = buildToolInvocations([
+      {
+        id: 'tool-call:call-1',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        completedAt: '2026-05-01T00:00:02.500Z',
+        toolCalls: [
+          { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } },
+        ],
+        toolMeta: meta({ kind: 'read', status: 'completed', title: 'Read package.json' }),
+      },
+    ]);
+
+    expect(invocations[0]).toMatchObject({
+      startedAtMs: Date.parse('2026-05-01T00:00:00.000Z'),
+      completedAtMs: Date.parse('2026-05-01T00:00:02.500Z'),
     });
   });
 
@@ -330,6 +360,8 @@ describe('buildToolInvocations', () => {
       kind: 'read',
       status: 'completed',
       title: 'Read package.json',
+      startedAtMs: null,
+      completedAtMs: null,
       statusLanguage: true,
       monospaceTitle: false,
       isError: false,

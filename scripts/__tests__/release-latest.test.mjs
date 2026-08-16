@@ -67,49 +67,40 @@ switch (args[0]) {
       );
       writeExecutable(
         binDirectory,
-        'npm',
-        `#!/usr/bin/env node
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-if (args.join(' ') !== 'run desktop:build:macos') {
-  process.stderr.write(\`unexpected npm args: \${args.join(' ')}\\n\`);
-  process.exit(1);
-}
-fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npm-start\\n\`);
-setTimeout(() => {
-  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npm-end\\n\`);
-  process.exit(0);
-}, 300);
-`,
-      );
-      writeExecutable(
-        binDirectory,
-        'npx',
+        'pnpm',
         `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
-const outputIndex = args.indexOf('--output');
-if (args.includes('build')) {
-  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npx-build-start\\n\`);
+if (args.join(' ') === 'run desktop:build:macos') {
+  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-tray-start\\n\`);
   setTimeout(() => {
-    const archivePath = args[outputIndex + 1];
-    fs.mkdirSync(path.dirname(archivePath), { recursive: true });
-    fs.writeFileSync(archivePath, 'ipa');
-    fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npx-build-end\\n\`);
+    fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-tray-end\\n\`);
     process.exit(0);
   }, 300);
   return;
 }
-if (args.includes('submit')) {
-  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npx-submit-start\\n\`);
+const outputIndex = args.indexOf('--output');
+if (args.slice(0, 3).join(' ') === 'dlx eas-cli build') {
+  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-build-start\\n\`);
   setTimeout(() => {
-    fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} npx-submit-end\\n\`);
+    const archivePath = args[outputIndex + 1];
+    fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+    fs.writeFileSync(archivePath, 'ipa');
+    fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-build-end\\n\`);
+    process.exit(0);
+  }, 300);
+  return;
+}
+if (args.slice(0, 3).join(' ') === 'dlx eas-cli submit') {
+  fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-submit-start\\n\`);
+  setTimeout(() => {
+    fs.appendFileSync(process.env.LOG_FILE, \`\${Date.now()} pnpm-submit-end\\n\`);
     process.exit(0);
   }, 50);
   return;
 }
-process.stderr.write(\`unexpected npx args: \${args.join(' ')}\\n\`);
+process.stderr.write(\`unexpected pnpm args: \${args.join(' ')}\\n\`);
 process.exit(1);
 `,
       );
@@ -158,14 +149,14 @@ process.stdout.write('123\\n');
           return { timestamp: Number(timestamp), name };
         });
 
-      const npmStart = readEventTimestamp(events, 'npm-start');
-      const npmEnd = readEventTimestamp(events, 'npm-end');
-      const buildStart = readEventTimestamp(events, 'npx-build-start');
-      const buildEnd = readEventTimestamp(events, 'npx-build-end');
-      const submitStart = readEventTimestamp(events, 'npx-submit-start');
+      const trayStart = readEventTimestamp(events, 'pnpm-tray-start');
+      const trayEnd = readEventTimestamp(events, 'pnpm-tray-end');
+      const buildStart = readEventTimestamp(events, 'pnpm-build-start');
+      const buildEnd = readEventTimestamp(events, 'pnpm-build-end');
+      const submitStart = readEventTimestamp(events, 'pnpm-submit-start');
 
       assert.ok(
-        Math.max(npmStart, buildStart) < Math.min(npmEnd, buildEnd),
+        Math.max(trayStart, buildStart) < Math.min(trayEnd, buildEnd),
         `expected overlapping build windows, got ${JSON.stringify(events)}`,
       );
       assert.ok(

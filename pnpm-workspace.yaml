@@ -1,0 +1,12 @@
+packages:
+  - apps/mobile
+
+overrides:
+  '@expo/metro-config>postcss': 8.5.23
+  linkify-it: ^5.0.2
+  markdown-it: ^14.2.0
+
+peerDependencyRules:
+  allowedVersions:
+    '@gorhom/bottom-sheet>react-native-reanimated': 4.5.0
+    'react-native>@react-native/jest-preset': 0.86.2

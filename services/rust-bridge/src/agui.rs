@@ -53,6 +53,8 @@ struct AgUiRunState {
 struct AgUiToolState {
     started: bool,
     ended: bool,
+    started_at_ms: Option<i64>,
+    completed_at_ms: Option<i64>,
     subagent_activity: bool,
     subagent_child_thread_id: Option<String>,
     subagent_terminal_status: Option<String>,
@@ -64,6 +66,8 @@ struct AgUiToolState {
     structured_truncated: bool,
     subagent_revision: Option<String>,
     meta_revision: Option<String>,
+    meta_kind: Option<String>,
+    meta_title: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -153,7 +157,14 @@ impl AgUiProjector {
                     self.subagent_links.retain(|_, link| {
                         link.parent_thread_id != *thread_id || link.parent_run_id != previous_run_id
                     });
-                    close_run(thread_id, previous, timestamp, &mut projection.events, true);
+                    close_run(
+                        thread_id,
+                        previous,
+                        timestamp,
+                        &mut projection.events,
+                        "failed",
+                        true,
+                    );
                 }
                 self.runs.insert(
                     thread_id.clone(),
@@ -420,6 +431,7 @@ impl AgUiProjector {
                     return projection;
                 };
                 let state = run.tools.entry(tool_call_id.clone()).or_default();
+                let started_at_ms = *state.started_at_ms.get_or_insert(timestamp);
                 state.subagent_activity |= subagent_tool || update_has_task;
                 let terminal = matches!(
                     status,
@@ -472,6 +484,11 @@ impl AgUiProjector {
                 }
                 if terminal && !state.ended {
                     state.ended = true;
+                    state.completed_at_ms = Some(
+                        state
+                            .completed_at_ms
+                            .unwrap_or(timestamp.max(started_at_ms)),
+                    );
                     if !state.subagent_activity {
                         projection.events.push(envelope(
                             thread_id,
@@ -679,12 +696,18 @@ impl AgUiProjector {
                 } else {
                     bounded(title, 256)
                 };
-                let meta_revision = format!("{kind_wire}\0{status_wire}\0{title_wire}");
+                let completed_at_ms = state.completed_at_ms;
+                let meta_revision = format!(
+                    "{kind_wire}\0{status_wire}\0{title_wire}\0{started_at_ms}\0{:?}",
+                    completed_at_ms
+                );
                 let meta_changed = !is_subagent_tool
                     && state.meta_revision.as_deref() != Some(meta_revision.as_str());
                 if meta_changed {
                     state.meta_revision = Some(meta_revision);
                 }
+                state.meta_kind = Some(kind_wire.clone());
+                state.meta_title = Some(title_wire.clone());
                 // Agents that never stream a child session only report progress through
                 // this tool, so mirror its latest output onto the card. Without real
                 // output there is nothing to say: an empty card reports "starting" and
@@ -774,6 +797,8 @@ impl AgUiProjector {
                             "kind": kind_wire,
                             "status": status_wire,
                             "title": title_wire,
+                            "startedAtMs": started_at_ms,
+                            "completedAtMs": completed_at_ms,
                         }),
                         timestamp,
                     );
@@ -891,7 +916,14 @@ impl AgUiProjector {
                     timestamp,
                     &mut projection.events,
                 );
-                close_run(thread_id, run, timestamp, &mut projection.events, false);
+                close_run(
+                    thread_id,
+                    run,
+                    timestamp,
+                    &mut projection.events,
+                    if run_failed { "failed" } else { "completed" },
+                    false,
+                );
                 let source_turn_id = canonical_source_turn_id(canonical).map(str::to_string);
                 projection.events.push(envelope(
                     thread_id,
@@ -1149,7 +1181,7 @@ impl AgUiProjector {
             return;
         };
         self.observed_runs.retain(|entry| entry != thread_id);
-        close_run(thread_id, run, timestamp, events, false);
+        close_run(thread_id, run, timestamp, events, "completed", false);
         events.push(envelope(
             thread_id,
             &observed_run_id.clone(),
@@ -1527,6 +1559,8 @@ pub(super) fn messages_snapshot_envelope(
                         "kind": tool_kind_wire(tool.kind),
                         "status": tool_status_wire(tool.status),
                         "title": bounded(&tool.title, 256),
+                        "startedAtMs": tool.started_at_ms,
+                        "completedAtMs": tool.completed_at_ms,
                         "content": tool.structured_content,
                         "locations": tool.locations,
                         "truncated": tool.truncated,
@@ -2313,6 +2347,7 @@ fn close_run(
     mut run: AgUiRunState,
     timestamp: i64,
     events: &mut Vec<AgUiEventEnvelope>,
+    dangling_tool_status: &str,
     superseded: bool,
 ) {
     if let Some(message_id) = run.open_user_id.take() {
@@ -2346,14 +2381,34 @@ fn close_run(
             ),
         ));
     }
-    for (tool_call_id, tool) in run.tools {
+    for (tool_call_id, tool) in &run.tools {
         if !tool.ended && !tool.subagent_activity {
             events.push(envelope(
                 thread_id,
                 &run.run_id,
                 run.source_turn_id.clone(),
-                tool_event(AgUiEventType::ToolCallEnd, tool_call_id, timestamp),
+                tool_event(AgUiEventType::ToolCallEnd, tool_call_id.clone(), timestamp),
             ));
+            if let (Some(started_at_ms), Some(kind), Some(title)) =
+                (tool.started_at_ms, &tool.meta_kind, &tool.meta_title)
+            {
+                push_structured_chunks(
+                    events,
+                    thread_id,
+                    &run,
+                    "dappercode.dev/tool-meta",
+                    tool_call_id,
+                    json!({
+                        "toolCallId": tool_call_id,
+                        "kind": kind,
+                        "status": dangling_tool_status,
+                        "title": title,
+                        "startedAtMs": started_at_ms,
+                        "completedAtMs": tool.completed_at_ms.unwrap_or(timestamp.max(started_at_ms)),
+                    }),
+                    timestamp,
+                );
+            }
         }
     }
     if superseded {
@@ -2669,6 +2724,8 @@ mod tests {
             kind: ToolKind::Read,
             status: ToolCallStatus::Completed,
             title: "Read src/math.ts".to_string(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: "export function add() {}\n".to_string(),
             structured_content: vec![
                 json!({"type": "content", "content": {"type": "text", "text": "export function add() {}\n"}}),
@@ -2804,6 +2861,8 @@ mod tests {
             kind: ToolKind::Edit,
             status: ToolCallStatus::Completed,
             title: "Edit src/math.ts".to_string(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: String::new(),
             structured_content: vec![
                 json!({"type": "diff", "path": "src/math.ts", "oldText": "old body", "newText": "new body"}),
@@ -4457,6 +4516,7 @@ mod tests {
                 "TEXT_MESSAGE_END",
                 "REASONING_MESSAGE_END",
                 "TOOL_CALL_END",
+                "CUSTOM",
                 "RUN_FINISHED"
             ]
         );
@@ -5062,6 +5122,8 @@ mod tests {
         assert_eq!(meta["content"]["kind"], "read");
         assert_eq!(meta["content"]["status"], "completed");
         assert_eq!(meta["content"]["title"], "Read");
+        assert!(meta["content"]["startedAtMs"].is_number());
+        assert!(meta["content"]["completedAtMs"].is_number());
     }
 
     #[test]
@@ -5089,15 +5151,67 @@ mod tests {
         assert_eq!(meta["event"]["value"]["status"], "in_progress");
         // A blank ACP title falls back to the kind, matching `toolCallName`.
         assert_eq!(meta["event"]["value"]["title"], "switch_mode");
+        let started_at_ms = meta["event"]["value"]["startedAtMs"]
+            .as_i64()
+            .expect("tool start timestamp");
+        assert!(meta["event"]["value"]["completedAtMs"].is_null());
         assert!(projector
             .project_canonical(&tool(ToolCallStatus::InProgress))
             .events
             .is_empty());
         let failed = projector.project_canonical(&tool(ToolCallStatus::Failed));
         assert_eq!(event_types(&failed.events), ["TOOL_CALL_END", "CUSTOM"]);
+        let failed_meta = serde_json::to_value(&failed.events[1]).unwrap();
+        assert_eq!(failed_meta["event"]["value"]["status"], "failed");
+        assert_eq!(failed_meta["event"]["value"]["startedAtMs"], started_at_ms);
+        assert!(
+            failed_meta["event"]["value"]["completedAtMs"]
+                .as_i64()
+                .expect("tool completion timestamp")
+                >= started_at_ms
+        );
+    }
+
+    #[test]
+    fn run_completion_emits_terminal_timing_for_a_dangling_tool() {
+        let mut projector = AgUiProjector::default();
+        projector.project_canonical(&canonical_run_started());
+        let started = projector.project_canonical(&CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "dangling-tool".to_string(),
+            kind: ToolKind::Execute,
+            status: ToolCallStatus::InProgress,
+            title: "npm test".to_string(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        });
+        let started_meta = serde_json::to_value(started.events.last().unwrap()).unwrap();
+        let started_at_ms = started_meta["event"]["value"]["startedAtMs"]
+            .as_i64()
+            .expect("tool start timestamp");
+
+        let finished = projector.project_canonical(&turn_run_finished(1));
         assert_eq!(
-            serde_json::to_value(&failed.events[1]).unwrap()["event"]["value"]["status"],
-            "failed"
+            event_types(&finished.events),
+            ["TOOL_CALL_END", "CUSTOM", "RUN_FINISHED"]
+        );
+        let completed_meta = serde_json::to_value(&finished.events[1]).unwrap();
+        assert_eq!(completed_meta["event"]["name"], "dappercode.dev/tool-meta");
+        assert_eq!(completed_meta["event"]["value"]["status"], "completed");
+        assert_eq!(
+            completed_meta["event"]["value"]["startedAtMs"],
+            started_at_ms
+        );
+        assert!(
+            completed_meta["event"]["value"]["completedAtMs"]
+                .as_i64()
+                .expect("tool completion timestamp")
+                >= started_at_ms
         );
     }
 

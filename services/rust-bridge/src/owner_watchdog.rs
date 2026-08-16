@@ -14,7 +14,7 @@ const OWNER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Reads and validates `BRIDGE_OWNER_PID`.
 ///
-/// Returns `Ok(None)` when unset, so the development flow (`npm run bridge`) keeps running without
+/// Returns `Ok(None)` when unset, so the development flow (`pnpm run bridge`) keeps running without
 /// an owner.
 pub(crate) fn owner_pid_from_env() -> Result<Option<u32>, String> {
     let Ok(raw) = std::env::var("BRIDGE_OWNER_PID") else {

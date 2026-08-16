@@ -2325,6 +2325,7 @@ mod tests {
     fn tool_event(id: &str, generation: u64, status: ToolCallStatus) -> CanonicalHubEvent {
         CanonicalHubEvent {
             event_id: 1,
+            foreground_mobile_present: false,
             event: CanonicalEvent::Tool {
                 agent_id: "agent".to_string(),
                 thread_id: "thread".to_string(),
@@ -2345,6 +2346,7 @@ mod tests {
     fn finish_event(source_turn_id: &str, generation: u64, event_id: u64) -> CanonicalHubEvent {
         CanonicalHubEvent {
             event_id,
+            foreground_mobile_present: false,
             event: CanonicalEvent::RunFinished {
                 agent_id: "agent".to_string(),
                 thread_id: "thread".to_string(),
@@ -2411,6 +2413,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 4,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::MessageChunk {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),
@@ -2453,6 +2456,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 2,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::PermissionResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),
@@ -2464,6 +2468,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 3,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::ElicitationResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),
@@ -3101,6 +3106,7 @@ mod tests {
             service
                 .handle_canonical_event(CanonicalHubEvent {
                     event_id: 20,
+                    foreground_mobile_present: false,
                     event,
                 })
                 .await;
@@ -3128,6 +3134,7 @@ mod tests {
             service
                 .handle_canonical_event(CanonicalHubEvent {
                     event_id: 21,
+                    foreground_mobile_present: false,
                     event,
                 })
                 .await;
@@ -3135,6 +3142,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 22,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::Ignored {
                     agent_id: "agent".to_string(),
                     thread_id: None,
@@ -3531,6 +3539,7 @@ mod tests {
 
         let completion_event = CanonicalHubEvent {
             event_id: 34,
+            foreground_mobile_present: false,
             event: CanonicalEvent::RunFinished {
                 agent_id: "agent".to_string(),
                 thread_id: "thread".to_string(),
@@ -3705,6 +3714,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 40,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::RunStarted {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),
@@ -3751,6 +3761,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 41,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::PermissionResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "missing".to_string(),
@@ -3762,6 +3773,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 42,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::ElicitationResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "missing".to_string(),
@@ -4016,6 +4028,7 @@ mod tests {
             service
                 .handle_canonical_event(CanonicalHubEvent {
                     event_id: 88,
+                    foreground_mobile_present: false,
                     event: CanonicalEvent::RunFinished {
                         agent_id: "agent".to_string(),
                         thread_id: "thread".to_string(),
@@ -4065,6 +4078,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 90,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::PermissionResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),
@@ -4092,6 +4106,7 @@ mod tests {
         service
             .handle_canonical_event(CanonicalHubEvent {
                 event_id: 91,
+                foreground_mobile_present: false,
                 event: CanonicalEvent::ElicitationResolved {
                     agent_id: "agent".to_string(),
                     thread_id: "thread".to_string(),

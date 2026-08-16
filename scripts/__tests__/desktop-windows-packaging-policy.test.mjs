@@ -115,7 +115,7 @@ test('Windows signing keeps private keys outside artifacts and fails closed in p
   assert.match(setupOperations, /-Operation Sign/);
 });
 
-test('production signing credentials are isolated from checkout, npm, build, and tests', () => {
+test('production signing credentials are isolated from checkout, package managers, build, and tests', () => {
   const buildJob = workflowJob('desktop-windows');
   const packageJob = workflowJob('desktop-windows-package');
   const validationJob = workflowJob('desktop-windows-validate');
@@ -142,7 +142,7 @@ test('production signing credentials are isolated from checkout, npm, build, and
   assert.match(signingJob, /actions\/download-artifact@v4/);
   assert.match(signingJob, /actions\/upload-artifact@v4/);
   assert.doesNotMatch(signingJob, /actions\/checkout|Checkout code/);
-  assert.doesNotMatch(signingJob, /(?:npm|node|dotnet|cargo)\s|Invoke-Expression|\biex\b/i);
+  assert.doesNotMatch(signingJob, /(?:npm|pnpm|node|dotnet|cargo)\s|Invoke-Expression|\biex\b/i);
   assert.match(signingJob, /Download reviewed production signing script/);
   assert.match(signingJob, /windows-signing-script\/sign-desktop-windows-production\.ps1/);
 
@@ -153,7 +153,7 @@ test('production signing credentials are isolated from checkout, npm, build, and
   assert.match(signingStep, /WINDOWS_SIGNING_CERTIFICATE_BASE64/);
   assert.match(signingStep, /WINDOWS_SIGNING_CERTIFICATE_PASSWORD/);
   assert.match(signingStep, /WINDOWS_SIGNING_TIMESTAMP_URL/);
-  assert.doesNotMatch(signingStep, /\bnpm\b/);
+  assert.doesNotMatch(signingStep, /\b(?:npm|pnpm)\b/);
   for (const required of [
     'expectedRelativeFiles',
     'DapperCode-$version-x64.msix',
@@ -240,12 +240,19 @@ test('Windows inspection covers signatures, identity, architecture, layout, and 
   ]) {
     assert.match(testScript, new RegExp(required.replaceAll('.', '\\.')));
   }
-  for (const forbidden of ['node_modules', 'package-lock.json', '.mjs', 'slint']) {
+  for (const forbidden of [
+    'node_modules',
+    'package-lock.json',
+    'pnpm-lock.yaml',
+    '.mjs',
+    'slint',
+  ]) {
     assert.match(testScript.toLowerCase(), new RegExp(forbidden.replaceAll('.', '\\.')));
   }
 });
 
-test('npm and CI expose the complete pinned Windows packaging flow', () => {
+test('pnpm and CI expose the complete pinned Windows packaging flow', () => {
+  assert.equal(packageManifest.packageManager, 'pnpm@11.1.2');
   assert.equal(
     packageManifest.scripts['desktop:build:windows'],
     'pwsh -NoProfile -File ./scripts/build-desktop-windows.ps1',
@@ -255,6 +262,8 @@ test('npm and CI expose the complete pinned Windows packaging flow', () => {
     'pwsh -NoProfile -File ./scripts/test-desktop-windows.ps1',
   );
   assert.match(workflow, /runs-on: windows-latest/);
+  assert.match(workflow, /pnpm\/action-setup@v4/);
+  assert.doesNotMatch(workflow, /npm ci|cache: npm|cache-dependency-path: package-lock\.json/);
   assert.match(workflow, /windows_signing_mode:[\s\S]+default: Test/);
   assert.match(workflow, /DOTNET_VERSION: ['"]10\.0\.302['"]/);
   assert.match(workflow, /NUGET_VERSION: ['"]6\.14\.0['"]/);

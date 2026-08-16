@@ -1,4 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { memo, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,36 +11,49 @@ import {
   View,
 } from 'react-native';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
+import type { AppTheme } from '@shared/theme';
 import { SwipeToDeleteRow } from '@shared/ui/SwipeToDeleteRow';
 import type { DrawerAttentionLane, DrawerAttentionRow } from '@shell/navigation/drawerAttention';
+import type { DrawerContentStyles } from '@shell/navigation/drawerContentStyles';
 import { relativeTime } from '@shell/navigation/drawerContentHelpers';
-import { useDrawerContentViewModel } from '@shell/navigation/drawerContentViewContext';
+import { useDrawerContentAtoms } from '@shell/navigation/drawerContentViewContext';
 
-export function DrawerChatList() {
+export interface DrawerChatListProps {
+  handleDeleteChat: (chatId: string) => Promise<boolean>;
+  handleSelectChat: (chatId: string) => void;
+  refreshDrawer: () => Promise<void>;
+  retryDeepChatListRef: RefObject<() => Promise<void>>;
+  styles: DrawerContentStyles;
+  theme: AppTheme;
+}
+
+export const DrawerChatList = memo(function DrawerChatList({
+  handleDeleteChat,
+  handleSelectChat,
+  refreshDrawer,
+  retryDeepChatListRef,
+  styles,
+  theme,
+}: DrawerChatListProps) {
+  const atoms = useDrawerContentAtoms();
   const {
     collapsedLaneKeys,
-    handleDeleteChat,
-    handleSelectChat,
     isSearching,
     loading,
     loadingOlderChats,
     noticeMessages,
     refreshing,
-    refreshDrawer,
     resolvedEmptyHint,
     resolvedEmptyTitle,
-    retryDeepChatListRef,
     searchQuery,
     selectedChatId,
     selectedChatIds,
     selectionMode,
-    styles,
-    theme,
-    toggleAttentionSection,
-    toggleChatSelection,
     visibleAttentionSections,
     wsConnected,
-  } = useDrawerContentViewModel();
+  } = useAtomValue(atoms.listStateAtom);
+  const toggleAttentionSection = useSetAtom(atoms.toggleAttentionSectionAtom);
+  const toggleChatSelection = useSetAtom(atoms.toggleChatSelectionAtom);
   const retryDrawerData = () => {
     void Promise.all([retryDeepChatListRef.current(), refreshDrawer()]);
   };
@@ -301,12 +316,9 @@ export function DrawerChatList() {
       }}
     />
   );
-}
+});
 
-function laneDotStyle(
-  lane: DrawerAttentionLane,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
-) {
+function laneDotStyle(lane: DrawerAttentionLane, styles: DrawerContentStyles) {
   if (lane === 'attention') {
     return styles.laneDotAttention;
   }
@@ -316,10 +328,7 @@ function laneDotStyle(
   return styles.laneDotRecent;
 }
 
-function rowStateDotStyle(
-  row: DrawerAttentionRow,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
-) {
+function rowStateDotStyle(row: DrawerAttentionRow, styles: DrawerContentStyles) {
   if (row.attentionReason === 'error') {
     return styles.chatStateDotError;
   }

@@ -93,6 +93,8 @@ function buildSnapshotToolMessage(tool: SnapshotTool, createdAt: string): ChatMe
       kind: toToolKind(tool.kind),
       status: toToolStatus(tool.status),
       title: tool.title || toToolKind(tool.kind),
+      ...(tool.startedAtMs == null ? {} : { startedAtMs: tool.startedAtMs }),
+      ...(tool.completedAtMs == null ? {} : { completedAtMs: tool.completedAtMs }),
       content: tool.structuredContent,
       locations: tool.locations,
       truncated: tool.truncated,

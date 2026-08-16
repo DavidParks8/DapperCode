@@ -139,7 +139,7 @@ function Test-ForbiddenRuntimeContent {
     try {
         while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
             $content = $overlap + [Text.Encoding]::ASCII.GetString($buffer, 0, $read)
-            if ($content -match '(?i)slint|node_modules|npm-shrinkwrap\.json|package-lock\.json') {
+            if ($content -match '(?i)slint|node_modules|npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml') {
                 return $true
             }
             $overlap = if ($content.Length -gt 64) {
@@ -210,6 +210,7 @@ function Assert-PackagePayload {
 
     $forbiddenNames = @(
         "node", "node.exe", "npm", "npm.cmd", "npm.exe", "npx", "npx.cmd", "npx.exe",
+        "pnpm", "pnpm.cmd", "pnpm.exe", "pnpx", "pnpx.cmd", "pnpx.exe",
         "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
         "pnpm-lock.yaml"
     )
@@ -221,7 +222,7 @@ function Assert-PackagePayload {
             $_.Name -match '(?i)slint'
         })
     if ($forbidden.Count -gt 0) {
-        throw "MSIX payload contains forbidden Node/npm/JavaScript/Slint files:`n$($forbidden.FullName -join "`n")"
+        throw "MSIX payload contains forbidden Node/package-manager/JavaScript/Slint files:`n$($forbidden.FullName -join "`n")"
     }
 
     $inspectableExtensions = @(

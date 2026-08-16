@@ -933,6 +933,7 @@ pub(super) struct RpcQuery {
     pub(super) token: Option<String>,
     pub(super) client_type: Option<String>,
     pub(super) client_name: Option<String>,
+    pub(super) client_foreground: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

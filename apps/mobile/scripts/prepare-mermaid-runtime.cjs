@@ -552,7 +552,7 @@ const current = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : null
 if (checkOnly) {
   if (current !== document) {
     console.error(
-      'Mermaid runtime asset is missing or stale. Run: npm run mermaid:prepare -w @dappercode/mobile',
+      'Mermaid runtime asset is missing or stale. Run: pnpm --filter @dappercode/mobile run mermaid:prepare',
     );
     process.exit(1);
   }

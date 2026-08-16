@@ -3,15 +3,16 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
 
+import { isUserPresentAppState } from '@shell/session/appVisibility';
 /**
  * Push notifications.
  *
- * The mobile app can only keep its bridge WebSocket open while foregrounded, so
- * it can never observe a turn completing once backgrounded. Instead the bridge
- * (always alive) sends a push when a turn finishes or an approval is needed. This
- * module owns the device-side half: requesting permission, obtaining the Expo
- * push token to hand to the bridge, foreground suppression, and deep-link routing
- * from a tapped notification.
+ * The mobile app cannot reliably render bridge events while backgrounded, even
+ * when its WebSocket remains connected. Instead the bridge (always alive) sends
+ * a push when a turn finishes or an approval is needed. This module owns the
+ * device-side half: requesting permission, obtaining the Expo push token to hand
+ * to the bridge, foreground suppression, and deep-link routing from a tapped
+ * notification.
  */
 
 export type PushEventKey = 'turnCompleted' | 'approvalRequested';
@@ -93,14 +94,15 @@ export const DEFAULT_PUSH_EVENT_PREFERENCES: PushEventPreferences = {
 };
 
 /**
- * While the app is foregrounded the user is already watching, so we suppress all
- * presentation, including Notification Center. When backgrounded the OS renders
- * the push directly without consulting this handler, so alerts still arrive.
+ * The bridge suppresses delivery after a foreground mobile client acknowledges
+ * the ordered live event. This handler remains a final safeguard for connection
+ * and app-state transition races, suppressing all presentation including
+ * Notification Center.
  */
 export function setupNotificationHandler(): void {
   Notifications.setNotificationHandler({
     handleNotification: () => {
-      const active = AppState.currentState === 'active';
+      const active = isUserPresentAppState(AppState.currentState);
       return Promise.resolve({
         shouldShowBanner: !active,
         shouldShowList: !active,

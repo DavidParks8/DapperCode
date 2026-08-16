@@ -115,6 +115,11 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     const pendingSocket = this.pendingSocket;
     this.pendingSocket = null;
     const socket = this.socket;
+    if (this.connected && socket?.readyState === 1) {
+      for (const listener of this.beforeDisconnectListeners) {
+        listener();
+      }
+    }
     this.socket = null;
     this.connectPromise = null;
     if (!socket && !pendingSocket) {
@@ -127,6 +132,22 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     socket?.close();
     this.emitStatus(false);
     this.rejectAllPending(new Error('Bridge websocket disconnected'));
+  }
+  notify(method: string, params?: unknown): boolean {
+    const socket = this.socket;
+    if (!this.connected || !socket || socket.readyState !== 1) {
+      return false;
+    }
+    const payload: Record<string, unknown> = { method };
+    if (params !== undefined) {
+      payload['params'] = params;
+    }
+    try {
+      socket.send(JSON.stringify(payload));
+      return true;
+    } catch {
+      return false;
+    }
   }
   async request<T>(method: string, params?: unknown): Promise<T> {
     await this.ensureConnected();

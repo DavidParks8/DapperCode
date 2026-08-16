@@ -5,11 +5,11 @@
 
 ## Validation
 
-- [ ] `npm run lint`
-- [ ] `npm run duplicates:check`
-- [ ] `npm run typecheck`
-- [ ] `npm run test`
-- [ ] `npm run payment:check`
+- [ ] `pnpm run lint`
+- [ ] `pnpm run duplicates:check`
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm run test`
+- [ ] `pnpm run payment:check`
 - [ ] Relevant manual verification completed
 
 ## Notes

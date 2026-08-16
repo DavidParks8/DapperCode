@@ -71,6 +71,8 @@ function invocation(kind: ChatToolKind, status: ChatToolStatus): ToolInvocation 
     kind,
     status,
     title: kind,
+    startedAtMs: null,
+    completedAtMs: null,
     statusLanguage: true,
     monospaceTitle: kind === 'execute',
     isError: status === 'failed',

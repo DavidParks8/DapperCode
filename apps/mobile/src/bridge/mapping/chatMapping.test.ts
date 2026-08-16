@@ -14,6 +14,7 @@ import {
   type RawThreadItem,
 } from '@bridge/mapping/chatMapping';
 import { renderAgUiCustomContent } from '@bridge/agui/agUi';
+import { toRawAcpSnapshot } from '@bridge/mapping/chatMappingSnapshotAndSummaryProjection';
 import { COMPACTION_ACTIVITY_TYPE, getMessageText, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
 import type { Chat, ChatSummary } from '@bridge/types/types';
 
@@ -35,6 +36,33 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
     ...overrides,
   };
 }
+
+it('rejects invalid snapshot tool timestamps', () => {
+  const snapshot = toRawAcpSnapshot(
+    makeSnapshot({
+      tools: [
+        {
+          id: 'tool-invalid-timing',
+          kind: 'read',
+          status: 'completed',
+          title: 'Read',
+          startedAtMs: -1,
+          completedAtMs: Number.POSITIVE_INFINITY,
+          content: '',
+          structuredContent: [],
+          locations: [],
+          truncated: false,
+          subagent: false,
+        },
+      ],
+    }),
+  );
+
+  expect(snapshot?.tools[0]).toMatchObject({
+    startedAtMs: null,
+    completedAtMs: null,
+  });
+});
 
 function malformedItems(items: unknown[]): RawThreadItem[] {
   return items as RawThreadItem[];
@@ -302,6 +330,8 @@ describe('chatMapping', () => {
               kind: 'read',
               status: 'completed',
               title: 'T',
+              startedAtMs: 1_000,
+              completedAtMs: 2_500,
               content: 'updated',
               structuredContent: [],
               locations: [],
@@ -329,6 +359,8 @@ describe('chatMapping', () => {
       kind: 'read',
       status: 'completed',
       title: 'T',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       content: [],
       locations: [],
       truncated: false,

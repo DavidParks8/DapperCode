@@ -213,7 +213,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const [expandedIds, setExpandedIds] = useAtom(expandedToolInvocationIdsAtom);
   const expanded = expandedIds[invocation.id] === true;
-  const expandable = !invocation.empty || invocation.truncated;
+  const expandable = !invocation.empty || invocation.truncated || invocation.startedAtMs !== null;
   const header = useMemo(
     () => resolveToolInvocationHeader(invocation, threadRunning),
     [invocation, threadRunning],

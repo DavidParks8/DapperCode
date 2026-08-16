@@ -13,6 +13,7 @@ import { setMockReducedMotionEnabled } from '@shared/testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
 
 const mockRequestCameraPermission = jest.fn().mockResolvedValue({ granted: false });
+const mockWsConstructor = jest.fn();
 const mockWsConnect = jest.fn();
 const mockWsRequest = jest.fn().mockResolvedValue({ status: 'ok' });
 const mockWsDisconnect = jest.fn();
@@ -42,6 +43,9 @@ jest.mock('expo-camera', () => ({
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@bridge/ws/ws', () => ({
   HostBridgeWsClient: class {
+    constructor(baseUrl: string, options: unknown) {
+      mockWsConstructor(baseUrl, options);
+    }
     connect = mockWsConnect;
     request = mockWsRequest;
     disconnect = mockWsDisconnect;
@@ -244,6 +248,14 @@ describe('OnboardingScreen behavior', () => {
       }),
     );
     expect(mockWsConnect).toHaveBeenCalledTimes(1);
+    expect(mockWsConstructor).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/path',
+      expect.objectContaining({
+        clientType: 'mobile',
+        clientName: 'DapperCode Mobile',
+        getClientForeground: expect.any(Function),
+      }),
+    );
     expect(mockWsConnect.mock.invocationCallOrder[0]).toBeLessThan(
       mockWsRequest.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
