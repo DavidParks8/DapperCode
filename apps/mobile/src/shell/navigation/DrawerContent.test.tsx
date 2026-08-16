@@ -23,7 +23,7 @@ import type {
   RpcNotification,
 } from '@bridge/types/types';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
-import { workspaceChatLimitAtom } from '@shell/state/appState/settings';
+import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state/appState/settings';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
@@ -1914,6 +1914,24 @@ describe('DrawerContent session deletion', () => {
 
     expect(harness.api.deleteChat).not.toHaveBeenCalled();
     expect(hasText(tree.root as Queryable, 'Chat a')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('deletes immediately without a modal when confirmation is disabled', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(confirmSessionDeletionAtom, false);
+    const alert = jest.spyOn(Alert, 'alert');
+    const tree = await renderDrawer(harness, { store });
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
     act(() => tree.unmount());
   });
 
