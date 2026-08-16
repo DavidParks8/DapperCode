@@ -12,6 +12,12 @@ import type {
   MainScreenComposerControlActionsResult,
 } from '../composer/controlActions';
 import { collaborationModeMenuVisibleAtom } from '../state/modals';
+import {
+  recentModelIdsByAgentAtom,
+  rememberRecentModelIdAtom,
+} from '@shell/state/appState/settings';
+
+const EMPTY_RECENT_MODEL_IDS: string[] = [];
 
 export type MainScreenPickerOptionBuildersContext = MainScreenComposerControlActionsContext &
   MainScreenComposerControlActionsResult;
@@ -42,6 +48,12 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
+  const recentModelIdsByAgent = useAtomValue(recentModelIdsByAgentAtom);
+  const rememberRecentModelId = useSetAtom(rememberRecentModelIdAtom);
+  const normalizedActiveAgentId = activeAgentId?.trim() ?? '';
+  const recentModelIds = normalizedActiveAgentId
+    ? (recentModelIdsByAgent[normalizedActiveAgentId] ?? EMPTY_RECENT_MODEL_IDS)
+    : EMPTY_RECENT_MODEL_IDS;
 
   const collaborationModeOptions = useMemo<SelectionSheetOption[]>(() => {
     const setMode = (mode: CollaborationMode, acpMode: string) => {
@@ -133,8 +145,31 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     [activeAgentId, readyAgents, selectPendingAgent],
   );
 
-  const modelPickerOptions = useMemo<SelectionSheetOption[]>(
-    () => [
+  const modelPickerOptions = useMemo<SelectionSheetOption[]>(() => {
+    const modelsById = new Map(modelOptions.map((model) => [model.id, model]));
+    const recentModels = recentModelIds.flatMap((modelId) => {
+      const model = modelsById.get(modelId);
+      return model ? [model] : [];
+    });
+    const recentModelIdSet = new Set(recentModels.map((model) => model.id));
+    const remainingModels = modelOptions.filter((model) => !recentModelIdSet.has(model.id));
+    const toPickerOption = (model: (typeof modelOptions)[number]): SelectionSheetOption => ({
+      key: model.id,
+      title: formatModelOptionLabel(model),
+      description: formatModelOptionDescription(model),
+      icon: 'hardware-chip-outline',
+      badge: model.isDefault ? 'Default' : undefined,
+      selected: model.id === effectiveModelId,
+      onPress: () => {
+        void feedback.selection();
+        if (selectModel(model.id) && normalizedActiveAgentId) {
+          rememberRecentModelId(normalizedActiveAgentId, model.id);
+        }
+      },
+    });
+
+    return [
+      ...recentModels.map(toPickerOption),
       ...(!selectedChatId || !modelConfig
         ? [
             {
@@ -153,21 +188,19 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
             },
           ]
         : []),
-      ...modelOptions.map((model) => ({
-        key: model.id,
-        title: formatModelOptionLabel(model),
-        description: formatModelOptionDescription(model),
-        icon: 'hardware-chip-outline' as const,
-        badge: model.isDefault ? 'Default' : undefined,
-        selected: model.id === effectiveModelId,
-        onPress: () => {
-          void feedback.selection();
-          void selectModel(model.id);
-        },
-      })),
-    ],
-    [effectiveModelId, modelConfig, modelOptions, selectModel, selectedChatId, serverDefaultModel],
-  );
+      ...remainingModels.map(toPickerOption),
+    ];
+  }, [
+    effectiveModelId,
+    modelConfig,
+    modelOptions,
+    normalizedActiveAgentId,
+    recentModelIds,
+    rememberRecentModelId,
+    selectModel,
+    selectedChatId,
+    serverDefaultModel,
+  ]);
 
   const effortPickerSheetOptions = useMemo<SelectionSheetOption[]>(
     () => [

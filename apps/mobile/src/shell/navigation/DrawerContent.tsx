@@ -5,7 +5,7 @@ import type { ChatSummary } from '@bridge/types/types';
 import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import { confirmAction } from '@shared/ui/confirm';
 import { feedback } from '@shared/feedback';
-import { workspaceChatLimitAtom } from '@shell/state/appState/settings';
+import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state/appState/settings';
 import { useBridgeApi, useBridgeWs } from '@shell/state/bridge/hooks';
 import { useBridgeCapabilitiesResource } from '@shell/state/bridge/capabilities';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
@@ -59,6 +59,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
   const theme = useAppTheme();
   const api = useBridgeApi();
   const ws = useBridgeWs();
+  const confirmSessionDeletion = useAtomValue(confirmSessionDeletionAtom);
   const workspaceChatLimit = useAtomValue(workspaceChatLimitAtom);
   const selectedChatId = useAtomValue(selectedChatIdAtom);
   const onSelectChat = useSetAtom(selectChatAtom);
@@ -268,24 +269,26 @@ export const DrawerContent = memo(function DrawerContentComponent({
    */
   const handleDeleteChat = useCallback(
     async (chatId: string): Promise<boolean> => {
-      const chat = chats.find((entry) => entry.id === chatId);
       const affectedChats = chatDeletionFamily(chats, chatId);
       const affectedChatIds = new Set([chatId, ...affectedChats.map((entry) => entry.id)]);
-      const descendantCount = affectedChats.filter((entry) => entry.id !== chatId).length;
-      const chatTitle = chat?.title?.trim();
-      const deleteSubject = chatTitle ? `“${chatTitle}”` : 'This session';
-      const descendantSuffix =
-        descendantCount > 0
-          ? ` and ${String(descendantCount)} linked sub-${descendantCount === 1 ? 'session' : 'sessions'}`
-          : '';
-      const confirmed = await confirmAction({
-        title: 'Delete session?',
-        message: `${deleteSubject}${descendantSuffix} will be removed from this agent’s history.`,
-        confirmLabel: 'Delete',
-        destructive: true,
-      });
-      if (!confirmed) {
-        return false;
+      if (confirmSessionDeletion) {
+        const chat = chats.find((entry) => entry.id === chatId);
+        const descendantCount = affectedChats.filter((entry) => entry.id !== chatId).length;
+        const chatTitle = chat?.title?.trim();
+        const deleteSubject = chatTitle ? `“${chatTitle}”` : 'This session';
+        const descendantSuffix =
+          descendantCount > 0
+            ? ` and ${String(descendantCount)} linked sub-${descendantCount === 1 ? 'session' : 'sessions'}`
+            : '';
+        const confirmed = await confirmAction({
+          title: 'Delete session?',
+          message: `${deleteSubject}${descendantSuffix} will be removed from this agent’s history.`,
+          confirmLabel: 'Delete',
+          destructive: true,
+        });
+        if (!confirmed) {
+          return false;
+        }
       }
       void feedback.destructive();
       for (const affectedChatId of affectedChatIds) {
@@ -313,7 +316,7 @@ export const DrawerContent = memo(function DrawerContentComponent({
       }
       return true;
     },
-    [api, chats, onNewChat, removeChat, restoreChat, selectedChatId],
+    [api, chats, confirmSessionDeletion, onNewChat, removeChat, restoreChat, selectedChatId],
   );
 
   const handleNavigate = useCallback(

@@ -26,6 +26,7 @@ import {
 } from '@shell/state/appState/atoms';
 import {
   approvalModeAtom,
+  confirmSessionDeletionAtom,
   showToolCallsAtom,
   workspaceChatLimitAtom,
 } from '@shell/state/appState/settings';
@@ -114,23 +115,12 @@ function InstalledAgentsSection({ loading, capabilities, theme }: InstalledAgent
   );
 }
 
-interface ChatSettingsSectionProps {
-  approvalMode: string;
-  setApprovalMode: (mode: 'normal' | 'yolo') => void;
-  showToolCalls: boolean;
-  setShowToolCalls: (value: boolean) => void;
-  workspaceChatLimit: WorkspaceChatLimit;
-  setWorkspaceChatLimit: (value: WorkspaceChatLimit) => void;
-}
+function ChatSettingsSection() {
+  const [approvalMode, setApprovalMode] = useAtom(approvalModeAtom);
+  const [confirmSessionDeletion, setConfirmSessionDeletion] = useAtom(confirmSessionDeletionAtom);
+  const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
+  const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
 
-function ChatSettingsSection({
-  approvalMode,
-  setApprovalMode,
-  showToolCalls,
-  setShowToolCalls,
-  workspaceChatLimit,
-  setWorkspaceChatLimit,
-}: ChatSettingsSectionProps) {
   return (
     <Section title="Chat">
       <Toggle
@@ -139,6 +129,11 @@ function ChatSettingsSection({
         onChange={(value) => setApprovalMode(value ? 'normal' : 'yolo')}
       />
       <Toggle label="Show tool calls" value={showToolCalls} onChange={setShowToolCalls} />
+      <Toggle
+        label="Confirm before deleting sessions"
+        value={confirmSessionDeletion}
+        onChange={setConfirmSessionDeletion}
+      />
       <Row
         label="Chats per workspace"
         value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
@@ -219,9 +214,6 @@ export function SettingsScreen() {
   const pushSettings = useAtomValue(pushSettingsAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
-  const [approvalMode, setApprovalMode] = useAtom(approvalModeAtom);
-  const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
-  const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
   const retryPersistence = useSetAtom(retryPersistenceAtom);
 
   const {
@@ -294,14 +286,7 @@ export function SettingsScreen() {
 
         <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-        <ChatSettingsSection
-          approvalMode={approvalMode}
-          setApprovalMode={setApprovalMode}
-          showToolCalls={showToolCalls}
-          setShowToolCalls={setShowToolCalls}
-          workspaceChatLimit={workspaceChatLimit}
-          setWorkspaceChatLimit={setWorkspaceChatLimit}
-        />
+        <ChatSettingsSection />
 
         <NotificationsSection
           pushSettings={pushSettings}

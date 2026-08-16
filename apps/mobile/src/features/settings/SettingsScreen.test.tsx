@@ -15,6 +15,7 @@ import { requestPushRegistration } from '@shell/push/notifications';
 import { appStateSnapshotAtom, pushSettingsAtom } from '@shell/state/appState/atoms';
 import {
   approvalModeAtom,
+  confirmSessionDeletionAtom,
   showToolCallsAtom,
   workspaceChatLimitAtom,
 } from '@shell/state/appState/settings';
@@ -287,9 +288,13 @@ describe('SettingsScreen behavior', () => {
 
     await changeToggle(findToggle(root, 'Require approvals'), false);
     await changeToggle(findToggle(root, 'Show tool calls'), false);
+    const deletionConfirmation = findToggle(root, 'Confirm before deleting sessions');
+    expect(deletionConfirmation.props['value']).toBe(true);
+    await changeToggle(deletionConfirmation, false);
     await press(findPressableByText(root, 'Chats per workspace'));
     expect(store.get(approvalModeAtom)).toBe('yolo');
     expect(store.get(showToolCallsAtom)).toBe(false);
+    expect(store.get(confirmSessionDeletionAtom)).toBe(false);
     expect(store.get(workspaceChatLimitAtom)).toBe(10);
 
     await press(findPressableByText(root, 'Primary'));
