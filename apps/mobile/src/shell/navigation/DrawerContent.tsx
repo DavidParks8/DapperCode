@@ -1,8 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Alert, AppState, Keyboard } from 'react-native';
-import type { HostBridgeApiClient } from '@bridge/client/client';
-import type { ChatSummary } from '@bridge/types/types';
 import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import { confirmAction } from '@shared/ui/confirm';
 import { feedback } from '@shared/feedback';
@@ -21,6 +19,13 @@ import {
   buildDrawerAttentionModel,
   type DrawerAttentionLane,
 } from '@shell/navigation/drawerAttention';
+import {
+  buildBulkDeletionPlan,
+  buildChatDeletionFamily,
+  deleteChatFamilies,
+  deleteChatFamily,
+  restoreChatFamilies,
+} from '@shell/navigation/chatDeletion';
 import { createDrawerContentStyles } from '@shell/navigation/drawerContentStyles';
 import type { DrawerContentProps, DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { DrawerContentView } from '@shell/navigation/DrawerContentView';
@@ -31,7 +36,6 @@ import {
   describeBulkDeleteFailure,
   describeBulkDeletion,
   pruneSelectedChatIds,
-  resolveBulkDeleteRootIds,
   toggleSelectedChatId,
 } from '@shell/navigation/drawerSelection';
 import {
@@ -42,83 +46,6 @@ import { useDrawerAttentionRequests } from '@shell/navigation/useDrawerAttention
 import { useDrawerChatLoading } from '@shell/navigation/useDrawerChatLoading';
 
 const DRAWER_EVENT_REFRESH_DEBOUNCE_MS = 250;
-
-function chatDeletionFamily(chats: ChatSummary[], rootId: string): ChatSummary[] {
-  const affectedIds = new Set([rootId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const chat of chats) {
-      if (
-        chat.parentThreadId &&
-        affectedIds.has(chat.parentThreadId) &&
-        !affectedIds.has(chat.id)
-      ) {
-        affectedIds.add(chat.id);
-        changed = true;
-      }
-    }
-  }
-  return chats.filter((chat) => affectedIds.has(chat.id));
-}
-
-type BulkDeletionFamily = { rootId: string; chats: ChatSummary[] };
-
-/** Expands the selection into the exact set of sessions a bulk delete will remove. */
-function buildBulkDeletionPlan(
-  chats: ChatSummary[],
-  selectedChatIds: ReadonlySet<string>,
-): { families: BulkDeletionFamily[]; affectedChatIds: Set<string> } {
-  const families = resolveBulkDeleteRootIds(chats, selectedChatIds).map((rootId) => ({
-    rootId,
-    chats: chatDeletionFamily(chats, rootId),
-  }));
-  const affectedChatIds = new Set<string>();
-  for (const family of families) {
-    affectedChatIds.add(family.rootId);
-    for (const chat of family.chats) {
-      affectedChatIds.add(chat.id);
-    }
-  }
-  return { families, affectedChatIds };
-}
-
-async function deleteBulkDeletionFamilies(
-  api: Pick<HostBridgeApiClient, 'deleteChat' | 'forgetChat'>,
-  families: BulkDeletionFamily[],
-): Promise<{ failedFamilies: BulkDeletionFamily[]; deletedChatIds: Set<string> }> {
-  const failedFamilies: BulkDeletionFamily[] = [];
-  const deletedChatIds = new Set<string>();
-  for (const family of families) {
-    try {
-      await api.deleteChat(family.rootId);
-      deletedChatIds.add(family.rootId);
-      for (const chat of family.chats) {
-        if (chat.id !== family.rootId) {
-          api.forgetChat(chat.id);
-          deletedChatIds.add(chat.id);
-        }
-      }
-    } catch {
-      failedFamilies.push(family);
-    }
-  }
-  return { failedFamilies, deletedChatIds };
-}
-
-function restoreBulkDeletionFamilies(
-  families: BulkDeletionFamily[],
-  restoreChat: (chat: ChatSummary) => void,
-): Set<string> {
-  const restoredChatIds = new Set<string>();
-  for (const family of families) {
-    for (const chat of family.chats) {
-      restoreChat(chat);
-      restoredChatIds.add(chat.id);
-    }
-  }
-  return restoredChatIds;
-}
 
 export const DrawerContent = memo(function DrawerContentComponent({
   active,
@@ -398,11 +325,10 @@ export const DrawerContent = memo(function DrawerContentComponent({
    */
   const handleDeleteChat = useCallback(
     async (chatId: string): Promise<boolean> => {
-      const affectedChats = chatDeletionFamily(chats, chatId);
-      const affectedChatIds = new Set([chatId, ...affectedChats.map((entry) => entry.id)]);
+      const family = buildChatDeletionFamily(chats, chatId);
       if (confirmSessionDeletion) {
         const chat = chats.find((entry) => entry.id === chatId);
-        const descendantCount = affectedChats.filter((entry) => entry.id !== chatId).length;
+        const descendantCount = family.chats.filter((entry) => entry.id !== chatId).length;
         const chatTitle = chat?.title?.trim();
         const deleteSubject = chatTitle ? `“${chatTitle}”` : 'This session';
         const descendantSuffix =
@@ -420,27 +346,19 @@ export const DrawerContent = memo(function DrawerContentComponent({
         }
       }
       void feedback.destructive();
-      for (const affectedChatId of affectedChatIds) {
+      for (const affectedChatId of family.chatIds) {
         removeChat(affectedChatId);
       }
-      try {
-        await api.deleteChat(chatId);
-        for (const affectedChatId of affectedChatIds) {
-          if (affectedChatId !== chatId) {
-            api.forgetChat(affectedChatId);
-          }
-        }
-      } catch {
-        for (const affectedChat of affectedChats) {
-          restoreChat(affectedChat);
-        }
+      const deletedChatIds = await deleteChatFamily(api, family);
+      if (!deletedChatIds) {
+        restoreChatFamilies([family], restoreChat);
         Alert.alert(
           'Could not delete session',
           'The session was restored. Check the bridge connection and try again.',
         );
         return false;
       }
-      if (selectedChatId && affectedChatIds.has(selectedChatId)) {
+      if (selectedChatId && family.chatIds.has(selectedChatId)) {
         onNewChat({ keepDrawerOpen: true });
       }
       return true;
@@ -490,9 +408,9 @@ export const DrawerContent = memo(function DrawerContentComponent({
     for (const chatId of affectedChatIds) {
       removeChat(chatId);
     }
-    const { failedFamilies, deletedChatIds } = await deleteBulkDeletionFamilies(api, families);
+    const { failedFamilies, deletedChatIds } = await deleteChatFamilies(api, families);
     if (failedFamilies.length > 0) {
-      const restoredChatIds = restoreBulkDeletionFamilies(failedFamilies, restoreChat);
+      const restoredChatIds = restoreChatFamilies(failedFamilies, restoreChat);
       const { title, message } = describeBulkDeleteFailure(failedFamilies.length);
       Alert.alert(title, message);
       setSelectedChatIds(
