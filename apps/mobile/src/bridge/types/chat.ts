@@ -70,6 +70,8 @@ export interface ChatToolMeta {
   kind: ChatToolKind;
   status: ChatToolStatus;
   title: string;
+  startedAtMs?: number;
+  completedAtMs?: number;
   content?: unknown[];
   locations?: unknown[];
   truncated?: boolean;

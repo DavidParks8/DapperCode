@@ -43,6 +43,8 @@ function invocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
     kind: 'other',
     status: 'completed',
     title: 'Did a thing',
+    startedAtMs: null,
+    completedAtMs: null,
     statusLanguage: true,
     monospaceTitle: false,
     isError: false,
@@ -320,7 +322,10 @@ function hexContrastRatio(left: string, right: string): number {
 }
 
 describe('ToolInvocationRow', () => {
-  afterEach(() => setMockReducedMotionEnabled(false));
+  afterEach(() => {
+    setMockReducedMotionEnabled(false);
+    jest.useRealTimers();
+  });
 
   it('marks a pending tool with a waiting affordance', () => {
     const tree = render(invocation({ id: 'tool-pending', status: 'pending', empty: true }));
@@ -328,6 +333,90 @@ describe('ToolInvocationRow', () => {
     expect(JSON.stringify(tree.toJSON())).toContain('ellipsis-horizontal');
     expect(tree.root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
 
+    act(() => tree.unmount());
+  });
+
+  it('expands a running timing-only tool and updates elapsed time only while open', () => {
+    jest.useFakeTimers();
+    const nowMs = Date.parse('2026-05-01T12:34:10.000Z');
+    jest.setSystemTime(nowMs);
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+    const value = invocation({
+      id: 'tool-running-timing',
+      status: 'in_progress',
+      startedAtMs: nowMs - 5_000,
+      empty: true,
+    });
+    const tree = render(value);
+    const row = tree.root.findByProps({ testID: 'tool-row' });
+
+    expect(row.props['accessibilityState']).toMatchObject({ disabled: false, expanded: false });
+    expand(tree, value.title);
+
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(value.startedAtMs!));
+    expect(textLines(tree)).toEqual(
+      expect.arrayContaining(['Timing', 'Started', startTime, 'Elapsed', '5s']),
+    );
+    expect(tree.root.findByProps({ testID: 'tool-row' }).props['accessibilityState']).toMatchObject(
+      {
+        disabled: false,
+        expanded: true,
+      },
+    );
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Elapsed 5 seconds.`,
+    );
+
+    act(() => jest.advanceTimersByTime(2_000));
+    expect(textLines(tree)).toContain('7s');
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Elapsed 7 seconds.`,
+    );
+
+    expand(tree, value.title);
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(tree.root.findAllByProps({ testID: 'tool-timing' })).toHaveLength(0);
+
+    clearIntervalSpy.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('freezes settled and failed tool duration from authoritative timestamps', () => {
+    jest.useFakeTimers();
+    const completedAtMs = Date.parse('2026-05-01T12:34:10.000Z');
+    const startedAtMs = completedAtMs - 65_000;
+    jest.setSystemTime(completedAtMs);
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const value = invocation({
+      id: 'tool-failed-timing',
+      status: 'failed',
+      isError: true,
+      startedAtMs,
+      completedAtMs,
+      empty: true,
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(startedAtMs));
+    expect(textLines(tree)).toEqual(
+      expect.arrayContaining(['Timing', 'Executed', startTime, 'Duration', '1m 5s']),
+    );
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Executed at ${startTime}. Duration 1 minute 5 seconds.`,
+    );
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    act(() => jest.advanceTimersByTime(30_000));
+    expect(textLines(tree)).toContain('1m 5s');
+
+    setIntervalSpy.mockRestore();
     act(() => tree.unmount());
   });
 

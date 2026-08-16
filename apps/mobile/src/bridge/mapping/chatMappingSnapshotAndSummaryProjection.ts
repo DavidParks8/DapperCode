@@ -81,6 +81,8 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
       kind: readString(entry['kind']) ?? '',
       status: readString(entry['status']) ?? '',
       title: readString(entry['title']) ?? '',
+      startedAtMs: readSnapshotTimestamp(entry['startedAtMs']),
+      completedAtMs: readSnapshotTimestamp(entry['completedAtMs']),
       content: readString(entry['content']) ?? '',
       structuredContent: Array.isArray(entry['structuredContent'])
         ? entry['structuredContent']
@@ -90,6 +92,11 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
       subagent: entry['subagent'] === true,
     }))
     .filter((entry) => entry.id);
+}
+
+function readSnapshotTimestamp(value: unknown): number | null {
+  const timestamp = readNonNegativeIntegerLike(value);
+  return timestamp !== null && Number(value) >= 0 ? timestamp : null;
 }
 
 function parseSnapshotTimeline(

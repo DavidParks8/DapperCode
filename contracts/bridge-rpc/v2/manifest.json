@@ -453,6 +453,8 @@
             "kind": "read",
             "status": "completed",
             "title": "Read file",
+            "startedAtMs": 1000,
+            "completedAtMs": 2000,
             "content": "done",
             "structuredContent": [
               { "type": "content", "content": { "type": "text", "text": "structured" } },

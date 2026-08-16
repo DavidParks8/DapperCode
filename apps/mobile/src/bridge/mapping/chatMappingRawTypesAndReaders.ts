@@ -80,6 +80,8 @@ export interface RawAcpSnapshot {
     kind: string;
     status: string;
     title: string;
+    startedAtMs?: number | null;
+    completedAtMs?: number | null;
     content: string;
     structuredContent: unknown[];
     locations: unknown[];

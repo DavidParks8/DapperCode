@@ -639,10 +639,17 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('projects tool metadata into a row before any output exists', () => {
-    const metaEvent = (status: string, title: string): AGUIEvent => ({
+    const metaEvent = (status: string, title: string, completedAtMs?: number): AGUIEvent => ({
       type: EventType.CUSTOM,
       name: 'dappercode.dev/tool-meta',
-      value: { toolCallId: 'tool', kind: 'execute', status, title },
+      value: {
+        toolCallId: 'tool',
+        kind: 'execute',
+        status,
+        title,
+        startedAtMs: 1_000,
+        ...(completedAtMs === undefined ? {} : { completedAtMs }),
+      },
     });
     let state = updateAgUiLiveAssistantMessages(
       {},
@@ -654,6 +661,7 @@ describe('AG-UI bridge notifications', () => {
       kind: 'execute',
       status: 'in_progress',
       title: 'npm test',
+      startedAtMs: 1_000,
     });
     expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
       'in_progress',
@@ -662,7 +670,7 @@ describe('AG-UI bridge notifications', () => {
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
-      event: metaEvent('completed', 'npm test'),
+      event: metaEvent('completed', 'npm test', 2_500),
     });
     expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
       'completed',
@@ -687,6 +695,8 @@ describe('AG-UI bridge notifications', () => {
     expect(result?.toolMeta).toMatchObject({
       kind: 'execute',
       status: 'completed',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       content: [{ type: 'terminal', terminalId: 'term-1' }],
       locations: [{ path: 'a.ts' }],
     });
@@ -717,6 +727,8 @@ describe('AG-UI bridge notifications', () => {
               kind: 'edit',
               status: 'failed',
               title: 'Edit a.ts',
+              startedAtMs: 1_000,
+              completedAtMs: 2_500,
               truncated: true,
             },
           },
@@ -741,6 +753,8 @@ describe('AG-UI bridge notifications', () => {
       kind: 'edit',
       status: 'failed',
       title: 'Edit a.ts',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       truncated: true,
     });
   });

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use super::events::{
@@ -120,6 +121,8 @@ pub struct SnapshotTool {
     pub kind: ToolKind,
     pub status: ToolCallStatus,
     pub title: String,
+    pub started_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
     pub content: String,
     pub structured_content: Vec<serde_json::Value>,
     pub locations: Vec<serde_json::Value>,
@@ -512,6 +515,10 @@ impl SessionSnapshot {
     }
 
     pub fn apply(&mut self, event: &CanonicalEvent) {
+        self.apply_at(event, Utc::now().timestamp_millis());
+    }
+
+    fn apply_at(&mut self, event: &CanonicalEvent, observed_at_ms: i64) {
         match event {
             CanonicalEvent::RunStarted {
                 run_id,
@@ -520,7 +527,7 @@ impl SessionSnapshot {
                 ..
             } => {
                 if let Some(active_generation) = self.active_generation {
-                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                     self.terminalize_unresolved_subagents("failed", active_generation);
                 }
                 self.active_run_id = Some(run_id.clone());
@@ -537,10 +544,10 @@ impl SessionSnapshot {
                     stop_reason,
                     agent_client_protocol::schema::v1::StopReason::Cancelled
                 ) {
-                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                     self.terminalize_unresolved_subagents("cancelled", *generation);
                 } else {
-                    self.terminalize_active_tools(ToolCallStatus::Completed);
+                    self.terminalize_active_tools(ToolCallStatus::Completed, observed_at_ms);
                 }
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -550,7 +557,7 @@ impl SessionSnapshot {
             CanonicalEvent::RunFailed { generation, .. }
                 if self.active_generation == Some(*generation) =>
             {
-                self.terminalize_active_tools(ToolCallStatus::Failed);
+                self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                 self.terminalize_unresolved_subagents("failed", *generation);
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -582,6 +589,7 @@ impl SessionSnapshot {
             } => self.apply_tool(
                 tool_call_id,
                 *generation,
+                observed_at_ms,
                 ToolProjection {
                     kind,
                     status,
@@ -756,7 +764,13 @@ impl SessionSnapshot {
         (!label.is_empty()).then(|| bound(label.to_string(), MAX_TEXT_BYTES))
     }
 
-    fn apply_tool(&mut self, id: &str, generation: Option<u64>, projection: ToolProjection<'_>) {
+    fn apply_tool(
+        &mut self,
+        id: &str,
+        generation: Option<u64>,
+        observed_at_ms: i64,
+        projection: ToolProjection<'_>,
+    ) {
         if self.tools.len() >= MAX_TOOLS && !self.tools.contains_key(id) {
             let oldest = self
                 .timeline
@@ -829,12 +843,28 @@ impl SessionSnapshot {
             }
         }
         let existing = self.tools.get(id).cloned().or(retained_tool);
+        let started_at_ms = existing
+            .as_ref()
+            .map(|tool| tool.started_at_ms)
+            .unwrap_or(observed_at_ms);
+        let completed_at_ms = if terminal {
+            Some(
+                existing
+                    .as_ref()
+                    .and_then(|tool| tool.completed_at_ms)
+                    .unwrap_or(observed_at_ms.max(started_at_ms)),
+            )
+        } else {
+            existing.as_ref().and_then(|tool| tool.completed_at_ms)
+        };
         let mut tool = SnapshotTool {
             id: id.to_string(),
             generation,
             kind: *projection.kind,
             status: *projection.status,
             title: bound(projection.title.to_string(), MAX_TEXT_BYTES),
+            started_at_ms,
+            completed_at_ms,
             content: existing
                 .as_ref()
                 .map(|tool| tool.content.clone())
@@ -1015,13 +1045,17 @@ impl SessionSnapshot {
         )
     }
 
-    fn terminalize_active_tools(&mut self, status: ToolCallStatus) {
+    fn terminalize_active_tools(&mut self, status: ToolCallStatus, completed_at_ms: i64) {
         let active_tool_ids = self.active_tool_ids.iter().cloned().collect::<Vec<_>>();
         let updates = active_tool_ids
             .iter()
             .filter_map(|tool_call_id| {
                 let tool = self.tools.get_mut(tool_call_id)?;
                 tool.status = status;
+                tool.completed_at_ms = Some(
+                    tool.completed_at_ms
+                        .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
+                );
                 Some(tool.clone())
             })
             .collect::<Vec<_>>();
@@ -1048,6 +1082,10 @@ impl SessionSnapshot {
                     return;
                 };
                 tool.status = status;
+                tool.completed_at_ms = Some(
+                    tool.completed_at_ms
+                        .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
+                );
                 if let Some(header) = header {
                     Self::ensure_durable_subagent_header(tool, &header);
                 }
@@ -1791,6 +1829,48 @@ mod tests {
             structured_content: FieldUpdate::Set(Vec::new()),
             locations: FieldUpdate::Set(Vec::new()),
         }
+    }
+
+    #[test]
+    fn tool_timing_keeps_first_observation_and_freezes_terminal_time() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::InProgress), 1_000);
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::InProgress), 1_500);
+        let running = &snapshot.tools["tool"];
+        assert_eq!(running.started_at_ms, 1_000);
+        assert_eq!(running.completed_at_ms, None);
+
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::Completed), 2_500);
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::Completed), 3_000);
+        let completed = &snapshot.tools["tool"];
+        assert_eq!(completed.started_at_ms, 1_000);
+        assert_eq!(completed.completed_at_ms, Some(2_500));
+        let value = serde_json::to_value(completed).unwrap();
+        assert_eq!(value["startedAtMs"], 1_000);
+        assert_eq!(value["completedAtMs"], 2_500);
+    }
+
+    #[test]
+    fn run_completion_stamps_dangling_tool_completion_time() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply_at(&run_started(1), 500);
+        snapshot.apply_at(&tool("tool", Some(1), ToolCallStatus::InProgress), 1_000);
+        snapshot.apply_at(
+            &CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run-1".to_string(),
+                source_turn_id: "turn-1".to_string(),
+                generation: 1,
+                stop_reason: StopReason::EndTurn,
+            },
+            4_000,
+        );
+
+        let tool = &snapshot.tools["tool"];
+        assert_eq!(tool.status, ToolCallStatus::Completed);
+        assert_eq!(tool.started_at_ms, 1_000);
+        assert_eq!(tool.completed_at_ms, Some(4_000));
     }
 
     /// Reproduces "a long complete session showed as in progress".
@@ -3004,6 +3084,8 @@ mod tests {
                 kind: ToolKind::Read,
                 status: ToolCallStatus::Completed,
                 title: "Read file".to_string(),
+                started_at_ms: 1_000,
+                completed_at_ms: Some(2_000),
                 content: "done".to_string(),
                 structured_content: vec![
                     serde_json::json!({"type":"content","content":{"type":"text","text":"structured"}}),
@@ -3249,6 +3331,8 @@ mod tests {
             kind: ToolKind::Read,
             status: ToolCallStatus::Completed,
             title: "Read".into(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: String::new(),
             structured_content: Vec::new(),
             locations: Vec::new(),
@@ -3273,6 +3357,8 @@ mod tests {
             kind: ToolKind::Read,
             status: ToolCallStatus::Completed,
             title: "Read".into(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: String::new(),
             structured_content: Vec::new(),
             locations: Vec::new(),
@@ -3485,6 +3571,7 @@ mod tests {
             snapshot.apply_tool(
                 "tool",
                 None,
+                index,
                 ToolProjection {
                     kind: &ToolKind::Execute,
                     status: if index == 999 {

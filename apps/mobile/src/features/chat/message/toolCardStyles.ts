@@ -106,6 +106,26 @@ export const createToolCardStyles = (theme: AppTheme) =>
       ...theme.typography.metadata,
       color: theme.colors.textMuted,
     },
+    timingMetrics: {
+      flexDirection: 'row',
+      gap: theme.spacing.lg,
+    },
+    timingMetric: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    timingLabel: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+    },
+    timingValue: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
+    timingDuration: {
+      fontVariant: ['tabular-nums'],
+    },
     outputSurface: {
       paddingVertical: theme.spacing.xs,
       gap: 2,
