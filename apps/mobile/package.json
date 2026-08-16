@@ -102,7 +102,8 @@
     "moduleNameMapper": {
       "^@bridge/(.*)$": "<rootDir>/src/bridge/$1",
       "^@shared/(.*)$": "<rootDir>/src/shared/$1",
-      "^@shell/(.*)$": "<rootDir>/src/shell/$1"
+      "^@shell/(.*)$": "<rootDir>/src/shell/$1",
+      "^react-native-drawer-layout$": "<rootDir>/src/shared/testing/drawerLayoutMock.tsx"
     },
     "collectCoverageFrom": [
       "src/**/*.{ts,tsx}",
