@@ -4,6 +4,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
+jest.mock('../liveActivities/adapter.ios', () => ({
+  agentTurnActivityAdapter: {
+    supported: false,
+    getInstances: jest.fn().mockResolvedValue([]),
+    start: jest.fn(),
+  },
+}));
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

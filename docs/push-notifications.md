@@ -99,6 +99,24 @@ not sent. Approval notifications never include reply content.
   fully-background resolve isn't reliable for this transport. The in-app approval
   banner remains as a fallback if the action can't complete.
 
+## iOS Live Activities
+
+On iOS 16.2 and later, DapperCode publishes one native Live Activity for the currently selected
+chat while its agent turn is running. The Lock Screen and Dynamic Island show only generic state:
+working, planning, waiting, completed, failed, or stopped. They do not show the chat title,
+workspace, prompt, command, approval detail, or error text. Tapping the activity opens the selected
+chat.
+
+Live Activities are enabled by default and respect the per-app iOS system setting. A completed,
+failed, or stopped result remains visible for one minute unless another selected turn starts first.
+They require a development, preview, or TestFlight build and do not work in Expo Go.
+
+This first phase uses local ActivityKit updates only. When the app is backgrounded, iOS suspends its
+JavaScript and the activity retains its last state until DapperCode returns to the foreground and
+reconciles with the bridge. Continuous background updates would require a separate ActivityKit
+push-token and direct APNs integration; ordinary Expo notification pushes do not update a Live
+Activity.
+
 ## Build requirements (standalone apps)
 
 Expo Go handles push credentials for you during development. **Standalone /
