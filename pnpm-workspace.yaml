@@ -6,6 +6,9 @@ overrides:
   linkify-it: ^5.0.2
   markdown-it: ^14.2.0
 
+patchedDependencies:
+  expo-widgets@57.0.10: patches/expo-widgets@57.0.10.patch
+
 peerDependencyRules:
   allowedVersions:
     '@gorhom/bottom-sheet>react-native-reanimated': 4.5.0
