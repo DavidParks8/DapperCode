@@ -1,5 +1,5 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
-import { Switch } from 'react-native';
+import { StyleSheet, Switch } from 'react-native';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 import { router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -321,6 +321,48 @@ describe('SettingsScreen behavior', () => {
     );
     await press(drawer);
     expect(drawerToggle).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('hands the title to the nav bar once the large title scrolls under it', async () => {
+    const { tree } = await renderSettings();
+    const root = tree.root as Queryable;
+    const opacityOf = (testID: string): unknown => {
+      const node = requireTestValue(
+        root.findAll((candidate) => candidate.props['testID'] === testID)[0],
+        testID,
+      );
+      return (StyleSheet.flatten(node.props['style'] as never) ?? ({} as Record<string, unknown>))[
+        'opacity'
+      ];
+    };
+    const scroll = async (y: number): Promise<void> => {
+      const scrollView = requireTestValue(
+        root.findAll(
+          (node) =>
+            typeof node.props['onScroll'] === 'function' &&
+            typeof node.props['scrollEventThrottle'] === 'number',
+        )[0],
+        'settings scroll view',
+      );
+      await act(async () => {
+        (scrollView.props['onScroll'] as (event: unknown) => void)({
+          nativeEvent: { contentOffset: { y } },
+        });
+        await Promise.resolve();
+      });
+    };
+
+    expect(opacityOf('settings-inline-title')).toBe(0);
+    expect(opacityOf('settings-bar-separator')).toBe(0);
+
+    await scroll(120);
+    expect(opacityOf('settings-inline-title')).toBe(1);
+    expect(opacityOf('settings-bar-separator')).toBe(1);
+
+    await scroll(0);
+    expect(opacityOf('settings-inline-title')).toBe(0);
+    expect(opacityOf('settings-bar-separator')).toBe(0);
     act(() => tree.unmount());
   });
 
