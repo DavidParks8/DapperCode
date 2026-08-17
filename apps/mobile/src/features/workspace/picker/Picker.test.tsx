@@ -1,7 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type * as fsNode from 'fs';
 import type * as pathNode from 'path';
-import { Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -506,10 +506,13 @@ describe('WorkspacePicker', () => {
       ).length;
 
     expect(countTitles()).toBe(1);
+    expect(navBarBottomBorder(root)).toBe(0);
     act(() => scrollList(root, 120));
     expect(countTitles()).toBe(2);
+    expect(navBarBottomBorder(root)).toBeGreaterThan(0);
     act(() => scrollList(root, 0));
     expect(countTitles()).toBe(1);
+    expect(navBarBottomBorder(root)).toBe(0);
     act(() => tree.unmount());
   });
 
@@ -728,6 +731,23 @@ function scrollList(root: QueryableTestInstance, offsetY: number): void {
   (list.props['onScroll'] as (event: unknown) => void)({
     nativeEvent: { contentOffset: { y: offsetY } },
   });
+}
+
+function navBarBottomBorder(root: QueryableTestInstance): number {
+  const navBar = requireTestValue(
+    root.findAll((node) => {
+      if (typeof node.type !== 'string') {
+        return false;
+      }
+      const style = StyleSheet.flatten(node.props['style'] as never) as
+        { height?: number; flexDirection?: string } | undefined;
+      return style?.height === 44 && style.flexDirection === 'row';
+    })[0],
+    'picker nav bar',
+  );
+  const style = StyleSheet.flatten(navBar.props['style'] as never) as
+    { borderBottomWidth?: number } | undefined;
+  return style?.borderBottomWidth ?? 0;
 }
 
 function expectPaddedTouchTarget(node: QueryableTestInstance, width: number, height: number): void {

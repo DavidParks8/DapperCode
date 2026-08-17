@@ -27,6 +27,11 @@ export const createWorkspacePickerLayoutStyles = (theme: AppTheme) => ({
     paddingHorizontal: theme.spacing.lg,
     gap: theme.spacing.sm,
   },
+  /** UIKit swaps in its standard appearance once content scrolls under the bar. */
+  navBarScrolled: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.borderLight,
+  },
   navBarTextButton: {
     minHeight: NAV_BAR_TEXT_BUTTON_HEIGHT,
     justifyContent: 'center' as const,

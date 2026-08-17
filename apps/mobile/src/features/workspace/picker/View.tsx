@@ -164,7 +164,7 @@ function WorkspacePickerNavBar({
   onOpenOverflowMenu: () => void;
 }) {
   return (
-    <View style={styles.navBar}>
+    <View style={[styles.navBar, collapsed && styles.navBarScrolled]}>
       <View style={styles.navBarSide}>
         <Pressable
           onPress={onClose}
