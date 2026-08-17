@@ -187,6 +187,9 @@ export const createStyles = (theme: AppTheme) =>
       borderCurve: 'continuous',
       borderWidth: StyleSheet.hairlineWidth,
       overflow: 'hidden',
+    },
+    // The readings settle into the formed shape separately from it, so they own their own spacing.
+    responseUsageContent: {
       gap: theme.spacing.xs,
     },
     responseUsageRow: {

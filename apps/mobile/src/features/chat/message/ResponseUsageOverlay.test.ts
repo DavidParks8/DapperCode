@@ -1,4 +1,5 @@
 import { resolveResponseUsagePlacement } from './ResponseUsageOverlay';
+import { resolvePourOrigin } from './responseUsagePour';
 
 const WINDOW = { width: 390, height: 844 };
 const INSETS = { top: 59, bottom: 34 };
@@ -54,5 +55,52 @@ describe('resolveResponseUsagePlacement', () => {
     });
     expect(placement.top).toBe(492);
     expect(placement.left).toBe(24);
+  });
+
+  it('reports which side of the anchor it settled on', () => {
+    expect(placeAt({ x: 24, y: 500 }).placedAbove).toBe(true);
+    expect(placeAt({ x: 24, y: 80 }).placedAbove).toBe(false);
+  });
+});
+
+describe('resolvePourOrigin', () => {
+  const anchor = { x: 24, y: 500, width: 30, height: 30 };
+
+  it('grows the panel out of the edge facing its button', () => {
+    expect(resolvePourOrigin({ anchor, left: 24, panel: PANEL, placedAbove: true })).toEqual({
+      x: 15,
+      y: PANEL.height,
+    });
+    expect(resolvePourOrigin({ anchor, left: 24, panel: PANEL, placedAbove: false })).toEqual({
+      x: 15,
+      y: 0,
+    });
+  });
+
+  it('keeps the origin inside a panel that had to slide away from its anchor', () => {
+    // A button near the right edge leaves the panel pulled back inside the screen, and an origin
+    // beyond the panel would fling the glass in from off screen.
+    const shifted = resolvePourOrigin({
+      anchor: { ...anchor, x: 380 },
+      left: 198,
+      panel: PANEL,
+      placedAbove: true,
+    });
+    expect(shifted.x).toBe(PANEL.width);
+    expect(
+      resolvePourOrigin({
+        anchor: { ...anchor, x: -40 },
+        left: 12,
+        panel: PANEL,
+        placedAbove: true,
+      }).x,
+    ).toBe(0);
+  });
+
+  it('falls back to the middle while the anchor is still unmeasured', () => {
+    expect(resolvePourOrigin({ anchor: null, left: 12, panel: PANEL, placedAbove: true })).toEqual({
+      x: PANEL.width / 2,
+      y: PANEL.height / 2,
+    });
   });
 });

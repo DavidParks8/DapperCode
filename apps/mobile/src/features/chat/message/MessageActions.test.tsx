@@ -10,9 +10,16 @@ import {
   setMockGlassEffectAPIAvailable,
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
+import { setMockReducedMotionEnabled } from '@shared/testing/reanimatedMock';
 import { responseUsageOverlayAtom } from '../state/modals';
 import { MessageActions } from './MessageActions';
 import { ResponseUsageOverlay } from './ResponseUsageOverlay';
+import {
+  POUR_CONTENT_OFFSET,
+  POUR_EXIT_MS,
+  POUR_MIN_SHELL_OPACITY,
+  POUR_START_SCALE,
+} from './responseUsagePour';
 
 jest.mock('./measureAnchor', () => ({
   __esModule: true,
@@ -127,6 +134,32 @@ function collectText(node: QueryableInstance): string[] {
   );
 }
 
+function flattenStyle(node: QueryableInstance | undefined): Record<string, unknown> {
+  return StyleSheet.flatten(node?.props['style'] as never) ?? {};
+}
+
+/**
+ * Reanimated's Jest double settles animations into its shared values, and the rendered style only
+ * picks them up on the next render, so sampling one means re-rendering first.
+ */
+function sampleStyle(
+  tree: ReactTestRenderer,
+  element: React.ReactNode,
+  testID: string,
+): Record<string, unknown> {
+  act(() => {
+    tree.update(wrap(element));
+  });
+  return flattenStyle(findHostByTestId(queryRoot(tree), testID));
+}
+
+/** Runs the retracting panel's exit out, which is what finally unmounts it. */
+function settleExit(): void {
+  act(() => {
+    jest.advanceTimersByTime(POUR_EXIT_MS);
+  });
+}
+
 describe('MessageActions', () => {
   beforeEach(() => {
     jest.useFakeTimers();
@@ -134,11 +167,14 @@ describe('MessageActions', () => {
   });
 
   afterEach(() => {
+    // The overlay atom outlives a render, so a leftover panel would leak into the next test. It is
+    // cleared before the timers run out so the panel's retraction lands inside act().
+    act(() => {
+      getDefaultStore().set(responseUsageOverlayAtom, null);
+    });
     act(() => jest.runOnlyPendingTimers());
     jest.useRealTimers();
     jest.restoreAllMocks();
-    // The overlay atom outlives a render, so a leftover panel would leak into the next test.
-    getDefaultStore().set(responseUsageOverlayAtom, null);
   });
 
   it('renders nothing for blank text', () => {
@@ -279,6 +315,7 @@ describe('MessageActions', () => {
     act(() => {
       invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
     });
+    settleExit();
     expect(findByTestId(queryRoot(tree), 'response-usage-overlay-card')).toBeUndefined();
   });
 
@@ -386,6 +423,13 @@ describe('MessageActions', () => {
       invokeProp(backdrop!, 'onPress');
     });
 
+    // The retracting panel must stop swallowing taps the instant it is dismissed, or it would eat
+    // whatever the reader reached for next.
+    const overlayRoot = findHostByTestId(queryRoot(tree), 'response-usage-overlay');
+    expect(overlayRoot?.props['pointerEvents']).toBe('none');
+    expect(overlayRoot?.props['accessibilityViewIsModal']).toBe(false);
+
+    settleExit();
     expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
     expect(
       findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
@@ -482,6 +526,7 @@ describe('MessageActions', () => {
 
     // Swallowing the event stops back from also popping the screen out from under the panel.
     expect(handled).toBe(true);
+    settleExit();
     expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
   });
 
@@ -537,9 +582,213 @@ describe('MessageActions', () => {
       invokeProp(panel!, 'onPress');
     });
 
+    settleExit();
     expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
     expect(
       findPressable(queryRoot(tree), 'Response details').props['accessibilityState'],
     ).toMatchObject({ expanded: false });
+  });
+
+  describe('the pour', () => {
+    const anchor = { x: 24, y: 500, width: 30, height: 30 };
+    const panelLayout = { x: 0, y: 0, width: 180, height: 96 };
+
+    function openPlacedPanel(): { tree: ReactTestRenderer; element: React.ReactElement } {
+      mockMeasureAnchor.mockImplementation((_node, onMeasured) => {
+        onMeasured(anchor);
+      });
+      const element = <MessageActions text="hello" testID="usage" usage={sampleUsage} />;
+      const tree = render(element);
+      act(() => {
+        invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+      });
+      return { tree, element };
+    }
+
+    function measurePanel(tree: ReactTestRenderer): void {
+      act(() => {
+        invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')!, 'onLayout', {
+          nativeEvent: { layout: panelLayout },
+        });
+      });
+    }
+
+    it('waits off screen as an unpoured bead until it knows where it belongs', () => {
+      const element = <MessageActions text="hello" testID="usage" usage={sampleUsage} />;
+      const tree = render(element);
+      act(() => {
+        invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+      });
+
+      // Pouring before the anchor lands would spend the whole animation at left: -9999 and land
+      // the panel on screen already formed, which is the pop the pour exists to replace.
+      const style = sampleStyle(tree, element, 'response-usage-overlay-panel');
+      expect(style['left']).toBe(-9999);
+      expect(style['opacity']).toBe(POUR_MIN_SHELL_OPACITY);
+      expect(style['transform']).toEqual([
+        { scaleX: POUR_START_SCALE },
+        { scaleY: POUR_START_SCALE },
+      ]);
+      expect(sampleStyle(tree, element, 'response-usage-overlay-content')['opacity']).toBe(0);
+    });
+
+    it('pours out of the button it is anchored to and settles into its full shape', () => {
+      const { tree, element } = openPlacedPanel();
+      measurePanel(tree);
+
+      const style = sampleStyle(tree, element, 'response-usage-overlay-panel');
+      // Growing about the centre would swell the glass beside the button rather than out of it,
+      // so it scales about the edge facing the anchor, under the anchor's centre.
+      expect(style['transformOrigin']).toEqual([
+        anchor.x + anchor.width / 2 - Number(style['left']),
+        panelLayout.height,
+        0,
+      ]);
+      expect(style['opacity']).toBe(1);
+      expect(style['transform']).toEqual([{ scaleX: 1 }, { scaleY: 1 }]);
+
+      // The readings settle into the shape after it forms rather than arriving stretched with it.
+      const content = sampleStyle(tree, element, 'response-usage-overlay-content');
+      expect(content['opacity']).toBe(1);
+      expect(content['transform']).toEqual([{ translateY: 0 }]);
+    });
+
+    it('travels the readings away from the button, whichever side the panel landed on', () => {
+      mockMeasureAnchor.mockImplementation((_node, onMeasured) => {
+        // A response at the very top of the transcript leaves no room above its action row.
+        onMeasured({ x: 24, y: 80, width: 30, height: 30 });
+      });
+      const element = <MessageActions text="hello" testID="usage" usage={sampleUsage} />;
+      const tree = render(element);
+      act(() => {
+        invokeProp(findPressable(queryRoot(tree), 'Response details'), 'onPress');
+      });
+      measurePanel(tree);
+
+      // Flipped below its button, so it grows out of its top edge.
+      const style = sampleStyle(tree, element, 'response-usage-overlay-panel');
+      expect(style['transformOrigin']).toEqual([15, 0, 0]);
+      expect(sampleStyle(tree, element, 'response-usage-overlay-content')['transform']).toEqual([
+        { translateY: 0 },
+      ]);
+
+      act(() => {
+        invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-backdrop')!, 'onPress');
+      });
+
+      // Retracting, the readings leave the way they arrived: upward, back into the button below.
+      expect(sampleStyle(tree, element, 'response-usage-overlay-content')['transform']).toEqual([
+        { translateY: -POUR_CONTENT_OFFSET },
+      ]);
+    });
+
+    it('retracts into its button before it leaves, instead of vanishing between frames', () => {
+      const { tree, element } = openPlacedPanel();
+      measurePanel(tree);
+      act(() => {
+        tree.update(wrap(element));
+      });
+
+      act(() => {
+        invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-backdrop')!, 'onPress');
+      });
+
+      // The panel is still on screen, drawing itself back down into the button that opened it.
+      expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeDefined();
+      const style = sampleStyle(tree, element, 'response-usage-overlay-panel');
+      expect(style['opacity']).toBe(POUR_MIN_SHELL_OPACITY);
+      expect(style['transform']).toEqual([
+        { scaleX: POUR_START_SCALE },
+        { scaleY: POUR_START_SCALE },
+      ]);
+      expect(sampleStyle(tree, element, 'response-usage-overlay-content')['opacity']).toBe(0);
+      expect(sampleStyle(tree, element, 'response-usage-overlay-content')['transform']).toEqual([
+        { translateY: POUR_CONTENT_OFFSET },
+      ]);
+
+      settleExit();
+      expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
+    });
+
+    it('never fades the glass to zero, which would stop UIKit rendering the material', () => {
+      const { tree, element } = openPlacedPanel();
+      measurePanel(tree);
+      act(() => {
+        invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-backdrop')!, 'onPress');
+      });
+
+      expect(
+        Number(sampleStyle(tree, element, 'response-usage-overlay-panel')['opacity']),
+      ).toBeGreaterThan(0);
+    });
+
+    it('drops the panel immediately when the reader asked for reduced motion', () => {
+      setMockReducedMotionEnabled(true);
+      try {
+        const { tree } = openPlacedPanel();
+        measurePanel(tree);
+
+        act(() => {
+          invokeProp(findByTestId(queryRoot(tree), 'response-usage-overlay-backdrop')!, 'onPress');
+        });
+
+        // There is no exit to cover, so holding the panel back would just leave it sitting there.
+        expect(findByTestId(queryRoot(tree), 'response-usage-overlay-panel')).toBeUndefined();
+      } finally {
+        setMockReducedMotionEnabled(false);
+      }
+    });
+
+    it('pours a second row\u2019s panel from its own button rather than reusing the first', () => {
+      let tree: ReactTestRenderer | undefined;
+      const element = (
+        <>
+          <MessageActions text="first" testID="first" usage={sampleUsage} />
+          <MessageActions text="second" testID="second" usage={sampleUsage} />
+        </>
+      );
+      mockMeasureAnchor.mockImplementationOnce((_node, onMeasured) => {
+        onMeasured(anchor);
+      });
+      act(() => {
+        tree = renderer.create(wrap(element));
+      });
+      const infoButton = (testID: string) =>
+        queryRoot(tree!)
+          .findAll(
+            (node) =>
+              node.props['testID'] === `${testID}-info` &&
+              typeof node.props['onPress'] === 'function',
+          )
+          .at(-1)!;
+
+      act(() => {
+        invokeProp(infoButton('first'), 'onPress');
+      });
+      measurePanel(tree!);
+      act(() => {
+        tree!.update(wrap(element));
+      });
+      expect(sampleStyle(tree!, element, 'response-usage-overlay-panel')['transform']).toEqual([
+        { scaleX: 1 },
+        { scaleY: 1 },
+      ]);
+
+      mockMeasureAnchor.mockImplementation((_node, onMeasured) => {
+        onMeasured({ x: 200, y: 300, width: 30, height: 30 });
+      });
+      act(() => {
+        invokeProp(infoButton('second'), 'onPress');
+      });
+
+      // Carrying the first panel's measurement over would leave the replacement already formed,
+      // parked over the row that no longer owns it.
+      const style = sampleStyle(tree!, element, 'response-usage-overlay-panel');
+      expect(style['left']).toBe(-9999);
+      expect(style['transform']).toEqual([
+        { scaleX: POUR_START_SCALE },
+        { scaleY: POUR_START_SCALE },
+      ]);
+    });
   });
 });
