@@ -2509,6 +2509,55 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps a newly picked model selected after the new chat is created', async () => {
+      const api = createApi();
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'server/default-model',
+          displayName: 'Default Model',
+          providerName: 'Bridge',
+          isDefault: true,
+        },
+        {
+          id: 'alt/chosen-model',
+          displayName: 'Chosen Model',
+          providerName: 'Bridge',
+        },
+      ]);
+      const createdChat: Chat = { ...rootChat, id: 'thread-created', messages: [] };
+      (api.createChatIdempotent as jest.Mock).mockResolvedValue(createdChat);
+      (api.sendChatMessageIdempotent as jest.Mock).mockResolvedValue(createdChat);
+      const { tree } = await renderMain({ api });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await press(byLabel(root, 'Bridge · Chosen Model'));
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Hi there');
+        await flush();
+      });
+      await press(byLabel(root, 'Send message'));
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      expect((api.createChatIdempotent as jest.Mock).mock.calls[0][0].model).toBe(
+        'alt/chosen-model',
+      );
+      expect((api.sendChatMessageIdempotent as jest.Mock).mock.calls[0][1].model).toBe(
+        'alt/chosen-model',
+      );
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      act(() => tree.unmount());
+    });
+
     it('opens and applies model, thinking, and mode controls before creating a chat', async () => {
       const api = createApi();
       (api.listModelOptions as jest.Mock).mockResolvedValue([

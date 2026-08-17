@@ -1466,6 +1466,7 @@ impl AgentManager {
             .iter()
             .map(|family_identity| SessionId::new(family_identity.acp_session_id.clone()))
             .collect::<Vec<_>>();
+        let configured_selections = self.configured_selections(connection, &session_id).await;
         let restoration = if connection.negotiated().supports_session_resume() {
             connection
                 .resume_session_with_policy_for_sessions(
@@ -1503,6 +1504,8 @@ impl AgentManager {
             .await?;
         self.apply_config_options(connection, &session_id, restoration)
             .await?;
+        self.restore_configured_selections(connection, &session_id, &configured_selections)
+            .await;
         drop(operations);
         self.read_known_session_from(connection, &session_id).await
     }
@@ -2010,6 +2013,8 @@ impl AgentManager {
                     .cloned()
                     .ok_or_else(|| AcpRuntimeError::UnknownSession(session_id.to_string()))?;
                 let cwd = self.validate_cwd(&entry.cwd)?;
+                let configured_selections =
+                    self.configured_selections(connection, &session_id).await;
                 let config_options = if connection.negotiated().supports_session_resume() {
                     connection
                         .resume_session_with_policy(
@@ -2034,6 +2039,8 @@ impl AgentManager {
                 self.register_session_events(&identity).await;
                 self.apply_config_options(connection, &session_id, config_options)
                     .await?;
+                self.restore_configured_selections(connection, &session_id, &configured_selections)
+                    .await;
             }
         }
         self.read_known_session_from(connection, &session_id).await
@@ -3249,6 +3256,77 @@ impl AgentManager {
         Ok(())
     }
 
+    /// Captures the session's selectable configuration (model, mode, thought level, ...) so it can
+    /// survive a resume/load: some agents answer those requests with a freshly defaulted config,
+    /// which would otherwise silently discard the user's choices.
+    async fn configured_selections(
+        &self,
+        connection: &AcpConnection,
+        session_id: &SessionId,
+    ) -> Vec<(String, String)> {
+        let Some(session) = connection.session(session_id).await else {
+            return Vec::new();
+        };
+        session
+            .snapshot()
+            .await
+            .config
+            .into_iter()
+            .filter(|entry| !entry.options.is_empty())
+            .map(|entry| (entry.id, entry.value))
+            .collect()
+    }
+
+    async fn restore_configured_selections(
+        &self,
+        connection: &AcpConnection,
+        session_id: &SessionId,
+        selections: &[(String, String)],
+    ) {
+        for (option_id, value) in selections {
+            let Some(session) = connection.session(session_id).await else {
+                return;
+            };
+            let Some(option) = session
+                .snapshot()
+                .await
+                .config
+                .into_iter()
+                .find(|entry| &entry.id == option_id)
+            else {
+                continue;
+            };
+            if &option.value == value || !option.options.iter().any(|choice| &choice.value == value)
+            {
+                continue;
+            }
+            let restored = connection
+                .set_session_config_option(SetSessionConfigOptionRequest::new(
+                    session_id.clone(),
+                    option_id.clone(),
+                    SessionConfigOptionValue::value_id(value.clone()),
+                ))
+                .await;
+            match restored {
+                Ok(response) => {
+                    if let Err(error) = self
+                        .apply_config_options(connection, session_id, Some(response.config_options))
+                        .await
+                    {
+                        eprintln!(
+                            "warning: failed to publish restored session config option {option_id}: {error}"
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!(
+                        "warning: failed to restore session config option {option_id} after resume: {error}"
+                    );
+                }
+            }
+        }
+    }
+
     async fn read_known_session_from(
         &self,
         connection: &AcpConnection,
@@ -4183,8 +4261,9 @@ mod tests {
         AgentCapabilities, CancelNotification, CloseSessionResponse, DeleteSessionResponse,
         InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
         LoadSessionResponse, NewSessionResponse, PromptResponse, ResumeSessionResponse,
-        SessionCapabilities, SessionCloseCapabilities, SessionDeleteCapabilities, SessionInfo,
-        SessionListCapabilities, SessionResumeCapabilities, StopReason, ToolCallStatus, ToolKind,
+        SessionCapabilities, SessionCloseCapabilities, SessionConfigOption,
+        SessionDeleteCapabilities, SessionInfo, SessionListCapabilities, SessionResumeCapabilities,
+        SetSessionConfigOptionResponse, StopReason, ToolCallStatus, ToolKind,
     };
     use agent_client_protocol::Agent;
     use axum::extract::{Path as AxumPath, Query, State};
@@ -7607,6 +7686,154 @@ mod tests {
 
         assert!(manager.delete_session("not-a-thread-id").await.is_err());
         manager.shutdown().await;
+    }
+
+    fn model_config_option(current: &str) -> SessionConfigOption {
+        serde_json::from_value(serde_json::json!({
+            "id": "model",
+            "name": "Model",
+            "category": "model",
+            "type": "select",
+            "currentValue": current,
+            "options": [
+                {"value": "default-model", "name": "Default Model"},
+                {"value": "chosen-model", "name": "Chosen Model"},
+            ],
+        }))
+        .expect("model config option")
+    }
+
+    /// Mirrors agents such as OpenCode, which answer `session/resume` with a freshly defaulted
+    /// configuration instead of the session's current one.
+    async fn model_resetting_connection(
+        agent_id: &str,
+        model: Arc<Mutex<String>>,
+    ) -> (AcpConnection, NegotiatedInitialize) {
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async move |request: InitializeRequest, responder, _| {
+                    responder.respond(
+                        InitializeResponse::new(request.protocol_version).agent_capabilities(
+                            AgentCapabilities::new().session_capabilities(
+                                SessionCapabilities::new().resume(SessionResumeCapabilities::new()),
+                            ),
+                        ),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let model = model.clone();
+                    async move |_: NewSessionRequest, responder, _| {
+                        let current = model.lock().await.clone();
+                        responder.respond(
+                            NewSessionResponse::new("model-session")
+                                .config_options(vec![model_config_option(&current)]),
+                        )
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let model = model.clone();
+                    async move |request: SetSessionConfigOptionRequest, responder, _| {
+                        let SessionConfigOptionValue::ValueId { value } = request.value else {
+                            return responder
+                                .respond_with_error(agent_client_protocol::Error::internal_error());
+                        };
+                        let value = value.to_string();
+                        *model.lock().await = value.clone();
+                        responder.respond(SetSessionConfigOptionResponse::new(vec![
+                            model_config_option(&value),
+                        ]))
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let model = model.clone();
+                    async move |_: ResumeSessionRequest, responder, _| {
+                        *model.lock().await = "default-model".to_string();
+                        responder.respond(
+                            ResumeSessionResponse::new()
+                                .config_options(vec![model_config_option("default-model")]),
+                        )
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        AcpConnection::start_transport(agent_id.to_string(), agent, Duration::from_secs(1))
+            .await
+            .expect("model resetting agent starts")
+    }
+
+    #[tokio::test]
+    async fn manager_resume_keeps_the_configured_model_when_the_agent_resets_it() {
+        let model = Arc::new(Mutex::new("default-model".to_string()));
+        let connection = model_resetting_connection("model-agent", model.clone()).await;
+        let manager = AgentManager::from_start_results(
+            "model-agent".to_string(),
+            vec![(manifest("model-agent", "Model"), Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        let session = manager
+            .new_session("model-agent", NewSessionRequest::new("/tmp"))
+            .await
+            .expect("session starts");
+        let thread_id = session.thread_id.clone();
+
+        let configured = manager
+            .set_session_config_option(
+                &thread_id,
+                "model",
+                SessionConfigOptionValue::value_id("chosen-model"),
+            )
+            .await
+            .expect("model applied");
+        assert_eq!(
+            configured
+                .snapshot
+                .config
+                .iter()
+                .find(|entry| entry.id == "model")
+                .map(|entry| entry.value.as_str()),
+            Some("chosen-model")
+        );
+
+        let resumed = manager
+            .resume_session_with_policy(&thread_id, "/tmp", ApprovalPolicy::Untrusted)
+            .await
+            .expect("session resumes");
+
+        assert_eq!(
+            resumed
+                .snapshot
+                .config
+                .iter()
+                .find(|entry| entry.id == "model")
+                .map(|entry| entry.value.as_str()),
+            Some("chosen-model"),
+            "resume must not discard the configured model"
+        );
+        assert_eq!(model.lock().await.as_str(), "chosen-model");
+
+        let read = manager
+            .read_session(&thread_id)
+            .await
+            .expect("session read");
+        assert_eq!(
+            read.snapshot
+                .config
+                .iter()
+                .find(|entry| entry.id == "model")
+                .map(|entry| entry.value.as_str()),
+            Some("chosen-model")
+        );
     }
 
     #[tokio::test]

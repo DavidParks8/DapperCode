@@ -81,9 +81,11 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
       return;
     }
     selectionChatIdRef.current = selectedChatId;
-    setSelectedModelId(null);
-    setSelectedEffort(null);
-  }, [selectedChatId, setSelectedEffort, setSelectedModelId]);
+    const chatId = selectedChatId?.trim();
+    const preference = chatId ? chatModelPreferencesRef.current[chatId] : null;
+    setSelectedModelId(preference?.modelId ?? null);
+    setSelectedEffort(preference?.effort ?? null);
+  }, [chatModelPreferencesRef, selectedChatId, setSelectedEffort, setSelectedModelId]);
   useEffect(() => {
     if (selectedChatId) {
       return;
