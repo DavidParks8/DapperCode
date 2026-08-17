@@ -27,16 +27,25 @@ try {
     throw new Error('macOS tray menu contains a removed bridge status message.');
   }
 
+  if (
+    !/Button\("About DapperCode"\)\s*\{\s*AboutPanelPresenter\.present\(\)\s*\}/.test(traySource)
+  ) {
+    throw new Error('macOS tray menu does not invoke the tested About panel action.');
+  }
+
   execFileSync(
     'xcrun',
     [
       'swiftc',
       '-parse-as-library',
+      'apps/desktop/macos/AboutPanelPresenter.swift',
       'apps/desktop/macos/AppTermination.swift',
       'apps/desktop/macos/BridgeStatusObserver.swift',
       'apps/desktop/macos/tests/AppTerminationTests.swift',
       '-o',
       testExecutable,
+      '-framework',
+      'AppKit',
     ],
     { cwd: rootDir, stdio: 'inherit' },
   );

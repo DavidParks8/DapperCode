@@ -648,7 +648,9 @@ private struct TrayMenu: View {
             get: { model.launchAtLogin },
             set: { model.setLaunchAtLogin($0) }
         ))
-        Button("About DapperCode") { NSApplication.shared.orderFrontStandardAboutPanel(nil) }
+        Button("About DapperCode") {
+            AboutPanelPresenter.present()
+        }
         Divider()
         Button("Quit DapperCode") {
             DispatchQueue.main.async {

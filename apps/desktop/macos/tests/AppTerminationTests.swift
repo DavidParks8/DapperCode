@@ -18,6 +18,19 @@ private func sleepingProcess() -> Process {
 }
 
 @MainActor
+private final class FakeAboutPanelApplication: AboutPanelApplication {
+    private(set) var events: [String] = []
+
+    func activate(ignoringOtherApps flag: Bool) {
+        events.append("activate:\(flag)")
+    }
+
+    func orderFrontStandardAboutPanel(_ sender: Any?) {
+        events.append(sender == nil ? "showAboutPanel" : "showAboutPanelWithSender")
+    }
+}
+
+@MainActor
 private final class FakeBridgeStatusConnection: BridgeStatusConnection {
     private let onHealth: (BridgeObservedHealth) -> Void
     private let onDisconnect: () -> Void
@@ -62,6 +75,13 @@ private final class FakeBridgeStatusConnection: BridgeStatusConnection {
 private struct AppTerminationTests {
     @MainActor
     static func main() async throws {
+        let aboutApplication = FakeAboutPanelApplication()
+        AboutPanelPresenter.present(application: aboutApplication)
+        try require(
+            aboutApplication.events == ["activate:true", "showAboutPanel"],
+            "the About action should activate the menu bar app before showing its panel"
+        )
+
         let registry = OperatorProcessRegistry()
         let inFlight = sleepingProcess()
         try registry.run(inFlight)
