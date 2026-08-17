@@ -46,6 +46,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     this.pendingSocket = null;
     this.connectPromise = null;
     this.reconnectAttempts = 0;
+    this.clearConnectionStableTimer();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -106,6 +107,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     this.shouldReconnect = false;
     this.connectGeneration += 1;
     this.reconnectAttempts = 0;
+    this.clearConnectionStableTimer();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

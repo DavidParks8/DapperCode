@@ -11,6 +11,14 @@ import { PUSH_OBSERVED_METHOD, PUSH_PRESENCE_METHOD } from '@bridge/ws/types';
 
 export abstract class HostBridgeWsClientCore {
   static readonly PROTOCOL_VERSION = 2;
+  /**
+   * How long a socket must stay open before its connection counts as usable.
+   *
+   * A bridge that accepts the upgrade and then immediately closes it (for example because the
+   * workspace runtime cannot start) would otherwise reset the backoff on every attempt and leave
+   * the client dialing at the minimum delay forever.
+   */
+  protected static readonly CONNECTION_STABLE_MS = 10_000;
   protected static readonly TURN_COMPLETION_TTL_MS = 5 * 60 * 1000;
   protected static readonly MAX_RECOVERY_BUFFERED_EVENTS = 2048;
   protected socket: WebSocket | null = null;
@@ -19,6 +27,7 @@ export abstract class HostBridgeWsClientCore {
   protected shouldReconnect = false;
   protected reconnectAttempts = 0;
   protected reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  protected connectionStableTimer: ReturnType<typeof setTimeout> | null = null;
   protected connectPromise: Promise<void> | null = null;
   protected connectGeneration = 0;
   protected readonly eventListeners = new Set<EventListener>();
@@ -54,6 +63,12 @@ export abstract class HostBridgeWsClientCore {
     this.getClientForeground = options.getClientForeground ?? null;
     this.allowQueryTokenAuth = options.allowQueryTokenAuth ?? false;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 180000;
+  }
+  protected clearConnectionStableTimer(): void {
+    if (this.connectionStableTimer) {
+      clearTimeout(this.connectionStableTimer);
+      this.connectionStableTimer = null;
+    }
   }
   public abstract get isConnected(): boolean;
   public abstract get bridgeProtocolError(): BridgeProtocolVersionError | null;

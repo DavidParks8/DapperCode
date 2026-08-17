@@ -48,6 +48,7 @@ use crate::{
     config::{runtime_executable_available, BridgeRuntimeConfig, RuntimePaths},
     platform,
     secrets::{SecretBackend, SecretStore},
+    setup::refresh_registered_agent,
     store::{AppPaths, BrokerSettings, Profile},
 };
 
@@ -1047,13 +1048,39 @@ struct ProcessWorkerLauncher {
     http: Client,
 }
 
+/// Re-registers a workspace's agent before waking its runtime.
+///
+/// A package-manager upgrade replaces the pinned executable, so healing here lets the first device
+/// connection recover the workspace instead of closing every socket until setup is rerun by hand.
+async fn refreshed_workspace_profile(paths: &AppPaths, profile: &Profile) -> Result<Profile> {
+    let refresh_paths = paths.clone();
+    let profile_id = profile.profile_id.clone();
+    let refreshed = tokio::task::spawn_blocking(move || -> Result<Option<Profile>> {
+        let Some(refresh) = refresh_registered_agent(&refresh_paths, &profile_id)? else {
+            return Ok(None);
+        };
+        println!(
+            "workspace {profile_id} re-registered {} after an upgrade: {} -> {} ({})",
+            refresh.agent_id,
+            refresh.previous_version,
+            refresh.resolved_version,
+            refresh.executable.display()
+        );
+        Ok(refresh_paths.load_config()?.find(&profile_id).cloned())
+    })
+    .await
+    .context("agent refresh task failed")??;
+    Ok(refreshed.unwrap_or_else(|| profile.clone()))
+}
+
 #[async_trait]
 impl WorkerLauncher for ProcessWorkerLauncher {
     async fn launch(&self, access: &WorkspaceAccess) -> Result<Arc<dyn ManagedWorker>> {
         let bridge_port = allocate_worker_port(access.profile.preview_port).await?;
         let internal_token = random_token()?;
+        let profile = refreshed_workspace_profile(&self.paths, &access.profile).await?;
         let mut config = BridgeRuntimeConfig::from_profile(
-            &access.profile,
+            &profile,
             &internal_token,
             SecretBackend::File,
             &self.paths,
@@ -1069,7 +1096,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
             .insert("BRIDGE_PREVIEW_HOST".into(), self.settings.host.clone());
         config.values.insert(
             "BRIDGE_PREVIEW_PORT".into(),
-            access.profile.preview_port.to_string(),
+            profile.preview_port.to_string(),
         );
         config.values.insert(
             "BRIDGE_CONNECT_URL".into(),
@@ -1077,7 +1104,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
         );
         config.values.insert(
             "BRIDGE_PREVIEW_CONNECT_URL".into(),
-            access.profile.preview_connect_url.clone(),
+            profile.preview_connect_url.clone(),
         );
         config
             .values
@@ -1092,7 +1119,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
             .values
             .insert("BRIDGE_OWNER_PID".into(), std::process::id().to_string());
 
-        let log_path = self.paths.log_path(&access.profile.profile_id);
+        let log_path = self.paths.log_path(&profile.profile_id);
         let stdout = OpenOptions::new()
             .create(true)
             .append(true)
@@ -1101,7 +1128,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
         let stderr = stdout.try_clone()?;
         let mut command = Command::new(&self.bridge_binary);
         command
-            .current_dir(&access.profile.workspace)
+            .current_dir(&profile.workspace)
             .envs(&config.values)
             .kill_on_drop(true)
             .stdin(Stdio::null())

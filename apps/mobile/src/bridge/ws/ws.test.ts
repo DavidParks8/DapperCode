@@ -476,6 +476,86 @@ describe('HostBridgeWsClient', () => {
     }
   });
 
+  it('backs off when the bridge accepts a socket and immediately closes it', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const client = new HostBridgeWsClient('http://localhost:8787');
+      const status = jest.fn();
+      client.onStatus(status);
+      client.connect();
+
+      // A workspace runtime that cannot start accepts the upgrade, then closes the socket. The
+      // connection was never usable, so the backoff must keep growing instead of pinning at its
+      // minimum and hot-looping the connection indicator.
+      const openThenClose = async () => {
+        const socket = latestMockSocket();
+        socket.simulateOpen();
+        socket.simulateClose();
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+
+      await openThenClose();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(2);
+
+      await openThenClose();
+      await jest.advanceTimersByTimeAsync(999);
+      expect(mockInstances).toHaveLength(2);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(mockInstances).toHaveLength(3);
+
+      await openThenClose();
+      await jest.advanceTimersByTimeAsync(1999);
+      expect(mockInstances).toHaveLength(3);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(mockInstances).toHaveLength(4);
+
+      expect(status.mock.calls.map(([connected]) => connected)).toEqual([
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+      ]);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it('resets backoff once a connection stays open long enough to be usable', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const client = new HostBridgeWsClient('http://localhost:8787');
+      client.connect();
+
+      latestMockSocket().simulateOpen();
+      latestMockSocket().simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(2);
+
+      const stable = latestMockSocket();
+      stable.simulateOpen();
+      await jest.advanceTimersByTimeAsync(10_000);
+      stable.simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(3);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it('disconnect() cancels a scheduled reconnect', async () => {
     jest.useFakeTimers();
     jest.spyOn(Math, 'random').mockReturnValue(0);

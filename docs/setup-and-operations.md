@@ -223,6 +223,18 @@ Native setup records the lowercase SHA-256 digest of the selected executable. Th
 rechecks that digest immediately before constructing the SDK process transport, so a moved or
 modified executable fails closed and must be registered again.
 
+Agent upgrades are handled without that manual step. Package managers install each release under a
+versioned directory and only keep the launcher entry stable, so an upgrade invalidates the recorded
+path and digest together and would otherwise break every workspace runtime until setup was rerun.
+Before waking a workspace, the operator therefore re-registers an agent whose recorded executable no
+longer matches. Re-registration remains an operator decision rather than implicit trust: the
+replacement must be published by one of the platform's trusted agent directories
+(`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` on macOS) and must not be writable by other
+users. The new path, version, and digest are written to `config.json` and the profile manifest, the
+change is recorded in `broker.log`, and the bridge still recomputes and fails closed on whatever
+digest it is handed. A binary that changes at an unchanged path, or a replacement outside those
+directories, is still rejected and requires setup.
+
 The bridge also retains compatibility with typed `dappercode-tree-v1` manifests. When such a
 manifest is loaded, it independently recomputes the complete controlled installation tree. The
 receipt is deterministic JSON Lines and excludes only `.dappercode-install.json` to avoid
