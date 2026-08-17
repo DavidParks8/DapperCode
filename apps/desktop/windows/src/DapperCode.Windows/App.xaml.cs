@@ -140,7 +140,6 @@ public sealed partial class App : Application
                 0,
                 IsRunning: false,
                 IsBusy: true,
-                IsConfigured: false,
                 CanOpenLogs: false,
                 LaunchAtLogin: false,
                 CanChangeLaunchAtLogin: false);
@@ -151,7 +150,6 @@ public sealed partial class App : Application
             model.Bridges.Count,
             model.IsRunning,
             model.IsBusy,
-            model.IsConfigured,
             !string.IsNullOrWhiteSpace(model.Snapshot.LogPath),
             model.LaunchAtLogin,
             model.LaunchAtLoginCanChange);

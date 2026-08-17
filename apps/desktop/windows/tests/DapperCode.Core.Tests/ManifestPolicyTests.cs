@@ -249,10 +249,10 @@ public sealed class ManifestPolicyTests
             window,
             "The broker runs while DapperCode is open and stops when it quits.",
             StringComparison.Ordinal);
-        StringAssert.Contains(
-            tray,
-            "Broker follows DapperCode's lifetime",
-            StringComparison.Ordinal);
+        Assert.IsFalse(
+            tray.Contains("Text = EscapeMenuLabel(state.Status)", StringComparison.Ordinal));
+        Assert.IsFalse(
+            tray.Contains("Broker follows DapperCode's lifetime", StringComparison.Ordinal));
         Assert.IsFalse(snapshot.Contains("AutoStart", StringComparison.Ordinal));
         foreach (var prohibited in new[]
                  {

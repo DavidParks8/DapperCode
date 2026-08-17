@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -14,8 +14,19 @@ if (process.platform !== 'darwin') {
 const rootDir = path.resolve(import.meta.dirname, '..');
 const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'dappercode-macos-tests-'));
 const testExecutable = path.join(temporaryDirectory, 'AppTerminationTests');
+const traySource = readFileSync(
+  path.join(rootDir, 'apps/desktop/macos/DapperCodeApp.swift'),
+  'utf8',
+);
 
 try {
+  if (
+    traySource.includes('Text(model.snapshot.headline)') ||
+    traySource.includes("Broker follows DapperCode's lifetime")
+  ) {
+    throw new Error('macOS tray menu contains a removed bridge status message.');
+  }
+
   execFileSync(
     'xcrun',
     [

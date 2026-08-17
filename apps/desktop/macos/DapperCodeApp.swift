@@ -639,10 +639,6 @@ private struct TrayMenu: View {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
         Divider()
-        Text(model.snapshot.headline)
-        if model.isConfigured {
-            Text("Broker follows DapperCode's lifetime")
-        }
         if model.bridges.count > 1 {
             Text("\(model.bridges.count) workspaces configured")
         }

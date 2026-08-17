@@ -124,25 +124,12 @@ public sealed class TrayIconService : IDisposable
             Text = "&Open DapperCode",
         });
         _menu.Items.Add(new MenuFlyoutSeparator());
-        _menu.Items.Add(new MenuFlyoutItem
-        {
-            IsEnabled = false,
-            Text = EscapeMenuLabel(state.Status),
-        });
         if (state.WorkspaceCount > 1)
         {
             _menu.Items.Add(new MenuFlyoutItem
             {
                 IsEnabled = false,
                 Text = $"{state.WorkspaceCount} workspaces configured",
-            });
-        }
-        if (state.IsConfigured)
-        {
-            _menu.Items.Add(new MenuFlyoutItem
-            {
-                IsEnabled = false,
-                Text = "Broker follows DapperCode's lifetime",
             });
         }
         _menu.Items.Add(new MenuFlyoutItem
