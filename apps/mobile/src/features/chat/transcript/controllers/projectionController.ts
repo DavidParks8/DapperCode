@@ -1,6 +1,11 @@
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import type { AgUiThreadMessageState } from '@bridge/agui/agUiMessages';
-import { getMessageText, getSubAgentMeta, preserveKnownSubAgentThreadLink } from '@bridge/messages';
+import {
+  getMessageText,
+  getSubAgentMeta,
+  isUnlinkedSubAgentActivity,
+  preserveKnownSubAgentThreadLink,
+} from '@bridge/messages';
 import { partsMatchMessageContent } from '@bridge/agui/agUiContent';
 import { filterReasoningMessages, normalizeChatMessageMatchContent } from '../../helpers/helpers';
 import { trimInheritedParentMessages } from '../../agents/transcript';
@@ -52,7 +57,7 @@ export function projectTranscript({
   );
 
   return {
-    messages,
+    messages: messages.filter((message) => !isUnlinkedSubAgentActivity(message)),
     hiddenInheritedMessageCount: base.hiddenInheritedMessageCount,
   };
 }

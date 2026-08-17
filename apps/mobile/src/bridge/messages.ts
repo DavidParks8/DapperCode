@@ -98,6 +98,20 @@ export function getSubAgentMeta(
   return isChatMessageSubAgentMeta(value) ? value : undefined;
 }
 
+export function getSubAgentThreadId(message: Message | ChatMessage): string | undefined {
+  return getSubAgentMeta(message)
+    ?.receiverThreadIds?.map((id) => id.trim())
+    .find(Boolean);
+}
+
+export function isUnlinkedSubAgentActivity(message: Message | ChatMessage): boolean {
+  return (
+    message.role === 'activity' &&
+    message.activityType === SUBAGENT_ACTIVITY_TYPE &&
+    getSubAgentThreadId(message) === undefined
+  );
+}
+
 export function preserveKnownSubAgentThreadLink(
   existing: ChatMessage | undefined,
   incoming: ChatMessage,

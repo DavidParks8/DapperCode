@@ -179,6 +179,60 @@ describe('transcriptProjectionController', () => {
     ).not.toThrow();
   });
 
+  it('suppresses an unlinked subagent until a navigable child thread arrives', () => {
+    const unlinked = createActivityMessage(
+      'subagent:task-1',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      'now',
+    );
+    const base = {
+      chat: { ...chat, parentThreadId: undefined },
+      parentChat: null,
+      showToolCalls: true,
+      threadStatuses: new Map<string, Chat['status']>(),
+    };
+
+    const beforeLink = projectTranscript({
+      ...base,
+      liveMessageState: liveState([unlinked]),
+    });
+    expect(beforeLink.messages.map((message) => message.id)).not.toContain(unlinked.id);
+
+    const linked = createActivityMessage(
+      unlinked.id,
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: ['child-thread'],
+          agentStatus: 'running',
+        },
+      },
+      'now',
+    );
+    const afterLink = projectTranscript({
+      ...base,
+      liveMessageState: liveState([linked]),
+    });
+    expect(afterLink.messages.at(-1)).toMatchObject({
+      id: unlinked.id,
+      content: {
+        subAgent: {
+          receiverThreadIds: ['child-thread'],
+        },
+      },
+    });
+  });
+
   it('does not append blank or duplicate live assistant text', () => {
     const withAssistant = {
       ...chat,

@@ -4164,7 +4164,11 @@ function MainRouteShell() {
         }
         return { node, props: messageProps(node) };
       };
-      const subagentActivity = (status: 'running' | 'completed', latest: string) =>
+      const subagentActivity = (
+        status: 'running' | 'completed',
+        latest: string,
+        receiverThreadIds = [childThreadId],
+      ) =>
         agUi({
           type: 'ACTIVITY_SNAPSHOT',
           messageId: 'subagent:task-live',
@@ -4177,11 +4181,21 @@ function MainRouteShell() {
               toolCallId: 'task-live',
               tool: 'spawnAgent',
               senderThreadId: threadId,
-              receiverThreadIds: [childThreadId],
+              receiverThreadIds,
               agentStatus: status,
             },
           },
         });
+
+      await emit(subagentActivity('running', 'Discovering child session', []));
+      expect(
+        renderedMessages().some(
+          (candidate) => messageProps(candidate).message.id === 'subagent:task-live',
+        ),
+      ).toBe(false);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat'),
+      ).toHaveLength(0);
 
       await emit(subagentActivity('running', 'Thinking: Reviewing architecture'));
       const liveCard = () => renderedMessage('subagent:task-live');

@@ -7,6 +7,7 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared
 import {
   COMPACTION_ACTIVITY_TYPE,
   getSubAgentMeta,
+  getSubAgentThreadId,
   SUBAGENT_ACTIVITY_TYPE,
 } from '@bridge/messages';
 import { useAppTheme, type AppTheme } from '@shared/theme';
@@ -264,7 +265,10 @@ function renderSubAgentChatMessage(ctx: ChatMessageRenderContext) {
   const { message, styles, timelineEntries, messageText, onOpenSubAgentThread } = ctx;
   const entries = timelineEntries?.length ? timelineEntries : [{ title: messageText, details: [] }];
   const meta = getSubAgentMeta(message);
-  const threadId = meta?.receiverThreadIds?.[0]?.trim() ?? '';
+  const threadId = getSubAgentThreadId(message);
+  if (!threadId) {
+    return <></>;
+  }
   const running = Boolean(meta?.agentStatus) && !isTerminalSubAgentStatus(meta?.agentStatus);
   return (
     <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>

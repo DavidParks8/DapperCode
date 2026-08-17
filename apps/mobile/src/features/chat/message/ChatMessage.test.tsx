@@ -1110,7 +1110,10 @@ describe('ChatMessage transcript width', () => {
           message={createActivityMessage(
             'subagent-width',
             SUBAGENT_ACTIVITY_TYPE,
-            { text: 'Delegated to explore agent' },
+            {
+              text: 'Delegated to explore agent',
+              subAgent: { receiverThreadIds: ['child-width'] },
+            },
             '2026-04-17T00:00:00.000Z',
           )}
         />
@@ -1777,7 +1780,11 @@ describe('ChatMessage system timeline matrices', () => {
       SUBAGENT_ACTIVITY_TYPE,
       {
         text: '• Sub-agent working\n  Status: running\n  Latest: Working on Read repository',
-        subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
+        subAgent: {
+          toolCallId: 'task-live',
+          agentStatus: 'running',
+          receiverThreadIds: ['child-live'],
+        },
       },
       '2026-04-17T00:00:00.000Z',
     );
@@ -1793,7 +1800,11 @@ describe('ChatMessage system timeline matrices', () => {
       SUBAGENT_ACTIVITY_TYPE,
       {
         text: '• Sub-agent completed\n  Status: completed\n  Latest: Returned result',
-        subAgent: { toolCallId: 'task-live', agentStatus: 'completed', receiverThreadIds: [] },
+        subAgent: {
+          toolCallId: 'task-live',
+          agentStatus: 'completed',
+          receiverThreadIds: ['child-live'],
+        },
       },
       '2026-04-17T00:00:01.000Z',
     );
@@ -1990,7 +2001,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders disabled reasoning, subagent, and empty tool edge cases', () => {
+  it('renders disabled reasoning and suppresses an unlinked subagent edge case', () => {
     const reasoning = renderMessage({
       id: 'reasoning-empty',
       role: 'system',
@@ -2015,11 +2026,9 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(
-      requireTestValue(
-        subagent.root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat')[0],
-        'indexed test value',
-      ).props['accessibilityState'],
-    ).toEqual({ disabled: true });
+      subagent.root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat'),
+    ).toHaveLength(0);
+    expect(hasRenderedText(subagent.root, 'Agent failed')).toBe(false);
     act(() => subagent.unmount());
 
     expect(buildToolInvocations([])).toEqual([]);
@@ -2036,6 +2045,7 @@ describe('ChatMessage system timeline matrices', () => {
       role: 'system',
       systemKind: 'subAgent',
       content: `• ${title}`,
+      subAgentMeta: { receiverThreadIds: [`child-${title}`] },
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(tree.root.findAll((node) => node.props['name'] === icon).length).toBeGreaterThan(0);
