@@ -48,14 +48,13 @@ function createToggleFavoriteHandler(
 
 function createActionPressHandler(
   onActionPress: WorkspacePickerProps['onActionPress'],
-  footerPath: string | null,
-): (() => void) | undefined {
+): ((path: string | null) => void) | undefined {
   if (!onActionPress) {
     return undefined;
   }
-  return () => {
+  return (path: string | null) => {
     void feedback.selection();
-    onActionPress(footerPath);
+    onActionPress(path);
   };
 }
 
@@ -210,7 +209,7 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
   };
 
   const handleToggleFavorite = createToggleFavoriteHandler(onToggleFavorite);
-  const handleActionPress = createActionPressHandler(onActionPress, footerPath);
+  const handleActionPress = createActionPressHandler(onActionPress);
 
   return (
     <WorkspacePickerView

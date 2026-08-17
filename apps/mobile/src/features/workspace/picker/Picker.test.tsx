@@ -1,7 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type * as fsNode from 'fs';
 import type * as pathNode from 'path';
-import { Alert, Text, TextInput } from 'react-native';
+import { Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -91,7 +91,7 @@ describe('WorkspacePicker', () => {
     });
 
     act(() => {
-      readOnPress(findPressableWithExactText(tree.root, 'Use').props)();
+      readOnPress(findPressableWithExactText(tree.root, 'Use serious-projects').props)();
     });
 
     expect(onSelectPath).toHaveBeenCalledWith(seriousProjectsPath);
@@ -118,11 +118,14 @@ describe('WorkspacePicker', () => {
 
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Back').length,
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Cancel').length,
     ).toBeGreaterThan(0);
     expect(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0]
-        ?.props['accessibilityState'],
+      root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Use default workspace' &&
+          typeof node.props['accessibilityState'] === 'object',
+      )[0]?.props['accessibilityState'],
     ).toEqual({ disabled: false, selected: false });
     act(() => {
       expectValue(rendered).unmount();
@@ -144,11 +147,8 @@ describe('WorkspacePicker', () => {
     const root = tree.root as QueryableTestInstance;
     act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
-    const parent = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Go to parent folder')[0],
-      'indexed test value',
-    );
-    act(() => readOnPress(parent.props)());
+    pressLabel(root, 'Code, current folder');
+    pressLabel(root, 'Go to davidparks');
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks');
     const search = root
       .findAllByType(TextInput)
@@ -159,31 +159,14 @@ describe('WorkspacePicker', () => {
     act(() => search.props.onChangeText('missing'));
     expect(flattenTreeText(root)).toContain('No folders match this search.');
     act(() => search.props.onChangeText(''));
-    act(() => readOnPress(findPressableWithExactText(root, 'Use').props)());
+    act(() => readOnPress(findPressableWithExactText(root, 'Use davidparks').props)());
     expect(onSelectPath).toHaveBeenCalledWith('/Users/davidparks');
-    const unpin = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Pin davidparks')[0],
-      'indexed test value',
-    );
-    act(() => readOnPress(unpin.props)());
+    pressLabel(root, 'More actions');
+    pressLabel(root, 'Pin davidparks');
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks');
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
+    pressLabel(root, 'Use default workspace');
     expect(onSelectPath).toHaveBeenCalledWith(null);
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
+    pressLabel(root, 'Cancel');
     expect(onClose).toHaveBeenCalled();
     act(() => tree.unmount());
   });
@@ -214,14 +197,8 @@ describe('WorkspacePicker', () => {
     expect(
       root.findAll((node) => node.props['accessibilityLabel'] === 'Loading folders...').length,
     ).toBeGreaterThan(0);
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
+    pressLabel(root, 'More actions');
+    pressLabel(root, 'Clone here');
     expect(onActionPress).toHaveBeenCalled();
     act(() => tree.update(renderPickerMatrix({ entries: [], loadingEntries: false })));
     expect(flattenTreeText(root)).toContain('No folders found here.');
@@ -258,18 +235,11 @@ describe('WorkspacePicker', () => {
       requireTestValue(root.findAllByType(TextInput)[0], 'indexed test value').props['value'],
     ).toBe('notes');
     expect(flattenTreeText(root)).toContain('Default workspace');
-    const use = requireTestValue(
-      root.findAll(
-        (node) => node.props['accessibilityLabel'] === 'Use Default workspace workspace',
-      )[0],
-      'indexed test value',
-    );
-    const pin = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Pin Default workspace')[0],
-      'indexed test value',
-    );
+    const use = findByLabel(root, 'Use Default workspace');
     expect(use.props['accessibilityState']).toEqual({ disabled: true });
-    expect(pin.props['accessibilityState']).toEqual({ disabled: true, selected: false });
+    // Nothing is pending and no custom action was supplied, so the overflow menu is withheld
+    // instead of rendering a button whose menu would be empty.
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === 'More actions')).toEqual([]);
 
     act(() =>
       tree.update(
@@ -317,54 +287,44 @@ describe('WorkspacePicker', () => {
       );
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    const up = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Go to parent folder')[0],
-      'indexed test value',
-    );
-    const action = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
-      'indexed test value',
-    );
-    expect(up.props['accessibilityState']).toEqual({ disabled: true });
+    pressLabel(root, 'More actions');
+    const action = findByLabel(root, 'Clone here');
     expect(action.props['accessibilityState']).toEqual({ disabled: true });
     expect(action.props['accessibilityHint']).toBe('Clones a repository into this folder');
+    act(() => readOnPress(findByLabel(root, 'Close menu').props)());
+
+    // The current folder is listed in the path menu for orientation, but selecting it is inert.
+    pressLabel(root, 'Code, current folder');
+    pressLabel(root, 'Code');
     expect(onBrowsePath).not.toHaveBeenCalled();
     expect(onActionPress).not.toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
   });
 
-  it('confirms pinned and unpinned workspaces through long-press actions', async () => {
+  it('offers row context-menu actions and swipe-to-unpin for pinned workspaces', () => {
     const onToggleFavorite = jest.fn();
-    const alert = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
-      buttons?.find((button) => button.style !== 'cancel')?.onPress?.();
-    });
+    const onSelectPath = jest.fn();
     let rendered: ReactTestRenderer | undefined;
     act(() => {
-      rendered = renderer.create(renderPickerMatrix({ onToggleFavorite }));
+      rendered = renderer.create(renderPickerMatrix({ onToggleFavorite, onSelectPath }));
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
-    const pinnedTile = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Code, 12 chats')[0],
-      'indexed test value',
-    );
-    const notesRow = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Open folder notes')[0],
-      'indexed test value',
-    );
-    act(() => {
-      pinnedTile.props.onLongPress();
-      notesRow.props.onLongPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(alert.mock.calls[0]?.[0]).toBe('Unpin this workspace?');
-    expect(alert.mock.calls[0]?.[2]?.[1]).toMatchObject({ text: 'Unpin workspace' });
-    expect(alert.mock.calls[1]?.[0]).toBe('Pin this workspace?');
-    expect(alert.mock.calls[1]?.[2]?.[1]).toMatchObject({ text: 'Pin workspace' });
-    expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code');
+
+    const notesRow = findByLabel(root, 'Open folder notes');
+    expect(notesRow.props['accessibilityHint']).toBe('Touch and hold for more actions');
+    act(() => notesRow.props.onLongPress());
+    pressLabel(root, 'Pin notes');
     expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
-    alert.mockRestore();
+
+    act(() => findByLabel(root, 'Open folder notes').props.onLongPress());
+    pressLabel(root, 'Use notes');
+    expect(onSelectPath).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
+
+    // Pinned rows are unpinned by swiping instead of a long-press confirmation dialog.
+    const pinnedRow = findByLabel(root, 'Open folder Code');
+    expect(pinnedRow.props['accessibilityHint']).toBe('Swipe left to unpin this workspace');
+    act(() => readOnPress(findByLabel(root, 'Unpin Code').props)());
+    expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code');
     act(() => expectValue(rendered).unmount());
   });
 
@@ -434,21 +394,12 @@ describe('WorkspacePicker', () => {
     });
     const root = expectValue(rendered).root as QueryableTestInstance;
     expect(flattenTreeText(root)).toContain('1 chat');
-    const action = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Clone here')[0],
-      'indexed test value',
-    );
+    pressLabel(root, 'More actions');
+    const action = findByLabel(root, 'Clone here');
     expect(action.props['accessibilityHint']).toBe('Create a checkout here');
     act(() => readOnPress(action.props)());
     expect(onActionPress).toHaveBeenCalledWith('/Users/davidparks/Code/dappercode');
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
+    pressLabel(root, 'Cancel');
     expect(onClose).toHaveBeenCalled();
     act(() => expectValue(rendered).unmount());
   });
@@ -496,12 +447,11 @@ describe('WorkspacePicker', () => {
         </SafeAreaProvider>,
       );
     });
-    expect(
-      requireTestValue(
-        root.findAll((node) => node.props['accessibilityLabel'] === 'Pin Default workspace')[0],
-        'indexed test value',
-      ).props['accessibilityState'],
-    ).toEqual({ disabled: true, selected: false });
+    expect(findByLabel(root, 'Use Default workspace').props['accessibilityState']).toEqual({
+      disabled: true,
+    });
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === 'More actions')).toEqual([]);
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === 'Unpin Code')).toEqual([]);
     act(() => expectValue(rendered).unmount());
   });
 
@@ -524,62 +474,57 @@ describe('WorkspacePicker', () => {
     act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
     expect(selection).toHaveBeenCalledTimes(1);
 
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Use default workspace')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
+    pressLabel(root, 'Use default workspace');
     expect(selection).toHaveBeenCalledTimes(2);
 
-    const unpin = requireTestValue(
-      root.findAll(
-        (node) =>
-          typeof node.props['accessibilityLabel'] === 'string' &&
-          /^(Pin|Unpin) /.test(node.props['accessibilityLabel']) &&
-          node.props['accessibilityLabel'] !== 'Pin Default workspace',
-      )[0],
-      'indexed test value',
-    );
-    act(() => readOnPress(unpin.props)());
+    // Opening a menu is one gesture and choosing from it is another, so each gets its own tick.
+    pressLabel(root, 'More actions');
     expect(selection).toHaveBeenCalledTimes(3);
-
-    act(() =>
-      readOnPress(
-        requireTestValue(
-          root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
-          'indexed test value',
-        ).props,
-      )(),
-    );
-    expect(onClose).toHaveBeenCalled();
+    pressLabel(root, 'Pin notes');
+    expect(onToggleFavorite).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
     expect(selection).toHaveBeenCalledTimes(4);
+
+    pressLabel(root, 'Cancel');
+    expect(onClose).toHaveBeenCalled();
+    expect(selection).toHaveBeenCalledTimes(5);
 
     act(() => tree.unmount());
   });
 
-  it('pads the compact header Back button out to the platform touch-target minimum', () => {
+  it('reveals the inline nav-bar title only once the large title scrolls away', () => {
     let rendered: ReactTestRenderer | undefined;
     act(() => {
       rendered = renderer.create(renderPickerMatrix({}));
     });
     const tree = expectValue(rendered);
     const root = tree.root as QueryableTestInstance;
-    const backButton = requireTestValue(
-      root.findAll((node) => node.props['accessibilityLabel'] === 'Back')[0],
-      'indexed test value',
-    );
-    const hitSlop = backButton.props['hitSlop'] as {
-      top: number;
-      bottom: number;
-      left: number;
-      right: number;
-    };
-    // closeButton is drawn at 36px; hitSlop must pad it out to at least 44 (iOS/default minimum).
-    expect(36 + hitSlop.top + hitSlop.bottom).toBeGreaterThanOrEqual(44);
-    expect(36 + hitSlop.left + hitSlop.right).toBeGreaterThanOrEqual(44);
+    const countTitles = () =>
+      root.findAll(
+        (node) =>
+          typeof node.type === 'string' &&
+          node.props['accessibilityLabel'] === 'Code, current folder',
+      ).length;
+
+    expect(countTitles()).toBe(1);
+    act(() => scrollList(root, 120));
+    expect(countTitles()).toBe(2);
+    act(() => scrollList(root, 0));
+    expect(countTitles()).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it('pads the compact nav bar buttons out to the platform touch-target minimum', () => {
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        renderPickerMatrix({ actionLabel: 'Clone here', onActionPress: jest.fn() }),
+      );
+    });
+    const tree = expectValue(rendered);
+    const root = tree.root as QueryableTestInstance;
+    // Cancel is drawn 64x32 and the overflow glyph 30x30; hitSlop pads both to at least 44.
+    expectPaddedTouchTarget(findByLabel(root, 'Cancel'), 64, 32);
+    expectPaddedTouchTarget(findByLabel(root, 'More actions'), 30, 30);
     act(() => tree.unmount());
   });
 
@@ -656,20 +601,18 @@ describe('WorkspacePicker', () => {
       expect(offenders).toEqual([]);
     });
 
-    it('renders the header title using the title semantic role', () => {
+    it('renders the current folder as a large title', () => {
       let rendered: ReactTestRenderer | undefined;
       act(() => {
         rendered = renderer.create(renderPickerMatrix({}));
       });
       const tree = expectValue(rendered);
       const root = tree.root as QueryableTestInstance;
-      const titleNode = root.findAll(
-        (node) => node.children.map(String).join('') === 'Choose Workspace',
-      )[0];
+      const titleNode = root.findAll((node) => node.children.map(String).join('') === 'Code')[0];
       const style = Array.isArray(titleNode?.props['style'])
         ? Object.assign({}, ...(titleNode.props['style'] as object[]))
         : ((titleNode?.props['style'] as Record<string, unknown>) ?? {});
-      expect(style.fontSize).toBe(theme.typography.title.fontSize);
+      expect(style.fontSize).toBe(theme.typography.largeTitle.fontSize);
       act(() => tree.unmount());
     });
   });
@@ -758,6 +701,44 @@ function expectValue<T>(value: T | undefined): T {
     throw new Error('Expected value to be set');
   }
   return value;
+}
+
+function findByLabel(root: QueryableTestInstance, label: string): QueryableTestInstance {
+  // Rows are composed, so several ancestors carry the same label; the innermost pressable is the
+  // one holding the real press handler, accessibility state, and hit slop.
+  const matches = root.findAll(
+    (node) =>
+      node.props['accessibilityLabel'] === label && typeof node.props['onPress'] === 'function',
+  );
+  return requireTestValue(matches[matches.length - 1], `control labelled "${label}"`);
+}
+
+function pressLabel(root: QueryableTestInstance, label: string): void {
+  const target = findByLabel(root, label);
+  act(() => readOnPress(target.props)());
+}
+
+function scrollList(root: QueryableTestInstance, offsetY: number): void {
+  const list = requireTestValue(
+    root.findAll(
+      (node) => typeof node.props['onScroll'] === 'function' && Array.isArray(node.props['data']),
+    )[0],
+    'scrollable folder list',
+  );
+  (list.props['onScroll'] as (event: unknown) => void)({
+    nativeEvent: { contentOffset: { y: offsetY } },
+  });
+}
+
+function expectPaddedTouchTarget(node: QueryableTestInstance, width: number, height: number): void {
+  const hitSlop = node.props['hitSlop'] as {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  };
+  expect(height + hitSlop.top + hitSlop.bottom).toBeGreaterThanOrEqual(44);
+  expect(width + hitSlop.left + hitSlop.right).toBeGreaterThanOrEqual(44);
 }
 
 function readOnPress(props: Record<string, unknown>): () => void {

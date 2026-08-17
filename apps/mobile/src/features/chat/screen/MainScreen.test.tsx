@@ -3160,11 +3160,13 @@ function MainRouteShell() {
         });
         await flush();
       });
+      await press(byLabel(root, 'More actions'));
       await press(byLabel(root, 'Pin workspace'));
       expect(byLabel(root, 'Unpin workspace')).toBeTruthy();
       await press(byLabel(root, 'Open folder mobile'));
       expect(hasText(root, 'Showing 0 of 12 entries.')).toBe(true);
-      await press(byLabel(root, 'Go to parent folder'));
+      await press(byLabel(root, 'mobile, current folder'));
+      await press(byLabel(root, 'Go to workspace'));
       expect(hasText(root, 'browse denied')).toBe(true);
       await press(byLabel(root, 'Use default workspace'));
       expect(store.get(defaultStartCwdAtom)).toBeNull();
@@ -3222,7 +3224,7 @@ function MainRouteShell() {
 
       await press(byLabelPrefix(root, 'Workspace, '));
       await press(byLabel(root, 'Open folder mobile'));
-      await press(byLabel(root, 'Use mobile workspace'));
+      await press(byLabel(root, 'Use mobile'));
       expect(store.get(defaultStartCwdAtom)).toBe('/workspace/mobile');
       expect(router.back).toHaveBeenCalledTimes(1);
       expect(router.dismissTo).not.toHaveBeenCalled();
@@ -3293,6 +3295,7 @@ function MainRouteShell() {
 
       await press(byLabelPrefix(root, 'Workspace, '));
       await flush();
+      await press(byLabel(root, 'More actions'));
       await press(byLabel(root, 'Clone Repo'));
       await act(async () => {
         textInput(root, 'Repository URL').props.onChangeText('git@github.com:org/repo.git');
@@ -3301,7 +3304,7 @@ function MainRouteShell() {
       expect(textInput(root, 'Clone directory name').props['value']).toBe('repo');
       await press(byLabelPrefix(root, 'Clone into '));
       await press(byLabel(root, 'Open folder destination'));
-      await press(byLabel(root, 'Use destination workspace'));
+      await press(byLabel(root, 'Use destination'));
       expect(hasText(root, 'Git checkout')).toBe(true);
 
       await press(pressForText(root, 'Clone and use'));

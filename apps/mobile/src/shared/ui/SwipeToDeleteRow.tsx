@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -31,13 +31,18 @@ export interface SwipeToDeleteRowProps {
   deleteLabel?: string;
   /** Painted behind the sliding content so the destructive layer stays hidden while at rest. */
   contentBackgroundColor?: string;
+  /** Overrides below let a caller reuse the gesture for a non-destructive action such as unpinning. */
+  actionIconName?: ComponentProps<typeof Ionicons>['name'];
+  actionBackgroundColor?: string;
+  actionForegroundColor?: string;
+  actionAccessibilityHint?: string;
   enabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
 /**
- * iOS Mail style row: dragging left reveals a destructive action, and dragging most of the way
- * across commits the delete without a second tap.
+ * iOS Mail style row: dragging left reveals an action, and dragging most of the way across commits
+ * it without a second tap. Destructive by default; the action props recolor it for other verbs.
  */
 export function SwipeToDeleteRow({
   children,
@@ -45,6 +50,10 @@ export function SwipeToDeleteRow({
   deleteAccessibilityLabel,
   deleteLabel = 'Delete',
   contentBackgroundColor,
+  actionIconName = 'trash-outline',
+  actionBackgroundColor,
+  actionForegroundColor,
+  actionAccessibilityHint = 'Deletes this session.',
   enabled = true,
   style,
 }: SwipeToDeleteRowProps) {
@@ -155,24 +164,39 @@ export function SwipeToDeleteRow({
       >
         {enabled ? (
           <Animated.View
-            style={[styles.actionLayer, actionLayerStyle]}
+            style={[
+              styles.actionLayer,
+              actionBackgroundColor ? { backgroundColor: actionBackgroundColor } : null,
+              actionLayerStyle,
+            ]}
             pointerEvents="box-none"
             testID="swipe-delete-action-layer"
           >
             <Pressable
-              accessibilityHint="Deletes this session."
+              accessibilityHint={actionAccessibilityHint}
               accessibilityLabel={deleteAccessibilityLabel}
               accessibilityRole="button"
               onPress={commitDelete}
-              style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+              style={({ pressed }) => [
+                styles.action,
+                actionBackgroundColor ? { backgroundColor: actionBackgroundColor } : null,
+                pressed && styles.actionPressed,
+              ]}
             >
               <Ionicons
                 {...decorativeAccessibilityProps}
-                name="trash-outline"
+                name={actionIconName}
                 size={18}
-                color={theme.colors.white}
+                color={actionForegroundColor ?? theme.colors.white}
               />
-              <Text style={styles.actionLabel}>{deleteLabel}</Text>
+              <Text
+                style={[
+                  styles.actionLabel,
+                  actionForegroundColor ? { color: actionForegroundColor } : null,
+                ]}
+              >
+                {deleteLabel}
+              </Text>
             </Pressable>
           </Animated.View>
         ) : null}

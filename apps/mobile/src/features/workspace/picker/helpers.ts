@@ -1,11 +1,49 @@
 import type { WorkspaceSummary } from '@bridge/types/types';
-import { confirmAction } from '@shared/ui/confirm';
 
-export const ENTRY_ROW_HEIGHT = 48;
+export const ENTRY_ROW_HEIGHT = 56;
 
 export function toPathBasename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+/** One rung of the folder path, ordered current-first so the title menu reads top-down like Files. */
+export interface WorkspacePathCrumb {
+  path: string;
+  name: string;
+  /** 0 for the current folder, 1 for its parent, and so on — drives the menu's indent. */
+  depth: number;
+}
+
+/**
+ * Expands a path into the chain the title menu offers, so climbing several levels is one tap
+ * instead of repeated trips through a parent button.
+ */
+export function toPathCrumbs(path: string | null): WorkspacePathCrumb[] {
+  if (!path) {
+    return [];
+  }
+  const isPosix = path.startsWith('/');
+  const separator = isPosix ? '/' : '\\';
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  const crumbs: WorkspacePathCrumb[] = [];
+  for (let length = segments.length; length > 0; length -= 1) {
+    const branch = segments.slice(0, length);
+    const joined = branch.join(separator);
+    crumbs.push({
+      path: isPosix ? `${separator}${joined}` : joined,
+      name: branch[branch.length - 1] ?? path,
+      depth: segments.length - length,
+    });
+  }
+  if (isPosix) {
+    crumbs.push({ path: separator, name: separator, depth: segments.length });
+  }
+  return crumbs;
+}
+
+export function formatFolderCount(count: number): string {
+  return count === 1 ? '1 folder' : `${String(count)} folders`;
 }
 
 export function matchesSearch(values: string[], query: string): boolean {
@@ -58,14 +96,4 @@ function formatRelativeTime(iso?: string): string | null {
     return `${String(weeks)} wk ago`;
   }
   return `${String(Math.floor(days / 30))} mo ago`;
-}
-
-export function showWorkspacePinAction(isPinned: boolean, onAction: () => void) {
-  const actionTitle = isPinned ? 'Unpin workspace' : 'Pin workspace';
-  const promptTitle = isPinned ? 'Unpin this workspace?' : 'Pin this workspace?';
-  void confirmAction({ title: promptTitle, confirmLabel: actionTitle }).then((confirmed) => {
-    if (confirmed) {
-      onAction();
-    }
-  });
 }

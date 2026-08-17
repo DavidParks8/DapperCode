@@ -3,175 +3,91 @@ import { StyleSheet } from 'react-native';
 import type { AppTheme } from '@shared/theme';
 import { ENTRY_ROW_HEIGHT } from './helpers';
 
+const ROW_ICON_SIZE = 24;
+/** Separators start at the text column, matching UIKit's inset separators. */
+const ROW_SEPARATOR_INSET = 16 + ROW_ICON_SIZE + 12;
+const USE_BUTTON_HEIGHT = 50;
+const STATUS_ROW_HEIGHT = 132;
+const ROW_VALUE_MAX_WIDTH = 132;
+
 export const createWorkspacePickerBrowserStyles = (theme: AppTheme) => ({
-  rowMainAction: {
-    flex: 1,
-    minWidth: 0,
+  list: { flex: 1 },
+  listContent: { paddingBottom: theme.spacing.lg },
+
+  groupedRow: {
+    minHeight: ENTRY_ROW_HEIGHT,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: theme.spacing.sm,
-  },
-  workspaceTile: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: 0,
-    minWidth: 0,
-    minHeight: 56,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.borderLight,
+    paddingHorizontal: theme.spacing.lg,
+    gap: theme.spacing.md,
     backgroundColor: theme.colors.bgItem,
-    overflow: 'hidden' as const,
   },
-  workspaceTileSelected: {
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
+  groupedRowPressed: { backgroundColor: theme.colors.bgInput },
+  groupedRowIcon: { width: ROW_ICON_SIZE, textAlign: 'center' as const },
+  groupedRowCopy: { flex: 1, minWidth: 0 },
+  groupedRowTitle: { ...theme.typography.headline, fontWeight: '400' as const },
+  groupedRowSubtitle: { ...theme.typography.caption, color: theme.colors.textMuted },
+  groupedRowValue: {
+    ...theme.typography.caption,
+    color: theme.colors.textMuted,
+    maxWidth: ROW_VALUE_MAX_WIDTH,
   },
-  workspaceTileSelectedOverlay: {
+  groupedRowSeparator: {
     position: 'absolute' as const,
-    top: 0,
-    left: 0,
+    left: ROW_SEPARATOR_INSET,
     right: 0,
     bottom: 0,
-    borderRadius: theme.radius.lg,
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: theme.colors.borderLight,
   },
-  workspaceTileContent: {
-    flex: 1,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-    gap: 4,
-    justifyContent: 'center' as const,
-  },
-  workspaceTileHeader: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 5,
-    minWidth: 0,
-  },
-  workspaceTileTitle: {
-    ...theme.typography.label,
-    color: theme.colors.textPrimary,
-  },
-  workspaceTileMeta: {
-    flex: 1,
-    minWidth: 0,
-    ...theme.typography.metadata,
-    color: theme.colors.textSecondary,
-    fontWeight: '600' as const,
+
+  listFooter: {
+    marginHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    gap: theme.spacing.xs,
   },
   errorText: { ...theme.typography.caption, color: theme.colors.error },
-  browserCard: {
-    flex: 1,
-    flexShrink: 1,
-    minHeight: 120,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    overflow: 'hidden' as const,
-  },
-  entryListScroll: { flex: 1 },
-  entryListContent: { paddingVertical: theme.spacing.xs },
-  entryRow: {
-    minHeight: ENTRY_ROW_HEIGHT,
-    paddingHorizontal: theme.spacing.md,
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
+  footerNote: { ...theme.typography.caption, color: theme.colors.textMuted },
+
+  toolbar: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.sm,
     gap: theme.spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.borderLight,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.borderLight,
+    backgroundColor: theme.colors.bgMain,
   },
-  entryRowLast: { borderBottomWidth: 0 },
-  entryIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: theme.radius.md,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    backgroundColor: theme.colors.bgInput,
-    borderWidth: 1,
-    borderColor: theme.colors.borderLight,
-  },
-  entryCopy: { flex: 1, gap: 1 },
-  entryName: {
+  toolbarPath: {
     ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '600' as const,
-  },
-  footer: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: theme.spacing.md,
-    paddingTop: theme.spacing.sm,
-  },
-  selectionSummary: {
-    flex: 1,
-    minWidth: 0,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    justifyContent: 'center' as const,
-    gap: 2,
-  },
-  selectionLabel: {
-    ...theme.typography.metadata,
-    fontWeight: '700' as const,
-    textTransform: 'uppercase' as const,
-    letterSpacing: 0,
-  },
-  selectionTitle: {
-    ...theme.typography.caption,
-    color: theme.colors.textPrimary,
-    fontWeight: '700' as const,
-  },
-  selectionPath: {
-    ...theme.typography.mono,
     color: theme.colors.textMuted,
+    textAlign: 'center' as const,
   },
-  footerFavoriteButton: {
-    width: theme.touchTarget.minimum,
-    height: theme.touchTarget.minimum,
-    borderRadius: theme.radius.full,
-    borderWidth: 1,
-    borderColor: theme.colors.borderLight,
-    backgroundColor: theme.colors.bgItem,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  footerFavoriteButtonActive: {
-    borderColor: theme.colors.borderHighlight,
-    backgroundColor: theme.colors.bgInput,
-  },
-  footerFavoriteButtonPressed: { opacity: 0.84 },
-  footerUseButton: {
-    width: 94,
-    height: theme.touchTarget.minimum,
-    borderRadius: theme.radius.lg,
+  useButton: {
+    height: USE_BUTTON_HEIGHT,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.lg,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     backgroundColor: theme.colors.accent,
   },
-  footerUseButtonPressed: { backgroundColor: theme.colors.accentPressed },
-  footerUseButtonText: {
-    ...theme.typography.body,
+  useButtonPressed: { backgroundColor: theme.colors.accentPressed },
+  useButtonText: {
+    ...theme.typography.headline,
     color: theme.colors.accentText,
-    fontWeight: '700' as const,
+    fontWeight: '600' as const,
   },
+
   statusRow: {
-    flex: 1,
-    minHeight: 132,
+    minHeight: STATUS_ROW_HEIGHT,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: theme.spacing.sm,
     paddingHorizontal: theme.spacing.lg,
   },
   statusText: {
-    ...theme.typography.body,
+    ...theme.typography.caption,
     textAlign: 'center' as const,
     color: theme.colors.textMuted,
   },
