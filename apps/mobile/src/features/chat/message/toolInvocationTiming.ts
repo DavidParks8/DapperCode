@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
 
+import {
+  formatActivityElapsedAccessibilityLabel,
+  formatActivityElapsedTime,
+} from '../transcript/activityDuration';
+
 const TOOL_DURATION_TICK_MS = 1_000;
 
 export function formatToolStartTime(startedAtMs: number): string {
@@ -19,6 +24,29 @@ export function resolveToolElapsedMs(
   }
   const endAtMs = isValidTimestamp(completedAtMs) ? completedAtMs : nowMs;
   return Math.max(0, Math.floor(endAtMs - startedAtMs));
+}
+
+export function formatToolElapsedTime(elapsedMs: number): string {
+  const milliseconds = Math.max(0, Math.floor(elapsedMs));
+  if (milliseconds < 1_000) {
+    return `${String(milliseconds)}ms`;
+  }
+  if (milliseconds < 60_000) {
+    return `${String(roundedToolSeconds(milliseconds))}s`;
+  }
+  return formatActivityElapsedTime(milliseconds);
+}
+
+export function formatToolElapsedAccessibilityLabel(elapsedMs: number): string {
+  const milliseconds = Math.max(0, Math.floor(elapsedMs));
+  if (milliseconds < 1_000) {
+    return `${String(milliseconds)} ${milliseconds === 1 ? 'millisecond' : 'milliseconds'}`;
+  }
+  if (milliseconds < 60_000) {
+    const seconds = roundedToolSeconds(milliseconds);
+    return `${String(seconds)} ${seconds === 1 ? 'second' : 'seconds'}`;
+  }
+  return formatActivityElapsedAccessibilityLabel(milliseconds);
 }
 
 export function useToolElapsedMs(
@@ -42,4 +70,8 @@ export function useToolElapsedMs(
 
 function isValidTimestamp(value: number | null): value is number {
   return value !== null && Number.isFinite(value) && value >= 0;
+}
+
+function roundedToolSeconds(milliseconds: number): number {
+  return Math.min(59.9, Math.round(milliseconds / 100) / 10);
 }

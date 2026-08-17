@@ -108,12 +108,15 @@ export const createToolCardStyles = (theme: AppTheme) =>
     },
     timingMetrics: {
       flexDirection: 'row',
-      gap: theme.spacing.lg,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      columnGap: theme.spacing.lg,
+      rowGap: theme.spacing.xs,
     },
     timingMetric: {
-      flex: 1,
-      minWidth: 0,
-      gap: 2,
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: theme.spacing.xs,
     },
     timingLabel: {
       ...theme.typography.metadata,

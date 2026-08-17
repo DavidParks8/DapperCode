@@ -17,10 +17,11 @@ import { compactToolDiff } from './toolInvocationPresentation';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { SelectableOutput } from './SelectableOutput/SelectableOutput';
 import {
-  formatActivityElapsedAccessibilityLabel,
-  formatActivityElapsedTime,
-} from '../transcript/activityDuration';
-import { formatToolStartTime, useToolElapsedMs } from './toolInvocationTiming';
+  formatToolElapsedAccessibilityLabel,
+  formatToolElapsedTime,
+  formatToolStartTime,
+  useToolElapsedMs,
+} from './toolInvocationTiming';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
@@ -51,10 +52,6 @@ export function ToolInvocationOutput({
       </View>,
     );
   };
-
-  if (invocation.startedAtMs !== null) {
-    addSection('timing', <ToolTiming invocation={invocation} />);
-  }
 
   if (visibleLocations.length > 0) {
     const shown = visibleLocations.slice(0, MAX_LOCATION_CHIPS);
@@ -155,6 +152,10 @@ export function ToolInvocationOutput({
     );
   }
 
+  if (invocation.startedAtMs !== null) {
+    addSection('timing', <ToolTiming invocation={invocation} />);
+  }
+
   if (sections.length === 0) {
     return null;
   }
@@ -187,34 +188,31 @@ function ToolTiming({ invocation }: { invocation: ToolInvocation }): ReactElemen
   }
 
   const settled = invocation.completedAtMs !== null;
-  const timestampLabel = settled ? 'Executed' : 'Started';
+  const timestampLabel = 'Started';
   const durationLabel = settled ? 'Duration' : 'Elapsed';
   const startTime = formatToolStartTime(invocation.startedAtMs);
-  const duration = formatActivityElapsedTime(elapsedMs);
+  const duration = formatToolElapsedTime(elapsedMs);
   const accessibilityLabel =
     `${timestampLabel} at ${startTime}. ` +
-    `${durationLabel} ${formatActivityElapsedAccessibilityLabel(elapsedMs)}.`;
+    `${durationLabel} ${formatToolElapsedAccessibilityLabel(elapsedMs)}.`;
 
   return (
-    <>
-      <Text style={styles.sectionLabel}>Timing</Text>
-      <View
-        style={styles.timingMetrics}
-        accessible
-        accessibilityRole="text"
-        accessibilityLabel={accessibilityLabel}
-        testID="tool-timing"
-      >
-        <View style={styles.timingMetric} accessible={false}>
-          <Text style={styles.timingLabel}>{timestampLabel}</Text>
-          <Text style={styles.timingValue}>{startTime}</Text>
-        </View>
-        <View style={styles.timingMetric} accessible={false}>
-          <Text style={styles.timingLabel}>{durationLabel}</Text>
-          <Text style={[styles.timingValue, styles.timingDuration]}>{duration}</Text>
-        </View>
+    <View
+      style={styles.timingMetrics}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={accessibilityLabel}
+      testID="tool-timing"
+    >
+      <View style={styles.timingMetric} accessible={false}>
+        <Text style={styles.timingLabel}>{timestampLabel}</Text>
+        <Text style={styles.timingValue}>{startTime}</Text>
       </View>
-    </>
+      <View style={styles.timingMetric} accessible={false}>
+        <Text style={styles.timingLabel}>{durationLabel}</Text>
+        <Text style={[styles.timingValue, styles.timingDuration]}>{duration}</Text>
+      </View>
+    </View>
   );
 }
 

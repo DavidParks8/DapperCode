@@ -7,6 +7,7 @@ import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
 import { createToolCardStyles } from './toolCardStyles';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
+import { formatToolElapsedAccessibilityLabel, formatToolElapsedTime } from './toolInvocationTiming';
 import {
   LinearTransition,
   ReduceMotion,
@@ -358,7 +359,7 @@ describe('ToolInvocationRow', () => {
       minute: '2-digit',
     }).format(new Date(value.startedAtMs!));
     expect(textLines(tree)).toEqual(
-      expect.arrayContaining(['Timing', 'Started', startTime, 'Elapsed', '5s']),
+      expect.arrayContaining(['Started', startTime, 'Elapsed', '5s']),
     );
     expect(tree.root.findByProps({ testID: 'tool-row' }).props['accessibilityState']).toMatchObject(
       {
@@ -406,10 +407,10 @@ describe('ToolInvocationRow', () => {
       minute: '2-digit',
     }).format(new Date(startedAtMs));
     expect(textLines(tree)).toEqual(
-      expect.arrayContaining(['Timing', 'Executed', startTime, 'Duration', '1m 5s']),
+      expect.arrayContaining(['Started', startTime, 'Duration', '1m 5s']),
     );
     expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
-      `Executed at ${startTime}. Duration 1 minute 5 seconds.`,
+      `Started at ${startTime}. Duration 1 minute 5 seconds.`,
     );
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
@@ -751,6 +752,14 @@ describe('ToolInvocationRow', () => {
 });
 
 describe('ToolInvocationOutput', () => {
+  it('uses compact duration precision in the metadata footer', () => {
+    expect(formatToolElapsedTime(425)).toBe('425ms');
+    expect(formatToolElapsedAccessibilityLabel(425)).toBe('425 milliseconds');
+    expect(formatToolElapsedTime(1_600)).toBe('1.6s');
+    expect(formatToolElapsedAccessibilityLabel(1_600)).toBe('1.6 seconds');
+    expect(formatToolElapsedTime(60_000)).toBe('1m 0s');
+  });
+
   it('renders terminal and text responses as an in-line selectable surface', () => {
     const value = invocation({
       id: 'tool-selectable-output',
@@ -779,6 +788,37 @@ describe('ToolInvocationOutput', () => {
         ['compile error', 'exit 1', 'fix the import', 'then rerun'].includes(flattenTestText(node)),
       );
     expect(outputLines).toHaveLength(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('places timing below the response and formats subsecond durations in milliseconds', () => {
+    const startedAtMs = Date.parse('2026-05-01T12:34:10.000Z');
+    const value = invocation({
+      id: 'tool-subsecond-timing',
+      startedAtMs,
+      completedAtMs: startedAtMs + 425,
+      textLines: ['done'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const lines = textLines(tree);
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(startedAtMs));
+    expect(lines.indexOf('Started')).toBeGreaterThan(lines.lastIndexOf('Response'));
+    expect(lines).toContain('425ms');
+    expect(lines).not.toContain('0s');
+    const timing = tree.root.findByProps({ testID: 'tool-timing' });
+    expect(StyleSheet.flatten(timing.props['style'] as object)).toMatchObject({
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    });
+    expect(timing.props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Duration 425 milliseconds.`,
+    );
 
     act(() => tree.unmount());
   });
