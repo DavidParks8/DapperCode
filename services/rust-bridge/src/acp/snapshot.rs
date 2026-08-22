@@ -72,6 +72,8 @@ pub struct SnapshotMessage {
     /// ended on so a reloaded transcript can report per-response usage instead of only the
     /// session-wide totals.
     pub usage: Option<BridgeTurnUsageSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
 }
 
 /// The token cost of a single prompt turn, plus the model that was configured while it ran.
@@ -415,6 +417,7 @@ impl SessionSnapshot {
             .iter()
             .filter(|entry| entry.kind == SnapshotTimelineKind::Message)
             .filter_map(|entry| entry.message.as_ref())
+            .filter(|message| message.agent_message.is_none())
             .collect::<Vec<_>>();
         let target = messages
             .iter()
@@ -576,6 +579,9 @@ impl SessionSnapshot {
                 content.clone(),
                 content_block.clone(),
             ),
+            CanonicalEvent::AgentMessage { message, .. } => {
+                self.append_agent_message(message.clone())
+            }
             CanonicalEvent::Tool {
                 tool_call_id,
                 generation,
@@ -676,7 +682,7 @@ impl SessionSnapshot {
         }
     }
 
-    fn append_message(
+    pub(crate) fn append_message(
         &mut self,
         id: String,
         role: MessageRole,
@@ -724,9 +730,159 @@ impl SessionSnapshot {
             parts,
             truncated,
             usage: None,
+            agent_message: None,
         });
         let message = self.messages.back().expect("message was inserted").clone();
         self.attach_history_message(message);
+    }
+
+    pub(crate) fn append_agent_message(
+        &mut self,
+        origin: crate::agent_messaging::AgentMessageOrigin,
+    ) {
+        let id = format!("agent-message:{}", origin.message_id);
+        if let Some(message) = self.messages.iter_mut().find(|message| message.id == id) {
+            if message.agent_message.is_some() {
+                message.agent_message = Some(origin);
+                let message = message.clone();
+                self.update_history_message(&message);
+                return;
+            }
+        }
+        self.append_message(id.clone(), MessageRole::User, origin.body.clone(), None);
+        if let Some(message) = self.messages.iter_mut().find(|message| message.id == id) {
+            message.agent_message = Some(origin);
+            let message = message.clone();
+            self.update_history_message(&message);
+        }
+    }
+
+    pub(crate) fn latest_timeline_canonical_id(&self) -> Option<&str> {
+        self.timeline
+            .back()
+            .map(|entry| entry.canonical_id.as_str())
+    }
+
+    pub(crate) fn append_agent_message_after(
+        &mut self,
+        origin: crate::agent_messaging::AgentMessageOrigin,
+        after_timeline_id: Option<&str>,
+    ) {
+        let id = format!("agent-message:{}", origin.message_id);
+        let already_present = self.messages.iter().any(|message| message.id == id);
+        self.append_agent_message(origin);
+        if already_present {
+            return;
+        }
+        let Some(after_timeline_id) = after_timeline_id.filter(|anchor| *anchor != id) else {
+            return;
+        };
+        self.reposition_message_after(&id, after_timeline_id);
+    }
+
+    fn reposition_message_after(&mut self, message_id: &str, after_timeline_id: &str) {
+        let Some((anchor_index, anchor_sequence)) = self
+            .timeline
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.canonical_id == after_timeline_id)
+            .map(|(index, entry)| (index, entry.sequence))
+        else {
+            return;
+        };
+        if !self
+            .history
+            .iter()
+            .any(|entry| entry.canonical_id == after_timeline_id)
+        {
+            return;
+        }
+        let Some(timeline_index) = self
+            .timeline
+            .iter()
+            .position(|entry| entry.canonical_id == message_id)
+        else {
+            return;
+        };
+        let Some(history_index) = self
+            .history
+            .iter()
+            .rposition(|entry| entry.canonical_id == message_id && entry.message.is_some())
+        else {
+            return;
+        };
+        let insertion_after_sequence = self
+            .timeline
+            .iter()
+            .skip(anchor_index + 1)
+            .take_while(|entry| {
+                entry.canonical_id != message_id
+                    && self.messages.iter().any(|message| {
+                        message.id == entry.canonical_id && message.agent_message.is_some()
+                    })
+            })
+            .map(|entry| entry.sequence)
+            .last()
+            .unwrap_or(anchor_sequence);
+        let Some(mut timeline_entry) = self.timeline.remove(timeline_index) else {
+            return;
+        };
+        let Some(mut history_entry) = self.history.remove(history_index) else {
+            return;
+        };
+
+        for entry in &mut self.timeline {
+            if entry.sequence > insertion_after_sequence {
+                entry.sequence = entry.sequence.saturating_add(1);
+            }
+        }
+        for entry in &mut self.history {
+            if entry.sequence > insertion_after_sequence {
+                entry.sequence = entry.sequence.saturating_add(1);
+            }
+        }
+        timeline_entry.sequence = insertion_after_sequence.saturating_add(1);
+        history_entry.sequence = timeline_entry.sequence;
+        let timeline_insert = self
+            .timeline
+            .iter()
+            .position(|entry| entry.sequence > timeline_entry.sequence)
+            .unwrap_or(self.timeline.len());
+        self.timeline.insert(timeline_insert, timeline_entry);
+        let history_insert = self
+            .history
+            .iter()
+            .position(|entry| entry.sequence > history_entry.sequence)
+            .unwrap_or(self.history.len());
+        self.history.insert(history_insert, history_entry);
+
+        if let Some(message_index) = self
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)
+        {
+            let message = self
+                .messages
+                .remove(message_index)
+                .expect("message index came from the snapshot");
+            let next_message_id = self
+                .timeline
+                .iter()
+                .skip(timeline_insert + 1)
+                .find(|entry| entry.kind == SnapshotTimelineKind::Message)
+                .map(|entry| entry.canonical_id.as_str());
+            if let Some(next_index) = next_message_id.and_then(|next_id| {
+                self.messages
+                    .iter()
+                    .position(|candidate| candidate.id == next_id)
+            }) {
+                self.messages.insert(next_index, message);
+            } else {
+                self.messages.push_back(message);
+            }
+        }
+        self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
+        self.enforce_history_bounds();
     }
 
     /// Records what a finished turn cost on the agent message the turn ended on. The transcript
@@ -3047,6 +3203,7 @@ mod tests {
                 total_tokens: 38_300,
                 model: Some("Example Model".to_string()),
             }),
+            agent_message: None,
         });
         snapshot.messages.push_back(SnapshotMessage {
             id: "reasoning-1".to_string(),
@@ -3054,6 +3211,7 @@ mod tests {
             parts: vec![serde_json::json!({"type":"text","text":"Snapshot reasoning"})],
             truncated: false,
             usage: None,
+            agent_message: None,
         });
         snapshot.timeline = VecDeque::from([
             SnapshotTimelineEntry {
@@ -3317,6 +3475,7 @@ mod tests {
                 parts: vec![serde_json::json!({"type":"text","text":"x"})],
                 truncated: false,
                 usage: None,
+                agent_message: None,
             });
             snapshot.history_bytes = MAX_HISTORY_BYTES + 1;
             snapshot.enforce_history_bounds();
@@ -3350,6 +3509,7 @@ mod tests {
             parts: Vec::new(),
             truncated: false,
             usage: None,
+            agent_message: None,
         });
         absent.attach_or_update_history_tool(SnapshotTool {
             id: "missing-tool".into(),
@@ -4057,6 +4217,119 @@ mod tests {
                 }),
             })
         );
+    }
+
+    #[test]
+    fn replayed_agent_messages_keep_timeline_order_without_becoming_fork_turns() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("user-1", MessageRole::User));
+        snapshot.apply(&message("agent-1", MessageRole::Agent));
+        snapshot.apply(&tool("tool-1", None, ToolCallStatus::Completed));
+        let anchor = snapshot
+            .latest_timeline_canonical_id()
+            .expect("timeline anchor")
+            .to_string();
+        snapshot.apply(&message("user-2", MessageRole::User));
+        snapshot.apply(&message("agent-2", MessageRole::Agent));
+        let agent_message =
+            |message_id: &str, body: &str| crate::agent_messaging::AgentMessageOrigin {
+                message_id: message_id.to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Sent,
+                related_thread_id: "child".to_string(),
+                related_title: Some("Worker".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                body: body.to_string(),
+            };
+        snapshot.append_agent_message_after(
+            agent_message("message-1", "Inspect the queue."),
+            Some(&anchor),
+        );
+        snapshot.append_agent_message_after(
+            agent_message("message-2", "Report the result."),
+            Some(&anchor),
+        );
+        snapshot.append_agent_message_after(
+            agent_message("message-3", "Confirm completion."),
+            Some(&anchor),
+        );
+
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.canonical_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "user-1",
+                "agent-1",
+                "tool-1",
+                "agent-message:message-1",
+                "agent-message:message-2",
+                "agent-message:message-3",
+                "user-2",
+                "agent-2"
+            ]
+        );
+
+        let mut live_snapshot =
+            SessionSnapshot::new("agent".to_string(), "live-thread".to_string());
+        live_snapshot.apply(&message("live-user", MessageRole::User));
+        live_snapshot.append_agent_message(agent_message("live-message", "Continue."));
+        assert_eq!(
+            live_snapshot.latest_timeline_canonical_id(),
+            Some("agent-message:live-message")
+        );
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(
+            snapshot
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "user-1",
+                "agent-1",
+                "agent-message:message-1",
+                "agent-message:message-2",
+                "agent-message:message-3",
+                "user-2",
+                "agent-2"
+            ]
+        );
+        assert_eq!(
+            snapshot.complete_fork_boundary("user-2"),
+            Some(ForkBoundary {
+                ordinal: 1,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-2".to_string(),
+                    first_text: "user-2".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        assert!(snapshot
+            .complete_fork_boundary("agent-message:message-1")
+            .is_none());
     }
 
     #[test]

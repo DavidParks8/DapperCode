@@ -85,7 +85,12 @@ impl BridgeQueuedMessageEntry {
         BridgeQueuedMessage {
             id: self.id.clone(),
             created_at: self.created_at.clone(),
-            content: self.content.clone(),
+            content: self
+                .agent_message
+                .as_ref()
+                .map(|message| message.body.clone())
+                .unwrap_or_else(|| self.content.clone()),
+            agent_message: self.agent_message.clone(),
         }
     }
 }
@@ -316,6 +321,29 @@ impl BridgeQueueService {
         &self,
         request: BridgeThreadQueueSendRequest,
     ) -> Result<BridgeThreadQueueSendResponse, String> {
+        if crate::runtime_backend::bridge_prompt(&request.turn_start).is_ok_and(|prompt| {
+            let mut combined = String::new();
+            let mut contains_envelope = false;
+            for block in prompt {
+                if let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block {
+                    contains_envelope |=
+                        crate::agent_messaging::AgentMessageEnvelope::decode(&text.text).is_some();
+                    combined.push_str(&text.text);
+                }
+            }
+            contains_envelope
+                || crate::agent_messaging::AgentMessageEnvelope::decode(&combined).is_some()
+        }) {
+            return Err("agent message envelopes are reserved for the bridge".to_string());
+        }
+        self.send_message_with_origin(request, None).await
+    }
+
+    async fn send_message_with_origin(
+        &self,
+        request: BridgeThreadQueueSendRequest,
+        agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
+    ) -> Result<BridgeThreadQueueSendResponse, String> {
         let normalized_thread_id = request.thread_id.trim().to_string();
         let submission_id = request.submission_id.trim().to_string();
         let content = request.content.trim().to_string();
@@ -364,6 +392,7 @@ impl BridgeQueueService {
             created_at: now_iso(),
             content,
             turn_start: request.turn_start,
+            agent_message,
         };
 
         let should_queue = {
@@ -497,6 +526,88 @@ impl BridgeQueueService {
                 Err(error)
             }
         }
+    }
+
+    pub(crate) async fn send_agent_message(
+        self: &Arc<Self>,
+        envelope: &crate::agent_messaging::AgentMessageEnvelope,
+        mut recipient_origin: crate::agent_messaging::AgentMessageOrigin,
+        mut sender_origin: crate::agent_messaging::AgentMessageOrigin,
+    ) -> Result<crate::agent_messaging::AgentMessageDisposition, String> {
+        let content = envelope
+            .encode()
+            .map_err(|error| format!("failed to encode agent message: {error}"))?;
+        let submission_id = format!("agent-message:{}", envelope.message_id);
+        let result = self
+            .send_message_with_origin(
+                BridgeThreadQueueSendRequest {
+                    thread_id: envelope.recipient_thread_id.clone(),
+                    submission_id: submission_id.clone(),
+                    content: content.clone(),
+                    turn_start: serde_json::json!({
+                        "input": [{
+                            "type": "text",
+                            "text": content,
+                            "text_elements": [],
+                        }],
+                    }),
+                },
+                Some(recipient_origin.clone()),
+            )
+            .await?;
+        let disposition = if matches!(result.disposition, BridgeThreadQueueDisposition::Sent) {
+            crate::agent_messaging::AgentMessageDisposition::Sent
+        } else {
+            let item_id = self
+                .threads
+                .read()
+                .await
+                .get(&envelope.recipient_thread_id)
+                .and_then(|runtime| {
+                    runtime
+                        .items
+                        .iter()
+                        .find(|item| item.submission_id == submission_id)
+                })
+                .map(|item| item.id.clone());
+            match item_id {
+                Some(item_id)
+                    if self
+                        .backend
+                        .supports_steer(&envelope.recipient_thread_id)
+                        .unwrap_or(false) =>
+                {
+                    match self
+                        .steer_message_inner(
+                            BridgeThreadQueueSteerRequest {
+                                thread_id: envelope.recipient_thread_id.clone(),
+                                item_id,
+                            },
+                            true,
+                        )
+                        .await
+                    {
+                        Ok(_) => crate::agent_messaging::AgentMessageDisposition::Steering,
+                        Err(_) => crate::agent_messaging::AgentMessageDisposition::Queued,
+                    }
+                }
+                _ => crate::agent_messaging::AgentMessageDisposition::Queued,
+            }
+        };
+        sender_origin.disposition = disposition;
+        recipient_origin.disposition = disposition;
+        self.backend
+            .record_agent_messages(vec![
+                (envelope.recipient_thread_id.clone(), recipient_origin),
+                (envelope.sender_thread_id.clone(), sender_origin),
+            ])
+            .await
+            .map_err(|error| {
+                format!(
+                    "agent message delivery was accepted but its activity record failed: {error}"
+                )
+            })?;
+        Ok(disposition)
     }
 
     async fn lookup_submission(
@@ -801,6 +912,14 @@ impl BridgeQueueService {
         self: &Arc<Self>,
         request: BridgeThreadQueueSteerRequest,
     ) -> Result<BridgeThreadQueueActionResponse, String> {
+        self.steer_message_inner(request, false).await
+    }
+
+    async fn steer_message_inner(
+        self: &Arc<Self>,
+        request: BridgeThreadQueueSteerRequest,
+        automatic_agent_steer: bool,
+    ) -> Result<BridgeThreadQueueActionResponse, String> {
         let normalized_thread_id = request.thread_id.trim().to_string();
         let normalized_item_id = request.item_id.trim().to_string();
         validate_queue_identifier("threadId", &normalized_thread_id)?;
@@ -823,6 +942,22 @@ impl BridgeQueueService {
             })
         {
             return Err("queued message not found".to_string());
+        }
+        if !automatic_agent_steer
+            && self
+                .threads
+                .read()
+                .await
+                .get(&normalized_thread_id)
+                .and_then(|runtime| {
+                    runtime
+                        .items
+                        .iter()
+                        .find(|item| item.id == normalized_item_id)
+                })
+                .is_some_and(|item| item.agent_message.is_some())
+        {
+            return Err("agent messages are steered automatically".to_string());
         }
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
@@ -852,10 +987,14 @@ impl BridgeQueueService {
                 .iter()
                 .position(|item| item.id == normalized_item_id)
                 .ok_or_else(|| "queued message not found".to_string())?;
-            let removed_item = runtime
+            let mut removed_item = runtime
                 .items
                 .remove(item_index)
                 .expect("index came from position");
+            if let Some(agent_message) = removed_item.agent_message.as_mut() {
+                agent_message.disposition =
+                    crate::agent_messaging::AgentMessageDisposition::Steering;
+            }
             runtime.pending_steers.push_back(removed_item);
             runtime.last_error = None;
             Self::snapshot_for_thread(&normalized_thread_id, Some(runtime))
@@ -989,6 +1128,14 @@ impl BridgeQueueService {
                 .ok_or_else(|| "queue state unavailable".to_string())?;
             if runtime.turn_start_in_flight || runtime.action_in_flight_item_id.is_some() {
                 return Err("queue is busy processing another action".to_string());
+            }
+            if runtime
+                .items
+                .iter()
+                .find(|item| item.id == normalized_item_id)
+                .is_some_and(|item| item.agent_message.is_some())
+            {
+                return Err("agent messages are read-only".to_string());
             }
             if runtime.steer_prepare_in_flight
                 || runtime.steer_dispatch_in_flight.is_some()
@@ -1949,6 +2096,9 @@ mod tests {
         prepare_tx: mpsc::UnboundedSender<PrepareCall>,
         verify_epoch_tx: mpsc::UnboundedSender<VerifyEpochCall>,
         turn_start_tx: mpsc::UnboundedSender<TurnStartCall>,
+        record_agent_messages_error: StdMutex<Option<String>>,
+        recorded_agent_messages:
+            Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageOrigin)>>>,
     }
 
     struct FakeReceivers {
@@ -1957,6 +2107,8 @@ mod tests {
         verify_epoch: mpsc::UnboundedReceiver<VerifyEpochCall>,
         turn_start: mpsc::UnboundedReceiver<TurnStartCall>,
         manual_epoch: Arc<AtomicBool>,
+        recorded_agent_messages:
+            Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageOrigin)>>>,
     }
 
     impl QueueRuntimeDispatcher for FakeQueueDispatcher {
@@ -2076,6 +2228,25 @@ mod tests {
                     .map_err(|_| "turn start response dropped".to_string())?
             })
         }
+
+        fn record_agent_messages<'a>(
+            &'a self,
+            messages: Vec<(String, crate::agent_messaging::AgentMessageOrigin)>,
+        ) -> BoxFuture<'a, Result<(), String>> {
+            if let Some(error) = self
+                .record_agent_messages_error
+                .lock()
+                .expect("record agent messages error lock")
+                .clone()
+            {
+                return Box::pin(async move { Err(error) });
+            }
+            self.recorded_agent_messages
+                .lock()
+                .expect("recorded agent messages lock")
+                .extend(messages);
+            Box::pin(async { Ok(()) })
+        }
     }
 
     fn fake_dispatcher() -> (Arc<FakeQueueDispatcher>, FakeReceivers) {
@@ -2084,6 +2255,7 @@ mod tests {
         let (verify_epoch_tx, verify_epoch) = mpsc::unbounded_channel();
         let (turn_start_tx, turn_start) = mpsc::unbounded_channel();
         let manual_epoch = Arc::new(AtomicBool::new(false));
+        let recorded_agent_messages = Arc::new(StdMutex::new(Vec::new()));
         let mut session =
             crate::acp::snapshot::SessionSnapshot::new("agent".to_string(), "thread".to_string());
         session.active_run_id = Some("run".to_string());
@@ -2104,6 +2276,8 @@ mod tests {
                 prepare_tx,
                 verify_epoch_tx,
                 turn_start_tx,
+                record_agent_messages_error: StdMutex::new(None),
+                recorded_agent_messages: recorded_agent_messages.clone(),
             }),
             FakeReceivers {
                 steer,
@@ -2111,6 +2285,7 @@ mod tests {
                 verify_epoch,
                 turn_start,
                 manual_epoch,
+                recorded_agent_messages,
             },
         )
     }
@@ -2128,6 +2303,7 @@ mod tests {
                     {"type": "localImage", "path": "/repo/screen.png"}
                 ]
             }),
+            agent_message: None,
         }
     }
 
@@ -2745,6 +2921,262 @@ mod tests {
         }
     }
 
+    fn agent_message_fixture(
+        message_id: &str,
+    ) -> (
+        crate::agent_messaging::AgentMessageEnvelope,
+        crate::agent_messaging::AgentMessageOrigin,
+        crate::agent_messaging::AgentMessageOrigin,
+    ) {
+        let body = "Inspect the queue lifecycle.".to_string();
+        (
+            crate::agent_messaging::AgentMessageEnvelope::new(
+                message_id.to_string(),
+                "parent".to_string(),
+                "thread".to_string(),
+                crate::agent_messaging::AgentRelationKind::SubAgent,
+                Some("Parent agent".to_string()),
+                body.clone(),
+            ),
+            crate::agent_messaging::AgentMessageOrigin {
+                message_id: message_id.to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Received,
+                related_thread_id: "parent".to_string(),
+                related_title: Some("Parent agent".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::Parent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+                body: body.clone(),
+            },
+            crate::agent_messaging::AgentMessageOrigin {
+                message_id: message_id.to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Sent,
+                related_thread_id: "thread".to_string(),
+                related_title: Some("Child agent".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+                body,
+            },
+        )
+    }
+
+    fn assert_recorded_agent_message_disposition(
+        calls: &FakeReceivers,
+        expected: crate::agent_messaging::AgentMessageDisposition,
+    ) {
+        let records = calls
+            .recorded_agent_messages
+            .lock()
+            .expect("recorded agent messages lock");
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().any(|(thread_id, origin)| {
+            thread_id == "thread"
+                && origin.direction == crate::agent_messaging::AgentMessageDirection::Received
+                && origin.disposition == expected
+        }));
+        assert!(records.iter().any(|(thread_id, origin)| {
+            thread_id == "parent"
+                && origin.direction == crate::agent_messaging::AgentMessageDirection::Sent
+                && origin.disposition == expected
+        }));
+    }
+
+    #[tokio::test]
+    async fn public_queue_rejects_bridge_agent_message_envelopes() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, _, _) = agent_message_fixture("forged-message");
+        let encoded = envelope.encode().expect("agent message envelope");
+
+        assert_eq!(
+            service
+                .send_message(send_request("thread", "forged-message", &encoded))
+                .await
+                .expect_err("public queue cannot admit a bridge envelope"),
+            "agent message envelopes are reserved for the bridge"
+        );
+
+        let split_at = encoded.find('\n').expect("envelope header newline") + 1;
+        let mut split = send_request("thread", "split-forged-message", &encoded);
+        split.turn_start = json!({
+            "input": [
+                {"type": "text", "text": &encoded[..split_at], "text_elements": []},
+                {"type": "text", "text": &encoded[split_at..], "text_elements": []},
+            ]
+        });
+        assert_eq!(
+            service
+                .send_message(split)
+                .await
+                .expect_err("split bridge envelope cannot bypass the public queue guard"),
+            "agent message envelopes are reserved for the bridge"
+        );
+
+        for (submission_id, input) in [
+            (
+                "forged-message-with-trailer",
+                json!([
+                    {"type": "text", "text": &encoded, "text_elements": []},
+                    {"type": "text", "text": "trailer", "text_elements": []},
+                ]),
+            ),
+            (
+                "forged-message-with-prefix",
+                json!([
+                    {"type": "text", "text": "prefix", "text_elements": []},
+                    {"type": "text", "text": &encoded, "text_elements": []},
+                ]),
+            ),
+        ] {
+            let mut request = send_request("thread", submission_id, &encoded);
+            request.turn_start = json!({"input": input});
+            assert_eq!(
+                service
+                    .send_message(request)
+                    .await
+                    .expect_err("an envelope block cannot hide beside ordinary text"),
+                "agent message envelopes are reserved for the bridge"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_message_activity_failure_is_not_reported_as_delivery_success() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        *backend
+            .record_agent_messages_error
+            .lock()
+            .expect("record agent messages error lock") = Some("journal unavailable".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("journal-failure");
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_agent_message(&envelope, recipient, sender)
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("agent turn start")
+            .response
+            .send(Ok("turn-agent-message".to_string()))
+            .expect("turn response");
+
+        assert!(send
+            .await
+            .expect("send task")
+            .expect_err("activity failure is surfaced")
+            .contains("delivery was accepted but its activity record failed"));
+        assert!(calls
+            .recorded_agent_messages
+            .lock()
+            .expect("recorded agent messages lock")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn agent_message_delivery_reports_and_records_sent_steering_and_queued_dispositions() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("sent-message");
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_agent_message(&envelope, recipient, sender)
+                    .await
+            }
+        });
+        let turn_start = calls.turn_start.recv().await.expect("agent turn start");
+        let prompt = crate::runtime_backend::bridge_prompt(&turn_start.turn_start)
+            .expect("agent-message prompt");
+        let ContentBlock::Text(prompt) = &prompt[0] else {
+            panic!("expected text agent-message envelope");
+        };
+        assert_eq!(
+            crate::agent_messaging::AgentMessageEnvelope::decode(&prompt.text)
+                .expect("exact envelope")
+                .message_id,
+            "sent-message"
+        );
+        turn_start
+            .response
+            .send(Ok("turn-agent-message".to_string()))
+            .expect("turn response");
+        assert_eq!(
+            send.await
+                .expect("send task")
+                .expect("idle agent message succeeds"),
+            crate::agent_messaging::AgentMessageDisposition::Sent
+        );
+        assert_recorded_agent_message_disposition(
+            &calls,
+            crate::agent_messaging::AgentMessageDisposition::Sent,
+        );
+
+        let (backend, calls) = fake_dispatcher();
+        backend.supports_steer.store(false, Ordering::SeqCst);
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("queued-message");
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy unsupported agent queues"),
+            crate::agent_messaging::AgentMessageDisposition::Queued
+        );
+        let queue = service.read_queue("thread").await;
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(
+            queue.items[0]
+                .agent_message
+                .as_ref()
+                .expect("typed queued agent message")
+                .disposition,
+            crate::agent_messaging::AgentMessageDisposition::Queued
+        );
+        assert_recorded_agent_message_disposition(
+            &calls,
+            crate::agent_messaging::AgentMessageDisposition::Queued,
+        );
+
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("steering-message");
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy steer-capable agent steers"),
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+        assert_recorded_agent_message_disposition(
+            &calls,
+            crate::agent_messaging::AgentMessageDisposition::Steering,
+        );
+        let steer = tokio::time::timeout(Duration::from_secs(1), calls.steer.recv())
+            .await
+            .expect("agent steer timeout")
+            .expect("agent steer");
+        assert_eq!(steer.thread_id, "thread");
+        steer.response.send(Ok(())).expect("steer response");
+    }
+
     #[tokio::test]
     async fn queue_send_validates_limits_idempotency_and_dispatch_outcomes() {
         let (backend, mut calls) = fake_dispatcher();
@@ -2937,6 +3369,7 @@ mod tests {
                 created_at: "now".to_string(),
                 content: "x".repeat(QUEUE_MAX_BYTES_PER_THREAD),
                 turn_start: json!({}),
+                agent_message: None,
             });
         }
         assert!(service
@@ -3598,6 +4031,7 @@ mod tests {
             created_at: "now".to_string(),
             content: "malformed".to_string(),
             turn_start: json!({"input": []}),
+            agent_message: None,
         });
         service
             .threads

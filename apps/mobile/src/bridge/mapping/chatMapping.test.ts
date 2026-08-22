@@ -15,7 +15,12 @@ import {
 } from '@bridge/mapping/chatMapping';
 import { renderAgUiCustomContent } from '@bridge/agui/agUi';
 import { toRawAcpSnapshot } from '@bridge/mapping/chatMappingSnapshotAndSummaryProjection';
-import { COMPACTION_ACTIVITY_TYPE, getMessageText, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
+  COMPACTION_ACTIVITY_TYPE,
+  getMessageText,
+  SUBAGENT_ACTIVITY_TYPE,
+} from '@bridge/messages';
 import type { Chat, ChatSummary } from '@bridge/types/types';
 
 function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
@@ -69,6 +74,59 @@ function malformedItems(items: unknown[]): RawThreadItem[] {
 }
 
 describe('chatMapping', () => {
+  it('preserves agent-message activities across raw snapshot hydration and reconnect replay', () => {
+    const agentMessage = {
+      messageId: 'message-1',
+      direction: 'received',
+      relatedThreadId: 'parent-thread',
+      relatedTitle: 'Parent agent',
+      relation: 'parent',
+      disposition: 'queued',
+      body: 'Inspect the queue lifecycle.',
+    };
+    const snapshot = toRawAcpSnapshot(
+      makeSnapshot({
+        messages: [
+          {
+            id: 'agent-message:message-1',
+            role: 'user',
+            parts: [{ type: 'text', text: agentMessage.body }],
+            truncated: false,
+            agentMessage,
+          },
+        ] as RawAcpSnapshot['messages'],
+        timeline: [
+          {
+            sequence: 0,
+            kind: 'message',
+            canonicalId: 'agent-message:message-1',
+          },
+        ],
+      }),
+    );
+    expect(snapshot).not.toBeNull();
+
+    const hydrated = mapChat(
+      toRawThread({
+        id: 'child-thread',
+        acpSnapshot: snapshot,
+      }),
+    );
+    expect(hydrated.messages).toHaveLength(1);
+    expect(hydrated.messages[0]).toMatchObject({
+      id: 'agent-message:message-1',
+      role: 'activity',
+      activityType: AGENT_MESSAGE_ACTIVITY_TYPE,
+      content: {
+        text: agentMessage.body,
+        agentMessage,
+      },
+    });
+
+    const replayed = applySnapshotToChat(hydrated, snapshot!);
+    expect(replayed.messages).toEqual(hydrated.messages);
+  });
+
   it('projects cumulative session token totals independently from context usage', () => {
     const tokenTotals = {
       turns: 14,

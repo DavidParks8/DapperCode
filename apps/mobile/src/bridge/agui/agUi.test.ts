@@ -64,7 +64,7 @@ describe('AG-UI bridge notifications', () => {
       ),
     ) as ContractManifest;
 
-    expect(manifest.fixtures.agUiEvents).toHaveLength(14);
+    expect(manifest.fixtures.agUiEvents).toHaveLength(15);
     for (const event of manifest.fixtures.agUiEvents) {
       expect(EventSchemas.safeParse(event).success).toBe(true);
     }
@@ -1035,6 +1035,46 @@ describe('AG-UI bridge notifications', () => {
     }
     expect(afterMessagesSnapshot.content.text).toContain('Latest: Running tests');
     expect(afterMessagesSnapshot.content.subAgent?.receiverThreadIds).toEqual(['child']);
+  });
+
+  it('preserves agent-message origin metadata from live activity snapshots', () => {
+    const agentMessage = {
+      messageId: 'agent-message-1',
+      direction: 'received',
+      relatedThreadId: 'parent',
+      relatedTitle: 'Lead agent',
+      relation: 'parent',
+      disposition: 'steering',
+      body: 'Please inspect the queue lifecycle.',
+    };
+    const state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'child',
+        runId: 'run',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'agent-message:agent-message-1',
+          activityType: 'dappercode.agent_message',
+          replace: true,
+          content: {
+            text: agentMessage.body,
+            agentMessage,
+          },
+        },
+      },
+    );
+
+    const message = requireTestValue(messages(state, 'child')[0], 'agent message activity');
+    expect(message).toMatchObject({
+      id: 'agent-message:agent-message-1',
+      role: 'activity',
+      activityType: 'dappercode.agent_message',
+      content: {
+        text: agentMessage.body,
+        agentMessage,
+      },
+    });
   });
 
   describe('AG-UI validation and fallback behavior', () => {

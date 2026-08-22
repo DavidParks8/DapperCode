@@ -13,7 +13,7 @@ use super::events::{
     CanonicalEvent, CommandEntry, ConfigEntry, ConfigOptionValue, FieldUpdate, MessageRole,
     PlanEntry,
 };
-use super::session::{AcpSession, ReceivedSessionNotification};
+use super::session::{AcpSession, AgentMessageChunkMatch, ReceivedSessionNotification};
 
 const MAX_MESSAGE_CHUNK_BYTES: usize = 32 * 1024;
 const MAX_TOOL_TEXT_CHUNK_BYTES: usize = 64 * 1024;
@@ -42,38 +42,43 @@ pub async fn handle_session_notification(
     };
     let event = match received.notification.update {
         SessionUpdate::UserMessageChunk(chunk) => {
-            message_event(
+            let Some(event) = message_event(
                 agent_id,
                 &thread_id,
                 session,
                 MessageRole::User,
                 chunk,
                 (run_id, source_turn_id, generation),
+                received.reconstruction,
             )
             .await
+            else {
+                return;
+            };
+            event
         }
-        SessionUpdate::AgentMessageChunk(chunk) => {
-            message_event(
-                agent_id,
-                &thread_id,
-                session,
-                MessageRole::Agent,
-                chunk,
-                (run_id, source_turn_id, generation),
-            )
-            .await
-        }
-        SessionUpdate::AgentThoughtChunk(chunk) => {
-            message_event(
-                agent_id,
-                &thread_id,
-                session,
-                MessageRole::Thought,
-                chunk,
-                (run_id, source_turn_id, generation),
-            )
-            .await
-        }
+        SessionUpdate::AgentMessageChunk(chunk) => message_event(
+            agent_id,
+            &thread_id,
+            session,
+            MessageRole::Agent,
+            chunk,
+            (run_id, source_turn_id, generation),
+            received.reconstruction,
+        )
+        .await
+        .expect("agent message chunks always produce canonical events"),
+        SessionUpdate::AgentThoughtChunk(chunk) => message_event(
+            agent_id,
+            &thread_id,
+            session,
+            MessageRole::Thought,
+            chunk,
+            (run_id, source_turn_id, generation),
+            received.reconstruction,
+        )
+        .await
+        .expect("thought chunks always produce canonical events"),
         SessionUpdate::ToolCall(tool) => CanonicalEvent::Tool {
             agent_id: agent_id.to_string(),
             thread_id,
@@ -252,13 +257,47 @@ async fn message_event(
     role: MessageRole,
     chunk: ContentChunk,
     operation: (Option<String>, Option<String>, Option<u64>),
-) -> CanonicalEvent {
+    reconstruction: bool,
+) -> Option<CanonicalEvent> {
     let (run_id, source_turn_id, generation) = operation;
     let supplied = chunk.message_id.map(|id| id.to_string());
     let message_id = session
         .message_id_for_generation(role, supplied, generation)
         .await;
-    let (content, content_block) = match chunk.content {
+    let content = if role == MessageRole::User {
+        match chunk.content {
+            ContentBlock::Text(mut text) => {
+                match session
+                    .classify_agent_message_chunk(&message_id, text.text, reconstruction)
+                    .await
+                {
+                    AgentMessageChunkMatch::Complete(envelope) => {
+                        return Some(CanonicalEvent::AgentMessage {
+                            agent_id: agent_id.to_string(),
+                            thread_id: thread_id.to_string(),
+                            message: crate::agent_messaging::AgentMessageOrigin {
+                                message_id: envelope.message_id,
+                                direction: crate::agent_messaging::AgentMessageDirection::Received,
+                                related_thread_id: envelope.sender_thread_id,
+                                related_title: envelope.sender_title,
+                                relation: envelope.recipient_relation.inverse(),
+                                disposition:
+                                    crate::agent_messaging::AgentMessageDisposition::Queued,
+                                body: envelope.body,
+                            },
+                        });
+                    }
+                    AgentMessageChunkMatch::Pending => return None,
+                    AgentMessageChunkMatch::Ordinary(content) => text.text = content,
+                }
+                ContentBlock::Text(text)
+            }
+            content => content,
+        }
+    } else {
+        chunk.content
+    };
+    let (content, content_block) = match content {
         ContentBlock::Text(text) => {
             let truncated = text.text.len() > MAX_MESSAGE_CHUNK_BYTES;
             (
@@ -277,7 +316,7 @@ async fn message_event(
             serde_json::to_value(content).ok().map(bound_json),
         ),
     };
-    CanonicalEvent::MessageChunk {
+    Some(CanonicalEvent::MessageChunk {
         agent_id: agent_id.to_string(),
         thread_id: thread_id.to_string(),
         run_id,
@@ -287,7 +326,7 @@ async fn message_event(
         message_id,
         content,
         content_block,
-    }
+    })
 }
 
 fn tool_content(content: &[ToolCallContent]) -> String {
@@ -519,6 +558,85 @@ mod tests {
         assert!(!serialized.contains("non-text content omitted"));
         assert!(!serialized.contains("hidden"));
         assert!(!serialized.contains("rawInput"));
+    }
+
+    #[tokio::test]
+    async fn reconstructed_agent_message_envelopes_may_span_multiple_user_chunks() {
+        let session = AcpSession::new("agent".into(), "child".into());
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message-1".to_string(),
+            "parent".to_string(),
+            "child".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent agent".to_string()),
+            "Inspect the queue lifecycle.".to_string(),
+        )
+        .encode()
+        .unwrap();
+        let split_at = envelope.len() / 2;
+        for content in [&envelope[..split_at], &envelope[split_at..]] {
+            let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "history-message",
+                "content": {"type": "text", "text": content}
+            }))
+            .expect("typed user update");
+            handle_session_notification(
+                "agent",
+                &session,
+                ReceivedSessionNotification {
+                    notification: SessionNotification::new("session", update),
+                    operation: None,
+                    reconstruction: true,
+                },
+            )
+            .await;
+        }
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "agent-message:message-1");
+        let origin = snapshot.messages[0]
+            .agent_message
+            .as_ref()
+            .expect("typed agent-message origin");
+        assert_eq!(origin.body, "Inspect the queue lifecycle.");
+        assert_eq!(
+            origin.direction,
+            crate::agent_messaging::AgentMessageDirection::Received
+        );
+        assert_eq!(
+            origin.relation,
+            crate::agent_messaging::AgentRelationKind::Parent
+        );
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_envelope_prefix_is_not_buffered_or_interpreted() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let content = "<<<dappercode.dev/agent-message:v1>>>";
+        let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "user_message_chunk",
+            "messageId": "live-user-message",
+            "content": {"type": "text", "text": content}
+        }))
+        .expect("typed user update");
+
+        handle_session_notification(
+            "agent",
+            &session,
+            ReceivedSessionNotification {
+                notification: SessionNotification::new("session", update),
+                operation: None,
+                reconstruction: false,
+            },
+        )
+        .await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].parts[0]["text"], content);
+        assert!(snapshot.messages[0].agent_message.is_none());
     }
 
     #[tokio::test]

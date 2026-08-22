@@ -156,6 +156,11 @@ pub enum CanonicalEvent {
         content: String,
         content_block: Option<serde_json::Value>,
     },
+    AgentMessage {
+        agent_id: String,
+        thread_id: String,
+        message: crate::agent_messaging::AgentMessageOrigin,
+    },
     Tool {
         agent_id: String,
         thread_id: String,
@@ -245,6 +250,7 @@ impl CanonicalEvent {
             | Self::RunFinished { thread_id, .. }
             | Self::RunFailed { thread_id, .. }
             | Self::MessageChunk { thread_id, .. }
+            | Self::AgentMessage { thread_id, .. }
             | Self::Tool { thread_id, .. }
             | Self::Plan { thread_id, .. }
             | Self::Usage { thread_id, .. }

@@ -6,6 +6,7 @@ import type {
   BridgeUiSurface,
   TurnPlanStep,
 } from '@bridge/types/types';
+import { parseAgentMessageMeta } from '@bridge/messages';
 import { normalizeWorkspacePath } from './attachments';
 import { toBridgeUiSurface } from './bridgeUi';
 import {
@@ -209,7 +210,14 @@ function parseBridgeQueuedMessage(value: unknown): BridgeQueuedMessage | null {
   const id = readString(entry?.['id'])?.trim();
   const createdAt = readString(entry?.['createdAt'])?.trim();
   const content = readString(entry?.['content'])?.replace(/\r\n/g, '\n');
-  return id && createdAt && content ? { id, createdAt, content } : null;
+  return id && createdAt && content
+    ? {
+        id,
+        createdAt,
+        content,
+        agentMessage: parseAgentMessageMeta(entry?.['agentMessage']),
+      }
+    : null;
 }
 
 function parseBridgeQueuedMessages(value: unknown): BridgeQueuedMessage[] {

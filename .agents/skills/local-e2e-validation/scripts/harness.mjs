@@ -1095,10 +1095,20 @@ export class E2EHarness {
     try {
       process.kill(-processGroupId, 'SIGTERM');
     } catch (error) {
-      if (error.code !== 'ESRCH') {
-        throw error;
+      if (error.code === 'ESRCH') {
+        return;
       }
-      return;
+      if (error.code === 'EPERM') {
+        // Darwin can briefly retain an unsignalable process group while exited descendants reap.
+        const deadline = Date.now() + 500;
+        while (Date.now() < deadline && processGroupIsAlive(processGroupId)) {
+          await sleep(25);
+        }
+        if (!processGroupIsAlive(processGroupId)) {
+          return;
+        }
+      }
+      throw error;
     }
     const deadline = Date.now() + 500;
     while (Date.now() < deadline && processGroupIsAlive(processGroupId)) {

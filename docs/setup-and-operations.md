@@ -150,13 +150,17 @@ live in a central per-user data directory:
     agents.json                typed ACP manifest with digest
     bridge.log
     runtime/                   legacy ownership data retained for safe migration
-    state/                     session index, push registry
+    state/                     session index, bounded agent-message journal, push registry
     attachments/               mobile uploads
 ```
 
 Each workspace gets a profile keyed by a hash of its canonical path, so separate worktrees of the
 same repository are independent. Every file is written through restrictive-mode temporary files and
 atomic rename.
+
+The agent-message journal contains bounded message activity metadata and bodies needed to reconstruct
+**Sent**/**Received** transcript rows. It contains no MCP credentials; those capabilities exist only
+in bridge memory and are revoked when their ACP session is replaced, deleted, or shut down.
 
 Bridge bearer tokens are **not** in `config.json`. macOS stores distinct workspace tokens together
 under Keychain service `dev.dappercode.desktop`, account `bridge-auth-vault:v1`. Windows uses the

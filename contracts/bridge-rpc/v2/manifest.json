@@ -330,16 +330,35 @@
         "timestamp": 1784371200008
       },
       {
+        "type": "ACTIVITY_SNAPSHOT",
+        "messageId": "agent-message:message-1",
+        "activityType": "dappercode.agent_message",
+        "replace": true,
+        "content": {
+          "text": "Please inspect the queue lifecycle.",
+          "agentMessage": {
+            "messageId": "message-1",
+            "direction": "received",
+            "relatedThreadId": "agent-alpha:parent",
+            "relatedTitle": "Lead agent",
+            "relation": "parent",
+            "disposition": "steering",
+            "body": "Please inspect the queue lifecycle."
+          }
+        },
+        "timestamp": 1784371200009
+      },
+      {
         "type": "RUN_FINISHED",
         "threadId": "thread-1",
         "runId": "run-1",
-        "timestamp": 1784371200009
+        "timestamp": 1784371200010
       },
       {
         "type": "RUN_ERROR",
         "message": "failed",
         "code": "acp_run_failed",
-        "timestamp": 1784371200010
+        "timestamp": 1784371200011
       }
     ],
     "toolRevisionEvents": [
@@ -598,6 +617,31 @@
       "submissionId": "submission-00000000-0000-4000-8000-000000000001",
       "threadId": "thread-1",
       "disposition": "queued"
+    },
+    "agentMessageQueue": {
+      "threadId": "agent-alpha:child",
+      "items": [
+        {
+          "id": "queued-message-1",
+          "createdAt": "2026-07-20T00:00:02+00:00",
+          "content": "Please inspect the queue lifecycle.",
+          "agentMessage": {
+            "messageId": "message-1",
+            "direction": "received",
+            "relatedThreadId": "agent-alpha:parent",
+            "relatedTitle": "Lead agent",
+            "relation": "parent",
+            "disposition": "queued",
+            "body": "Please inspect the queue lifecycle."
+          }
+        }
+      ],
+      "pendingSteers": [],
+      "pendingSteerCount": 0,
+      "editingItemId": null,
+      "waitingForToolCalls": false,
+      "steeringInFlight": false,
+      "lastError": null
     },
     "pushRegistration": {
       "profileId": "bridge-profile-1",

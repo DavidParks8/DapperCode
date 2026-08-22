@@ -1,13 +1,19 @@
 import type { ActivityMessage, Message } from '@ag-ui/core';
 
-import type { ChatMessage, ChatMessageSubAgentMeta } from '@bridge/types/types';
+import type {
+  ChatAgentMessageMeta,
+  ChatMessage,
+  ChatMessageSubAgentMeta,
+} from '@bridge/types/types';
 
 export const SUBAGENT_ACTIVITY_TYPE = 'dappercode.subagent';
 export const COMPACTION_ACTIVITY_TYPE = 'dappercode.compaction';
+export const AGENT_MESSAGE_ACTIVITY_TYPE = 'dappercode.agent_message';
 
 export interface DapperCodeActivityContent extends Record<string, unknown> {
   text: string;
   subAgent?: ChatMessageSubAgentMeta;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 function readActivityText(content: unknown): string {
@@ -86,6 +92,39 @@ function isChatMessageSubAgentMeta(value: unknown): value is ChatMessageSubAgent
     isOptionalStringArrayProperty(value, 'receiverThreadIds') &&
     isOptionalStringProperty(value, 'agentStatus')
   );
+}
+
+function isChatAgentMessageMeta(value: unknown): value is ChatAgentMessageMeta {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value['messageId'] === 'string' &&
+    (value['direction'] === 'sent' || value['direction'] === 'received') &&
+    typeof value['relatedThreadId'] === 'string' &&
+    (value['relatedTitle'] === undefined ||
+      value['relatedTitle'] === null ||
+      typeof value['relatedTitle'] === 'string') &&
+    (value['relation'] === 'parent' || value['relation'] === 'sub_agent') &&
+    (value['disposition'] === 'sent' ||
+      value['disposition'] === 'steering' ||
+      value['disposition'] === 'queued') &&
+    typeof value['body'] === 'string'
+  );
+}
+
+export function parseAgentMessageMeta(value: unknown): ChatAgentMessageMeta | undefined {
+  return isChatAgentMessageMeta(value) ? value : undefined;
+}
+
+export function getAgentMessageMeta(
+  message: Message | ChatMessage,
+): ChatAgentMessageMeta | undefined {
+  if (message.role !== 'activity' || message.activityType !== AGENT_MESSAGE_ACTIVITY_TYPE) {
+    return undefined;
+  }
+  const value: unknown = message.content.agentMessage;
+  return parseAgentMessageMeta(value);
 }
 
 export function getSubAgentMeta(

@@ -4,7 +4,7 @@ use std::sync::{
     Arc, Mutex as StdMutex,
 };
 
-use agent_client_protocol::schema::v1::{SessionId, SessionNotification};
+use agent_client_protocol::schema::v1::{ContentBlock, SessionId, SessionNotification};
 use tokio::sync::{mpsc, oneshot, Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
@@ -53,6 +53,7 @@ struct SessionState {
     /// Only one message per generation is ever open, so anything that interrupts the
     /// stream -- the speaker changing or a tool call landing -- starts a new one.
     open_messages: HashMap<u64, (MessageRole, String)>,
+    pending_agent_message_envelopes: HashMap<String, String>,
     live_serial: u64,
     history_role: Option<MessageRole>,
     history_serial: u64,
@@ -71,6 +72,12 @@ enum GenerationState {
     Active(u64),
     Cancelling(u64),
     Handoff { generation: u64, settled: bool },
+}
+
+pub(crate) enum AgentMessageChunkMatch {
+    Ordinary(String),
+    Pending,
+    Complete(crate::agent_messaging::AgentMessageEnvelope),
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -97,6 +104,7 @@ impl AcpSession {
                 next_generation: 0,
                 generation_state: GenerationState::Terminal,
                 open_messages: HashMap::new(),
+                pending_agent_message_envelopes: HashMap::new(),
                 live_serial: 0,
                 history_role: None,
                 history_serial: 0,
@@ -139,6 +147,7 @@ impl AcpSession {
         fresh.history_reconstruction = true;
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
         state.open_messages.clear();
+        state.pending_agent_message_envelopes.clear();
         state.reconstruction_history_cursor = Some((state.history_role, state.history_serial));
         state.history_role = None;
         state.history_serial = 0;
@@ -157,6 +166,7 @@ impl AcpSession {
         );
         state.snapshot.history_reconstruction = true;
         state.reconstruction_backup = Some(previous);
+        state.pending_agent_message_envelopes.clear();
         ReconstructionTransaction {
             session: self.clone(),
             _guard: guard,
@@ -164,6 +174,7 @@ impl AcpSession {
     }
     async fn finish_reconstruction(&self, commit: bool) {
         let mut state = self.inner.lock().await;
+        let pending_agent_messages = std::mem::take(&mut state.pending_agent_message_envelopes);
         let restored_cursor = state.reconstruction_history_cursor.take();
         let Some(previous) = state.reconstruction_backup.take() else {
             return;
@@ -181,6 +192,13 @@ impl AcpSession {
         } else {
             false
         };
+        if commit {
+            for (message_id, content) in pending_agent_messages {
+                state
+                    .snapshot
+                    .append_message(message_id, MessageRole::User, content, None);
+            }
+        }
         // Restoring a transcript also has to restore the history id cursor, otherwise
         // the next replayed chunk reuses `history-1` and is appended to the oldest
         // message instead of starting a new one.
@@ -195,6 +213,41 @@ impl AcpSession {
             state.snapshot.settle_unresolved_subagents_without_run();
         }
     }
+
+    pub(crate) async fn classify_agent_message_chunk(
+        &self,
+        message_id: &str,
+        content: String,
+        reconstruction: bool,
+    ) -> AgentMessageChunkMatch {
+        const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
+
+        if !reconstruction {
+            return AgentMessageChunkMatch::Ordinary(content);
+        }
+        let mut state = self.inner.lock().await;
+        let combined =
+            if let Some(mut pending) = state.pending_agent_message_envelopes.remove(message_id) {
+                pending.push_str(&content);
+                pending
+            } else {
+                content
+            };
+        if let Some(envelope) = crate::agent_messaging::AgentMessageEnvelope::decode(&combined) {
+            return AgentMessageChunkMatch::Complete(envelope);
+        }
+        if combined.len() > MAX_ENVELOPE_BYTES
+            || !crate::agent_messaging::AgentMessageEnvelope::may_be_partial(&combined)
+            || crate::agent_messaging::AgentMessageEnvelope::has_complete_suffix(&combined)
+        {
+            return AgentMessageChunkMatch::Ordinary(combined);
+        }
+        state
+            .pending_agent_message_envelopes
+            .insert(message_id.to_string(), combined);
+        AgentMessageChunkMatch::Pending
+    }
+
     pub async fn admit_prompt(
         &self,
         run_id: String,
@@ -352,6 +405,56 @@ impl AcpSession {
         state.open_messages.insert(generation, (role, id.clone()));
         id
     }
+    pub async fn emit_prompt_transcript(
+        &self,
+        prompt: &[ContentBlock],
+        run_id: Option<String>,
+        source_turn_id: Option<String>,
+        generation: Option<u64>,
+        message_id: String,
+    ) {
+        let snapshot = self.snapshot().await;
+        for block in prompt {
+            if let ContentBlock::Text(text) = block {
+                if let Some(envelope) =
+                    crate::agent_messaging::AgentMessageEnvelope::decode(&text.text)
+                {
+                    self.emit(CanonicalEvent::AgentMessage {
+                        agent_id: snapshot.agent_id.clone(),
+                        thread_id: snapshot.thread_id.clone(),
+                        message: crate::agent_messaging::AgentMessageOrigin {
+                            message_id: envelope.message_id,
+                            direction: crate::agent_messaging::AgentMessageDirection::Received,
+                            related_thread_id: envelope.sender_thread_id,
+                            related_title: envelope.sender_title,
+                            relation: envelope.recipient_relation.inverse(),
+                            disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+                            body: envelope.body,
+                        },
+                    })
+                    .await;
+                    continue;
+                }
+            }
+            let (content, content_block) = match block {
+                ContentBlock::Text(text) => (text.text.clone(), None),
+                block => (String::new(), serde_json::to_value(block).ok()),
+            };
+            self.emit(CanonicalEvent::MessageChunk {
+                agent_id: snapshot.agent_id.clone(),
+                thread_id: snapshot.thread_id.clone(),
+                run_id: run_id.clone(),
+                source_turn_id: source_turn_id.clone(),
+                generation,
+                role: MessageRole::User,
+                message_id: message_id.clone(),
+                content,
+                content_block,
+            })
+            .await;
+        }
+    }
+
     pub async fn emit(&self, event: CanonicalEvent) {
         let mut state = self.inner.lock().await;
         match &event {

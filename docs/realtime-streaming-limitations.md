@@ -72,6 +72,37 @@ when it starts the agent. The port is allocated per agent process rather than fi
 worktrees keep working. OpenCode exits if it is handed a port that is already taken, so a failed
 start is retried without one — losing sub-agent streaming rather than the agent.
 
+## Agent-to-Agent Messaging
+
+Eligible managed sessions receive two bridge-owned MCP tools:
+
+- `list_agent_relations` lists the caller's direct parent and direct children.
+- `send_agent_message` sends a bounded, one-way message to one of those direct relations. A reply is
+  another explicit `send_agent_message` call; the bridge does not synthesize conversations.
+
+The bridge owns exactly one OS-assigned loopback listener and one MCP server task per bridge process.
+Every eligible ACP session shares it. DapperCode injects one Streamable HTTP descriptor when the ACP
+host advertises HTTP MCP support, otherwise one legacy SSE descriptor when it advertises SSE. It
+does not inject both, start a per-session process, or use stdio as a fallback.
+
+Each descriptor carries a random session-scoped bearer credential in its headers. Credentials are
+inactive until the corresponding ACP lifecycle request and durable session-index update succeed,
+rotate on load or resume, and revoke their bound HTTP/SSE protocol sessions on replacement,
+deletion, or bridge shutdown. Tokens are never placed in URLs, logs, repositories, or central
+state. The listener is loopback-only; it is a least-privilege boundary inside private-network bridge
+software, not an internet-facing service.
+
+Authorization is limited to one indexed parent/child edge. Self, sibling, cross-agent, unknown,
+deleted, and more-distant ancestor or descendant targets are rejected. An idle recipient starts a
+new turn immediately. A busy recipient enters the existing turn queue, is promoted through the
+safe steering lane when the host supports steering, and otherwise remains queued for automatic
+dispatch. Agent queue entries are read-only and expose only cancellation on mobile.
+
+Accepted messages are projected as dedicated `dappercode.agent_message` activities: **Sent to …**
+for the sender and **Received from …** for the recipient. A bounded private journal under the
+workspace profile's central state restores sender-side activities after a bridge restart; exact
+versioned envelopes restore recipient origin without treating arbitrary user text as agent traffic.
+
 ## Known Limits
 
 1. Only events emitted by the ACP agent session owned by this bridge can be delivered live.
@@ -84,6 +115,11 @@ start is retried without one — losing sub-agent streaming rather than the agen
    only when negotiated or supported by the selected agent.
 6. Sub-agent streaming needs an agent that reports its session tree. Agents that only reveal a
    sub-agent through the task tool's own result still show it when the tool completes.
+7. Agent messaging requires the ACP host to advertise HTTP or SSE MCP support. Stdio-only hosts do
+   not receive these tools because the one-server invariant forbids per-session stdio servers.
+8. A child cannot be addressed until the host exposes enough session identity for the bridge to
+   index its direct relationship. The sender receives a clear tool error and can retry after
+   relation discovery.
 
 ## Operational Guidance
 

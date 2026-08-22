@@ -38,6 +38,7 @@ function QueueActionButtons({
   onCancelEdit,
   onCancelQueuedMessage,
   onSteerQueuedMessage,
+  agentEntry,
   styles,
 }: Pick<
   QueuedMessageDockProps,
@@ -52,6 +53,7 @@ function QueueActionButtons({
   | 'onSteerQueuedMessage'
 > & {
   queuedMessageId: string;
+  agentEntry: boolean;
   styles: ReturnType<typeof createStyles>;
 }) {
   if (editing) {
@@ -96,7 +98,7 @@ function QueueActionButtons({
           Cancel
         </Text>
       </Pressable>
-      {!steerPending ? (
+      {!agentEntry && !steerPending ? (
         <Pressable
           onPress={onSteerQueuedMessage}
           disabled={!steerEnabled}
@@ -127,38 +129,74 @@ function QueueActionButtons({
   );
 }
 
+interface QueuePresentation {
+  agentEntry: boolean;
+  bodyHint: string;
+  bodyLabel: string;
+  editEnabled: boolean;
+  editing: boolean;
+  footerHint: string | null;
+  icon: 'arrow-down-circle-outline' | 'pause-circle-outline' | 'pencil-outline';
+  status: string;
+  steerPending: boolean;
+}
+
+function queuePresentation(props: QueuedMessageDockProps): QueuePresentation {
+  const agentMessage = props.queuedMessage.agentMessage;
+  if (agentMessage) {
+    const relatedAgent =
+      agentMessage.relatedTitle?.trim() || agentMessage.relatedThreadId || 'agent';
+    const relation = agentMessage.relation === 'parent' ? 'parent' : 'sub-agent';
+    return {
+      agentEntry: true,
+      bodyHint: 'Queued agent messages are read only',
+      bodyLabel: `Queued message received from ${relation} ${relatedAgent}`,
+      editEnabled: false,
+      editing: false,
+      footerHint: null,
+      icon: 'arrow-down-circle-outline',
+      status: `Received from ${relation} · ${relatedAgent}`,
+      steerPending: false,
+    };
+  }
+  if (props.editing) {
+    return {
+      agentEntry: false,
+      bodyHint: 'The queue is paused until you save or discard your changes',
+      bodyLabel: 'Editing queued message',
+      editEnabled: props.editEnabled,
+      editing: true,
+      footerHint: 'Queue paused. Send your changes or discard them to resume the original.',
+      icon: 'pause-circle-outline',
+      status: 'Editing queued message',
+      steerPending: props.steerPending,
+    };
+  }
+  return {
+    agentEntry: false,
+    bodyHint: 'Pauses this message and opens it in the composer',
+    bodyLabel: 'Edit queued message',
+    editEnabled: props.editEnabled,
+    editing: false,
+    footerHint: props.steerDisabledReason,
+    icon: 'pencil-outline',
+    status: queuedMessageStatusLabel(props),
+    steerPending: props.steerPending,
+  };
+}
+
 export function QueuedMessageDock(props: QueuedMessageDockProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const {
-    queuedMessage,
-    remainingQueuedMessagesCount,
-    pendingSubmission,
-    editEnabled,
-    steeringActive,
-    steerPending,
-    editing,
-    waitingForToolCalls,
-    steeringInFlight,
-    steerDisabledReason,
-    onEditQueuedMessage,
-  } = props;
-  const status = editing
-    ? 'Editing queued message'
-    : queuedMessageStatusLabel({
-        pendingSubmission,
-        steeringActive,
-        steeringInFlight,
-        steerPending,
-        waitingForToolCalls,
-      });
+  const { queuedMessage, remainingQueuedMessagesCount, onEditQueuedMessage } = props;
+  const presentation = queuePresentation(props);
 
   return (
     <View style={styles.queuedMessageDock} accessibilityLiveRegion="polite">
       <View style={[styles.planCard, styles.planOverlayCard, styles.queuedMessageCard]}>
         <View style={styles.queuedMessageHeader}>
           <View style={styles.queuedMessageHeaderText}>
-            <Text style={styles.planCardTitle}>{status}</Text>
+            <Text style={styles.planCardTitle}>{presentation.status}</Text>
             {remainingQueuedMessagesCount > 0 ? (
               <Text style={styles.queuedMessageSummary}>
                 {`+${String(remainingQueuedMessagesCount)} more queued`}
@@ -166,41 +204,40 @@ export function QueuedMessageDock(props: QueuedMessageDockProps) {
             ) : null}
           </View>
           <View style={styles.queuedMessageActions}>
-            <QueueActionButtons {...props} queuedMessageId={queuedMessage.id} styles={styles} />
+            <QueueActionButtons
+              {...props}
+              editing={presentation.editing}
+              steerPending={presentation.steerPending}
+              agentEntry={presentation.agentEntry}
+              queuedMessageId={queuedMessage.id}
+              styles={styles}
+            />
           </View>
         </View>
         <Pressable
           onPress={() => onEditQueuedMessage(queuedMessage)}
-          disabled={!editEnabled}
+          disabled={!presentation.editEnabled}
           style={({ pressed }) => [
             styles.queuedMessageBodyButton,
-            pressed && editEnabled && styles.queuedMessageBodyButtonPressed,
+            pressed && presentation.editEnabled && styles.queuedMessageBodyButtonPressed,
           ]}
-          accessibilityRole="button"
-          accessibilityLabel={editing ? 'Editing queued message' : 'Edit queued message'}
-          accessibilityHint={
-            editing
-              ? 'The queue is paused until you save or discard your changes'
-              : 'Pauses this message and opens it in the composer'
-          }
-          accessibilityState={controlAccessibilityState({ disabled: !editEnabled })}
+          accessibilityRole={presentation.editEnabled ? 'button' : undefined}
+          accessibilityLabel={presentation.bodyLabel}
+          accessibilityHint={presentation.bodyHint}
+          accessibilityState={controlAccessibilityState({ disabled: !presentation.editEnabled })}
         >
           <Text numberOfLines={3} style={styles.queuedMessageBody}>
             {queuedMessage.content}
           </Text>
           <Ionicons
             {...decorativeAccessibilityProps}
-            name={editing ? 'pause-circle-outline' : 'pencil-outline'}
+            name={presentation.icon}
             size={16}
-            color={editing ? theme.colors.accent : theme.colors.textMuted}
+            color={presentation.editing ? theme.colors.accent : theme.colors.textMuted}
           />
         </Pressable>
-        {editing ? (
-          <Text style={styles.queuedMessageHint}>
-            Queue paused. Send your changes or discard them to resume the original.
-          </Text>
-        ) : steerDisabledReason ? (
-          <Text style={styles.queuedMessageHint}>{steerDisabledReason}</Text>
+        {presentation.footerHint ? (
+          <Text style={styles.queuedMessageHint}>{presentation.footerHint}</Text>
         ) : null}
       </View>
     </View>

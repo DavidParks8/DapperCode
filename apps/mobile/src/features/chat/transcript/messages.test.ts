@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ChatMessage } from '@bridge/types/types';
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
   SUBAGENT_ACTIVITY_TYPE,
@@ -68,7 +69,7 @@ function message(
   role: ChatMessage['role'],
   content: string,
   extras?: {
-    systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
+    systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction' | 'agentMessage';
     subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
   } & Record<string, unknown>,
 ): ChatMessage {
@@ -92,6 +93,9 @@ function message(
   }
   if (extras?.systemKind === 'compaction') {
     return createActivityMessage(id, COMPACTION_ACTIVITY_TYPE, { text: content }, createdAt);
+  }
+  if (extras?.systemKind === 'agentMessage') {
+    return createActivityMessage(id, AGENT_MESSAGE_ACTIVITY_TYPE, { text: content }, createdAt);
   }
   return {
     id,
@@ -159,6 +163,22 @@ describe('getVisibleTranscriptMessages', () => {
     expect(getVisibleTranscriptMessages(messages, false).map((entry) => entry.id)).toEqual([
       'u1',
       'c1',
+      'a1',
+    ]);
+  });
+
+  it('keeps agent-message rows visible when tool calls are disabled', () => {
+    const messages = [
+      message('u1', 'user', 'Delegate this task'),
+      message('m1', 'system', 'Sent to Worker', {
+        systemKind: 'agentMessage',
+      }),
+      message('a1', 'assistant', 'Done.'),
+    ];
+
+    expect(getVisibleTranscriptMessages(messages, false).map((entry) => entry.id)).toEqual([
+      'u1',
+      'm1',
       'a1',
     ]);
   });

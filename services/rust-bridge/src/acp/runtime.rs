@@ -175,6 +175,14 @@ pub struct NegotiatedInitialize {
     pub response: InitializeResponse,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum McpTransportPreference {
+    Http,
+    Sse,
+    #[default]
+    Unavailable,
+}
+
 impl NegotiatedInitialize {
     pub fn native_capabilities(&self) -> NativeAcpCapabilities {
         NativeAcpCapabilities {
@@ -230,6 +238,17 @@ impl NegotiatedInitialize {
 
     pub fn supports_session_fork(&self) -> bool {
         self.extension_capability("sessionFork", FORK_METHOD)
+    }
+
+    pub(crate) fn mcp_transport_preference(&self) -> McpTransportPreference {
+        let capabilities = &self.response.agent_capabilities.mcp_capabilities;
+        if capabilities.http {
+            McpTransportPreference::Http
+        } else if capabilities.sse {
+            McpTransportPreference::Sse
+        } else {
+            McpTransportPreference::Unavailable
+        }
     }
 
     fn extension_capability(&self, capability: &str, method: &str) -> bool {
@@ -1253,25 +1272,15 @@ impl Command {
                 let snapshot = session.snapshot().await;
                 let message_id =
                     format!("{}::user::{}", snapshot.thread_id, admission.source_turn_id);
-                for block in &request.prompt {
-                    let (content, content_block) = match block {
-                        ContentBlock::Text(text) => (text.text.clone(), None),
-                        block => (String::new(), serde_json::to_value(block).ok()),
-                    };
-                    session
-                        .emit(CanonicalEvent::MessageChunk {
-                            agent_id: snapshot.agent_id.clone(),
-                            thread_id: snapshot.thread_id.clone(),
-                            run_id: Some(admission.run_id.clone()),
-                            source_turn_id: Some(admission.source_turn_id.clone()),
-                            generation: Some(admission.generation),
-                            role: super::events::MessageRole::User,
-                            message_id: message_id.clone(),
-                            content,
-                            content_block,
-                        })
-                        .await;
-                }
+                session
+                    .emit_prompt_transcript(
+                        &request.prompt,
+                        Some(admission.run_id.clone()),
+                        Some(admission.source_turn_id.clone()),
+                        Some(admission.generation),
+                        message_id,
+                    )
+                    .await;
                 let callback_session = session.clone();
                 let callback_admission = admission.clone();
                 let registration = connection.send_request(request).on_receiving_result(
@@ -1949,6 +1958,7 @@ mod tests {
             response.meta = serde_json::from_value(value).ok();
             assert!(!NegotiatedInitialize { response }.supports_session_steer());
         }
+
         let mut response = initialized(AgentCapabilities::new());
         response.meta = Some(steer_meta());
         assert!(NegotiatedInitialize { response }.supports_session_steer());
@@ -1974,6 +1984,28 @@ mod tests {
         }))
         .ok();
         assert!(!NegotiatedInitialize { response }.supports_session_steer());
+    }
+
+    #[test]
+    fn mcp_transport_prefers_http_then_sse_without_stdio_fallback() {
+        use agent_client_protocol::schema::v1::McpCapabilities;
+
+        for (capabilities, expected) in [
+            (
+                McpCapabilities::new().http(true).sse(true),
+                McpTransportPreference::Http,
+            ),
+            (
+                McpCapabilities::new().sse(true),
+                McpTransportPreference::Sse,
+            ),
+            (McpCapabilities::new(), McpTransportPreference::Unavailable),
+        ] {
+            let negotiated = NegotiatedInitialize {
+                response: initialized(AgentCapabilities::new().mcp_capabilities(capabilities)),
+            };
+            assert_eq!(negotiated.mcp_transport_preference(), expected);
+        }
     }
 
     #[test]

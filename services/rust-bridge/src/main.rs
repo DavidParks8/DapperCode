@@ -52,6 +52,7 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 mod acp;
+mod agent_messaging;
 mod agui;
 #[allow(clippy::all)]
 mod agui_generated;
@@ -208,6 +209,24 @@ async fn main() {
         Some(queue_submission_path),
         queue_submissions,
     );
+    let agent_messaging = match agent_messaging::AgentMessagingService::start(
+        Arc::downgrade(&backend),
+        Arc::downgrade(&queue),
+    )
+    .await
+    {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("{error}");
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = backend.attach_agent_messaging(agent_messaging).await {
+        eprintln!("{error}");
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
 
     let project_label = config
         .workdir
@@ -330,10 +349,32 @@ where
     Start: FnOnce() -> StartFuture,
     StartFuture: Future<Output = Result<T, String>>,
 {
-    let bind_addr = format!("{host}:{port}");
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
+    let requested_bind_addr = format!("{host}:{port}");
+    let listener = tokio::net::TcpListener::bind(&requested_bind_addr)
         .await
-        .map_err(|error| format!("failed to bind {bind_addr}: {error}"))?;
+        .map_err(|error| format!("failed to bind {requested_bind_addr}: {error}"))?;
+    let bind_addr = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read bound bridge address: {error}"))?
+        .to_string();
     let backend = start_backend().await?;
     Ok((bind_addr, listener, backend))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::bind_then_start_backend;
+
+    #[tokio::test]
+    async fn port_zero_reports_the_os_assigned_bridge_address() {
+        let (address, listener, backend) =
+            bind_then_start_backend("127.0.0.1", 0, || async { Ok::<_, String>("ready") })
+                .await
+                .expect("bind bridge listener");
+
+        assert_eq!(address, listener.local_addr().unwrap().to_string());
+        assert_ne!(listener.local_addr().unwrap().port(), 0);
+        assert_eq!(backend, "ready");
+    }
 }

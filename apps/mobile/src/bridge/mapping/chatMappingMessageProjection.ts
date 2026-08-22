@@ -1,4 +1,5 @@
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
   SUBAGENT_ACTIVITY_TYPE,
@@ -142,6 +143,16 @@ function mapSnapshotMessageEntry(
     parts,
     createdAt: new Date(context.baseTs + index * 1000).toISOString(),
   };
+  if (message.agentMessage) {
+    return [
+      createActivityMessage(
+        message.id,
+        AGENT_MESSAGE_ACTIVITY_TYPE,
+        { text: message.agentMessage.body, agentMessage: message.agentMessage },
+        common.createdAt,
+      ),
+    ];
+  }
   if (message.role === 'agent') {
     return [{ ...common, role: 'assistant' as const, usage: message.usage ?? null }];
   }

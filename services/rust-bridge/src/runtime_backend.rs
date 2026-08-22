@@ -39,6 +39,7 @@ pub(super) struct RuntimeBackend {
     hub: Arc<ClientHub>,
     event_pump: Mutex<Option<tokio::task::JoinHandle<()>>>,
     event_side_effects: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    agent_messaging: Mutex<Option<crate::agent_messaging::AgentMessagingService>>,
     client_requests: ClientRequestTracker,
 }
 
@@ -660,6 +661,12 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
         thread_id: &'a str,
         turn_start: &'a Value,
     ) -> BoxFuture<'a, Result<String, String>>;
+    fn record_agent_messages<'a>(
+        &'a self,
+        _messages: Vec<(String, crate::agent_messaging::AgentMessageOrigin)>,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl RuntimeBackend {
@@ -726,11 +733,60 @@ impl RuntimeBackend {
             hub,
             event_pump: Mutex::new(Some(event_pump)),
             event_side_effects: Mutex::new(Some(event_side_effects)),
+            agent_messaging: Mutex::new(None),
             client_requests: ClientRequestTracker::default(),
         }))
     }
 
+    pub(crate) async fn attach_agent_messaging(
+        &self,
+        service: crate::agent_messaging::AgentMessagingService,
+    ) -> Result<(), String> {
+        let mut attached = self.agent_messaging.lock().await;
+        if attached.is_some() {
+            return Err("shared agent messaging MCP service is already attached".to_string());
+        }
+        self.manager
+            .attach_agent_messaging(service.config())
+            .map_err(|error| error.to_string())?;
+        *attached = Some(service);
+        Ok(())
+    }
+
+    pub(crate) async fn agent_relations(
+        &self,
+        caller_thread_id: &str,
+    ) -> Result<crate::agent_messaging::AgentRelations, crate::agent_messaging::AgentRelationError>
+    {
+        self.manager.agent_relations(caller_thread_id).await
+    }
+
+    pub(crate) async fn direct_agent_relation(
+        &self,
+        caller_thread_id: &str,
+        target_thread_id: &str,
+    ) -> Result<crate::agent_messaging::AgentRelationKind, crate::agent_messaging::AgentRelationError>
+    {
+        self.manager
+            .direct_agent_relation(caller_thread_id, target_thread_id)
+            .await
+    }
+
+    pub(crate) async fn record_agent_messages(
+        &self,
+        messages: Vec<(String, crate::agent_messaging::AgentMessageOrigin)>,
+    ) -> Result<(), String> {
+        self.manager
+            .record_agent_messages(messages)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub(super) async fn shutdown(&self) {
+        let agent_messaging = self.agent_messaging.lock().await.take();
+        if let Some(service) = agent_messaging {
+            service.shutdown().await;
+        }
         self.manager.shutdown().await;
         self.manager.flush_events().await;
         if let Some(pump) = self.event_pump.lock().await.take() {
@@ -1346,6 +1402,13 @@ impl QueueRuntimeDispatcher for RuntimeBackend {
             )
             .ok_or_else(|| "turn/start did not return turn id".to_string())
         })
+    }
+
+    fn record_agent_messages<'a>(
+        &'a self,
+        messages: Vec<(String, crate::agent_messaging::AgentMessageOrigin)>,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(RuntimeBackend::record_agent_messages(self, messages))
     }
 }
 

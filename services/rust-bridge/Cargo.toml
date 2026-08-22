@@ -15,6 +15,7 @@ axum = { version = "0.8", features = ["ws", "http1", "tokio", "multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 futures-util = "0.3"
+futures = "0.3"
 getrandom = "0.3"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +31,9 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
 agent-client-protocol = { version = "1.2.0", features = ["unstable_elicitation", "unstable_end_turn_token_usage"] }
+rmcp = { version = "3.1.4", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+tokio-util = "0.7"
+tokio-stream = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

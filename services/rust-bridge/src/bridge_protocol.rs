@@ -808,6 +808,8 @@ pub(super) struct BridgeQueuedMessage {
     pub(super) id: String,
     pub(super) created_at: String,
     pub(super) content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
 }
 
 #[derive(Debug, Clone)]
@@ -817,6 +819,7 @@ pub(super) struct BridgeQueuedMessageEntry {
     pub(super) created_at: String,
     pub(super) content: String,
     pub(super) turn_start: Value,
+    pub(super) agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

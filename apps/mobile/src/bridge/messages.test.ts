@@ -1,5 +1,7 @@
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   createActivityMessage,
+  getAgentMessageMeta,
   getMessageText,
   getSubAgentMeta,
   getToolCallDisplayLines,
@@ -104,7 +106,51 @@ describe('messages', () => {
         },
       },
     });
+
     expect(malformedMeta).toBeUndefined();
+  });
+
+  it('accepts only complete agent-message metadata on its dedicated activity type', () => {
+    const agentMessage = {
+      messageId: 'agent-message-1',
+      direction: 'sent' as const,
+      relatedThreadId: 'child',
+      relatedTitle: 'Review agent',
+      relation: 'sub_agent' as const,
+      disposition: 'steering' as const,
+      body: 'Please check the queue lifecycle.',
+    };
+    const activity = createActivityMessage(
+      'agent-message-1',
+      AGENT_MESSAGE_ACTIVITY_TYPE,
+      { text: agentMessage.body, agentMessage },
+      'now',
+    );
+
+    expect(getAgentMessageMeta(activity)).toBe(agentMessage);
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
+          'wrong-type',
+          'status',
+          { text: agentMessage.body, agentMessage },
+          'now',
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
+          'malformed',
+          AGENT_MESSAGE_ACTIVITY_TYPE,
+          {
+            text: 'Malformed',
+            agentMessage: { ...agentMessage, disposition: 'delivered' } as never,
+          },
+          'now',
+        ),
+      ),
+    ).toBeUndefined();
   });
 
   it('does not let a later snapshot discard a known sub-agent thread link', () => {

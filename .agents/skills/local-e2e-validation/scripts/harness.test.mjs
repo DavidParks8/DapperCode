@@ -504,6 +504,42 @@ child.unref();
   }
 });
 
+test('process-group cleanup tolerates transient EPERM after the leader exits', async () => {
+  const harness = createHarness({ name: 'process-group-eperm', output: memoryOutput().stream });
+  const child = await harness.start(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], {
+    label: 'short-lived-group',
+  });
+  const originalKill = process.kill;
+  let zeroProbes = 0;
+  process.kill = (pid, signal) => {
+    if (pid === -child.pid) {
+      if (signal === 0) {
+        zeroProbes += 1;
+        if (zeroProbes <= 2) {
+          return;
+        }
+        const error = new Error('process group no longer exists');
+        error.code = 'ESRCH';
+        throw error;
+      }
+      if (signal === 'SIGTERM') {
+        const error = new Error('process group is temporarily unsignalable');
+        error.code = 'EPERM';
+        throw error;
+      }
+    }
+    return originalKill(pid, signal);
+  };
+  try {
+    await child.wait();
+    await harness.cleanup();
+    assert.ok(zeroProbes >= 3);
+    assert.equal(existsSync(harness.root), false);
+  } finally {
+    process.kill = originalKill;
+  }
+});
+
 test('lease ports are released by the OS after a hard crash', async () => {
   const owner = createHarness({ name: 'stale-lease-owner', output: memoryOutput().stream });
   const claimant = createHarness({ name: 'stale-lease-claimant', output: memoryOutput().stream });

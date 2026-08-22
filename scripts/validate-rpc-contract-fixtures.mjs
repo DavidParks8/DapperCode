@@ -165,6 +165,12 @@ if (
 )
   fail('filesystem truncation fixture');
 if (!fixtures.submission.submissionId || !fixtures.submission.threadId) fail('submission fixture');
+if (
+  fixtures.agentMessageQueue.items.length !== 1 ||
+  fixtures.agentMessageQueue.items[0].agentMessage?.direction !== 'received' ||
+  fixtures.agentMessageQueue.items[0].agentMessage?.disposition !== 'queued'
+)
+  fail('agent message queue fixture');
 if (!fixtures.pushRegistration.profileId || !fixtures.pushRegistration.registrationId)
   fail('push registration fixture');
 if (

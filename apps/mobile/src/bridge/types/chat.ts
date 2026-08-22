@@ -22,6 +22,20 @@ export interface ChatMessageSubAgentMeta {
   agentStatus?: string;
 }
 
+export type AgentMessageDirection = 'sent' | 'received';
+export type AgentMessageDisposition = 'sent' | 'steering' | 'queued';
+export type AgentMessageRelation = 'parent' | 'sub_agent';
+
+export interface ChatAgentMessageMeta {
+  messageId: string;
+  direction: AgentMessageDirection;
+  relatedThreadId: string;
+  relatedTitle?: string | null;
+  relation: AgentMessageRelation;
+  disposition: AgentMessageDisposition;
+  body: string;
+}
+
 export type ChatMessagePart =
   | { type: 'text'; text: string }
   | { type: 'image'; data?: string; mimeType?: string; uri?: string; url?: string }
@@ -104,6 +118,7 @@ export interface MessageTokenUsage {
 export interface ChatActivityContent extends Record<string, unknown> {
   text?: string;
   subAgent?: ChatMessageSubAgentMeta;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 type ChatActivityMessage = Omit<ActivityMessage, 'content'> & {
@@ -233,6 +248,7 @@ export interface BridgeQueuedMessage {
   id: string;
   createdAt: string;
   content: string;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 export interface BridgeThreadQueueError {

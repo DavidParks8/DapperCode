@@ -3,6 +3,7 @@ import { buildToolInvocations, type ToolInvocation } from '../message/toolInvoca
 import { isComputerUseTraceEntry } from '../message/computerUseTrace';
 import type { ChatMessage, ChatStatus } from '@bridge/types/types';
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   getMessageText,
   getSubAgentMeta,
@@ -220,6 +221,7 @@ function shouldHideToolTranscriptMessage(
 function isHiddenActivityTranscriptMessage(message: ChatMessage): boolean {
   return (
     message.role === 'activity' &&
+    message.activityType !== AGENT_MESSAGE_ACTIVITY_TYPE &&
     message.activityType !== SUBAGENT_ACTIVITY_TYPE &&
     message.activityType !== COMPACTION_ACTIVITY_TYPE
   );

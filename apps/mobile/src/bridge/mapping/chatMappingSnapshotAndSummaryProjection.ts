@@ -25,6 +25,7 @@ import {
   toPreview,
   unixSecondsToIso,
 } from '@bridge/mapping/chatMappingRawTypesAndReaders';
+import { parseAgentMessageMeta } from '@bridge/messages';
 
 function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapshot['messages'] {
   return (Array.isArray(snapshot['messages']) ? snapshot['messages'] : [])
@@ -36,6 +37,7 @@ function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapsho
       parts: Array.isArray(entry['parts']) ? entry['parts'] : [],
       truncated: entry['truncated'] === true,
       usage: parseSnapshotMessageUsage(entry['usage']),
+      agentMessage: parseAgentMessageMeta(entry['agentMessage']),
     }))
     .filter((entry) => entry.id && entry.role);
 }

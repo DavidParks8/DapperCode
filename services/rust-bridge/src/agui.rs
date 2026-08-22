@@ -389,6 +389,26 @@ impl AgUiProjector {
                     }
                 }
             }
+            CanonicalEvent::AgentMessage {
+                thread_id, message, ..
+            } => {
+                let (run_id, source_turn_id) = self
+                    .runs
+                    .get(thread_id)
+                    .map(|run| (run.run_id.clone(), run.source_turn_id.clone()))
+                    .unwrap_or_else(|| (format!("{thread_id}::history"), None));
+                projection.events.push(envelope(
+                    thread_id,
+                    &run_id,
+                    source_turn_id,
+                    activity_event(
+                        format!("agent-message:{}", message.message_id),
+                        "dappercode.agent_message",
+                        agent_message_activity_content(message),
+                        timestamp,
+                    ),
+                ));
+            }
             CanonicalEvent::Tool {
                 agent_id,
                 thread_id,
@@ -1485,6 +1505,14 @@ pub(super) fn messages_snapshot_envelope(
                 let Some(message) = messages_by_id.get(entry.canonical_id.as_str()) else {
                     continue;
                 };
+                if let Some(agent_message) = &message.agent_message {
+                    messages.push(activity_message(
+                        message.id.clone(),
+                        "dappercode.agent_message",
+                        agent_message_activity_content(agent_message),
+                    ));
+                    continue;
+                }
                 messages.push(Message {
                     id: message.id.clone(),
                     role: match message.role {
@@ -1837,6 +1865,13 @@ fn activity_message(id: String, activity_type: &str, content: Value) -> Message 
         tool_call_id: None,
         activity_type: Some(activity_type.to_string()),
     }
+}
+
+fn agent_message_activity_content(message: &crate::agent_messaging::AgentMessageOrigin) -> Value {
+    json!({
+        "text": message.body,
+        "agentMessage": message,
+    })
 }
 
 struct TaskSubagent<'a> {
