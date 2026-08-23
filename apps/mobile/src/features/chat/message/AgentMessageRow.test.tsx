@@ -17,7 +17,10 @@ type Queryable = ReactTestInstance & {
   findByProps(props: Record<string, unknown>): Queryable;
 };
 
-function renderRow(direction: 'sent' | 'received' = 'sent') {
+function renderRow(
+  direction: 'sent' | 'received' = 'sent',
+  disposition: 'sent' | 'steering' | 'queued' | 'cancelled' = 'queued',
+) {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
@@ -30,7 +33,7 @@ function renderRow(direction: 'sent' | 'received' = 'sent') {
             relatedThreadId: direction === 'sent' ? 'child-1' : 'parent-1',
             relatedTitle: direction === 'sent' ? 'Review agent' : 'Lead agent',
             relation: direction === 'sent' ? 'sub_agent' : 'parent',
-            disposition: 'queued',
+            disposition,
             body: 'Inspect the queue lifecycle and report any race.',
           }}
         />
@@ -65,9 +68,7 @@ describe('AgentMessageRow', () => {
     expect(renderedContent(tree)).not.toContain('Inspect the queue lifecycle');
 
     act(() => {
-      const onPress = root.findByProps({ testID: 'agent-message-toggle-message-1' }).props[
-        'onPress'
-      ];
+      const onPress = accessibleRow.props['onPress'];
       if (typeof onPress === 'function') {
         onPress();
       }
@@ -89,5 +90,17 @@ describe('AgentMessageRow', () => {
 
     expect(accessibleRow.props['accessibilityValue']).toEqual({ text: 'Lead agent' });
     expect(renderedContent(tree)).toContain('Received from parent');
+  });
+
+  it('renders a cancelled sender activity as a terminal status', () => {
+    const tree = renderRow('sent', 'cancelled');
+    const accessibleRow = (tree.root as Queryable).findAll(
+      (node) => node.props['accessibilityLabel'] === 'Sent to sub-agent: Review agent',
+    )[0];
+
+    expect(accessibleRow?.props['accessibilityValue']).toEqual({
+      text: 'Review agent, cancelled',
+    });
+    expect(renderedContent(tree)).toContain('cancelled');
   });
 });

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::io;
 use std::pin::Pin;
@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::acp::runtime::McpTransportPreference;
 use crate::bridge_protocol::BridgeQueueService;
+use crate::resource_limits::QUEUE_MAX_CONTENT_BYTES;
 use crate::runtime_backend::RuntimeBackend;
 
 pub(crate) const AGENT_MESSAGE_ENVELOPE_VERSION: u32 = 1;
@@ -44,8 +45,8 @@ const MCP_SERVER_NAME: &str = "dappercode-agent-messaging";
 const MAX_MCP_CREDENTIALS: usize = 4_096;
 const MAX_MCP_PROTOCOL_SESSIONS: usize = 512;
 const MAX_MCP_SESSIONS_PER_CREDENTIAL: usize = 4;
-const MAX_MCP_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_AGENT_MESSAGE_BODY_BYTES: usize = 48 * 1024;
+const MAX_MCP_REQUEST_BYTES: usize = MAX_AGENT_MESSAGE_BODY_BYTES * 6 + 16 * 1024;
 const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const MCP_SESSION_HEADER: HeaderName = HeaderName::from_static("mcp-session-id");
@@ -220,6 +221,33 @@ struct McpCredentialState {
     active_by_thread: HashMap<String, String>,
     http_sessions: HashMap<String, String>,
     legacy_sessions: HashMap<String, (String, CancellationToken)>,
+    protocol_session_order: VecDeque<McpProtocolSession>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum McpProtocolSession {
+    Http(String),
+    Legacy(String),
+}
+
+#[derive(Default)]
+struct McpProtocolSessionEvictions {
+    http_sessions: Vec<String>,
+    legacy_sessions: Vec<CancellationToken>,
+}
+
+impl McpProtocolSessionEvictions {
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.http_sessions.is_empty() && self.legacy_sessions.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum McpHttpSessionAuthorization {
+    Authorized,
+    WrongCredential,
+    Unknown,
 }
 
 struct McpCredentialRecord {
@@ -338,6 +366,7 @@ impl McpCredentialStore {
         state.by_token.clear();
         state.active_by_thread.clear();
         state.http_sessions.clear();
+        state.protocol_session_order.clear();
         drop(state);
         self.close_protocol_sessions(http_sessions, legacy_sessions);
     }
@@ -366,51 +395,54 @@ impl McpCredentialStore {
         })
     }
 
-    fn http_session_is_authorized(&self, session_id: &str, token: &str) -> bool {
-        self.state
+    fn http_session_authorization(
+        &self,
+        session_id: &str,
+        token: &str,
+    ) -> McpHttpSessionAuthorization {
+        match self
+            .state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .http_sessions
             .get(session_id)
-            .is_some_and(|bound| bound == token)
+        {
+            Some(bound) if bound == token => McpHttpSessionAuthorization::Authorized,
+            Some(_) => McpHttpSessionAuthorization::WrongCredential,
+            None => McpHttpSessionAuthorization::Unknown,
+        }
     }
 
-    fn bind_http_session(&self, session_id: &str, token: &str) -> bool {
+    fn bind_http_session(
+        &self,
+        session_id: &str,
+        token: &str,
+    ) -> Result<McpProtocolSessionEvictions, ()> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if !state.by_token.contains_key(token) {
-            return false;
+            return Err(());
         }
         if let Some(bound) = state.http_sessions.get(session_id) {
-            return bound == token;
+            return (bound == token)
+                .then(McpProtocolSessionEvictions::default)
+                .ok_or(());
         }
-        let total_sessions = state.http_sessions.len() + state.legacy_sessions.len();
-        let credential_sessions = state
-            .http_sessions
-            .values()
-            .filter(|bound| bound.as_str() == token)
-            .count()
-            + state
-                .legacy_sessions
-                .values()
-                .filter(|(bound, _)| bound == token)
-                .count();
-        if total_sessions >= MAX_MCP_PROTOCOL_SESSIONS
-            || credential_sessions >= MAX_MCP_SESSIONS_PER_CREDENTIAL
-        {
-            return false;
-        }
+        let evicted = Self::make_protocol_session_capacity(&mut state, token)?;
         state
             .http_sessions
             .insert(session_id.to_string(), token.to_string());
-        true
+        state
+            .protocol_session_order
+            .push_back(McpProtocolSession::Http(session_id.to_string()));
+        Ok(evicted)
     }
 
     fn unbind_http_session(&self, session_id: &str) {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .http_sessions
-            .remove(session_id);
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.http_sessions.remove(session_id);
+        state
+            .protocol_session_order
+            .retain(|bound| *bound != McpProtocolSession::Http(session_id.to_string()));
     }
 
     async fn close_http_session(&self, session_id: &str) {
@@ -426,14 +458,54 @@ impl McpCredentialStore {
         session_id: &str,
         token: &str,
         cancellation: CancellationToken,
-    ) -> bool {
+    ) -> Result<McpProtocolSessionEvictions, ()> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if !state.by_token.contains_key(token)
-            || state.http_sessions.len() + state.legacy_sessions.len() >= MAX_MCP_PROTOCOL_SESSIONS
-        {
-            return false;
+        if !state.by_token.contains_key(token) {
+            return Err(());
         }
-        let credential_sessions = state
+        let evicted = Self::make_protocol_session_capacity(&mut state, token)?;
+        state
+            .legacy_sessions
+            .insert(session_id.to_string(), (token.to_string(), cancellation));
+        state
+            .protocol_session_order
+            .push_back(McpProtocolSession::Legacy(session_id.to_string()));
+        Ok(evicted)
+    }
+
+    fn unbind_legacy_session(&self, session_id: &str) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.legacy_sessions.remove(session_id);
+        state
+            .protocol_session_order
+            .retain(|bound| *bound != McpProtocolSession::Legacy(session_id.to_string()));
+    }
+
+    fn make_protocol_session_capacity(
+        state: &mut McpCredentialState,
+        token: &str,
+    ) -> Result<McpProtocolSessionEvictions, ()> {
+        let mut evicted = McpProtocolSessionEvictions::default();
+        while Self::credential_protocol_session_count(state, token)
+            >= MAX_MCP_SESSIONS_PER_CREDENTIAL
+        {
+            let bound = state
+                .protocol_session_order
+                .iter()
+                .find(|bound| Self::protocol_session_matches_token(state, bound, token))
+                .cloned()
+                .ok_or(())?;
+            Self::evict_protocol_session(state, bound, &mut evicted);
+        }
+        while state.http_sessions.len() + state.legacy_sessions.len() >= MAX_MCP_PROTOCOL_SESSIONS {
+            let bound = state.protocol_session_order.front().cloned().ok_or(())?;
+            Self::evict_protocol_session(state, bound, &mut evicted);
+        }
+        Ok(evicted)
+    }
+
+    fn credential_protocol_session_count(state: &McpCredentialState, token: &str) -> usize {
+        state
             .http_sessions
             .values()
             .filter(|bound| bound.as_str() == token)
@@ -442,22 +514,46 @@ impl McpCredentialStore {
                 .legacy_sessions
                 .values()
                 .filter(|(bound, _)| bound == token)
-                .count();
-        if credential_sessions >= MAX_MCP_SESSIONS_PER_CREDENTIAL {
-            return false;
-        }
-        state
-            .legacy_sessions
-            .insert(session_id.to_string(), (token.to_string(), cancellation));
-        true
+                .count()
     }
 
-    fn unbind_legacy_session(&self, session_id: &str) {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .legacy_sessions
-            .remove(session_id);
+    fn protocol_session_matches_token(
+        state: &McpCredentialState,
+        session: &McpProtocolSession,
+        token: &str,
+    ) -> bool {
+        match session {
+            McpProtocolSession::Http(session_id) => state
+                .http_sessions
+                .get(session_id)
+                .is_some_and(|bound| bound == token),
+            McpProtocolSession::Legacy(session_id) => state
+                .legacy_sessions
+                .get(session_id)
+                .is_some_and(|(bound, _)| bound == token),
+        }
+    }
+
+    fn evict_protocol_session(
+        state: &mut McpCredentialState,
+        session: McpProtocolSession,
+        evicted: &mut McpProtocolSessionEvictions,
+    ) {
+        state
+            .protocol_session_order
+            .retain(|bound| bound != &session);
+        match session {
+            McpProtocolSession::Http(session_id) => {
+                if state.http_sessions.remove(&session_id).is_some() {
+                    evicted.http_sessions.push(session_id);
+                }
+            }
+            McpProtocolSession::Legacy(session_id) => {
+                if let Some((_, cancellation)) = state.legacy_sessions.remove(&session_id) {
+                    evicted.legacy_sessions.push(cancellation);
+                }
+            }
+        }
     }
 
     fn take_protocol_sessions(
@@ -478,14 +574,18 @@ impl McpCredentialStore {
             .filter_map(|(session_id, (bound, _))| (bound == token).then_some(session_id.clone()))
             .collect::<Vec<_>>();
         let legacy_cancellations = legacy_ids
-            .into_iter()
+            .iter()
             .filter_map(|session_id| {
                 state
                     .legacy_sessions
-                    .remove(&session_id)
+                    .remove(session_id)
                     .map(|(_, cancellation)| cancellation)
             })
-            .collect();
+            .collect::<Vec<_>>();
+        state.protocol_session_order.retain(|bound| match bound {
+            McpProtocolSession::Http(session_id) => !http_ids.contains(session_id),
+            McpProtocolSession::Legacy(session_id) => !legacy_ids.contains(session_id),
+        });
         (http_ids, legacy_cancellations)
     }
 
@@ -734,33 +834,36 @@ impl AgentMessagingMcpHandler {
         }
 
         let backend = self.backend()?;
-        let relation = backend
-            .direct_agent_relation(&caller_thread_id, recipient_thread_id)
+        let (relation, caller, recipient) = backend
+            .direct_agent_relation_sessions(&caller_thread_id, recipient_thread_id)
             .await
             .map_err(agent_relation_tool_error)?;
-        let relations = backend
-            .agent_relations(&caller_thread_id)
-            .await
-            .map_err(agent_relation_tool_error)?;
-        let recipient = match relation {
-            AgentRelationKind::Parent => relations.parent.as_ref(),
-            AgentRelationKind::SubAgent => relations
-                .children
-                .iter()
-                .find(|child| child.thread_id == recipient_thread_id),
+        if !matches!(
+            recipient.status,
+            AgentRelationStatus::Running | AgentRelationStatus::Idle
+        ) {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "recipient agent session is {} and must be loaded before messaging",
+                    match recipient.status {
+                        AgentRelationStatus::Unloaded => "unloaded",
+                        AgentRelationStatus::Unavailable => "unavailable",
+                        AgentRelationStatus::Running | AgentRelationStatus::Idle => unreachable!(),
+                    }
+                ),
+                None,
+            ));
         }
-        .ok_or_else(|| {
-            ErrorData::invalid_params("recipient is no longer a direct agent relation", None)
-        })?;
         let message_id = Uuid::new_v4().to_string();
         let envelope = AgentMessageEnvelope::new(
             message_id.clone(),
             caller_thread_id.clone(),
             recipient.thread_id.clone(),
             relation,
-            relations.caller.title.clone(),
+            caller.title.clone(),
             arguments.message.clone(),
         );
+        validate_agent_message_envelope_size(&envelope)?;
         let disposition = self
             .queue()?
             .send_agent_message(
@@ -769,7 +872,7 @@ impl AgentMessagingMcpHandler {
                     message_id: message_id.clone(),
                     direction: AgentMessageDirection::Received,
                     related_thread_id: caller_thread_id,
-                    related_title: relations.caller.title,
+                    related_title: caller.title,
                     relation: relation.inverse(),
                     disposition: AgentMessageDisposition::Queued,
                     body: arguments.message,
@@ -802,6 +905,21 @@ impl ServerHandler for AgentMessagingMcpHandler {
     }
 }
 
+fn validate_agent_message_envelope_size(envelope: &AgentMessageEnvelope) -> Result<(), ErrorData> {
+    let encoded = envelope
+        .encode()
+        .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+    if encoded.len() > QUEUE_MAX_CONTENT_BYTES {
+        return Err(ErrorData::invalid_params(
+            format!(
+                "message is too large after delivery encoding; shorten it so the encoded payload is at most {QUEUE_MAX_CONTENT_BYTES} bytes"
+            ),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 fn json_tool_result(value: impl Serialize) -> Result<CallToolResult, ErrorData> {
     Ok(CallToolResult::success(vec![ContentBlock::json(value)?]))
 }
@@ -830,12 +948,19 @@ async fn authenticate_mcp_request(
         .get(&MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    if session_id.as_deref().is_some_and(|session_id| {
-        !state
+    if let Some(session_id) = session_id.as_deref() {
+        match state
             .credentials
-            .http_session_is_authorized(session_id, &credential.token)
-    }) {
-        return StatusCode::FORBIDDEN.into_response();
+            .http_session_authorization(session_id, &credential.token)
+        {
+            McpHttpSessionAuthorization::Authorized => {}
+            McpHttpSessionAuthorization::WrongCredential => {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            McpHttpSessionAuthorization::Unknown => {
+                return StatusCode::NOT_FOUND.into_response();
+            }
+        }
     }
     let deleting = request.method() == Method::DELETE;
     let token = credential.token.clone();
@@ -848,15 +973,25 @@ async fn authenticate_mcp_request(
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     if let Some(response_session_id) = response_session_id {
-        if !state
+        match state
             .credentials
             .bind_http_session(&response_session_id, &token)
         {
-            state
-                .credentials
-                .close_http_session(&response_session_id)
-                .await;
-            return StatusCode::TOO_MANY_REQUESTS.into_response();
+            Ok(evicted) => {
+                for cancellation in evicted.legacy_sessions {
+                    cancellation.cancel();
+                }
+                for session_id in evicted.http_sessions {
+                    state.credentials.close_http_session(&session_id).await;
+                }
+            }
+            Err(()) => {
+                state
+                    .credentials
+                    .close_http_session(&response_session_id)
+                    .await;
+                return StatusCode::TOO_MANY_REQUESTS.into_response();
+            }
         }
     }
     if deleting && response.status().is_success() {
@@ -883,11 +1018,19 @@ async fn open_legacy_sse(
     };
     let session_id = format!("sse_{}", Uuid::new_v4().simple());
     let cancellation = CancellationToken::new();
-    if !state
-        .credentials
-        .bind_legacy_session(&session_id, &credential.token, cancellation.clone())
-    {
-        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    let evicted = match state.credentials.bind_legacy_session(
+        &session_id,
+        &credential.token,
+        cancellation.clone(),
+    ) {
+        Ok(evicted) => evicted,
+        Err(()) => return StatusCode::TOO_MANY_REQUESTS.into_response(),
+    };
+    for cancellation in evicted.legacy_sessions {
+        cancellation.cancel();
+    }
+    for session_id in evicted.http_sessions {
+        state.credentials.close_http_session(&session_id).await;
     }
 
     let (inbound, inbound_receiver) = mpsc::channel(64);
@@ -1022,6 +1165,7 @@ pub(crate) enum AgentMessageDisposition {
     Sent,
     Steering,
     Queued,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1058,7 +1202,9 @@ pub(crate) struct AgentMessageEnvelope {
 
 impl AgentMessageEnvelope {
     pub(crate) fn may_be_partial(value: &str) -> bool {
-        ENVELOPE_PREFIX.starts_with(value) || value.starts_with(ENVELOPE_PREFIX)
+        let value = value.trim_start_matches(|character: char| character.is_ascii_whitespace());
+        !value.is_empty()
+            && (ENVELOPE_PREFIX.starts_with(value) || value.starts_with(ENVELOPE_PREFIX))
     }
 
     pub(crate) fn has_complete_suffix(value: &str) -> bool {
@@ -1099,6 +1245,28 @@ impl AgentMessageEnvelope {
             && envelope.reply_tool == SEND_AGENT_MESSAGE_TOOL)
             .then_some(envelope)
     }
+
+    pub(crate) fn decode_echo(value: &str) -> Option<Self> {
+        Self::decode(value.trim_matches(|character: char| character.is_ascii_whitespace()))
+    }
+}
+
+pub(crate) fn prompt_contains_agent_message_envelope(
+    prompt: &[agent_client_protocol::schema::v1::ContentBlock],
+) -> bool {
+    let mut combined = String::new();
+    let mut contains_envelope = false;
+    for block in prompt {
+        if let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block {
+            contains_envelope |= contains_reserved_agent_message_marker(&text.text);
+            combined.push_str(&text.text);
+        }
+    }
+    contains_envelope || contains_reserved_agent_message_marker(&combined)
+}
+
+fn contains_reserved_agent_message_marker(value: &str) -> bool {
+    value.contains(ENVELOPE_PREFIX.trim_end()) || value.contains(ENVELOPE_SUFFIX.trim_start())
 }
 
 #[cfg(test)]
@@ -1166,6 +1334,23 @@ mod tests {
     }
 
     #[test]
+    fn echoed_agent_message_envelope_allows_only_outer_ascii_whitespace() {
+        let expected = envelope();
+        let encoded = expected.encode().unwrap();
+
+        assert_eq!(
+            AgentMessageEnvelope::decode_echo(&format!("\n{encoded}\r\n")),
+            Some(expected)
+        );
+        assert!(AgentMessageEnvelope::decode_echo(&format!("{encoded}suffix")).is_none());
+        assert!(AgentMessageEnvelope::may_be_partial(&format!(
+            "\n{}",
+            &encoded[..8]
+        )));
+        assert!(!AgentMessageEnvelope::may_be_partial(""));
+    }
+
+    #[test]
     fn envelope_parser_rejects_partial_forgiving_or_future_shapes() {
         let encoded = envelope().encode().unwrap();
         assert!(AgentMessageEnvelope::decode(&format!("prefix{encoded}")).is_none());
@@ -1179,6 +1364,75 @@ mod tests {
 
         let unknown_field = encoded.replace("\"replyTool\"", "\"unexpected\":true,\"replyTool\"");
         assert!(AgentMessageEnvelope::decode(&unknown_field).is_none());
+    }
+
+    #[test]
+    fn reserved_envelope_markers_are_detected_across_prefixed_text_blocks() {
+        let encoded = envelope().encode().expect("agent message envelope");
+        let split_at = encoded
+            .find(",\"senderThreadId\"")
+            .expect("encoded sender field");
+        let prompt = [
+            "ordinary prefix",
+            &encoded[..split_at],
+            &encoded[split_at..],
+        ]
+        .into_iter()
+        .map(|text| {
+            serde_json::from_value(serde_json::json!({
+                "type": "text",
+                "text": text,
+                "text_elements": [],
+            }))
+            .expect("ACP text block")
+        })
+        .collect::<Vec<agent_client_protocol::schema::v1::ContentBlock>>();
+
+        assert!(prompt_contains_agent_message_envelope(&prompt));
+    }
+
+    #[test]
+    fn mcp_body_limit_admits_a_maximum_size_fully_escaped_message() {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": SEND_AGENT_MESSAGE_TOOL,
+                "arguments": {
+                    "recipientThreadId": "agent-alpha:child",
+                    "message": "\u{0000}".repeat(MAX_AGENT_MESSAGE_BODY_BYTES),
+                },
+            },
+        });
+
+        assert!(
+            serde_json::to_vec(&request)
+                .expect("MCP request serializes")
+                .len()
+                <= MAX_MCP_REQUEST_BYTES
+        );
+    }
+
+    #[test]
+    fn encoded_agent_message_must_fit_the_queue_before_admission() {
+        let oversized = AgentMessageEnvelope::new(
+            "message-oversized".to_string(),
+            "parent".to_string(),
+            "child".to_string(),
+            AgentRelationKind::SubAgent,
+            Some("Parent agent".to_string()),
+            "\"".repeat(MAX_AGENT_MESSAGE_BODY_BYTES),
+        );
+        assert!(oversized.body.len() <= MAX_AGENT_MESSAGE_BODY_BYTES);
+        assert!(
+            oversized.encode().expect("agent-message envelope").len() > QUEUE_MAX_CONTENT_BYTES
+        );
+        let error = validate_agent_message_envelope_size(&oversized)
+            .expect_err("encoded payload above the queue limit must be rejected");
+        assert!(format!("{error:?}").contains("shorten"));
+        validate_agent_message_envelope_size(&envelope())
+            .expect("ordinary agent-message envelope fits");
     }
 
     #[test]
@@ -1267,14 +1521,99 @@ mod tests {
         let first = config.stage_credential("agent-a").unwrap();
         let second = config.stage_credential("agent-a").unwrap();
 
-        assert!(store.bind_http_session("mcp-session", &first.token));
-        assert!(store.http_session_is_authorized("mcp-session", &first.token));
-        assert!(!store.http_session_is_authorized("mcp-session", &second.token));
-        assert!(!store.bind_http_session("mcp-session", &second.token));
+        assert!(store.bind_http_session("mcp-session", &first.token).is_ok());
+        assert_eq!(
+            store.http_session_authorization("mcp-session", &first.token),
+            McpHttpSessionAuthorization::Authorized
+        );
+        assert_eq!(
+            store.http_session_authorization("mcp-session", &second.token),
+            McpHttpSessionAuthorization::WrongCredential
+        );
+        assert!(store
+            .bind_http_session("mcp-session", &second.token)
+            .is_err());
 
         drop(first);
-        assert!(!store.http_session_is_authorized("mcp-session", &second.token));
-        assert!(store.bind_http_session("mcp-session", &second.token));
+        assert_eq!(
+            store.http_session_authorization("mcp-session", &second.token),
+            McpHttpSessionAuthorization::Unknown
+        );
+        assert!(store
+            .bind_http_session("mcp-session", &second.token)
+            .is_ok());
+    }
+
+    #[test]
+    fn global_http_session_quota_evicts_the_oldest_reconnectable_worker() {
+        let store = Arc::new(McpCredentialStore::default());
+        let mut credentials = Vec::new();
+        for index in 0..MAX_MCP_PROTOCOL_SESSIONS {
+            let credential = McpCredentialStore::stage(&store, "agent-a").unwrap();
+            assert!(store
+                .bind_http_session(&format!("session-{index}"), &credential.token)
+                .expect("session binds without eviction")
+                .is_empty());
+            credentials.push(credential);
+        }
+        let replacement = McpCredentialStore::stage(&store, "agent-a").unwrap();
+        let evicted = store
+            .bind_http_session("replacement", &replacement.token)
+            .expect("replacement evicts stale HTTP state");
+        assert_eq!(evicted.http_sessions, vec!["session-0".to_string()]);
+        assert!(evicted.legacy_sessions.is_empty());
+        assert_eq!(
+            store.http_session_authorization("session-0", &credentials[0].token),
+            McpHttpSessionAuthorization::Unknown
+        );
+        assert_eq!(
+            store.http_session_authorization("replacement", &replacement.token),
+            McpHttpSessionAuthorization::Authorized
+        );
+        assert_eq!(
+            store
+                .state
+                .lock()
+                .expect("credential state lock")
+                .http_sessions
+                .len(),
+            MAX_MCP_PROTOCOL_SESSIONS
+        );
+    }
+
+    #[test]
+    fn legacy_session_admission_evicts_the_oldest_http_binding_at_global_capacity() {
+        let store = Arc::new(McpCredentialStore::default());
+        let mut credentials = Vec::new();
+        for index in 0..MAX_MCP_PROTOCOL_SESSIONS {
+            let credential = McpCredentialStore::stage(&store, "agent-a").unwrap();
+            assert!(store
+                .bind_http_session(&format!("session-{index}"), &credential.token)
+                .expect("HTTP session binds without eviction")
+                .is_empty());
+            credentials.push(credential);
+        }
+        let legacy = McpCredentialStore::stage(&store, "agent-a").unwrap();
+        let evicted = store
+            .bind_legacy_session(
+                "legacy-replacement",
+                &legacy.token,
+                CancellationToken::new(),
+            )
+            .expect("legacy session evicts stale HTTP state");
+
+        assert_eq!(evicted.http_sessions, vec!["session-0".to_string()]);
+        assert!(evicted.legacy_sessions.is_empty());
+        assert_eq!(
+            store.http_session_authorization("session-0", &credentials[0].token),
+            McpHttpSessionAuthorization::Unknown
+        );
+        assert!(store
+            .state
+            .lock()
+            .expect("credential state lock")
+            .legacy_sessions
+            .contains_key("legacy-replacement"));
     }
 
     #[tokio::test]
@@ -1333,7 +1672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_session_quota_closes_rejected_workers_and_failed_delete_stays_bound() {
+    async fn http_session_reconnect_evicts_the_oldest_worker_and_failed_delete_stays_bound() {
         let service = AgentMessagingService::start(
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
@@ -1375,14 +1714,34 @@ mod tests {
             MAX_MCP_SESSIONS_PER_CREDENTIAL
         );
 
-        let rejected = initialize_http_session(&client, &config, &authorization, 99).await;
-        assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        let replacement = initialize_http_session(&client, &config, &authorization, 99).await;
+        assert_eq!(replacement.status(), StatusCode::OK);
         assert_eq!(
             manager.sessions.read().await.len(),
             MAX_MCP_SESSIONS_PER_CREDENTIAL
         );
+        assert_eq!(
+            config
+                .credentials
+                .http_session_authorization(&session_ids[0], &pending.token),
+            McpHttpSessionAuthorization::Unknown
+        );
+        let evicted_request = client
+            .post(config.http_url.clone())
+            .header(AUTHORIZATION, &authorization)
+            .header(MCP_SESSION_HEADER.as_str(), &session_ids[0])
+            .header("mcp-protocol-version", "2025-03-26")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1000,
+                "method": "tools/list",
+            }))
+            .send()
+            .await
+            .expect("evicted HTTP MCP session response");
+        assert_eq!(evicted_request.status(), StatusCode::NOT_FOUND);
 
-        let first_session = &session_ids[0];
+        let first_session = &session_ids[1];
         let failed_delete = client
             .delete(config.http_url.clone())
             .header(AUTHORIZATION, &authorization)
@@ -1392,9 +1751,12 @@ mod tests {
             .await
             .expect("malformed HTTP MCP delete response");
         assert!(!failed_delete.status().is_success());
-        assert!(config
-            .credentials
-            .http_session_is_authorized(first_session, &pending.token));
+        assert_eq!(
+            config
+                .credentials
+                .http_session_authorization(first_session, &pending.token),
+            McpHttpSessionAuthorization::Authorized
+        );
 
         let deleted = client
             .delete(config.http_url.clone())
@@ -1405,16 +1767,19 @@ mod tests {
             .await
             .expect("valid HTTP MCP delete response");
         assert!(deleted.status().is_success());
-        assert!(!config
-            .credentials
-            .http_session_is_authorized(first_session, &pending.token));
+        assert_eq!(
+            config
+                .credentials
+                .http_session_authorization(first_session, &pending.token),
+            McpHttpSessionAuthorization::Unknown
+        );
         assert_eq!(
             manager.sessions.read().await.len(),
             MAX_MCP_SESSIONS_PER_CREDENTIAL - 1
         );
 
-        let replacement = initialize_http_session(&client, &config, &authorization, 100).await;
-        assert_eq!(replacement.status(), StatusCode::OK);
+        let next_replacement = initialize_http_session(&client, &config, &authorization, 100).await;
+        assert_eq!(next_replacement.status(), StatusCode::OK);
         assert_eq!(
             manager.sessions.read().await.len(),
             MAX_MCP_SESSIONS_PER_CREDENTIAL

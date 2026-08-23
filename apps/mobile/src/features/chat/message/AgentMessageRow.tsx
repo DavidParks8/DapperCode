@@ -87,8 +87,10 @@ export const AgentMessageRow = memo(function AgentMessageRowComponent({
       layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
       testID={`agent-message-row-${messageId}`}
     >
-      <View
-        style={toolStyles.row}
+      <Pressable
+        style={({ pressed }) => [toolStyles.row, pressed && toolStyles.rowPressed]}
+        onPress={toggle}
+        hitSlop={computeHitSlop(AGENT_MESSAGE_ROW_VISIBLE_SIZE, { maxHorizontal: 0 })}
         accessible
         accessibilityRole="button"
         accessibilityLabel={`${headerLabel}: ${relatedLabel}`}
@@ -102,14 +104,8 @@ export const AgentMessageRow = memo(function AgentMessageRowComponent({
             toggle();
           }
         }}
+        testID={`agent-message-toggle-${messageId}`}
       >
-        <Pressable
-          onPress={toggle}
-          accessible={false}
-          hitSlop={computeHitSlop(AGENT_MESSAGE_ROW_VISIBLE_SIZE, { maxHorizontal: 0 })}
-          style={({ pressed }) => [toolStyles.rowTouchTarget, pressed && toolStyles.rowPressed]}
-          testID={`agent-message-toggle-${messageId}`}
-        />
         <View style={[toolStyles.rowRegion, toolStyles.rowIcon]}>
           <Ionicons
             {...decorativeAccessibilityProps}
@@ -139,7 +135,7 @@ export const AgentMessageRow = memo(function AgentMessageRowComponent({
             color={theme.colors.textMuted}
           />
         </View>
-      </View>
+      </Pressable>
       {expanded ? (
         <Animated.View
           entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}

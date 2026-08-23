@@ -131,6 +131,19 @@ describe('messages', () => {
     expect(
       getAgentMessageMeta(
         createActivityMessage(
+          'cancelled',
+          AGENT_MESSAGE_ACTIVITY_TYPE,
+          {
+            text: agentMessage.body,
+            agentMessage: { ...agentMessage, disposition: 'cancelled' },
+          },
+          'now',
+        ),
+      )?.disposition,
+    ).toBe('cancelled');
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
           'wrong-type',
           'status',
           { text: agentMessage.body, agentMessage },

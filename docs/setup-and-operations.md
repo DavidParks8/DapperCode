@@ -160,7 +160,10 @@ atomic rename.
 
 The agent-message journal contains bounded message activity metadata and bodies needed to reconstruct
 **Sent**/**Received** transcript rows. It contains no MCP credentials; those capabilities exist only
-in bridge memory and are revoked when their ACP session is replaced, deleted, or shut down.
+in bridge memory and are revoked when their ACP session is replaced, deleted, or shut down. Queued
+and pending-steer activities are marked `cancelled` after a bridge restart because their in-memory
+payloads do not survive the process; an envelope recovered from ACP history reconciles the
+corresponding activity to `sent`.
 
 Bridge bearer tokens are **not** in `config.json`. macOS stores distinct workspace tokens together
 under Keychain service `dev.dappercode.desktop`, account `bridge-auth-vault:v1`. Windows uses the

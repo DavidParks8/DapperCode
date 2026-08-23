@@ -90,13 +90,21 @@ inactive until the corresponding ACP lifecycle request and durable session-index
 rotate on load or resume, and revoke their bound HTTP/SSE protocol sessions on replacement,
 deletion, or bridge shutdown. Tokens are never placed in URLs, logs, repositories, or central
 state. The listener is loopback-only; it is a least-privilege boundary inside private-network bridge
-software, not an internet-facing service.
+software, not an internet-facing service. Remote MCP reconnects replace the oldest protocol binding
+at the per-credential or global cap, and evicted Streamable HTTP sessions return `404` so compliant
+clients reinitialize instead of treating recovery as an authorization failure.
+If the bounded credential registry is saturated, ACP session creation and restoration still proceed
+without the additive messaging descriptor rather than failing the host lifecycle.
 
 Authorization is limited to one indexed parent/child edge. Self, sibling, cross-agent, unknown,
 deleted, and more-distant ancestor or descendant targets are rejected. An idle recipient starts a
 new turn immediately. A busy recipient enters the existing turn queue, is promoted through the
 safe steering lane when the host supports steering, and otherwise remains queued for automatic
 dispatch. Agent queue entries are read-only and expose only cancellation on mobile.
+Cancellation updates the durable activity to `cancelled`. Because queued and pending-steer payloads
+are intentionally in memory, either activity still in flight when the bridge starts is reconciled
+to `cancelled` rather than implying that lost work remains pending. If ACP history proves the
+recipient accepted the prompt before shutdown, reconstruction corrects that activity to `sent`.
 
 Accepted messages are projected as dedicated `dappercode.agent_message` activities: **Sent to …**
 for the sender and **Received from …** for the recipient. A bounded private journal under the
@@ -110,7 +118,8 @@ versioned envelopes restore recipient origin without treating arbitrary user tex
    files and is not synthesized into the canonical channel.
 3. Slow or disconnected clients can miss live delivery after the bounded replay window is evicted;
    snapshot convergence restores durable session state, but transient deltas may no longer exist.
-4. Queue state is intentionally in memory and does not survive a full bridge process restart.
+4. Queue and pending-steer state is intentionally in memory and does not survive a full bridge
+   process restart.
 5. Agent capabilities vary. Steering, session resume/load, permissions, and elicitations are exposed
    only when negotiated or supported by the selected agent.
 6. Sub-agent streaming needs an agent that reports its session tree. Agents that only reveal a

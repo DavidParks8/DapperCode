@@ -736,6 +736,28 @@ impl SessionSnapshot {
         self.attach_history_message(message);
     }
 
+    pub(crate) fn append_message_after(
+        &mut self,
+        id: String,
+        role: MessageRole,
+        content: String,
+        content_block: Option<serde_json::Value>,
+        after_timeline_id: Option<&str>,
+    ) {
+        let already_present = self.messages.iter().any(|message| message.id == id);
+        self.append_message(id.clone(), role, content, content_block);
+        if already_present {
+            return;
+        }
+        match after_timeline_id {
+            Some(after_timeline_id) if after_timeline_id != id => {
+                self.reposition_message_after(&id, after_timeline_id);
+            }
+            Some(_) => {}
+            None => self.reposition_message_at_start(&id),
+        }
+    }
+
     pub(crate) fn append_agent_message(
         &mut self,
         origin: crate::agent_messaging::AgentMessageOrigin,
@@ -880,6 +902,53 @@ impl SessionSnapshot {
             } else {
                 self.messages.push_back(message);
             }
+        }
+        self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
+        self.enforce_history_bounds();
+    }
+
+    fn reposition_message_at_start(&mut self, message_id: &str) {
+        let Some(timeline_index) = self
+            .timeline
+            .iter()
+            .position(|entry| entry.canonical_id == message_id)
+        else {
+            return;
+        };
+        let Some(history_index) = self
+            .history
+            .iter()
+            .rposition(|entry| entry.canonical_id == message_id && entry.message.is_some())
+        else {
+            return;
+        };
+        let Some(mut timeline_entry) = self.timeline.remove(timeline_index) else {
+            return;
+        };
+        let Some(mut history_entry) = self.history.remove(history_index) else {
+            return;
+        };
+        for entry in &mut self.timeline {
+            entry.sequence = entry.sequence.saturating_add(1);
+        }
+        for entry in &mut self.history {
+            entry.sequence = entry.sequence.saturating_add(1);
+        }
+        timeline_entry.sequence = 0;
+        history_entry.sequence = 0;
+        self.timeline.push_front(timeline_entry);
+        self.history.push_front(history_entry);
+
+        if let Some(message_index) = self
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)
+        {
+            let message = self
+                .messages
+                .remove(message_index)
+                .expect("message index came from the snapshot");
+            self.messages.push_front(message);
         }
         self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
         self.enforce_history_bounds();

@@ -53,12 +53,19 @@ struct SessionState {
     /// Only one message per generation is ever open, so anything that interrupts the
     /// stream -- the speaker changing or a tool call landing -- starts a new one.
     open_messages: HashMap<u64, (MessageRole, String)>,
-    pending_agent_message_envelopes: HashMap<String, String>,
+    pending_agent_message_envelopes: HashMap<String, PendingAgentMessageEnvelope>,
+    pending_agent_message_serial: u64,
     live_serial: u64,
     history_role: Option<MessageRole>,
     history_serial: u64,
     notification_receipts: VecDeque<RoutedSessionNotification>,
     notification_draining: bool,
+}
+
+struct PendingAgentMessageEnvelope {
+    content: String,
+    after_timeline_id: Option<String>,
+    serial: u64,
 }
 
 struct RoutedSessionNotification {
@@ -72,6 +79,28 @@ enum GenerationState {
     Active(u64),
     Cancelling(u64),
     Handoff { generation: u64, settled: bool },
+}
+
+impl SessionState {
+    fn flush_pending_agent_message_envelopes(&mut self) {
+        let mut pending = std::mem::take(&mut self.pending_agent_message_envelopes)
+            .into_iter()
+            .collect::<Vec<_>>();
+        let (mut anchored, mut unanchored): (Vec<_>, Vec<_>) = pending
+            .drain(..)
+            .partition(|(_, pending)| pending.after_timeline_id.is_some());
+        unanchored.sort_by_key(|(_, pending)| std::cmp::Reverse(pending.serial));
+        anchored.sort_by_key(|(_, pending)| std::cmp::Reverse(pending.serial));
+        for (message_id, pending) in unanchored.into_iter().chain(anchored) {
+            self.snapshot.append_message_after(
+                message_id,
+                MessageRole::User,
+                pending.content,
+                None,
+                pending.after_timeline_id.as_deref(),
+            );
+        }
+    }
 }
 
 pub(crate) enum AgentMessageChunkMatch {
@@ -105,6 +134,7 @@ impl AcpSession {
                 generation_state: GenerationState::Terminal,
                 open_messages: HashMap::new(),
                 pending_agent_message_envelopes: HashMap::new(),
+                pending_agent_message_serial: 0,
                 live_serial: 0,
                 history_role: None,
                 history_serial: 0,
@@ -148,6 +178,7 @@ impl AcpSession {
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
         state.open_messages.clear();
         state.pending_agent_message_envelopes.clear();
+        state.pending_agent_message_serial = 0;
         state.reconstruction_history_cursor = Some((state.history_role, state.history_serial));
         state.history_role = None;
         state.history_serial = 0;
@@ -167,6 +198,7 @@ impl AcpSession {
         state.snapshot.history_reconstruction = true;
         state.reconstruction_backup = Some(previous);
         state.pending_agent_message_envelopes.clear();
+        state.pending_agent_message_serial = 0;
         ReconstructionTransaction {
             session: self.clone(),
             _guard: guard,
@@ -174,7 +206,6 @@ impl AcpSession {
     }
     async fn finish_reconstruction(&self, commit: bool) {
         let mut state = self.inner.lock().await;
-        let pending_agent_messages = std::mem::take(&mut state.pending_agent_message_envelopes);
         let restored_cursor = state.reconstruction_history_cursor.take();
         let Some(previous) = state.reconstruction_backup.take() else {
             return;
@@ -192,12 +223,10 @@ impl AcpSession {
         } else {
             false
         };
-        if commit {
-            for (message_id, content) in pending_agent_messages {
-                state
-                    .snapshot
-                    .append_message(message_id, MessageRole::User, content, None);
-            }
+        if commit && !restored {
+            state.flush_pending_agent_message_envelopes();
+        } else {
+            state.pending_agent_message_envelopes.clear();
         }
         // Restoring a transcript also has to restore the history id cursor, otherwise
         // the next replayed chunk reuses `history-1` and is appended to the oldest
@@ -218,23 +247,34 @@ impl AcpSession {
         &self,
         message_id: &str,
         content: String,
-        reconstruction: bool,
+        recipient_thread_id: &str,
     ) -> AgentMessageChunkMatch {
         const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
 
-        if !reconstruction {
-            return AgentMessageChunkMatch::Ordinary(content);
-        }
         let mut state = self.inner.lock().await;
-        let combined =
+        let (combined, after_timeline_id, serial) =
             if let Some(mut pending) = state.pending_agent_message_envelopes.remove(message_id) {
-                pending.push_str(&content);
-                pending
+                pending.content.push_str(&content);
+                (pending.content, pending.after_timeline_id, pending.serial)
             } else {
-                content
+                state.pending_agent_message_serial =
+                    state.pending_agent_message_serial.saturating_add(1);
+                (
+                    content,
+                    state
+                        .snapshot
+                        .latest_timeline_canonical_id()
+                        .map(str::to_string),
+                    state.pending_agent_message_serial,
+                )
             };
-        if let Some(envelope) = crate::agent_messaging::AgentMessageEnvelope::decode(&combined) {
-            return AgentMessageChunkMatch::Complete(envelope);
+        if let Some(envelope) = crate::agent_messaging::AgentMessageEnvelope::decode_echo(&combined)
+        {
+            return if envelope.recipient_thread_id == recipient_thread_id {
+                AgentMessageChunkMatch::Complete(envelope)
+            } else {
+                AgentMessageChunkMatch::Ordinary(combined)
+            };
         }
         if combined.len() > MAX_ENVELOPE_BYTES
             || !crate::agent_messaging::AgentMessageEnvelope::may_be_partial(&combined)
@@ -242,9 +282,14 @@ impl AcpSession {
         {
             return AgentMessageChunkMatch::Ordinary(combined);
         }
-        state
-            .pending_agent_message_envelopes
-            .insert(message_id.to_string(), combined);
+        state.pending_agent_message_envelopes.insert(
+            message_id.to_string(),
+            PendingAgentMessageEnvelope {
+                content: combined,
+                after_timeline_id,
+                serial,
+            },
+        );
         AgentMessageChunkMatch::Pending
     }
 
@@ -405,6 +450,22 @@ impl AcpSession {
         state.open_messages.insert(generation, (role, id.clone()));
         id
     }
+    pub(crate) async fn agent_message_disposition(
+        &self,
+        message_id: &str,
+    ) -> Option<crate::agent_messaging::AgentMessageDisposition> {
+        let activity_id = format!("agent-message:{message_id}");
+        self.inner
+            .lock()
+            .await
+            .snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == activity_id)
+            .and_then(|message| message.agent_message.as_ref())
+            .map(|message| message.disposition)
+    }
+
     pub async fn emit_prompt_transcript(
         &self,
         prompt: &[ContentBlock],
@@ -418,7 +479,12 @@ impl AcpSession {
             if let ContentBlock::Text(text) = block {
                 if let Some(envelope) =
                     crate::agent_messaging::AgentMessageEnvelope::decode(&text.text)
+                        .filter(|envelope| envelope.recipient_thread_id == snapshot.thread_id)
                 {
+                    let disposition = self
+                        .agent_message_disposition(&envelope.message_id)
+                        .await
+                        .unwrap_or(crate::agent_messaging::AgentMessageDisposition::Queued);
                     self.emit(CanonicalEvent::AgentMessage {
                         agent_id: snapshot.agent_id.clone(),
                         thread_id: snapshot.thread_id.clone(),
@@ -428,7 +494,7 @@ impl AcpSession {
                             related_thread_id: envelope.sender_thread_id,
                             related_title: envelope.sender_title,
                             relation: envelope.recipient_relation.inverse(),
-                            disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+                            disposition,
                             body: envelope.body,
                         },
                     })
@@ -468,6 +534,7 @@ impl AcpSession {
                     } if active == *generation
                 ) =>
             {
+                state.flush_pending_agent_message_envelopes();
                 state.generation_state = GenerationState::Handoff {
                     generation: *generation,
                     settled: true,
@@ -482,6 +549,7 @@ impl AcpSession {
                         if active == *generation
                 ) =>
             {
+                state.flush_pending_agent_message_envelopes();
                 state.generation_state = GenerationState::Terminal;
                 state.open_messages.remove(generation);
             }
@@ -1566,6 +1634,207 @@ mod tests {
             }))
             .expect("valid notification"),
         )
+    }
+
+    #[tokio::test]
+    async fn prompt_transcript_preserves_an_existing_agent_message_disposition() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message".to_string(),
+            "parent".to_string(),
+            "thread".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent".to_string()),
+            "Please inspect the lifecycle.".to_string(),
+        );
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message".to_string(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "parent".to_string(),
+                    related_title: Some("Parent".to_string()),
+                    relation: crate::agent_messaging::AgentRelationKind::Parent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Steering,
+                    body: "Please inspect the lifecycle.".to_string(),
+                },
+            })
+            .await;
+        let prompt = vec![serde_json::from_value(serde_json::json!({
+            "type": "text",
+            "text": envelope.encode().expect("agent message envelope"),
+        }))
+        .expect("text content block")];
+
+        session
+            .emit_prompt_transcript(
+                &prompt,
+                Some("run".to_string()),
+                Some("turn".to_string()),
+                Some(1),
+                "prompt-message".to_string(),
+            )
+            .await;
+
+        let snapshot = session.snapshot().await;
+        let activity = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "agent-message:message")
+            .and_then(|message| message.agent_message.as_ref())
+            .expect("agent message activity");
+        assert_eq!(
+            activity.disposition,
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_transcript_does_not_project_an_envelope_for_another_thread() {
+        let session = AcpSession::new("agent".to_string(), "fork".to_string());
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message".to_string(),
+            "parent".to_string(),
+            "original-child".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent".to_string()),
+            "Keep this bound to the original recipient.".to_string(),
+        );
+        let prompt = vec![serde_json::from_value(serde_json::json!({
+            "type": "text",
+            "text": envelope.encode().expect("agent message envelope"),
+        }))
+        .expect("text content block")];
+
+        session
+            .emit_prompt_transcript(
+                &prompt,
+                Some("run".to_string()),
+                Some("turn".to_string()),
+                Some(1),
+                "prompt-message".to_string(),
+            )
+            .await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "prompt-message");
+        assert!(snapshot.messages[0].agent_message.is_none());
+        assert!(snapshot.messages[0].parts[0]["text"]
+            .as_str()
+            .expect("ordinary prompt text")
+            .contains("original-child"));
+    }
+
+    #[tokio::test]
+    async fn incomplete_reconstructed_envelope_prefix_keeps_its_original_message_order() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "before".to_string(),
+                MessageRole::User,
+                "Before".to_string(),
+                None,
+            );
+        }
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial-prefix", "<<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("second-prefix", "<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "after".to_string(),
+                MessageRole::Agent,
+                "After".to_string(),
+                None,
+            );
+        }
+        reconstruction.finish(true).await;
+
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["before", "partial-prefix", "second-prefix", "after"]
+        );
+    }
+
+    #[tokio::test]
+    async fn incomplete_reconstructed_prefixes_precede_later_content_on_an_empty_timeline() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        for (message_id, content) in [("first-prefix", "<"), ("second-prefix", "<<")] {
+            assert!(matches!(
+                session
+                    .classify_agent_message_chunk(message_id, content.to_string(), "thread")
+                    .await,
+                AgentMessageChunkMatch::Pending
+            ));
+        }
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "after".to_string(),
+                MessageRole::Agent,
+                "After".to_string(),
+                None,
+            );
+        }
+        reconstruction.finish(true).await;
+
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first-prefix", "second-prefix", "after"]
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_reconstruction_discards_pending_fragments_when_restoring_the_transcript() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "existing".to_string(),
+                MessageRole::Agent,
+                "Existing".to_string(),
+                None,
+            );
+        }
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial-prefix", "<<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "existing");
     }
 
     #[tokio::test]

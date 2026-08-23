@@ -23,7 +23,7 @@ export interface ChatMessageSubAgentMeta {
 }
 
 export type AgentMessageDirection = 'sent' | 'received';
-export type AgentMessageDisposition = 'sent' | 'steering' | 'queued';
+export type AgentMessageDisposition = 'sent' | 'steering' | 'queued' | 'cancelled';
 export type AgentMessageRelation = 'parent' | 'sub_agent';
 
 export interface ChatAgentMessageMeta {

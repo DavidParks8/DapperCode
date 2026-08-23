@@ -41,6 +41,7 @@ export function transcriptDisplayItemKey(item: TranscriptDisplayItem): string {
 export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
 const HIDDEN_TRANSCRIPT_MARKERS = [
+  '<<<dappercode.dev/agent-message:',
   'FINAL_TASK_RESULT_JSON',
   'Current working directory is:',
   'You are operating in task worktree',
@@ -192,10 +193,12 @@ function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
 function shouldDisplayTranscriptMessage(message: ChatMessage, showToolCalls: boolean): boolean {
   const text = getMessageText(message);
   const hasToolCalls = getToolCallDisplayLines(message).length > 0;
+  const isAgentMessageActivity =
+    message.role === 'activity' && message.activityType === AGENT_MESSAGE_ACTIVITY_TYPE;
 
   return !(
     shouldHideToolTranscriptMessage(message, text, hasToolCalls, showToolCalls) ||
-    hasHiddenTranscriptMarker(text) ||
+    (!isAgentMessageActivity && hasHiddenTranscriptMarker(text)) ||
     isBlankAssistantTranscriptMessage(message, text, hasToolCalls)
   );
 }

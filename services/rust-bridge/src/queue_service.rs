@@ -8,6 +8,11 @@ pub(super) struct DurableQueueSubmissions {
     pub(super) pending_order: VecDeque<String>,
 }
 
+fn turn_start_contains_agent_message_envelope(turn_start: &Value) -> bool {
+    crate::runtime_backend::bridge_prompt(turn_start)
+        .is_ok_and(|prompt| crate::agent_messaging::prompt_contains_agent_message_envelope(&prompt))
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DurableQueueReceipt {
@@ -32,6 +37,8 @@ const QUEUE_RECEIPT_STORE_MAX_BYTES: usize = 1024 * 1024;
 const QUEUE_IDENTIFIER_MAX_BYTES: usize = 4096;
 const QUEUE_DISPATCH_RETRY_MIN_MS: u64 = 250;
 const QUEUE_DISPATCH_RETRY_MAX_MS: u64 = 30_000;
+const AGENT_MESSAGE_JOURNAL_UPDATE_ATTEMPTS: usize = 3;
+const AGENT_MESSAGE_JOURNAL_UPDATE_RETRY_MS: u64 = 10;
 
 fn dispatch_failure_is_indeterminate(error: &str) -> bool {
     error.starts_with(INDETERMINATE_OPERATION_PREFIX)
@@ -321,19 +328,7 @@ impl BridgeQueueService {
         &self,
         request: BridgeThreadQueueSendRequest,
     ) -> Result<BridgeThreadQueueSendResponse, String> {
-        if crate::runtime_backend::bridge_prompt(&request.turn_start).is_ok_and(|prompt| {
-            let mut combined = String::new();
-            let mut contains_envelope = false;
-            for block in prompt {
-                if let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block {
-                    contains_envelope |=
-                        crate::agent_messaging::AgentMessageEnvelope::decode(&text.text).is_some();
-                    combined.push_str(&text.text);
-                }
-            }
-            contains_envelope
-                || crate::agent_messaging::AgentMessageEnvelope::decode(&combined).is_some()
-        }) {
+        if turn_start_contains_agent_message_envelope(&request.turn_start) {
             return Err("agent message envelopes are reserved for the bridge".to_string());
         }
         self.send_message_with_origin(request, None).await
@@ -531,14 +526,23 @@ impl BridgeQueueService {
     pub(crate) async fn send_agent_message(
         self: &Arc<Self>,
         envelope: &crate::agent_messaging::AgentMessageEnvelope,
-        mut recipient_origin: crate::agent_messaging::AgentMessageOrigin,
-        mut sender_origin: crate::agent_messaging::AgentMessageOrigin,
+        recipient_origin: crate::agent_messaging::AgentMessageOrigin,
+        sender_origin: crate::agent_messaging::AgentMessageOrigin,
     ) -> Result<crate::agent_messaging::AgentMessageDisposition, String> {
         let content = envelope
             .encode()
             .map_err(|error| format!("failed to encode agent message: {error}"))?;
         let submission_id = format!("agent-message:{}", envelope.message_id);
-        let result = self
+        self.backend
+            .record_agent_messages(vec![
+                (
+                    envelope.recipient_thread_id.clone(),
+                    recipient_origin.clone(),
+                ),
+                (envelope.sender_thread_id.clone(), sender_origin.clone()),
+            ])
+            .await?;
+        let result = match self
             .send_message_with_origin(
                 BridgeThreadQueueSendRequest {
                     thread_id: envelope.recipient_thread_id.clone(),
@@ -552,9 +556,38 @@ impl BridgeQueueService {
                         }],
                     }),
                 },
-                Some(recipient_origin.clone()),
+                Some(recipient_origin),
             )
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                if dispatch_failure_is_indeterminate(&error) {
+                    if let Err(update_error) = self
+                        .persist_agent_message_disposition(
+                            &envelope.message_id,
+                            crate::agent_messaging::AgentMessageDisposition::Cancelled,
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "failed to settle indeterminate agent-message activity {}: {update_error}",
+                            envelope.message_id
+                        );
+                    }
+                } else if let Err(remove_error) = self
+                    .backend
+                    .remove_agent_message(&envelope.message_id)
+                    .await
+                {
+                    eprintln!(
+                        "failed to remove rejected agent-message activity {}: {remove_error}",
+                        envelope.message_id
+                    );
+                }
+                return Err(error);
+            }
+        };
         let disposition = if matches!(result.disposition, BridgeThreadQueueDisposition::Sent) {
             crate::agent_messaging::AgentMessageDisposition::Sent
         } else {
@@ -594,20 +627,49 @@ impl BridgeQueueService {
                 _ => crate::agent_messaging::AgentMessageDisposition::Queued,
             }
         };
-        sender_origin.disposition = disposition;
-        recipient_origin.disposition = disposition;
-        self.backend
-            .record_agent_messages(vec![
-                (envelope.recipient_thread_id.clone(), recipient_origin),
-                (envelope.sender_thread_id.clone(), sender_origin),
-            ])
+        if disposition == crate::agent_messaging::AgentMessageDisposition::Queued {
+            self.backend
+                .publish_agent_message(&envelope.message_id)
+                .await;
+        } else if let Err(error) = self
+            .persist_agent_message_disposition(&envelope.message_id, disposition)
             .await
-            .map_err(|error| {
-                format!(
-                    "agent message delivery was accepted but its activity record failed: {error}"
-                )
-            })?;
+        {
+            eprintln!(
+                "failed to persist accepted agent-message activity {}: {error}",
+                envelope.message_id
+            );
+            self.backend
+                .publish_agent_message(&envelope.message_id)
+                .await;
+        }
+        if disposition == crate::agent_messaging::AgentMessageDisposition::Steering {
+            self.spawn_steer_dispatch(envelope.recipient_thread_id.clone());
+        }
         Ok(disposition)
+    }
+
+    async fn persist_agent_message_disposition(
+        &self,
+        message_id: &str,
+        disposition: crate::agent_messaging::AgentMessageDisposition,
+    ) -> Result<(), String> {
+        let mut last_error = None;
+        for attempt in 0..AGENT_MESSAGE_JOURNAL_UPDATE_ATTEMPTS {
+            match self
+                .backend
+                .update_agent_message_disposition(message_id, disposition)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) => last_error = Some(error),
+            }
+            if attempt + 1 < AGENT_MESSAGE_JOURNAL_UPDATE_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(AGENT_MESSAGE_JOURNAL_UPDATE_RETRY_MS))
+                    .await;
+            }
+        }
+        Err(last_error.unwrap_or_else(|| "agent-message journal update failed".to_string()))
     }
 
     async fn lookup_submission(
@@ -1002,7 +1064,9 @@ impl BridgeQueueService {
 
         self.broadcast_snapshot(&snapshot).await;
         drop(_actor_guard);
-        self.spawn_steer_dispatch(normalized_thread_id);
+        if !automatic_agent_steer {
+            self.spawn_steer_dispatch(normalized_thread_id);
+        }
         Ok(BridgeThreadQueueActionResponse {
             ok: true,
             queue: snapshot,
@@ -1029,7 +1093,7 @@ impl BridgeQueueService {
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
 
-        let (mut snapshot, should_dispatch, removed_submission_id) = {
+        let (mut snapshot, should_dispatch, removed_submission_id, agent_message_id) = {
             let mut threads = self.threads.write().await;
             let runtime = threads
                 .get_mut(&normalized_thread_id)
@@ -1039,7 +1103,7 @@ impl BridgeQueueService {
                     "cannot cancel a queued message while it is being processed".to_string()
                 );
             }
-            let removed_submission_id = if let Some(item_index) = runtime
+            let (removed_submission_id, agent_message_id) = if let Some(item_index) = runtime
                 .items
                 .iter()
                 .position(|item| item.id == normalized_item_id)
@@ -1051,17 +1115,23 @@ impl BridgeQueueService {
                 if runtime.editing_item_id.as_deref() == Some(normalized_item_id.as_str()) {
                     runtime.editing_item_id = None;
                 };
-                removed.submission_id
+                (
+                    removed.submission_id,
+                    removed.agent_message.map(|message| message.message_id),
+                )
             } else if let Some(item_index) = runtime
                 .pending_steers
                 .iter()
                 .position(|item| item.id == normalized_item_id)
             {
-                runtime
+                let removed = runtime
                     .pending_steers
                     .remove(item_index)
-                    .expect("index came from position")
-                    .submission_id
+                    .expect("index came from position");
+                (
+                    removed.submission_id,
+                    removed.agent_message.map(|message| message.message_id),
+                )
             } else if runtime
                 .steer_dispatch_in_flight
                 .as_ref()
@@ -1076,9 +1146,31 @@ impl BridgeQueueService {
                 Self::snapshot_for_thread(&normalized_thread_id, Some(runtime)),
                 !Self::runtime_has_blockers(runtime),
                 removed_submission_id,
+                agent_message_id,
             )
         };
 
+        drop(_actor_guard);
+        if let Some(message_id) = agent_message_id {
+            if let Err(error) = self
+                .persist_agent_message_disposition(
+                    &message_id,
+                    crate::agent_messaging::AgentMessageDisposition::Cancelled,
+                )
+                .await
+            {
+                let mut threads = self.threads.write().await;
+                if let Some(runtime) = threads.get_mut(&normalized_thread_id) {
+                    runtime.last_error = Some(BridgeThreadQueueError {
+                        message: error,
+                        operation: "persist".to_string(),
+                        at: now_iso(),
+                        item_id: Some(normalized_item_id.clone()),
+                    });
+                    snapshot = Self::snapshot_for_thread(&normalized_thread_id, Some(runtime));
+                }
+            }
+        }
         if let Err(error) = self.forget_submission_result(&removed_submission_id).await {
             let mut threads = self.threads.write().await;
             if let Some(runtime) = threads.get_mut(&normalized_thread_id) {
@@ -1086,7 +1178,7 @@ impl BridgeQueueService {
                     message: error,
                     operation: "persist".to_string(),
                     at: now_iso(),
-                    item_id: Some(normalized_item_id),
+                    item_id: Some(normalized_item_id.clone()),
                 });
                 snapshot = Self::snapshot_for_thread(&normalized_thread_id, Some(runtime));
             }
@@ -1210,6 +1302,9 @@ impl BridgeQueueService {
                 .ok_or_else(|| "queued message not found".to_string())?;
             let mut turn_start = runtime.items[item_index].turn_start.clone();
             replace_turn_start_text(&mut turn_start, &content)?;
+            if turn_start_contains_agent_message_envelope(&turn_start) {
+                return Err("agent message envelopes are reserved for the bridge".to_string());
+            }
             let item_bytes = serde_json::to_vec(&turn_start)
                 .map(|value| value.len())
                 .unwrap_or(usize::MAX)
@@ -1458,19 +1553,21 @@ impl BridgeQueueService {
                     }
                     (
                         Self::snapshot_for_thread(&thread_id, Some(runtime)),
-                        result.is_err()
-                            && runtime.pending_steers.is_empty()
+                        runtime.pending_steers.is_empty()
                             && !runtime.thread_running
-                            && !runtime.items.is_empty(),
+                            && (!runtime.items.is_empty()
+                                || !runtime.pending_completion_event_ids.is_empty()),
                     )
                 };
                 drop(actor_guard);
                 if snapshot.last_error.is_some() {
                     self.broadcast_snapshot(&snapshot).await;
-                    return;
                 }
                 if should_auto_dispatch {
                     self.spawn_auto_dispatch(thread_id.clone());
+                }
+                if snapshot.last_error.is_some() || should_auto_dispatch {
+                    return;
                 }
                 let epoch = result.expect("error returned above");
                 match self.backend.verify_steer_epoch(&thread_id, epoch).await {
@@ -1550,33 +1647,113 @@ impl BridgeQueueService {
                 let Some(runtime) = threads.get_mut(&thread_id) else {
                     return;
                 };
-                let Some(owned) = runtime.steer_dispatch_in_flight.take() else {
+                let Some(mut owned) = runtime.steer_dispatch_in_flight.take() else {
                     return;
                 };
                 if owned.entry.id != dispatch.entry.id {
                     runtime.steer_dispatch_in_flight = Some(owned);
                     return;
                 }
+                let succeeded = result.is_ok();
+                let indeterminate = result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| dispatch_failure_is_indeterminate(error));
+                let submission_id = owned.entry.submission_id.clone();
+                let item_id = owned.entry.id.clone();
+                let agent_message_id = owned
+                    .entry
+                    .agent_message
+                    .as_ref()
+                    .map(|origin| origin.message_id.clone());
+                let mut requeued_agent_message_id = None;
                 match result {
                     Ok(()) => runtime.last_error = None,
                     Err(error) => {
-                        if owned.crossed_completion_boundary {
-                            runtime.items.push_front(owned.entry.clone());
-                        } else {
-                            runtime.pending_steers.push_front(owned.entry.clone());
+                        if !indeterminate {
+                            if owned.crossed_completion_boundary {
+                                if let Some(agent_message) = owned.entry.agent_message.as_mut() {
+                                    agent_message.disposition =
+                                        crate::agent_messaging::AgentMessageDisposition::Queued;
+                                    requeued_agent_message_id =
+                                        Some(agent_message.message_id.clone());
+                                }
+                                runtime.items.push_front(owned.entry);
+                            } else {
+                                runtime.pending_steers.push_front(owned.entry);
+                            }
                         }
                         runtime.last_error = Some(BridgeThreadQueueError {
                             message: error,
                             operation: "steer".to_string(),
                             at: now_iso(),
-                            item_id: Some(owned.entry.id),
+                            item_id: Some(item_id),
                         });
                     }
                 }
-                Self::snapshot_for_thread(&thread_id, Some(runtime))
+                (
+                    Self::snapshot_for_thread(&thread_id, Some(runtime)),
+                    succeeded.then_some((
+                        submission_id,
+                        agent_message_id.clone(),
+                        dispatch.expected_turn_id.clone(),
+                    )),
+                    indeterminate.then_some(agent_message_id).flatten(),
+                    requeued_agent_message_id,
+                )
             };
             drop(actor_guard);
-            self.broadcast_snapshot(&snapshot).await;
+            self.broadcast_snapshot(&snapshot.0).await;
+            if let Some((submission_id, agent_message_id, turn_id)) = snapshot.1 {
+                if let Err(error) = self
+                    .remember_submission_result(BridgeThreadQueueSendResponse {
+                        submission_id,
+                        disposition: BridgeThreadQueueDisposition::Sent,
+                        queue: snapshot.0.clone(),
+                        turn_id: Some(turn_id),
+                    })
+                    .await
+                {
+                    eprintln!("failed to persist successful steer receipt: {error}");
+                }
+                if let Some(message_id) = agent_message_id {
+                    if let Err(error) = self
+                        .persist_agent_message_disposition(
+                            &message_id,
+                            crate::agent_messaging::AgentMessageDisposition::Sent,
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "failed to settle steered agent-message activity {message_id}: {error}"
+                        );
+                    }
+                }
+            } else if let Some(message_id) = snapshot.2 {
+                if let Err(error) = self
+                    .persist_agent_message_disposition(
+                        &message_id,
+                        crate::agent_messaging::AgentMessageDisposition::Cancelled,
+                    )
+                    .await
+                {
+                    eprintln!(
+                        "failed to settle indeterminate steered agent-message activity {message_id}: {error}"
+                    );
+                }
+            } else if let Some(message_id) = snapshot.3 {
+                if let Err(error) = self
+                    .persist_agent_message_disposition(
+                        &message_id,
+                        crate::agent_messaging::AgentMessageDisposition::Queued,
+                    )
+                    .await
+                {
+                    eprintln!(
+                        "failed to persist requeued agent-message activity {message_id}: {error}"
+                    );
+                }
+            }
             if dispatch_failed {
                 self.spawn_auto_dispatch(thread_id.clone());
                 return;
@@ -1691,6 +1868,8 @@ impl BridgeQueueService {
             } => {
                 let mut threads = self.threads.write().await;
                 let runtime = threads.entry(thread_id).or_default();
+                let completion_event_ids =
+                    std::mem::take(&mut runtime.pending_completion_event_ids);
                 runtime.thread_running = true;
                 runtime.turn_start_in_flight = false;
                 runtime.active_turn_id = Some(source_turn_id);
@@ -1699,6 +1878,14 @@ impl BridgeQueueService {
                 runtime.active_tool_call_ids.clear();
                 runtime.live_generation_known = true;
                 runtime.last_error = None;
+                drop(threads);
+                for event_id in completion_event_ids {
+                    self.record_completion_disposition(
+                        event_id,
+                        QueueCompletionDisposition::Continued,
+                    )
+                    .await;
+                }
             }
             crate::acp::events::CanonicalEvent::RunFinished {
                 thread_id,
@@ -1717,6 +1904,7 @@ impl BridgeQueueService {
                     should_queue_completion,
                     should_wait_for_continuation,
                     should_finalize_for_edit,
+                    requeued_agent_message_ids,
                 ) = {
                     let mut threads = self.threads.write().await;
                     let runtime = threads.entry(thread_id.clone()).or_default();
@@ -1726,6 +1914,7 @@ impl BridgeQueueService {
                         return;
                     }
                     let continuation_already_in_flight = runtime.turn_start_in_flight;
+                    let steer_prepare_in_flight = runtime.steer_prepare_in_flight;
                     runtime.thread_running = false;
                     if !continuation_already_in_flight {
                         runtime.active_turn_id = None;
@@ -1736,7 +1925,13 @@ impl BridgeQueueService {
                     runtime.live_generation_known = false;
                     runtime.pending_approval_ids.clear();
                     runtime.pending_user_input_ids.clear();
-                    while let Some(entry) = runtime.pending_steers.pop_back() {
+                    let mut requeued_agent_message_ids = Vec::new();
+                    while let Some(mut entry) = runtime.pending_steers.pop_back() {
+                        if let Some(agent_message) = entry.agent_message.as_mut() {
+                            agent_message.disposition =
+                                crate::agent_messaging::AgentMessageDisposition::Queued;
+                            requeued_agent_message_ids.push(agent_message.message_id.clone());
+                        }
                         runtime.items.push_front(entry);
                     }
                     if let Some(in_flight) = runtime.steer_dispatch_in_flight.as_mut() {
@@ -1744,23 +1939,58 @@ impl BridgeQueueService {
                     }
                     (
                         !continuation_already_in_flight
+                            && !steer_prepare_in_flight
                             && runtime.steer_dispatch_in_flight.is_none()
                             && runtime.editing_item_id.is_none()
                             && !runtime.items.is_empty(),
-                        continuation_already_in_flight,
+                        continuation_already_in_flight || steer_prepare_in_flight,
                         continuation_already_in_flight
+                            || steer_prepare_in_flight
                             || runtime.steer_dispatch_in_flight.is_some(),
                         runtime.editing_item_id.is_some(),
+                        requeued_agent_message_ids,
                     )
                 };
-                if should_queue_completion || should_dispatch {
+                let should_auto_dispatch = should_queue_completion || should_dispatch;
+                let should_record_completion = !should_auto_dispatch
+                    && (should_finalize_for_edit || !should_wait_for_continuation);
+                if should_auto_dispatch {
                     let mut threads = self.threads.write().await;
                     if let Some(runtime) = threads.get_mut(&thread_id) {
                         runtime.pending_completion_event_ids.push(received.event_id);
                     }
                     drop(threads);
+                }
+                if !requeued_agent_message_ids.is_empty() {
+                    let this = Arc::clone(self);
+                    let event_id = received.event_id;
+                    tokio::spawn(async move {
+                        for message_id in requeued_agent_message_ids {
+                            if let Err(error) = this
+                                .persist_agent_message_disposition(
+                                    &message_id,
+                                    crate::agent_messaging::AgentMessageDisposition::Queued,
+                                )
+                                .await
+                            {
+                                eprintln!(
+                                    "failed to persist requeued agent-message activity {message_id}: {error}"
+                                );
+                            }
+                        }
+                        if should_auto_dispatch {
+                            this.spawn_auto_dispatch(thread_id);
+                        } else if should_record_completion {
+                            this.record_completion_disposition(
+                                event_id,
+                                QueueCompletionDisposition::Final,
+                            )
+                            .await;
+                        }
+                    });
+                } else if should_auto_dispatch {
                     self.spawn_auto_dispatch(thread_id);
-                } else if should_finalize_for_edit || !should_wait_for_continuation {
+                } else if should_record_completion {
                     self.record_completion_disposition(
                         received.event_id,
                         QueueCompletionDisposition::Final,
@@ -1888,7 +2118,7 @@ impl BridgeQueueService {
 
     pub(super) async fn drain_thread_queue(self: &Arc<Self>, thread_id: String) {
         let actor = self.thread_actor(&thread_id).await;
-        let _actor_guard = actor.lock().await;
+        let actor_guard = actor.lock().await;
         let (queued_item, snapshot) = {
             let mut threads = self.threads.write().await;
             let Some(runtime) = threads.get_mut(&thread_id) else {
@@ -1910,6 +2140,7 @@ impl BridgeQueueService {
                 let completion_event_ids =
                     std::mem::take(&mut runtime.pending_completion_event_ids);
                 drop(threads);
+                drop(actor_guard);
                 for event_id in completion_event_ids {
                     self.record_completion_disposition(event_id, QueueCompletionDisposition::Final)
                         .await;
@@ -1950,6 +2181,7 @@ impl BridgeQueueService {
                     schedule_retry,
                 )
             };
+            drop(actor_guard);
             self.broadcast_snapshot(&snapshot).await;
             if schedule_retry {
                 self.schedule_auto_dispatch_retry(thread_id, retry_attempt);
@@ -1966,6 +2198,10 @@ impl BridgeQueueService {
             .await
         {
             Ok(turn_id) => {
+                let agent_message_id = queued_item
+                    .agent_message
+                    .as_ref()
+                    .map(|message| message.message_id.clone());
                 let (completion_event_ids, queue) = {
                     let mut threads = self.threads.write().await;
                     let Some(runtime) = threads.get_mut(&thread_id) else {
@@ -1980,6 +2216,7 @@ impl BridgeQueueService {
                         BridgeQueueService::snapshot_for_thread(&thread_id, Some(runtime)),
                     )
                 };
+                drop(actor_guard);
                 if let Err(error) = self
                     .remember_submission_result(BridgeThreadQueueSendResponse {
                         submission_id: queued_item.submission_id,
@@ -1990,6 +2227,19 @@ impl BridgeQueueService {
                     .await
                 {
                     eprintln!("failed to persist dispatched queue submission: {error}");
+                }
+                if let Some(message_id) = agent_message_id {
+                    if let Err(error) = self
+                        .persist_agent_message_disposition(
+                            &message_id,
+                            crate::agent_messaging::AgentMessageDisposition::Sent,
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "failed to update dispatched agent-message activity {message_id}: {error}"
+                        );
+                    }
                 }
                 for event_id in completion_event_ids {
                     self.record_completion_disposition(
@@ -2003,6 +2253,10 @@ impl BridgeQueueService {
                 let indeterminate = dispatch_failure_is_indeterminate(&error);
                 let failed_submission_id = queued_item.submission_id.clone();
                 let failed_item_id = queued_item.id.clone();
+                let failed_agent_message_id = queued_item
+                    .agent_message
+                    .as_ref()
+                    .map(|message| message.message_id.clone());
                 let (snapshot, completion_event_ids) = {
                     let mut threads = self.threads.write().await;
                     let Some(runtime) = threads.get_mut(&thread_id) else {
@@ -2023,6 +2277,7 @@ impl BridgeQueueService {
                         std::mem::take(&mut runtime.pending_completion_event_ids),
                     )
                 };
+                drop(actor_guard);
                 if !indeterminate {
                     if let Err(persist_error) = self
                         .remember_submission_result(BridgeThreadQueueSendResponse {
@@ -2039,6 +2294,21 @@ impl BridgeQueueService {
                     }
                 }
                 self.broadcast_snapshot(&snapshot).await;
+                if indeterminate {
+                    if let Some(message_id) = failed_agent_message_id {
+                        if let Err(update_error) = self
+                            .persist_agent_message_disposition(
+                                &message_id,
+                                crate::agent_messaging::AgentMessageDisposition::Cancelled,
+                            )
+                            .await
+                        {
+                            eprintln!(
+                                "failed to settle indeterminate queued agent-message activity {message_id}: {update_error}"
+                            );
+                        }
+                    }
+                }
                 for event_id in completion_event_ids {
                     self.record_completion_disposition(event_id, QueueCompletionDisposition::Final)
                         .await;
@@ -2086,6 +2356,12 @@ mod tests {
         response: oneshot::Sender<Result<String, String>>,
     }
 
+    struct DispositionUpdateCall {
+        message_id: String,
+        disposition: crate::agent_messaging::AgentMessageDisposition,
+        response: oneshot::Sender<Result<(), String>>,
+    }
+
     struct FakeQueueDispatcher {
         snapshot: StdMutex<QueueRuntimeSnapshot>,
         snapshot_error: StdMutex<Option<String>>,
@@ -2096,9 +2372,16 @@ mod tests {
         prepare_tx: mpsc::UnboundedSender<PrepareCall>,
         verify_epoch_tx: mpsc::UnboundedSender<VerifyEpochCall>,
         turn_start_tx: mpsc::UnboundedSender<TurnStartCall>,
+        disposition_update_tx: mpsc::UnboundedSender<DispositionUpdateCall>,
+        manual_disposition_update: Arc<AtomicBool>,
         record_agent_messages_error: StdMutex<Option<String>>,
+        update_agent_message_failures: AtomicU64,
         recorded_agent_messages:
             Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageOrigin)>>>,
+        published_agent_message_ids: Arc<StdMutex<Vec<String>>>,
+        removed_agent_message_ids: Arc<StdMutex<Vec<String>>>,
+        updated_agent_message_dispositions:
+            Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageDisposition)>>>,
     }
 
     struct FakeReceivers {
@@ -2106,9 +2389,15 @@ mod tests {
         prepare: mpsc::UnboundedReceiver<PrepareCall>,
         verify_epoch: mpsc::UnboundedReceiver<VerifyEpochCall>,
         turn_start: mpsc::UnboundedReceiver<TurnStartCall>,
+        disposition_update: mpsc::UnboundedReceiver<DispositionUpdateCall>,
+        manual_disposition_update: Arc<AtomicBool>,
         manual_epoch: Arc<AtomicBool>,
         recorded_agent_messages:
             Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageOrigin)>>>,
+        published_agent_message_ids: Arc<StdMutex<Vec<String>>>,
+        removed_agent_message_ids: Arc<StdMutex<Vec<String>>>,
+        updated_agent_message_dispositions:
+            Arc<StdMutex<Vec<(String, crate::agent_messaging::AgentMessageDisposition)>>>,
     }
 
     impl QueueRuntimeDispatcher for FakeQueueDispatcher {
@@ -2247,6 +2536,65 @@ mod tests {
                 .extend(messages);
             Box::pin(async { Ok(()) })
         }
+
+        fn update_agent_message_disposition<'a>(
+            &'a self,
+            message_id: &'a str,
+            disposition: crate::agent_messaging::AgentMessageDisposition,
+        ) -> BoxFuture<'a, Result<(), String>> {
+            if self.manual_disposition_update.load(Ordering::SeqCst) {
+                return Box::pin(async move {
+                    let (response, received) = oneshot::channel();
+                    self.disposition_update_tx
+                        .send(DispositionUpdateCall {
+                            message_id: message_id.to_string(),
+                            disposition,
+                            response,
+                        })
+                        .map_err(|_| "disposition update receiver closed".to_string())?;
+                    received
+                        .await
+                        .map_err(|_| "disposition update response dropped".to_string())?
+                });
+            }
+            self.updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .push((message_id.to_string(), disposition));
+            if self
+                .update_agent_message_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Box::pin(async { Err("journal update unavailable".to_string()) });
+            }
+            Box::pin(async { Ok(()) })
+        }
+
+        fn publish_agent_message<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ()> {
+            self.published_agent_message_ids
+                .lock()
+                .expect("published agent message ids lock")
+                .push(message_id.to_string());
+            Box::pin(async {})
+        }
+
+        fn remove_agent_message<'a>(
+            &'a self,
+            message_id: &'a str,
+        ) -> BoxFuture<'a, Result<(), String>> {
+            self.removed_agent_message_ids
+                .lock()
+                .expect("removed agent message ids lock")
+                .push(message_id.to_string());
+            self.recorded_agent_messages
+                .lock()
+                .expect("recorded agent messages lock")
+                .retain(|(_, message)| message.message_id != message_id);
+            Box::pin(async { Ok(()) })
+        }
     }
 
     fn fake_dispatcher() -> (Arc<FakeQueueDispatcher>, FakeReceivers) {
@@ -2254,8 +2602,13 @@ mod tests {
         let (prepare_tx, prepare) = mpsc::unbounded_channel();
         let (verify_epoch_tx, verify_epoch) = mpsc::unbounded_channel();
         let (turn_start_tx, turn_start) = mpsc::unbounded_channel();
+        let (disposition_update_tx, disposition_update) = mpsc::unbounded_channel();
         let manual_epoch = Arc::new(AtomicBool::new(false));
+        let manual_disposition_update = Arc::new(AtomicBool::new(false));
         let recorded_agent_messages = Arc::new(StdMutex::new(Vec::new()));
+        let published_agent_message_ids = Arc::new(StdMutex::new(Vec::new()));
+        let removed_agent_message_ids = Arc::new(StdMutex::new(Vec::new()));
+        let updated_agent_message_dispositions = Arc::new(StdMutex::new(Vec::new()));
         let mut session =
             crate::acp::snapshot::SessionSnapshot::new("agent".to_string(), "thread".to_string());
         session.active_run_id = Some("run".to_string());
@@ -2276,16 +2629,27 @@ mod tests {
                 prepare_tx,
                 verify_epoch_tx,
                 turn_start_tx,
+                disposition_update_tx,
+                manual_disposition_update: manual_disposition_update.clone(),
                 record_agent_messages_error: StdMutex::new(None),
+                update_agent_message_failures: AtomicU64::new(0),
                 recorded_agent_messages: recorded_agent_messages.clone(),
+                published_agent_message_ids: published_agent_message_ids.clone(),
+                removed_agent_message_ids: removed_agent_message_ids.clone(),
+                updated_agent_message_dispositions: updated_agent_message_dispositions.clone(),
             }),
             FakeReceivers {
                 steer,
                 prepare,
                 verify_epoch,
                 turn_start,
+                disposition_update,
+                manual_disposition_update,
                 manual_epoch,
                 recorded_agent_messages,
+                published_agent_message_ids,
+                removed_agent_message_ids,
+                updated_agent_message_dispositions,
             },
         )
     }
@@ -2485,6 +2849,116 @@ mod tests {
         .expect("stopped thread blocker returns without dispatch");
 
         assert!(calls.prepare.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn turn_completion_during_steer_preparation_resumes_auto_dispatch() {
+        let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            runtime
+                .pending_steers
+                .push_back(runtime.items.pop_front().expect("queued steer"));
+        }
+        let drain = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_pending_steers("thread".to_string()).await }
+        });
+        let prepare = calls.prepare.recv().await.expect("steer preparation");
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 2))
+            .await;
+        prepare.response.send(Ok(1)).expect("prepare completes");
+        drain.await.expect("steer drain completes");
+
+        let turn_start = tokio::time::timeout(Duration::from_secs(1), calls.turn_start.recv())
+            .await
+            .expect("requeued message dispatches")
+            .expect("turn start");
+        assert_eq!(turn_start.turn_start["input"][0]["text"], "text-steer");
+        turn_start
+            .response
+            .send(Ok("resumed-turn".to_string()))
+            .expect("turn starts");
+    }
+
+    #[tokio::test]
+    async fn cancelling_requeued_work_during_steer_preparation_settles_completion() {
+        let (service, mut calls) = service_with_runtime(&["steer"], &[]).await;
+        calls.manual_epoch.store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            runtime
+                .pending_steers
+                .push_back(runtime.items.pop_front().expect("queued steer"));
+        }
+        let drain = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_pending_steers("thread".to_string()).await }
+        });
+        let prepare = calls.prepare.recv().await.expect("steer preparation");
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 3))
+            .await;
+        service
+            .cancel_message(BridgeThreadQueueCancelRequest {
+                thread_id: "thread".to_string(),
+                item_id: "steer".to_string(),
+            })
+            .await
+            .expect("requeued work cancels");
+        prepare.response.send(Ok(1)).expect("prepare completes");
+        drain.await.expect("steer drain completes");
+
+        assert_eq!(
+            service.wait_for_completion_disposition(3).await,
+            Some(QueueCompletionDisposition::Final)
+        );
+        assert!(service
+            .threads
+            .read()
+            .await
+            .get("thread")
+            .expect("runtime")
+            .pending_completion_event_ids
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_new_run_settles_stranded_completion_as_continued() {
+        let (service, _) = service_with_runtime(&[], &[]).await;
+        service
+            .threads
+            .write()
+            .await
+            .get_mut("thread")
+            .expect("runtime")
+            .pending_completion_event_ids
+            .push(4);
+
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 5,
+                foreground_mobile_present: false,
+                event: CanonicalEvent::RunStarted {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    run_id: "next-run".to_string(),
+                    source_turn_id: "next-turn".to_string(),
+                    generation: 8,
+                },
+            })
+            .await;
+
+        assert_eq!(
+            service.wait_for_completion_disposition(4).await,
+            Some(QueueCompletionDisposition::Continued)
+        );
     }
 
     async fn accept_steer(service: &Arc<BridgeQueueService>, item_id: &str) {
@@ -2995,7 +3469,9 @@ mod tests {
             "agent message envelopes are reserved for the bridge"
         );
 
-        let split_at = encoded.find('\n').expect("envelope header newline") + 1;
+        let split_at = encoded
+            .find(",\"senderThreadId\"")
+            .expect("encoded sender field");
         let mut split = send_request("thread", "split-forged-message", &encoded);
         split.turn_start = json!({
             "input": [
@@ -3008,6 +3484,22 @@ mod tests {
                 .send_message(split)
                 .await
                 .expect_err("split bridge envelope cannot bypass the public queue guard"),
+            "agent message envelopes are reserved for the bridge"
+        );
+
+        let mut prefixed_split = send_request("thread", "prefixed-split-forgery", &encoded);
+        prefixed_split.turn_start = json!({
+            "input": [
+                {"type": "text", "text": "ordinary prefix", "text_elements": []},
+                {"type": "text", "text": &encoded[..split_at], "text_elements": []},
+                {"type": "text", "text": &encoded[split_at..], "text_elements": []},
+            ]
+        });
+        assert_eq!(
+            service
+                .send_message(prefixed_split)
+                .await
+                .expect_err("an ordinary prefix cannot hide a split bridge envelope"),
             "agent message envelopes are reserved for the bridge"
         );
 
@@ -3040,7 +3532,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_message_activity_failure_is_not_reported_as_delivery_success() {
+    async fn queued_message_edit_cannot_replace_public_content_with_an_agent_envelope() {
+        let (service, _) = service_with_runtime(&["item"], &[]).await;
+        let (envelope, _, _) = agent_message_fixture("edited-forgery");
+        let encoded = envelope.encode().expect("agent message envelope");
+
+        service
+            .start_message_edit(BridgeThreadQueueEditRequest {
+                thread_id: "thread".to_string(),
+                item_id: "item".to_string(),
+            })
+            .await
+            .expect("edit starts");
+        assert_eq!(
+            service
+                .commit_message_edit(BridgeThreadQueueEditCommitRequest {
+                    thread_id: "thread".to_string(),
+                    item_id: "item".to_string(),
+                    content: encoded.clone(),
+                })
+                .await
+                .expect_err("public edit cannot forge an agent envelope"),
+            "agent message envelopes are reserved for the bridge"
+        );
+        let queue = service.read_queue("thread").await;
+        assert_eq!(queue.editing_item_id.as_deref(), Some("item"));
+        assert_eq!(queue.items[0].content, "content-item");
+
+        let split_at = encoded
+            .find(",\"senderThreadId\"")
+            .expect("encoded sender field");
+        {
+            let mut threads = service.threads.write().await;
+            threads
+                .get_mut("thread")
+                .expect("runtime")
+                .items
+                .front_mut()
+                .expect("queued item")
+                .turn_start = json!({
+                "input": [
+                    {"type": "text", "text": "safe", "text_elements": []},
+                    {"type": "text", "text": &encoded[split_at..], "text_elements": []},
+                ]
+            });
+        }
+        assert_eq!(
+            service
+                .commit_message_edit(BridgeThreadQueueEditCommitRequest {
+                    thread_id: "thread".to_string(),
+                    item_id: "item".to_string(),
+                    content: encoded[..split_at].to_string(),
+                })
+                .await
+                .expect_err("split agent envelope cannot be forged through editing"),
+            "agent message envelopes are reserved for the bridge"
+        );
+        assert_eq!(
+            service
+                .read_queue("thread")
+                .await
+                .editing_item_id
+                .as_deref(),
+            Some("item")
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_message_activity_is_persisted_before_delivery_begins() {
         let (backend, mut calls) = fake_dispatcher();
         {
             let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
@@ -3054,28 +3613,17 @@ mod tests {
             .expect("record agent messages error lock") = Some("journal unavailable".to_string());
         let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
         let (envelope, recipient, sender) = agent_message_fixture("journal-failure");
-        let send = tokio::spawn({
-            let service = service.clone();
-            async move {
-                service
-                    .send_agent_message(&envelope, recipient, sender)
-                    .await
-            }
-        });
-        calls
-            .turn_start
-            .recv()
+        assert!(service
+            .send_agent_message(&envelope, recipient, sender)
             .await
-            .expect("agent turn start")
-            .response
-            .send(Ok("turn-agent-message".to_string()))
-            .expect("turn response");
-
-        assert!(send
-            .await
-            .expect("send task")
             .expect_err("activity failure is surfaced")
-            .contains("delivery was accepted but its activity record failed"));
+            .contains("journal unavailable"));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.turn_start.recv())
+                .await
+                .is_err(),
+            "delivery must not begin before durable activity admission"
+        );
         assert!(calls
             .recorded_agent_messages
             .lock()
@@ -3126,12 +3674,23 @@ mod tests {
         );
         assert_recorded_agent_message_disposition(
             &calls,
-            crate::agent_messaging::AgentMessageDisposition::Sent,
+            crate::agent_messaging::AgentMessageDisposition::Queued,
+        );
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [(
+                "sent-message".to_string(),
+                crate::agent_messaging::AgentMessageDisposition::Sent,
+            )]
         );
 
-        let (backend, calls) = fake_dispatcher();
+        let (backend, mut calls) = fake_dispatcher();
         backend.supports_steer.store(false, Ordering::SeqCst);
-        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let service = BridgeQueueService::new(backend.clone(), Arc::new(ClientHub::new()));
         let (envelope, recipient, sender) = agent_message_fixture("queued-message");
         assert_eq!(
             service
@@ -3154,27 +3713,580 @@ mod tests {
             &calls,
             crate::agent_messaging::AgentMessageDisposition::Queued,
         );
+        assert_eq!(
+            calls
+                .published_agent_message_ids
+                .lock()
+                .expect("published agent message ids lock")
+                .as_slice(),
+            ["queued-message"]
+        );
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("recipient runtime");
+            runtime.thread_running = false;
+            runtime.active_turn_id = None;
+            runtime.active_run_id = None;
+            runtime.active_prompt_generation = None;
+        }
+        backend
+            .update_agent_message_failures
+            .store(1, Ordering::SeqCst);
+        let dispatch = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service.drain_thread_queue("thread".to_string()).await;
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("queued agent message dispatch")
+            .response
+            .send(Ok("dispatched-agent-message".to_string()))
+            .expect("dispatch response");
+        dispatch.await.expect("dispatch task");
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [
+                (
+                    "queued-message".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Sent,
+                ),
+                (
+                    "queued-message".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Sent,
+                ),
+            ]
+        );
 
         let (backend, mut calls) = fake_dispatcher();
         let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
         let (envelope, recipient, sender) = agent_message_fixture("steering-message");
-        assert_eq!(
-            service
-                .send_agent_message(&envelope, recipient, sender)
-                .await
-                .expect("busy steer-capable agent steers"),
-            crate::agent_messaging::AgentMessageDisposition::Steering
-        );
-        assert_recorded_agent_message_disposition(
-            &calls,
-            crate::agent_messaging::AgentMessageDisposition::Steering,
-        );
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_agent_message(&envelope, recipient, sender)
+                    .await
+            }
+        });
         let steer = tokio::time::timeout(Duration::from_secs(1), calls.steer.recv())
             .await
             .expect("agent steer timeout")
             .expect("agent steer");
         assert_eq!(steer.thread_id, "thread");
+        assert_recorded_agent_message_disposition(
+            &calls,
+            crate::agent_messaging::AgentMessageDisposition::Queued,
+        );
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [(
+                "steering-message".to_string(),
+                crate::agent_messaging::AgentMessageDisposition::Steering,
+            )]
+        );
         steer.response.send(Ok(())).expect("steer response");
+        assert_eq!(
+            send.await
+                .expect("send task")
+                .expect("busy steer-capable agent steers"),
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated agent message dispositions lock")
+                    .last()
+                    .is_some_and(|(_, disposition)| {
+                        *disposition == crate::agent_messaging::AgentMessageDisposition::Sent
+                    })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("successful steer settles the durable activity");
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [
+                (
+                    "steering-message".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Steering,
+                ),
+                (
+                    "steering-message".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Sent,
+                ),
+            ]
+        );
+        assert!(matches!(
+            service
+                .submission_results
+                .lock()
+                .await
+                .get("agent-message:steering-message")
+                .map(|response| response.disposition.clone()),
+            Some(BridgeThreadQueueDisposition::Sent)
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_completion_requeues_pending_agent_steers_with_queued_journal_state() {
+        let (service, calls) = service_with_runtime(&[], &[]).await;
+        let mut entry = queued("agent-steer");
+        entry.agent_message = Some(crate::agent_messaging::AgentMessageOrigin {
+            message_id: "agent-steer-message".to_string(),
+            direction: crate::agent_messaging::AgentMessageDirection::Received,
+            related_thread_id: "parent".to_string(),
+            related_title: Some("Parent".to_string()),
+            relation: crate::agent_messaging::AgentRelationKind::Parent,
+            disposition: crate::agent_messaging::AgentMessageDisposition::Steering,
+            body: "Wait for the next turn.".to_string(),
+        });
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            runtime.pending_steers.push_back(entry);
+            runtime.editing_item_id = Some("paused-edit".to_string());
+        }
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 43))
+            .await;
+
+        let queue = service.read_queue("thread").await;
+        assert!(queue.pending_steers.is_empty());
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(
+            queue.items[0]
+                .agent_message
+                .as_ref()
+                .expect("agent message")
+                .disposition,
+            crate::agent_messaging::AgentMessageDisposition::Queued
+        );
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated agent message dispositions lock")
+                    .as_slice()
+                    == [(
+                        "agent-steer-message".to_string(),
+                        crate::agent_messaging::AgentMessageDisposition::Queued,
+                    )]
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("queued disposition is persisted off the event-consumer loop");
+    }
+
+    #[tokio::test]
+    async fn auto_dispatch_releases_the_actor_before_agent_message_journal_updates() {
+        let (backend, mut calls) = fake_dispatcher();
+        calls
+            .manual_disposition_update
+            .store(true, Ordering::SeqCst);
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let mut entry = queued("agent-dispatch");
+        entry.agent_message = Some(crate::agent_messaging::AgentMessageOrigin {
+            message_id: "journal-lock-order".to_string(),
+            direction: crate::agent_messaging::AgentMessageDirection::Received,
+            related_thread_id: "parent".to_string(),
+            related_title: Some("Parent".to_string()),
+            relation: crate::agent_messaging::AgentRelationKind::Parent,
+            disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+            body: "Dispatch without holding the actor.".to_string(),
+        });
+        service.threads.write().await.insert(
+            "thread".to_string(),
+            BridgeThreadQueueRuntime {
+                items: VecDeque::from([entry]),
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+        let drain = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_thread_queue("thread".to_string()).await }
+        });
+        let turn_start = calls.turn_start.recv().await.expect("turn start");
+        turn_start
+            .response
+            .send(Ok("agent-turn".to_string()))
+            .expect("turn starts");
+        let update = calls
+            .disposition_update
+            .recv()
+            .await
+            .expect("journal update");
+        assert_eq!(update.message_id, "journal-lock-order");
+        assert_eq!(
+            update.disposition,
+            crate::agent_messaging::AgentMessageDisposition::Sent
+        );
+
+        let actor = service.thread_actor("thread").await;
+        let actor_guard = tokio::time::timeout(Duration::from_secs(1), actor.lock())
+            .await
+            .expect("actor is released before the journal update");
+        drop(actor_guard);
+        update
+            .response
+            .send(Ok(()))
+            .expect("journal update settles");
+        drain.await.expect("auto dispatch completes");
+    }
+
+    #[tokio::test]
+    async fn determinate_steer_failure_after_completion_requeues_with_queued_state() {
+        let (service, mut calls) = service_with_runtime(&["agent-steer"], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            let mut entry = runtime.items.pop_front().expect("queued steer");
+            entry.agent_message = Some(crate::agent_messaging::AgentMessageOrigin {
+                message_id: "crossed-boundary".to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Received,
+                related_thread_id: "parent".to_string(),
+                related_title: Some("Parent".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::Parent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Steering,
+                body: "Retry this after the active turn.".to_string(),
+            });
+            runtime.pending_steers.push_back(entry);
+        }
+        service.spawn_steer_dispatch("thread".to_string());
+        let steer = calls.steer.recv().await.expect("steer dispatch");
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 44))
+            .await;
+        service
+            .threads
+            .write()
+            .await
+            .get_mut("thread")
+            .expect("runtime")
+            .editing_item_id = Some("paused-edit".to_string());
+        steer
+            .response
+            .send(Err("active turn already ended".to_string()))
+            .expect("steer failure");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let queue = service.read_queue("thread").await;
+                let queued = queue
+                    .items
+                    .first()
+                    .and_then(|item| item.agent_message.as_ref());
+                let persisted = calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated agent message dispositions lock")
+                    .contains(&(
+                        "crossed-boundary".to_string(),
+                        crate::agent_messaging::AgentMessageDisposition::Queued,
+                    ));
+                if queued.is_some_and(|message| {
+                    message.disposition == crate::agent_messaging::AgentMessageDisposition::Queued
+                }) && persisted
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("determinate failure returns the activity to queued");
+    }
+
+    #[tokio::test]
+    async fn rejected_agent_message_delivery_removes_its_provisional_journal_entries() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("rejected-message");
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_agent_message(&envelope, recipient, sender)
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("agent turn start")
+            .response
+            .send(Err("recipient rejected the turn".to_string()))
+            .expect("turn response");
+
+        assert_eq!(
+            send.await.expect("send task"),
+            Err("recipient rejected the turn".to_string())
+        );
+        assert!(calls
+            .recorded_agent_messages
+            .lock()
+            .expect("recorded agent messages lock")
+            .is_empty());
+        assert_eq!(
+            calls
+                .removed_agent_message_ids
+                .lock()
+                .expect("removed agent message ids lock")
+                .as_slice(),
+            ["rejected-message"]
+        );
+        assert!(calls
+            .published_agent_message_ids
+            .lock()
+            .expect("published agent message ids lock")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn indeterminate_immediate_agent_message_keeps_terminal_journal_evidence() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("indeterminate-immediate");
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_agent_message(&envelope, recipient, sender)
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("agent turn start")
+            .response
+            .send(Err(format!(
+                "{INDETERMINATE_OPERATION_PREFIX}connection closed"
+            )))
+            .expect("turn response");
+
+        assert!(send
+            .await
+            .expect("send task")
+            .expect_err("indeterminate delivery fails")
+            .starts_with(INDETERMINATE_OPERATION_PREFIX));
+        assert_eq!(
+            calls
+                .recorded_agent_messages
+                .lock()
+                .expect("recorded agent messages lock")
+                .len(),
+            2
+        );
+        assert!(calls
+            .removed_agent_message_ids
+            .lock()
+            .expect("removed agent message ids lock")
+            .is_empty());
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [(
+                "indeterminate-immediate".to_string(),
+                crate::agent_messaging::AgentMessageDisposition::Cancelled,
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn indeterminate_agent_message_auto_dispatch_settles_after_dropping_the_item() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend.supports_steer.store(false, Ordering::SeqCst);
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("indeterminate-dispatch");
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy agent message queues"),
+            crate::agent_messaging::AgentMessageDisposition::Queued
+        );
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("recipient runtime");
+            runtime.thread_running = false;
+            runtime.active_turn_id = None;
+            runtime.active_run_id = None;
+            runtime.active_prompt_generation = None;
+        }
+        let dispatch = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service.drain_thread_queue("thread".to_string()).await;
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("queued agent message dispatch")
+            .response
+            .send(Err(format!(
+                "{INDETERMINATE_OPERATION_PREFIX}response dropped"
+            )))
+            .expect("dispatch response");
+        dispatch.await.expect("dispatch task");
+
+        assert!(service.read_queue("thread").await.items.is_empty());
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [(
+                "indeterminate-dispatch".to_string(),
+                crate::agent_messaging::AgentMessageDisposition::Cancelled,
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn indeterminate_agent_message_steer_is_not_replayed() {
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("indeterminate-steer");
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy steer-capable agent begins steering"),
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+        calls
+            .steer
+            .recv()
+            .await
+            .expect("agent steer")
+            .response
+            .send(Err(format!(
+                "{INDETERMINATE_OPERATION_PREFIX}connection closed"
+            )))
+            .expect("steer response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated agent message dispositions lock")
+                    .last()
+                    .is_some_and(|(_, disposition)| {
+                        *disposition == crate::agent_messaging::AgentMessageDisposition::Cancelled
+                    })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("indeterminate steer settles the durable activity");
+
+        let queue = service.read_queue("thread").await;
+        assert!(queue.items.is_empty());
+        assert!(queue.pending_steers.is_empty());
+        assert!(calls.steer.try_recv().is_err());
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [
+                (
+                    "indeterminate-steer".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Steering,
+                ),
+                (
+                    "indeterminate-steer".to_string(),
+                    crate::agent_messaging::AgentMessageDisposition::Cancelled,
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_agent_message_persists_a_terminal_disposition() {
+        let (backend, calls) = fake_dispatcher();
+        backend.supports_steer.store(false, Ordering::SeqCst);
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("cancelled-message");
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy agent message queues");
+        let item_id = service.read_queue("thread").await.items[0].id.clone();
+
+        service
+            .cancel_message(BridgeThreadQueueCancelRequest {
+                thread_id: "thread".to_string(),
+                item_id,
+            })
+            .await
+            .expect("agent message cancellation succeeds");
+
+        assert_eq!(
+            calls
+                .updated_agent_message_dispositions
+                .lock()
+                .expect("updated agent message dispositions lock")
+                .as_slice(),
+            [(
+                "cancelled-message".to_string(),
+                crate::agent_messaging::AgentMessageDisposition::Cancelled,
+            )]
+        );
+        assert!(service.read_queue("thread").await.items.is_empty());
     }
 
     #[tokio::test]

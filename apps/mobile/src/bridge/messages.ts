@@ -108,7 +108,8 @@ function isChatAgentMessageMeta(value: unknown): value is ChatAgentMessageMeta {
     (value['relation'] === 'parent' || value['relation'] === 'sub_agent') &&
     (value['disposition'] === 'sent' ||
       value['disposition'] === 'steering' ||
-      value['disposition'] === 'queued') &&
+      value['disposition'] === 'queued' ||
+      value['disposition'] === 'cancelled') &&
     typeof value['body'] === 'string'
   );
 }

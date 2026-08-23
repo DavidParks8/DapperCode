@@ -171,6 +171,11 @@ if (
   fixtures.agentMessageQueue.items[0].agentMessage?.disposition !== 'queued'
 )
   fail('agent message queue fixture');
+if (
+  fixtures.cancelledAgentMessage.direction !== 'sent' ||
+  fixtures.cancelledAgentMessage.disposition !== 'cancelled'
+)
+  fail('cancelled agent message fixture');
 if (!fixtures.pushRegistration.profileId || !fixtures.pushRegistration.registrationId)
   fail('push registration fixture');
 if (

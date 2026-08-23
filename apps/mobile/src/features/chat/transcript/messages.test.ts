@@ -167,10 +167,10 @@ describe('getVisibleTranscriptMessages', () => {
     ]);
   });
 
-  it('keeps agent-message rows visible when tool calls are disabled', () => {
+  it('keeps agent-message rows visible when tool calls are disabled or their body has a marker', () => {
     const messages = [
       message('u1', 'user', 'Delegate this task'),
-      message('m1', 'system', 'Sent to Worker', {
+      message('m1', 'system', 'Sent to Worker: inspect FINAL_TASK_RESULT_JSON parsing', {
         systemKind: 'agentMessage',
       }),
       message('a1', 'assistant', 'Done.'),
@@ -252,10 +252,11 @@ describe('getVisibleTranscriptMessages', () => {
       message('result', 'assistant', 'FINAL_TASK_RESULT_JSON {}'),
       message('cwd', 'user', 'Current working directory is: /repo'),
       message('worktree', 'system', 'You are operating in task worktree /tmp'),
+      message('agent-envelope', 'user', '<<<dappercode.dev/agent-message:v1>>>{}'),
       message('blank', 'assistant', '   '),
       message('visible', 'assistant', 'Visible'),
     ];
-    expect(getVisibleTranscriptMessages(messages, true)).toEqual([messages[4]]);
+    expect(getVisibleTranscriptMessages(messages, true)).toEqual([messages[5]]);
   });
 
   it('returns the original list when no sub-agent status can change', () => {

@@ -643,6 +643,15 @@
       "steeringInFlight": false,
       "lastError": null
     },
+    "cancelledAgentMessage": {
+      "messageId": "message-cancelled",
+      "direction": "sent",
+      "relatedThreadId": "agent-alpha:child",
+      "relatedTitle": "Worker agent",
+      "relation": "sub_agent",
+      "disposition": "cancelled",
+      "body": "This queued message was cancelled."
+    },
     "pushRegistration": {
       "profileId": "bridge-profile-1",
       "registrationId": "push-registration-1",

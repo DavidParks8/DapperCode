@@ -667,6 +667,22 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
     ) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async { Ok(()) })
     }
+    fn publish_agent_message<'a>(&'a self, _message_id: &'a str) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+    fn remove_agent_message<'a>(
+        &'a self,
+        _message_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn update_agent_message_disposition<'a>(
+        &'a self,
+        _message_id: &'a str,
+        _disposition: crate::agent_messaging::AgentMessageDisposition,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 impl RuntimeBackend {
@@ -761,14 +777,20 @@ impl RuntimeBackend {
         self.manager.agent_relations(caller_thread_id).await
     }
 
-    pub(crate) async fn direct_agent_relation(
+    pub(crate) async fn direct_agent_relation_sessions(
         &self,
         caller_thread_id: &str,
         target_thread_id: &str,
-    ) -> Result<crate::agent_messaging::AgentRelationKind, crate::agent_messaging::AgentRelationError>
-    {
+    ) -> Result<
+        (
+            crate::agent_messaging::AgentRelationKind,
+            crate::agent_messaging::AgentRelationSession,
+            crate::agent_messaging::AgentRelationSession,
+        ),
+        crate::agent_messaging::AgentRelationError,
+    > {
         self.manager
-            .direct_agent_relation(caller_thread_id, target_thread_id)
+            .direct_agent_relation_sessions(caller_thread_id, target_thread_id)
             .await
     }
 
@@ -778,6 +800,28 @@ impl RuntimeBackend {
     ) -> Result<(), String> {
         self.manager
             .record_agent_messages(messages)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn publish_agent_message(&self, message_id: &str) {
+        self.manager.publish_agent_message(message_id).await;
+    }
+
+    pub(crate) async fn remove_agent_message(&self, message_id: &str) -> Result<(), String> {
+        self.manager
+            .remove_agent_message(message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn update_agent_message_disposition(
+        &self,
+        message_id: &str,
+        disposition: crate::agent_messaging::AgentMessageDisposition,
+    ) -> Result<(), String> {
+        self.manager
+            .update_agent_message_disposition(message_id, disposition)
             .await
             .map_err(|error| error.to_string())
     }
@@ -1184,6 +1228,7 @@ impl RuntimeBackend {
                         .start_thread(params.unwrap_or_else(|| json!({})), cancellation)
                         .await;
                 }
+                reject_client_agent_message_envelope(method, params.as_ref())?;
                 self.request_internal(method, params).await
             })
             .await
@@ -1410,6 +1455,43 @@ impl QueueRuntimeDispatcher for RuntimeBackend {
     ) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(RuntimeBackend::record_agent_messages(self, messages))
     }
+
+    fn publish_agent_message<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ()> {
+        Box::pin(RuntimeBackend::publish_agent_message(self, message_id))
+    }
+
+    fn remove_agent_message<'a>(
+        &'a self,
+        message_id: &'a str,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(RuntimeBackend::remove_agent_message(self, message_id))
+    }
+
+    fn update_agent_message_disposition<'a>(
+        &'a self,
+        message_id: &'a str,
+        disposition: crate::agent_messaging::AgentMessageDisposition,
+    ) -> BoxFuture<'a, Result<(), String>> {
+        Box::pin(RuntimeBackend::update_agent_message_disposition(
+            self,
+            message_id,
+            disposition,
+        ))
+    }
+}
+
+fn reject_client_agent_message_envelope(
+    method: &str,
+    params: Option<&Value>,
+) -> Result<(), String> {
+    if method != "turn/start" {
+        return Ok(());
+    }
+    let prompt = bridge_prompt(params.ok_or_else(|| "turn/start requires params".to_string())?)?;
+    if crate::agent_messaging::prompt_contains_agent_message_envelope(&prompt) {
+        return Err("agent message envelopes are reserved for the bridge".to_string());
+    }
+    Ok(())
 }
 
 fn elicitation_value(
@@ -1573,6 +1655,50 @@ mod client_request_tests {
         sync::{oneshot, Semaphore},
         time::{timeout, Duration},
     };
+
+    #[test]
+    fn client_turn_start_rejects_reserved_agent_message_envelopes() {
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message-1".to_string(),
+            "parent".to_string(),
+            "child".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent".to_string()),
+            "Inspect the queue.".to_string(),
+        )
+        .encode()
+        .expect("agent-message envelope");
+        let split_at = envelope
+            .find(",\"senderThreadId\"")
+            .expect("encoded sender field");
+
+        for params in [
+            json!({"input": [{"type": "text", "text": envelope.clone(), "text_elements": []}]}),
+            json!({
+                "input": [
+                    {"type": "text", "text": &envelope[..split_at], "text_elements": []},
+                    {"type": "text", "text": &envelope[split_at..], "text_elements": []},
+                ]
+            }),
+        ] {
+            assert_eq!(
+                reject_client_agent_message_envelope("turn/start", Some(&params)),
+                Err("agent message envelopes are reserved for the bridge".to_string())
+            );
+        }
+        assert!(reject_client_agent_message_envelope(
+            "turn/start",
+            Some(&json!({
+                "input": [{"type": "text", "text": "ordinary user prompt", "text_elements": []}]
+            })),
+        )
+        .is_ok());
+        assert!(reject_client_agent_message_envelope(
+            "bridge/thread/queue/send",
+            Some(&json!({"input": []})),
+        )
+        .is_ok());
+    }
 
     #[tokio::test]
     async fn canonical_event_pump_keeps_draining_while_side_effects_are_backlogged() {
