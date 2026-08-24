@@ -2530,7 +2530,7 @@ impl AgentManager {
     ) -> Result<AgentRelations, AgentRelationError> {
         let caller = AgentSessionId::decode(caller_thread_id)
             .map_err(|_| AgentRelationError::InvalidThreadId)?;
-        let (caller_entry, parent_entry, mut child_entries) = {
+        let (parent_entry, mut child_entries) = {
             let index = self.session_index.lock().await;
             let caller_entry = index
                 .entries
@@ -2563,7 +2563,7 @@ impl AgentManager {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            (caller_entry, parent_entry, child_entries)
+            (parent_entry, child_entries)
         };
 
         child_entries.sort_by(|left, right| {
@@ -2576,7 +2576,6 @@ impl AgentManager {
         let children_truncated = child_entries.len() > MAX_AGENT_RELATION_CHILDREN;
         child_entries.truncate(MAX_AGENT_RELATION_CHILDREN);
 
-        let caller = self.agent_relation_session(&caller_entry).await;
         let parent = match parent_entry {
             Some(entry) => Some(self.agent_relation_session(&entry).await),
             None => None,
@@ -2585,9 +2584,7 @@ impl AgentManager {
         for entry in child_entries {
             children.push(self.agent_relation_session(&entry).await);
         }
-
         Ok(AgentRelations {
-            caller,
             parent,
             children,
             children_truncated,
@@ -4121,10 +4118,9 @@ impl AgentManager {
             self.adopt_snapshot_subagents(&snapshot, &entry.cwd).await?;
             self.adopt_exported_subagents(&identity, &entry.cwd).await?;
         }
-        // A session that already recorded anything -- a streamed message or a tool a
-        // sub-agent ran before it said a word -- has a transcript of its own, and the
-        // export would restate it under exported ids instead of hydrating it.
-        if snapshot.timeline.is_empty() {
+        // Agent-message activities are a durable overlay, not proof that the agent replayed its
+        // conversation. An activity-only snapshot still needs its ordinary transcript hydrated.
+        if !snapshot.has_ordinary_transcript() {
             self.seed_exported_session(&identity, &entry.cwd, &session)
                 .await;
             snapshot = session.snapshot().await;
@@ -9278,13 +9274,12 @@ mod tests {
             .agent_relations(&child.encode())
             .await
             .expect("child relations");
-        assert_eq!(
-            relations.caller,
-            AgentRelationSession {
-                thread_id: child.encode(),
-                title: Some("Worker".into()),
-                status: AgentRelationStatus::Idle,
-            }
+        assert!(
+            serde_json::to_value(&relations)
+                .expect("relations serialize")
+                .get("caller")
+                .is_none(),
+            "the recipient listing must not expose the caller as a target"
         );
         assert_eq!(
             relations.parent,

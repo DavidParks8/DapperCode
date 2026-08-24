@@ -447,10 +447,14 @@ impl SessionSnapshot {
         Some(ForkBoundary { ordinal, kind })
     }
 
-    /// Restores the transcript recorded before a reload while keeping the session
-    /// metadata (mode, commands, config, plan, usage, title) that the agent just
-    /// reported. Used when a reload replays no history at all.
+    /// Restores ordinary transcript history while keeping the current metadata and any
+    /// agent-message activity that arrived during reconstruction.
     pub fn restore_transcript_from(&mut self, previous: SessionSnapshot) {
+        let replayed_agent_messages = self
+            .messages
+            .iter()
+            .filter_map(|message| message.agent_message.clone())
+            .collect::<Vec<_>>();
         self.messages = previous.messages;
         self.tools = previous.tools;
         self.subagent_headers = previous.subagent_headers;
@@ -462,6 +466,17 @@ impl SessionSnapshot {
         self.history = previous.history;
         self.history_bytes = previous.history_bytes;
         self.unavailable_count = previous.unavailable_count;
+        for message in replayed_agent_messages {
+            self.append_agent_message(message);
+        }
+    }
+
+    pub(crate) fn has_ordinary_transcript(&self) -> bool {
+        !self.tools.is_empty()
+            || self
+                .messages
+                .iter()
+                .any(|message| message.agent_message.is_none())
     }
 
     pub fn new(agent_id: String, thread_id: String) -> Self {

@@ -87,7 +87,6 @@ pub(crate) struct AgentRelationSession {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AgentRelations {
-    pub(crate) caller: AgentRelationSession,
     pub(crate) parent: Option<AgentRelationSession>,
     pub(crate) children: Vec<AgentRelationSession>,
     pub(crate) children_truncated: bool,
@@ -101,7 +100,9 @@ pub(crate) enum AgentRelationError {
     UnknownCaller(String),
     #[error("unknown target thread: {0}")]
     UnknownTarget(String),
-    #[error("an agent cannot message itself")]
+    #[error(
+        "recipientThreadId is this session's own ID; choose parent.threadId or children[].threadId from list_agent_relations"
+    )]
     SelfTarget,
     #[error("agent messaging cannot cross ACP agents")]
     CrossAgent,
@@ -780,7 +781,9 @@ impl AgentMessagingMcpHandler {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendAgentMessageArguments {
-    #[schemars(description = "Opaque bridge thread ID of a direct parent or direct sub-agent")]
+    #[schemars(
+        description = "Opaque bridge thread ID of a direct parent or direct sub-agent. When replying to a delivered agent message, use its replyToThreadId; never copy its recipientThreadId, which identifies this session."
+    )]
     recipient_thread_id: String,
     #[schemars(description = "One-way message body; the recipient must call this tool to reply")]
     message: String,
@@ -796,7 +799,7 @@ struct SendAgentMessageResult {
 #[tool_router]
 impl AgentMessagingMcpHandler {
     #[tool(
-        description = "List this session's direct parent and direct sub-agents that can receive one-way messages"
+        description = "List this session's direct parent and direct sub-agents. The caller's own thread ID is omitted; only parent.threadId or children[].threadId may be passed to send_agent_message, and only recipients with status running or idle are currently messageable"
     )]
     async fn list_agent_relations(&self) -> Result<CallToolResult, ErrorData> {
         let (_, caller_thread_id) = self.active_caller()?;
@@ -809,7 +812,7 @@ impl AgentMessagingMcpHandler {
     }
 
     #[tool(
-        description = "Send a one-way message to a direct parent or direct sub-agent; the recipient explicitly calls this tool to reply"
+        description = "Send a one-way message to a direct parent or direct sub-agent using parent.threadId or children[].threadId from list_agent_relations; never use this session's own thread ID. The recipient explicitly calls this tool to reply"
     )]
     async fn send_agent_message(
         &self,
@@ -900,7 +903,7 @@ impl AgentMessagingMcpHandler {
 impl ServerHandler for AgentMessagingMcpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Use these tools only for explicit one-way communication with direct parent and sub-agent sessions.",
+            "Use these tools only for explicit one-way communication with direct parent and sub-agent sessions. list_agent_relations omits this session's own thread ID; only its parent.threadId and children[].threadId values are valid send_agent_message recipients.",
         )
     }
 }
@@ -1193,6 +1196,8 @@ pub(crate) struct AgentMessageEnvelope {
     pub(crate) version: u32,
     pub(crate) message_id: String,
     pub(crate) sender_thread_id: String,
+    #[serde(default)]
+    pub(crate) reply_to_thread_id: String,
     pub(crate) recipient_thread_id: String,
     pub(crate) recipient_relation: AgentRelationKind,
     pub(crate) sender_title: Option<String>,
@@ -1222,6 +1227,7 @@ impl AgentMessageEnvelope {
         Self {
             version: AGENT_MESSAGE_ENVELOPE_VERSION,
             message_id,
+            reply_to_thread_id: sender_thread_id.clone(),
             sender_thread_id,
             recipient_thread_id,
             recipient_relation,
@@ -1240,8 +1246,12 @@ impl AgentMessageEnvelope {
         let payload = value
             .strip_prefix(ENVELOPE_PREFIX)?
             .strip_suffix(ENVELOPE_SUFFIX)?;
-        let envelope = serde_json::from_str::<Self>(payload).ok()?;
+        let mut envelope = serde_json::from_str::<Self>(payload).ok()?;
+        if envelope.reply_to_thread_id.is_empty() {
+            envelope.reply_to_thread_id = envelope.sender_thread_id.clone();
+        }
         (envelope.version == AGENT_MESSAGE_ENVELOPE_VERSION
+            && envelope.reply_to_thread_id == envelope.sender_thread_id
             && envelope.reply_tool == SEND_AGENT_MESSAGE_TOOL)
             .then_some(envelope)
     }
@@ -1330,7 +1340,22 @@ mod tests {
         let expected = envelope();
         let encoded = expected.encode().unwrap();
 
+        assert!(encoded.contains("\"replyToThreadId\":\"parent\""));
         assert_eq!(AgentMessageEnvelope::decode(&encoded), Some(expected));
+    }
+
+    #[test]
+    fn legacy_agent_message_envelopes_gain_an_unambiguous_reply_target() {
+        let expected = envelope();
+        let encoded = expected.encode().unwrap();
+        let legacy = encoded.replacen(",\"replyToThreadId\":\"parent\"", "", 1);
+
+        assert_eq!(AgentMessageEnvelope::decode(&legacy), Some(expected));
+        assert!(AgentMessageEnvelope::decode(&encoded.replace(
+            "\"replyToThreadId\":\"parent\"",
+            "\"replyToThreadId\":\"child\""
+        ))
+        .is_none());
     }
 
     #[test]

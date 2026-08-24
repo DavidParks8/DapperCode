@@ -1,3 +1,4 @@
+import { AGENT_MESSAGE_ACTIVITY_TYPE, createActivityMessage } from '@bridge/messages';
 import type { Chat } from '@bridge/types/types';
 import { resolveEquivalentChat } from './chatReconciliation';
 
@@ -131,6 +132,67 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
     );
   });
 
+  it('keeps settled history when a refresh contains only agent-message activities', () => {
+    const originalQuestion: Chat['messages'][number] = {
+      id: 'question',
+      role: 'user',
+      content: 'Original question',
+      createdAt: '2026-07-25T00:00:01.000Z',
+    };
+    const originalAnswer: Chat['messages'][number] = {
+      id: 'answer',
+      role: 'assistant',
+      content: 'Original answer',
+      createdAt: '2026-07-25T00:00:02.000Z',
+    };
+    const activity = (id: string, body: string, createdAt: string) =>
+      createActivityMessage(
+        `agent-message:${id}`,
+        AGENT_MESSAGE_ACTIVITY_TYPE,
+        {
+          text: body,
+          agentMessage: {
+            messageId: id,
+            direction: 'received',
+            relatedThreadId: `child-${id}`,
+            relatedTitle: `Worker ${id}`,
+            relation: 'sub_agent',
+            disposition: 'sent',
+            body,
+          },
+        },
+        createdAt,
+      );
+    const existingActivity = activity('one', 'First child update', '2026-07-25T00:00:03.000Z');
+    const previous = chat({
+      status: 'complete',
+      lastMessagePreview: originalAnswer.content,
+      messages: [originalQuestion, originalAnswer, existingActivity],
+    });
+    const refreshedActivity = activity(
+      'one',
+      'First child update, delivered',
+      '2026-07-25T00:00:03.000Z',
+    );
+    const newActivity = activity('two', 'Second child update', '2026-07-24T00:00:00.000Z');
+    const refreshed = chat({
+      status: 'complete',
+      lastMessagePreview: 'Second child update',
+      messages: [refreshedActivity, newActivity],
+    });
+
+    const resolved = resolveEquivalentChat(previous, refreshed);
+
+    expect(resolved.messages.map(({ id }) => id)).toEqual([
+      'question',
+      'answer',
+      'agent-message:one',
+      'agent-message:two',
+    ]);
+    expect(resolved.messages[2]).toBe(refreshedActivity);
+    expect(resolved.lastMessagePreview).toBe(originalAnswer.content);
+  });
+
   it('applies usage-only updates from a settled turn snapshot', () => {
     const previous = chat();
     const next = chat({
@@ -176,7 +238,7 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
       createdAt: '2026-07-25T00:00:02.000Z',
     };
     const previous = chat({
-      status: 'running',
+      status: 'complete',
       messages: [
         {
           id: 'older-user',

@@ -213,11 +213,13 @@ impl AcpSession {
         let restored = if !commit {
             state.snapshot = previous;
             true
-        } else if state.snapshot.timeline.is_empty() && !previous.timeline.is_empty() {
+        } else if !state.snapshot.has_ordinary_transcript()
+            && (previous.has_ordinary_transcript() || !previous.timeline.is_empty())
+        {
             // Agents are expected to replay the conversation while `session/load` is
-            // in flight. When nothing was replayed, keep the transcript we already had
-            // while retaining the metadata (mode, commands, config, plan) the reload
-            // reported.
+            // in flight. Agent-message envelopes are auxiliary activity, not proof that
+            // the ordinary conversation was replayed, so keep the transcript we already
+            // had while retaining both the new activity and the metadata the reload reported.
             state.snapshot.restore_transcript_from(previous);
             true
         } else {
@@ -584,12 +586,20 @@ impl AcpSession {
     /// session is loaded cold, which is strictly better than a duplicated, out-of-order one.
     pub async fn seed_history(&self, events: Vec<CanonicalEvent>) -> bool {
         let mut state = self.inner.lock().await;
-        if !state.snapshot.timeline.is_empty() {
+        if state.snapshot.has_ordinary_transcript() {
             return false;
         }
+        let mut seeded = SessionSnapshot::new(
+            state.snapshot.agent_id.clone(),
+            state.snapshot.thread_id.clone(),
+        );
         for event in &events {
-            state.snapshot.apply(event);
+            seeded.apply(event);
         }
+        if !seeded.has_ordinary_transcript() {
+            return false;
+        }
+        state.snapshot.restore_transcript_from(seeded);
         let live = !state.snapshot.history_reconstruction;
         drop(state);
         if live {
@@ -2977,6 +2987,151 @@ mod tests {
         assert_eq!(snapshot.messages[0].id, "kept");
         assert_eq!(snapshot.mode_id.as_deref(), Some("plan"));
         assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn activity_only_reconstruction_keeps_history_and_new_agent_messages() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        for (message_id, role, content) in [
+            ("user", MessageRole::User, "Original question"),
+            ("assistant", MessageRole::Agent, "Original answer"),
+        ] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role,
+                    message_id: message_id.into(),
+                    content: content.into(),
+                    content_block: None,
+                })
+                .await;
+        }
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(
+            snapshot
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["user", "assistant", "agent-message:message-from-child"]
+        );
+        assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn empty_reconstruction_preserves_an_activity_only_transcript() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(
+            snapshot.messages[0]
+                .agent_message
+                .as_ref()
+                .map(|message| message.message_id.as_str()),
+            Some("message-from-child")
+        );
+        assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn history_seeding_hydrates_an_activity_only_snapshot() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+
+        let seeded = session
+            .seed_history(vec![
+                CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::User,
+                    message_id: "user".into(),
+                    content: "Original question".into(),
+                    content_block: None,
+                },
+                CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::Agent,
+                    message_id: "assistant".into(),
+                    content: "Original answer".into(),
+                    content_block: None,
+                },
+            ])
+            .await;
+
+        assert!(seeded);
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["user", "assistant", "agent-message:message-from-child"]
+        );
     }
 
     #[tokio::test]

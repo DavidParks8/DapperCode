@@ -76,9 +76,11 @@ start is retried without one — losing sub-agent streaming rather than the agen
 
 Eligible managed sessions receive two bridge-owned MCP tools:
 
-- `list_agent_relations` lists the caller's direct parent and direct children.
+- `list_agent_relations` lists the caller's direct parent and direct children without exposing the
+  caller's own thread ID as a possible recipient.
 - `send_agent_message` sends a bounded, one-way message to one of those direct relations. A reply is
-  another explicit `send_agent_message` call; the bridge does not synthesize conversations.
+  another explicit `send_agent_message` call using the delivered envelope's `replyToThreadId`; the
+  bridge does not synthesize conversations.
 
 The bridge owns exactly one OS-assigned loopback listener and one MCP server task per bridge process.
 Every eligible ACP session shares it. DapperCode injects one Streamable HTTP descriptor when the ACP

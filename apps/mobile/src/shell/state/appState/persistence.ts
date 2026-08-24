@@ -16,7 +16,7 @@ export function createAppStatePersistence(): AppStatePersistenceAdapter {
   if (
     __DEV__ &&
     Platform.OS !== 'web' &&
-    process.env['EXPO_PUBLIC_E2E_FILE_PERSISTENCE']?.trim().toLowerCase() === 'true'
+    process.env.EXPO_PUBLIC_E2E_FILE_PERSISTENCE?.trim().toLowerCase() === 'true'
   ) {
     return {
       readCurrent: readE2EFile,

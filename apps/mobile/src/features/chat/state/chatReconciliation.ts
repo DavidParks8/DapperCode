@@ -1,6 +1,6 @@
-import { getMessageText } from '@bridge/messages';
+import { getAgentMessageMeta, getMessageText } from '@bridge/messages';
 import type { Chat, ChatMessage, ChatSummary } from '@bridge/types/types';
-import { countUserMessages, hasRecentUnansweredUserTurn } from '../helpers/helpers';
+import { countUserMessages } from '../helpers/helpers';
 import { areChatsEquivalent } from './chatEquivalence';
 
 const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
@@ -30,6 +30,10 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
     return next;
   }
 
+  if (isAgentMessageOnlySnapshot(next) && hasOrdinaryTranscript(previous)) {
+    return mergeAgentMessageOnlySnapshot(previous, next);
+  }
+
   // A summary-only bridge fallback has no turns and must not erase already-hydrated history.
   if (previous.messages.length > 0 && next.messages.length === 0) {
     return withPreviousTranscript(previous, next);
@@ -38,14 +42,6 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
   const previousUserCount = countUserMessages(previous.messages);
   const nextUserCount = countUserMessages(next.messages);
   if (nextUserCount >= previousUserCount) {
-    return next;
-  }
-
-  const shouldPreserveTranscript =
-    hasRecentUnansweredUserTurn(previous) ||
-    previous.status === 'running' ||
-    next.status === 'running';
-  if (!shouldPreserveTranscript) {
     return next;
   }
 
@@ -120,6 +116,31 @@ function findRepresentedMessageIndexes(
     }
   }
   return represented;
+}
+
+function isAgentMessageOnlySnapshot(chat: Chat): boolean {
+  return chat.messages.length > 0 && chat.messages.every((message) => getAgentMessageMeta(message));
+}
+
+function hasOrdinaryTranscript(chat: Chat): boolean {
+  return chat.messages.some((message) => !getAgentMessageMeta(message));
+}
+
+function mergeAgentMessageOnlySnapshot(previous: Chat, next: Chat): Chat {
+  const nextMessagesById = new Map(next.messages.map((message) => [message.id, message]));
+  const messages = previous.messages.map((message) => nextMessagesById.get(message.id) ?? message);
+  const mergedMessageIds = new Set(messages.map((message) => message.id));
+  for (const message of next.messages) {
+    if (!mergedMessageIds.has(message.id)) {
+      messages.push(message);
+      mergedMessageIds.add(message.id);
+    }
+  }
+  return {
+    ...next,
+    lastMessagePreview: previous.lastMessagePreview,
+    messages,
+  };
 }
 
 function messagesShareTranscriptIdentity(left: ChatMessage, right: ChatMessage): boolean {
