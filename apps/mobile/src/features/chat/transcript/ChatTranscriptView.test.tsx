@@ -344,6 +344,17 @@ describe('ChatTranscriptView activity collapse', () => {
 });
 
 describe('ChatTranscriptView edge scrims', () => {
+  it('leaves the latest row unfaded when a long transcript has no bottom chrome', () => {
+    const tree = render({
+      chat: makeChat({ messages: makeMessages(60) }),
+      bottomInset: 0,
+    });
+
+    expect(getList(tree).props['inverted']).toBe(true);
+    expect(tree.root.findAllByProps({ testID: 'transcript-bottom-scrim' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('fades transcript content only into the bottom chrome without blocking touches', () => {
     const tree = render({ topInset: 96, bottomInset: 88 });
     const bottomScrim = requireTestValue(

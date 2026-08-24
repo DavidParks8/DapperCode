@@ -579,21 +579,28 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
-  it('animates expand/collapse without throwing, and the transition config is reduce-motion aware', () => {
+  it('animates the row layout while removing collapsed output immediately', () => {
     const value = invocation({ id: 'tool-animated', textLines: ['out'] });
     const tree = render(value);
 
-    // Toggling twice exercises both the entering and exiting animation branches without crashing;
-    // this is the regression the mocked reanimated layer protects against.
     expand(tree, value.title);
     expect(textLines(tree)).toContain('out');
+    const outputPanel = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
+      'tool output panel',
+    );
+    const outputContainer = tree.root.findByProps({ testID: 'tool-output-container' });
+    expect(outputContainer.props['entering']).toBeDefined();
+    expect(outputContainer.props['exiting']).toBeUndefined();
+    expect(ancestorTestIDs(outputPanel)).toContain('tool-output-container');
+
     expand(tree, value.title);
     expect(textLines(tree)).not.toContain('out');
 
     act(() => tree.unmount());
   });
 
-  it('clips exiting output to the animated row layout', () => {
+  it('clips expanding output to the animated row layout', () => {
     const value = invocation({ id: 'tool-collapse-clip', textLines: ['out'] });
     const tree = render(value);
     const layout = requireTestValue(
