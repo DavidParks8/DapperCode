@@ -51,8 +51,11 @@ const DapperCodeAgentActivity = (props: DapperCodeAgentActivityProps) => {
           ? '#FFB347'
           : '#58BEF6';
 
-  const StatusIcon = ({ size }: { size: number }) =>
-    props.phase === 'planning' ? (
+  const StatusIcon = ({ size }: { size: number }) => {
+    'use no memo';
+
+    // Widget layouts run in JavaScriptCore without the React Compiler runtime.
+    return props.phase === 'planning' ? (
       <Image systemName="list.bullet.clipboard.fill" size={size} color={accent} />
     ) : props.phase === 'waiting' ? (
       <Image systemName="questionmark.bubble.fill" size={size} color={accent} />
@@ -65,6 +68,7 @@ const DapperCodeAgentActivity = (props: DapperCodeAgentActivityProps) => {
     ) : (
       <Image systemName="terminal.fill" size={size} color={accent} />
     );
+  };
 
   return {
     banner: (

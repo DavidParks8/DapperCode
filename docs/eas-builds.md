@@ -151,6 +151,10 @@ include this native extension.
 `expo-widgets@57.0.10` is patched through `pnpm-workspace.yaml` so ActivityKit evaluates layouts
 after SwiftUI installs the presentation environment. Keep that patch until the upstream package
 ships the render-time evaluation fix; otherwise iOS can show a blank Live Activity surface.
+Expo serializes each widget layout and evaluates it in the extension's JavaScriptCore context, which
+does not include the React Compiler runtime. Keep nested JSX-producing functions inside widget
+layouts opted out with `use no memo`, and keep the production compile/runtime regression in
+`src/features/chat/liveActivities/config.test.ts` when changing the layout.
 There is no separate Live Activities switch in App Store Connect. During `eas build`, EAS syncs the
 configured App Group capability to the Apple Developer Console and regenerates signing as needed;
 do not set `EXPO_NO_CAPABILITY_SYNC=1` for these builds.
