@@ -2510,6 +2510,14 @@ function MainRouteShell() {
     });
 
     it('keeps a newly picked model selected after the new chat is created', async () => {
+      let resolveCreate!: (chat: Chat) => void;
+      const createPending = new Promise<Chat>((resolve) => {
+        resolveCreate = resolve;
+      });
+      let resolveSend!: (chat: Chat) => void;
+      const sendPending = new Promise<Chat>((resolve) => {
+        resolveSend = resolve;
+      });
       const api = createApi();
       (api.listModelOptions as jest.Mock).mockResolvedValue([
         {
@@ -2525,8 +2533,8 @@ function MainRouteShell() {
         },
       ]);
       const createdChat: Chat = { ...rootChat, id: 'thread-created', messages: [] };
-      (api.createChatIdempotent as jest.Mock).mockResolvedValue(createdChat);
-      (api.sendChatMessageIdempotent as jest.Mock).mockResolvedValue(createdChat);
+      (api.createChatIdempotent as jest.Mock).mockReturnValue(createPending);
+      (api.sendChatMessageIdempotent as jest.Mock).mockReturnValue(sendPending);
       const { tree } = await renderMain({ api });
       const root = rootOf(tree);
       await act(async () => {
@@ -2542,10 +2550,35 @@ function MainRouteShell() {
         textInput(root, 'Message').props.onChangeText('Hi there');
         await flush();
       });
-      await press(byLabel(root, 'Send message'));
+      let sendPromise: Promise<void> | undefined;
       await act(async () => {
-        await flush();
-        await flush();
+        sendPromise = (byLabel(root, 'Send message').props.onPress as () => Promise<void>)();
+        await Promise.resolve();
+      });
+
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Model, Bridge · Default Model',
+        ),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        resolveCreate(createdChat);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Model, Bridge · Default Model',
+        ),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        resolveSend(createdChat);
+        await sendPromise;
       });
 
       expect((api.createChatIdempotent as jest.Mock).mock.calls[0][0].model).toBe(

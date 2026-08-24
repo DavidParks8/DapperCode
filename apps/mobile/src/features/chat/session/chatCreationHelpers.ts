@@ -93,6 +93,7 @@ export function showOptimisticChatIfNeeded(params: {
   selectedChatRef: MainScreenChatCreationFlowContext['selectedChatRef'];
   optimisticChatId: string;
   optimisticChat: Chat;
+  preserveModelSelectionForChat: MainScreenChatCreationFlowContext['preserveModelSelectionForChat'];
   setSelectedChatId: MainScreenChatCreationFlowContext['setSelectedChatId'];
   setSelectedChat: MainScreenChatCreationFlowContext['setSelectedChat'];
   scrollToBottomReliable: MainScreenChatCreationFlowContext['scrollToBottomReliable'];
@@ -102,6 +103,7 @@ export function showOptimisticChatIfNeeded(params: {
     selectedChatRef,
     optimisticChatId,
     optimisticChat,
+    preserveModelSelectionForChat,
     setSelectedChatId,
     setSelectedChat,
     scrollToBottomReliable,
@@ -110,6 +112,7 @@ export function showOptimisticChatIfNeeded(params: {
     return;
   }
 
+  preserveModelSelectionForChat(optimisticChatId);
   selectedChatIdRef.current = optimisticChatId;
   selectedChatRef.current = optimisticChat;
   setSelectedChatId(optimisticChatId);
@@ -200,6 +203,7 @@ export function createOnChatCreatedHandler(params: {
   optimisticMessage: ChatTranscriptMessage;
   selectedChatIdRef: MainScreenChatCreationFlowContext['selectedChatIdRef'];
   optimisticChatId: string;
+  preserveModelSelectionForChat: MainScreenChatCreationFlowContext['preserveModelSelectionForChat'];
   setSelectedChatId: MainScreenChatCreationFlowContext['setSelectedChatId'];
   selectedChatRef: MainScreenChatCreationFlowContext['selectedChatRef'];
   setSelectedChat: MainScreenChatCreationFlowContext['setSelectedChat'];
@@ -217,6 +221,7 @@ export function createOnChatCreatedHandler(params: {
     optimisticMessage,
     selectedChatIdRef,
     optimisticChatId,
+    preserveModelSelectionForChat,
     setSelectedChatId,
     selectedChatRef,
     setSelectedChat,
@@ -240,6 +245,7 @@ export function createOnChatCreatedHandler(params: {
     }
 
     tracker.markAdopted();
+    preserveModelSelectionForChat(created.id);
     selectedChatIdRef.current = created.id;
     setSelectedChatId(created.id);
     const visibleCreatedChat = buildVisibleCreatedChat(created, content, optimisticMessage);
@@ -301,6 +307,7 @@ export function clearOptimisticChatSelection(params: {
   selectedChatIdRef: MainScreenChatCreationFlowContext['selectedChatIdRef'];
   selectedChatRef: MainScreenChatCreationFlowContext['selectedChatRef'];
   optimisticChatId: string;
+  preserveModelSelectionForChat: MainScreenChatCreationFlowContext['preserveModelSelectionForChat'];
   setSelectedChatId: MainScreenChatCreationFlowContext['setSelectedChatId'];
   setSelectedChat: MainScreenChatCreationFlowContext['setSelectedChat'];
 }): void {
@@ -308,6 +315,7 @@ export function clearOptimisticChatSelection(params: {
     selectedChatIdRef,
     selectedChatRef,
     optimisticChatId,
+    preserveModelSelectionForChat,
     setSelectedChatId,
     setSelectedChat,
   } = params;
@@ -315,6 +323,7 @@ export function clearOptimisticChatSelection(params: {
     return;
   }
 
+  preserveModelSelectionForChat(null);
   selectedChatIdRef.current = null;
   selectedChatRef.current = null;
   setSelectedChatId(null);
@@ -358,6 +367,7 @@ export function handleCreateChatFailure(params: {
   selectedChatIdRef: MainScreenChatCreationFlowContext['selectedChatIdRef'];
   selectedChatRef: MainScreenChatCreationFlowContext['selectedChatRef'];
   optimisticChatId: string;
+  preserveModelSelectionForChat: MainScreenChatCreationFlowContext['preserveModelSelectionForChat'];
   setSelectedChatId: MainScreenChatCreationFlowContext['setSelectedChatId'];
   setSelectedChat: MainScreenChatCreationFlowContext['setSelectedChat'];
   handleTurnFailure: MainScreenChatCreationFlowContext['handleTurnFailure'];
@@ -384,6 +394,7 @@ export function handleCreateChatFailure(params: {
       selectedChatIdRef: params.selectedChatIdRef,
       selectedChatRef: params.selectedChatRef,
       optimisticChatId: params.optimisticChatId,
+      preserveModelSelectionForChat: params.preserveModelSelectionForChat,
       setSelectedChatId: params.setSelectedChatId,
       setSelectedChat: params.setSelectedChat,
     });
