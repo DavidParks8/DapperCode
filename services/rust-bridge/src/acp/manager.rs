@@ -31,8 +31,9 @@ use super::events::{
     FieldUpdate, MessageRole,
 };
 use super::harness::{
-    harness_for_manifest, HarnessAdapter, HarnessContext, HarnessDeleteRequest, HarnessError,
-    HarnessForkBoundary, HarnessForkBoundaryMessage, HarnessForkRequest, HarnessSteerRequest,
+    harness_for_manifest, HarnessAdapter, HarnessAgentMessageOutcome, HarnessAgentMessageRequest,
+    HarnessContext, HarnessDeleteRequest, HarnessError, HarnessForkBoundary,
+    HarnessForkBoundaryMessage, HarnessForkRequest, HarnessOperationFailure, HarnessSteerRequest,
     SessionContext,
 };
 use super::identity::AgentSessionId;
@@ -155,6 +156,16 @@ fn classify_runtime_operation_failure(error: AcpRuntimeError) -> AgentOperationF
             | AcpRuntimeError::Interaction(InteractionError::Response(_))
     );
     let error = AgentManagerError::Runtime(error);
+    if indeterminate {
+        AgentOperationFailure::indeterminate(error)
+    } else {
+        AgentOperationFailure::definitive(error)
+    }
+}
+
+fn classify_harness_operation_failure(failure: HarnessOperationFailure) -> AgentOperationFailure {
+    let indeterminate = failure.is_indeterminate();
+    let error = AgentManagerError::Harness(failure.into_error());
     if indeterminate {
         AgentOperationFailure::indeterminate(error)
     } else {
@@ -1205,6 +1216,7 @@ impl AgentManager {
                 host_environment,
                 initialize_timeout,
                 &launch.extra_args,
+                &launch.extra_environment,
             )
             .await;
             if result.is_ok() {
@@ -1218,6 +1230,7 @@ impl AgentManager {
                 host_environment,
                 initialize_timeout,
                 &[],
+                &BTreeMap::new(),
             )
             .await,
             None,
@@ -3317,6 +3330,11 @@ impl AgentManager {
         Ok(connection.prepare_steer(&session_id).await?)
     }
 
+    pub async fn current_steer_epoch(&self, thread_id: &str) -> Result<u64, AgentManagerError> {
+        let (_, session_id, connection) = self.route_thread(thread_id)?;
+        Ok(connection.current_steer_epoch(&session_id).await?)
+    }
+
     pub async fn verify_steer_epoch(
         &self,
         thread_id: &str,
@@ -3334,6 +3352,79 @@ impl AgentManager {
             .ok_or_else(|| AgentManagerError::UnknownAgent(identity.agent_id.clone()))?;
         Ok(connection.negotiated().supports_session_steer()
             || harness_capabilities(runtime).session_steer)
+    }
+
+    pub fn supports_live_agent_message(&self, thread_id: &str) -> Result<bool, AgentManagerError> {
+        let (identity, _, _) = self.route_thread(thread_id)?;
+        let runtime = self
+            .agents
+            .get(&identity.agent_id)
+            .ok_or_else(|| AgentManagerError::UnknownAgent(identity.agent_id.clone()))?;
+        Ok(harness_capabilities(runtime).live_agent_message)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn deliver_live_agent_message(
+        &self,
+        thread_id: &str,
+        expected_run_id: String,
+        expected_source_turn_id: String,
+        prompt_generation: u64,
+        interaction_epoch: u64,
+        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+    ) -> Result<HarnessAgentMessageOutcome, AgentOperationFailure> {
+        let (identity, session_id, connection) = self
+            .route_thread(thread_id)
+            .map_err(AgentOperationFailure::definitive)?;
+        let runtime = self.agents.get(&identity.agent_id).ok_or_else(|| {
+            AgentOperationFailure::definitive(AgentManagerError::UnknownAgent(
+                identity.agent_id.clone(),
+            ))
+        })?;
+        if !harness_capabilities(runtime).live_agent_message {
+            return Err(AgentOperationFailure::definitive(
+                AcpRuntimeError::Unsupported("live agent messaging").into(),
+            ));
+        }
+        self.flush_pending_durable_sessions()
+            .await
+            .map_err(AgentOperationFailure::definitive)?;
+        if !connection
+            .verify_steer_epoch(&session_id, interaction_epoch)
+            .await
+            .map_err(classify_runtime_operation_failure)?
+        {
+            return Err(AgentOperationFailure::definitive(
+                AcpRuntimeError::Unsupported("stale agent-message interaction epoch").into(),
+            ));
+        }
+        let session = connection.session(&session_id).await.ok_or_else(|| {
+            AgentOperationFailure::definitive(
+                AcpRuntimeError::UnknownSession(session_id.to_string()).into(),
+            )
+        })?;
+        if session.operation().await
+            != Some((expected_run_id, expected_source_turn_id, prompt_generation))
+        {
+            return Err(AgentOperationFailure::definitive(
+                AcpRuntimeError::Unsupported("stale agent-message correlation").into(),
+            ));
+        }
+        let promote_blocking_subagents = session.snapshot().await.has_active_subagent_tool();
+        let (harness, context) = self
+            .harness_session_context(&identity, session_id)
+            .await
+            .map_err(AgentOperationFailure::definitive)?;
+        harness
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt,
+                    promote_blocking_subagents,
+                },
+            )
+            .await
+            .map_err(classify_harness_operation_failure)
     }
 
     pub async fn steer(
@@ -5024,6 +5115,10 @@ mod tests {
             "already closed".to_string(),
         ));
         assert!(!failure.is_indeterminate());
+        let failure = classify_harness_operation_failure(HarnessOperationFailure::indeterminate(
+            HarnessError::Timeout,
+        ));
+        assert!(failure.is_indeterminate());
     }
 
     fn echo_digest() -> String {
@@ -8423,7 +8518,6 @@ mod tests {
             .admit_prompt("run".to_string(), "turn".to_string())
             .await
             .expect("admit source prompt");
-
         let abort_calls = Arc::new(AtomicUsize::new(0));
         let abort_calls_for_route = abort_calls.clone();
         let status_idle = Arc::new(AtomicBool::new(false));
@@ -8568,6 +8662,205 @@ mod tests {
         })
         .await
         .expect("steered generation settles");
+
+        server.abort();
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn manager_delivers_opencode_agent_message_without_aborting_the_active_generation() {
+        let (acp_observed_tx, _acp_observed_rx) = mpsc::unbounded_channel();
+        let connection = deleting_connection("opencode", false, true, acp_observed_tx).await;
+        let session_id = SessionId::new("opencode-listed");
+        connection
+            .0
+            .ensure_session(session_id.clone())
+            .await
+            .expect("load OpenCode session");
+        let session = connection
+            .0
+            .session(&session_id)
+            .await
+            .expect("loaded OpenCode session");
+        let (generation, _) = session
+            .admit_prompt("run".to_string(), "turn".to_string())
+            .await
+            .expect("admit source prompt");
+        session
+            .emit(CanonicalEvent::Tool {
+                agent_id: "opencode".to_string(),
+                thread_id: AgentSessionId::new("opencode", "opencode-listed")
+                    .unwrap()
+                    .encode(),
+                run_id: Some("run".to_string()),
+                source_turn_id: Some("turn".to_string()),
+                generation: Some(generation),
+                tool_call_id: "task-child".to_string(),
+                kind: ToolKind::Other,
+                status: ToolCallStatus::InProgress,
+                title: "task".to_string(),
+                content: FieldUpdate::Set(String::new()),
+                structured_content: FieldUpdate::Set(Vec::new()),
+                locations: FieldUpdate::Set(Vec::new()),
+            })
+            .await;
+
+        let (http_observed_tx, mut http_observed_rx) = mpsc::unbounded_channel();
+        let background_observed = http_observed_tx.clone();
+        let prompt_observed = http_observed_tx;
+        let app = Router::new()
+            .route(
+                "/experimental/session/opencode-listed/background",
+                post(move || {
+                    let observed = background_observed.clone();
+                    async move {
+                        observed
+                            .send(("background".to_string(), serde_json::Value::Null))
+                            .expect("observe background request");
+                        Json(true)
+                    }
+                }),
+            )
+            .route(
+                "/session/opencode-listed/prompt_async",
+                post(move |Json(body): Json<serde_json::Value>| {
+                    let observed = prompt_observed.clone();
+                    async move {
+                        observed
+                            .send(("prompt".to_string(), body))
+                            .expect("observe prompt request");
+                        AxumStatusCode::NO_CONTENT
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener");
+        let http_base = format!(
+            "http://{}",
+            listener.local_addr().expect("fixture local address")
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve OpenCode live-message fixture");
+        });
+
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable = PathBuf::from("/usr/local/bin/opencode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager = AgentManager::from_start_results(
+            "opencode".to_string(),
+            vec![(opencode, Ok(connection))],
+        )
+        .await
+        .expect("manager");
+        let identity = AgentSessionId::new("opencode", "opencode-listed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), PathBuf::from("/tmp"))])
+            .await
+            .expect("source index");
+        let prompt = || {
+            vec![serde_json::from_value(serde_json::json!({
+                "type": "text",
+                "text": "child needs guidance"
+            }))
+            .expect("text content block")]
+        };
+        assert!(!manager
+            .supports_live_agent_message(&identity.encode())
+            .expect("missing live-message capability"));
+        let unsupported = manager
+            .deliver_live_agent_message(
+                &identity.encode(),
+                "run".to_string(),
+                "turn".to_string(),
+                generation,
+                0,
+                prompt(),
+            )
+            .await
+            .expect_err("missing harness is rejected");
+        assert!(!unsupported.is_indeterminate());
+        assert!(unsupported.to_string().contains("live agent messaging"));
+
+        manager
+            .agents
+            .get_mut("opencode")
+            .expect("OpenCode runtime")
+            .http_base = Some(http_base);
+        assert!(manager
+            .supports_live_agent_message(&identity.encode())
+            .expect("live-message capability"));
+        let epoch = manager
+            .current_steer_epoch(&identity.encode())
+            .await
+            .expect("read live-message epoch");
+        let stale_epoch = manager
+            .deliver_live_agent_message(
+                &identity.encode(),
+                "run".to_string(),
+                "turn".to_string(),
+                generation,
+                epoch + 1,
+                prompt(),
+            )
+            .await
+            .expect_err("stale epoch is rejected");
+        assert!(!stale_epoch.is_indeterminate());
+        assert!(stale_epoch
+            .to_string()
+            .contains("stale agent-message interaction epoch"));
+        let stale_correlation = manager
+            .deliver_live_agent_message(
+                &identity.encode(),
+                "stale-run".to_string(),
+                "turn".to_string(),
+                generation,
+                epoch,
+                prompt(),
+            )
+            .await
+            .expect_err("stale correlation is rejected");
+        assert!(!stale_correlation.is_indeterminate());
+        assert!(stale_correlation
+            .to_string()
+            .contains("stale agent-message correlation"));
+        assert!(http_observed_rx.try_recv().is_err());
+
+        manager
+            .deliver_live_agent_message(
+                &identity.encode(),
+                "run".to_string(),
+                "turn".to_string(),
+                generation,
+                epoch,
+                prompt(),
+            )
+            .await
+            .expect("deliver live agent message");
+
+        assert_eq!(
+            http_observed_rx.recv().await,
+            Some(("background".to_string(), serde_json::Value::Null))
+        );
+        assert_eq!(
+            http_observed_rx.recv().await,
+            Some((
+                "prompt".to_string(),
+                serde_json::json!({
+                    "parts": [{"type": "text", "text": "child needs guidance"}]
+                })
+            ))
+        );
+        assert!(http_observed_rx.try_recv().is_err());
+        assert_eq!(
+            session.operation().await,
+            Some(("run".to_string(), "turn".to_string(), generation))
+        );
 
         server.abort();
         manager.shutdown().await;

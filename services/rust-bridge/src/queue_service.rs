@@ -1506,36 +1506,57 @@ impl BridgeQueueService {
         });
     }
 
+    fn pending_steer_can_bypass_tools(
+        runtime: &BridgeThreadQueueRuntime,
+        supports_live_agent_message: bool,
+    ) -> bool {
+        runtime
+            .pending_steers
+            .front()
+            .is_some_and(|entry| entry.agent_message.is_some())
+            && supports_live_agent_message
+    }
+
     pub(super) async fn drain_pending_steers(self: &Arc<Self>, thread_id: String) {
         loop {
+            let supports_live_agent_message = self
+                .backend
+                .supports_live_agent_message(&thread_id)
+                .unwrap_or(false);
             let actor = self.thread_actor(&thread_id).await;
             let actor_guard = actor.lock().await;
-            let should_prepare = {
+            let prepared_live_agent_message = {
                 let mut threads = self.threads.write().await;
                 let Some(runtime) = threads.get_mut(&thread_id) else {
                     return;
                 };
+                let live_agent_message =
+                    Self::pending_steer_can_bypass_tools(runtime, supports_live_agent_message);
                 if runtime.pending_steers.is_empty()
                     || runtime.steer_prepare_in_flight
                     || runtime.steer_dispatch_in_flight.is_some()
                     || runtime.turn_start_in_flight
                     || runtime.action_in_flight_item_id.is_some()
-                    || !runtime.active_tool_call_ids.is_empty()
+                    || (!runtime.active_tool_call_ids.is_empty() && !live_agent_message)
+                    || (live_agent_message
+                        && (!runtime.pending_approval_ids.is_empty()
+                            || !runtime.pending_user_input_ids.is_empty()))
                     || !runtime.live_generation_known
                     || !runtime.thread_running
                 {
                     return;
                 }
-                let should_prepare = true;
-                if should_prepare {
-                    runtime.steer_prepare_in_flight = true;
-                }
-                should_prepare
+                runtime.steer_prepare_in_flight = true;
+                live_agent_message
             };
 
-            let interaction_epoch = if should_prepare {
+            let interaction_epoch = {
                 drop(actor_guard);
-                let result = self.backend.prepare_steer(&thread_id).await;
+                let result = if prepared_live_agent_message {
+                    self.backend.current_steer_epoch(&thread_id).await
+                } else {
+                    self.backend.prepare_steer(&thread_id).await
+                };
                 let actor_guard = actor.lock().await;
                 let (snapshot, should_auto_dispatch) = {
                     let mut threads = self.threads.write().await;
@@ -1578,20 +1599,23 @@ impl BridgeQueueService {
                         return;
                     }
                 }
-            } else {
-                continue;
             };
 
             let actor_guard = actor.lock().await;
-            let dispatch = {
+            let (dispatch, live_agent_message) = {
                 let mut threads = self.threads.write().await;
                 let Some(runtime) = threads.get_mut(&thread_id) else {
                     return;
                 };
+                let live_agent_message =
+                    Self::pending_steer_can_bypass_tools(runtime, supports_live_agent_message);
+                if live_agent_message != prepared_live_agent_message {
+                    continue;
+                }
                 if runtime.steer_dispatch_in_flight.is_some()
                     || runtime.turn_start_in_flight
                     || runtime.action_in_flight_item_id.is_some()
-                    || !runtime.active_tool_call_ids.is_empty()
+                    || (!runtime.active_tool_call_ids.is_empty() && !live_agent_message)
                     || !runtime.live_generation_known
                     || !runtime.thread_running
                     || !runtime.pending_approval_ids.is_empty()
@@ -1617,7 +1641,7 @@ impl BridgeQueueService {
                     crossed_completion_boundary: false,
                 };
                 runtime.steer_dispatch_in_flight = Some(dispatch.clone());
-                dispatch
+                (dispatch, live_agent_message)
             };
             drop(actor_guard);
 
@@ -1629,18 +1653,35 @@ impl BridgeQueueService {
                     return;
                 }
             };
-            let result = self
-                .backend
-                .steer(
-                    &thread_id,
-                    dispatch.expected_run_id.clone(),
-                    dispatch.expected_turn_id.clone(),
-                    dispatch.prompt_generation,
-                    interaction_epoch,
-                    prompt,
-                )
-                .await;
+            let result = if live_agent_message {
+                self.backend
+                    .deliver_live_agent_message(
+                        &thread_id,
+                        dispatch.expected_run_id.clone(),
+                        dispatch.expected_turn_id.clone(),
+                        dispatch.prompt_generation,
+                        interaction_epoch,
+                        prompt,
+                    )
+                    .await
+            } else {
+                self.backend
+                    .steer(
+                        &thread_id,
+                        dispatch.expected_run_id.clone(),
+                        dispatch.expected_turn_id.clone(),
+                        dispatch.prompt_generation,
+                        interaction_epoch,
+                        prompt,
+                    )
+                    .await
+                    .map(|_| crate::acp::harness::HarnessAgentMessageOutcome::Delivered)
+            };
             let dispatch_failed = result.is_err();
+            let delivery_deferred = matches!(
+                &result,
+                Ok(crate::acp::harness::HarnessAgentMessageOutcome::Deferred)
+            );
             let actor_guard = actor.lock().await;
             let snapshot = {
                 let mut threads = self.threads.write().await;
@@ -1654,7 +1695,10 @@ impl BridgeQueueService {
                     runtime.steer_dispatch_in_flight = Some(owned);
                     return;
                 }
-                let succeeded = result.is_ok();
+                let succeeded = matches!(
+                    &result,
+                    Ok(crate::acp::harness::HarnessAgentMessageOutcome::Delivered)
+                );
                 let indeterminate = result
                     .as_ref()
                     .err()
@@ -1667,8 +1711,25 @@ impl BridgeQueueService {
                     .as_ref()
                     .map(|origin| origin.message_id.clone());
                 let mut requeued_agent_message_id = None;
+                let deferred_after_completion =
+                    delivery_deferred && owned.crossed_completion_boundary;
                 match result {
-                    Ok(()) => runtime.last_error = None,
+                    Ok(crate::acp::harness::HarnessAgentMessageOutcome::Delivered) => {
+                        runtime.last_error = None;
+                    }
+                    Ok(crate::acp::harness::HarnessAgentMessageOutcome::Deferred) => {
+                        if deferred_after_completion {
+                            if let Some(agent_message) = owned.entry.agent_message.as_mut() {
+                                agent_message.disposition =
+                                    crate::agent_messaging::AgentMessageDisposition::Queued;
+                                requeued_agent_message_id = Some(agent_message.message_id.clone());
+                            }
+                            runtime.items.push_front(owned.entry);
+                        } else {
+                            runtime.pending_steers.push_front(owned.entry);
+                        }
+                        runtime.last_error = None;
+                    }
                     Err(error) => {
                         if !indeterminate {
                             if owned.crossed_completion_boundary {
@@ -1700,6 +1761,7 @@ impl BridgeQueueService {
                     )),
                     indeterminate.then_some(agent_message_id).flatten(),
                     requeued_agent_message_id,
+                    deferred_after_completion,
                 )
             };
             drop(actor_guard);
@@ -1754,8 +1816,10 @@ impl BridgeQueueService {
                     );
                 }
             }
-            if dispatch_failed {
-                self.spawn_auto_dispatch(thread_id.clone());
+            if dispatch_failed || delivery_deferred {
+                if dispatch_failed || snapshot.4 {
+                    self.spawn_auto_dispatch(thread_id.clone());
+                }
                 return;
             }
         }
@@ -2052,12 +2116,20 @@ impl BridgeQueueService {
                 request_id,
                 ..
             } => {
+                let supports_live_agent_message = self
+                    .backend
+                    .supports_live_agent_message(&thread_id)
+                    .unwrap_or(false);
                 let mut should_drain = false;
                 if let Some(runtime) = self.threads.write().await.get_mut(&thread_id) {
                     runtime.pending_approval_ids.remove(&request_id);
                     should_drain = runtime.pending_approval_ids.is_empty()
                         && runtime.pending_user_input_ids.is_empty()
-                        && runtime.active_tool_call_ids.is_empty()
+                        && (runtime.active_tool_call_ids.is_empty()
+                            || Self::pending_steer_can_bypass_tools(
+                                runtime,
+                                supports_live_agent_message,
+                            ))
                         && !runtime.pending_steers.is_empty();
                 }
                 if should_drain {
@@ -2078,12 +2150,20 @@ impl BridgeQueueService {
                 request_id,
                 ..
             } => {
+                let supports_live_agent_message = self
+                    .backend
+                    .supports_live_agent_message(&thread_id)
+                    .unwrap_or(false);
                 let mut should_drain = false;
                 if let Some(runtime) = self.threads.write().await.get_mut(&thread_id) {
                     runtime.pending_user_input_ids.remove(&request_id);
                     should_drain = runtime.pending_approval_ids.is_empty()
                         && runtime.pending_user_input_ids.is_empty()
-                        && runtime.active_tool_call_ids.is_empty()
+                        && (runtime.active_tool_call_ids.is_empty()
+                            || Self::pending_steer_can_bypass_tools(
+                                runtime,
+                                supports_live_agent_message,
+                            ))
                         && !runtime.pending_steers.is_empty();
                 }
                 if should_drain {
@@ -2339,6 +2419,15 @@ mod tests {
         response: oneshot::Sender<Result<(), String>>,
     }
 
+    struct LiveAgentMessageCall {
+        thread_id: String,
+        expected_run_id: String,
+        expected_source_turn_id: String,
+        prompt_generation: u64,
+        prompt: Vec<ContentBlock>,
+        response: oneshot::Sender<Result<crate::acp::harness::HarnessAgentMessageOutcome, String>>,
+    }
+
     struct PrepareCall {
         thread_id: String,
         response: oneshot::Sender<Result<u64, String>>,
@@ -2366,9 +2455,11 @@ mod tests {
         snapshot: StdMutex<QueueRuntimeSnapshot>,
         snapshot_error: StdMutex<Option<String>>,
         supports_steer: AtomicBool,
+        supports_live_agent_message: AtomicBool,
         manual_epoch: Arc<AtomicBool>,
         supports_steer_error: StdMutex<Option<String>>,
         steer_tx: mpsc::UnboundedSender<SteerCall>,
+        live_agent_message_tx: mpsc::UnboundedSender<LiveAgentMessageCall>,
         prepare_tx: mpsc::UnboundedSender<PrepareCall>,
         verify_epoch_tx: mpsc::UnboundedSender<VerifyEpochCall>,
         turn_start_tx: mpsc::UnboundedSender<TurnStartCall>,
@@ -2386,6 +2477,7 @@ mod tests {
 
     struct FakeReceivers {
         steer: mpsc::UnboundedReceiver<SteerCall>,
+        live_agent_message: mpsc::UnboundedReceiver<LiveAgentMessageCall>,
         prepare: mpsc::UnboundedReceiver<PrepareCall>,
         verify_epoch: mpsc::UnboundedReceiver<VerifyEpochCall>,
         turn_start: mpsc::UnboundedReceiver<TurnStartCall>,
@@ -2429,6 +2521,10 @@ mod tests {
             Ok(self.supports_steer.load(Ordering::SeqCst))
         }
 
+        fn supports_live_agent_message(&self, _thread_id: &str) -> Result<bool, String> {
+            Ok(self.supports_live_agent_message.load(Ordering::SeqCst))
+        }
+
         fn prepare_steer<'a>(&'a self, thread_id: &'a str) -> BoxFuture<'a, Result<u64, String>> {
             if !self.manual_epoch.load(Ordering::SeqCst) {
                 return Box::pin(async { Ok(1) });
@@ -2445,6 +2541,13 @@ mod tests {
                     .await
                     .map_err(|_| "prepare response dropped".to_string())?
             })
+        }
+
+        fn current_steer_epoch<'a>(
+            &'a self,
+            _thread_id: &'a str,
+        ) -> BoxFuture<'a, Result<u64, String>> {
+            Box::pin(async { Ok(1) })
         }
 
         fn verify_steer_epoch<'a>(
@@ -2494,6 +2597,34 @@ mod tests {
                 received
                     .await
                     .map_err(|_| "steer response dropped".to_string())?
+            })
+        }
+
+        fn deliver_live_agent_message<'a>(
+            &'a self,
+            thread_id: &'a str,
+            expected_run_id: String,
+            expected_source_turn_id: String,
+            prompt_generation: u64,
+            _interaction_epoch: u64,
+            prompt: Vec<ContentBlock>,
+        ) -> BoxFuture<'a, Result<crate::acp::harness::HarnessAgentMessageOutcome, String>>
+        {
+            Box::pin(async move {
+                let (response, received) = oneshot::channel();
+                self.live_agent_message_tx
+                    .send(LiveAgentMessageCall {
+                        thread_id: thread_id.to_string(),
+                        expected_run_id,
+                        expected_source_turn_id,
+                        prompt_generation,
+                        prompt,
+                        response,
+                    })
+                    .map_err(|_| "live agent message receiver closed".to_string())?;
+                received
+                    .await
+                    .map_err(|_| "live agent message response dropped".to_string())?
             })
         }
 
@@ -2599,6 +2730,7 @@ mod tests {
 
     fn fake_dispatcher() -> (Arc<FakeQueueDispatcher>, FakeReceivers) {
         let (steer_tx, steer) = mpsc::unbounded_channel();
+        let (live_agent_message_tx, live_agent_message) = mpsc::unbounded_channel();
         let (prepare_tx, prepare) = mpsc::unbounded_channel();
         let (verify_epoch_tx, verify_epoch) = mpsc::unbounded_channel();
         let (turn_start_tx, turn_start) = mpsc::unbounded_channel();
@@ -2623,9 +2755,11 @@ mod tests {
                 }),
                 snapshot_error: StdMutex::new(None),
                 supports_steer: AtomicBool::new(true),
+                supports_live_agent_message: AtomicBool::new(false),
                 manual_epoch: manual_epoch.clone(),
                 supports_steer_error: StdMutex::new(None),
                 steer_tx,
+                live_agent_message_tx,
                 prepare_tx,
                 verify_epoch_tx,
                 turn_start_tx,
@@ -2640,6 +2774,7 @@ mod tests {
             }),
             FakeReceivers {
                 steer,
+                live_agent_message,
                 prepare,
                 verify_epoch,
                 turn_start,
@@ -3629,6 +3764,495 @@ mod tests {
             .lock()
             .expect("recorded agent messages lock")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_reaches_a_parent_before_its_task_tool_finishes() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        backend
+            .snapshot
+            .lock()
+            .expect("snapshot lock")
+            .session
+            .active_tool_ids
+            .insert("task-child".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("child-question");
+
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy parent begins live delivery"),
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        assert_eq!(delivery.thread_id, "thread");
+        assert_eq!(delivery.expected_run_id, "run");
+        assert_eq!(delivery.expected_source_turn_id, "turn");
+        assert_eq!(delivery.prompt_generation, 7);
+        let ContentBlock::Text(prompt) = &delivery.prompt[0] else {
+            panic!("expected text agent-message envelope");
+        };
+        assert_eq!(
+            crate::agent_messaging::AgentMessageEnvelope::decode(&prompt.text)
+                .expect("exact envelope")
+                .message_id,
+            "child-question"
+        );
+        assert!(
+            service
+                .threads
+                .read()
+                .await
+                .get("thread")
+                .expect("recipient runtime")
+                .active_tool_call_ids
+                .contains("task-child"),
+            "delivery must not wait for the parent task to finish"
+        );
+        assert!(calls.steer.try_recv().is_err());
+
+        delivery
+            .response
+            .send(Ok(
+                crate::acp::harness::HarnessAgentMessageOutcome::Delivered,
+            ))
+            .expect("live delivery response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if service.read_queue("thread").await.pending_steers.is_empty()
+                    && calls
+                        .updated_agent_message_dispositions
+                        .lock()
+                        .expect("updated dispositions lock")
+                        .last()
+                        .is_some_and(|(message_id, disposition)| {
+                            message_id == "child-question"
+                                && *disposition
+                                    == crate::agent_messaging::AgentMessageDisposition::Sent
+                        })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("live delivery settles before task completion");
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_defers_without_resolving_the_parent_permission() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot
+                .session
+                .active_tool_ids
+                .insert("task-child".to_string());
+            snapshot
+                .pending_approval_ids
+                .insert("approval-parent".to_string());
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("child-question");
+
+        assert_eq!(
+            service
+                .send_agent_message(&envelope, recipient, sender)
+                .await
+                .expect("busy parent accepts message"),
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+        tokio::task::yield_now().await;
+        assert!(calls.prepare.try_recv().is_err());
+        assert!(calls.live_agent_message.try_recv().is_err());
+        assert!(service
+            .threads
+            .read()
+            .await
+            .get("thread")
+            .expect("recipient runtime")
+            .pending_approval_ids
+            .contains("approval-parent"));
+
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 91,
+                foreground_mobile_present: false,
+                event: CanonicalEvent::PermissionResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "approval-parent".to_string(),
+                    outcome: "approved".to_string(),
+                },
+            })
+            .await;
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        assert!(calls.prepare.try_recv().is_err());
+        delivery
+            .response
+            .send(Ok(
+                crate::acp::harness::HarnessAgentMessageOutcome::Delivered,
+            ))
+            .expect("live delivery response");
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_defers_without_resolving_the_parent_elicitation() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot
+                .session
+                .active_tool_ids
+                .insert("task-child".to_string());
+            snapshot
+                .pending_user_input_ids
+                .insert("elicitation-parent".to_string());
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("child-question");
+
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy parent accepts message");
+        tokio::task::yield_now().await;
+        assert!(calls.prepare.try_recv().is_err());
+        assert!(calls.live_agent_message.try_recv().is_err());
+        assert!(service
+            .threads
+            .read()
+            .await
+            .get("thread")
+            .expect("recipient runtime")
+            .pending_user_input_ids
+            .contains("elicitation-parent"));
+
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 93,
+                foreground_mobile_present: false,
+                event: CanonicalEvent::ElicitationResolved {
+                    agent_id: "agent".to_string(),
+                    thread_id: "thread".to_string(),
+                    request_id: "elicitation-parent".to_string(),
+                    action: "submitted".to_string(),
+                },
+            })
+            .await;
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        assert!(calls.prepare.try_recv().is_err());
+        delivery
+            .response
+            .send(Ok(
+                crate::acp::harness::HarnessAgentMessageOutcome::Delivered,
+            ))
+            .expect("live delivery response");
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_deferral_stays_pending_without_a_queue_error() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        backend
+            .snapshot
+            .lock()
+            .expect("snapshot lock")
+            .session
+            .active_tool_ids
+            .insert("task-child".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("child-question");
+
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy parent accepts message");
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        delivery
+            .response
+            .send(Ok(
+                crate::acp::harness::HarnessAgentMessageOutcome::Deferred,
+            ))
+            .expect("deferred delivery response");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let queue = service.read_queue("thread").await;
+                if queue.pending_steer_count == 1 && !queue.steering_in_flight {
+                    assert!(queue.last_error.is_none());
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("deferred delivery returns to pending state");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.live_agent_message.recv())
+                .await
+                .is_err(),
+            "deferred delivery must not spin"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_agent_message_deferral_after_completion_rejoins_turn_queue() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        backend
+            .snapshot
+            .lock()
+            .expect("snapshot lock")
+            .session
+            .active_tool_ids
+            .insert("task-child".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("child-question");
+
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy parent accepts message");
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        service
+            .handle_canonical_event(finish_event("turn", 7, 92))
+            .await;
+        delivery
+            .response
+            .send(Ok(
+                crate::acp::harness::HarnessAgentMessageOutcome::Deferred,
+            ))
+            .expect("deferred delivery response");
+
+        let turn_start = tokio::time::timeout(Duration::from_secs(1), calls.turn_start.recv())
+            .await
+            .expect("deferred message dispatch timeout")
+            .expect("deferred message starts a new turn");
+        let prompt = crate::runtime_backend::bridge_prompt(&turn_start.turn_start)
+            .expect("agent-message prompt");
+        let ContentBlock::Text(prompt) = &prompt[0] else {
+            panic!("expected text agent-message envelope");
+        };
+        assert_eq!(
+            crate::agent_messaging::AgentMessageEnvelope::decode(&prompt.text)
+                .expect("exact envelope")
+                .message_id,
+            "child-question"
+        );
+        turn_start
+            .response
+            .send(Ok("turn-after-task".to_string()))
+            .expect("turn response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated dispositions lock")
+                    .last()
+                    .is_some_and(|(message_id, disposition)| {
+                        message_id == "child-question"
+                            && *disposition == crate::agent_messaging::AgentMessageDisposition::Sent
+                    })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("deferred message settles after queued dispatch");
+        let queue = service.read_queue("thread").await;
+        assert!(queue.items.is_empty());
+        assert!(queue.pending_steers.is_empty());
+        assert!(queue.last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn indeterminate_live_agent_message_is_cancelled_without_retry() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        backend
+            .snapshot
+            .lock()
+            .expect("snapshot lock")
+            .session
+            .active_tool_ids
+            .insert("task-child".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("ambiguous-question");
+
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy parent accepts message");
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        delivery
+            .response
+            .send(Err(format!(
+                "{INDETERMINATE_OPERATION_PREFIX}prompt response timed out"
+            )))
+            .expect("indeterminate delivery response");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated dispositions lock")
+                    .last()
+                    .is_some_and(|(message_id, disposition)| {
+                        message_id == "ambiguous-question"
+                            && *disposition
+                                == crate::agent_messaging::AgentMessageDisposition::Cancelled
+                    })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("indeterminate delivery settles as cancelled");
+        let queue = service.read_queue("thread").await;
+        assert!(queue.items.is_empty());
+        assert!(queue.pending_steers.is_empty());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.live_agent_message.recv())
+                .await
+                .is_err(),
+            "ambiguous prompt must not be retried"
+        );
+    }
+
+    #[tokio::test]
+    async fn definitive_live_agent_message_failure_retries_after_parent_turn() {
+        let (backend, mut calls) = fake_dispatcher();
+        backend
+            .supports_live_agent_message
+            .store(true, Ordering::SeqCst);
+        backend
+            .snapshot
+            .lock()
+            .expect("snapshot lock")
+            .session
+            .active_tool_ids
+            .insert("task-child".to_string());
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, recipient, sender) = agent_message_fixture("retry-question");
+
+        service
+            .send_agent_message(&envelope, recipient, sender)
+            .await
+            .expect("busy parent accepts message");
+        let delivery =
+            tokio::time::timeout(Duration::from_secs(1), calls.live_agent_message.recv())
+                .await
+                .expect("live delivery timeout")
+                .expect("live delivery");
+        delivery
+            .response
+            .send(Err("OpenCode promotion returned HTTP 500".to_string()))
+            .expect("definitive delivery response");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let queue = service.read_queue("thread").await;
+                if queue.pending_steer_count == 1 && !queue.steering_in_flight {
+                    assert_eq!(
+                        queue
+                            .last_error
+                            .as_ref()
+                            .map(|error| error.operation.as_str()),
+                        Some("steer")
+                    );
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("definitive failure returns to pending");
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 94))
+            .await;
+        let turn_start = tokio::time::timeout(Duration::from_secs(1), calls.turn_start.recv())
+            .await
+            .expect("queued retry timeout")
+            .expect("queued retry");
+        turn_start
+            .response
+            .send(Ok("turn-after-retry".to_string()))
+            .expect("turn response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if calls
+                    .updated_agent_message_dispositions
+                    .lock()
+                    .expect("updated dispositions lock")
+                    .last()
+                    .is_some_and(|(message_id, disposition)| {
+                        message_id == "retry-question"
+                            && *disposition == crate::agent_messaging::AgentMessageDisposition::Sent
+                    })
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("definitive failure retries after the turn");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), calls.live_agent_message.recv())
+                .await
+                .is_err(),
+            "failed live submission must retry through the normal turn queue"
+        );
     }
 
     #[tokio::test]

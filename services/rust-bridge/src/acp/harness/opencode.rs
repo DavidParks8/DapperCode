@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -10,9 +10,10 @@ use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    HarnessAdapter, HarnessCapabilities, HarnessContext, HarnessDeleteRequest, HarnessError,
-    HarnessForkBoundary, HarnessForkBoundaryMessage, HarnessForkRequest, HarnessForkedSession,
-    HarnessLaunchConfig, HarnessOperationFailure, HarnessSteerRequest, SessionContext,
+    HarnessAdapter, HarnessAgentMessageOutcome, HarnessAgentMessageRequest, HarnessCapabilities,
+    HarnessContext, HarnessDeleteRequest, HarnessError, HarnessForkBoundary,
+    HarnessForkBoundaryMessage, HarnessForkRequest, HarnessForkedSession, HarnessLaunchConfig,
+    HarnessOperationFailure, HarnessSteerRequest, SessionContext,
 };
 use crate::acp::config::ResolvedAgentManifest;
 
@@ -22,6 +23,7 @@ const OPENCODE_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const OPENCODE_IDLE_CONFIRMATION: Duration = Duration::from_secs(1);
 const MAX_OPENCODE_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OPENCODE_SESSION_ID_BYTES: usize = 1_024;
+const OPENCODE_BACKGROUND_SUBAGENTS_ENV: &str = "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS";
 
 pub(super) fn resolve(manifest: &ResolvedAgentManifest) -> Option<Arc<dyn HarnessAdapter>> {
     is_verified_opencode_acp(manifest)
@@ -125,6 +127,7 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
             session_delete: available,
             session_steer: available,
             session_fork: available,
+            live_agent_message: available,
         }
     }
 
@@ -132,6 +135,10 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
         let port = allocate_loopback_port()?;
         Some(HarnessLaunchConfig {
             extra_args: vec!["--port".to_string(), port.to_string()],
+            extra_environment: BTreeMap::from([(
+                OPENCODE_BACKGROUND_SUBAGENTS_ENV.to_string(),
+                "true".to_string(),
+            )]),
             http_base: format!("http://127.0.0.1:{port}"),
         })
     }
@@ -215,6 +222,67 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
                 return Err(HarnessError::Http(response.status()));
             }
             Ok(())
+        }
+        .boxed()
+    }
+
+    fn deliver_agent_message<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessAgentMessageRequest,
+    ) -> BoxFuture<'a, Result<HarnessAgentMessageOutcome, HarnessOperationFailure>> {
+        async move {
+            let parts = opencode_prompt_parts(&request.prompt)
+                .map_err(HarnessOperationFailure::definitive)?;
+            if request.promote_blocking_subagents {
+                let mut background_url = experimental_session_action_url(context, "background")
+                    .map_err(HarnessOperationFailure::definitive)?;
+                background_url
+                    .query_pairs_mut()
+                    .append_pair("directory", context.cwd.to_string_lossy().as_ref());
+                let response = timed_send(context.http.post(background_url))
+                    .await
+                    .map_err(HarnessOperationFailure::definitive)?;
+                if response.status() == StatusCode::NOT_FOUND {
+                    return Ok(HarnessAgentMessageOutcome::Deferred);
+                }
+                if !response.status().is_success() {
+                    return Err(HarnessOperationFailure::definitive(HarnessError::Http(
+                        response.status(),
+                    )));
+                }
+                let promoted = bounded_body(response)
+                    .await
+                    .map_err(HarnessOperationFailure::definitive)
+                    .and_then(|bytes| {
+                        serde_json::from_slice::<bool>(&bytes)
+                            .map_err(|error| HarnessError::InvalidResponse(error.to_string()))
+                            .map_err(HarnessOperationFailure::definitive)
+                    })?;
+                if !promoted {
+                    return Ok(HarnessAgentMessageOutcome::Deferred);
+                }
+            }
+
+            let mut prompt_url =
+                session_action_url(context, &context.session_id.to_string(), "prompt_async")
+                    .map_err(HarnessOperationFailure::definitive)?;
+            prompt_url
+                .query_pairs_mut()
+                .append_pair("directory", context.cwd.to_string_lossy().as_ref());
+            let response = timed_agent_message_send(
+                context
+                    .http
+                    .post(prompt_url)
+                    .json(&OpenCodePromptRequest { parts }),
+            )
+            .await?;
+            if response.status() != StatusCode::NO_CONTENT && !response.status().is_success() {
+                return Err(HarnessOperationFailure::definitive(HarnessError::Http(
+                    response.status(),
+                )));
+            }
+            Ok(HarnessAgentMessageOutcome::Delivered)
         }
         .boxed()
     }
@@ -473,11 +541,53 @@ fn session_action_url(
     Ok(url)
 }
 
+fn experimental_session_action_url(
+    context: &SessionContext,
+    action: &str,
+) -> Result<Url, HarnessError> {
+    let mut url = Url::parse(&context.http_base).map_err(|_| HarnessError::InvalidUrl)?;
+    url.path_segments_mut()
+        .map_err(|_| HarnessError::InvalidUrl)?
+        .pop_if_empty()
+        .push("experimental")
+        .push("session")
+        .push(&context.session_id.to_string())
+        .push(action);
+    Ok(url)
+}
+
 async fn timed_send(builder: reqwest::RequestBuilder) -> Result<reqwest::Response, HarnessError> {
     tokio::time::timeout(OPENCODE_REQUEST_TIMEOUT, builder.send())
         .await
         .map_err(|_| HarnessError::Timeout)?
         .map_err(|error| HarnessError::Request(error.without_url().to_string()))
+}
+
+async fn timed_agent_message_send(
+    builder: reqwest::RequestBuilder,
+) -> Result<reqwest::Response, HarnessOperationFailure> {
+    timed_agent_message_send_with_timeout(builder, OPENCODE_REQUEST_TIMEOUT).await
+}
+
+async fn timed_agent_message_send_with_timeout(
+    builder: reqwest::RequestBuilder,
+    timeout: Duration,
+) -> Result<reqwest::Response, HarnessOperationFailure> {
+    match tokio::time::timeout(timeout, builder.send()).await {
+        Err(_) => Err(HarnessOperationFailure::indeterminate(
+            HarnessError::Timeout,
+        )),
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error)) => {
+            let definitive = error.is_builder() || error.is_connect() || error.is_redirect();
+            let error = HarnessError::Request(error.without_url().to_string());
+            if definitive {
+                Err(HarnessOperationFailure::definitive(error))
+            } else {
+                Err(HarnessOperationFailure::indeterminate(error))
+            }
+        }
+    }
 }
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, HarnessError> {
@@ -616,6 +726,7 @@ mod tests {
     use reqwest::Client;
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex as StdMutex;
     use tokio::sync::mpsc;
 
     async fn fixture_context(
@@ -721,6 +832,13 @@ mod tests {
             .launch_config()
             .expect("loopback launch configuration");
         assert_eq!(launch.extra_args[0], "--port");
+        assert_eq!(
+            launch
+                .extra_environment
+                .get(OPENCODE_BACKGROUND_SUBAGENTS_ENV)
+                .map(String::as_str),
+            Some("true")
+        );
         assert!(launch.http_base.starts_with("http://127.0.0.1:"));
     }
 
@@ -887,6 +1005,266 @@ mod tests {
             opencode_prompt_parts(&[image]),
             Err(HarnessError::UnsupportedContent)
         ));
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_message_promotes_then_prompts_without_aborting() {
+        let observed = Arc::new(StdMutex::new(Vec::<(String, serde_json::Value)>::new()));
+        let background_observed = observed.clone();
+        let prompt_observed = observed.clone();
+        let app = Router::new()
+            .route(
+                "/experimental/session/source/background",
+                post(move || {
+                    let observed = background_observed.clone();
+                    async move {
+                        observed
+                            .lock()
+                            .expect("observed requests lock")
+                            .push(("background".to_string(), serde_json::Value::Null));
+                        Json(true)
+                    }
+                }),
+            )
+            .route(
+                "/session/source/prompt_async",
+                post(move |Json(body): Json<serde_json::Value>| {
+                    let observed = prompt_observed.clone();
+                    async move {
+                        observed
+                            .lock()
+                            .expect("observed requests lock")
+                            .push(("prompt".to_string(), body));
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+
+        let outcome = OpenCodeHarnessAdapter
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt: vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "child needs guidance"
+                    }))
+                    .expect("text content")],
+                    promote_blocking_subagents: true,
+                },
+            )
+            .await
+            .expect("live agent message");
+        assert_eq!(outcome, HarnessAgentMessageOutcome::Delivered);
+
+        let observed = observed.lock().expect("observed requests lock");
+        assert_eq!(
+            observed
+                .iter()
+                .map(|(operation, _)| operation.as_str())
+                .collect::<Vec<_>>(),
+            ["background", "prompt"]
+        );
+        assert_eq!(
+            observed[1].1,
+            serde_json::json!({
+                "parts": [{"type": "text", "text": "child needs guidance"}]
+            })
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_message_does_not_submit_when_promotion_is_unavailable() {
+        let prompt_calls = Arc::new(AtomicUsize::new(0));
+        let prompt_calls_for_route = prompt_calls.clone();
+        let app = Router::new()
+            .route(
+                "/experimental/session/source/background",
+                post(|| async { Json(false) }),
+            )
+            .route(
+                "/session/source/prompt_async",
+                post(move || {
+                    let prompt_calls = prompt_calls_for_route.clone();
+                    async move {
+                        prompt_calls.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+
+        let outcome = OpenCodeHarnessAdapter
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt: vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "wait for the current tool"
+                    }))
+                    .expect("text content")],
+                    promote_blocking_subagents: true,
+                },
+            )
+            .await
+            .expect("unavailable promotion defers without submission");
+        assert_eq!(outcome, HarnessAgentMessageOutcome::Deferred);
+        assert_eq!(prompt_calls.load(Ordering::SeqCst), 0);
+        server.abort();
+
+        let app = Router::new().route(
+            "/experimental/session/source/background",
+            post(|| async { StatusCode::NOT_FOUND }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        let outcome = OpenCodeHarnessAdapter
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt: vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "older OpenCode"
+                    }))
+                    .expect("text content")],
+                    promote_blocking_subagents: true,
+                },
+            )
+            .await
+            .expect("missing promotion endpoint defers safely");
+        assert_eq!(outcome, HarnessAgentMessageOutcome::Deferred);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_message_keeps_connect_failures_retryable() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("reserve closed test port");
+        let address = listener.local_addr().expect("test address");
+        drop(listener);
+        let context = SessionContext {
+            http: Client::new(),
+            http_base: format!("http://{address}"),
+            session_id: SessionId::new("source"),
+            cwd: std::env::current_dir().expect("current directory"),
+        };
+
+        let failure = OpenCodeHarnessAdapter
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt: vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "retry safely"
+                    }))
+                    .expect("text content")],
+                    promote_blocking_subagents: false,
+                },
+            )
+            .await
+            .expect_err("closed port must fail");
+        assert!(!failure.is_indeterminate());
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_reply_skips_promotion_and_prompts_the_running_child() {
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let app = Router::new().route(
+            "/session/source/prompt_async",
+            post(move |Json(body): Json<serde_json::Value>| {
+                let observed = observed_tx.clone();
+                async move {
+                    observed.send(body).expect("observe child prompt");
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+
+        let outcome = OpenCodeHarnessAdapter
+            .deliver_agent_message(
+                &context,
+                HarnessAgentMessageRequest {
+                    prompt: vec![serde_json::from_value(serde_json::json!({
+                        "type": "text",
+                        "text": "parent reply"
+                    }))
+                    .expect("text content")],
+                    promote_blocking_subagents: false,
+                },
+            )
+            .await
+            .expect("live child reply");
+
+        assert_eq!(outcome, HarnessAgentMessageOutcome::Delivered);
+        assert_eq!(
+            observed_rx.recv().await,
+            Some(serde_json::json!({
+                "parts": [{"type": "text", "text": "parent reply"}]
+            }))
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_message_surfaces_definitive_http_failures() {
+        let app = Router::new().route(
+            "/experimental/session/source/background",
+            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        let request = |promote_blocking_subagents| HarnessAgentMessageRequest {
+            prompt: vec![serde_json::from_value(serde_json::json!({
+                "type": "text",
+                "text": "message"
+            }))
+            .expect("text content")],
+            promote_blocking_subagents,
+        };
+        let failure = OpenCodeHarnessAdapter
+            .deliver_agent_message(&context, request(true))
+            .await
+            .expect_err("promotion HTTP failure");
+        assert!(!failure.is_indeterminate());
+        server.abort();
+
+        let app = Router::new().route(
+            "/session/source/prompt_async",
+            post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        let failure = OpenCodeHarnessAdapter
+            .deliver_agent_message(&context, request(false))
+            .await
+            .expect_err("prompt HTTP failure");
+        assert!(!failure.is_indeterminate());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_live_agent_message_timeout_is_indeterminate() {
+        let app = Router::new().route(
+            "/session/source/prompt_async",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                StatusCode::NO_CONTENT
+            }),
+        );
+        let (context, server) = fixture_context(app, "source").await;
+        let url = session_action_url(&context, "source", "prompt_async").expect("prompt URL");
+        let failure = timed_agent_message_send_with_timeout(
+            context.http.post(url).json(&OpenCodePromptRequest {
+                parts: vec![OpenCodePromptPart::Text {
+                    text: "ambiguous".to_string(),
+                }],
+            }),
+            Duration::from_millis(10),
+        )
+        .await
+        .expect_err("prompt timeout");
+        assert!(failure.is_indeterminate());
+        server.abort();
     }
 
     #[derive(Clone)]

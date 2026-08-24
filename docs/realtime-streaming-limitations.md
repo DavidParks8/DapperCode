@@ -103,6 +103,20 @@ deleted, and more-distant ancestor or descendant targets are rejected. An idle r
 new turn immediately. A busy recipient enters the existing turn queue, is promoted through the
 safe steering lane when the host supports steering, and otherwise remains queued for automatic
 dispatch. Agent queue entries are read-only and expose only cancellation on mobile.
+
+Verified OpenCode launches use a non-aborting live-delivery path. DapperCode enables OpenCode's
+background-subagent capability for its isolated agent process. If a foreground task is blocking the
+recipient, the bridge first promotes that child to background work, then submits the message through
+OpenCode's asynchronous prompt endpoint. The prompt joins the active session loop instead of
+aborting it, so the parent can answer while the child remains alive. A failed promotion leaves the
+message pending; an ambiguous prompt submission is never retried because OpenCode may already have
+accepted it.
+
+Promotion deliberately detaches the child from the foreground task: cancelling the parent's turn no
+longer cancels that child. When the child later finishes, OpenCode may inject its normal synthetic
+background-result continuation into the parent session; OpenCode serializes that continuation with
+any active prompt, and ACP history remains the convergence source for the transcript.
+
 Cancellation updates the durable activity to `cancelled`. Because queued and pending-steer payloads
 are intentionally in memory, either activity still in flight when the bridge starts is reconciled
 to `cancelled` rather than implying that lost work remains pending. If ACP history proves the
@@ -131,6 +145,9 @@ versioned envelopes restore recipient origin without treating arbitrary user tex
 8. A child cannot be addressed until the host exposes enough session identity for the bridge to
    index its direct relationship. The sender receives a clear tool error and can retry after
    relation discovery.
+9. OpenCode builds without the experimental background-subagent endpoint cannot release a
+   foreground task wait. The message remains queued until the blocking tool settles rather than
+   aborting the parent and cancelling its child.
 
 ## Operational Guidance
 

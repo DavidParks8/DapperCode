@@ -345,10 +345,16 @@ impl AcpConnection {
         host_environment: &BTreeMap<String, String>,
         initialize_timeout: Duration,
         extra_argv: &[String],
+        extra_environment: &BTreeMap<String, String>,
     ) -> Result<(Self, NegotiatedInitialize), AcpRuntimeError> {
         Self::start_transport(
             manifest.agent_id.clone(),
-            manifest.acp_agent_with_args(approved_roots, host_environment, extra_argv)?,
+            manifest.acp_agent_with_args(
+                approved_roots,
+                host_environment,
+                extra_argv,
+                extra_environment,
+            )?,
             initialize_timeout,
         )
         .await
@@ -818,6 +824,16 @@ impl AcpConnection {
             return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
         }
         Ok(self.interactions.prepare_steer(session_id).await?)
+    }
+
+    pub async fn current_steer_epoch(
+        &self,
+        session_id: &agent_client_protocol::schema::v1::SessionId,
+    ) -> Result<u64, AcpRuntimeError> {
+        if self.sessions.get(session_id).await.is_none() {
+            return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
+        }
+        Ok(self.interactions.current_steer_epoch(session_id).await)
     }
 
     pub async fn verify_steer_epoch(
@@ -2077,6 +2093,10 @@ mod tests {
             plain
                 .verify_steer_epoch(&SessionId::new("missing"), 1)
                 .await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        assert!(matches!(
+            plain.current_steer_epoch(&SessionId::new("missing")).await,
             Err(AcpRuntimeError::UnknownSession(_))
         ));
         assert!(matches!(

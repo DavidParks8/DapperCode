@@ -491,6 +491,15 @@ impl SessionSnapshot {
         self.subagent_headers.get(tool_call_id).map(String::as_str)
     }
 
+    pub(crate) fn has_active_subagent_tool(&self) -> bool {
+        self.active_tool_ids.iter().any(|tool_call_id| {
+            self.tools
+                .get(tool_call_id)
+                .is_some_and(|tool| tool.subagent)
+                || self.subagent_headers.contains_key(tool_call_id)
+        })
+    }
+
     pub(crate) fn mark_subagent_terminal(&mut self, child_session_id: &str, status: &str) -> bool {
         let tool_call_id = self
             .subagent_headers
@@ -2189,6 +2198,24 @@ mod tests {
         let tool = snapshot.tools.get("call-task-1").expect("tool");
         assert!(tool.subagent, "renaming un-classified the sub-agent");
         assert_eq!(tool.title, "Inspect workspace");
+    }
+
+    #[test]
+    fn active_subagent_detection_survives_tool_snapshot_eviction() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "Inspect workspace",
+            ToolCallStatus::InProgress,
+            "<task id=\"child\" state=\"running\">\nWorking\n</task>",
+        ));
+        assert!(snapshot.has_active_subagent_tool());
+
+        snapshot.tools.remove("call-task-1");
+        assert!(snapshot.active_tool_ids.contains("call-task-1"));
+        assert!(snapshot.subagent_headers.contains_key("call-task-1"));
+        assert!(snapshot.has_active_subagent_tool());
     }
 
     /// Agents that never name the tool `task` are still classified once a task header lands.

@@ -1304,6 +1304,16 @@ impl InteractionRegistry {
         first_error.map_or(Ok(epoch), Err)
     }
 
+    pub async fn current_steer_epoch(&self, session_id: &SessionId) -> u64 {
+        self.inner
+            .lock()
+            .await
+            .session_epochs
+            .get(session_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
     pub async fn verify_steer_epoch(&self, session_id: &SessionId, epoch: u64) -> bool {
         let state = self.inner.lock().await;
         state
@@ -2059,12 +2069,14 @@ mod tests {
             InteractionRegistry::with_limits(SessionRegistry::default(), 1, 0);
         assert!(zero_session_capacity.at_capacity(&InteractionState::default(), Some(&session_id)));
         assert!(registry.verify_steer_epoch(&session_id, 0).await);
+        assert_eq!(registry.current_steer_epoch(&session_id).await, 0);
         {
             let mut state = registry.inner.lock().await;
             assert_eq!(InteractionRegistry::bump_epoch(&mut state, &session_id), 1);
         }
 
         assert!(registry.verify_steer_epoch(&session_id, 1).await);
+        assert_eq!(registry.current_steer_epoch(&session_id).await, 1);
         assert!(!registry.verify_steer_epoch(&session_id, 0).await);
         assert_eq!(
             registry

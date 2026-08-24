@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,11 +15,13 @@ pub struct HarnessCapabilities {
     pub session_delete: bool,
     pub session_steer: bool,
     pub session_fork: bool,
+    pub live_agent_message: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessLaunchConfig {
     pub extra_args: Vec<String>,
+    pub extra_environment: BTreeMap<String, String>,
     pub http_base: String,
 }
 
@@ -44,6 +47,18 @@ pub struct HarnessDeleteRequest {
 #[derive(Debug, Clone)]
 pub struct HarnessSteerRequest {
     pub prompt: Vec<ContentBlock>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessAgentMessageRequest {
+    pub prompt: Vec<ContentBlock>,
+    pub promote_blocking_subagents: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessAgentMessageOutcome {
+    Delivered,
+    Deferred,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +167,12 @@ pub trait HarnessAdapter: Send + Sync {
         context: &'a SessionContext,
         request: HarnessSteerRequest,
     ) -> BoxFuture<'a, Result<(), HarnessError>>;
+
+    fn deliver_agent_message<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessAgentMessageRequest,
+    ) -> BoxFuture<'a, Result<HarnessAgentMessageOutcome, HarnessOperationFailure>>;
 
     #[cfg(test)]
     fn fork<'a>(

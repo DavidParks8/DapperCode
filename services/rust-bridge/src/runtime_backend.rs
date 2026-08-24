@@ -641,7 +641,16 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
         thread_id: &'a str,
     ) -> BoxFuture<'a, Result<QueueRuntimeSnapshot, String>>;
     fn supports_steer(&self, thread_id: &str) -> Result<bool, String>;
+    fn supports_live_agent_message(&self, _thread_id: &str) -> Result<bool, String> {
+        Ok(false)
+    }
     fn prepare_steer<'a>(&'a self, thread_id: &'a str) -> BoxFuture<'a, Result<u64, String>>;
+    fn current_steer_epoch<'a>(
+        &'a self,
+        _thread_id: &'a str,
+    ) -> BoxFuture<'a, Result<u64, String>> {
+        Box::pin(async { Err("live agent messaging is unsupported".to_string()) })
+    }
     fn verify_steer_epoch<'a>(
         &'a self,
         thread_id: &'a str,
@@ -656,6 +665,18 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
         interaction_epoch: u64,
         prompt: Vec<ContentBlock>,
     ) -> BoxFuture<'a, Result<(), String>>;
+    #[allow(clippy::too_many_arguments)]
+    fn deliver_live_agent_message<'a>(
+        &'a self,
+        _thread_id: &'a str,
+        _expected_run_id: String,
+        _expected_source_turn_id: String,
+        _prompt_generation: u64,
+        _interaction_epoch: u64,
+        _prompt: Vec<ContentBlock>,
+    ) -> BoxFuture<'a, Result<crate::acp::harness::HarnessAgentMessageOutcome, String>> {
+        Box::pin(async { Err("live agent messaging is unsupported".to_string()) })
+    }
     fn turn_start<'a>(
         &'a self,
         thread_id: &'a str,
@@ -897,6 +918,13 @@ impl RuntimeBackend {
             .map_err(|error| error.to_string())
     }
 
+    pub(super) async fn current_steer_epoch(&self, thread_id: &str) -> Result<u64, String> {
+        self.manager
+            .current_steer_epoch(thread_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub(super) async fn verify_steer_epoch(
         &self,
         thread_id: &str,
@@ -912,6 +940,35 @@ impl RuntimeBackend {
         self.manager
             .supports_steer(thread_id)
             .map_err(|error| error.to_string())
+    }
+
+    pub(super) fn supports_live_agent_message(&self, thread_id: &str) -> Result<bool, String> {
+        self.manager
+            .supports_live_agent_message(thread_id)
+            .map_err(|error| error.to_string())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn deliver_live_agent_message(
+        &self,
+        thread_id: &str,
+        expected_run_id: String,
+        expected_source_turn_id: String,
+        prompt_generation: u64,
+        interaction_epoch: u64,
+        prompt: Vec<ContentBlock>,
+    ) -> Result<crate::acp::harness::HarnessAgentMessageOutcome, String> {
+        self.manager
+            .deliver_live_agent_message(
+                thread_id,
+                expected_run_id,
+                expected_source_turn_id,
+                prompt_generation,
+                interaction_epoch,
+                prompt,
+            )
+            .await
+            .map_err(classified_operation_error)
     }
 
     pub(super) async fn steer(
@@ -1392,8 +1449,16 @@ impl QueueRuntimeDispatcher for RuntimeBackend {
         RuntimeBackend::supports_steer(self, thread_id)
     }
 
+    fn supports_live_agent_message(&self, thread_id: &str) -> Result<bool, String> {
+        RuntimeBackend::supports_live_agent_message(self, thread_id)
+    }
+
     fn prepare_steer<'a>(&'a self, thread_id: &'a str) -> BoxFuture<'a, Result<u64, String>> {
         Box::pin(RuntimeBackend::prepare_steer(self, thread_id))
+    }
+
+    fn current_steer_epoch<'a>(&'a self, thread_id: &'a str) -> BoxFuture<'a, Result<u64, String>> {
+        Box::pin(RuntimeBackend::current_steer_epoch(self, thread_id))
     }
 
     fn verify_steer_epoch<'a>(
@@ -1414,6 +1479,26 @@ impl QueueRuntimeDispatcher for RuntimeBackend {
         prompt: Vec<ContentBlock>,
     ) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(RuntimeBackend::steer(
+            self,
+            thread_id,
+            expected_run_id,
+            expected_source_turn_id,
+            prompt_generation,
+            interaction_epoch,
+            prompt,
+        ))
+    }
+
+    fn deliver_live_agent_message<'a>(
+        &'a self,
+        thread_id: &'a str,
+        expected_run_id: String,
+        expected_source_turn_id: String,
+        prompt_generation: u64,
+        interaction_epoch: u64,
+        prompt: Vec<ContentBlock>,
+    ) -> BoxFuture<'a, Result<crate::acp::harness::HarnessAgentMessageOutcome, String>> {
+        Box::pin(RuntimeBackend::deliver_live_agent_message(
             self,
             thread_id,
             expected_run_id,
