@@ -54,6 +54,16 @@ export const createStyles = (theme: AppTheme) =>
       paddingHorizontal: 3,
       overflow: 'hidden',
     },
+    userInlineSlashCommandText: {
+      color: theme.colors.userBubbleText,
+      backgroundColor: theme.colors.userBubbleInset,
+      borderColor: theme.colors.userBubbleInset,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: theme.radius.sm,
+      paddingHorizontal: 4,
+      fontWeight: '600',
+      overflow: 'hidden',
+    },
     userFileChip: {
       flexDirection: 'row',
       alignItems: 'center',

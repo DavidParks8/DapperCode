@@ -1247,6 +1247,47 @@ describe('ChatMessage user bubble', () => {
     act(() => tree.unmount());
   });
 
+  it('formats a slash command only when it leads the user message', () => {
+    const theme = createAppTheme('dark');
+    const tree = renderMessage({
+      id: 'user-slash-command',
+      role: 'user',
+      content: '/status for @report.txt',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const command = tree.root.findByProps({ testID: 'user-slash-command' });
+    const commandStyle = (StyleSheet.flatten(command.props['style'] as never) ?? {}) as {
+      backgroundColor?: string;
+      color?: string;
+      fontWeight?: string;
+    };
+
+    expect(flattenRenderedText(command.props['children'])).toBe('/status');
+    expect(commandStyle).toMatchObject({
+      backgroundColor: theme.colors.userBubbleInset,
+      color: theme.colors.userBubbleText,
+      fontWeight: '600',
+    });
+    expect(
+      tree.root
+        .findAll((node) => node.type === Text)
+        .some((node) => flattenRenderedText(node.props['children']) === '@report.txt'),
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('leaves slash syntax later in a user message as regular text', () => {
+    const tree = renderMessage({
+      id: 'user-inline-slash',
+      role: 'user',
+      content: 'Please run /status for this chat.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(tree.root.findAllByProps({ testID: 'user-slash-command' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('hugs the widest rendered line instead of filling the allowed width', () => {
     const tree = renderMessage({
       id: 'user-hug',
