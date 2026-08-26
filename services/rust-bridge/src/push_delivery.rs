@@ -648,7 +648,7 @@ mod tests {
         }
     }
 
-    async fn next_push_candidate(receiver: &mut mpsc::Receiver<Message>) -> u64 {
+    async fn next_push_candidate(receiver: &mut ClientOutboxReceiver) -> u64 {
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 let Message::Text(text) = receiver.recv().await.expect("candidate message") else {
@@ -1025,7 +1025,7 @@ mod tests {
 
         let hub = Arc::new(ClientHub::new());
         let mut canonical_events = hub.subscribe_canonical_events();
-        let (sender, mut messages) = mpsc::channel(16);
+        let (sender, mut messages) = client_outbox(16);
         let mobile = hub
             .add_client_with_metadata(
                 sender,
@@ -1036,7 +1036,7 @@ mod tests {
                 },
             )
             .await;
-        let (background_sender, _background_messages) = mpsc::channel(16);
+        let (background_sender, _background_messages) = client_outbox(16);
         let background_mobile = hub
             .add_client_with_metadata(
                 background_sender,

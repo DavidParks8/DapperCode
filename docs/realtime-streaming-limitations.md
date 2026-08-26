@@ -21,6 +21,11 @@ ACP executable and writes the local manifest consumed by Rust.
   text or resumes the original item; queue order and non-text turn input remain intact.
 - Outward WebSocket notifications receive monotonically increasing `eventId` values and are stored
   in a bounded replay buffer.
+- Each connected client has its own bounded 256-message outbox. A suspended or slow client that
+  fills its outbox is removed and its socket is cancelled without blocking healthy clients.
+  Numbered notifications enter replay before live fan-out, so mobile reconnects and recovers the
+  complete tail instead of remaining connected with an invisible gap. The
+  `operational.replay.clientQueueDrops` health counter records these forced reconnects.
 - `protocolVersion` and the per-process `streamId` let mobile distinguish a reconnect from a bridge
   restart.
 - Mobile requests `bridge/events/replay` after reconnect, buffers concurrent live notifications,
@@ -132,8 +137,9 @@ versioned envelopes restore recipient origin without treating arbitrary user tex
 1. Only events emitted by the ACP agent session owned by this bridge can be delivered live.
 2. Work started through an unrelated agent process or client is not tailed from backend-specific
    files and is not synthesized into the canonical channel.
-3. Slow or disconnected clients can miss live delivery after the bounded replay window is evicted;
-   snapshot convergence restores durable session state, but transient deltas may no longer exist.
+3. A slow client is disconnected when its bounded outbox fills. It can still miss transient deltas
+   if the bounded replay window is evicted before it reconnects; snapshot convergence restores
+   durable session state, but evicted deltas may no longer exist.
 4. Queue and pending-steer state is intentionally in memory and does not survive a full bridge
    process restart.
 5. Agent capabilities vary. Steering, session resume/load, permissions, and elicitations are exposed
@@ -161,8 +167,9 @@ versioned envelopes restore recipient origin without treating arbitrary user tex
 
 ## Testing
 
-- `pnpm run test:acp` covers fake ACP transports, session lifecycle, interactions, canonical events,
-  steering, cancellation, and manager recovery.
+- Rust bridge tests cover per-client outbox saturation and isolation in addition to fake ACP
+  transports, session lifecycle, interactions, canonical events, steering, cancellation, and
+  manager recovery.
 - `pnpm --filter @dappercode/mobile run test` covers WebSocket replay ordering, stream changes, and snapshot
   convergence behavior.
 - `pnpm run contract:check` validates the checked mobile/Rust bridge contract fixtures.

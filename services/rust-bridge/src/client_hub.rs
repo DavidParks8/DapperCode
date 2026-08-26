@@ -14,7 +14,7 @@ pub(super) struct ClientHub {
     pub(super) next_event_id: AtomicU64,
     pub(super) next_canonical_event_id: AtomicU64,
     pub(super) stream_id: String,
-    pub(super) clients: RwLock<HashMap<u64, mpsc::Sender<Message>>>,
+    pub(super) clients: RwLock<HashMap<u64, ClientOutbox>>,
     pub(super) client_infos: RwLock<HashMap<u64, BridgeDeviceConnection>>,
     pub(super) notification_replay: NotificationReplay,
     pub(super) canonical_subscribers: std::sync::Mutex<Vec<mpsc::Sender<CanonicalHubEvent>>>,
@@ -179,13 +179,13 @@ impl ClientHub {
 
     pub(super) async fn add_client_with_metadata(
         &self,
-        tx: mpsc::Sender<Message>,
+        outbox: ClientOutbox,
         metadata: ClientConnectionMetadata,
     ) -> u64 {
         let id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
         let now = now_iso();
         let foreground_updated_at = Instant::now();
-        self.clients.write().await.insert(id, tx);
+        self.clients.write().await.insert(id, outbox);
         self.client_infos.write().await.insert(
             id,
             BridgeDeviceConnection {
@@ -203,7 +203,21 @@ impl ClientHub {
     }
 
     pub(super) async fn remove_client(&self, client_id: u64) {
-        self.clients.write().await.remove(&client_id);
+        self.disconnect_client(client_id, false).await;
+    }
+
+    pub(super) async fn disconnect_saturated_client(&self, client_id: u64) {
+        self.disconnect_client(client_id, true).await;
+    }
+
+    async fn disconnect_client(&self, client_id: u64, queue_drop: bool) {
+        let outbox = self.clients.write().await.remove(&client_id);
+        if let Some(outbox) = outbox {
+            if queue_drop {
+                self.client_queue_drops.fetch_add(1, Ordering::Relaxed);
+            }
+            outbox.disconnect();
+        }
         self.client_infos.write().await.remove(&client_id);
     }
 
@@ -338,28 +352,29 @@ impl ClientHub {
     pub(super) async fn send_json(&self, client_id: u64, value: Value) {
         let text = serde_json::to_string(&value).expect("JSON Value is serializable");
 
-        let tx = {
+        let outbox = {
             let clients = self.clients.read().await;
             clients.get(&client_id).cloned()
         };
-        let Some(tx) = tx else {
+        let Some(outbox) = outbox else {
             return;
         };
 
         let message = Message::Text(text.into());
-        let should_remove = match tx.try_send(message) {
-            Ok(()) => false,
-            Err(mpsc::error::TrySendError::Closed(_)) => true,
+        let removal = match outbox.try_send(message) {
+            Ok(()) => None,
+            Err(mpsc::error::TrySendError::Closed(_)) => Some(false),
             Err(mpsc::error::TrySendError::Full(message)) => {
-                match timeout(Duration::from_millis(250), tx.send(message)).await {
-                    Ok(Ok(())) => false,
-                    Ok(Err(_)) | Err(_) => true,
+                match timeout(Duration::from_millis(250), outbox.send(message)).await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(())) => Some(false),
+                    Err(_) => Some(true),
                 }
             }
         };
 
-        if should_remove {
-            self.remove_client(client_id).await;
+        if let Some(queue_drop) = removal {
+            self.disconnect_client(client_id, queue_drop).await;
         }
     }
 
@@ -373,31 +388,21 @@ impl ClientHub {
         let mut stale_clients = Vec::new();
         {
             let clients = self.clients.read().await;
-            for (client_id, tx) in clients.iter() {
-                match tx.try_send(message.clone()) {
+            for (client_id, outbox) in clients.iter() {
+                match outbox.try_send(message.clone()) {
                     Ok(()) => {}
                     Err(mpsc::error::TrySendError::Closed(_)) => {
-                        stale_clients.push(*client_id);
+                        stale_clients.push((*client_id, false));
                     }
                     Err(mpsc::error::TrySendError::Full(_)) => {
-                        // Keep the client and rely on replay to catch up dropped notifications.
-                        self.client_queue_drops.fetch_add(1, Ordering::Relaxed);
+                        stale_clients.push((*client_id, true));
                     }
                 }
             }
         }
 
-        {
-            let mut clients = self.clients.write().await;
-            for client_id in &stale_clients {
-                clients.remove(client_id);
-            }
-        }
-        {
-            let mut client_infos = self.client_infos.write().await;
-            for client_id in stale_clients {
-                client_infos.remove(&client_id);
-            }
+        for (client_id, queue_drop) in stale_clients {
+            self.disconnect_client(client_id, queue_drop).await;
         }
     }
 
@@ -623,7 +628,7 @@ mod canonical_mailbox_tests {
     #[tokio::test]
     async fn foreground_mobile_presence_is_explicit_and_removed_with_the_connection() {
         let hub = ClientHub::new();
-        let (sender, _receiver) = mpsc::channel(1);
+        let (sender, _receiver) = client_outbox(1);
         let client_id = hub
             .add_client_with_metadata(
                 sender,
@@ -658,7 +663,7 @@ mod canonical_mailbox_tests {
         );
         assert!(!hub.has_foreground_mobile_client().await);
 
-        let (desktop_sender, _desktop_receiver) = mpsc::channel(1);
+        let (desktop_sender, _desktop_receiver) = client_outbox(1);
         let desktop_id = hub
             .add_client_with_metadata(
                 desktop_sender,
@@ -680,7 +685,7 @@ mod canonical_mailbox_tests {
     async fn canonical_events_snapshot_leased_foreground_presence_at_emit_time() {
         let hub = ClientHub::new();
         let mut events = hub.subscribe_canonical_events();
-        let (sender, _receiver) = mpsc::channel(1);
+        let (sender, _receiver) = client_outbox(1);
         let client_id = hub
             .add_client_with_metadata(
                 sender,
@@ -725,7 +730,7 @@ mod canonical_mailbox_tests {
     async fn push_candidate_requires_a_live_projection_to_observe() {
         let hub = ClientHub::new();
         let mut canonical_events = hub.subscribe_canonical_events();
-        let (sender, mut client_messages) = mpsc::channel(16);
+        let (sender, mut client_messages) = client_outbox(16);
         hub.add_client_with_metadata(
             sender,
             ClientConnectionMetadata {
@@ -761,7 +766,7 @@ mod canonical_mailbox_tests {
     async fn push_observation_requires_matching_leased_foreground_presence() {
         let hub = ClientHub::new();
         let mut canonical_events = hub.subscribe_canonical_events();
-        let (sender, mut client_messages) = mpsc::channel(16);
+        let (sender, mut client_messages) = client_outbox(16);
         let client_id = hub
             .add_client_with_metadata(
                 sender,
@@ -972,8 +977,8 @@ mod canonical_mailbox_tests {
     #[tokio::test]
     async fn notification_is_serialized_once_for_replay_and_all_clients() {
         let hub = ClientHub::new();
-        let (first_sender, mut first_receiver) = mpsc::channel(1);
-        let (second_sender, mut second_receiver) = mpsc::channel(1);
+        let (first_sender, mut first_receiver) = client_outbox(1);
+        let (second_sender, mut second_receiver) = client_outbox(1);
         hub.add_client_with_metadata(first_sender, ClientConnectionMetadata::default())
             .await;
         hub.add_client_with_metadata(second_sender, ClientConnectionMetadata::default())
@@ -988,6 +993,88 @@ mod canonical_mailbox_tests {
         assert_eq!(first, second);
         let replay = hub.replay_snapshot(None, 8).await;
         assert_eq!(replay.events[0]["params"]["value"], 7);
+    }
+
+    #[tokio::test]
+    async fn saturated_client_is_evicted_without_affecting_healthy_delivery_or_replay() {
+        let hub = ClientHub::new();
+        let (stalled_sender, _stalled_receiver) = client_outbox(WS_CLIENT_QUEUE_CAPACITY);
+        let stalled_signal = stalled_sender.clone();
+        let stalled_id = hub
+            .add_client_with_metadata(stalled_sender, ClientConnectionMetadata::default())
+            .await;
+        let (healthy_sender, mut healthy_receiver) = client_outbox(WS_CLIENT_QUEUE_CAPACITY);
+        let healthy_signal = healthy_sender.clone();
+        let healthy_id = hub
+            .add_client_with_metadata(healthy_sender, ClientConnectionMetadata::default())
+            .await;
+        let mut healthy_event_ids = Vec::new();
+
+        for index in 0..=WS_CLIENT_QUEUE_CAPACITY {
+            let terminal = index == WS_CLIENT_QUEUE_CAPACITY;
+            hub.broadcast_notification(
+                "bridge/test",
+                json!({
+                    "index": index,
+                    "terminal": terminal,
+                }),
+            )
+            .await;
+            let message = timeout(Duration::from_millis(100), healthy_receiver.recv())
+                .await
+                .expect("healthy client receives promptly")
+                .expect("healthy client remains connected");
+            let Message::Text(text) = message else {
+                panic!("test notification must be text");
+            };
+            let payload: Value = serde_json::from_str(&text).expect("notification JSON");
+            healthy_event_ids.push(payload["eventId"].as_u64().expect("numbered event"));
+        }
+
+        assert!(!hub.clients.read().await.contains_key(&stalled_id));
+        assert!(!hub.client_infos.read().await.contains_key(&stalled_id));
+        assert!(stalled_signal.is_disconnected());
+        assert!(hub.clients.read().await.contains_key(&healthy_id));
+        assert!(!healthy_signal.is_disconnected());
+        assert_eq!(
+            hub.client_queue_drops.load(Ordering::Relaxed),
+            1,
+            "one saturated live delivery should force one reconnect"
+        );
+
+        let (replacement_sender, _replacement_receiver) = client_outbox(WS_CLIENT_QUEUE_CAPACITY);
+        hub.add_client_with_metadata(replacement_sender, ClientConnectionMetadata::default())
+            .await;
+        let replay = hub
+            .replay_snapshot(None, WS_CLIENT_QUEUE_CAPACITY + 1)
+            .await;
+        let replay_event_ids = replay
+            .events
+            .iter()
+            .map(|event| event["eventId"].as_u64().expect("replay event id"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(healthy_event_ids, replay_event_ids);
+        assert_eq!(replay.events.last().unwrap()["params"]["terminal"], true);
+        assert!(!replay.has_more);
+    }
+
+    #[tokio::test]
+    async fn timed_out_direct_send_disconnects_the_client_and_wakes_its_outbox() {
+        let hub = ClientHub::new();
+        let (outbox, _receiver) = client_outbox(1);
+        let disconnect_signal = outbox.clone();
+        let client_id = hub
+            .add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+            .await;
+        hub.send_json(client_id, json!({"first": true})).await;
+
+        hub.send_json(client_id, json!({"blocked": true})).await;
+
+        assert!(!hub.clients.read().await.contains_key(&client_id));
+        assert!(!hub.client_infos.read().await.contains_key(&client_id));
+        assert!(disconnect_signal.is_disconnected());
+        assert_eq!(hub.client_queue_drops.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
@@ -1011,7 +1098,7 @@ mod canonical_mailbox_tests {
     #[tokio::test]
     async fn hub_client_and_replay_paths_cover_presence_close_and_truncation() {
         let hub = ClientHub::with_replay_capacity(4);
-        let (sender, mut receiver) = mpsc::channel(1);
+        let (sender, mut receiver) = client_outbox(1);
         let client_id = hub
             .add_client_with_metadata(sender, ClientConnectionMetadata::default())
             .await;
@@ -1027,7 +1114,7 @@ mod canonical_mailbox_tests {
         hub.send_json(client_id, json!({"missing": true})).await;
         hub.remove_client(client_id + 1).await;
 
-        let (full_sender, _full_receiver) = mpsc::channel(1);
+        let (full_sender, _full_receiver) = client_outbox(1);
         let full_id = hub
             .add_client_with_metadata(full_sender, ClientConnectionMetadata::default())
             .await;
@@ -1038,7 +1125,7 @@ mod canonical_mailbox_tests {
         hub.send_json(full_id, json!({"timeout": true})).await;
         assert!(!hub.clients.read().await.contains_key(&full_id));
 
-        let (closed_sender, closed_receiver) = mpsc::channel(1);
+        let (closed_sender, closed_receiver) = client_outbox(1);
         let closed_id = hub
             .add_client_with_metadata(closed_sender, ClientConnectionMetadata::default())
             .await;

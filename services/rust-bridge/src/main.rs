@@ -102,6 +102,7 @@ use rpc::{is_forwarded_method, parse_client_request_id, parse_request, RpcReques
 mod app_state;
 mod bridge_protocol;
 mod client_hub;
+mod client_outbox;
 mod http_routes;
 mod interaction_validation;
 mod pairing;
@@ -116,6 +117,7 @@ use agui::*;
 use app_state::*;
 use bridge_protocol::*;
 use client_hub::*;
+use client_outbox::*;
 use http_routes::*;
 use interaction_validation::*;
 use pairing::*;

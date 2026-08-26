@@ -16,9 +16,9 @@ fn client_heartbeat_expired(
 }
 
 fn heartbeat_send_requires_disconnect(
-    result: Result<(), mpsc::error::TrySendError<Message>>,
+    result: &Result<(), mpsc::error::TrySendError<Message>>,
 ) -> bool {
-    matches!(result, Err(mpsc::error::TrySendError::Closed(_)))
+    result.is_err()
 }
 
 pub(super) fn protected_request_error(
@@ -60,17 +60,18 @@ pub(super) async fn handle_socket(
     client_metadata: ClientConnectionMetadata,
 ) {
     let (mut socket_tx, mut socket_rx) = socket.split();
-    let (tx, mut rx) = mpsc::channel::<Message>(WS_CLIENT_QUEUE_CAPACITY);
-    let heartbeat_tx = tx.clone();
+    let (outbox, mut outbox_receiver) = client_outbox(WS_CLIENT_QUEUE_CAPACITY);
+    let heartbeat_outbox = outbox.clone();
+    let disconnect_signal = outbox.clone();
     let client_in_flight = Arc::new(Semaphore::new(state.config.ws_limits.per_client_in_flight));
     let client_id = state
         .hub
-        .add_client_with_metadata(tx, client_metadata)
+        .add_client_with_metadata(outbox, client_metadata)
         .await;
     state.backend.register_client(client_id);
 
     let mut writer_task = tokio::spawn(async move {
-        while let Some(message) = rx.recv().await {
+        while let Some(message) = outbox_receiver.recv().await {
             if socket_tx.send(message).await.is_err() {
                 break;
             }
@@ -91,6 +92,7 @@ pub(super) async fn handle_socket(
 
     loop {
         tokio::select! {
+            _ = disconnect_signal.disconnected() => break,
             writer_result = &mut writer_task => {
                 if let Err(error) = writer_result {
                     eprintln!("websocket writer task error: {error}");
@@ -101,9 +103,11 @@ pub(super) async fn handle_socket(
                 if client_heartbeat_expired(last_client_activity, tokio::time::Instant::now()) {
                     break;
                 }
-                if heartbeat_send_requires_disconnect(
-                    heartbeat_tx.try_send(Message::Ping(Vec::new().into())),
-                ) {
+                let result = heartbeat_outbox.try_send(Message::Ping(Vec::new().into()));
+                if heartbeat_send_requires_disconnect(&result) {
+                    if matches!(result, Err(mpsc::error::TrySendError::Full(_))) {
+                        state.hub.disconnect_saturated_client(client_id).await;
+                    }
                     break;
                 }
             }
@@ -1783,16 +1787,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_full_heartbeat_queue_is_recoverable_but_a_closed_queue_is_not() {
-        let (sender, receiver) = mpsc::channel(1);
-        sender.try_send(Message::Text("busy".into())).unwrap();
-        assert!(!heartbeat_send_requires_disconnect(
-            sender.try_send(Message::Ping(Vec::new().into()))
+    async fn a_full_or_closed_heartbeat_outbox_requires_disconnect() {
+        let (outbox, receiver) = client_outbox(1);
+        outbox
+            .try_send(Message::Text("busy".into()))
+            .expect("fill outbox");
+        assert!(heartbeat_send_requires_disconnect(
+            &outbox.try_send(Message::Ping(Vec::new().into()))
         ));
 
         drop(receiver);
         assert!(heartbeat_send_requires_disconnect(
-            sender.try_send(Message::Ping(Vec::new().into()))
+            &outbox.try_send(Message::Ping(Vec::new().into()))
         ));
     }
 
